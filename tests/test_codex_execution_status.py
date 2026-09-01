@@ -63,6 +63,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert idempotency.state == "VERIFIED"
     assert "b4c46c6c" in idempotency.commits
     assert "tests/test_alert_idempotency_v26.py" in idempotency.tests
+    scoring = V26_EVIDENCE["V26-P0-004"]
+    assert scoring.state == "VERIFIED"
+    assert "425f33c0" in scoring.commits
+    assert "tests/test_alert_scoring_v26.py" in scoring.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

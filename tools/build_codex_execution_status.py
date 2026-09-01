@@ -210,6 +210,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_idempotency_v26.py; tests/test_alert_spine_v26.py; tests/test_alert_envelope_v26.py",
         "b4c46c6c",
     ),
+    "V26-P0-004": _verified(
+        "Score de classement versionne, pondere, hashe et ablate; opinion modele exclue de l autorite, admissibilite economique separee et capacites d ordre interdites.",
+        "tests/test_alert_scoring_v26.py; tests/test_alert_idempotency_v26.py",
+        "425f33c0",
+    ),
 }
 
 
