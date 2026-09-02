@@ -240,6 +240,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_read_model_v26.py; tests/test_alert_idempotency_v26.py",
         "0c741184",
     ),
+    "V26-P1-004": _verified(
+        "Route dashboard GET-only lisant exclusivement une projection hashee en PAPER/READ-ONLY; aucune reconstruction ou mutation du ledger, POST refuses et capacites limitees a la navigation recherche.",
+        "tests/test_alert_dashboard_projection_v26.py; tests/test_ui_app.py",
+        "386a57c5; d021e502",
+    ),
 }
 
 

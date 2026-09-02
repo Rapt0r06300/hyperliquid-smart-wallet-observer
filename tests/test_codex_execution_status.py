@@ -87,6 +87,11 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert read_model.state == "VERIFIED"
     assert "0c741184" in read_model.commits
     assert "tests/test_alert_read_model_v26.py" in read_model.tests
+    dashboard = V26_EVIDENCE["V26-P1-004"]
+    assert dashboard.state == "VERIFIED"
+    assert "386a57c5" in dashboard.commits
+    assert "d021e502" in dashboard.commits
+    assert "tests/test_alert_dashboard_projection_v26.py" in dashboard.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
