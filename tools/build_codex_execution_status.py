@@ -250,6 +250,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_projection_rebuild_v26.py; tests/test_alert_ledger_v26.py",
         "90e5ed0b",
     ),
+    "V26-P1-006": _verified(
+        "Vue alertes affichant timestamp source, age observe, sante, dernier refresh, marqueur stale/degrade et correction/retraction; badge vert autorise uniquement sur fraicheur mesuree HEALTHY sous SLO, jamais sur process running.",
+        "tests/test_alert_dashboard_projection_v26.py; tests/test_alert_freshness_v26.py; tests/test_alert_read_model_v26.py",
+        "824f611d",
+    ),
 }
 
 

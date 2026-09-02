@@ -96,6 +96,11 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert rebuild.state == "VERIFIED"
     assert "90e5ed0b" in rebuild.commits
     assert "tests/test_alert_projection_rebuild_v26.py" in rebuild.tests
+    freshness_ux = V26_EVIDENCE["V26-P1-006"]
+    assert freshness_ux.state == "VERIFIED"
+    assert "824f611d" in freshness_ux.commits
+    assert "tests/test_alert_dashboard_projection_v26.py" in freshness_ux.tests
+    assert "tests/test_alert_freshness_v26.py" in freshness_ux.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
