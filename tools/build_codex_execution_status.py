@@ -235,6 +235,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_ledger_v26.py; tests/test_alert_spine_v26.py",
         "a0162181",
     ),
+    "V26-P1-003": _verified(
+        "Modele de lecture borne par alertes/familles/entites/categories, sante source, conflits, fraicheur et resumes; hash stable au replay du meme prefixe malgre l horloge d affichage.",
+        "tests/test_alert_read_model_v26.py; tests/test_alert_idempotency_v26.py",
+        "0c741184",
+    ),
 }
 
 

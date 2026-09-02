@@ -4,9 +4,9 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `a01621812a8d4e03100a49bce724d904da04c2f2`
+- HEAD audite: `0c741184fb705066f752e5796f3dca221b4c768b`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=668, TRACE_ONLY=18, VERIFIED=34`
+- Etats: `PENDING_AUDIT=667, TRACE_ONLY=18, VERIFIED=35`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
@@ -19,7 +19,7 @@
 | V26-P0-006 | Replacement/Parity Claim Decomposition Gate | KEEP / P0 | VERIFIED | Matrice complete a 18 axes et verdict fail-closed; la configuration Roh/MAX face a Bloomberg reste honnetement PARTIAL_SUBSTITUTE avec recu hashe. | tests/test_replacement_parity_v26.py | 8e4a7517 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-001 | Durable Per-Producer Inbox / Spool | KEEP / P1 | VERIFIED | Spools isoles par producteur, publication temporaire fsync puis lien exclusif, schema/epoque/sequence/hash payload verifies, archives immuables et reprise sans perte apres terminaison brutale. | tests/test_alert_spool_v26.py; tests/test_alert_spine_v26.py | 48ff58fe | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-002 | Native Canonical JSONL Alert Ledger | KEEP / P1 / SEARCH_EXISTING_MAP_EXTEND | VERIFIED | Ledger natif JSONL sous verrou unique, append+fsync, segments immuables hashes, rotation bornee et pointeur latest atomique validant le prefixe sans base de donnees prematuree. | tests/test_alert_ledger_v26.py; tests/test_alert_spine_v26.py | a0162181 | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V26-P1-003 | Materialized Alert Read Model | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-003 contre code, tests et runtime actuels. |
+| V26-P1-003 | Materialized Alert Read Model | KEEP / P1 | VERIFIED | Modele de lecture borne par alertes/familles/entites/categories, sante source, conflits, fraicheur et resumes; hash stable au replay du meme prefixe malgre l horloge d affichage. | tests/test_alert_read_model_v26.py; tests/test_alert_idempotency_v26.py | 0c741184 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-004 | Read-Only Dashboard Projection Contract | KEEP / P1 / EXTENDS_HERCULES_PRESENTATION | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-004 contre code, tests et runtime actuels. |
 | V26-P1-005 | Projection Rebuild & Crash-Recovery Test | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-005 contre code, tests et runtime actuels. |
 | V26-P1-006 | Freshness/Staleness UX Contract | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-006 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P1-003` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P1-004` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.

@@ -83,6 +83,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert ledger.state == "VERIFIED"
     assert "a0162181" in ledger.commits
     assert "tests/test_alert_ledger_v26.py" in ledger.tests
+    read_model = V26_EVIDENCE["V26-P1-003"]
+    assert read_model.state == "VERIFIED"
+    assert "0c741184" in read_model.commits
+    assert "tests/test_alert_read_model_v26.py" in read_model.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:
