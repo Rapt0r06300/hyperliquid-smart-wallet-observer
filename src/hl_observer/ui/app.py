@@ -9,8 +9,13 @@ from fastapi.staticfiles import StaticFiles
 
 from hl_observer.config.loader import load_settings
 from hl_observer.config.settings import Settings
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
 from hl_observer.storage.database import init_db
 from hl_observer.ui import dashboard_v2 as dashboard_v2_module
+from hl_observer.ui.alert_projection_router import (
+    create_alert_projection_router,
+    default_alert_projection_path,
+)
 from hl_observer.ui.economic_writer import EconomicWriter
 from hl_observer.ui.event_bus import UiEventBus
 from hl_observer.ui.persistent_state import load_or_create_ui_state
@@ -18,8 +23,6 @@ from hl_observer.ui.read_only_status_router import create_read_only_status_route
 from hl_observer.ui.routes import create_router
 from hl_observer.ui.state import UiState
 from hl_observer.ui.status_routes import create_status_router
-from hl_observer.ops.echec_silencieux import noter as _noter_echec
-
 
 BRAND_NAME = "Alina SmartFlow"
 SMOOTH_METAGRAPH_SCRIPT = '<script src="/static/metagraph_smooth_v2.js?v=simulation-ui-20260615-smooth-metagraph-v3"></script>'
@@ -59,6 +62,9 @@ def create_ui_app(settings: Settings | None = None, state: UiState | None = None
     app = FastAPI(title=f"{BRAND_NAME} - Hyperliquid Command Center")
     static_dir = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    app.include_router(
+        create_alert_projection_router(default_alert_projection_path(settings))
+    )
 
     # One lock, one paper-economic writer. HTTP GETs only project state. Prime one
     # tick as part of SERVER construction so economic correctness never depends on
