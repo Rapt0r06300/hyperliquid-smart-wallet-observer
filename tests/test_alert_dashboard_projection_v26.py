@@ -23,26 +23,36 @@ from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.state import UiState
 
 
-def _proposal() -> dict[str, object]:
+def _proposal(
+    sequence: int = 1,
+    *,
+    revision_of: str | None = None,
+) -> dict[str, object]:
     return build_alert_proposal(
         producer_id="dashboard-producer",
         producer_epoch="dashboard-epoch-1",
-        producer_seq=1,
+        producer_seq=sequence,
         source_id="primary-wire",
-        source_uri="https://example.invalid/dashboard/1",
-        source_content_hash=hashlib.sha256(b"dashboard-source").hexdigest(),
-        observed_at_ms=1_000,
-        fetched_at_ms=2_000,
-        verified_at_ms=3_000,
+        source_uri=f"https://example.invalid/dashboard/{sequence}",
+        source_content_hash=hashlib.sha256(
+            f"dashboard-source:{sequence}".encode()
+        ).hexdigest(),
+        source_event_time_ms=500 + sequence,
+        source_publish_time_ms=600 + sequence,
+        source_available_time_ms=700 + sequence,
+        observed_at_ms=1_000 + sequence,
+        fetched_at_ms=2_000 + sequence,
+        verified_at_ms=3_000 + sequence,
         category="MARKET_EVENT",
-        headline="Dashboard projection alert",
-        dedup_key="dashboard:1",
+        headline=f"Dashboard projection alert {sequence}",
+        dedup_key=f"dashboard:{sequence}",
         policy_version="dashboard-projection-test.v1",
         ingestion_code_sha="d" * 40,
         entity_ids=["asset:btc"],
         normalized_tickers=["BTC"],
         source_health_state="HEALTHY",
         freshness_state="FRESH",
+        revision_of=revision_of,
         deterministic_score_components={"source_authority": 0.8},
         payload={"alert_family": "macro", "research_summary": "Primary evidence"},
     )
@@ -58,9 +68,11 @@ def _writer(root: Path) -> CanonicalAlertWriter:
     return writer
 
 
-def _client(projection_path: Path) -> TestClient:
+def _client(projection_path: Path, *, clock_ms=None) -> TestClient:
     app = FastAPI()
-    app.include_router(create_alert_projection_router(projection_path))
+    app.include_router(
+        create_alert_projection_router(projection_path, clock_ms=clock_ms)
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -142,6 +154,98 @@ def test_capacites_dashboard_sont_uniquement_navigation_recherche() -> None:
         and capability["mutates_state"] is False
         for capability in manifest["capabilities"]
     )
+
+
+def test_ux_expose_fraicheur_mesuree_et_interdit_faux_badge_live(
+    tmp_path: Path,
+) -> None:
+    writer = _writer(tmp_path / "spine")
+
+    live = _client(writer.paths.projection_path, clock_ms=lambda: 10_000).get(
+        "/api/alerts/projection"
+    ).json()["dashboard_ux"]
+    alert = live["alerts"][0]
+
+    assert alert["source_timestamp_ms"] == 501
+    assert alert["source_timestamp_available"] is True
+    assert alert["observed_age_ms"] == 8_999
+    assert alert["source_health_state"] == "HEALTHY"
+    assert alert["last_successful_refresh_ms"] == 2_001
+    assert alert["stale_degraded_marker"] == "FRESH"
+    assert alert["lifecycle_state"] == "PROJECTED"
+    assert alert["corrected_or_retracted"] is False
+    assert alert["display_slo_state"] == "MEETS_SLO"
+    assert live["live_badge"] == {
+        "state": "LIVE",
+        "color": "GREEN",
+        "measurable_freshness": True,
+        "reason": "MEASURED_FRESH_HEALTHY_WITHIN_SLO",
+        "process_running_is_not_evidence": True,
+    }
+
+    stale = _client(writer.paths.projection_path, clock_ms=lambda: 1_000_000).get(
+        "/api/alerts/projection"
+    ).json()["dashboard_ux"]
+    assert stale["alerts"][0]["stale_degraded_marker"] == "STALE"
+    assert stale["live_badge"]["state"] == "STALE"
+    assert stale["live_badge"]["color"] == "NON_GREEN"
+
+
+def test_ux_signale_explicitement_une_alerte_corrigee(tmp_path: Path) -> None:
+    writer = _writer(tmp_path / "spine")
+    original_id = writer.read_ledger()[0]["event_id"]
+    writer.producer("dashboard-producer").submit(
+        _proposal(2, revision_of=original_id)
+    )
+    writer.process_pending()
+
+    ux = _client(writer.paths.projection_path, clock_ms=lambda: 10_000).get(
+        "/api/alerts/projection"
+    ).json()["dashboard_ux"]
+    original = next(alert for alert in ux["alerts"] if alert["event_id"] == original_id)
+
+    assert original["lifecycle_state"] == "CORRECTED"
+    assert original["corrected_or_retracted"] is True
+
+
+def test_projection_vide_ne_devient_jamais_live_par_etat_processus(
+    tmp_path: Path,
+) -> None:
+    writer = CanonicalAlertWriter(
+        AlertSpinePaths.from_root(tmp_path / "empty-spine"),
+        clock_ms=lambda: 10_000,
+    )
+    writer.rebuild_projection()
+
+    ux = _client(writer.paths.projection_path, clock_ms=lambda: 10_000).get(
+        "/api/alerts/projection"
+    ).json()["dashboard_ux"]
+
+    assert ux["alerts"] == []
+    assert ux["live_badge"]["state"] == "NO_DATA"
+    assert ux["live_badge"]["color"] == "NON_GREEN"
+    assert ux["live_badge"]["measurable_freshness"] is False
+    assert ux["live_badge"]["process_running_is_not_evidence"] is True
+
+
+def test_page_alertes_affiche_tous_les_champs_du_contrat(tmp_path: Path) -> None:
+    writer = _writer(tmp_path / "spine")
+    response = _client(writer.paths.projection_path).get("/alerts")
+
+    assert response.status_code == 200
+    for label in (
+        "Timestamp source",
+        "Âge observé",
+        "Santé source",
+        "Dernier rafraîchissement réussi",
+        "Fraîcheur",
+        "Correction / rétractation",
+    ):
+        assert label in response.text
+    assert 'data-capability="FILTER_ALERT_FAMILY"' in response.text
+    assert 'data-capability="FILTER_ALERT_CATEGORY"' in response.text
+    assert 'data-capability="FILTER_ALERT_SOURCE"' in response.text
+    assert 'data-capability="VIEW_LATEST_ALERTS"' in response.text
 
 
 def test_application_principale_monte_le_chemin_portable_de_projection(

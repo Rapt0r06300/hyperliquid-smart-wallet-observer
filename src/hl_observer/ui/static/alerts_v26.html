@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alina SmartFlow - Alertes canoniques</title>
+  <style>
+    :root {
+      --bg: #090d12;
+      --panel: #111821;
+      --panel-2: #0d131b;
+      --line: #23303d;
+      --text: #e8eef4;
+      --muted: #91a4b6;
+      --cyan: #39c0ed;
+      --green: #24c98a;
+      --amber: #e5aa3d;
+      --red: #ff6573;
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: var(--bg); }
+    body {
+      min-height: 100%;
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    .shell { width: min(1440px, 100%); margin: 0 auto; padding: 22px; }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+    .sub { margin-top: 5px; color: var(--muted); }
+    .status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .badge.live { color: var(--green); border-color: #176b4d; }
+    .badge.degraded { color: var(--amber); border-color: #765820; }
+    .badge.stale, .badge.error { color: var(--red); border-color: #7f303a; }
+    a { color: var(--cyan); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(150px, 1fr));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      margin-bottom: 14px;
+    }
+    .metric { padding: 14px 16px; border-right: 1px solid var(--line); min-width: 0; }
+    .metric:last-child { border-right: 0; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 5px; }
+    .metric strong { display: block; font-size: 18px; overflow-wrap: anywhere; }
+    .toolbar {
+      display: flex;
+      align-items: end;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 0;
+    }
+    label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+    select {
+      min-width: 170px;
+      min-height: 34px;
+      padding: 5px 30px 5px 9px;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    table { width: 100%; border-collapse: collapse; min-width: 1120px; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; z-index: 1; background: var(--panel-2); color: var(--muted); font-size: 12px; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .headline { min-width: 240px; font-weight: 600; }
+    .source { color: var(--cyan); }
+    .marker { font-weight: 700; }
+    .marker.FRESH { color: var(--green); }
+    .marker.DEGRADED { color: var(--amber); }
+    .marker.STALE { color: var(--red); }
+    .lifecycle.CORRECTED, .lifecycle.RETRACTED { color: var(--red); font-weight: 700; }
+    .empty { padding: 28px; color: var(--muted); text-align: center; }
+    footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 12px; }
+    @media (max-width: 820px) {
+      .shell { padding: 14px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      select { min-width: min(240px, calc(100vw - 28px)); }
+      footer { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <h1>Alina SmartFlow - Alertes canoniques</h1>
+        <div class="sub">Projection locale PAPER/READ-ONLY</div>
+      </div>
+      <div class="status">
+        <span id="liveBadge" class="badge">NO DATA</span>
+        <span id="clock" class="badge">--:--:--</span>
+        <a href="/">Tableau principal</a>
+      </div>
+    </header>
+
+    <section class="summary" aria-label="Synthèse de fraîcheur">
+      <div class="metric"><span>Alertes visibles</span><strong id="alertCount">0</strong></div>
+      <div class="metric"><span>Dernière observation</span><strong id="latestObserved">--</strong></div>
+      <div class="metric"><span>Dernier rafraîchissement réussi</span><strong id="latestRefresh">--</strong></div>
+      <div class="metric"><span>Latence détection-affichage</span><strong id="displayLatency">--</strong></div>
+    </section>
+
+    <div class="toolbar" aria-label="Filtres de recherche">
+      <label>Famille
+        <select id="familyFilter" data-capability="FILTER_ALERT_FAMILY"><option value="">Toutes</option></select>
+      </label>
+      <label>Catégorie
+        <select id="categoryFilter" data-capability="FILTER_ALERT_CATEGORY"><option value="">Toutes</option></select>
+      </label>
+      <label>Source
+        <select id="sourceFilter" data-capability="FILTER_ALERT_SOURCE"><option value="">Toutes</option></select>
+      </label>
+    </div>
+
+    <section class="table-wrap" data-capability="VIEW_LATEST_ALERTS">
+      <table>
+        <thead>
+          <tr>
+            <th>Alerte</th>
+            <th>Source</th>
+            <th>Timestamp source</th>
+            <th>Âge observé</th>
+            <th>Santé source</th>
+            <th>Dernier rafraîchissement réussi</th>
+            <th>Fraîcheur</th>
+            <th>Correction / rétractation</th>
+          </tr>
+        </thead>
+        <tbody id="alertRows"></tbody>
+      </table>
+      <div id="empty" class="empty">Aucune projection d’alerte disponible.</div>
+    </section>
+
+    <footer>
+      <span id="projectionState">Projection en attente</span>
+      <span>0 ordre réel · 0 clé · 0 signature</span>
+    </footer>
+  </main>
+  <script>
+    const state = { alerts: [], capabilities: new Set() };
+    const byId = id => document.getElementById(id);
+    const fmtTime = value => value == null ? "--" : new Date(Number(value)).toLocaleString("fr-FR");
+    const fmtAge = value => {
+      if (value == null) return "--";
+      const seconds = Math.max(0, Number(value)) / 1000;
+      if (seconds < 60) return `${seconds.toFixed(1)} s`;
+      if (seconds < 3600) return `${(seconds / 60).toFixed(1)} min`;
+      return `${(seconds / 3600).toFixed(1)} h`;
+    };
+    function setBadge(badge) {
+      const el = byId("liveBadge");
+      const value = String((badge && badge.state) || "NO_DATA");
+      el.textContent = value.replace("_", " ");
+      el.className = `badge ${value === "LIVE" ? "live" : value.toLowerCase()}`;
+      el.title = String((badge && badge.reason) || "NO_MEASURABLE_ALERT_FRESHNESS");
+    }
+    function refill(select, values) {
+      const selected = select.value;
+      const options = ["", ...new Set(values.filter(Boolean))];
+      select.replaceChildren(...options.map(value => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value || "Toutes";
+        return option;
+      }));
+      if (options.includes(selected)) select.value = selected;
+    }
+    function renderRows() {
+      const family = byId("familyFilter").value;
+      const category = byId("categoryFilter").value;
+      const source = byId("sourceFilter").value;
+      const rows = state.alerts.filter(alert =>
+        (!family || alert.family === family) &&
+        (!category || alert.category === category) &&
+        (!source || alert.source_id === source)
+      );
+      const body = byId("alertRows");
+      body.replaceChildren(...rows.map(alert => {
+        const row = document.createElement("tr");
+        const values = [
+          [alert.headline, "headline"],
+          [alert.source_id, "source"],
+          [alert.source_timestamp_available ? fmtTime(alert.source_timestamp_ms) : "Non fourni", ""],
+          [fmtAge(alert.observed_age_ms), ""],
+          [alert.source_health_state, ""],
+          [fmtTime(alert.last_successful_refresh_ms), ""],
+          [alert.stale_degraded_marker, `marker ${alert.stale_degraded_marker}`],
+          [alert.lifecycle_state, `lifecycle ${alert.lifecycle_state}`],
+        ];
+        values.forEach(([value, className]) => {
+          const cell = document.createElement("td");
+          cell.textContent = String(value || "--");
+          if (className) cell.className = className;
+          row.appendChild(cell);
+        });
+        return row;
+      }));
+      byId("empty").hidden = rows.length > 0;
+      byId("alertCount").textContent = String(rows.length);
+    }
+    function render(payload) {
+      const ux = payload.dashboard_ux || {};
+      state.alerts = Array.isArray(ux.alerts) ? ux.alerts : [];
+      refill(byId("familyFilter"), state.alerts.map(alert => alert.family));
+      refill(byId("categoryFilter"), state.alerts.map(alert => alert.category));
+      refill(byId("sourceFilter"), state.alerts.map(alert => alert.source_id));
+      renderRows();
+      setBadge(ux.live_badge);
+      const latest = [...state.alerts].sort((a, b) => b.observed_at_ms - a.observed_at_ms)[0];
+      byId("latestObserved").textContent = latest ? fmtTime(latest.observed_at_ms) : "--";
+      byId("latestRefresh").textContent = latest ? fmtTime(latest.last_successful_refresh_ms) : "--";
+      byId("displayLatency").textContent = latest ? fmtAge(latest.detection_to_display_ms) : "--";
+      byId("projectionState").textContent = `Ledger #${payload.last_ledger_sequence || 0} · hash ${String(payload.canonical_projection_hash || "").slice(0, 12) || "--"}`;
+    }
+    async function refresh() {
+      try {
+        const response = await fetch(`/api/alerts/projection?t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        state.alerts = [];
+        renderRows();
+        setBadge({ state: "STALE", reason: String(error.message || error) });
+        byId("projectionState").textContent = "Projection indisponible";
+      }
+    }
+    ["familyFilter", "categoryFilter", "sourceFilter"].forEach(id => byId(id).addEventListener("change", renderRows));
+    setInterval(() => { byId("clock").textContent = new Date().toLocaleTimeString("fr-FR"); }, 1000);
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

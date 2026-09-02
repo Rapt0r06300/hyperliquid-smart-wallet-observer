@@ -58,6 +58,12 @@ def _alert_summary(event: Mapping[str, Any]) -> dict[str, Any]:
         "source_health_state": str(event["source_health_state"]),
         "freshness_state": str(event["freshness_state"]),
         "observed_at_ms": int(event["observed_at_ms"]),
+        "source_timestamp_ms": (
+            int(event["source_event_time_ms"])
+            if event.get("source_event_time_ms") is not None
+            else None
+        ),
+        "last_successful_refresh_ms": int(event["fetched_at_ms"]),
         "admitted_at_ms": int(event["admitted_at_ms"]),
         "expires_at_ms": event.get("expires_at_ms"),
         "revision_of": event.get("revision_of"),
@@ -137,6 +143,7 @@ def _source_health(
             "declared_health_state": str(event["source_health_state"]),
             "declared_freshness_state": str(event["freshness_state"]),
             "last_observed_at_ms": int(event["observed_at_ms"]),
+            "last_successful_refresh_ms": int(event["fetched_at_ms"]),
             "last_admitted_at_ms": int(event["admitted_at_ms"]),
             "observation_count": observation_count[source_id],
             "gap_count": gaps,

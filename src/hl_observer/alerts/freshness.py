@@ -96,6 +96,11 @@ def project_alert_freshness(
             )
         )
         event_states[event_id] = {
+            "source_timestamp_ms": (
+                int(source_event) if source_event is not None else None
+            ),
+            "observed_at_ms": observed,
+            "last_successful_refresh_ms": fetched,
             "effective_freshness_state": effective_freshness,
             "effective_source_health_state": effective_health,
             "age_ms": age_ms,
@@ -148,6 +153,7 @@ def project_alert_freshness(
             "effective_health_state": state["effective_source_health_state"],
             "effective_freshness_state": state["effective_freshness_state"],
             "last_observed_at_ms": int(event["observed_at_ms"]),
+            "last_successful_refresh_ms": int(event["fetched_at_ms"]),
             "age_ms": state["age_ms"],
             "stale_source_duration_ms": state["stale_source_duration_ms"],
             "missed_poll_or_gap_rate": (
