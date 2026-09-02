@@ -4,9 +4,9 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `d021e502d6771ef7dcc63ba22c84ac8b6f198aa5`
+- HEAD audite: `90e5ed0b30c9e481aa563aa825c5b672ca9893c3`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=666, TRACE_ONLY=18, VERIFIED=36`
+- Etats: `PENDING_AUDIT=665, TRACE_ONLY=18, VERIFIED=37`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
@@ -21,7 +21,7 @@
 | V26-P1-002 | Native Canonical JSONL Alert Ledger | KEEP / P1 / SEARCH_EXISTING_MAP_EXTEND | VERIFIED | Ledger natif JSONL sous verrou unique, append+fsync, segments immuables hashes, rotation bornee et pointeur latest atomique validant le prefixe sans base de donnees prematuree. | tests/test_alert_ledger_v26.py; tests/test_alert_spine_v26.py | a0162181 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-003 | Materialized Alert Read Model | KEEP / P1 | VERIFIED | Modele de lecture borne par alertes/familles/entites/categories, sante source, conflits, fraicheur et resumes; hash stable au replay du meme prefixe malgre l horloge d affichage. | tests/test_alert_read_model_v26.py; tests/test_alert_idempotency_v26.py | 0c741184 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-004 | Read-Only Dashboard Projection Contract | KEEP / P1 / EXTENDS_HERCULES_PRESENTATION | VERIFIED | Route dashboard GET-only lisant exclusivement une projection hashee en PAPER/READ-ONLY; aucune reconstruction ou mutation du ledger, POST refuses et capacites limitees a la navigation recherche. | tests/test_alert_dashboard_projection_v26.py; tests/test_ui_app.py | 386a57c5; d021e502 | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V26-P1-005 | Projection Rebuild & Crash-Recovery Test | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-005 contre code, tests et runtime actuels. |
+| V26-P1-005 | Projection Rebuild & Crash-Recovery Test | KEEP / P1 | VERIFIED | Test recurrent supprimant toutes les projections puis tuant le processus; reprise depuis ledger segmente bit-identique, projection/cursor exactement equivalents sous horloge figee et aucune publication si le canonical est corrompu. | tests/test_alert_projection_rebuild_v26.py; tests/test_alert_ledger_v26.py | 90e5ed0b | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-006 | Freshness/Staleness UX Contract | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-006 contre code, tests et runtime actuels. |
 | V26-P1-007 | Explicit Source Coverage Universe + Gap Ledger | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-007 contre code, tests et runtime actuels. |
 | V26-P1-008 | Coverage Allocation ≠ Completeness Proof | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-008 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P1-005` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P1-006` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.

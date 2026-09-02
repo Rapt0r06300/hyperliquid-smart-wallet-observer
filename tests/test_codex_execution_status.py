@@ -92,6 +92,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert "386a57c5" in dashboard.commits
     assert "d021e502" in dashboard.commits
     assert "tests/test_alert_dashboard_projection_v26.py" in dashboard.tests
+    rebuild = V26_EVIDENCE["V26-P1-005"]
+    assert rebuild.state == "VERIFIED"
+    assert "90e5ed0b" in rebuild.commits
+    assert "tests/test_alert_projection_rebuild_v26.py" in rebuild.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

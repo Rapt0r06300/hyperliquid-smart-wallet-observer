@@ -245,6 +245,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_dashboard_projection_v26.py; tests/test_ui_app.py",
         "386a57c5; d021e502",
     ),
+    "V26-P1-005": _verified(
+        "Test recurrent supprimant toutes les projections puis tuant le processus; reprise depuis ledger segmente bit-identique, projection/cursor exactement equivalents sous horloge figee et aucune publication si le canonical est corrompu.",
+        "tests/test_alert_projection_rebuild_v26.py; tests/test_alert_ledger_v26.py",
+        "90e5ed0b",
+    ),
 }
 
 
