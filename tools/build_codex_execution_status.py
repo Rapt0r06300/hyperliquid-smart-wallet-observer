@@ -255,6 +255,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_dashboard_projection_v26.py; tests/test_alert_freshness_v26.py; tests/test_alert_read_model_v26.py",
         "824f611d",
     ),
+    "V26-P1-007": _verified(
+        "Univers explicite des sept classes de sources avec sources desirees/connectees, etat, droits, licence, latence, fraicheur, exclusions et derniere validation; toute absence ou derive alimente un gap ledger deterministe et maintient COVERAGE_UNKNOWN.",
+        "tests/test_alert_source_coverage_v26.py; tests/test_capability_reconciliation.py; tests/test_source_health_everywhere.py",
+        "e7423e9b",
+    ),
 }
 
 

@@ -101,6 +101,11 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert "824f611d" in freshness_ux.commits
     assert "tests/test_alert_dashboard_projection_v26.py" in freshness_ux.tests
     assert "tests/test_alert_freshness_v26.py" in freshness_ux.tests
+    source_coverage = V26_EVIDENCE["V26-P1-007"]
+    assert source_coverage.state == "VERIFIED"
+    assert "e7423e9b" in source_coverage.commits
+    assert "tests/test_alert_source_coverage_v26.py" in source_coverage.tests
+    assert "tests/test_capability_reconciliation.py" in source_coverage.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

@@ -4,9 +4,9 @@
 > `PENDING_AUDIT` signifie que la preuve manque; ce n'est jamais un DONE implicite.
 
 - Roadmap SHA256: `317ab00e61beb0ae5b9b7abacf76b2389aff3b6bfdae96d15c38f143a8af34fc`
-- HEAD audite: `824f611d92cb299bb62b345ccd1d5b4906f0a5f6`
+- HEAD audite: `e7423e9b2e9be627b3acf98812f5cde39f12899e`
 - Work units uniques: **720**
-- Etats: `PENDING_AUDIT=664, TRACE_ONLY=18, VERIFIED=38`
+- Etats: `PENDING_AUDIT=663, TRACE_ONLY=18, VERIFIED=39`
 - Invariant: PAPER/READ-ONLY; aucune execution reelle ou testnet.
 
 | ID | Exigence | Disposition roadmap | Etat | Preuve | Tests | Commits | Blocage | Prochaine action |
@@ -23,7 +23,7 @@
 | V26-P1-004 | Read-Only Dashboard Projection Contract | KEEP / P1 / EXTENDS_HERCULES_PRESENTATION | VERIFIED | Route dashboard GET-only lisant exclusivement une projection hashee en PAPER/READ-ONLY; aucune reconstruction ou mutation du ledger, POST refuses et capacites limitees a la navigation recherche. | tests/test_alert_dashboard_projection_v26.py; tests/test_ui_app.py | 386a57c5; d021e502 | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-005 | Projection Rebuild & Crash-Recovery Test | KEEP / P1 | VERIFIED | Test recurrent supprimant toutes les projections puis tuant le processus; reprise depuis ledger segmente bit-identique, projection/cursor exactement equivalents sous horloge figee et aucune publication si le canonical est corrompu. | tests/test_alert_projection_rebuild_v26.py; tests/test_alert_ledger_v26.py | 90e5ed0b | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-006 | Freshness/Staleness UX Contract | KEEP / P1 | VERIFIED | Vue alertes affichant timestamp source, age observe, sante, dernier refresh, marqueur stale/degrade et correction/retraction; badge vert autorise uniquement sur fraicheur mesuree HEALTHY sous SLO, jamais sur process running. | tests/test_alert_dashboard_projection_v26.py; tests/test_alert_freshness_v26.py; tests/test_alert_read_model_v26.py | 824f611d | Aucun | Conserver la regression et revalider dans la suite globale. |
-| V26-P1-007 | Explicit Source Coverage Universe + Gap Ledger | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-007 contre code, tests et runtime actuels. |
+| V26-P1-007 | Explicit Source Coverage Universe + Gap Ledger | KEEP / P1 | VERIFIED | Univers explicite des sept classes de sources avec sources desirees/connectees, etat, droits, licence, latence, fraicheur, exclusions et derniere validation; toute absence ou derive alimente un gap ledger deterministe et maintient COVERAGE_UNKNOWN. | tests/test_alert_source_coverage_v26.py; tests/test_capability_reconciliation.py; tests/test_source_health_everywhere.py | e7423e9b | Aucun | Conserver la regression et revalider dans la suite globale. |
 | V26-P1-008 | Coverage Allocation ≠ Completeness Proof | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-008 contre code, tests et runtime actuels. |
 | V26-P1-009 | Source Redundancy & Correlation Map | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-009 contre code, tests et runtime actuels. |
 | V26-P1-010 | Primary-Source-First Event Routing | KEEP / P1 | PENDING_AUDIT | Preuve HEAD non encore rattachee. | Aucun test qualifie dans ce ledger. | Aucun commit qualifie dans ce ledger. | Etat actuel insuffisamment audite. | Auditer V26-P1-010 contre code, tests et runtime actuels. |
@@ -734,4 +734,4 @@
 
 ## Prochaine action canonique
 
-Auditer `V26-P1-007` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
+Auditer `V26-P1-008` contre le HEAD, les tests et le runtime, puis fermer uniquement les exigences réellement prouvees.
