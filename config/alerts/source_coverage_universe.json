@@ -1,0 +1,195 @@
+{
+  "schema_version": "hypersmart.source_coverage_universe.v1",
+  "workflow_id": "alerts-public-research-v26",
+  "description": "Declared source universe for local read-only event and market research. Connection and completeness are never inferred from this declaration.",
+  "coverage_classes": [
+    {
+      "class_id": "SEC_FILINGS",
+      "desired_sources": [
+        {
+          "source_id": "sec-edgar-submissions",
+          "authority": "US-SEC",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 300000,
+          "freshness_slo_ms": 900000,
+          "validation_slo_ms": 2592000000
+        },
+        {
+          "source_id": "sec-edgar-companyfacts",
+          "authority": "US-SEC",
+          "required": false,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 300000,
+          "freshness_slo_ms": 900000,
+          "validation_slo_ms": 2592000000
+        }
+      ],
+      "known_exclusions": [
+        "No paid filing normalization or private regulatory feed is included."
+      ]
+    },
+    {
+      "class_id": "OFFICIAL_MACRO_RELEASES",
+      "desired_sources": [
+        {
+          "source_id": "federal-reserve-official-releases",
+          "authority": "US-FEDERAL-RESERVE",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 120000,
+          "freshness_slo_ms": 300000,
+          "validation_slo_ms": 2592000000
+        },
+        {
+          "source_id": "fred-official-series",
+          "authority": "FRED",
+          "required": false,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 300000,
+          "freshness_slo_ms": 900000,
+          "validation_slo_ms": 2592000000
+        }
+      ],
+      "known_exclusions": [
+        "No complete global central-bank or national-statistics universe is claimed."
+      ]
+    },
+    {
+      "class_id": "COMPANY_IR",
+      "desired_sources": [
+        {
+          "source_id": "issuer-ir-primary-releases",
+          "authority": "ISSUER-PRIMARY",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "ISSUER_PUBLIC_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 300000,
+          "freshness_slo_ms": 900000,
+          "validation_slo_ms": 2592000000
+        }
+      ],
+      "known_exclusions": [
+        "Issuer allowlist is not yet empirically complete and private IR distribution is excluded."
+      ]
+    },
+    {
+      "class_id": "VENUE_NOTICES",
+      "desired_sources": [
+        {
+          "source_id": "hyperliquid-official-status",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_WEB_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 60000,
+          "freshness_slo_ms": 120000,
+          "validation_slo_ms": 604800000
+        },
+        {
+          "source_id": "hyperliquid-official-announcements",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_WEB_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 60000,
+          "freshness_slo_ms": 120000,
+          "validation_slo_ms": 604800000
+        }
+      ],
+      "known_exclusions": [
+        "No guarantee of pre-publication venue incident disclosure is claimed."
+      ]
+    },
+    {
+      "class_id": "MARKET_MICROSTRUCTURE",
+      "desired_sources": [
+        {
+          "source_id": "hyperliquid-info-allmids",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 2000,
+          "freshness_slo_ms": 4000,
+          "validation_slo_ms": 86400000
+        },
+        {
+          "source_id": "hyperliquid-info-l2book",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 2000,
+          "freshness_slo_ms": 4000,
+          "validation_slo_ms": 86400000
+        },
+        {
+          "source_id": "hyperliquid-public-trades",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 2000,
+          "freshness_slo_ms": 4000,
+          "validation_slo_ms": 86400000
+        }
+      ],
+      "known_exclusions": [
+        "Private matching-engine queue state and colocation-grade timestamps are unavailable."
+      ]
+    },
+    {
+      "class_id": "SELECTED_PUBLIC_NEWS",
+      "desired_sources": [
+        {
+          "source_id": "selected-public-rss",
+          "authority": "PUBLIC-PUBLISHERS",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PER_SOURCE_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 300000,
+          "freshness_slo_ms": 600000,
+          "validation_slo_ms": 604800000
+        }
+      ],
+      "known_exclusions": [
+        "Paid newswires and any claim of comprehensive public-news recall are excluded."
+      ]
+    },
+    {
+      "class_id": "ONCHAIN_PUBLIC_CRYPTO",
+      "desired_sources": [
+        {
+          "source_id": "hyperliquid-public-userfills",
+          "authority": "HYPERLIQUID",
+          "required": true,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 30000,
+          "freshness_slo_ms": 60000,
+          "validation_slo_ms": 86400000
+        },
+        {
+          "source_id": "hyperliquid-public-vaults",
+          "authority": "HYPERLIQUID",
+          "required": false,
+          "entitlement": "PUBLIC_ZERO_EURO",
+          "license_class": "PUBLIC_API_TERMS_REVIEW_REQUIRED",
+          "latency_slo_ms": 60000,
+          "freshness_slo_ms": 300000,
+          "validation_slo_ms": 604800000
+        }
+      ],
+      "known_exclusions": [
+        "Private wallet ownership, off-chain intent and undisclosed subaccount linkage are excluded."
+      ]
+    }
+  ],
+  "paper_read_only": true,
+  "real_execution": false
+}
