@@ -79,6 +79,10 @@ def test_v26_rattache_le_spine_canonique_a_ses_preuves() -> None:
     assert spool.state == "VERIFIED"
     assert "48ff58fe" in spool.commits
     assert "tests/test_alert_spool_v26.py" in spool.tests
+    ledger = V26_EVIDENCE["V26-P1-002"]
+    assert ledger.state == "VERIFIED"
+    assert "a0162181" in ledger.commits
+    assert "tests/test_alert_ledger_v26.py" in ledger.tests
 
 
 def test_rendu_contient_preuve_tests_commit_blocage_et_action() -> None:

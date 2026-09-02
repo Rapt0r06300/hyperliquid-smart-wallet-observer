@@ -230,6 +230,11 @@ V26_EVIDENCE: dict[str, Evidence] = {
         "tests/test_alert_spool_v26.py; tests/test_alert_spine_v26.py",
         "48ff58fe",
     ),
+    "V26-P1-002": _verified(
+        "Ledger natif JSONL sous verrou unique, append+fsync, segments immuables hashes, rotation bornee et pointeur latest atomique validant le prefixe sans base de donnees prematuree.",
+        "tests/test_alert_ledger_v26.py; tests/test_alert_spine_v26.py",
+        "a0162181",
+    ),
 }
 
 
