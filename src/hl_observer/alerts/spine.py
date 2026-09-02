@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.alerts.freshness import project_alert_freshness
+from hl_observer.alerts.read_model import (
+    build_materialized_alert_read_model,
+    materialized_read_model_hash,
+)
 from hl_observer.collection.collecte_fiable import append_jsonl, ecrire_atomique
 
 PROPOSAL_SCHEMA = "hypersmart.alert_proposal.v1"
@@ -1155,10 +1159,12 @@ class CanonicalAlertWriter:
         *,
         clock_ms: Callable[[], int] | None = None,
         ledger_rotate_bytes: int = _DEFAULT_LEDGER_ROTATE_BYTES,
+        projection_limit: int = 500,
     ) -> None:
         self.paths = paths
         self.clock_ms = clock_ms or (lambda: int(time.time() * 1000))
         self.ledger_rotate_bytes = max(1, int(ledger_rotate_bytes))
+        self.projection_limit = max(1, min(10_000, int(projection_limit)))
 
     def producer(self, producer_id: str) -> AlertProducerInbox:
         return AlertProducerInbox(self.paths.pending_root, producer_id)
@@ -1743,8 +1749,9 @@ class CanonicalAlertWriter:
                 states[str(revision_of)] = "CORRECTED"
             if retracts is not None:
                 states[str(retracts)] = "RETRACTED"
+        visible_replayed = replayed[-self.projection_limit :]
         freshness_projection = project_alert_freshness(
-            replayed,
+            visible_replayed,
             projected_at_ms=projected_at_ms,
             displayed_at_ms=displayed_at_ms,
         )
@@ -1762,21 +1769,27 @@ class CanonicalAlertWriter:
                     str(event["event_id"])
                 ]["no_news_conclusion_valid"],
             }
-            for event in replayed
+            for event in reversed(visible_replayed)
         ]
         telemetry: dict[str, int] = {"projected_at_ms": projected_at_ms}
         if displayed_at_ms is not None:
             telemetry["displayed_at_ms"] = displayed_at_ms
-        deterministic_projection = {
+        read_model = build_materialized_alert_read_model(
+            replayed,
+            limit=self.projection_limit,
+        )
+        read_model_hash = materialized_read_model_hash(read_model)
+        projection = {
             "schema_version": PROJECTION_SCHEMA,
             "last_ledger_sequence": len(replayed),
             "alert_count": len(replayed),
+            "returned_alert_count": len(projected_alerts),
+            "omitted_alert_count": max(0, len(replayed) - len(projected_alerts)),
             "alerts": projected_alerts,
-        }
-        projection = {
-            **deterministic_projection,
-            "derived_from": str(self.paths.ledger_path),
-            "canonical_projection_hash": _sha256(deterministic_projection),
+            "materialized_read_model": read_model,
+            "materialized_read_model_hash": read_model_hash,
+            "derived_from": str(self.paths.ledger_latest_pointer_path),
+            "canonical_projection_hash": read_model_hash,
             "freshness": freshness_projection,
             "projection_telemetry": telemetry,
             "paper_read_only": True,
