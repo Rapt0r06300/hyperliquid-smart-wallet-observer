@@ -135,7 +135,14 @@ def _write_workspace(root: Path, *, weak_family: str | None = None) -> None:
         (raw_dir / f"{family}.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
-def _write_job_result(result_dir: Path, workspace: Path, *, project_sha: str) -> None:
+def _write_job_result(
+    result_dir: Path,
+    workspace: Path,
+    *,
+    project_sha: str,
+    analysis_complete: bool = True,
+    completion_recorded: bool = True,
+) -> None:
     result_dir.mkdir(parents=True, exist_ok=True)
     (result_dir / "JOB_RESULT.json").write_text(
         json.dumps(
@@ -151,6 +158,9 @@ def _write_job_result(result_dir: Path, workspace: Path, *, project_sha: str) ->
                 "exit_code": 0,
                 "paper_only": True,
                 "real_execution": False,
+                "start_live_collection": False,
+                "analysis_complete": analysis_complete,
+                "completion_recorded": completion_recorded,
             }
         ),
         encoding="utf-8",
@@ -183,6 +193,7 @@ def test_alina_return_est_strictement_derive_de_la_certification_canonique(
     returned = self_hosted_return.build_return(result_dir)
 
     assert returned["technical_status"] == "SUCCESS"
+    assert returned["completion_ready"] is True
     assert returned["project_sha"] == project_sha
     assert returned["economic_certification"] == canonical
     assert returned["economic_certification"]["all_families_certified"] is True
@@ -198,6 +209,41 @@ def test_alina_return_est_strictement_derive_de_la_certification_canonique(
     assert _contains_forbidden_raw_key(returned) is False
 
 
+def test_alina_return_refuse_toute_certification_avant_completion_guard(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    result_dir = tmp_path / "result"
+    _write_workspace(workspace)
+    _write_job_result(
+        result_dir,
+        workspace,
+        project_sha="3" * 40,
+        analysis_complete=False,
+        completion_recorded=False,
+    )
+    monkeypatch.setattr(
+        self_hosted_return,
+        "certify_workspace",
+        lambda _root: (_ for _ in ()).throw(AssertionError("certification called before completion")),
+    )
+    monkeypatch.setattr(
+        self_hosted_return,
+        "build_decision",
+        lambda _root: (_ for _ in ()).throw(AssertionError("brain called before completion")),
+    )
+
+    returned = self_hosted_return.build_return(result_dir)
+
+    assert returned["technical_status"] == "SUCCESS"
+    assert returned["completion_ready"] is False
+    assert returned["economic_certification"] is None
+    assert returned["brain_decision"] is None
+    assert returned["paper_only"] is True
+    assert returned["real_execution"] is False
+    assert returned["message_fr"].startswith("Retour compact prêt")
+
+
 def test_alina_return_ne_surclasse_jamais_un_more_data_ou_kill(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -211,6 +257,7 @@ def test_alina_return_ne_surclasse_jamais_un_more_data_ou_kill(
     returned = self_hosted_return.build_return(result_dir)
 
     assert canonical["all_families_certified"] is False
+    assert returned["completion_ready"] is True
     assert returned["economic_certification"] == canonical
     assert returned["economic_certification"]["all_families_certified"] is False
     assert returned["economic_certification"]["families"]["lead_lag"]["certified"] is False
