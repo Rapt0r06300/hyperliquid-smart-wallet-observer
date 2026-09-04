@@ -56,12 +56,14 @@ def _economic_contract(family: str) -> dict:
 
 
 def _campaign(family: str) -> dict:
+    economic_contract = _economic_contract(family)
     row = {
         "family": family,
         "starting_capital_usd": 1000.0,
         "paper_read_only": True,
         "real_execution": False,
-        "economic_contract": _economic_contract(family),
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": economic_contract["assumption_snapshot_hash"],
         "parameters_frozen": True,
         "parameter_freeze": {
             "campaign_id": f"freeze-{family}",
