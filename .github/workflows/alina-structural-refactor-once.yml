@@ -22,7 +22,7 @@ jobs:
       REAL_MAINNET_TRADING: "false"
       HYPERSMART_ENABLE_REAL_ORDERS: "0"
       ENABLE_REAL_ORDERS: "0"
-      EXPECTED_PARENT: cf9b12bcec13b7aeac57f2ca610749bcfe660b3a
+      EXPECTED_PARENT: e1adc69f544193f0aef0518d904cafc56ff52d38
       EXPECTED_SOURCE_BLOB: f28c4fd090b37280fce8fe6570614d93c3952aba
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -145,7 +145,7 @@ jobs:
           python -m ruff check \
             src/hl_observer/backtesting/lead_lag_shadow_economics.py \
             src/hl_observer/backtesting/lead_lag_shadow_temporal.py
-          mapfile -t TEST_FILES < <(rg -l 'lead_lag_shadow(_economics|_temporal)?' tests --glob 'test_*.py' | sort)
+          mapfile -t TEST_FILES < <(grep -RIlE 'lead_lag_shadow(_economics|_temporal)?' tests --include='test_*.py' | sort)
           test "${#TEST_FILES[@]}" -gt 0
           python -m pytest -q "${TEST_FILES[@]}"
           python -m pytest -q \
