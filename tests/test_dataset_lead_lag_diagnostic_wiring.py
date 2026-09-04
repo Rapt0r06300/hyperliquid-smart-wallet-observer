@@ -91,7 +91,7 @@ def test_full_cold_diagnostic_expands_windows_without_changing_economic_threshol
     assert diagnostic["economic_shocks_seen"] == 0
     assert diagnostic["diagnostic_shocks_seen"] == 1
     assert diagnostic["events"][0]["classification"] == (
-        "CONTIGUOUS_CAPTURE_NO_BOOK_WITHIN_LIMIT"
+        "CAUSAL_BOOK_TOO_LATE_NO_GAP_PROOF"
     )
     assert diagnostic["strategy_parameters_changed"] is False
     assert diagnostic["paper_read_only"] is True
