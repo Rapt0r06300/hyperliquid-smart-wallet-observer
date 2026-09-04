@@ -3,6 +3,15 @@ import pytest
 from hl_observer.simulation import vnext_promotion_protocol as protocol
 
 
+_REQUIRED_ECONOMIC_PROOFS = (
+    "costs_complete",
+    "liquidability_complete",
+    "provenance_complete",
+    "positions_flat",
+    "economic_reconciliation_ok",
+)
+
+
 def _candidate(status: str) -> dict[str, object]:
     return {
         "certification_status": status,
@@ -10,6 +19,7 @@ def _candidate(status: str) -> dict[str, object]:
         "post_freeze_oos_consumed": True,
         "paper_read_only": True,
         "real_execution": False,
+        **{field: True for field in _REQUIRED_ECONOMIC_PROOFS},
     }
 
 
@@ -45,3 +55,19 @@ def test_certification_entry_fails_closed_when_proof_or_safety_is_incomplete(
     candidate[field] = value
     with pytest.raises(ValueError):
         gate(candidate)
+
+
+@pytest.mark.parametrize("field", _REQUIRED_ECONOMIC_PROOFS)
+def test_certification_entry_rejects_incomplete_economic_proof(field: str) -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate[field] = False
+    with pytest.raises(ValueError, match=field):
+        protocol.validate_certification_entry(candidate)
+
+
+@pytest.mark.parametrize("field", _REQUIRED_ECONOMIC_PROOFS)
+def test_certification_entry_rejects_missing_economic_proof(field: str) -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate.pop(field)
+    with pytest.raises(ValueError, match=field):
+        protocol.validate_certification_entry(candidate)
