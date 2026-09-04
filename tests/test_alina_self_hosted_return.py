@@ -30,6 +30,11 @@ def _job_result(result_dir: Path, *, workspace: Path | None) -> None:
                 "request_digest": "b" * 64,
                 "workspace": str(workspace) if workspace is not None else None,
                 "exit_code": 0,
+                "paper_only": True,
+                "real_execution": False,
+                "start_live_collection": False,
+                "analysis_complete": True,
+                "completion_recorded": True,
             }
         ),
         encoding="utf-8",
