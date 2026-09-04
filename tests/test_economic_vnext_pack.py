@@ -90,6 +90,9 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     assert result["canonical_campaigns_mutated"] is False
     assert result["heldout_evaluated"] is False
     assert result["real_execution"] is False
+    assert result["certification_status"] == "TRAIN_ONLY_NOT_CERTIFIED"
+    assert result["freeze_hash"] is None
+    assert result["post_freeze_oos_consumed"] is False
     assert (
         result["research_variants"]["copy_vault_continuation_v4"]["heldout_evaluated"]
         is False
