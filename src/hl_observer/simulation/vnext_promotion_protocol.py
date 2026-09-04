@@ -138,9 +138,27 @@ def consume_post_freeze_once(
     }
 
 
+def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
+    """Allow certification namespace entry only for complete, safe evidence."""
+
+    status = candidate.get("certification_status")
+    if status != "CERTIFICATION_READY":
+        raise ValueError(f"certification status is not eligible: {status!r}")
+    if not _is_sha256(candidate.get("freeze_hash")):
+        raise ValueError("certification requires a full freeze_hash")
+    if candidate.get("post_freeze_oos_consumed") is not True:
+        raise ValueError("certification requires consumed post-freeze OOS")
+    if candidate.get("paper_read_only") is not True:
+        raise ValueError("certification requires paper_read_only=True")
+    if candidate.get("real_execution") is not False:
+        raise ValueError("certification requires real_execution=False")
+    return True
+
+
 __all__ = [
     "SCHEMA_VERSION",
     "build_freeze_manifest",
     "consume_post_freeze_once",
+    "validate_certification_entry",
     "verify_freeze_manifest",
 ]
