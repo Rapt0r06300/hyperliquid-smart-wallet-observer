@@ -47,17 +47,18 @@ def test_aucune_variable_de_calibrage_ne_fuit_dans_les_tests():
     impose son calibrage a la suite -- et que les tests ne mesurent plus le code.
     """
     fuites = sorted(k for k in os.environ if k.startswith(PREFIXES_RUNTIME))
-    # Ces trois-la sont POSEES par le conftest lui-meme, vers des chemins de TEST :
-    #   HL_LOGS_DIR                     -> un tmp_path (les logs reels restent intacts)
+    # Ces variables sont POSEES intentionnellement par le harnais de test :
+    #   HL_LOGS_DIR                       -> un tmp_path (les logs reels restent intacts)
     #   HYPERSMART_EDGE_CALIBRATION_PATH -> l'ancienne TEST_FIXTURE d'edge (legacy)
     #   HYPERSMART_EDGE_TABLE_PATH       -> la TEST_FIXTURE de la PORTE UNIQUE (#594)
-    # Ce n'est pas une fuite de la MACHINE : c'est un decor, declare dans conftest, sous les yeux
-    # du lecteur. La regle que ce test defend -- « un test ne lit pas l'environnement de Flo » --
-    # est intacte.
+    #   HYPERSMART_COVERAGE_CONTRACT_SHARD -> controle du harnais coverage, PAS calibrage runtime
+    # La derniere est explicitement allowlistee dans tests/conftest.py afin de repartir les
+    # contrats de couverture deterministes sans laisser fuir un parametre economique/runtime.
     _DECOR_DU_CONFTEST = {
         "HL_LOGS_DIR",
         "HYPERSMART_EDGE_CALIBRATION_PATH",
         "HYPERSMART_EDGE_TABLE_PATH",
+        "HYPERSMART_COVERAGE_CONTRACT_SHARD",
     }
     fuites = [k for k in fuites if k not in _DECOR_DU_CONFTEST]
     assert fuites == [], (
