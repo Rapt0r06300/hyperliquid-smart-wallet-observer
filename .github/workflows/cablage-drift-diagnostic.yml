@@ -16,12 +16,28 @@ jobs:
     timeout-minutes: 10
     env:
       PYTHONPATH: src
+      BASELINE_SHA: 1e4ee809e80b2851dc4dd7cd941380dc7e63248a
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Nommer les modules testes-non-branches hors dette
-        run: python tools/diagnose_cablage_drift.py
+      - name: Calculer le delta exact depuis le cliquet 830
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT="$RUNNER_TEMP/current-cablage.txt"
+          BASE="$RUNNER_TEMP/base-cablage.txt"
+          git worktree add --detach "$RUNNER_TEMP/cablage-baseline" "$BASELINE_SHA"
+          python tools/diagnose_cablage_drift.py "$GITHUB_WORKSPACE" --names-only | sort -u > "$CURRENT"
+          python tools/diagnose_cablage_drift.py "$RUNNER_TEMP/cablage-baseline" --names-only | sort -u > "$BASE"
+          echo "CURRENT_COUNT=$(wc -l < "$CURRENT")"
+          echo "BASELINE_COUNT=$(wc -l < "$BASE")"
+          echo "BEGIN_ADDED_SINCE_BASELINE"
+          comm -13 "$BASE" "$CURRENT"
+          echo "END_ADDED_SINCE_BASELINE"
+          echo "BEGIN_REMOVED_SINCE_BASELINE"
+          comm -23 "$BASE" "$CURRENT"
+          echo "END_REMOVED_SINCE_BASELINE"

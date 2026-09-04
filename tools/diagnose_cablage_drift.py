@@ -6,19 +6,18 @@ Utilise exactement le même moteur et le même périmètre que
 """
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from hl_observer.audit.cablage import auditer_les_modules
 from hl_observer.audit.dette_cablage import DETTE_CABLAGE, est_dette
 
-ROOT = Path(__file__).resolve().parents[1]
 
-
-def _sources(motifs: tuple[str, ...]) -> dict[str, str]:
+def _sources(root: Path, motifs: tuple[str, ...]) -> dict[str, str]:
     out: dict[str, str] = {}
     for motif in motifs:
-        for path in ROOT.glob(motif):
-            rel = path.relative_to(ROOT).as_posix()
+        for path in root.glob(motif):
+            rel = path.relative_to(root).as_posix()
             if "__pycache__" in rel:
                 continue
             try:
@@ -28,36 +27,35 @@ def _sources(motifs: tuple[str, ...]) -> dict[str, str]:
     return out
 
 
-def main() -> int:
-    fichiers = _sources(("src/**/*.py", "hyper_smart_observer/**/*.py", "tests/**/*.py"))
-    lanceurs = _sources(
-        (
-            "*.cmd",
-            "*.ps1",
-            "*.sh",
-            "tools/**/*.ps1",
-            "tools/**/*.cmd",
-            "outils de test/**/*.cmd",
-            "outils de test/**/*.ps1",
-        )
-    )
-    outils = _sources(("tools/**/*.py",))
+def auditer(root: Path) -> tuple[list[str], int, int, int]:
+    fichiers = _sources(root, ("src/**/*.py", "hyper_smart_observer/**/*.py", "tests/**/*.py"))
+    lanceurs = _sources(root, ("*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd", "outils de test/**/*.cmd", "outils de test/**/*.ps1"))
+    outils = _sources(root, ("tools/**/*.py",))
     verdict = auditer_les_modules(fichiers, lanceurs=lanceurs, outils=outils)
     if not verdict.fiable:
-        print(f"AUDIT_NON_FIABLE={len(verdict.illisibles)}")
-        for item in verdict.illisibles[:20]:
-            print(f"ILLISIBLE={item}")
-        return 2
-
+        raise RuntimeError(f"audit non fiable: {verdict.illisibles[:20]}")
     declares = sorted(m for m in verdict.testes_non_branches if est_dette(m))
     hors_dette = sorted(m for m in verdict.testes_non_branches if not est_dette(m))
+    return hors_dette, len(verdict.testes_non_branches), len(declares), len(verdict.illisibles)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("root", nargs="?", default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--names-only", action="store_true")
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    hors_dette, total, declares, _ = auditer(root)
+    if args.names_only:
+        print("\n".join(hors_dette))
+        return 0
+    print(f"ROOT={root}")
     print(f"DETTE_REGISTRE={len(DETTE_CABLAGE)}")
-    print(f"TESTES_NON_BRANCHES_TOTAL={len(verdict.testes_non_branches)}")
-    print(f"TESTES_NON_BRANCHES_DECLARES={len(declares)}")
+    print(f"TESTES_NON_BRANCHES_TOTAL={total}")
+    print(f"TESTES_NON_BRANCHES_DECLARES={declares}")
     print(f"TESTES_NON_BRANCHES_HORS_DETTE={len(hors_dette)}")
     print("BEGIN_HORS_DETTE")
-    for module in hors_dette:
-        print(module)
+    print("\n".join(hors_dette))
     print("END_HORS_DETTE")
     return 0
 
