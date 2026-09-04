@@ -185,6 +185,9 @@ def _lead_lag_diagnostic_overrides(canonical) -> dict[str, object]:
         replay["causal_gap_diagnostic"]["diagnostic_shocks_seen"] = len(
             diagnostic_shocks
         )
+        replay["causal_gap_diagnostic"]["strategy_parameters_changed"] = False
+        replay["causal_gap_diagnostic"]["paper_read_only"] = True
+        replay["causal_gap_diagnostic"]["real_execution"] = False
         return replay
 
     return {
