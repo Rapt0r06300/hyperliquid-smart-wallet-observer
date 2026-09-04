@@ -144,6 +144,20 @@ def _load_lead_lag_diagnostic(result_path: Path, workspace: Path | None) -> dict
     return compact_lead_lag_diagnostic(_load_object(workspace / LEAD_LAG_DIAGNOSTIC_FALLBACK))
 
 
+def _completion_ready(job_result: Mapping[str, Any]) -> bool:
+    """Only canonical completion may unlock certification or brain decisions."""
+
+    return (
+        job_result.get("status") == "SUCCESS"
+        and job_result.get("exit_code") == 0
+        and job_result.get("paper_only") is True
+        and job_result.get("real_execution") is False
+        and job_result.get("start_live_collection") is False
+        and job_result.get("analysis_complete") is True
+        and job_result.get("completion_recorded") is True
+    )
+
+
 def build_return(result_dir: str | Path) -> dict[str, Any]:
     result_path = Path(result_dir).resolve()
     job_result = _load_object(result_path / "JOB_RESULT.json")
@@ -154,16 +168,18 @@ def build_return(result_dir: str | Path) -> dict[str, Any]:
     workspace_exists = bool(workspace and workspace.is_dir())
     usable_workspace = workspace if workspace_exists else None
     families = load_family_summaries(usable_workspace)
-    economic_certification = certify_workspace(workspace) if workspace_exists and any(value is not None for value in families.values()) else None
+    completion_ready = _completion_ready(job_result)
+    certification_allowed = completion_ready and workspace_exists and any(value is not None for value in families.values())
+    economic_certification = certify_workspace(workspace) if certification_allowed else None
     brain: dict[str, Any] | None = None
-    if workspace_exists and any(value is not None for value in families.values()):
+    if certification_allowed:
         try:
             brain = build_decision(workspace)
         except (OSError, ValueError, TypeError):
             brain = None
     next_job = brain.get("next_recommended_job") if isinstance(brain, Mapping) else None
     all_certified = bool(isinstance(economic_certification, Mapping) and economic_certification.get("all_families_certified") is True)
-    return {"schema": SCHEMA, "status": "READY_FOR_ANALYSIS", "technical_status": job_result.get("status"), "job_id": job_result.get("job_id"), "project_sha": job_result.get("project_sha"), "request_digest": job_result.get("request_digest"), "suite": job_result.get("suite"), "mode": job_result.get("mode"), "exit_code": job_result.get("exit_code"), "workspace_available": workspace_exists, "family_summaries": families, "economic_certification": economic_certification, "brain_decision": brain, "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None, "vnext_research": _load_vnext_summary(usable_workspace), "lead_lag_causal_diagnostic": _load_lead_lag_diagnostic(result_path, usable_workspace), "paper_only": True, "real_execution": False, "message_fr": "Les trois familles sont certifiées séparément avec la gate économique canonique; aucune compensation inter-familles." if all_certified else "Retour compact prêt. La certification économique reste fail-closed tant que chaque famille n'est pas certifiée séparément; aucune compensation inter-familles."}
+    return {"schema": SCHEMA, "status": "READY_FOR_ANALYSIS", "technical_status": job_result.get("status"), "completion_ready": completion_ready, "job_id": job_result.get("job_id"), "project_sha": job_result.get("project_sha"), "request_digest": job_result.get("request_digest"), "suite": job_result.get("suite"), "mode": job_result.get("mode"), "exit_code": job_result.get("exit_code"), "workspace_available": workspace_exists, "family_summaries": families, "economic_certification": economic_certification, "brain_decision": brain, "next_recommended_job": dict(next_job) if isinstance(next_job, Mapping) else None, "vnext_research": _load_vnext_summary(usable_workspace), "lead_lag_causal_diagnostic": _load_lead_lag_diagnostic(result_path, usable_workspace), "paper_only": True, "real_execution": False, "message_fr": "Les trois familles sont certifiées séparément avec la gate économique canonique; aucune compensation inter-familles." if all_certified else "Retour compact prêt. La certification économique reste fail-closed tant que chaque famille n'est pas certifiée séparément; aucune compensation inter-familles."}
 
 
 def write_return(result_dir: str | Path, payload: Mapping[str, Any]) -> tuple[Path, Path]:
