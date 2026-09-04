@@ -5,6 +5,12 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import (
+    build_copy_vault_contract,
+    build_cross_venue_contract,
+    build_lead_lag_contract,
+)
 from hl_observer.ops import self_hosted_return
 from hl_observer.ops.final_economic_certification import certify_workspace
 from hl_observer.simulation.economic_objective import evaluate_objective
@@ -31,12 +37,31 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
     }
 
 
+def _economic_contract(family: str) -> dict:
+    if family == "copy_vault":
+        contract = build_copy_vault_contract(
+            mode=EconomicRunMode.CERTIFIABLE,
+            notional_usd=150.0,
+            copy_delay_ms=60_000.0,
+            max_reference_lag_ms=30_000.0,
+            max_target_lag_ms=30_000.0,
+        )
+    elif family == "lead_lag":
+        contract = build_lead_lag_contract(mode=EconomicRunMode.CERTIFIABLE)
+    else:
+        contract = build_cross_venue_contract(mode=EconomicRunMode.CERTIFIABLE)
+    receipt = contract.receipt()
+    assert receipt["certification"]["ready"] is True
+    return receipt
+
+
 def _campaign(family: str) -> dict:
     row = {
         "family": family,
         "starting_capital_usd": 1000.0,
         "paper_read_only": True,
         "real_execution": False,
+        "economic_contract": _economic_contract(family),
         "parameters_frozen": True,
         "parameter_freeze": {
             "campaign_id": f"freeze-{family}",
