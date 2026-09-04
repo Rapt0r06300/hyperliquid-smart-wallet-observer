@@ -2,7 +2,7 @@
 
 **Read-only Hyperliquid smart-wallet observer with paper trading simulation & measurable research.**
 
-A local-only observation engine for Hyperliquid mainnet. **No real execution ever.** Discovers interesting wallets, scores them by edge, and runs paper-only strategies to test profitability assumptions before they reach real money.
+A local-only observation engine for Hyperliquid mainnet. **No real execution ever. Aucune exécution réelle.** Discovers interesting wallets, scores them by edge, and runs paper-only strategies to test profitability assumptions before they reach real money.
 
 ---
 
@@ -35,7 +35,7 @@ Results go to `runtime/replay/`.
 
 ---
 
-## 🎯 Active Economic Scope
+## 🎯 Périmètre économique officiel — Active Economic Scope
 
 The canonical economic scope contains exactly three active paper-only families:
 
