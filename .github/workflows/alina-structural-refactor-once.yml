@@ -22,7 +22,7 @@ jobs:
       REAL_MAINNET_TRADING: "false"
       HYPERSMART_ENABLE_REAL_ORDERS: "0"
       ENABLE_REAL_ORDERS: "0"
-      EXPECTED_PARENT: 95ea6de8b1ea005ebc011dd6120ebbcaae5310ba
+      EXPECTED_PARENT: cf9b12bcec13b7aeac57f2ca610749bcfe660b3a
       EXPECTED_SOURCE_BLOB: f28c4fd090b37280fce8fe6570614d93c3952aba
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -52,6 +52,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
+          import textwrap
 
           source_path = Path("src/hl_observer/backtesting/lead_lag_shadow_economics.py")
           helper_path = Path("src/hl_observer/backtesting/lead_lag_shadow_temporal.py")
@@ -77,12 +78,11 @@ jobs:
           if "def _temporal_bounds" not in removed or "placebo-v1" not in removed:
               raise SystemExit("unexpected helper block")
           source = source.replace(import_anchor, import_anchor + helper_import, 1)
-          source = source[:start + len(helper_import)] if False else source
-          # Re-find markers after the import insertion, then remove only helper definitions.
           start = source.find(start_marker)
           end = source.find(end_marker, start + 1)
           source = source[:start] + "\n" + source[end:]
-          helper = '''"""Pure deterministic temporal helpers for Lead-Lag shadow economics."""
+          helper = textwrap.dedent('''\
+          """Pure deterministic temporal helpers for Lead-Lag shadow economics."""
           from __future__ import annotations
 
           import hashlib
@@ -124,10 +124,7 @@ jobs:
                   "oos_start_ns": validation_end + int(purge_ns),
                   "purge_ns": int(purge_ns),
               }
-          '''
-          # Dedent the embedded helper while preserving deterministic content.
-          import textwrap
-          helper = textwrap.dedent(helper)
+          ''')
           source_path.write_text(source, encoding="utf-8")
           helper_path.write_text(helper, encoding="utf-8")
           source_lines = len(source.splitlines())
@@ -142,6 +139,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m ruff check --fix \
+            src/hl_observer/backtesting/lead_lag_shadow_economics.py \
+            src/hl_observer/backtesting/lead_lag_shadow_temporal.py
           python -m ruff check \
             src/hl_observer/backtesting/lead_lag_shadow_economics.py \
             src/hl_observer/backtesting/lead_lag_shadow_temporal.py
