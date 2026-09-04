@@ -22,7 +22,7 @@ jobs:
       REAL_MAINNET_TRADING: "false"
       HYPERSMART_ENABLE_REAL_ORDERS: "0"
       ENABLE_REAL_ORDERS: "0"
-      EXPECTED_PARENT: 6f088ea685c2bae9d9f69c8185b99409dd5105ff
+      EXPECTED_PARENT: f0a2b9347ece2c0c034c56acb9a213c8165864b6
       EXPECTED_SOURCE_BLOB: 5978b893b6f1d60ccd5046c6e44e0a167f625a2c
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -188,7 +188,7 @@ jobs:
               }
               target.parent.mkdir(parents=True, exist_ok=True)
               try:
-                  with target.open("x", encoding="utf-8", newline="\n") as handle:
+                  with target.open("x", encoding="utf-8", newline="\\n") as handle:
                       json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
                       handle.flush()
                       os.fsync(handle.fileno())
@@ -351,17 +351,15 @@ jobs:
           p = Path('src/hl_observer/simulation/economic_campaigns.py')
           assert len(p.read_text(encoding='utf-8').splitlines()) < 800
           PY
-      - name: Commit verified extraction and remove one-shot workflow
+      - name: Commit verified extraction
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/alina-economic-campaigns-refactor-once.yml
           git status --short
           git config user.name "Rapt0r06300"
           git config user.email "bermond.florent06@gmail.com"
           git add src/hl_observer/simulation/economic_campaigns.py \
-                  src/hl_observer/simulation/economic_campaign_provenance.py \
-                  .github/workflows/alina-economic-campaigns-refactor-once.yml
+                  src/hl_observer/simulation/economic_campaign_provenance.py
           git diff --cached --check
           git commit -m "refactor: extract economic campaign provenance"
           git push origin HEAD:main
