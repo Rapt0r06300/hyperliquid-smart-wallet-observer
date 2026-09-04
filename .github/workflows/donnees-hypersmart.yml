@@ -7,6 +7,9 @@ on:
       - 'src/hl_observer/datasets/**'
       - 'tests/test_dataset_*.py'
       - 'tests/test_autonomous_*.py'
+      - 'PREPARER_EXPERIENCE_FULL_COLD.cmd'
+      - 'LANCER_LABO_180GO.cmd'
+      - 'ANALYSER_DONNEES_HYPERSMART.cmd'
       - '.github/workflows/donnees-hypersmart.yml'
   workflow_dispatch: {}
 
@@ -17,7 +20,6 @@ jobs:
   test-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -32,19 +34,27 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e . --no-deps
-          python -m pip install pytest pytest-timeout 2>/dev/null || true
+          python -m pip install pytest pytest-timeout
 
       - name: Lancer tests dataset
         env:
           PYTHONPATH: src:tools
         run: |
-          timeout 300 python -m pytest -q --tb=line --timeout=15 \
-            tests/test_dataset*.py tests/test_autonomous*.py 2>/dev/null || echo "Tests optional"
+          mapfile -t DATASET_TESTS < <(find tests -maxdepth 1 -type f -name 'test_dataset_*.py' | sort)
+          if [ "${#DATASET_TESTS[@]}" -eq 0 ]; then
+            echo "Aucun test dataset découvert sur Linux"
+            exit 1
+          fi
+          timeout 300 python -m pytest -q "${DATASET_TESTS[@]}" --tb=line --timeout=15
+
+          mapfile -t AUTONOMOUS_TESTS < <(find tests -maxdepth 1 -type f -name 'test_autonomous_*.py' | sort)
+          if [ "${#AUTONOMOUS_TESTS[@]}" -gt 0 ]; then
+            timeout 300 python -m pytest -q "${AUTONOMOUS_TESTS[@]}" --tb=line --timeout=15
+          fi
 
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -60,12 +70,23 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e . --no-deps
-          python -m pip install pytest pytest-timeout 2>&1 | Out-Null
+          python -m pip install pytest pytest-timeout
 
       - name: Lancer tests dataset
         shell: pwsh
         env:
           PYTHONPATH: src;tools
         run: |
-          python -m pytest -q --tb=line --timeout=15 `
-            tests/test_dataset*.py tests/test_autonomous*.py 2>&1 | Out-Null
+          $datasetTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_dataset_*.py' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($datasetTests.Count -eq 0) {
+            Write-Error "Aucun test dataset découvert sur Windows"
+            exit 1
+          }
+          python -m pytest -q @datasetTests --tb=line --timeout=15
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $autonomousTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_autonomous_*.py' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($autonomousTests.Count -gt 0) {
+            python -m pytest -q @autonomousTests --tb=line --timeout=15
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
