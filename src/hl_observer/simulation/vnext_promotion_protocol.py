@@ -152,6 +152,15 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
         raise ValueError("certification requires paper_read_only=True")
     if candidate.get("real_execution") is not False:
         raise ValueError("certification requires real_execution=False")
+    for field in (
+        "costs_complete",
+        "liquidability_complete",
+        "provenance_complete",
+        "positions_flat",
+        "economic_reconciliation_ok",
+    ):
+        if candidate.get(field) is not True:
+            raise ValueError(f"certification requires {field}=True")
     return True
 
 
