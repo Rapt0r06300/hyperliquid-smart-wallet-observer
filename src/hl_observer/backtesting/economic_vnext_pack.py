@@ -158,6 +158,9 @@ def run_economic_vnext_pack(
     summary = {
         "schema_version": SCHEMA_VERSION,
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+        "certification_status": "TRAIN_ONLY_NOT_CERTIFIED",
+        "freeze_hash": None,
+        "post_freeze_oos_consumed": False,
         "heldout_evaluated": False,
         "canonical_campaigns_mutated": False,
         "families": {
