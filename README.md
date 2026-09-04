@@ -35,14 +35,24 @@ Results go to `runtime/replay/`.
 
 ---
 
+## 🎯 Active Economic Scope
+
+The canonical economic scope contains exactly three active paper-only families:
+
+- **Copy-Vault** — wallet/vault-copy research and paper simulation.
+- **Lead-Lag** — causal short-horizon lead-lag research.
+- **Cross-Venue Dislocation** — executable cross-venue dislocation research.
+
+**Carry is `DISABLED_BY_SCOPE`**. Historical carry/funding modules and measurements may remain for audit/backward compatibility, but Carry is not an active economic family and must never be promoted by the active scope.
+
 ## 🎯 What It Does
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Wallet Discovery** | ✅ Live | Finds top Hyperliquid wallets by PnL & consistency |
 | **Copy-Trading Simulation** | 🔒 Locked | Measures profitability, now **−7.97 bps** out-of-sample |
-| **Funding Arbitrage** | 🟡 Standby | Waits for ≥15 bps edge (8 bps cost + 7 bps margin) |
-| **Cross-Venue Funding** | 🕐 Measuring | 72-hour protocol; results at epoch end only |
+| **Funding Arbitrage** | 🟡 Standby | Historical/compatibility surface; Carry remains `DISABLED_BY_SCOPE` |
+| **Cross-Venue Funding** | 🕐 Measuring | Historical measurement surface; active family is Cross-Venue Dislocation |
 | **Liquidation Tracking** | ⏸️ Suspended | Collects clusters, awaits decision logic |
 | **Paper Settlements** | ✅ Fixed | Funding accrual now matches **hourly reality** (not linear interpolation) |
 
@@ -50,7 +60,7 @@ Results go to `runtime/replay/`.
 
 ## 📊 Current Measurements (July 22, 2026)
 
-- **Carry Funding**: 0.00% above HLP threshold → **dominated** strategy  
+- **Carry Funding**: historical measurement only; Carry is `DISABLED_BY_SCOPE`  
 - **Arbitrage**: Mid-price +0.54% → execution price −2.7% (illusion detected)  
 - **Liquidations**: 231 clusters tracked over 31.6h; signal logic pending
 
