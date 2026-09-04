@@ -158,6 +158,10 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
         "provenance_complete",
         "positions_flat",
         "economic_reconciliation_ok",
+        "validation_without_recalibration",
+        "temporal_disjointness_ok",
+        "forward_post_freeze_complete",
+        "placebo_complete",
     ):
         if candidate.get(field) is not True:
             raise ValueError(f"certification requires {field}=True")
