@@ -1,0 +1,70 @@
+name: Alina economic-campaigns recovery once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/alina-economic-campaigns-recovery-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair-generator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      HL_ENABLE_MAINNET_EXECUTION: "0"
+      HL_ENABLE_TESTNET_EXECUTION: "0"
+      REAL_MAINNET_TRADING: "false"
+      HYPERSMART_ENABLE_REAL_ORDERS: "0"
+      ENABLE_REAL_ORDERS: "0"
+      EXPECTED_PARENT: d5a7b59af921dcf3de0bf564ea93846a869979f3
+      EXPECTED_WORKFLOW_BLOB: cd2ebd1ac36186f676e0d986fc8ae49b107cb947
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
+      - name: Verify exact recovery base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_PARENT"
+          test "$(git hash-object .github/workflows/alina-economic-campaigns-refactor-once.yml)" = "$EXPECTED_WORKFLOW_BLOB"
+      - name: Repair generated newline literal and exact parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+
+          path = Path('.github/workflows/alina-economic-campaigns-refactor-once.yml')
+          text = path.read_text(encoding='utf-8')
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          text, count = re.subn(r'EXPECTED_PARENT: [0-9a-f]{40}', f'EXPECTED_PARENT: {head}', text, count=1)
+          if count != 1:
+              raise SystemExit(f'EXPECTED_PARENT replacement count={count}')
+          needle = r'newline="\n"'
+          replacement = r'newline="\\n"'
+          if text.count(needle) != 1:
+              raise SystemExit(f'newline literal match count={text.count(needle)}')
+          text = text.replace(needle, replacement, 1)
+          path.write_text(text, encoding='utf-8')
+          verify = path.read_text(encoding='utf-8')
+          if f'EXPECTED_PARENT: {head}' not in verify or replacement not in verify:
+              raise SystemExit('post-write verification failed')
+          PY
+      - name: Commit repair and remove recovery workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/alina-economic-campaigns-recovery-once.yml
+          git config user.name "Rapt0r06300"
+          git config user.email "bermond.florent06@gmail.com"
+          git add .github/workflows/alina-economic-campaigns-refactor-once.yml \
+                  .github/workflows/alina-economic-campaigns-recovery-once.yml
+          git diff --cached --check
+          git commit -m "fix: repair economic-campaign extraction generator"
+          git push origin HEAD:main
