@@ -184,5 +184,6 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "INSTALLER_ALINA_RUNNER_FINAL_V1.cmd",
         "PREPARER_PC_ALINA.cmd",
         "LANCER_COCKPIT_ALINA.cmd",
+        "VERIFIER_LAB_AUTONOME_ALINA.cmd",
     }
     assert cmd_racine <= officiels | outils_conserves
