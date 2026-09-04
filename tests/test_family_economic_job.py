@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import FAMILY_ECONOMIC_SUITES, validate_family_request
 from hl_observer.simulation.economic_objective import evaluate_objective
@@ -75,11 +77,21 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
 
 
 def _valid_copy_campaign() -> dict:
+    economic_contract = build_copy_vault_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=150.0,
+        copy_delay_ms=60_000.0,
+        max_reference_lag_ms=30_000.0,
+        max_target_lag_ms=30_000.0,
+    ).receipt()
+    assert economic_contract["certification"]["ready"] is True
     campaign = {
         "family": "copy_vault",
         "starting_capital_usd": 1000.0,
         "paper_read_only": True,
         "real_execution": False,
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": economic_contract["assumption_snapshot_hash"],
         "parameters_frozen": True,
         "opened_positions": 2,
         "closed_positions": 2,
