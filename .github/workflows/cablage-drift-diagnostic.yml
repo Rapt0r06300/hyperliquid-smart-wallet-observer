@@ -1,0 +1,27 @@
+name: cablage-drift-diagnostic
+
+on:
+  push:
+    paths:
+      - "tools/diagnose_cablage_drift.py"
+      - ".github/workflows/cablage-drift-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Nommer les modules testes-non-branches hors dette
+        run: python tools/diagnose_cablage_drift.py
