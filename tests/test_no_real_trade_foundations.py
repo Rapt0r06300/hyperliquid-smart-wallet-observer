@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hl_observer.core.config import default_core_config
+import pytest
+
+from hl_observer.core.config import CoreConfig, default_core_config
 
 
 def test_core_config_is_simulation_only(tmp_path):
@@ -12,6 +14,11 @@ def test_core_config_is_simulation_only(tmp_path):
     assert cfg.runtime_mode.orders_allowed is False
     assert cfg.runtime_mode.signatures_allowed is False
     assert cfg.runtime_mode.wallet_connect_allowed is False
+
+
+def test_core_config_rejects_non_positive_starting_balance():
+    with pytest.raises(ValueError, match="default_starting_balance_usdc must be positive"):
+        CoreConfig(default_starting_balance_usdc=0).validate()
 
 
 def test_phase0_foundations_do_not_introduce_real_exchange_calls():
