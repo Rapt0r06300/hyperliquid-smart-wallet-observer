@@ -9,7 +9,7 @@ from math import sqrt
 
 from pydantic import BaseModel, Field
 
-from hl_observer.utils.math import clamp
+from hl_observer.analysis.profit_patterns import compute_profit_pattern_score
 
 
 class OpeningPatternDecision(StrEnum):
@@ -73,14 +73,12 @@ def compute_opening_pattern_stats(
     else:
         decision = OpeningPatternDecision.PAPER_FOLLOW_ALLOWED
         reasons.append("positive_expectancy_with_sample")
-    score = clamp(
-        0.20 * clamp((expectancy or 0) / 100.0 * 100.0, 0.0, 100.0)
-        + 0.18 * clamp((profit_factor or 0) / 3.0 * 100.0, 0.0, 100.0)
-        + 0.15 * clamp((wilson or 0) * 100.0, 0.0, 100.0)
-        + 0.12 * clamp(sample / min_samples * 100.0, 0.0, 100.0)
-        + 0.35 * 50.0,
-        0.0,
-        100.0,
+    score = compute_profit_pattern_score(
+        expectancy=expectancy,
+        profit_factor=profit_factor,
+        wilson_lower_bound=wilson,
+        sample_size=sample,
+        min_samples=min_samples,
     )
     return OpeningPatternStats(
         wallet_address=wallet_address,
