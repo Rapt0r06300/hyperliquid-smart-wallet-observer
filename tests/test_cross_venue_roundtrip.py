@@ -27,6 +27,18 @@ def test_round_trip_flat_ne_paie_que_les_4_frais():
     assert r["cout_round_trip_bps"] == 16.0
 
 
+def test_round_trip_sell_hl_buy_binance_est_symetrique():
+    r = R.cout_round_trip(
+        R.SELL_HL_BUY_BINANCE, entree=_books(), sortie=_books(),
+        notional_usd=100.0, fee_bps_hl=3.5, fee_bps_binance=4.5,
+    )
+    assert r["statut"] == "OK"
+    assert r["direction"] == R.SELL_HL_BUY_BINANCE
+    assert r["slippage_4_jambes_bps"] == 0.0
+    assert r["cout_round_trip_bps"] == 16.0
+    assert r["real_execution"] is False
+
+
 def test_round_trip_compte_le_slippage_des_quatre_jambes():
     # Carnets fins : le notionnel traverse plusieurs niveaux → slippage > 0 sur chaque jambe.
     profond = {
