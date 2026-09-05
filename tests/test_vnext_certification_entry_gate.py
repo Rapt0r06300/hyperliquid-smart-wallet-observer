@@ -19,12 +19,25 @@ _REQUIRED_TEMPORAL_PROOFS = (
 )
 
 
+def _freeze_manifest() -> dict[str, object]:
+    return protocol.build_freeze_manifest(
+        family="lead_lag",
+        freeze_candidate={"variant": "alpha", "threshold_bps": 20.0},
+        dataset_fingerprint="d" * 64,
+        config={"capital_usd": 1000.0, "paper_read_only": True},
+        frozen_at_ms=1_000,
+    )
+
+
 def _candidate(status: str) -> dict[str, object]:
+    manifest = _freeze_manifest()
+    freeze_hash = str(manifest["freeze_hash"])
     return {
         "certification_status": status,
-        "freeze_hash": "a" * 64,
+        "freeze_manifest": manifest,
+        "freeze_hash": freeze_hash,
         "post_freeze_oos_consumed": True,
-        "consumed_freeze_hash": "a" * 64,
+        "consumed_freeze_hash": freeze_hash,
         "paper_read_only": True,
         "real_execution": False,
         "frozen_at_ms": 1_000,
@@ -73,6 +86,30 @@ def test_certification_entry_rejects_missing_consumed_freeze_binding() -> None:
     candidate = _candidate("CERTIFICATION_READY")
     candidate.pop("consumed_freeze_hash")
     with pytest.raises(ValueError, match="consumed_freeze_hash"):
+        protocol.validate_certification_entry(candidate)
+
+
+def test_certification_entry_rejects_missing_freeze_manifest() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate.pop("freeze_manifest")
+    with pytest.raises(ValueError, match="freeze_manifest"):
+        protocol.validate_certification_entry(candidate)
+
+
+def test_certification_entry_rejects_tampered_freeze_manifest() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    manifest = dict(candidate["freeze_manifest"])
+    manifest["dataset_sha256"] = "e" * 64
+    candidate["freeze_manifest"] = manifest
+    with pytest.raises(ValueError, match="freeze_manifest"):
+        protocol.validate_certification_entry(candidate)
+
+
+def test_certification_entry_rejects_freeze_hash_not_bound_to_manifest() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate["freeze_hash"] = "b" * 64
+    candidate["consumed_freeze_hash"] = "b" * 64
+    with pytest.raises(ValueError, match="freeze_hash"):
         protocol.validate_certification_entry(candidate)
 
 
