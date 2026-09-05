@@ -91,3 +91,12 @@ def test_aucun_tag_flottant_connu_ne_reapparait():
         "@master",
     ):
         assert floating not in text, floating
+
+
+def test_pre_run_101_200_clean_gate_precedes_workspace_mutating_setup():
+    text = (WORKFLOWS / "pre-run-101-200.yml").read_text(encoding="utf-8")
+    gate = text.index("Gate initial exact HEAD securite et couverture")
+    setup = text.index("uses: actions/setup-python@")
+    install = text.index("Installer dependances fail-closed")
+    assert gate < setup
+    assert gate < install
