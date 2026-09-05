@@ -183,6 +183,16 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
         raise ValueError("certification requires paper_read_only=True")
     if candidate.get("real_execution") is not False:
         raise ValueError("certification requires real_execution=False")
+    windows = candidate.get("temporal_windows")
+    if not isinstance(windows, Mapping):
+        raise ValueError("certification requires temporal_windows")
+    try:
+        frozen_at_ms = int(candidate["frozen_at_ms"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("certification requires a valid frozen_at_ms") from exc
+    if frozen_at_ms <= 0:
+        raise ValueError("certification requires a positive frozen_at_ms")
+    validate_temporal_disjointness(windows, frozen_at_ms=frozen_at_ms)
     for field in (
         "costs_complete",
         "liquidability_complete",
