@@ -12,9 +12,19 @@ def test_sharpe_et_sortino():
     assert m.sortino([1.0, -1.0, 1.0, -1.0]) is not None
 
 
+def test_sortino_sans_baisse_couvre_les_deux_fallbacks():
+    assert m.sortino([1.0, 2.0]) == float("inf")
+    assert m.sortino([0.0, 0.0]) == 0.0
+
+
 def test_profit_factor_et_payoff():
     assert m.profit_factor([10.0, -5.0]) == pytest.approx(2.0)
     assert m.payoff([10.0, 10.0, -5.0]) == pytest.approx(2.0)
+
+
+def test_profit_factor_sans_perte_reste_fail_closed_sur_absence_de_gain():
+    assert m.profit_factor([1.0, 2.0]) == float("inf")
+    assert m.profit_factor([0.0, 0.0]) is None
 
 
 def test_max_drawdown_et_recuperation():
@@ -24,8 +34,19 @@ def test_max_drawdown_et_recuperation():
     assert m.temps_recuperation(pnls) is not None
 
 
+def test_recuperation_couvre_vide_aucun_drawdown_et_non_recupere():
+    assert m.temps_recuperation([]) is None
+    assert m.temps_recuperation([1.0, 1.0, 1.0]) == 0
+    assert m.temps_recuperation([10.0, -5.0]) is None
+
+
 def test_calmar():
     assert m.calmar([10.0, -5.0, 10.0]) == pytest.approx(15.0 / 5.0)
+
+
+def test_calmar_sans_drawdown_distingue_gain_et_non_gain():
+    assert m.calmar([1.0, 1.0]) == float("inf")
+    assert m.calmar([0.0, 0.0]) is None
 
 
 def test_q2_decroissance_roulante():
