@@ -21,11 +21,17 @@ def test_scan_for_secrets_flags_private_key():
 def test_no_real_trade_violations_fuzz():
     safe = {"REAL_MAINNET_TRADING": "false", "TESTNET_ONLY": "true"}
     assert no_real_trade_violations(safe) == []
-    danger = {"REAL_MAINNET_TRADING": "true", "TESTNET_ONLY": "false", "ENABLE_REAL_ORDERS": "1"}
+    danger = {
+        "REAL_MAINNET_TRADING": "true",
+        "TESTNET_ONLY": "false",
+        "ENABLE_REAL_ORDERS": "1",
+        "HYPERSMART_ALLOW_EXCHANGE_ENDPOINT": "true",
+    }
     v = no_real_trade_violations(danger)
     assert "REAL_MAINNET_TRADING_ENABLED" in v
     assert "TESTNET_ONLY_DISABLED" in v
     assert "REAL_ORDERS_ENABLED" in v
+    assert "EXCHANGE_ENDPOINT_ENABLED" in v
 
 
 def test_kill_switch(tmp_path):
