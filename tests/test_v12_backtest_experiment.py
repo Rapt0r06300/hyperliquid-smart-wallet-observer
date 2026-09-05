@@ -3,6 +3,7 @@ from __future__ import annotations
 from hl_observer.backtesting.experiment import (
     BacktestExperimentConfig,
     PriceTick,
+    _latest_marks_before,
     run_paper_replay_experiment,
 )
 from hl_observer.paper_trading.paper_engine import PaperEngineConfig
@@ -77,3 +78,14 @@ def test_v12_backtest_skips_when_no_future_price_tick():
     assert result.decisions[0].stopped_reason == "NO_FUTURE_PRICE_TICK"
     assert result.skipped_no_future_price == 1
     assert result.evidence == ()
+
+
+def test_latest_marks_before_stops_before_first_future_tick():
+    ticks_by_coin = {
+        "HYPE": [
+            PriceTick("HYPE", 1_000, 100.0, "before"),
+            PriceTick("HYPE", 2_000, 105.0, "future"),
+        ]
+    }
+
+    assert _latest_marks_before(ticks_by_coin, 1_500) == {"HYPE": 100.0}
