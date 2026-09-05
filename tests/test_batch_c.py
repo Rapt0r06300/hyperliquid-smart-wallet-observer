@@ -89,3 +89,14 @@ def test_abnormal_regime():
     r = AR.regime_anormal(age_listing_h=2.0, spread_bps=5.0, depth_usd=10000.0)
     assert r["anormal"] is True and "NOUVEAU_LISTING" in r["raisons"] and r["action"] == "NO_TRADE"
     assert AR.regime_anormal(age_listing_h=100.0, spread_bps=5.0, depth_usd=10000.0)["anormal"] is False
+
+    fail_closed = AR.regime_anormal(
+        delisting=True,
+        tick_ou_lot_change=True,
+        age_listing_h=100.0,
+        spread_bps=5.0,
+        depth_usd=1000.0,
+    )
+    assert fail_closed["anormal"] is True
+    assert fail_closed["action"] == "NO_TRADE"
+    assert {"DELISTING", "TICK_OU_LOT_CHANGE", "ILLIQUIDE"} <= set(fail_closed["raisons"])
