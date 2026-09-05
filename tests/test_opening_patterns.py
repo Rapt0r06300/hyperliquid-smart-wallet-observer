@@ -1,4 +1,5 @@
 from hl_observer.analysis.opening_patterns import OpeningPatternDecision, compute_opening_pattern_stats
+from hl_observer.analysis.profit_patterns import rank_profit_patterns
 
 
 def test_opening_patterns_require_min_sample_size():
@@ -18,6 +19,13 @@ def test_opening_patterns_reject_negative_expectancy():
     stats = compute_opening_pattern_stats([-5.0] * 30, opening_type="BAD", min_samples=20)
 
     assert stats.decision == OpeningPatternDecision.REJECT_NEGATIVE_EXPECTANCY
+
+
+def test_profit_patterns_rank_by_score_descending():
+    ranked = rank_profit_patterns({"weak": [-5.0] * 30, "strong": [10.0] * 25 + [-2.0] * 5})
+
+    assert [item.opening_type for item in ranked] == ["strong", "weak"]
+    assert ranked[0].score > ranked[1].score
 
 
 def test_profit_patterns_do_not_claim_always_wins():
