@@ -23,6 +23,7 @@ def test_queue_fill_probability_bounds():
     assert queue_fill_probability(0, 100) == 1.0
     assert queue_fill_probability(100, 100) == 0.0
     assert 0.0 < queue_fill_probability(40, 100) < 1.0
+    assert queue_fill_probability(40, 0) == 0.0
 
 
 # ---- #152 smart money ----
