@@ -40,6 +40,24 @@ def test_refusal_cost_flags_costly_gate():
     assert "EDGE_TOO_SMALL" in out["costly_gates"]
 
 
+def test_refusal_cost_ignores_non_mapping_rows():
+    out = refusal_cost_by_reason([
+        None,
+        "malformed-row",
+        {"reason": "SAFE", "shadow_net_pnl_usdc": -0.25},
+    ])
+    assert out["rows"] == [{
+        "reason": "SAFE",
+        "refused": 1,
+        "would_have_won": 0,
+        "missed_pnl_usdc": 0.0,
+        "avoided_loss_usdc": 0.25,
+        "net_benefit_usdc": 0.25,
+        "verdict": "GATE_PAYS_OFF",
+    }]
+    assert out["costly_gates"] == []
+
+
 def test_shadow_arms_suggest_promotion_when_candidate_beats_active():
     reg = ShadowArmRegistry("active")
     reg.add_candidate("cand_maker")
