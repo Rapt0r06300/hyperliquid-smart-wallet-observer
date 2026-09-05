@@ -13,6 +13,7 @@ def test_iceberg_slices():
     s = iceberg_slices(100.0, 30.0)
     assert abs(sum(s) - 100.0) < 1e-9
     assert s[:3] == [30.0, 30.0, 30.0] and abs(s[-1] - 10.0) < 1e-9
+    assert iceberg_slices(5.0, 0.0) == [5.0]
 
 
 def test_latency_sampler_bounds_and_determinism():
