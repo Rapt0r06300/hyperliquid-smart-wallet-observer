@@ -178,6 +178,16 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
     freeze_hash = candidate.get("freeze_hash")
     if not _is_sha256(freeze_hash):
         raise ValueError("certification requires a full freeze_hash")
+    freeze_manifest = candidate.get("freeze_manifest")
+    if not isinstance(freeze_manifest, Mapping):
+        raise ValueError("certification requires freeze_manifest")
+    if not verify_freeze_manifest(freeze_manifest):
+        raise ValueError("certification requires a valid freeze_manifest")
+    manifest_freeze_hash = freeze_manifest.get("freeze_hash")
+    if not _is_sha256(manifest_freeze_hash) or not hmac.compare_digest(
+        str(manifest_freeze_hash), str(freeze_hash)
+    ):
+        raise ValueError("certification freeze_hash must match freeze_manifest")
     consumed_freeze_hash = candidate.get("consumed_freeze_hash")
     if not _is_sha256(consumed_freeze_hash):
         raise ValueError("certification requires a full consumed_freeze_hash")
