@@ -34,6 +34,8 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
+      - name: Gate initial exact HEAD securite et couverture
+        run: python3 -m hl_observer.ops.pre_run_guard_101_200 --root . --output runtime/reports/pre_run_101_200.json --require-clean-git
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
@@ -43,8 +45,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
-      - name: Gate initial exact HEAD securite et couverture
-        run: python -m hl_observer.ops.pre_run_guard_101_200 --root . --output runtime/reports/pre_run_101_200.json --require-clean-git
       - name: Matrice exacte 101-200
         run: python -m pytest -q -p no:cacheprovider --junitxml=junit-pre-run-101-200-core.xml tests/test_pre_run_optimizations_101_200.py tests/test_pre_run_guard_101_200.py
       - name: Preuves operationnelles et PAPER 101-130
