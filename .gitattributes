@@ -7,6 +7,9 @@
 # executes : on les fixe en LF pour que leurs octets (et donc leurs hashes) soient identiques sur
 # Linux et Windows, independamment de core.autocrlf.
 docs/archive/legacy_cmd/**/*.cmd.txt text eol=lf
+# Exception historique : TOUT-TESTER v3 a ete archive explicitement en CRLF et son test de
+# non-regression protege ces octets, car cette terminaison faisait partie du correctif Windows.
+docs/archive/legacy_cmd/2026-07-25/TOUT-TESTER.cmd.txt text eol=crlf
 # Les scripts POSIX restent en LF.
 *.sh text eol=lf
 
