@@ -24,6 +24,7 @@ def _candidate(status: str) -> dict[str, object]:
         "certification_status": status,
         "freeze_hash": "a" * 64,
         "post_freeze_oos_consumed": True,
+        "consumed_freeze_hash": "a" * 64,
         "paper_read_only": True,
         "real_execution": False,
         "frozen_at_ms": 1_000,
@@ -58,6 +59,20 @@ def test_certification_entry_recomputes_temporal_disjointness() -> None:
     windows["oos"] = {"start_ms": 1_150, "end_ms": 1_300}
     candidate["temporal_windows"] = windows
     with pytest.raises(ValueError, match="overlap"):
+        protocol.validate_certification_entry(candidate)
+
+
+def test_certification_entry_rejects_oos_consumed_for_different_freeze() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate["consumed_freeze_hash"] = "b" * 64
+    with pytest.raises(ValueError, match="consumed_freeze_hash"):
+        protocol.validate_certification_entry(candidate)
+
+
+def test_certification_entry_rejects_missing_consumed_freeze_binding() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate.pop("consumed_freeze_hash")
+    with pytest.raises(ValueError, match="consumed_freeze_hash"):
         protocol.validate_certification_entry(candidate)
 
 
