@@ -21,3 +21,13 @@ def test_agressivite_plafonnee_au_collar():
 
 def test_prix_invalide():
     assert prix_marketable(0.0, "ACHAT")["prix"] == "UNMEASURABLE"
+
+
+def test_vente_est_bornee_par_le_collar():
+    r = prix_marketable(100.0, "VENTE", agressivite_bps=50.0, collar_bps=30.0)
+    assert r == {"prix": 99.7, "sens": "VENTE", "borne_collar": 99.7}
+
+
+def test_sens_inconnu_et_prix_non_numerique_sont_fail_closed():
+    assert prix_marketable(100.0, "HOLD") == {"prix": "UNMEASURABLE", "raison": "SENS_INCONNU"}
+    assert prix_marketable("100", "ACHAT") == {"prix": "UNMEASURABLE", "raison": "PRIX_INVALIDE"}
