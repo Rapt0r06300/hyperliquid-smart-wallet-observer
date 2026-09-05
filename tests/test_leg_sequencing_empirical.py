@@ -15,6 +15,15 @@ def test_venue_la_plus_risquee_en_premier():
     assert r["premiere"] == "BINANCE" and r["seconde"] == "HL"       # BINANCE plus risquée -> d'abord
 
 
+def test_venue_a_plus_risquee_en_premier():
+    r = ordonner_jambes("HL", {"proba_echec": 0.12, "latence_ms": 90.0},
+                        "BINANCE", {"proba_echec": 0.02, "latence_ms": 40.0})
+    assert r["ordre"] == ["HL", "BINANCE"]
+    assert r["premiere"] == "HL"
+    assert r["seconde"] == "BINANCE"
+    assert r["raison"] == "JAMBE_INCERTAINE_EN_PREMIER"
+
+
 def test_departage_par_latence():
     r = ordonner_jambes("A", {"proba_echec": 0.05, "latence_ms": 30.0},
                         "B", {"proba_echec": 0.05, "latence_ms": 90.0})
