@@ -73,11 +73,14 @@ jobs:
           helper.write_text(header + block, encoding='utf-8')
 
           import_block = '''from hl_observer.simulation.economic_proof_controls import (
+              _CONTROL_NAMES,
               _COST_KEYS,
+              _ECONOMIC_KEYS,
               _SEGMENTS,
               _aggregate,
               _compare_metric,
               _concentration,
+              _control_receipt,
               _distribution,
               _freshness,
               _hash_ids,
@@ -85,6 +88,7 @@ jobs:
               _is_liquidatable,
               _number,
               _raw_trades,
+              _rounded,
               _trade_economics,
               _trade_times,
           )
