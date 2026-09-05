@@ -17,6 +17,10 @@ def test_atr_basic():
     assert atr(highs, lows, closes, window=3) > 0.0
 
 
+def test_atr_returns_zero_with_insufficient_history():
+    assert atr([10], [9], [9.5]) == 0.0
+
+
 def test_time_features_epoch():
     f = time_features(0)                 # 1970-01-01 00:00 UTC = jeudi (wday=3)
     assert f["hour"] == 0
