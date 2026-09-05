@@ -113,6 +113,13 @@ def test_certification_entry_rejects_freeze_hash_not_bound_to_manifest() -> None
         protocol.validate_certification_entry(candidate)
 
 
+def test_certification_entry_rejects_freeze_time_not_bound_to_manifest() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate["frozen_at_ms"] = 900
+    with pytest.raises(ValueError, match="frozen_at_ms"):
+        protocol.validate_certification_entry(candidate)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
