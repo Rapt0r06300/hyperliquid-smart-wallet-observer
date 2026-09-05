@@ -49,7 +49,7 @@ jobs:
           if n <= 800:
               raise SystemExit('EXPECTED_STRUCTURAL_RED_MISSING')
           PY
-      - name: Extraire durabilité et compacter les reexports
+      - name: Extraire durabilité canonique et mixin writer
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -81,9 +81,11 @@ jobs:
               _CODE_SHA_RE,
               _MAX_DEDUP_KEY,
               _MAX_HEADLINE,
+              _SEGMENT_RE,
               _SHA256_RE,
               EVENT_SCHEMA,
               FRESHNESS_STATES,
+              LEDGER_LATEST_SCHEMA,
               SOURCE_HEALTH_STATES,
               AlertSpineError,
               AlertValidationError,
@@ -100,20 +102,21 @@ jobs:
               _score_components,
               _score_receipt,
               _sha256,
+              _sha256_bytes,
               _validate_lifecycle_receipt,
               _validate_producer_epoch,
               _validate_producer_id,
               _validate_proposal,
           )
-          from hl_observer.collection.collecte_fiable import append_jsonl
+          from hl_observer.collection.collecte_fiable import append_jsonl, ecrire_atomique
 
           '''
           header = '\n'.join(line[10:] if line.startswith('          ') else line for line in header.splitlines()) + '\n'
-          helper.write_text(header + block, encoding='utf-8')
 
           imported = '''from hl_observer.alerts.durability import (
               AlertProducerInbox,
               AlertSpinePaths,
+              CanonicalAlertDurabilityMixin,
               SingleWriterFileLock,
               _validate_canonical_event,
               jsonl_append_fsync,
@@ -122,55 +125,19 @@ jobs:
           imported = '\n'.join(line[10:] if line.startswith('          ') else line for line in imported.splitlines()) + '\n'
           rewritten = text[:start] + '\n\n' + imported + '\n' + text[end + 1:]
 
-          validation_start = rewritten.index('from hl_observer.alerts.validation import (')
-          collection_start = rewritten.index('from hl_observer.collection.collecte_fiable')
-          compact = '''from hl_observer.alerts.validation import (
-              _CODE_SHA_RE as _CODE_SHA_RE,
-              _DEFAULT_LEDGER_ROTATE_BYTES as _DEFAULT_LEDGER_ROTATE_BYTES,
-              _EPOCH_RE as _EPOCH_RE,
-              _FORBIDDEN_ORDER_KEYS as _FORBIDDEN_ORDER_KEYS,
-              _MAX_DEDUP_KEY as _MAX_DEDUP_KEY,
-              _MAX_ENTITY_COUNT as _MAX_ENTITY_COUNT,
-              _MAX_EVIDENCE_REFS as _MAX_EVIDENCE_REFS,
-              _MAX_HEADLINE as _MAX_HEADLINE,
-              _PRODUCER_RE as _PRODUCER_RE,
-              _SEGMENT_RE as _SEGMENT_RE,
-              _SHA256_RE as _SHA256_RE,
-              EVENT_SCHEMA as EVENT_SCHEMA,
-              FRESHNESS_STATES as FRESHNESS_STATES,
-              IMMUTABLE_LIFECYCLE_STATES as IMMUTABLE_LIFECYCLE_STATES,
-              LEDGER_LATEST_SCHEMA as LEDGER_LATEST_SCHEMA,
-              PROJECTION_LIFECYCLE_STATES as PROJECTION_LIFECYCLE_STATES,
-              PROJECTION_SCHEMA as PROJECTION_SCHEMA,
-              PROPOSAL_SCHEMA as PROPOSAL_SCHEMA,
-              SCORE_POLICY_VERSION as SCORE_POLICY_VERSION,
-              SCORE_WEIGHTS_BPS as SCORE_WEIGHTS_BPS,
-              SOURCE_HEALTH_STATES as SOURCE_HEALTH_STATES,
-              AlertSpineError as AlertSpineError,
-              AlertValidationError as AlertValidationError,
-              CanonicalLedgerCorruption as CanonicalLedgerCorruption,
-              WriterBusy as WriterBusy,
-              _bounded_strings as _bounded_strings,
-              _canonical_bytes as _canonical_bytes,
-              _event_identity as _event_identity,
-              _event_reference as _event_reference,
-              _event_stream_hash as _event_stream_hash,
-              _evidence_refs as _evidence_refs,
-              _is_within as _is_within,
-              _reject_order_capability as _reject_order_capability,
-              _score_components as _score_components,
-              _score_receipt as _score_receipt,
-              _sha256 as _sha256,
-              _sha256_bytes as _sha256_bytes,
-              _validate_lifecycle_receipt as _validate_lifecycle_receipt,
-              _validate_producer_epoch as _validate_producer_epoch,
-              _validate_producer_id as _validate_producer_id,
-              _validate_proposal as _validate_proposal,
-              build_alert_proposal as build_alert_proposal,
+          method_start = rewritten.index('    def _cursor_payload(')
+          method_end = rewritten.index('    def _pending_paths(')
+          methods = rewritten[method_start:method_end].rstrip() + '\n'
+          helper.write_text(
+              header + block + '\n\nclass CanonicalAlertDurabilityMixin:\n' + methods,
+              encoding='utf-8',
           )
-          '''
-          compact = '\n'.join(line[10:] if line.startswith('          ') else line for line in compact.splitlines()) + '\n'
-          rewritten = rewritten[:validation_start] + compact + rewritten[collection_start:]
+          rewritten = rewritten[:method_start] + rewritten[method_end:]
+          rewritten = rewritten.replace(
+              'class CanonicalAlertWriter:',
+              'class CanonicalAlertWriter(CanonicalAlertDurabilityMixin):',
+              1,
+          )
           source.write_text(rewritten, encoding='utf-8')
           PY
       - name: Vérifier structure et style
