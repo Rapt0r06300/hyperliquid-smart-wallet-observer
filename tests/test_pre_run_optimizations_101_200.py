@@ -1,5 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
+from hl_observer.audit import pre_run_101_200 as audit_registry
 from hl_observer.audit.pre_run_101_200 import ITEMS, ids, inspect_coverage
 from hl_observer.research.experiment_infra import CacheNoeudDag, RegistreExperiencesSQLite
 from hl_observer.research.qa_rigor import detecter_dependance_ordre, detecter_flaky
@@ -13,6 +14,19 @@ def test_registry_exact_101_200_and_evidence_present():
     assert r['historical_registry_present'] and r['exact_ids'] and r['duplicate_free']
     assert r['n_items']==100 and r['n_code_present']==100 and r['n_missing']==0 and r['all_code_present']
     assert r['verified_by_presence'] is False and all(x['verified'] is False for x in r['details'])
+
+def test_inspect_coverage_reports_missing_registry_item(monkeypatch):
+    monkeypatch.setattr(
+        audit_registry,
+        'ITEMS',
+        {item_id: item for item_id, item in audit_registry.ITEMS.items() if item_id != 101},
+    )
+
+    result = audit_registry.inspect_coverage(ROOT)
+
+    assert result['missing_ids'] == [101]
+    assert result['n_missing'] == 1
+    assert result['all_code_present'] is False
 
 def test_range_bindings_are_current_and_explicit():
     for i in range(101,131):
