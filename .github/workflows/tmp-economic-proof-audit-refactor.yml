@@ -1,0 +1,138 @@
+name: tmp-economic-proof-audit-refactor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-economic-proof-audit-refactor.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  HYPERSMART_ENABLE_REAL_ORDERS: "0"
+  ENABLE_REAL_ORDERS: "0"
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: true
+          fetch-depth: 2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Installer dépendances exactes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Extraire contrôles indépendants de preuve économique
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/hl_observer/simulation/economic_proof_audit.py')
+          helper = Path('src/hl_observer/simulation/economic_proof_controls.py')
+          text = source.read_text(encoding='utf-8')
+          start = text.index('\n_SEGMENTS =')
+          end = text.index('\ndef audit_family')
+          block = text[start + 1:end].rstrip() + '\n'
+
+          header = '''"""Independent deterministic controls used by the economic proof audit."""
+          from __future__ import annotations
+
+          import hashlib
+          import math
+          import statistics
+          from collections import defaultdict
+          from collections.abc import Iterable, Mapping
+          from datetime import UTC, datetime
+          from typing import Any
+
+          from hl_observer.economics.assumptions import ZeroCostReason
+          from hl_observer.economics.hardcode_scanner import PROPOSAL_DISPOSITION
+          from hl_observer.economics.hardcode_scanner import SCHEMA_VERSION as HARDCODE_SCAN_SCHEMA
+
+          INDEPENDENT_AUDIT_SCHEMA = "hypersmart.independent_economic_audit.v1"
+
+          '''
+          header = '\n'.join(line[10:] if line.startswith('          ') else line for line in header.splitlines()) + '\n'
+          helper.write_text(header + block, encoding='utf-8')
+
+          import_block = '''from hl_observer.simulation.economic_proof_controls import (
+              _COST_KEYS,
+              _SEGMENTS,
+              _aggregate,
+              _compare_metric,
+              _concentration,
+              _distribution,
+              _freshness,
+              _hash_ids,
+              _independent_economic_audit,
+              _is_liquidatable,
+              _number,
+              _raw_trades,
+              _trade_economics,
+              _trade_times,
+          )
+          '''
+          import_block = '\n'.join(line[10:] if line.startswith('          ') else line for line in import_block.splitlines()) + '\n'
+          rewritten = text[:start] + '\n\n' + text[end + 1:]
+          anchor = 'from hl_observer.economics.proof_binding import audit_economic_contract_receipt\n'
+          rewritten = rewritten.replace(anchor, anchor + import_block, 1)
+          source.write_text(rewritten, encoding='utf-8')
+          PY
+      - name: Vérifier structure et style
+        run: |
+          python -m ruff check --fix src/hl_observer/simulation/economic_proof_audit.py src/hl_observer/simulation/economic_proof_controls.py
+          python -m ruff check src/hl_observer/simulation/economic_proof_audit.py src/hl_observer/simulation/economic_proof_controls.py
+          python - <<'PY'
+          from pathlib import Path
+          for raw in (
+              'src/hl_observer/simulation/economic_proof_audit.py',
+              'src/hl_observer/simulation/economic_proof_controls.py',
+          ):
+              count = len(Path(raw).read_text(encoding='utf-8').splitlines())
+              print(f'{raw}={count}')
+              if count > 800:
+                  raise SystemExit(f'FILE_TOO_LARGE:{raw}:{count}')
+          PY
+      - name: Tests preuve économique ciblés
+        run: |
+          python -m pytest -q tests/test_economic_proof_audit.py tests/test_economic_proof_audit_controls.py tests/test_economic_proof_audit_independent.py
+      - name: Vérifier invariants safety
+        run: |
+          python -m pytest -q tests/test_no_mainnet_execution.py tests/test_runtime_contract.py tests/test_coverage_closure_import_all.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: economic-proof-audit-refactor-${{ github.sha }}
+          path: |
+            src/hl_observer/simulation/economic_proof_audit.py
+            src/hl_observer/simulation/economic_proof_controls.py
+      - name: Publier uniquement le refactor vérifié sur main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || { echo "MAIN_MOVED_ABORT"; exit 1; }
+          git diff --check -- src/hl_observer/simulation/economic_proof_audit.py src/hl_observer/simulation/economic_proof_controls.py
+          git add src/hl_observer/simulation/economic_proof_audit.py src/hl_observer/simulation/economic_proof_controls.py
+          git diff --cached --check
+          git config user.name "alina-smartflow-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "refactor: extract economic proof controls"
+          test "$(git rev-parse HEAD^)" = "$GITHUB_SHA" || { echo "PARENT_MISMATCH_ABORT"; exit 1; }
+          git push origin HEAD:main
