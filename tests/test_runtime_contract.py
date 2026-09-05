@@ -59,3 +59,8 @@ def test_real_execution_flags_are_deny_by_default_in_contract():
     assert RC.CRITICAL_RUNTIME_FLAGS["HL_ENABLE_MAINNET_EXECUTION"] == "0"
     assert RC.CRITICAL_RUNTIME_FLAGS["HL_ENABLE_TESTNET_EXECUTION"] == "0"
     assert RC.CRITICAL_RUNTIME_FLAGS["HL_ENV"] == "paper"
+
+
+def test_cmd_parser_ignores_malformed_set_without_assignment():
+    assignments = RC.parse_cmd_set_assignments('set "MALFORMED"\nset "HL_ENV=paper"\n')
+    assert assignments == {"HL_ENV": ["paper"]}
