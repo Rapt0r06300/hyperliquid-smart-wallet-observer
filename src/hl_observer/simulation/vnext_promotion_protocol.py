@@ -175,8 +175,14 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
     status = candidate.get("certification_status")
     if status != "CERTIFICATION_READY":
         raise ValueError(f"certification status is not eligible: {status!r}")
-    if not _is_sha256(candidate.get("freeze_hash")):
+    freeze_hash = candidate.get("freeze_hash")
+    if not _is_sha256(freeze_hash):
         raise ValueError("certification requires a full freeze_hash")
+    consumed_freeze_hash = candidate.get("consumed_freeze_hash")
+    if not _is_sha256(consumed_freeze_hash):
+        raise ValueError("certification requires a full consumed_freeze_hash")
+    if not hmac.compare_digest(str(consumed_freeze_hash), str(freeze_hash)):
+        raise ValueError("certification consumed_freeze_hash must match freeze_hash")
     if candidate.get("post_freeze_oos_consumed") is not True:
         raise ValueError("certification requires consumed post-freeze OOS")
     if candidate.get("paper_read_only") is not True:
