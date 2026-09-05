@@ -35,5 +35,10 @@ def test_q2_decroissance_roulante():
     assert m.perf_roulante_decroit([5.0] * 40, fenetre=20) is False
 
 
+def test_q2_global_non_positif_ne_declenche_pas_de_decroissance():
+    assert m.perf_roulante_decroit([-1.0] * 40, fenetre=20) is False
+    assert m.perf_roulante_decroit([1.0, -1.0] * 20, fenetre=20) is False
+
+
 def test_deny_by_default():
     assert m.sharpe([1.0]) is None and m.payoff([1.0]) is None
