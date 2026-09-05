@@ -63,3 +63,13 @@ def test_lookahead_skipped_without_events():
     r = run_validation_gates([1.5, -0.8] * 20)
     lk = _gate(r, "lookahead")
     assert lk.get("skipped") is True and lk["passed"] is True    # honnête: pas d'events -> skip
+
+
+def test_lookahead_rejects_future_data_event():
+    events = [{"decision_ts_ms": 1_000, "data_ts_ms": 1_001}]
+    r = run_validation_gates([1.5, -0.8] * 20, events=events)
+    lk = _gate(r, "lookahead")
+    assert lk["passed"] is False
+    assert lk["violation_count"] == 1
+    assert r["verdict"] == "REJECT"
+    assert r["real_execution"] is False
