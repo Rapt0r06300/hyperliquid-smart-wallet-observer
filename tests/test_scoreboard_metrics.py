@@ -57,6 +57,10 @@ def test_expected_shortfall_vide_est_unmeasurable():
     assert S.expected_shortfall([]) is None
 
 
+def test_expected_shortfall_queue_plus_grande_que_l_echantillon_est_unmeasurable():
+    assert S.expected_shortfall([-10.0, 5.0], q=2.0) is None
+
+
 # --- hit_rate ----------------------------------------------------------------
 def test_hit_rate_fraction_gagnante():
     assert S.hit_rate([1.0, -1.0, 2.0, -3.0]) == 0.5
