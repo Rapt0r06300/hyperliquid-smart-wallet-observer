@@ -67,7 +67,6 @@ jobs:
           from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
           '''
-          # De-indent the embedded workflow string while preserving generated Python.
           helper_header = '\n'.join(line[10:] if line.startswith('          ') else line for line in helper_header.splitlines()) + '\n'
           helper.write_text(helper_header + block, encoding='utf-8')
 
@@ -111,7 +110,7 @@ jobs:
           python -m pytest -q tests/test_copy_vault_executable.py
       - name: Vérifier invariants safety
         run: |
-          python -m pytest -q tests/test_paper_only_guard.py tests/test_no_real_trade_surface.py || python -m pytest -q tests/test_paper_only_guard.py
+          python -m pytest -q tests/test_no_mainnet_execution.py tests/test_runtime_contract.py tests/test_coverage_closure_import_all.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
