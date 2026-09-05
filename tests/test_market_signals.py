@@ -17,6 +17,10 @@ def test_rolling_correlation():
     assert rolling_correlation(a, b, window=30) > 0.99
 
 
+def test_rolling_correlation_returns_zero_with_insufficient_history():
+    assert rolling_correlation([1.0], [2.0], window=30) == 0.0
+
+
 def test_anomaly_detects_spike():
     rng = random.Random(0)
     series = [10.0 + rng.gauss(0.0, 0.1) for _ in range(60)]   # bruit léger -> sd>0
