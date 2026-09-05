@@ -22,6 +22,16 @@ def test_champ_disparu_et_type_modifie():
     assert r["action"] == "QUARANTAINE" and {"CHAMP_DISPARU", "TYPE_MODIFIE"} <= raisons
 
 
+def test_champ_nouveau_met_le_dataset_en_quarantaine():
+    ref = {"price": "str"}
+    r = detecter(ref, {"price": "str", "unexpected": "str"})
+    assert r == {
+        "action": "QUARANTAINE",
+        "drift": True,
+        "anomalies": [{"type": "CHAMP_NOUVEAU", "champ": "unexpected"}],
+    }
+
+
 def test_enum_nouveau():
     ref = {"side": "str"}
     r = detecter(ref, {"side": "str"}, enums_connus={"side": {"BUY", "SELL"}}, enums_observes={"side": "XXX"})
