@@ -1,6 +1,7 @@
 """Palier de frais — plus de volume = frais plus bas ; volume inconnu = palier de base (jamais mieux)."""
 from __future__ import annotations
 
+import hl_observer.fees.fee_tier as fee_tier
 from hl_observer.fees.fee_tier import economie_bps_2_jambes, frais_selon_volume
 
 
@@ -15,3 +16,8 @@ def test_economie_croit_avec_le_volume():
     assert economie_bps_2_jambes(None) == 0.0              # base -> pas d'économie
     assert economie_bps_2_jambes(30_000_000.0, maker=True) == 1.0   # 2×(1.5-1.0)
     assert economie_bps_2_jambes(30_000_000.0) > economie_bps_2_jambes(10_000_000.0)
+
+
+def test_frais_selon_volume_fallback_uses_base_tier(monkeypatch):
+    monkeypatch.setattr(fee_tier, "PALIERS", ((10.0, 1.5, 4.5),))
+    assert fee_tier.frais_selon_volume(None) == (1.5, 4.5)
