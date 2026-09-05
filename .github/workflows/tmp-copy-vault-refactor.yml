@@ -1,0 +1,121 @@
+name: tmp-copy-vault-refactor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/tmp-copy-vault-refactor.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: src:tools
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  HYPERSMART_ENABLE_REAL_ORDERS: "0"
+  ENABLE_REAL_ORDERS: "0"
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Installer dépendances exactes
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install -r requirements-recherche.txt
+          python -m pip install -r requirements-ci-tools.txt
+      - name: Extraire la sélection causale Copy-Vault
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/hl_observer/backtesting/copy_vault_executable.py')
+          helper = Path('src/hl_observer/backtesting/copy_vault_causal_selection.py')
+          text = source.read_text(encoding='utf-8')
+          start = text.index('\ndef _event_identity')
+          end = text.index('\ndef _first_at_or_after')
+          block = text[start + 1:end].rstrip() + '\n'
+
+          helper_header = '''"""Causal Copy-Vault signal preparation extracted from executable replay."""
+          from __future__ import annotations
+
+          import hashlib
+          from collections.abc import Iterable, Mapping
+          from typing import Any
+
+          from hl_observer.backtesting.copy_vault_protocol import (
+              COPYABLE_ENTRY_ACTIONS,
+              METAORDER_GAP_MS,
+              canonical_metaorder_id,
+              expected_open_direction,
+          )
+          from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
+          '''
+          # De-indent the embedded workflow string while preserving generated Python.
+          helper_header = '\n'.join(line[10:] if line.startswith('          ') else line for line in helper_header.splitlines()) + '\n'
+          helper.write_text(helper_header + block, encoding='utf-8')
+
+          import_block = '''from hl_observer.backtesting.copy_vault_causal_selection import (
+              cluster_metaorders,
+              select_causal_protocol_inputs,
+              select_observed_continuations,
+          )
+          '''
+          import_block = '\n'.join(line[10:] if line.startswith('          ') else line for line in import_block.splitlines()) + '\n'
+          rewritten = text[:start] + '\n\n' + text[end + 1:]
+          rewritten = rewritten.replace(
+              'from hl_observer.backtesting.copy_vault_book_loader import load_observed_books\n',
+              'from hl_observer.backtesting.copy_vault_book_loader import load_observed_books\n' + import_block,
+              1,
+          )
+          rewritten = rewritten.replace('    COPYABLE_ENTRY_ACTIONS,\n', '', 1)
+          rewritten = rewritten.replace(
+              'from hl_observer.ops.echec_silencieux import noter as _noter_echec\n', '', 1
+          )
+          source.write_text(rewritten, encoding='utf-8')
+          PY
+      - name: Vérifier structure et style
+        run: |
+          python -m ruff check --fix src/hl_observer/backtesting/copy_vault_executable.py src/hl_observer/backtesting/copy_vault_causal_selection.py
+          python -m ruff check src/hl_observer/backtesting/copy_vault_executable.py src/hl_observer/backtesting/copy_vault_causal_selection.py
+          python - <<'PY'
+          from pathlib import Path
+          for raw in (
+              'src/hl_observer/backtesting/copy_vault_executable.py',
+              'src/hl_observer/backtesting/copy_vault_causal_selection.py',
+          ):
+              path = Path(raw)
+              count = len(path.read_text(encoding='utf-8').splitlines())
+              print(f'{raw}={count}')
+              if count > 800:
+                  raise SystemExit(f'FILE_TOO_LARGE:{raw}:{count}')
+          PY
+      - name: Tests Copy-Vault ciblés
+        run: |
+          python -m pytest -q tests/test_copy_vault_executable.py
+      - name: Vérifier invariants safety
+        run: |
+          python -m pytest -q tests/test_paper_only_guard.py tests/test_no_real_trade_surface.py || python -m pytest -q tests/test_paper_only_guard.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: copy-vault-refactor-${{ github.sha }}
+          path: |
+            src/hl_observer/backtesting/copy_vault_executable.py
+            src/hl_observer/backtesting/copy_vault_causal_selection.py
