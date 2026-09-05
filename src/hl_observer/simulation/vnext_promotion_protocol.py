@@ -208,6 +208,9 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
         raise ValueError("certification requires a valid frozen_at_ms") from exc
     if frozen_at_ms <= 0:
         raise ValueError("certification requires a positive frozen_at_ms")
+    manifest_frozen_at_ms = int(freeze_manifest["frozen_at_ms"])
+    if frozen_at_ms != manifest_frozen_at_ms:
+        raise ValueError("certification frozen_at_ms must match freeze_manifest")
     validate_temporal_disjointness(windows, frozen_at_ms=frozen_at_ms)
     for field in (
         "costs_complete",
