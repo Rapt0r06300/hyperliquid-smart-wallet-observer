@@ -31,3 +31,13 @@ def test_costs_reduce_net():
 def test_deterministic():
     px = [100.0 + 2.0 * math.sin(i / 7.0) for i in range(300)]
     assert simulate_mean_reversion(px, MRConfig()) == simulate_mean_reversion(px, MRConfig())
+
+
+def test_short_series_returns_empty_metrics():
+    assert simulate_mean_reversion([100.0, 101.0, 102.0], MRConfig()) == {
+        "trades": 0,
+        "net_usd": 0.0,
+        "win_rate": None,
+        "profit_factor": 0.0,
+        "max_drawdown_usd": 0.0,
+    }
