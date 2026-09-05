@@ -116,7 +116,7 @@ jobs:
           PY
       - name: Tests preuve économique ciblés
         run: |
-          python -m pytest -q tests/test_economic_proof_audit.py tests/test_economic_proof_audit_controls.py tests/test_economic_proof_audit_independent.py
+          python -m pytest -q tests/test_economic_proof_audit.py tests/test_economic_assumption_registry_v21.py
       - name: Vérifier invariants safety
         run: |
           python -m pytest -q tests/test_no_mainnet_execution.py tests/test_runtime_contract.py tests/test_coverage_closure_import_all.py
