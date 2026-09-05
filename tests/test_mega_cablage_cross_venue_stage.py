@@ -23,3 +23,8 @@ def test_pas_de_hedge_sous_seuil():
 def test_pas_de_hedge_sans_edge_mesure():
     r = intent_hedge(coin="BTC", notional_copie_signe=600.0, edge_cross_venue_bps=None)
     assert r["hedge"] is None and r["raison"] == "DONNEE_INSUFFISANTE"
+
+
+def test_pas_de_hedge_sans_coin():
+    r = intent_hedge(coin="", notional_copie_signe=600.0, edge_cross_venue_bps=5.0)
+    assert r["hedge"] is None and r["raison"] == "COIN_MANQUANT"
