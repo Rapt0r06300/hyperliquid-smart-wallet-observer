@@ -138,6 +138,37 @@ def consume_post_freeze_once(
     }
 
 
+def validate_temporal_disjointness(
+    windows: Mapping[str, Mapping[str, Any]],
+    *,
+    frozen_at_ms: int,
+) -> bool:
+    """Verify all certification evidence windows are valid, disjoint, and post-freeze."""
+
+    freeze = int(frozen_at_ms)
+    ordered_names = ("validation", "oos", "forward", "placebo")
+    normalized: list[tuple[str, int, int]] = []
+    for name in ordered_names:
+        window = windows.get(name)
+        if not isinstance(window, Mapping):
+            raise ValueError(f"missing temporal window: {name}")
+        try:
+            start_ms = int(window["start_ms"])
+            end_ms = int(window["end_ms"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f"invalid temporal window: {name}") from exc
+        if start_ms >= end_ms:
+            raise ValueError(f"invalid temporal window: {name}")
+        if start_ms <= freeze:
+            raise ValueError(f"{name} evidence must be strictly post-freeze")
+        normalized.append((name, start_ms, end_ms))
+
+    for previous, current in zip(normalized, normalized[1:]):
+        if current[1] < previous[2]:
+            raise ValueError(f"temporal overlap: {previous[0]}->{current[0]}")
+    return True
+
+
 def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
     """Allow certification namespace entry only for complete, safe evidence."""
 
@@ -173,5 +204,6 @@ __all__ = [
     "build_freeze_manifest",
     "consume_post_freeze_once",
     "validate_certification_entry",
+    "validate_temporal_disjointness",
     "verify_freeze_manifest",
 ]
