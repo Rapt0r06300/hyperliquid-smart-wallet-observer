@@ -80,7 +80,7 @@ jobs:
           '''
           header = '\n'.join(line[10:] if line.startswith('          ') else line for line in header.splitlines()) + '\n'
           helper.write_text(header + block, encoding='utf-8')
-          import_block = 'from hl_observer.alerts.validation import (\n' + ''.join(f'    {name},\n' for name in names) + ')\n'
+          import_block = 'from hl_observer.alerts.validation import (\n' + ''.join(f'    {name} as {name},\n' for name in names) + ')\n'
           rewritten = text[:start] + '\n\n' + import_block + '\n' + text[end + 1:]
           source.write_text(rewritten, encoding='utf-8')
           PY
