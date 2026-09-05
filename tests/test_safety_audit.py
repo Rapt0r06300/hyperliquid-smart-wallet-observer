@@ -15,6 +15,17 @@ def test_safety_audit_detects_env_secret_pattern(tmp_path):
     assert contains_secret_pattern(secret_file.read_text(encoding="utf-8"))
 
 
+def test_scan_file_for_secret_detects_openai_key(tmp_path):
+    secret_file = tmp_path / "bad.txt"
+    secret_file.write_text("OPENAI_API_KEY=sk-proj-" + "a" * 24 + "\n", encoding="utf-8")
+
+    finding = scan_file_for_secret(secret_file)
+
+    assert finding is not None
+    assert finding.path == secret_file
+    assert finding.pattern == "openai_key"
+
+
 def test_safety_audit_passes_project_baseline():
     result = run_safety_audit(Path.cwd())
 
