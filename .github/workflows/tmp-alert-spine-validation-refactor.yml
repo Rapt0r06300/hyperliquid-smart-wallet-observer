@@ -49,7 +49,7 @@ jobs:
           helper = Path('src/hl_observer/alerts/validation.py')
           text = source.read_text(encoding='utf-8')
           start = text.index('\nPROPOSAL_SCHEMA =')
-          end = text.index('\n@dataclass(frozen=True, slots=True)\nclass AlertSpinePaths:')
+          end = text.index('\ndef _validate_canonical_event(')
           block = text[start + 1:end].rstrip() + '\n'
 
           tree = ast.parse(block)
@@ -72,6 +72,7 @@ jobs:
           import math
           import re
           from collections.abc import Mapping
+          from pathlib import Path
           from typing import Any
 
           from hl_observer.alerts.freshness import project_alert_freshness
