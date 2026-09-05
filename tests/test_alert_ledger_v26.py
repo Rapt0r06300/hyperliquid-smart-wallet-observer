@@ -146,3 +146,128 @@ def test_pointeur_en_avance_sur_le_ledger_est_refuse(tmp_path: Path) -> None:
         match="CANONICAL_LATEST_POINTER_AHEAD",
     ):
         writer.read_ledger()
+
+
+def test_curseur_durable_refuse_schema_sequence_et_hash_alteres(tmp_path: Path) -> None:
+    writer = _writer(tmp_path / "spine", rotate_bytes=10_000_000)
+    _submit(writer, 0)
+    writer.process_pending()
+    events = writer.read_ledger()
+    cursor_path = tmp_path / "cursor.json"
+
+    writer._write_cursor(cursor_path, consumer="coverage-audit", events=events)
+    original = json.loads(cursor_path.read_text(encoding="utf-8"))
+    assert writer._validate_cursor(
+        cursor_path,
+        consumer="coverage-audit",
+        events=events,
+    ) == 1
+
+    cursor_path.write_text("{", encoding="utf-8")
+    with pytest.raises(CanonicalLedgerCorruption, match="DURABLE_CURSOR_INVALID"):
+        writer._validate_cursor(cursor_path, consumer="coverage-audit", events=events)
+
+    tampered = dict(original)
+    tampered["real_execution"] = True
+    cursor_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(CanonicalLedgerCorruption, match="DURABLE_CURSOR_SCHEMA_INVALID"):
+        writer._validate_cursor(cursor_path, consumer="coverage-audit", events=events)
+
+    tampered = dict(original)
+    tampered["ledger_sequence"] = "not-an-int"
+    cursor_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="DURABLE_CURSOR_SEQUENCE_INVALID",
+    ):
+        writer._validate_cursor(cursor_path, consumer="coverage-audit", events=events)
+
+    tampered = dict(original)
+    tampered["ledger_sequence"] = 2
+    cursor_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="DURABLE_CURSOR_AHEAD_OF_LEDGER",
+    ):
+        writer._validate_cursor(cursor_path, consumer="coverage-audit", events=events)
+
+    tampered = dict(original)
+    tampered["ledger_prefix_hash"] = "0" * 64
+    cursor_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="DURABLE_CURSOR_LEDGER_MISMATCH",
+    ):
+        writer._validate_cursor(cursor_path, consumer="coverage-audit", events=events)
+
+
+def test_pointeur_latest_refuse_corruption_schema_sequence_et_prefixe(
+    tmp_path: Path,
+) -> None:
+    writer = _writer(tmp_path / "spine", rotate_bytes=10_000_000)
+    _submit(writer, 0)
+    writer.process_pending()
+    events = writer.read_ledger()
+    pointer_path = writer.paths.ledger_latest_pointer_path
+    original = json.loads(pointer_path.read_text(encoding="utf-8"))
+
+    pointer_path.write_text("{", encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_LATEST_POINTER_INVALID",
+    ):
+        writer._validate_latest_pointer(events)
+
+    tampered = dict(original)
+    tampered["database_promoted"] = True
+    pointer_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_LATEST_POINTER_SCHEMA_INVALID",
+    ):
+        writer._validate_latest_pointer(events)
+
+    tampered = dict(original)
+    tampered["ledger_sequence"] = "not-an-int"
+    pointer_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_LATEST_POINTER_SEQUENCE_INVALID",
+    ):
+        writer._validate_latest_pointer(events)
+
+    tampered = dict(original)
+    tampered["ledger_prefix_hash"] = "0" * 64
+    pointer_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_LATEST_POINTER_MISMATCH",
+    ):
+        writer._validate_latest_pointer(events)
+
+
+def test_segment_au_nom_non_canonique_est_refuse(tmp_path: Path) -> None:
+    writer = _writer(tmp_path / "spine", rotate_bytes=1)
+    writer.paths.ledger_segments_root.mkdir(parents=True)
+    (writer.paths.ledger_segments_root / "alerts.invalid.jsonl").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_SEGMENT_NAME_INVALID",
+    ):
+        writer._segment_paths()
+
+
+def test_rotation_refuse_une_source_partielle(tmp_path: Path) -> None:
+    writer = _writer(tmp_path / "spine", rotate_bytes=1)
+    writer.paths.ledger_path.parent.mkdir(parents=True)
+    writer.paths.ledger_path.write_bytes(b'{"partial": true}')
+
+    with pytest.raises(
+        CanonicalLedgerCorruption,
+        match="CANONICAL_LEDGER_ROTATION_SOURCE_INVALID",
+    ):
+        writer._rotate_ledger_if_needed([])
