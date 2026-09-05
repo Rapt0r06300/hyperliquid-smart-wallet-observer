@@ -26,6 +26,13 @@ def _candidate(status: str) -> dict[str, object]:
         "post_freeze_oos_consumed": True,
         "paper_read_only": True,
         "real_execution": False,
+        "frozen_at_ms": 1_000,
+        "temporal_windows": {
+            "validation": {"start_ms": 1_100, "end_ms": 1_200},
+            "oos": {"start_ms": 1_200, "end_ms": 1_300},
+            "forward": {"start_ms": 1_300, "end_ms": 1_400},
+            "placebo": {"start_ms": 1_400, "end_ms": 1_500},
+        },
         **{field: True for field in _REQUIRED_ECONOMIC_PROOFS},
         **{field: True for field in _REQUIRED_TEMPORAL_PROOFS},
     }
@@ -42,6 +49,16 @@ def test_only_explicit_ready_candidate_with_consumed_oos_is_eligible() -> None:
     gate = getattr(protocol, "validate_certification_entry", None)
     assert callable(gate), "certification namespace gate must exist"
     assert gate(_candidate("CERTIFICATION_READY")) is True
+
+
+def test_certification_entry_recomputes_temporal_disjointness() -> None:
+    candidate = _candidate("CERTIFICATION_READY")
+    candidate["temporal_disjointness_ok"] = True
+    windows = dict(candidate["temporal_windows"])
+    windows["oos"] = {"start_ms": 1_150, "end_ms": 1_300}
+    candidate["temporal_windows"] = windows
+    with pytest.raises(ValueError, match="overlap"):
+        protocol.validate_certification_entry(candidate)
 
 
 @pytest.mark.parametrize(
