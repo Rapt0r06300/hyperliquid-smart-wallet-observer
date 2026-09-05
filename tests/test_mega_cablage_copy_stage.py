@@ -25,3 +25,10 @@ def test_sens_vente_notional_negatif():
 def test_equity_leader_invalide_refuse():
     ev = {"coin": "BTC", "px": 60000.0, "sz": 1.0, "signe": 1}
     assert intent_copie(ev, notre_equity=1000.0, leader_equity=0.0)["refuse"] is True
+
+
+def test_sens_absent_refuse_sans_intention():
+    ev = {"coin": "BTC", "px": 60000.0, "sz": 1.0, "signe": 0}
+    r = intent_copie(ev, notre_equity=1000.0, leader_equity=100000.0)
+    assert r == {"refuse": True, "raison": "SENS_ABSENT"}
+    assert "intent" not in r
