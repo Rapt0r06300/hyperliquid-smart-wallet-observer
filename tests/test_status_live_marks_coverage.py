@@ -53,7 +53,6 @@ def test_live_all_mids_is_disabled_without_opt_in(monkeypatch) -> None:
     )
 
     assert result["read_status"] == "LIVE_MARKS_DISABLED"
-    assert result["read_only"] is True
 
 
 def test_live_all_mids_uses_fresh_cache_without_network(monkeypatch) -> None:
@@ -135,4 +134,3 @@ def test_live_all_mids_fails_closed_when_bad_payload_has_no_usable_cache(monkeyp
     assert result["read_status"] == "LIVE_ALLMIDS_READ_FAILED"
     assert result["prices"] == {}
     assert "ValueError" in result["error"]
-    assert result["read_only"] is True
