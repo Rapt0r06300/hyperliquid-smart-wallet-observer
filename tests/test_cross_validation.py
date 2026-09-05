@@ -29,3 +29,8 @@ def test_reality_check_significance():
     none = whites_reality_check([0.0] * 100, [0.0] * 100)     # aucun edge
     assert strong < 0.05
     assert none > 0.5
+
+
+def test_reality_check_empty_overlap_is_fail_closed():
+    assert whites_reality_check([], [0.0, 1.0]) == 1.0
+    assert whites_reality_check([1.0, 2.0], []) == 1.0
