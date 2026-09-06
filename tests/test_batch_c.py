@@ -34,6 +34,15 @@ def test_cross_asset_beta_neutre():
     assert r["beta"] is not None
 
 
+def test_cross_asset_constant_lead_uses_zero_beta():
+    lead = [1.0] * 40
+    follow = [float(i % 5) for i in range(40)]
+    r = CA.leadlag_beta_neutre(lead, follow, horizon=1)
+    assert r["beta"] == 0.0
+    assert r["pente_predictive_decalee"] == 0.0
+    assert r["n"] == 40
+
+
 def test_universal_micro_transferable():
     par_coin = {}
     for c in ("BTC", "ETH", "SOL"):
