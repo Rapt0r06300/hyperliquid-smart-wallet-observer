@@ -107,6 +107,14 @@ def test_dedupe_duplicate_request_id():
     assert reg.health("hl_allmids", now_ms=1100).samples == 1
 
 
+def test_dedupe_seen_request_ids_are_bounded_to_retained_history():
+    reg = SourceRegistry(history_per_source=1)
+    reg.register(_def())
+    for i in range(5):
+        assert reg.record_fetch(_prov(rid=f"r{i}", ts=1000 + i)) is True
+    assert reg._seen_requests["hl_allmids"] == {"r4"}
+
+
 def test_disabled_source_not_usable_even_if_fresh():
     reg = SourceRegistry()
     reg.register(_def(enabled=False))
