@@ -116,6 +116,8 @@ def test_spread_transition_decisions():
     assert ST.decision(spread_bps=2.0, spread_tendance=-1.0, depth_tendance=1.0)["action"] == "MAKER"
     assert ST.decision(spread_bps=12.0, spread_tendance=1.0, depth_tendance=-1.0)["action"] == "NO_TRADE"
     assert ST.decision(spread_bps=3.0, spread_tendance=1.0, depth_tendance=0.0)["action"] == "TAKER_NOW"
+    invalid = ST.decision(spread_bps=None, spread_tendance=1.0, depth_tendance=1.0)
+    assert invalid == {"action": "NO_TRADE", "raison": "UNMEASURABLE"}
 
 
 def test_reproducibility():
