@@ -77,6 +77,23 @@ def test_realtime_replay_reports_locked_output_without_crashing(tmp_path, monkey
     assert result.write_warnings == ("locked", "locked")
 
 
+def test_safe_write_text_reports_oserror(tmp_path, monkeypatch):
+    from hl_observer.realtime import replay as replay_module
+
+    target = tmp_path / "locked" / "replay.json"
+
+    def fail_write(self, text, *, encoding=None, errors=None, newline=None):
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+
+    warning = replay_module._safe_write_text(target, "payload")
+
+    assert warning is not None
+    assert "PermissionError" in warning
+    assert "locked" in warning
+
+
 def test_recent_decision_loader_reads_tail_without_loading_every_event(tmp_path):
     log_dir = tmp_path / "logs a envoyer"
     log_dir.mkdir(parents=True)
