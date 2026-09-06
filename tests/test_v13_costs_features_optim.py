@@ -51,6 +51,15 @@ def test_depth_guard_blocks_thin_book():
     thin, code = depth_guard(bid_depth_usd=100, ask_depth_usd=100, side="LONG", needed_usd=100)
     assert not thin and code in {"DEPTH_TOO_LOW", "SIZE_EXCEEDS_DEPTH"}
 
+    oversized, oversized_code = depth_guard(
+        bid_depth_usd=1000,
+        ask_depth_usd=1000,
+        side="LONG",
+        needed_usd=300,
+    )
+    assert oversized is False
+    assert oversized_code == "SIZE_EXCEEDS_DEPTH"
+
 
 def test_depth_fill_guard_blocks_missed_or_slippy_book():
     missed, code, result = depth_fill_guard(
