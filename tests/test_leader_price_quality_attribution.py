@@ -22,3 +22,10 @@ def test_prix_normal_replicable():
 
 def test_prix_manquant():
     assert attribuer(None, 100.0, "ACHAT")["avantage_execution_bps"] == "UNMEASURABLE"
+
+
+def test_vente_prix_exceptionnel_non_replicable():
+    r = attribuer(101.0, 100.0, "SELL", seuil_bps=5.0)
+    assert r["avantage_execution_bps"] == 100.0
+    assert r["replicable"] is False
+    assert r["verdict"] == "EDGE_EXECUTION_NON_REPLICABLE"
