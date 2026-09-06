@@ -20,9 +20,7 @@ def divergence_max_frac(marks: Sequence[float]) -> float | None:
     if len(vals) < 2:
         return None
     vals_tries = sorted(vals)
-    ref = vals_tries[len(vals_tries) // 2]           # médiane
-    if ref <= 0:
-        return None
+    ref = vals_tries[len(vals_tries) // 2]           # médiane ; strictement > 0 par construction
     return max(abs(v - ref) / ref for v in vals)
 
 
