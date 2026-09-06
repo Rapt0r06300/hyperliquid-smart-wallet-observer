@@ -54,6 +54,19 @@ def test_correlated_exposure_net_beta_cap():
     assert verdict.cluster_notional_usd == 250.0
     assert verdict.net_beta == 650.0
 
+
+def test_correlated_exposure_short_positions_use_negative_beta():
+    verdict = correlated_exposure_check(
+        [Position("ETH", "SHORT", 200, 1.0)],
+        Position("BTC", "SELL", 150, 1.0),
+        max_cluster_notional_usd=1000,
+        max_net_beta_usd=600,
+    )
+    assert verdict.ok is True
+    assert verdict.reason is None
+    assert verdict.cluster_notional_usd == 150.0
+    assert verdict.net_beta == -350.0
+
 # #204
 from hl_observer.copy_fidelity.slippage_model import slippage_bps
 
