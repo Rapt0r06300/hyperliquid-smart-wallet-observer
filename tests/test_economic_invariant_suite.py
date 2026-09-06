@@ -16,6 +16,11 @@ def test_invariants_unitaires():
     assert EIS.inv_pnl_sans_fill(5.0, 0)["ok"] is False and EIS.inv_completed_sans_residu("COMPLETED", 0.3)["ok"] is False
 
 
+def test_non_completed_residual_is_not_misclassified_as_completed_violation():
+    result = EIS.inv_completed_sans_residu("PARTIAL", 0.3)
+    assert result == {"ok": True, "raison": "NON_COMPLETED"}
+
+
 def test_suite_agrege_violations():
     etat = {"hedge_qty": 1.5, "actual_fill_qty": 1.0,          # violation
             "fill_ids": ["x", "x"],                            # violation
