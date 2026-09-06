@@ -28,6 +28,11 @@ def test_ks_detects_drift():
     assert ks_statistic(a, shifted) > 0.9
 
 
+def test_ks_empty_sample_returns_neutral_statistic():
+    assert ks_statistic([], [1.0, 2.0]) == 0.0
+    assert ks_statistic([1.0, 2.0], []) == 0.0
+
+
 def test_pca_finds_main_axis():
     # données variant surtout sur l'axe 0
     X = [[float(i), 0.01 * ((i % 3) - 1)] for i in range(60)]
