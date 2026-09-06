@@ -22,3 +22,8 @@ def test_changement_prix_detruit():
 def test_augmentation_recule():
     r = effet_sur_queue(prix_avant=100.0, prix_apres=100.0, qte_avant=1.0, qte_apres=1.5)
     assert r["preserve_queue"] is False and r["type"] == "AUGMENTATION_QTE"
+
+
+def test_identique_preserve_queue():
+    r = effet_sur_queue(prix_avant=100.0, prix_apres=100.0, qte_avant=1.0, qte_apres=1.0)
+    assert r == {"preserve_queue": True, "type": "AUCUN_CHANGEMENT", "raison": "IDENTIQUE"}
