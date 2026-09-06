@@ -19,6 +19,7 @@ def test_kelly_discret_formule():
     # p=0.6, b=2 -> 0.6 - 0.4/2 = 0.4
     assert kelly_discret(0.6, 2.0) == pytest.approx(0.4)
     assert kelly_discret(0.4, 1.0) == 0.0           # 0.4 - 0.6 = -0.2 -> borne 0
+    assert kelly_discret(0.6, 0.0) == 0.0           # ratio invalide -> aucun pari
 
 
 def test_fraction_applique_le_quart_et_le_plafond():
