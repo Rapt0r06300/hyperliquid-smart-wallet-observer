@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import runpy
+import sys
 from pathlib import Path
 
 from hl_observer.datasets.experiment_contract import CURRENT_REPLAY_INPUT_CONTRACT
 from hl_observer.datasets.experiment_plan import CURRENT_EXPERIMENT_PLAN
+import hl_observer.ops.dataset_experiment_contract as contract_cli
 from hl_observer.ops.dataset_experiment_contract import main
 
 
@@ -63,3 +66,26 @@ def test_cli_contrat_refuse_un_plan_non_ready(tmp_path: Path) -> None:
 
 def test_cli_contrat_refuse_un_workspace_sans_plan(tmp_path: Path) -> None:
     assert main(["--root", str(tmp_path)]) == 2
+
+
+def test_module_entrypoint_ecrit_un_contrat_read_only(tmp_path: Path, monkeypatch) -> None:
+    _write_plan(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["dataset_experiment_contract", "--root", str(tmp_path)],
+    )
+
+    try:
+        runpy.run_path(str(Path(contract_cli.__file__).resolve()), run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Le module __main__ doit terminer via SystemExit")
+
+    current = tmp_path / CURRENT_REPLAY_INPUT_CONTRACT
+    assert current.is_file()
+    payload = json.loads(current.read_text(encoding="utf-8"))
+    assert payload["read_only"] is True
+    assert payload["network_used"] is False
+    assert payload["raw_data_embedded"] is False
