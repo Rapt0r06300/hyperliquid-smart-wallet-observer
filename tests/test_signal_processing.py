@@ -26,6 +26,14 @@ def test_cointegration_detects_relationship():
     assert r["spread_autocorr"] < 0.6                             # spread mean-reverting (cointégré)
 
 
+def test_cointegration_short_input_returns_conservative_default():
+    assert engle_granger_spread([1.0, 2.0], [3.0, 4.0]) == {
+        "beta": 0.0,
+        "spread": [],
+        "spread_autocorr": 1.0,
+    }
+
+
 def test_failsafe_default_no_trade():
     assert safe_default_decision(False)["decision"] == "NO_TRADE"
     assert safe_default_decision(True)["decision"] == "EVALUATE"
