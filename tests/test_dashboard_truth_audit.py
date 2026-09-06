@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 
 from hl_observer.cli import app
 from hl_observer.dashboard_truth.dashboard_truth_audit import run_dashboard_truth_audit
+from hl_observer.dashboard_truth.fake_data_detector import detect_placeholder_values
 
 
 def _write_snapshot(log_dir: Path, *, placeholder: bool = False) -> None:
@@ -51,6 +52,11 @@ def test_dashboard_truth_audit_rejects_placeholder(tmp_path):
 
     assert audit.ok is False
     assert audit.placeholder_findings
+
+
+def test_placeholder_detector_ignores_explicit_fake_negation():
+    assert detect_placeholder_values({"methodology": "No fake fills; observed data only"}) == []
+    assert detect_placeholder_values({"methodology": "Not fake; directly observed"}) == []
 
 
 def test_dashboard_truth_audit_cli(tmp_path):
