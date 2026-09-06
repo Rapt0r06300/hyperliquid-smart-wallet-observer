@@ -18,6 +18,11 @@ def test_as_of_jamais_le_futur():
     assert s.as_of("f", 100) is None       # rien de disponible avant 200 -> pas de lecture du futur
 
 
+def test_as_of_serie_absente_reste_fail_closed():
+    s = FeatureStore()
+    assert s.as_of("inconnue", 250) is None
+
+
 def test_ecrasement_meme_estampille():
     s = FeatureStore()
     s.ecrire("f", 100, "a"); s.ecrire("f", 100, "z")
