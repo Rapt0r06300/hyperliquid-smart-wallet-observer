@@ -36,3 +36,4 @@ def test_backoff_hint_and_user_rate_limit_sync():
     # l'endpoint userRateLimit dit qu'il reste 80 → on s'aligne
     b.observe_user_rate_limit(remaining=80, capacity=200)
     assert b.stats()["tokens"] == 80.0 and b.stats()["capacity"] == 200.0
+    assert b.wait_ms_for(50, 0) == 0.0
