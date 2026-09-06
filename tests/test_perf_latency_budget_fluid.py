@@ -73,3 +73,13 @@ def test_status_delta_only_reports_changes():
     curr2 = {"net_pnl_usdt": 1.2, "open_positions": 3, "positions": curr["positions"] + [{"coin": "BTC", "side": "SHORT", "notional_usdt": 25.0}]}
     d2 = compute_status_delta(curr, curr2)
     assert d2["positions_changed"] is True
+
+
+def test_status_delta_ignores_non_mapping_position_entries():
+    valid = {"coin": "HYPE", "side": "LONG", "notional_usdt": 40.0}
+    prev = {"positions": [valid]}
+    curr = {"positions": [None, "garbage", valid]}
+    delta = compute_status_delta(prev, curr)
+    assert delta["positions_changed"] is False
+    assert delta["has_changes"] is False
+    assert delta["positions_fingerprint"] == (("HYPE", "LONG", 40.0),)
