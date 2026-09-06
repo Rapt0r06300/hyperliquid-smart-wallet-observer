@@ -60,6 +60,11 @@ def test_sizing_grows_with_edge_and_confidence():
     assert 0 < small < big <= 0.10
 
 
+def test_sizing_zero_when_edge_or_confidence_nonpositive():
+    assert edge_confidence_size_pct(0.0, 1.0) == 0.0
+    assert edge_confidence_size_pct(50.0, 0.0) == 0.0
+
+
 def test_sizing_correlation_cap():
     d = size_with_correlation_cap(50, 1.0, equity_usdc=1000.0,
                                   correlated_notional_used=95.0, correlated_notional_cap=100.0)
