@@ -10,6 +10,7 @@ def test_anomalies():
     assert anomalies(drawdown=50.0, drawdown_max=100.0) == []
     assert "DRAWDOWN_SEUIL" in anomalies(drawdown=120.0, drawdown_max=100.0)
     assert "DIVERGENCE_SOURCES" in anomalies(sources_sures=False)
+    assert "EDGE_DECROCHE" in anomalies(edge_decroche=True)
 
 
 def test_desactiver_zombie():
