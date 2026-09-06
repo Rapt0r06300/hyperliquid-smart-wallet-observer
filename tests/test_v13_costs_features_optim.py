@@ -42,6 +42,8 @@ def test_depth_and_window_caps():
     assert ok
     blocked, code = window_caps_ok(trades_in_window=30, usd_in_window=50)
     assert not blocked and code == "MAX_SLICES_PER_WINDOW"
+    usd_blocked, usd_code = window_caps_ok(trades_in_window=5, usd_in_window=300)
+    assert not usd_blocked and usd_code == "MAX_USD_PER_WINDOW"
 
 
 # ---- #155 depth guard + OBI ----
