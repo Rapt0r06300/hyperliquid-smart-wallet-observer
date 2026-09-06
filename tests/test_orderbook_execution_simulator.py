@@ -33,3 +33,19 @@ def test_orderbook_execution_marks_partial_and_missed():
     assert result.missed
     assert result.reason == "MISSED_FILL"
     assert result.filled_notional_usdc == 199.8
+
+
+def test_orderbook_execution_marks_partial_without_miss():
+    result = simulate_orderbook_execution(
+        side="BUY",
+        notional_usdc=100.0,
+        mid_price=10.0,
+        asks=[(10.0, 9.0)],
+        bids=[],
+        min_fill_ratio=0.8,
+    )
+
+    assert result.partial
+    assert not result.missed
+    assert result.reason == "PARTIAL_FILL"
+    assert result.fill_ratio == 0.9
