@@ -16,6 +16,8 @@ def test_desactiver_zombie():
     assert doit_desactiver(2.0, 10.0, fraction=0.4) is True     # 2 < 4 -> decroche
     assert doit_desactiver(8.0, 10.0, fraction=0.4) is False
     assert doit_desactiver(None, 10.0) is True                  # edge inconnu -> observation
+    assert doit_desactiver(1.0, 0.0) is False                  # reference non positive -> pas de desactivation
+    assert doit_desactiver(1.0, -1.0) is False
 
 
 def test_registre_cycle_de_vie():
