@@ -22,3 +22,8 @@ def test_carnet_insuffisant():
 
 def test_quantite_invalide():
     assert prix_pour_quantite([(100.0, 1.0)], 0.0)["vwap"] == "UNMEASURABLE"
+
+
+def test_niveau_invalide_refuse_sans_extrapolation():
+    r = prix_pour_quantite([(100.0, 0.25), ("prix-invalide", 1.0)], 1.0)
+    assert r == {"vwap": "UNMEASURABLE", "raison": "NIVEAU_INVALIDE"}
