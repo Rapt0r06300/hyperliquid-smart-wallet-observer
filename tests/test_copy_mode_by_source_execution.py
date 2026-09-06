@@ -21,3 +21,8 @@ def test_taker_dominant_direct():
 
 def test_taux_non_mesure():
     assert mode_copie({"taux_maker": "UNMEASURABLE", "taux_taker": "UNMEASURABLE"})["mode"] == "UNMEASURABLE"
+
+
+def test_profil_mixte_reste_copiable_avec_decote_moyenne():
+    r = mode_copie({"taux_maker": 0.4, "taux_taker": 0.5})
+    assert r == {"mode": "MIXTE", "decote_confiance": 0.3, "copiable_taker_direct": True}
