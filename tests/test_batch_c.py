@@ -68,6 +68,13 @@ def test_cascade_warning():
     assert r["regime"] == "PRUDENCE_PRE_CASCADE"
     assert CW.warning_score()["score"] == CW.UNMEASURABLE
 
+    liq_only = CW.warning_score(liq_proxy=0.75)
+    assert liq_only == {
+        "score": 0.75,
+        "n_composantes": 1,
+        "regime": "PRUDENCE_PRE_CASCADE",
+    }
+
 
 def test_clock_regimes():
     assert CR.bucket_horloge(1234, "seconde") == 234
