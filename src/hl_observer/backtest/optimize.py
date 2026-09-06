@@ -12,6 +12,8 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from hl_observer.backtesting.hyperopt_local import hyperopt_local_only
+
 
 @dataclass(frozen=True, slots=True)
 class Trial:
@@ -32,12 +34,16 @@ def random_grid_search(
 ) -> list[Trial]:
     rng = random.Random(seed)
     keys = sorted(param_space)
-    trials: list[Trial] = []
-    for _ in range(max(1, int(n_trials))):
-        params = {k: rng.choice(param_space[k]) for k in keys}
-        trials.append(Trial(params=params, score=float(objective_fn(params))))
-    trials.sort(key=lambda t: -t.score)
-    return trials
+    candidates = [
+        {key: rng.choice(param_space[key]) for key in keys}
+        for _ in range(max(1, int(n_trials)))
+    ]
+    ranked = hyperopt_local_only(
+        candidates,
+        lambda params: (float(objective_fn(params)), {}),
+        limit=len(candidates),
+    )
+    return [Trial(params=dict(candidate.params), score=candidate.score) for candidate in ranked]
 
 
 def optimize(
