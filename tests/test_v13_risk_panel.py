@@ -11,6 +11,10 @@ def test_stress_long_short_directions():
     assert wc["pnl_usdc"] <= 0.0
 
 
+def test_worst_case_empty_shocks_is_neutral():
+    assert worst_case([], shocks=()) == {"shock_pct": 0.0, "pnl_usdc": 0.0}
+
+
 def test_risk_panel_with_data():
     pnls = [2.0, -1.0, 3.0, -4.0, 1.0, -0.5, 2.5, -3.0, 0.5, -1.5]
     pos = [{"side": "LONG", "notional_usdt": 200}]
