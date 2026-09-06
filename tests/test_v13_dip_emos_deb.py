@@ -18,6 +18,7 @@ def test_contrarian_favorite_dip_and_paper_only():
     approved = approve_with_risk(intent, lambda i: (True, ["ok"]))
     assert is_actionable(approved) is True
     assert propose_contrarian_favorite_dip_hedge(coin="ETH", favorite_prob=0.5, short_term_return_pct=-2) is None
+    assert propose_contrarian_favorite_dip_hedge(coin="ETH", favorite_prob=0.8, short_term_return_pct=0) is None
 
 
 # ---- #164 ----
