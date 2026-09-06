@@ -28,8 +28,6 @@ def calculate_spread_bps(book: dict[str, Any]) -> float | None:
     if best_bid is None or best_ask is None or best_bid <= 0 or best_ask <= 0:
         return None
     mid = (best_bid + best_ask) / 2
-    if mid <= 0:
-        return None
     return (best_ask - best_bid) / mid * 10000
 
 
