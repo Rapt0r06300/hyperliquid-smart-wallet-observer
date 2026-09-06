@@ -35,6 +35,12 @@ def test_marks_depuis_bbo_clef_par_position_id():
     assert marks == {"p1": 101.0}
 
 
+def test_marks_depuis_bbo_reessaie_la_clef_coin_originale():
+    pos = {"position_id": "p1", "coin": "btc", "side": "LONG"}
+    marks = LM.marks_depuis_bbo([pos], {"btc": {"bid": 101.0, "ask": 112.0}})
+    assert marks == {"p1": 101.0}
+
+
 def test_marks_depuis_bbo_clef_coin_side_sans_id():
     pos = {"coin": "ETH", "side": "SHORT"}
     marks = LM.marks_depuis_bbo([pos], {"ETH": (99.0, 103.0)})
