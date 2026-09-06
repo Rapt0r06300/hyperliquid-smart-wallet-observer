@@ -17,6 +17,11 @@ def test_microprice_leans_toward_thin_side():
     assert abs(microprice(100.0, 100.2, 500, 500) - mid) < 1e-6
 
 
+def test_microprice_falls_back_for_empty_or_invalid_book():
+    assert microprice(100.0, 100.2, 0.0, 0.0) == 100.1
+    assert microprice(0.0, 100.2, 10.0, 10.0) == 0.0
+
+
 def test_markout_sign_is_trade_relative():
     assert markout_bps("LONG", 100.0, 100.5) == 50.0     # LONG, prix monte = favorable
     assert markout_bps("LONG", 100.0, 99.5) == -50.0     # LONG, prix baisse = adverse
