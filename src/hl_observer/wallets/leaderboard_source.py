@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from hl_observer.config.settings import Settings
 from hl_observer.wallets.leaderboard_browser import scrape_leaderboard_with_browser
+from hl_observer.wallets.leaderboard_dom_extractor import extract_leaderboard_dom
 from hl_observer.wallets.leaderboard_import import store_leaderboard_result
 from hl_observer.wallets.leaderboard_models import LeaderboardResult, LeaderboardSourceStatus
 from hl_observer.wallets.leaderboard_network_probe import probe_leaderboard_network
@@ -20,6 +21,7 @@ async def scrape_leaderboard(
     store: bool = False,
     session: Session | None = None,
     target: int = 500,
+    dom_html: str | None = None,
 ) -> LeaderboardResult:
     method = method.lower()
     if method in {"network", "api", "auto"}:
@@ -32,12 +34,15 @@ async def scrape_leaderboard(
     elif method == "browser":
         result = await scrape_leaderboard_with_browser(period=period, dry_run=dry_run)
     elif method == "dom":
-        result = LeaderboardResult(
-            period=period,
-            method="dom",
-            status=LeaderboardSourceStatus.IMPORT_REQUIRED,
-            notes=["dom_extractor_requires_html_fixture_or_browser_source"],
-        )
+        if dom_html is None:
+            result = LeaderboardResult(
+                period=period,
+                method="dom",
+                status=LeaderboardSourceStatus.IMPORT_REQUIRED,
+                notes=["dom_extractor_requires_html_fixture_or_browser_source"],
+            )
+        else:
+            result = extract_leaderboard_dom(dom_html, period=period, source_method="dom")
     else:
         result = LeaderboardResult(
             period=period,
