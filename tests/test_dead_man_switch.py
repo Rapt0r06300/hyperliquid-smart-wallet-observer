@@ -25,3 +25,8 @@ def test_heartbeat_perdu_cancel_all():
 
 def test_aucun_heartbeat_declenche():
     assert DeadManSwitch().etat(1000.0)["declenche"] is True
+
+
+def test_temps_invalide_declenche_fail_closed():
+    etat = DeadManSwitch().etat("not-a-timestamp")
+    assert etat == {"declenche": True, "raison": "TEMPS_INVALIDE"}
