@@ -44,6 +44,16 @@ def test_universal_micro_transferable():
     assert r["verdict"] in ("TRANSFERABLE_A_OOS", "KILL", "MORE_DATA")
 
 
+def test_universal_micro_constant_feature_kills_degenerate_fit():
+    par_coin = {
+        c: ([1.0] * 40, [1.0] * 40)
+        for c in ("BTC", "ETH", "SOL")
+    }
+    r = UM.leave_one_coin_out(par_coin, cout_bps=9.0)
+    assert r["verdict"] == "KILL"
+    assert r["net_oos_moyen_bps"] == -10.0
+
+
 def test_nonlinear_challenger_verdict():
     f = [(1.0 if i % 2 == 0 else -1.0) for i in range(120)]
     t = [15.0 * x for x in f]
