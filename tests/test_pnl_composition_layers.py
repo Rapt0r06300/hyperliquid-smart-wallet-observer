@@ -36,6 +36,15 @@ def test_entry_gate_obi_optional():
     assert evaluate_entry_gate(EntryGateInputs(require_obi=True, **base)).no_trade
 
 
+def test_entry_gate_rejects_insufficient_leader_consensus():
+    verdict = evaluate_entry_gate(EntryGateInputs(
+        signal_freshness_score=0.9, edge_net_bps=40, min_edge_bps=30,
+        leader_consensus=1, min_consensus=2,
+    ))
+    assert verdict.no_trade
+    assert verdict.reasons == ("CONSENSUS_TOO_LOW<2",)
+
+
 # R9 — promotion calibration
 def test_promotion_states():
     assert promotion_decision(0.03, 100) == "PROMOTE"
