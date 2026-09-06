@@ -104,3 +104,36 @@ def test_main_ready_nogo_and_validation(tmp_path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(router.canonical_policy, "load_suite_plans", lambda root: {})
     with pytest.raises(ValueError, match="BIBLIOTHEQUE_180GO"):
         router.main(["--brain-json", str(brain), "--lab-root", str(lab), "--output-dir", str(out)])
+
+
+def test_module_entrypoint_exits_with_main_status(tmp_path, monkeypatch) -> None:
+    import runpy
+    import sys
+
+    brain = tmp_path / "brain.json"
+    brain.write_text(json.dumps({"family_decisions": []}), encoding="utf-8")
+    lab = tmp_path / "lab"
+    lab.mkdir()
+    out = tmp_path / "out"
+
+    monkeypatch.setattr(router.canonical_policy, "load_suite_plans", lambda root: {"economic-full": {}})
+    monkeypatch.setattr(router.canonical_policy, "completed_suites_from_registry", lambda root, project_sha=None: ())
+    monkeypatch.setattr(router.canonical_policy, "targets_reached_from_brain", lambda decisions: False)
+    monkeypatch.setattr(router.canonical_policy, "choose_max_data_job", lambda **kwargs: {
+        "status": "READY",
+        "recommended_suite": "economic-full",
+        "recommended_mode": "economic",
+    })
+    monkeypatch.setattr(router.canonical_policy, "completed_registry_path", lambda root: lab / "registry.json")
+    monkeypatch.setattr(router.canonical_policy, "write_decision", lambda output_dir, decision: (out / "d.json", out / "d.md"))
+    monkeypatch.setattr(router.shutil, "disk_usage", lambda root: SimpleNamespace(free=100 * 1024**3))
+    monkeypatch.setattr(sys, "argv", [
+        "max_data_router.py",
+        "--brain-json", str(brain),
+        "--lab-root", str(lab),
+        "--output-dir", str(out),
+    ])
+
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_module("hl_observer.datasets.max_data_router", run_name="__main__")
+    assert exc.value.code == 0
