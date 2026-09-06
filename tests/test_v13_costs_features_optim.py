@@ -98,6 +98,7 @@ def test_obi_signal_direction():
 def test_eat_flow_and_levels():
     assert eat_flow_ratio(300, 100) == 3.0
     assert levels_eaten(250, [100, 100, 100]) == 2
+    assert levels_eaten(100, [100, 100]) == 1
 
 
 def test_basis_and_lag():
