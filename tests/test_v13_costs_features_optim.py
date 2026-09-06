@@ -84,6 +84,22 @@ def test_depth_fill_guard_blocks_missed_or_slippy_book():
     assert slippy_result.slippage_bps > 20
 
 
+def test_depth_fill_guard_blocks_partial_fill_above_minimum():
+    ok, code, result = depth_fill_guard(
+        side="LONG",
+        needed_usd=100,
+        mid_price=25,
+        asks=((25.0, 3.6),),
+        min_fill_ratio=0.85,
+        max_slippage_bps=20,
+    )
+    assert ok is False
+    assert code == "PARTIAL_FILL_BELOW_FULL_COPY_STANDARD"
+    assert result.fill_ratio == 0.9
+    assert result.partial is True
+    assert result.missed is False
+
+
 def test_depth_fill_guard_accepts_clean_book():
     ok, code, result = depth_fill_guard(
         side="LONG",
