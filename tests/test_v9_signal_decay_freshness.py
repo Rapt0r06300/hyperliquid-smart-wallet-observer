@@ -66,6 +66,8 @@ def test_calibrated_reaches_zero_at_max():
 
 
 def test_config_validation():
+    with pytest.raises(ValueError, match="grace_ms must be >= 0"):
+        FreshnessDecayConfig(grace_ms=-1)
     with pytest.raises(ValueError):
         FreshnessDecayConfig(half_life_ms=0)
     with pytest.raises(ValueError):
