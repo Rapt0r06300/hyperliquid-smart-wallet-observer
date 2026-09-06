@@ -48,6 +48,17 @@ def test_ready_only_when_all_gates_pass():
     assert r["mean_pf"] == 1.2
 
 
+def test_not_ready_when_mean_pf_below_min():
+    r = evaluate_testnet_readiness(
+        [0.9] * 14,
+        safety_audit_green=True,
+        closed_trades=200,
+    )
+    assert r["testnet_eligible"] is False
+    assert r["verdict"] == "NOT_READY_STAY_PAPER"
+    assert "MEAN_PF_BELOW_MIN" in r["reasons"]
+
+
 def test_drawdown_blocks_readiness():
     pfs = [1.5] * 14
     r = evaluate_testnet_readiness(pfs, safety_audit_green=True, closed_trades=200,
