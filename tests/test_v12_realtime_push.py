@@ -11,6 +11,7 @@ def test_event_log_revision_and_replay_missed():
     r1 = log.append(kind="fill", payload={"coin": "BTC"}, ts_ms=1)
     r2 = log.append(kind="fill", payload={"coin": "ETH"}, ts_ms=2)
     assert r1 == 1 and r2 == 2 and log.latest_revision == 2
+    assert len(log) == 2
     missed = log.since(1)                       # client saw rev 1, replay the rest
     assert [e.revision for e in missed] == [2]
 
