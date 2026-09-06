@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import runpy
 import sqlite3
+import sys
 from pathlib import Path
 
 from hl_observer.datasets.experiment_contract import write_replay_input_contract
 from hl_observer.datasets.experiment_plan import CURRENT_EXPERIMENT_PLAN
+import hl_observer.ops.dataset_experiment_contract_verify as contract_verify_cli
 from hl_observer.ops.dataset_experiment_contract_verify import main
 
 
@@ -120,3 +123,19 @@ def test_cli_verification_retourne_deux_si_le_workspace_est_absent(tmp_path: Pat
 
     assert rc == 2
     assert "DATASET_CONTRACT_VERIFY_NO_GO" in output
+
+
+def test_module_entrypoint_verifie_un_contrat_ready(tmp_path: Path, monkeypatch) -> None:
+    _prepare_ready_workspace(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["dataset_experiment_contract_verify", "--root", str(tmp_path)],
+    )
+
+    try:
+        runpy.run_path(str(Path(contract_verify_cli.__file__).resolve()), run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Le module __main__ doit terminer via SystemExit")
