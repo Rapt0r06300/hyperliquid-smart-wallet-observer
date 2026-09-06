@@ -39,3 +39,7 @@ def test_majorite_nette_passe():
 
 def test_doublon_d_adresse_compte_une_fois():
     assert consensus([_s("a", "BUY"), _s("a", "BUY"), _s("b", "BUY")], min_wallets=3) is None
+
+
+def test_ignore_un_signal_non_mapping_fail_closed():
+    assert consensus([None, _s("a", "BUY")], min_wallets=2) is None
