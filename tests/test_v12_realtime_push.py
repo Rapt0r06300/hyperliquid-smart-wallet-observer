@@ -47,3 +47,20 @@ def test_runtime_state_persist(tmp_path):
     st = RuntimeState(str(tmp_path / "rt.json"))
     st.set("phase", "scanning")
     assert RuntimeState(str(tmp_path / "rt.json")).get("phase") == "scanning"
+
+
+def test_runtime_state_write_failure_is_reported(tmp_path, monkeypatch):
+    import hl_observer.storage.runtime_state as runtime_state
+
+    reported: list[str] = []
+    monkeypatch.setattr(runtime_state, "_noter_echec", reported.append)
+
+    def fail_write(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runtime_state.Path, "write_text", fail_write)
+    st = RuntimeState(str(tmp_path / "rt.json"))
+    st.set("phase", "scanning")
+
+    assert st.get("phase") == "scanning"
+    assert reported == ["hl_observer/storage/runtime_state.py:32"]
