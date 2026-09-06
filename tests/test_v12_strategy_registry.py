@@ -50,6 +50,14 @@ def test_deny_by_default_unregistered_and_disabled():
     assert reg.is_usable("off", context=RunContext.LIVE) is False
 
 
+def test_registry_can_open_active_paper_strategy():
+    reg = PaperStrategyRegistry()
+    reg.register(make_strategy(strategy_id="copy_ready", version=1, kind=StrategyKind.COPY_FOLLOW))
+    assert reg.can_open(
+        "copy_ready", context=RunContext.LIVE, lane=StrategyLane.STRICT
+    ) is True
+
+
 def test_for_context_filters_by_allowed_contexts():
     reg = PaperStrategyRegistry()
     reg.register(make_strategy(
