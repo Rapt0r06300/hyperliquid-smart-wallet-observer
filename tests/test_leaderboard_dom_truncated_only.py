@@ -40,3 +40,17 @@ def test_browser_source_stays_fail_closed_until_extractor_is_active() -> None:
     assert result.full_addresses_found == 0
     assert result.candidates_created == 0
     assert "browser_extractor_prepared_not_active" in result.notes
+
+
+def test_dom_without_html_stays_fail_closed() -> None:
+    result = asyncio.run(
+        scrape_leaderboard(
+            Settings(),
+            method="dom",
+            dom_html=None,
+        )
+    )
+
+    assert result.status == LeaderboardSourceStatus.IMPORT_REQUIRED
+    assert result.method == "dom"
+    assert result.notes == ["dom_extractor_requires_html_fixture_or_browser_source"]
