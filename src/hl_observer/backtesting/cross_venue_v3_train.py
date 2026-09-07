@@ -26,6 +26,7 @@ from hl_observer.economics.families import (
     FamilyEconomicContract,
     build_cross_venue_contract,
 )
+from hl_observer.funding.funding_times import next_funding_time_ms
 
 SCHEMA_VERSION = "hypersmart.cross_venue_v3_train.v1"
 MECHANISM = "cross_venue_v3_leader_impulse_basis_reversion"
@@ -349,6 +350,11 @@ def replay_variant_train(
                     break
             if exit_row is None:
                 diagnostics["NO_CAUSAL_EXIT"] += 1
+                continue
+            entry_ts_ms = int(float(entry[0]))
+            exit_ts_ms = int(float(exit_row[0]))
+            if next_funding_time_ms(entry_ts_ms, interval_hours=1) <= exit_ts_ms:
+                diagnostics["FUNDING_BOUNDARY_UNPRICED"] += 1
                 continue
             exit_capacity = _capacity_at(
                 coin_depth,
