@@ -88,3 +88,32 @@ def test_copy_vnext_refuse_de_selectionner_avant_freeze_physique_de_base() -> No
     assert result["diagnostic_train_candidate_count"] >= 1
     assert result["diagnostic_train_candidate"]["statistics"]["net_pnl_usd"] > 0
     assert all(variant["eligible"] is False for variant in result["variants"])
+
+
+def test_copy_vnext_fail_closed_when_execution_capacity_is_missing() -> None:
+    day = 86_400_000
+    rows: list[dict] = []
+    for day_index in range(4):
+        base = (30_000 + day_index) * day
+        coin = "ETH" if day_index % 2 == 0 else "SOL"
+        for wallet_index in range(3):
+            row = _row(ts=base + (wallet_index + 1) * 1_000, vault=f"0x{wallet_index}", coin=coin)
+            row.update(
+                {
+                    "entry_price": 2_000.0,
+                    "exit_price": 2_001.0,
+                    "entry_capacity_usd": 1_000.0,
+                    "exit_capacity_usd": 1_000.0,
+                    "reference_lag_ms": 0,
+                    "entry_target_lag_ms": 0,
+                    "exit_target_lag_ms": 0,
+                }
+            )
+            rows.append(row)
+    rows[0].pop("entry_capacity_usd")
+
+    result = explore_copy_vault_vnext_train(
+        {"provisional_without_physical_freeze": False, "trades": rows}
+    )
+
+    assert result["train_rows_seen"] == 11
