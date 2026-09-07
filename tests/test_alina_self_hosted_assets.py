@@ -40,6 +40,15 @@ def test_workflow_gate_le_ref_acteur_sha_avant_code_projet() -> None:
     assert "pip install --disable-pip-version-check -e ." not in text
 
 
+def test_workflow_refuse_un_sha_devenu_stale_avant_preflight() -> None:
+    text = _text(WORKFLOW)
+    assert "git ls-remote origin refs/heads/main" in text
+    assert "SELF_HOSTED_STALE_MAIN_REFUSED" in text
+    stale_gate = text.index("SELF_HOSTED_STALE_MAIN_REFUSED")
+    preflight = text.index("Vérifier la machine sans exécuter le projet")
+    assert stale_gate < preflight
+
+
 def test_les_commandes_versionnees_sont_immuables_et_control_only() -> None:
     text = _text(WORKFLOW)
     assert "git diff-tree --no-commit-id --name-status" in text
