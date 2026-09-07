@@ -43,6 +43,7 @@ WINDOW_CONTINUATION_MECHANISM = "lead_lag_v6_cumulative_window_continuation_take
 CROSS_ASSET_MECHANISM = "lead_lag_v7_major_to_alt_cumulative_continuation_taker"
 DEFAULT_CANDIDATE_COINS = ("BTC", "ETH", "SOL", "XRP", "DOGE", "SUI", "LINK", "AVAX", "INJ", "AAVE", "ONDO")
 SHOCK_THRESHOLDS_BPS = (8.0, 12.0, 20.0)
+DIAGNOSTIC_ONLY_SHOCK_THRESHOLD_BPS = 8.0
 HORIZONS_MS = (1_000, 5_000)
 EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS = (20.0, 30.0, 50.0)
 EXTREME_REVERSAL_HORIZONS_MS = (1_000, 5_000, 15_000)
@@ -428,6 +429,7 @@ def _score_report(
     min_train_fills: int = MIN_TRAIN_FILLS,
     shock_window_ms: float | None = None,
     admission_policy: str = ADMISSION_PRIOR_MEAN_POSITIVE,
+    economic_predeclaration_id: str | None = None,
 ) -> dict[str, Any]:
     raw_rows = _rows_from_ledgers(report)
     rows, independence = _independent_train_rows(
@@ -450,8 +452,11 @@ def _score_report(
     net = float(stats.get("net_pnl_usd") or 0.0)
     pf = stats.get("profit_factor")
     lcb = stats.get("total_lcb_usd")
+    economic_predeclaration = str(economic_predeclaration_id or "").strip() or None
+    economic_threshold_allowed = float(threshold_bps) != DIAGNOSTIC_ONLY_SHOCK_THRESHOLD_BPS or economic_predeclaration is not None
     eligible = bool(
-        report.get("costs_measured") is True
+        economic_threshold_allowed
+        and report.get("costs_measured") is True
         and int(independence["effective_sample_count"]) >= int(min_train_fills)
         and int(independence["effective_distinct_days"]) >= MIN_DISTINCT_DAYS
         and int(stats.get("sample_count") or 0) >= int(min_train_fills)
@@ -475,6 +480,9 @@ def _score_report(
         ),
         "coin": str(coin).upper(),
         "shock_threshold_bps": float(threshold_bps),
+        "threshold_role": "TRAIN_ECONOMIC_PREDECLARED" if economic_threshold_allowed else "DIAGNOSTIC_ONLY",
+        "economic_threshold_allowed": economic_threshold_allowed,
+        "economic_predeclaration_id": economic_predeclaration,
         "horizon_ms": int(horizon_ms),
         "shock_window_ms": (float(shock_window_ms) if shock_window_ms is not None else None),
         "admission_policy": str(admission_policy),
@@ -788,11 +796,4 @@ def explore_lead_lag_multiasset_train(
     }
 
 
-__all__ = ["CROSS_ASSET_FOLLOWERS", "CROSS_ASSET_HORIZONS_MS", "CROSS_ASSET_LEADERS", "CROSS_ASSET_MECHANISM",
-           "CROSS_ASSET_MIN_TRAIN_FILLS", "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", "CROSS_ASSET_SHOCK_WINDOWS_MS",
-           "DEFAULT_CANDIDATE_COINS", "EXTREME_REVERSAL_HORIZONS_MS", "EXTREME_REVERSAL_MECHANISM",
-           "EXTREME_REVERSAL_MIN_TRAIN_FILLS", "EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS", "HORIZONS_MS", "MECHANISM",
-           "SCHEMA_VERSION", "SHOCK_THRESHOLDS_BPS", "TRAIN_HYPOTHESES", "WINDOW_CONTINUATION_MECHANISM",
-           "WINDOW_HORIZONS_MS", "WINDOW_MIN_TRAIN_FILLS", "WINDOW_SHOCK_THRESHOLDS_BPS", "WINDOW_SHOCK_WINDOWS_MS",
-           "_independent_train_rows", "_planned_cross_asset_pairs", "_score_report", "explore_lead_lag_multiasset_train",
-           "load_multiasset_train_tape"]
+__all__ = ["CROSS_ASSET_FOLLOWERS", "CROSS_ASSET_HORIZONS_MS", "CROSS_ASSET_LEADERS", "CROSS_ASSET_MECHANISM", "CROSS_ASSET_MIN_TRAIN_FILLS", "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", "CROSS_ASSET_SHOCK_WINDOWS_MS", "DEFAULT_CANDIDATE_COINS", "DIAGNOSTIC_ONLY_SHOCK_THRESHOLD_BPS", "EXTREME_REVERSAL_HORIZONS_MS", "EXTREME_REVERSAL_MECHANISM", "EXTREME_REVERSAL_MIN_TRAIN_FILLS", "EXTREME_REVERSAL_SHOCK_THRESHOLDS_BPS", "HORIZONS_MS", "MECHANISM", "SCHEMA_VERSION", "SHOCK_THRESHOLDS_BPS", "TRAIN_HYPOTHESES", "WINDOW_CONTINUATION_MECHANISM", "WINDOW_HORIZONS_MS", "WINDOW_MIN_TRAIN_FILLS", "WINDOW_SHOCK_THRESHOLDS_BPS", "WINDOW_SHOCK_WINDOWS_MS", "_independent_train_rows", "_planned_cross_asset_pairs", "_score_report", "explore_lead_lag_multiasset_train", "load_multiasset_train_tape"]
