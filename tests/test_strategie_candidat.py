@@ -91,6 +91,13 @@ def test_le_resume_sur_un_historique_copy_dit_100_pourcent_classable():
     assert r["par_strategie"] == {"copy": 1000}
 
 
+def test_le_resume_ignore_les_entrees_non_dict_sans_inventer_de_candidat():
+    r = resume_etiquetage([None, "bruit", {"leader_wallet": "0x1"}, 42])
+    assert r["total"] == 1
+    assert r["classes_pct"] == 100.0
+    assert r["par_strategie"] == {"copy": 1}
+
+
 def test_le_resume_vide_ne_LEVE_pas():
     r = resume_etiquetage([])
     assert r["total"] == 0 and r["classes_pct"] == 100.0
