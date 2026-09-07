@@ -21,6 +21,13 @@ def test_contrefactuels_effet_marginal():
     assert abs(d["x"] - 1.0) < 1e-9 and abs(d["y"]) < 1e-9
 
 
+def test_contrefactuels_refuse_un_plan_explosif():
+    import pytest
+
+    with pytest.raises(ValueError, match="<=12"):
+        contrefactuels_systematiques([f"f{i}" for i in range(13)], lambda _: 0.0)
+
+
 def test_clusterer_erreurs_par_frequence():
     errs = [{"signature": "A"}, {"signature": "B"}, {"signature": "A"}, {"signature": "A"}]
     r = clusterer_erreurs(errs)
