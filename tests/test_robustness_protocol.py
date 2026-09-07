@@ -34,3 +34,8 @@ def test_alternate_universes_are_order_independent_and_disjoint():
     assert a == b
     flattened = [item for bucket in a for item in bucket]
     assert len(flattened) == len(set(flattened)) == 6
+
+
+def test_freeze_train_selection_rejects_nonfinite_score():
+    with pytest.raises(ValueError, match="train score must be finite"):
+        freeze_train_selection({"A": float("nan")})
