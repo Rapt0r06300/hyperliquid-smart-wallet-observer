@@ -41,6 +41,18 @@ def test_warmup_incomplet_bloque_puis_debloque():
     assert r2["lead_lag"].ready is True
 
 
+def test_famille_sans_dependance_declaree_reste_non_ready(monkeypatch):
+    monkeypatch.setattr(R, "active_strategy_families", lambda: frozenset({"lead_lag"}))
+    monkeypatch.setattr(R, "required_sources", lambda _fam: frozenset())
+
+    r = R.ready_strategies({})
+
+    assert r["lead_lag"].ready is False
+    assert r["lead_lag"].data_ready is False
+    assert r["lead_lag"].missing_sources == frozenset()
+    assert r["lead_lag"].raison == "AUCUNE_DEPENDANCE_DECLAREE"
+
+
 def test_all_active_families_ready():
     tout = {"bbo-collector": True, "userfills-live": True, "allmids-collector": True}
     assert R.all_active_families_ready(tout) is True
