@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from hl_observer.backtesting.copy_vault_vnext_train import explore_copy_vault_vnext_train
+from hl_observer.backtesting.copy_vault_vnext_train import (
+    admit_consensus_train_rows,
+    explore_copy_vault_vnext_train,
+)
 
 
 def _row(
@@ -14,6 +17,7 @@ def _row(
         "signal_ts_ms": ts,
         "walk_forward_segment": segment,
         "liquidatable_net": True,
+        "public_entity_id": f"entity-{vault.lower()}",
         "entry_price": 2_000.0,
         "exit_price": 2_001.0,
         "notional_usd": 100.0,
@@ -68,7 +72,7 @@ def test_copy_vnext_selection_ignore_totalement_oos_et_exige_consensus_prior_onl
     assert result["selection_eligible"] is True
     assert result["selected"]["statistics"]["net_pnl_usd"] == 8.0
     assert result["selected"]["largest_coin_trade_share"] == 0.5
-    assert result["freeze_candidate"]["identity_claim"].startswith("DISTINCT_RECORDED_WALLET")
+    assert result["freeze_candidate"]["identity_claim"].startswith("ENTITY_NORMALIZED")
 
 
 def test_copy_vnext_refuse_de_selectionner_avant_freeze_physique_de_base() -> None:
@@ -156,3 +160,22 @@ def test_copy_vnext_refuses_capacity_below_notional() -> None:
     )
 
     assert result["train_rows_seen"] == 0
+
+
+def test_copy_vnext_does_not_count_same_public_entity_as_independent_wallets() -> None:
+    rows = [
+        {
+            **_row(ts=2_000_000_000_000 + index * 1_000, vault=f"0x{index}"),
+            "public_entity_id": "public-entity-one",
+        }
+        for index in range(3)
+    ]
+
+    admitted, reasons = admit_consensus_train_rows(
+        rows,
+        window_ms=30_000,
+        minimum_distinct_wallets=2,
+    )
+
+    assert admitted == []
+    assert reasons["ENTITY_INDEPENDENCE_NOT_PROVEN"] >= 1
