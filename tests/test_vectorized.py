@@ -39,3 +39,8 @@ def test_rolling_vol_both_paths():
     b = fast_rolling_vol(p, window=20, use_numpy=False)
     assert all(abs(u - v) < 1e-9 for u, v in zip(a, b))
     assert max(a) > 0
+
+
+def test_rolling_vol_short_inputs_are_empty():
+    assert fast_rolling_vol([]) == []
+    assert fast_rolling_vol([100.0]) == []
