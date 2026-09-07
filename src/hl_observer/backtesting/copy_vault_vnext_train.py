@@ -1,14 +1,15 @@
 """Copy-Vault vNext TRAIN-only causal consensus research.
 
-The killed simple whitelist is not reused.  A candidate is admitted only when
-multiple distinct recorded vault addresses independently point to the same coin
-and direction inside a predeclared causal lookback window.  Admission reads no
-PnL and never consults validation/OOS/forward.  Only already executable,
-liquidatable and economically reconciled TRAIN rows are scored afterwards.
+The killed simple whitelist is not reused. A candidate is admitted only when
+multiple independently evidenced entities point to the same coin and direction
+inside a predeclared causal lookback window. Admission reads no PnL and never
+consults validation/OOS/forward. Only already executable, liquidatable and
+economically reconciled TRAIN rows are scored afterwards.
 
-Distinct addresses are not claimed to be distinct human entities.  The report
-states this limitation explicitly.  PAPER/READ-ONLY; selection merely creates a
-freeze candidate and cannot certify the family.
+Entity normalization reuses the public, point-in-time Copy-Vault consensus gate.
+Missing identity evidence reduces effective independence and therefore fails
+closed when the quorum cannot be proved. PAPER/READ-ONLY; selection merely
+creates a freeze candidate and cannot certify the family.
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
+from hl_observer.following.entity_consensus import entity_consensus_gate
 
 SCHEMA_VERSION = "hypersmart.copy_vault_vnext_train.v1"
 MECHANISM = "copy_vault_vnext_causal_multiwallet_consensus"
@@ -29,6 +31,7 @@ MAX_COIN_TRADE_SHARE = 0.65
 MAX_VAULT_TRADE_SHARE = 0.50
 MAX_TOP_POSITIVE_SHARE = 0.60
 FAMILY_ALPHA = 0.05
+IDENTITY_CLAIM = "ENTITY_NORMALIZED_STRICT_PUBLIC_OR_REPEATED_BEHAVIORAL_EVIDENCE"
 
 
 def _number(value: object) -> float | None:
@@ -44,12 +47,15 @@ def _reconciled(row: Mapping[str, Any]) -> bool:
         return False
     net = _number(row.get("net_pnl_usd"))
     gross = _number(row.get("gross_pnl_usd"))
-    costs = [_number(row.get(key)) for key in (
-        "fees_usd",
-        "spread_cost_usd",
-        "slippage_cost_usd",
-        "latency_cost_usd",
-    )]
+    costs = [
+        _number(row.get(key))
+        for key in (
+            "fees_usd",
+            "spread_cost_usd",
+            "slippage_cost_usd",
+            "latency_cost_usd",
+        )
+    ]
     if net is None or gross is None or any(cost is None or cost < 0.0 for cost in costs):
         return False
     fees, spread, slippage, latency = (float(cost) for cost in costs)
@@ -126,13 +132,30 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _identity_vote(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Adapt a causal Copy-Vault row to the canonical entity-consensus schema."""
+
+    direction = int(row.get("direction") or 0)
+    return {
+        "wallet": str(row.get("vault") or "").strip().lower(),
+        "coin": str(row.get("coin") or "").strip().upper(),
+        "side": "long" if direction == 1 else "short",
+        "ts_ms": int(row.get("signal_ts_ms") or 0),
+        "size": _number(row.get("notional_usd")),
+        "public_entity_id": row.get("public_entity_id"),
+        "twap_cadence_ms": row.get("twap_cadence_ms"),
+        "funding_profile": row.get("funding_profile"),
+        "hedge_profile": row.get("hedge_profile"),
+    }
+
+
 def admit_consensus_train_rows(
     rows: Sequence[Mapping[str, Any]],
     *,
     window_ms: int,
     minimum_distinct_wallets: int,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Apply a prior-only consensus gate; PnL is never read for admission."""
+    """Apply prior-only entity-normalized consensus; PnL is never read here."""
 
     ordered = sorted(
         [dict(row) for row in rows],
@@ -145,6 +168,7 @@ def admit_consensus_train_rows(
         coin = str(row.get("coin") or "").upper()
         direction = int(row.get("direction") or 0)
         current_vault = str(row.get("vault") or "").lower()
+        supporting_rows: list[dict[str, Any]] = []
         prior_vaults: set[str] = set()
         for previous in reversed(ordered[:index]):
             previous_ts = int(previous.get("signal_ts_ms") or 0)
@@ -160,9 +184,19 @@ def admit_consensus_train_rows(
                 vault = str(previous.get("vault") or "").lower()
                 if vault and vault != current_vault:
                     prior_vaults.add(vault)
+                    supporting_rows.append(previous)
         distinct_addresses = len(prior_vaults | {current_vault}) if current_vault else len(prior_vaults)
         if distinct_addresses < int(minimum_distinct_wallets):
             reasons["INSUFFICIENT_PRIOR_DISTINCT_WALLET_CONSENSUS"] += 1
+            continue
+        identity = entity_consensus_gate(
+            [_identity_vote(item) for item in [*reversed(supporting_rows), row]],
+            min_independent_votes=float(minimum_distinct_wallets),
+            strict=True,
+            as_of_ms=timestamp,
+        )
+        if identity.get("decision") != "ALLOW_SHADOW":
+            reasons["ENTITY_INDEPENDENCE_NOT_PROVEN"] += 1
             continue
         admitted.append(
             {
@@ -171,7 +205,11 @@ def admit_consensus_train_rows(
                 "minimum_distinct_wallets": int(minimum_distinct_wallets),
                 "prior_supporting_wallet_addresses": sorted(prior_vaults),
                 "distinct_wallet_addresses_at_signal": distinct_addresses,
-                "consensus_observation_policy": "STRICTLY_PRIOR_SIGNALS_SAME_COIN_DIRECTION",
+                "entity_cluster_count_at_signal": int(identity["entity_cluster_count"]),
+                "effective_independent_votes_at_signal": float(identity["effective_independent_votes"]),
+                "entity_independence_measurable": bool(identity["independence_measurable"]),
+                "entity_consensus_warnings": list(identity.get("warnings") or []),
+                "consensus_observation_policy": "STRICTLY_PRIOR_ENTITY_NORMALIZED_SAME_COIN_DIRECTION",
             }
         )
         reasons["ADMITTED"] += 1
@@ -262,7 +300,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             "mechanism": MECHANISM,
             "consensus_window_ms": selected["consensus_window_ms"],
             "minimum_distinct_wallets": selected["minimum_distinct_wallets"],
-            "identity_claim": "DISTINCT_RECORDED_WALLET_ADDRESSES_ONLY_NOT_DISTINCT_HUMANS",
+            "identity_claim": IDENTITY_CLAIM,
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         }
         if selected
@@ -288,7 +326,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
         "diagnostic_train_candidate": diagnostic_selected,
         "diagnostic_train_candidate_count": len(diagnostic_rows),
         "diagnostic_not_admitted_pnl": physical_freeze_blocked,
-        "identity_claim": "DISTINCT_RECORDED_WALLET_ADDRESSES_ONLY_NOT_DISTINCT_HUMANS",
+        "identity_claim": IDENTITY_CLAIM,
         "train_rows_seen": len(rows),
         "fixed_grid": {
             "consensus_windows_ms": list(CONSENSUS_WINDOWS_MS),
