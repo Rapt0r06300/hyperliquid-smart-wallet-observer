@@ -113,6 +113,14 @@ jobs:
           if ($actual -ne $env:GITHUB_SHA.ToLowerInvariant()) {
             throw "SELF_HOSTED_SHA_REFUSED: checkout=$actual github=$env:GITHUB_SHA"
           }
+          $remoteMainRows = @(git ls-remote origin refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $remoteMainRows.Count -ne 1) {
+            throw 'SELF_HOSTED_MAIN_HEAD_UNVERIFIABLE: impossible de certifier le HEAD courant de main.'
+          }
+          $remoteMain = (($remoteMainRows[0] -split '\s+', 2)[0]).Trim().ToLowerInvariant()
+          if ($remoteMain -ne $actual) {
+            throw "SELF_HOSTED_STALE_MAIN_REFUSED: checkout=$actual main=$remoteMain"
+          }
 
           if ($env:GITHUB_EVENT_NAME -eq 'push') {
             $rows = @(git diff-tree --no-commit-id --name-status -r $env:GITHUB_SHA)
