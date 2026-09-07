@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from hl_observer.config.cross_venue_instruments import MAPPING_SCHEMA_VERSION
 from hl_observer.simulation.cross_venue_depth_adapter import (
     enrich_trades_with_depth,
     finalize_judgement,
@@ -68,12 +69,50 @@ def test_load_depth_snapshots_converts_collecte_seconds_to_ms(tmp_path: Path):
     path = tmp_path / "runtime" / "data" / "carnet_venues.jsonl"
     path.parent.mkdir(parents=True)
     path.write_text(
-        json.dumps({"coin": "btc", "collecte_ts": 1_786_552_000.125, "taille_min_usd": 42.0}) + "\n",
+        json.dumps(
+            {
+                "coin": "btc",
+                "collecte_ts": 1_786_552_000.125,
+                "taille_min_usd": 42.0,
+                "instrument_mapping_schema": MAPPING_SCHEMA_VERSION,
+                "instrument_mapping_exact": True,
+                "atomic_snapshot_certified": True,
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     rows = load_depth_snapshots(tmp_path)
     assert rows["BTC"][0]["_ts_ms"] == 1_786_552_000_125
     assert rows["BTC"][0]["_capacity_usd"] == 42.0
+
+
+def test_load_depth_snapshots_rejects_uncertified_mapping_and_four_side_provenance(tmp_path: Path):
+    path = tmp_path / "runtime" / "data" / "carnet_venues.jsonl"
+    path.parent.mkdir(parents=True)
+    rows = [
+        {"coin": "BTC", "collecte_ts": 1_786_552_000.100, "taille_min_usd": 50.0},
+        {
+            "coin": "ETH",
+            "collecte_ts": 1_786_552_000.200,
+            "taille_min_usd": 50.0,
+            "instrument_mapping_schema": MAPPING_SCHEMA_VERSION,
+            "instrument_mapping_exact": False,
+            "atomic_snapshot_certified": False,
+        },
+        {
+            "coin": "SOL",
+            "collecte_ts": 1_786_552_000.300,
+            "taille_min_usd": 50.0,
+            "instrument_mapping_schema": MAPPING_SCHEMA_VERSION,
+            "instrument_mapping_exact": True,
+            "atomic_snapshot_certified": True,
+        },
+    ]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    snapshots = load_depth_snapshots(tmp_path)
+    assert set(snapshots) == {"SOL"}
+    assert snapshots["SOL"][0]["_capacity_usd"] == 50.0
 
 
 def test_finalize_judgement_keeps_missing_depth_fail_closed():

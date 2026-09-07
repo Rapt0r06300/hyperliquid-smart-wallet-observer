@@ -16,6 +16,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.config.cross_venue_instruments import MAPPING_SCHEMA_VERSION
+
 DEFAULT_DEPTH_FRESHNESS_MS = 3_000.0
 DEPTH_PATH = Path("runtime") / "data" / "carnet_venues.jsonl"
 
@@ -55,6 +57,12 @@ def load_depth_snapshots(root: str | Path) -> dict[str, list[dict[str, Any]]]:
             except (TypeError, ValueError):
                 continue
             if not isinstance(row, dict):
+                continue
+            if (
+                row.get("instrument_mapping_schema") != MAPPING_SCHEMA_VERSION
+                or row.get("instrument_mapping_exact") is not True
+                or row.get("atomic_snapshot_certified") is not True
+            ):
                 continue
             coin = str(row.get("coin") or "").upper().strip()
             ts_ms = _timestamp_ms(row)
