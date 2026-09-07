@@ -179,3 +179,16 @@ def test_copy_vnext_does_not_count_same_public_entity_as_independent_wallets() -
 
     assert admitted == []
     assert reasons["ENTITY_INDEPENDENCE_NOT_PROVEN"] >= 1
+
+
+def test_copy_vnext_counts_each_metaorder_only_once_for_train_statistics() -> None:
+    first = _row(ts=2_100_000_000_000, vault="0xa")
+    second = _row(ts=2_100_000_001_000, vault="0xb")
+    first["metaorder_id"] = "metaorder-shared"
+    second["metaorder_id"] = "metaorder-shared"
+
+    result = explore_copy_vault_vnext_train(
+        {"provisional_without_physical_freeze": False, "trades": [first, second]}
+    )
+
+    assert result["train_rows_seen"] == 1
