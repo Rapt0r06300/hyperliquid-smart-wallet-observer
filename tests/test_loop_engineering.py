@@ -106,3 +106,24 @@ def test_load_signal_candidates_accepts_windows_utf8_bom(tmp_path: Path) -> None
 
     assert len(candidates) == 1
     assert candidates[0].id == "loop-sig-1"
+
+
+def test_loop_memory_mirror_is_best_effort_when_logs_bundle_is_unwritable(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class _BlockedLogDir:
+        def mkdir(self, *args, **kwargs) -> None:
+            raise OSError("read-only")
+
+    memory = LoopMemoryStore(tmp_path / "learning")
+    monkeypatch.setattr(
+        "hl_observer.loops.memory.default_logs_to_send_dir",
+        lambda _project_root: _BlockedLogDir(),
+    )
+
+    memory._mirror_latest_to_logs_to_send(
+        result_json="{}",
+        trace_json="[]",
+        report_text="# Report\n",
+    )
