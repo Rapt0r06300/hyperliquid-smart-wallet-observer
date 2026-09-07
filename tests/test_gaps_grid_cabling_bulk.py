@@ -22,6 +22,22 @@ def test_grid_is_bounded_and_never_martingale():
     assert g["real_execution"] is False
 
 
+def test_grid_stops_before_exceeding_total_notional_cap():
+    g = build_grid(
+        mid_price=100.0,
+        side="LONG",
+        levels=5,
+        base_size_usdt=10.0,
+        max_reentries=5,
+        max_total_usdt=15.0,
+    )
+    assert g["ok"] is True
+    assert g["level_count"] == 1
+    assert g["total_notional_usdt"] == 10.0
+    assert g["paper_only"] is True
+    assert g["real_execution"] is False
+
+
 def test_grid_flag_off_by_default(monkeypatch):
     monkeypatch.delenv("HYPERSMART_GRID_PAPER", raising=False)
     assert grid_paper_enabled() is False
