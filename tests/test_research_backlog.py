@@ -18,6 +18,13 @@ def test_hard_negatives_skip_sauf_nouveaute():
     assert hn.doit_retester("zone_inconnue") is True
 
 
+def test_hard_negatives_seeded_zone_is_preserved():
+    hn = R.HardNegatives([
+        {"cle": "dead_edge", "raison": "KILL", "dataset_hash": "d1", "hypothese": "h1"},
+    ])
+    assert hn.doit_retester("dead_edge", dataset_hash="d1", hypothese="h1") is False
+
+
 def test_score_idee():
     fort = R.score_idee(impact=5, data_readiness=1.0, independence=1.0, cost=1.0)
     faible = R.score_idee(impact=5, data_readiness=0.1, independence=1.0, cost=5.0)
