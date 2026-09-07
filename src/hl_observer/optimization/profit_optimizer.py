@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Callable
 
+from hl_observer.backtesting.hyperopt_local import hyperopt_local_only
 from hl_observer.simulation.log_metrics import (
     LogDecisionRow,
     iter_decision_rows,
@@ -112,7 +113,15 @@ def run_strategy_tournament(log_dir: Path, configs: tuple[StrategyConfig, ...] |
             and result.validation_pnl_usdc < 0
         )
         result.holdout_failed_after_selection = result.holdout_pnl_usdc < 0
-    best = max(results, key=lambda item: item.selection_score)
+    ranked = hyperopt_local_only(
+        ({"result_index": index} for index in range(len(results))),
+        lambda params: (
+            results[int(params["result_index"])].selection_score,
+            {"selection_score": results[int(params["result_index"])].selection_score},
+        ),
+        limit=1,
+    )
+    best = results[int(ranked[0].params["result_index"])]
     best.selected_as_best = True
     return OptimizationReport(source_dir=log_dir, strategies=tuple(results), best=best)
 
