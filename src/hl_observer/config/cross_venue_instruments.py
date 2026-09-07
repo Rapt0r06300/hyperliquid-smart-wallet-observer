@@ -21,7 +21,7 @@ BINANCE_PERP_EXCEPTIONS: dict[str, str | None] = {
     "HYPE": None,
 }
 
-MAPPING_SCHEMA_VERSION = "cross_venue_instrument_mapping_v1"
+MAPPING_SCHEMA_VERSION = "cross_venue_instrument_mapping_v2"
 ATOMIC_BBO_SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_BBO_V1"
 
 
@@ -47,12 +47,20 @@ def mapping_record(coin_hl: object, binance_symbol: object | None = None) -> dic
     coin = normalize_hl_coin(coin_hl)
     expected = binance_perp_symbol(coin)
     observed = str(binance_symbol or "").strip().upper() or None
-    exact = bool(coin and expected and observed == expected)
+    contract_multiplier = 1000 if expected and expected.startswith("1000") else 1
+    quote_currency = "USDT" if expected and expected.endswith("USDT") else None
+    settlement_currency = quote_currency
+    unit_equivalent = bool(expected and contract_multiplier == 1)
+    exact = bool(coin and expected and observed == expected and unit_equivalent)
     return {
         "schema_version": MAPPING_SCHEMA_VERSION,
         "hl_coin": coin,
         "binance_symbol_expected": expected,
         "binance_symbol_observed": observed,
+        "contract_multiplier": contract_multiplier if expected else None,
+        "quote_currency": quote_currency,
+        "settlement_currency": settlement_currency,
+        "unit_equivalent": unit_equivalent,
         "exact": exact,
         "supported": expected is not None,
     }

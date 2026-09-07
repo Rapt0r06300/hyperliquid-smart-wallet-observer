@@ -22,3 +22,19 @@ def test_mapping_fail_closed_and_canonical_branches():
 
     assert mapping_is_exact({"coin": "BTC", "binance_symbol": "BTCUSDT"}) is True
     assert mapping_is_exact({"coin": "BTC", "binance_symbol": "ETHUSDT"}) is False
+
+
+def test_mapping_record_certifies_contract_units_and_currency():
+    btc = mapping_record("BTC", "BTCUSDT")
+    assert btc["contract_multiplier"] == 1
+    assert btc["quote_currency"] == "USDT"
+    assert btc["settlement_currency"] == "USDT"
+    assert btc["unit_equivalent"] is True
+    assert btc["exact"] is True
+
+    pepe = mapping_record("PEPE", "1000PEPEUSDT")
+    assert pepe["contract_multiplier"] == 1000
+    assert pepe["quote_currency"] == "USDT"
+    assert pepe["settlement_currency"] == "USDT"
+    assert pepe["unit_equivalent"] is False
+    assert pepe["exact"] is False
