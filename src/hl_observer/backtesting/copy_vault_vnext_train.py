@@ -44,14 +44,48 @@ def _reconciled(row: Mapping[str, Any]) -> bool:
         return False
     net = _number(row.get("net_pnl_usd"))
     gross = _number(row.get("gross_pnl_usd"))
-    if net is None or gross is None:
+    costs = [_number(row.get(key)) for key in (
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+    )]
+    if net is None or gross is None or any(cost is None or cost < 0.0 for cost in costs):
         return False
-    fees = _number(row.get("fees_usd")) or 0.0
-    spread = _number(row.get("spread_cost_usd")) or 0.0
-    slippage = _number(row.get("slippage_cost_usd")) or 0.0
-    latency = _number(row.get("latency_cost_usd")) or 0.0
+    fees, spread, slippage, latency = (float(cost) for cost in costs)
     expected = gross - fees - spread - slippage - latency
     return math.isclose(expected, net, abs_tol=max(1e-8, abs(expected) * 1e-8))
+
+
+def _execution_evidence_complete(row: Mapping[str, Any]) -> bool:
+    positive_fields = (
+        "entry_price",
+        "exit_price",
+        "notional_usd",
+        "entry_capacity_usd",
+        "exit_capacity_usd",
+    )
+    nonnegative_fields = (
+        "reference_lag_ms",
+        "entry_target_lag_ms",
+        "exit_target_lag_ms",
+        "observed_latency_ms",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+    )
+    positive = {field: _number(row.get(field)) for field in positive_fields}
+    nonnegative = {field: _number(row.get(field)) for field in nonnegative_fields}
+    if any(value is None or value <= 0.0 for value in positive.values()):
+        return False
+    if any(value is None or value < 0.0 for value in nonnegative.values()):
+        return False
+    notional = float(positive["notional_usd"])
+    return (
+        float(positive["entry_capacity_usd"]) >= notional
+        and float(positive["exit_capacity_usd"]) >= notional
+    )
 
 
 def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -82,6 +116,7 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             or direction not in (-1, 1)
             or signal_ts_ms <= 0
             or raw.get("liquidatable_net") is not True
+            or not _execution_evidence_complete(raw)
             or not _reconciled(raw)
         ):
             continue
