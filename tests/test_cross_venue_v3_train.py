@@ -20,6 +20,17 @@ def _atomic(ts: int, hl_mid: float, bin_mid: float) -> tuple:
     )
 
 
+def _source_meta() -> dict[str, object]:
+    return {
+        "source_mode": BBO_SOURCE_MODE,
+        "mapping_verified": True,
+        "instrument_mapping_schema": "cross_venue_instrument_mapping_v2",
+        "contract_multipliers_normalized": True,
+        "quote_currencies_normalized": True,
+        "sizes_normalized_to_usd_notional": True,
+    }
+
+
 def test_cross_v3_rejoue_impulsion_puis_entree_retardee_et_quatre_fills() -> None:
     start = 1_800_000_000_000
     series = {
@@ -86,9 +97,15 @@ def test_cross_v3_accepte_la_source_bbo_atomique_certifiee() -> None:
     start = 1_800_000_000_000
     series = {"BTC": [_atomic(start, 100.0, 100.0), _atomic(start + 1_000, 100.1, 100.0)]}
     depth = {"BTC": [(row[0], 1_000.0) for row in series["BTC"]]}
-    result = explore_cross_venue_v3_train(series, depth, source_mode=BBO_SOURCE_MODE)
+    result = explore_cross_venue_v3_train(
+        series,
+        depth,
+        source_mode=BBO_SOURCE_MODE,
+        source_meta=_source_meta(),
+    )
     assert result["status"] != "MORE_DATA_CERTIFIED_ATOMIC_BOOK_REQUIRED"
     assert result["source_mode"] == BBO_SOURCE_MODE
+    assert result["instrument_normalization_verified"] is True
     assert result["cost_contract"] == {
         "fee_bps_hyperliquid_per_fill": 4.5,
         "fee_bps_binance_per_fill": 4.5,
@@ -97,6 +114,25 @@ def test_cross_v3_accepte_la_source_bbo_atomique_certifiee() -> None:
         "spread_embedded_in_executable_prices": True,
         "entry_must_cover_fee_only_burden": True,
     }
+    assert result["real_execution"] is False
+
+
+def test_cross_v3_refuse_source_mode_certifie_sans_preuve_de_normalisation_instrument() -> None:
+    start = 1_800_000_000_000
+    series = {"BTC": [_atomic(start, 100.0, 100.0), _atomic(start + 1_000, 100.1, 100.0)]}
+    depth = {"BTC": [(row[0], 1_000.0) for row in series["BTC"]]}
+
+    result = explore_cross_venue_v3_train(
+        series,
+        depth,
+        source_mode=BBO_SOURCE_MODE,
+        source_meta={"source_mode": BBO_SOURCE_MODE, "mapping_verified": True},
+    )
+
+    assert result["status"] == "INSTRUMENT_NORMALIZATION_PROOF_REQUIRED"
+    assert result["selection_eligible"] is False
+    assert result["physical_freeze_allowed"] is False
+    assert result["instrument_normalization_verified"] is False
     assert result["real_execution"] is False
 
 
