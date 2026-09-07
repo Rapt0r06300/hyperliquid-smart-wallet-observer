@@ -193,10 +193,13 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     liquidatable = payload.get("liquidatable_net") is True
 
     vnext_promotion = payload.get("vnext_promotion")
-    if vnext_promotion is not None and (
-        not isinstance(vnext_promotion, Mapping)
-        or not validate_certification_entry(vnext_promotion)
-    ):
+    vnext_certified = vnext_promotion is None
+    if isinstance(vnext_promotion, Mapping):
+        try:
+            vnext_certified = bool(validate_certification_entry(vnext_promotion))
+        except (TypeError, ValueError):
+            vnext_certified = False
+    if not vnext_certified:
         reasons.append("VNEXT_PROMOTION_NOT_CERTIFIED")
 
     unique_reasons = list(dict.fromkeys(reasons))
