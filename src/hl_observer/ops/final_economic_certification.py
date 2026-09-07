@@ -17,6 +17,7 @@ from hl_observer.simulation.economic_proof_identity import (
     audit_family_event_sets,
     proof_events,
 )
+from hl_observer.simulation.vnext_promotion_protocol import validate_certification_entry
 
 SCHEMA = "hypersmart.final_economic_certification.v2"
 CAMPAIGN_DIR = Path("runtime") / "reports" / "economic_campaigns"
@@ -190,6 +191,13 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     forward_post_freeze = forward.get("post_freeze") is True
     placebo_beaten = placebos.get("beaten") is True
     liquidatable = payload.get("liquidatable_net") is True
+
+    vnext_promotion = payload.get("vnext_promotion")
+    if vnext_promotion is not None and (
+        not isinstance(vnext_promotion, Mapping)
+        or not validate_certification_entry(vnext_promotion)
+    ):
+        reasons.append("VNEXT_PROMOTION_NOT_CERTIFIED")
 
     unique_reasons = list(dict.fromkeys(reasons))
     certified = (
