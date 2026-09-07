@@ -39,6 +39,12 @@ def test_events_par_s_calibration_puis_calcule():
     assert t2.lignes[0].events_par_s == 10.0                   # 20 events / 2 s
 
 
+def test_events_par_s_refuse_un_delta_t_nonpositif():
+    precedent = {"bbo-collector": {"n": 10.0, "ts": NOW}}
+    assert TS._events_par_s("bbo-collector", 30, NOW, precedent) is None
+    assert TS._events_par_s("bbo-collector", 30, NOW - 1000.0, precedent) is None
+
+
 def test_etat_manque_pour_obligatoire_absente():
     t = TS.construire_tableau(SRCS[:1], {}, {}, {}, now_ms=NOW, pid_vivant=_vivant)
     assert t.lignes[0].etat == "MANQUE"                        # obligatoire sans preuve
