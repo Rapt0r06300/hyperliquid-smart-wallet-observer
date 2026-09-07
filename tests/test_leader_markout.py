@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.copy_wallet.leader_markout import (
-    MIN_EVENEMENTS, markout_fill_bps, juger_leader, selectionner_leaders, copier_ce_leader,
+    MIN_EVENEMENTS, markout_fill_bps, markout_leader_bps, juger_leader, selectionner_leaders, copier_ce_leader,
 )
 
 
@@ -17,6 +17,15 @@ def test_markout_fill_signe_par_la_direction():
     assert markout_fill_bps("SELL", 100.0, 101.0) == pytest.approx(-100.0)  # vente perdante
     assert markout_fill_bps("SELL", 100.0, 99.0) == pytest.approx(100.0)    # vente gagnante
     assert markout_fill_bps("BUY", 0.0, 1.0) is None                        # prix invalide
+
+
+def test_markout_leader_ignore_les_entrees_non_mapping():
+    markout, n = markout_leader_bps([
+        None,
+        {"side": "BUY", "mid_at_fill": 100.0, "mid_forward": 101.0},
+    ])
+    assert n == 1
+    assert markout == pytest.approx(100.0)
 
 
 def test_leader_predicteur_est_garde():
