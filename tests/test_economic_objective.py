@@ -181,3 +181,24 @@ def test_preuve_positive_sans_detail_des_couts_est_refusee():
     assert result["proof_net_pnl_usd"] is None
     assert "OOS_UNMEASURED:fees_usd" in result["objective_reasons"]
     assert "OOS_TRADE_ID_PROOF_INCOMPLETE" in result["objective_reasons"]
+
+
+def test_preuve_non_liquidable_reste_non_certifiable():
+    result = evaluate_objective(_proof(LIQUIDATABLE_NET=False))
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["eligible_net_pnl_usd"] is None
+    assert "NOT_LIQUIDATABLE_NET" in result["objective_reasons"]
+
+
+def test_placebo_non_battu_reste_non_certifiable():
+    result = evaluate_objective(_proof(placebos={"beaten": False}))
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["eligible_net_pnl_usd"] is None
+    assert "PLACEBO_NOT_BEATEN" in result["objective_reasons"]
+
+
+def test_preuve_dupliquee_reste_non_certifiable():
+    result = evaluate_objective(_proof(duplicate_trade_ids=1))
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert result["eligible_net_pnl_usd"] is None
+    assert "DUPLICATE_TRADE_IDENTITIES" in result["objective_reasons"]
