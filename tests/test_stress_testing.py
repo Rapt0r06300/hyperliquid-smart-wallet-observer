@@ -23,3 +23,8 @@ def test_monte_carlo_distribution_ordering():
 def test_regime_conditional_size_reduces_in_high_vol():
     assert regime_conditional_size(100.0, regime_vol=0.40, target_vol=0.10) == 25.0   # 4x vol -> 1/4
     assert regime_conditional_size(100.0, regime_vol=0.05, target_vol=0.10) == 100.0  # peu volatil -> plein
+
+
+def test_regime_conditional_size_keeps_base_when_regime_vol_is_nonpositive():
+    assert regime_conditional_size(100.0, regime_vol=0.0, target_vol=0.10) == 100.0
+    assert regime_conditional_size(100.0, regime_vol=-0.01, target_vol=0.10) == 100.0
