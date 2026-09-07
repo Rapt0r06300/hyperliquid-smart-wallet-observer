@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hl_observer.backtesting.train_statistics import summarize_train_rows
+from hl_observer.backtesting.train_statistics import profit_factor, summarize_train_rows
 
 
 def test_bonferroni_lcb_reste_strictement_train_et_positif_sur_jours_stables() -> None:
@@ -23,3 +23,7 @@ def test_bonferroni_lcb_reste_strictement_train_et_positif_sur_jours_stables() -
     assert result["net_pnl_usd"] == 5.0
     assert result["daily_mean_lcb_usd"] == 1.0
     assert result["total_lcb_usd"] == 5.0
+
+
+def test_profit_factor_mixed_pnl_uses_win_loss_ratio() -> None:
+    assert profit_factor([3.0, -1.0, 2.0, -1.0]) == 2.5
