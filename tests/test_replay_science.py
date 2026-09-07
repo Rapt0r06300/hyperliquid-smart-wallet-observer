@@ -19,6 +19,11 @@ def test_segmentation_regime():
     assert seg["FUNDING_HAUT"] == [3.0, 2.0] and seg["FUNDING_BAS"] == [-1.0]
 
 
+def test_segmentation_regime_ignore_non_mapping_entries():
+    seg = segmenter_par_regime([None, "invalide", {"regime": "CALME", "pnl": 2.5}])
+    assert seg == {"CALME": [2.5]}
+
+
 def test_attribution_triee():
     trades = [{"coin": "HYPE", "pnl": 5.0}, {"coin": "PURR", "pnl": 2.0}, {"coin": "HYPE", "pnl": 1.0}]
     att = attribution(trades, "coin")
