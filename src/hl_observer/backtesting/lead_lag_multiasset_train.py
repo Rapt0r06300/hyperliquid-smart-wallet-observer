@@ -364,6 +364,58 @@ def _rows_from_ledgers(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _independent_train_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    horizon_ms: int,
+    shock_window_ms: float | None,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Keep a deterministic, outcome-blind set of non-overlapping episodes.
+
+    Events whose causal observation/holding windows overlap are not independent
+    evidence.  The first observable event is kept and later events on the same
+    coin are embargoed until the larger of the shock window and holding horizon
+    has elapsed.  Selection never inspects PnL when choosing which row survives.
+    """
+
+    minimum_separation_ms = max(
+        1,
+        int(horizon_ms),
+        int(math.ceil(float(shock_window_ms))) if shock_window_ms is not None else 0,
+    )
+    ordered = sorted(
+        (dict(row) for row in rows),
+        key=lambda row: (
+            int(row.get("timestamp_ms") or 0),
+            str(row.get("coin") or ""),
+            str(row.get("trade_id") or ""),
+        ),
+    )
+    accepted: list[dict[str, Any]] = []
+    last_timestamp_by_coin: dict[str, int] = {}
+    rejected = 0
+    for row in ordered:
+        timestamp_ms = int(row.get("timestamp_ms") or 0)
+        coin = str(row.get("coin") or "").upper()
+        if timestamp_ms <= 0 or not coin:
+            rejected += 1
+            continue
+        previous = last_timestamp_by_coin.get(coin)
+        if previous is not None and timestamp_ms - previous < minimum_separation_ms:
+            rejected += 1
+            continue
+        accepted.append(row)
+        last_timestamp_by_coin[coin] = timestamp_ms
+    effective_days = len({int(row["timestamp_ms"]) // 86_400_000 for row in accepted})
+    return accepted, {
+        "raw_sample_count": len(rows),
+        "effective_sample_count": len(accepted),
+        "overlapping_events_rejected": rejected,
+        "minimum_separation_ms": minimum_separation_ms,
+        "effective_distinct_days": effective_days,
+    }
+
+
 def _score_report(
     report: Mapping[str, Any],
     *,
@@ -377,7 +429,12 @@ def _score_report(
     shock_window_ms: float | None = None,
     admission_policy: str = ADMISSION_PRIOR_MEAN_POSITIVE,
 ) -> dict[str, Any]:
-    rows = _rows_from_ledgers(report)
+    raw_rows = _rows_from_ledgers(report)
+    rows, independence = _independent_train_rows(
+        raw_rows,
+        horizon_ms=horizon_ms,
+        shock_window_ms=shock_window_ms,
+    )
     stats = summarize_train_rows(
         rows,
         value_key="net_pnl_usd",
@@ -395,6 +452,8 @@ def _score_report(
     lcb = stats.get("total_lcb_usd")
     eligible = bool(
         report.get("costs_measured") is True
+        and int(independence["effective_sample_count"]) >= int(min_train_fills)
+        and int(independence["effective_distinct_days"]) >= MIN_DISTINCT_DAYS
         and int(stats.get("sample_count") or 0) >= int(min_train_fills)
         and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
         and net > 0.0
@@ -420,6 +479,7 @@ def _score_report(
         "shock_window_ms": (float(shock_window_ms) if shock_window_ms is not None else None),
         "admission_policy": str(admission_policy),
         "statistics": stats,
+        "independence": independence,
         "internal_train_fold_nets": internal_fold_nets,
         "placebo_net_pnl_usd": placebo_net,
         "minimum_train_fills": int(min_train_fills),
@@ -751,6 +811,7 @@ __all__ = [
     "WINDOW_MIN_TRAIN_FILLS",
     "WINDOW_SHOCK_THRESHOLDS_BPS",
     "WINDOW_SHOCK_WINDOWS_MS",
+    "_independent_train_rows",
     "_planned_cross_asset_pairs",
     "_score_report",
     "explore_lead_lag_multiasset_train",
