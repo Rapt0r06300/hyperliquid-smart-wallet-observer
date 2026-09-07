@@ -32,6 +32,18 @@ annotation sans autorité.
 
 Le workflow ne se déclenche **jamais sur une pull request**.
 
+## Politique : un seul meilleur prochain gros run
+
+La file versionnée conserve tout l'historique mais n'autorise qu'un seul meilleur prochain gros run :
+
+- le job déjà en cours n'est pas interrompu (`cancel-in-progress: false`) ;
+- parmi les commandes en attente, la plus récente sur `main` est la seule candidate encore admissible ;
+- juste avant tout preflight ou gros calcul, le workflow compare le SHA checkouté au HEAD distant courant de `main` avec `git ls-remote origin refs/heads/main` ;
+- si `main` a avancé, la commande en attente est **stale/superseded** et échoue avec `SELF_HOSTED_STALE_MAIN_REFUSED` avant de consommer le calcul ;
+- pour remplacer une commande, on ajoute un nouveau JSON dans un nouveau commit : l'ancien JSON reste immuable et n'est jamais supprimé, renommé ou réécrit.
+
+Cette politique évite le churn de gros runs tout en préservant la preuve Git complète de chaque demande.
+
 ## Exemple de commande
 
 ```json
