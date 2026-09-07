@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hl_observer.risk.graded_halt import realized_window_pnl_usd
+from hl_observer.risk.graded_halt import AMBER_LOSS_ENV, _f, realized_window_pnl_usd
 
 
 def test_realized_window_pnl_ignores_malformed_non_close_and_stale_events() -> None:
@@ -27,3 +27,7 @@ def test_realized_window_pnl_ignores_malformed_non_close_and_stale_events() -> N
     ]
 
     assert realized_window_pnl_usd(events, now_ms, 1.0) == -3.5
+
+
+def test_invalid_graded_halt_threshold_falls_back_to_safe_default() -> None:
+    assert _f(AMBER_LOSS_ENV, {AMBER_LOSS_ENV: "not-a-number"}) == 12.0
