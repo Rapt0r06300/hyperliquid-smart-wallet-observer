@@ -422,11 +422,31 @@ def _placebo_net(trades: Sequence[Mapping[str, Any]]) -> float:
     return total
 
 
+def _normalization_proof_ok(source_mode: str, source_meta: Mapping[str, Any] | None) -> bool:
+    """Require upstream certified mapping and USD-size normalization before PnL."""
+
+    if not isinstance(source_meta, Mapping) or source_meta.get("source_mode") != source_mode:
+        return False
+    if source_meta.get("mapping_verified") is not True:
+        return False
+    explicit_units = bool(
+        source_meta.get("contract_multipliers_normalized") is True
+        and source_meta.get("quote_currencies_normalized") is True
+        and source_meta.get("sizes_normalized_to_usd_notional") is True
+    )
+    certified_loader_units = source_meta.get("capacity_definition") in {
+        "minimum USD capacity on the four raw BBO sides",
+        "minimum USD capacity on the four BBO top levels",
+    }
+    return explicit_units or certified_loader_units
+
+
 def explore_cross_venue_v3_train(
     series: Mapping[str, Sequence[Sequence[Any]]],
     depth: Mapping[str, Sequence[tuple[float, float]]],
     *,
     source_mode: str,
+    source_meta: Mapping[str, Any] | None = None,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Select a v3 freeze candidate from TRAIN only, never from heldout rows."""
@@ -456,6 +476,22 @@ def explore_cross_venue_v3_train(
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             "heldout_evaluated": False,
             "source_mode": source_mode,
+            "instrument_normalization_verified": False,
+            "economic_contract": economic_receipt,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    if not _normalization_proof_ok(source_mode, source_meta):
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mechanism": MECHANISM,
+            "status": "INSTRUMENT_NORMALIZATION_PROOF_REQUIRED",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "heldout_evaluated": False,
+            "source_mode": source_mode,
+            "instrument_normalization_verified": False,
             "economic_contract": economic_receipt,
             "paper_read_only": True,
             "real_execution": False,
@@ -550,6 +586,7 @@ def explore_cross_venue_v3_train(
         "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         "heldout_evaluated": False,
         "source_mode": source_mode,
+        "instrument_normalization_verified": True,
         "train_bounds": {"start_ms": start_ms, "end_ms": train_end, "full_end_ms": end_ms},
         "fixed_grid": {
             "leader_thresholds_bps": list(LEADER_THRESHOLDS_BPS),
