@@ -14,6 +14,15 @@ def _row(
         "signal_ts_ms": ts,
         "walk_forward_segment": segment,
         "liquidatable_net": True,
+        "entry_price": 2_000.0,
+        "exit_price": 2_001.0,
+        "notional_usd": 100.0,
+        "entry_capacity_usd": 1_000.0,
+        "exit_capacity_usd": 1_000.0,
+        "reference_lag_ms": 0,
+        "entry_target_lag_ms": 0,
+        "exit_target_lag_ms": 0,
+        "observed_latency_ms": 0,
         "gross_pnl_usd": net,
         "fees_usd": 0.0,
         "spread_cost_usd": 0.0,
@@ -97,19 +106,13 @@ def test_copy_vnext_fail_closed_when_execution_capacity_is_missing() -> None:
         base = (30_000 + day_index) * day
         coin = "ETH" if day_index % 2 == 0 else "SOL"
         for wallet_index in range(3):
-            row = _row(ts=base + (wallet_index + 1) * 1_000, vault=f"0x{wallet_index}", coin=coin)
-            row.update(
-                {
-                    "entry_price": 2_000.0,
-                    "exit_price": 2_001.0,
-                    "entry_capacity_usd": 1_000.0,
-                    "exit_capacity_usd": 1_000.0,
-                    "reference_lag_ms": 0,
-                    "entry_target_lag_ms": 0,
-                    "exit_target_lag_ms": 0,
-                }
+            rows.append(
+                _row(
+                    ts=base + (wallet_index + 1) * 1_000,
+                    vault=f"0x{wallet_index}",
+                    coin=coin,
+                )
             )
-            rows.append(row)
     rows[0].pop("entry_capacity_usd")
 
     result = explore_copy_vault_vnext_train(
@@ -117,3 +120,39 @@ def test_copy_vnext_fail_closed_when_execution_capacity_is_missing() -> None:
     )
 
     assert result["train_rows_seen"] == 11
+
+
+def test_copy_vnext_fail_closed_when_execution_evidence_is_incomplete() -> None:
+    required_fields = (
+        "entry_price",
+        "exit_price",
+        "notional_usd",
+        "entry_capacity_usd",
+        "exit_capacity_usd",
+        "reference_lag_ms",
+        "entry_target_lag_ms",
+        "exit_target_lag_ms",
+        "observed_latency_ms",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+    )
+    for index, field in enumerate(required_fields):
+        row = _row(ts=1_900_000_000_000 + index, vault=f"0x{index}")
+        row.pop(field)
+        result = explore_copy_vault_vnext_train(
+            {"provisional_without_physical_freeze": False, "trades": [row]}
+        )
+        assert result["train_rows_seen"] == 0, field
+
+
+def test_copy_vnext_refuses_capacity_below_notional() -> None:
+    row = _row(ts=1_900_100_000_000, vault="0xcapacity")
+    row["entry_capacity_usd"] = row["notional_usd"] - 0.01
+
+    result = explore_copy_vault_vnext_train(
+        {"provisional_without_physical_freeze": False, "trades": [row]}
+    )
+
+    assert result["train_rows_seen"] == 0
