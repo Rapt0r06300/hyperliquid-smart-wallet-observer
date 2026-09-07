@@ -24,6 +24,17 @@ def test_workspace_refuse_si_aucune_donnee_reconstruite(tmp_path: Path) -> None:
         prepare_replay_workspace(root)
 
 
+def test_workspace_refuse_si_outil_projet_manquant(tmp_path: Path) -> None:
+    root = _make_project(tmp_path)
+    (root / "tools" / "backtest_dislocation_2jambes.py").unlink()
+    workspace = root / "data" / "hypersmart_datasets" / "materialized"
+    (workspace / "runtime" / "data").mkdir(parents=True)
+    (workspace / "runtime" / "data" / "bbo_tape.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(DatasetBridgeError, match="Outil du projet introuvable"):
+        prepare_replay_workspace(root)
+
+
 def test_workspace_copie_seulement_les_petits_outils(tmp_path: Path) -> None:
     root = _make_project(tmp_path)
     workspace = root / "data" / "hypersmart_datasets" / "materialized"
