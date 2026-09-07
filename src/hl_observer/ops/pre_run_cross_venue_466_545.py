@@ -125,9 +125,29 @@ def _scenario_depth_vwap() -> Scenario:
 
 
 def _scenario_instrument_mapping() -> Scenario:
+    btc = mapping_record("BTC", "BTCUSDT")
     pepe = mapping_record("PEPE", "1000PEPEUSDT")
     false = mapping_record("PEPE", "PEPEUSDT")
-    return Scenario(pepe["exact"] is True and binance_perp_symbol("kBONK") == "1000BONKUSDT", false["exact"] is False and binance_perp_symbol("HYPE") is None, pepe == mapping_record("PEPE", "1000PEPEUSDT"), {"schema": pepe["schema_version"]})
+    positive = (
+        btc["exact"] is True
+        and btc["contract_multiplier"] == 1
+        and btc["quote_currency"] == "USDT"
+        and btc["unit_equivalent"] is True
+        and binance_perp_symbol("kBONK") == "1000BONKUSDT"
+    )
+    negative = (
+        pepe["exact"] is False
+        and pepe["contract_multiplier"] == 1000
+        and pepe["unit_equivalent"] is False
+        and false["exact"] is False
+        and binance_perp_symbol("HYPE") is None
+    )
+    return Scenario(
+        positive,
+        negative,
+        btc == mapping_record("BTC", "BTCUSDT") and pepe == mapping_record("PEPE", "1000PEPEUSDT"),
+        {"schema": btc["schema_version"], "pepe_multiplier": pepe["contract_multiplier"]},
+    )
 
 
 def _scenario_entry_two_legs() -> Scenario:
