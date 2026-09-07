@@ -100,6 +100,7 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         return []
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_metaorders: set[str] = set()
     for raw in trades:
         if not isinstance(raw, Mapping):
             continue
@@ -126,6 +127,11 @@ def _train_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             or not _reconciled(raw)
         ):
             continue
+        metaorder_id = str(raw.get("metaorder_id") or "").strip()
+        if metaorder_id:
+            if metaorder_id in seen_metaorders:
+                continue
+            seen_metaorders.add(metaorder_id)
         seen.add(trade_id)
         result.append(dict(raw))
     result.sort(key=lambda row: (int(row["signal_ts_ms"]), str(row["trade_id"])))
