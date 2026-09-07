@@ -21,3 +21,7 @@ def test_echantillon_insuffisant():
 
 def test_meilleure_route():
     assert meilleure(route_a_p95=5.0, route_b_p95=8.0)["meilleure"] == "A"
+
+
+def test_meilleure_route_ecarte_b_non_mesurable():
+    assert meilleure(route_a_p95=5.0, route_b_p95="UNMEASURABLE")["meilleure"] == "A"
