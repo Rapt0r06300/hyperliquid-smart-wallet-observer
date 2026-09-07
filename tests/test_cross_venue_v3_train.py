@@ -98,3 +98,30 @@ def test_cross_v3_accepte_la_source_bbo_atomique_certifiee() -> None:
         "entry_must_cover_fee_only_burden": True,
     }
     assert result["real_execution"] is False
+
+
+def test_cross_v3_refuse_un_cycle_qui_traverse_un_funding_hl_non_price() -> None:
+    # Hyperliquid settles funding every hour.  Without a certified funding rate
+    # in the replay input, a paper cycle spanning that boundary must fail closed.
+    funding_boundary = 1_800_000_000_000
+    start = funding_boundary - 2_000
+    series = {
+        "BTC": [
+            _atomic(start, 100.0, 100.0),
+            _atomic(start + 1_000, 100.25, 100.0),
+            _atomic(start + 1_400, 100.25, 100.0),
+            _atomic(start + 2_500, 100.05, 100.05),
+        ]
+    }
+    depth = {"BTC": [(row[0], 1_000.0) for row in series["BTC"]]}
+
+    trades, diagnostics = replay_variant_train(
+        series,
+        depth,
+        leader_threshold_bps=8.0,
+        max_hold_ms=10_000,
+        train_end_ms=funding_boundary + 20_000,
+    )
+
+    assert trades == []
+    assert diagnostics["FUNDING_BOUNDARY_UNPRICED"] == 1
