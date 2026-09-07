@@ -67,6 +67,18 @@ def test_hot_watch_rotation_never_exceeds_ten_and_keeps_active_slot() -> None:
     assert any(slot.wallet_address == active.wallet_address for slot in slots)
 
 
+def test_hot_watch_rotation_skips_duplicate_wallet_candidate() -> None:
+    wallet = "0x" + "a" * 40
+    slots = rotate_hot_watch(
+        [(wallet, 2.0, 100), (wallet.upper(), 1.0, 90)],
+        now_ms=100,
+        max_slots=10,
+    )
+    assert len(slots) == 1
+    assert slots[0].wallet_address == wallet
+    assert slots[0].priority == 2.0
+
+
 def test_new_cli_commands_are_available(tmp_path) -> None:
     env = os.environ.copy()
     env["HL_DATABASE_URL"] = f"sqlite:///{(tmp_path / 'cli_commands.sqlite3').as_posix()}"
