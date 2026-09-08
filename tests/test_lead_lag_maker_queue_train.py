@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import pytest
 
 from hl_observer.backtesting import lead_lag_maker_queue_train as module
 
@@ -52,7 +53,7 @@ def test_maker_queue_fill_requiert_flux_agressif_signe_apres_observation() -> No
     aggressive_trades = [
         {"ts_ms": 1_100, "price": 100.0, "qty": 1.0, "aggressor_side": "SELL"},
         {"ts_ms": 1_200, "price": 100.0, "qty": 2.0, "aggressor_side": "SELL"},
-        {"ts_ms": 1_300, "price": 100.0, "qty": 2.1, "aggressor_side": "SELL"},
+        {"ts_ms": 1_300, "price": 100.0, "qty": 2.3, "aggressor_side": "SELL"},
     ]
 
     decision = module.evaluate_measured_maker_queue_fill(
@@ -65,13 +66,38 @@ def test_maker_queue_fill_requiert_flux_agressif_signe_apres_observation() -> No
     )
 
     assert decision["status"] == "FILLED_MEASURED_QUEUE"
-    assert decision["queue_model"] == "RISK_AVERSE_SIGNED_TRADE_FLOW"
+    assert decision["queue_model"] == "RISK_AVERSE_SIGNED_TRADE_FLOW_FULL_ORDER_V2"
     assert decision["limit_price"] == 100.0
     assert decision["queue_ahead_qty"] == 5.0
-    assert decision["aggressive_qty_at_level"] == 5.1
+    assert decision["aggressive_qty_at_level"] == 5.3
+    assert decision["order_qty"] == 0.25
+    assert decision["remaining_order_qty"] == 0.0
     assert decision["fill_ts_ms"] == 1_300
     assert decision["paper_read_only"] is True
     assert decision["real_execution"] is False
+
+
+def test_maker_queue_ne_certifie_pas_un_simple_depassement_de_la_file() -> None:
+    books = [
+        _book(1_000, bid=100.0, ask=100.2, bid_size=5.0, ask_size=5.0),
+    ]
+    aggressive_trades = [
+        {"ts_ms": 1_100, "price": 100.0, "qty": 5.1, "aggressor_side": "SELL"},
+    ]
+
+    decision = module.evaluate_measured_maker_queue_fill(
+        books,
+        aggressive_trades,
+        side="BUY",
+        observable_at_ms=1_000,
+        deadline_ms=1_100,
+        notional_usd=25.0,
+    )
+
+    assert decision["status"] == "NOT_FILLED_MEASURED_QUEUE"
+    assert decision["filled"] is False
+    assert decision["remaining_queue_ahead_qty"] == 0.0
+    assert decision["remaining_order_qty"] == pytest.approx(0.15)
 
 
 def test_maker_queue_refuse_touch_sans_queue_mesurable() -> None:

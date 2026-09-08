@@ -20,7 +20,7 @@ from typing import Any
 from hl_observer.backtesting.queue_model import avancer
 from hl_observer.simulation.lead_lag_l2_history import load_market_microstructure_history
 
-QUEUE_MODEL = "RISK_AVERSE_SIGNED_TRADE_FLOW"
+QUEUE_MODEL = "RISK_AVERSE_SIGNED_TRADE_FLOW_FULL_ORDER_V2"
 TRAIN_TAPE_SCHEMA_VERSION = "hypersmart.lead_lag_maker_train_data.v1"
 
 
@@ -95,7 +95,8 @@ def evaluate_measured_maker_queue_fill(
         return _base_result(status="MAKER_FILL_UNMEASURABLE", filled=False, reason="MISSING_QUEUE_DEPTH")
 
     required_aggressor = "SELL" if selected_side == "BUY" else "BUY"
-    state_qty = float(queue_ahead_qty)
+    order_qty = float(notional) / float(limit_price)
+    state_qty = float(queue_ahead_qty) + order_qty
     filled = False
     fill_ts_ms: int | None = None
     aggressive_qty = 0.0
@@ -140,9 +141,12 @@ def evaluate_measured_maker_queue_fill(
             "limit_price": float(limit_price),
             "queue_ahead_qty": float(queue_ahead_qty),
             "queue_ahead_usd": float(queue_ahead_qty) * float(limit_price),
-            "order_qty": float(notional) / float(limit_price),
+            "order_qty": order_qty,
             "aggressive_qty_at_level": float(aggressive_qty),
-            "remaining_queue_ahead_qty": float(state_qty),
+            "remaining_queue_ahead_qty": max(
+                0.0, float(queue_ahead_qty) - float(aggressive_qty)
+            ),
+            "remaining_order_qty": float(state_qty),
             "fill_ts_ms": fill_ts_ms,
         }
     )
