@@ -17,6 +17,16 @@ def _empty_report():
     }
 
 
+def _cross_asset_only_train_hypotheses():
+    return (
+        {
+            "shock_thresholds_bps": (),
+            "shock_windows_ms": (1_000,),
+            "horizons_ms": (5_000,),
+        },
+    )
+
+
 def test_cross_asset_refuse_des_shards_disjoints_sans_reduire_trial_count(tmp_path: Path, monkeypatch) -> None:
     trigger_ns = 1_800_000_000_500_000_000
     btc_trades = [(1_800_000_000_000_000_000, 100.0, 1.0), (trigger_ns, 101.0, 1.0)]
@@ -33,7 +43,7 @@ def test_cross_asset_refuse_des_shards_disjoints_sans_reduire_trial_count(tmp_pa
         "SOL": {"TRADE": [(trigger_ns, 10.0, 1.0)], "HL_BOOK": [sol_book], "TRADE_SOURCE_IDS": ["follower.jsonl"], "HL_BOOK_SOURCE_IDS": ["follower.jsonl"]},
     }
     monkeypatch.setattr(module, "load_multiasset_train_tape", lambda *_args, **_kwargs: (tape, {"heldout_loaded": False}))
-    monkeypatch.setattr(module, "TRAIN_HYPOTHESES", ())
+    monkeypatch.setattr(module, "TRAIN_HYPOTHESES", _cross_asset_only_train_hypotheses())
     monkeypatch.setattr(module, "CROSS_ASSET_LEADERS", ("BTC",))
     monkeypatch.setattr(module, "CROSS_ASSET_FOLLOWERS", ("SOL",))
     monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", (12.0,))
@@ -69,7 +79,7 @@ def test_cross_asset_accepte_uniquement_une_source_alignee_commune(tmp_path: Pat
         "SOL": {"TRADE": [(trigger_ns, 10.0, 1.0)], "HL_BOOK": [sol_book], "TRADE_SOURCE_IDS": ["follower.jsonl"], "HL_BOOK_SOURCE_IDS": ["shared.jsonl", "follower.jsonl"]},
     }
     monkeypatch.setattr(module, "load_multiasset_train_tape", lambda *_args, **_kwargs: (tape, {"heldout_loaded": False}))
-    monkeypatch.setattr(module, "TRAIN_HYPOTHESES", ())
+    monkeypatch.setattr(module, "TRAIN_HYPOTHESES", _cross_asset_only_train_hypotheses())
     monkeypatch.setattr(module, "CROSS_ASSET_LEADERS", ("BTC",))
     monkeypatch.setattr(module, "CROSS_ASSET_FOLLOWERS", ("SOL",))
     monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", (12.0,))
