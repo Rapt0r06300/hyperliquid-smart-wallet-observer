@@ -283,6 +283,96 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     assert audit["causal_forward_rows"] == 1
 
 
+def test_loader_quarantaine_tout_metaordre_avec_checkpoint_duplique(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+
+    def checkpoint(
+        metaorder_id: str,
+        stage: str,
+        checkpoint_id: str,
+        received_at_ms: int,
+    ) -> dict:
+        return {
+            "schema_version": "hypersmart.copy_vault_l2.v1",
+            "coin": "BTC",
+            "received_at_ms": received_at_ms,
+            "exchange_ts_ms": received_at_ms - 10,
+            "bid": 100.0,
+            "ask": 102.0,
+            "capacity_usd": 700.0,
+            "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+            "data_origin": "REAL_OBSERVED",
+            "causal_observation": True,
+            "checkpoint_stage": stage,
+            "checkpoint_target_ms": received_at_ms - 5,
+            "checkpoint_id": checkpoint_id,
+            "metaorder_id": metaorder_id,
+            "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        }
+
+    rows = [
+        checkpoint("mo-bad", "REFERENCE", "mo-bad:REFERENCE", 2_010),
+        checkpoint("mo-bad", "ENTRY", "mo-bad:ENTRY", 2_020),
+        checkpoint("mo-bad", "ENTRY", "mo-bad:ENTRY", 2_030),
+        checkpoint("mo-good", "ENTRY", "mo-good:ENTRY", 2_040),
+    ]
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert [row["metaorder_id"] for row in books["BTC"]] == ["mo-good"]
+    assert audit["duplicate_checkpoint_ids"] == 1
+    assert audit["duplicate_checkpoint_rows"] == 1
+    assert audit["quarantined_checkpoint_metaorders"] == 1
+    assert audit["quarantined_checkpoint_rows"] == 3
+
+
+def test_loader_quarantaine_chaque_metaordre_partageant_un_checkpoint_id(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+
+    def checkpoint(metaorder_id: str, checkpoint_id: str, received_at_ms: int) -> dict:
+        return {
+            "schema_version": "hypersmart.copy_vault_l2.v1",
+            "coin": "BTC",
+            "received_at_ms": received_at_ms,
+            "exchange_ts_ms": received_at_ms - 10,
+            "bid": 100.0,
+            "ask": 102.0,
+            "capacity_usd": 700.0,
+            "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+            "data_origin": "REAL_OBSERVED",
+            "causal_observation": True,
+            "checkpoint_stage": "ENTRY",
+            "checkpoint_target_ms": received_at_ms - 5,
+            "checkpoint_id": checkpoint_id,
+            "metaorder_id": metaorder_id,
+            "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        }
+
+    rows = [
+        checkpoint("mo-a", "shared:ENTRY", 2_010),
+        checkpoint("mo-b", "shared:ENTRY", 2_020),
+        checkpoint("mo-good", "mo-good:ENTRY", 2_030),
+    ]
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert [row["metaorder_id"] for row in books["BTC"]] == ["mo-good"]
+    assert audit["duplicate_checkpoint_ids"] == 1
+    assert audit["duplicate_checkpoint_rows"] == 1
+    assert audit["quarantined_checkpoint_metaorders"] == 2
+    assert audit["quarantined_checkpoint_rows"] == 2
+
+
 def test_loader_refuse_checkpoint_ancien_protocole(tmp_path) -> None:
     data = tmp_path / "runtime" / "data"
     data.mkdir(parents=True)

@@ -7,6 +7,7 @@ changed here.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,10 @@ def load_observed_books(
     rows_read = 0
     duplicate_rows = 0
     checkpoint_protocol_mismatches = 0
+    duplicate_checkpoint_ids = 0
+    duplicate_checkpoint_rows = 0
+    quarantined_checkpoint_rows = 0
+    quarantined_checkpoint_metaorders: set[str] = set()
     seen: set[tuple[Any, ...]] = set()
     source_counts: dict[str, int] = {
         "historical_observed": 0,
@@ -116,6 +121,68 @@ def load_observed_books(
                 except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
                     invalid += 1
     if causal_path.is_file():
+        checkpoint_counts: Counter[str] = Counter()
+        checkpoint_metaorders: dict[str, set[str]] = {}
+        with causal_path.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                try:
+                    raw = json.loads(line)
+                    coin = str(raw.get("coin") or "").upper()
+                    if wanted is not None and coin not in wanted:
+                        continue
+                    checkpoint_id = str(raw.get("checkpoint_id") or "").strip()
+                    if not checkpoint_id:
+                        continue
+                    metaorder_id = str(raw.get("metaorder_id") or "").strip()
+                    checkpoint_stage = str(raw.get("checkpoint_stage") or "").strip()
+                    collector_protocol = str(raw.get("collector_protocol") or "").strip()
+                    received = int(raw["received_at_ms"])
+                    exchange_ts = int(raw["exchange_ts_ms"])
+                    checkpoint_target_ms = int(raw["checkpoint_target_ms"])
+                    bid = float(raw["bid"])
+                    ask = float(raw["ask"])
+                    capacity_usd = float(raw["capacity_usd"])
+                    if not (
+                        collector_protocol == CHECKPOINT_COLLECTOR_PROTOCOL
+                        and metaorder_id
+                        and checkpoint_stage
+                        and checkpoint_target_ms > 0
+                        and raw.get("schema_version") == "hypersmart.copy_vault_l2.v1"
+                        and raw.get("source") in {
+                            "HYPERLIQUID_L2_WS",
+                            "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+                        }
+                        and raw.get("data_origin") == "REAL_OBSERVED"
+                        and raw.get("causal_observation") is True
+                        and received >= exchange_ts > 0
+                        and received - exchange_ts <= MAX_TARGET_LAG_MS
+                        and coin
+                        and bid > 0
+                        and ask > bid
+                        and capacity_usd > 0
+                    ):
+                        continue
+                    checkpoint_counts[checkpoint_id] += 1
+                    checkpoint_metaorders.setdefault(checkpoint_id, set()).add(metaorder_id)
+                except (KeyError, TypeError, ValueError, OverflowError, json.JSONDecodeError):
+                    continue
+        duplicated_ids = {
+            checkpoint_id
+            for checkpoint_id, count in checkpoint_counts.items()
+            if count > 1
+        }
+        duplicate_checkpoint_ids = len(duplicated_ids)
+        duplicate_checkpoint_rows = sum(
+            checkpoint_counts[checkpoint_id] - 1
+            for checkpoint_id in duplicated_ids
+        )
+        quarantined_checkpoint_metaorders = {
+            metaorder_id
+            for checkpoint_id in duplicated_ids
+            for metaorder_id in checkpoint_metaorders[checkpoint_id]
+        }
+        duplicate_rows += duplicate_checkpoint_rows
+
         with causal_path.open("r", encoding="utf-8", errors="ignore") as handle:
             for line_number, line in enumerate(handle, 1):
                 rows_read += 1
@@ -171,6 +238,9 @@ def load_observed_books(
                     if not causal:
                         invalid += 1
                         continue
+                    if is_checkpoint and metaorder_id in quarantined_checkpoint_metaorders:
+                        quarantined_checkpoint_rows += 1
+                        continue
                     add_row(
                         coin=coin,
                         ts_ms=received,
@@ -198,6 +268,10 @@ def load_observed_books(
         "valid_rows": valid,
         "invalid_rows": invalid,
         "duplicate_rows_rejected": duplicate_rows,
+        "duplicate_checkpoint_ids": duplicate_checkpoint_ids,
+        "duplicate_checkpoint_rows": duplicate_checkpoint_rows,
+        "quarantined_checkpoint_metaorders": len(quarantined_checkpoint_metaorders),
+        "quarantined_checkpoint_rows": quarantined_checkpoint_rows,
         "checkpoint_protocol_mismatches_rejected": checkpoint_protocol_mismatches,
         "coins": len(by_coin),
         "source_counts": source_counts,
