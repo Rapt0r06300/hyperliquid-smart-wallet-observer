@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from hl_observer.simulation.economic_objective import canonical_family, evaluate_objective
+from hl_observer.simulation.economic_objective import (
+    canonical_family,
+    evaluate_daily_net,
+    evaluate_objective,
+)
 
 
 def _segment(
@@ -80,6 +84,27 @@ def _proof(**overrides):
             "all_proof_trades_exact_checkpoint_bound": True,
             "all_proof_trades_same_writer_run": True,
             "all_proof_trades_post_clean_epoch": True,
+        },
+        "daily_target_required": True,
+        "daily_evidence": {
+            "schema_version": "hypersmart.daily_net_evidence.v1",
+            "target_net_usd_per_day": 4.0,
+            "sample_count": 1,
+            "observed_trade_count": 4,
+            "missing_trade_timestamps": 0,
+            "missing_trade_net": 0,
+            "days": [
+                {
+                    "date_utc": "2024-09-05",
+                    "net_pnl_usd": 4.6,
+                    "trade_count": 4,
+                    "at_or_above_target": True,
+                }
+            ],
+            "total_net_pnl_usd": 4.6,
+            "mean_daily_net_pnl_usd": 4.6,
+            "min_daily_net_pnl_usd": 4.6,
+            "all_days_at_or_above_target": True,
         },
     }
     row.update(overrides)
@@ -235,3 +260,57 @@ def test_copy_checkpoint_integrity_gate_fails_closed_without_clean_epoch() -> No
     )
     assert quarantined["objective_status"] == "NON_ATTEINT"
     assert "COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN" in quarantined["objective_reasons"]
+
+
+def test_daily_net_groups_only_supplied_closed_trades_by_utc_day() -> None:
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": 1_725_571_200_000, "net_pnl_usd": 4.25},
+            {"exit_ts_ms": 1_725_571_200_001, "net_pnl_usd": -0.25},
+            {"exit_ts_ms": 1_725_657_600_000, "net_pnl_usd": 5.0},
+        ]
+    )
+
+    assert result["total_net_pnl_usd"] == 9.0
+    assert result["mean_daily_net_pnl_usd"] == 4.5
+    assert result["min_daily_net_pnl_usd"] == 4.0
+    assert result["all_days_at_or_above_target"] is True
+
+
+def test_daily_net_fails_closed_for_missing_timestamp_or_bad_day() -> None:
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": 1_725_571_200_000, "net_pnl_usd": 3.99},
+            {"net_pnl_usd": 10.0},
+        ]
+    )
+
+    assert result["missing_trade_timestamps"] == 1
+    assert result["min_daily_net_pnl_usd"] == 3.99
+    assert result["all_days_at_or_above_target"] is False
+
+
+def test_daily_net_accepts_nanosecond_close_timestamps() -> None:
+    result = evaluate_daily_net(
+        [{"exit_ts_ns": 1_725_571_200_000_000_000, "net_pnl_usd": 4.25}]
+    )
+
+    assert result["days"][0]["date_utc"] == "2024-09-05"
+    assert result["all_days_at_or_above_target"] is True
+
+
+def test_daily_target_is_a_strict_per_family_gate() -> None:
+    below = evaluate_objective(
+        _proof(
+            daily_evidence={
+                **_proof()["daily_evidence"],
+                "min_daily_net_pnl_usd": 3.99,
+                "all_days_at_or_above_target": False,
+            }
+        )
+    )
+    assert below["objective_status"] == "NON_ATTEINT"
+    assert "DAILY_NET_TARGET_NOT_REACHED" in below["objective_reasons"]
+
+    missing = evaluate_objective(_proof(daily_evidence=None))
+    assert "DAILY_NET_PROOF_MISSING" in missing["objective_reasons"]

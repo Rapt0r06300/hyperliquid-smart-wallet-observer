@@ -315,7 +315,9 @@ def run_campaigns(
     copy_raw["next_hypothesis_v4"] = copy_v4
     copy_raw["next_hypothesis_v5"] = copy_v5
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
-    copy_campaign = build_copy_campaign(copy_raw, freeze=copy_freeze, datasets=copy_data)
+    copy_campaign = build_copy_campaign(
+        copy_raw, freeze=copy_freeze, datasets=copy_data, require_daily=True
+    )
     copy_campaign["evidence_paths"].append(copy_raw_path.relative_to(root).as_posix())
     write_campaign(root, copy_campaign)
 
@@ -451,7 +453,9 @@ def run_campaigns(
             lead_raw
         )
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
-    lead_campaign = build_lead_lag_campaign(lead_raw, freeze=lead_freeze, datasets=lead_data)
+    lead_campaign = build_lead_lag_campaign(
+        lead_raw, freeze=lead_freeze, datasets=lead_data, require_daily=True
+    )
     lead_campaign["evidence_paths"].append(lead_raw_path.relative_to(root).as_posix())
     write_campaign(root, lead_campaign)
 
@@ -586,7 +590,9 @@ def run_campaigns(
         source_mode=str(cross_params.get("source_mode") or ""),
     )
     cross_raw_path = _write_raw(root, "cross_venue_dislocation_v2", cross_raw)
-    cross_campaign = build_cross_campaign(cross_raw, freeze=cross_freeze, datasets=cross_data)
+    cross_campaign = build_cross_campaign(
+        cross_raw, freeze=cross_freeze, datasets=cross_data, require_daily=True
+    )
     cross_campaign["evidence_paths"].append(cross_raw_path.relative_to(root).as_posix())
     write_campaign(root, cross_campaign)
 
@@ -661,8 +667,12 @@ def main(argv: list[str] | None = None) -> int:
     for row in result["campaigns"]:
         net = row.get("net_pnl_usd")
         exact = "NON_MESURABLE" if net is None else f"{float(net):+.6f} USD"
+        daily = row.get("daily_evidence")
+        daily = daily if isinstance(daily, dict) else {}
         print(
-            f"{row['family']}: OBJECTIF +4 USD {row['objective_status']} | net={exact}",
+            f"{row['family']}: OBJECTIF +4 USD/JOUR {row['objective_status']} "
+            f"| net={exact} | daily_mean={daily.get('mean_daily_net_pnl_usd')} "
+            f"| daily_min={daily.get('min_daily_net_pnl_usd')}",
             flush=True,
         )
     print(f"report={result['report_path']}", flush=True)

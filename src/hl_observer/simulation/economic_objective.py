@@ -9,7 +9,8 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Mapping
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Iterable
 
 from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.backtesting.cross_venue_certified import (
@@ -18,6 +19,7 @@ from hl_observer.backtesting.cross_venue_certified import (
 )
 
 TARGET_NET_USD = 4.0
+TARGET_NET_USD_PER_DAY = 4.0
 STARTING_CAPITAL_USD = 1000.0
 COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
@@ -35,6 +37,110 @@ _COST_KEYS = ("fees_usd", "spread_cost_usd", "slippage_cost_usd", "latency_cost_
 def canonical_family(value: object) -> str:
     normalized = str(value or "").strip().lower().replace(" ", "_")
     return _ALIASES.get(normalized, normalized)
+
+
+def evaluate_daily_net(
+    trades: Iterable[Mapping[str, Any]],
+    *,
+    target_net_usd_per_day: float = TARGET_NET_USD_PER_DAY,
+) -> dict[str, Any]:
+    """Aggregate supplied closed-trade net PnL by UTC exit day, fail closed."""
+
+    target = _number(target_net_usd_per_day)
+    if target is None:
+        raise ValueError("target_net_usd_per_day must be finite")
+    daily: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    missing_trade_timestamps = 0
+    missing_trade_net = 0
+    observed_trades = 0
+    for trade in trades:
+        observed_trades += 1
+        if not isinstance(trade, Mapping):
+            missing_trade_timestamps += 1
+            missing_trade_net += 1
+            continue
+        timestamp = next(
+            (
+                value
+                for key in ("exit_ts_ms", "ts_out", "close_ts_ms", "timestamp_ms")
+                for value in [_number(trade.get(key))]
+                if value is not None
+            ),
+            None,
+        )
+        if timestamp is None:
+            timestamp_ns = next(
+                (
+                    value
+                    for key in (
+                        "exit_ts_ns",
+                        "ts_out_ns",
+                        "close_ts_ns",
+                        "timestamp_ns",
+                    )
+                    for value in [_number(trade.get(key))]
+                    if value is not None
+                ),
+                None,
+            )
+            if timestamp_ns is not None:
+                timestamp = timestamp_ns / 1_000_000.0
+        net = next(
+            (
+                value
+                for key in ("net_pnl_usd", "net_usd", "net")
+                for value in [_number(trade.get(key))]
+                if value is not None
+            ),
+            None,
+        )
+        if timestamp is None:
+            missing_trade_timestamps += 1
+        if net is None:
+            missing_trade_net += 1
+        if timestamp is None or net is None:
+            continue
+        try:
+            day = datetime.fromtimestamp(
+                timestamp / 1000.0, tz=timezone.utc
+            ).date().isoformat()
+        except (OSError, OverflowError, ValueError):
+            missing_trade_timestamps += 1
+            continue
+        daily[day] = daily.get(day, 0.0) + net
+        counts[day] = counts.get(day, 0) + 1
+
+    days = [
+        {
+            "date_utc": day,
+            "net_pnl_usd": round(value, 8),
+            "trade_count": counts[day],
+            "at_or_above_target": value >= target,
+        }
+        for day, value in sorted(daily.items())
+    ]
+    values = [float(row["net_pnl_usd"]) for row in days]
+    return {
+        "schema_version": "hypersmart.daily_net_evidence.v1",
+        "target_net_usd_per_day": float(target),
+        "sample_count": len(values),
+        "observed_trade_count": observed_trades,
+        "missing_trade_timestamps": missing_trade_timestamps,
+        "missing_trade_net": missing_trade_net,
+        "days": days,
+        "total_net_pnl_usd": round(sum(values), 8) if values else None,
+        "mean_daily_net_pnl_usd": (
+            round(sum(values) / len(values), 8) if values else None
+        ),
+        "min_daily_net_pnl_usd": round(min(values), 8) if values else None,
+        "all_days_at_or_above_target": bool(
+            values
+            and missing_trade_timestamps == 0
+            and missing_trade_net == 0
+            and min(values) >= target
+        ),
+    }
 
 
 def _number(value: object) -> float | None:
@@ -202,6 +308,24 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         issues.append("FORWARD_NOT_PROVEN_POST_FREEZE")
     if not isinstance(placebos, Mapping) or placebos.get("beaten") is not True:
         issues.append("PLACEBO_NOT_BEATEN")
+    daily_evidence = evidence.get("daily_evidence")
+    daily_target_required = evidence.get("daily_target_required") is True
+    if daily_target_required:
+        if not isinstance(daily_evidence, Mapping):
+            issues.append("DAILY_NET_PROOF_MISSING")
+        elif not (
+            daily_evidence.get("schema_version")
+            == "hypersmart.daily_net_evidence.v1"
+            and _number(daily_evidence.get("target_net_usd_per_day"))
+            == TARGET_NET_USD_PER_DAY
+            and (_number(daily_evidence.get("sample_count")) or 0) > 0
+            and _number(daily_evidence.get("missing_trade_timestamps")) == 0
+            and _number(daily_evidence.get("missing_trade_net")) == 0
+            and (_number(daily_evidence.get("min_daily_net_pnl_usd")) or -math.inf)
+            >= TARGET_NET_USD_PER_DAY
+            and daily_evidence.get("all_days_at_or_above_target") is True
+        ):
+            issues.append("DAILY_NET_TARGET_NOT_REACHED")
     proof_economics = None
     if oos_economics is not None and forward_economics is not None:
         proof_economics = {key: round(float(oos_economics[key]) + float(forward_economics[key]), 8) for key in _ECONOMIC_KEYS}
@@ -212,7 +336,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if proof_net is None or proof_net < float(target_net_usd):
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
-    return {"family": family, "target_net_usd": float(target_net_usd), "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
+    return {"family": family, "target_net_usd": float(target_net_usd), "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
-__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "canonical_family", "evaluate_objective"]
+__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

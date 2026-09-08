@@ -4,7 +4,7 @@ REM ============================================================
 REM  LANCER_OBJECTIF_4USD.cmd
 REM  Campagnes economiques PAPER/READ-ONLY separees :
 REM    Copy-Vault / Lead-Lag / Cross-Venue Dislocation v2
-REM  Cible de preuve : +4 USD NET REALISE par famille.
+REM  Cible de preuve : +4 USD NET REALISE PAR JOUR et par famille.
 REM  Aucun ordre reel, aucune signature, aucun /exchange.
 REM ============================================================
 cd /d "%~dp0"
@@ -27,7 +27,7 @@ set "TESTNET_ONLY=true"
 
 echo.
 echo ============================================================
-echo   OBJECTIF ECONOMIQUE PAPER : +4 USD NET PAR FAMILLE
+echo   OBJECTIF ECONOMIQUE PAPER : +4 USD NET PAR JOUR ET PAR FAMILLE
 echo   Copy-Vault / Lead-Lag / Cross-Venue Dislocation v2
 echo   LIQUIDATABLE_NET + OOS + FORWARD + PLACEBO obligatoires
 echo ============================================================

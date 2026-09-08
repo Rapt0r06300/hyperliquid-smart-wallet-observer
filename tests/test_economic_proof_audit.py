@@ -13,7 +13,7 @@ from hl_observer.economics.hardcode_scanner import (
 from hl_observer.economics.hardcode_scanner import (
     SCHEMA_VERSION as HARDCODE_SCAN_SCHEMA,
 )
-from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import evaluate_daily_net, evaluate_objective
 from hl_observer.simulation.economic_proof_audit import (
     INDEPENDENT_AUDIT_SCHEMA,
     audit_family,
@@ -209,7 +209,6 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
             "all_proof_trades_post_clean_epoch": True,
         },
     }
-    campaign.update(evaluate_objective(campaign))
     raw = {
         "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
         "paper_read_only": True,
@@ -229,6 +228,9 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
             ),
         ],
     }
+    campaign["daily_target_required"] = True
+    campaign["daily_evidence"] = evaluate_daily_net(raw["trades"])
+    campaign.update(evaluate_objective(campaign))
     return campaign, raw
 
 
