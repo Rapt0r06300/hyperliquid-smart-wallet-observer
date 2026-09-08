@@ -20,9 +20,14 @@ def _empty_report():
 def _cross_asset_only_train_hypotheses():
     return (
         {
+            "mechanism": module.MECHANISM,
+            "direction_multiplier": 1,
+            "direction_policy": "SHOCK_CONTINUATION",
             "shock_thresholds_bps": (),
             "shock_windows_ms": (1_000,),
             "horizons_ms": (5_000,),
+            "min_train_fills": module.MIN_TRAIN_FILLS,
+            "admission_policy": module.ADMISSION_PRIOR_MEAN_POSITIVE,
         },
     )
 
