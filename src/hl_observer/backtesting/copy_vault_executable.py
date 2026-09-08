@@ -188,6 +188,38 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
+    checkpoint_writer_ids = {
+        str(row.get("writer_run_id") or "").strip()
+        for row in (reference, entry, exit_book)
+        if str(row.get("writer_run_id") or "").strip()
+    }
+    checkpoint_clean_epochs = {
+        int(row.get("clean_epoch_ms") or 0)
+        for row in (reference, entry, exit_book)
+        if int(row.get("clean_epoch_ms") or 0) > 0
+    }
+    checkpoint_writer_run_id = (
+        next(iter(checkpoint_writer_ids))
+        if book_binding_method == "EXACT_METAORDER_CHECKPOINTS"
+        and len(checkpoint_writer_ids) == 1
+        else None
+    )
+    checkpoint_clean_epoch_ms = (
+        next(iter(checkpoint_clean_epochs))
+        if book_binding_method == "EXACT_METAORDER_CHECKPOINTS"
+        and len(checkpoint_clean_epochs) == 1
+        else None
+    )
+    all_checkpoints_post_clean_epoch = bool(
+        checkpoint_writer_run_id
+        and checkpoint_clean_epoch_ms
+        and all(
+            int(row["ts_ms"]) >= checkpoint_clean_epoch_ms
+            and str(row.get("writer_run_id") or "") == checkpoint_writer_run_id
+            and int(row.get("clean_epoch_ms") or 0) == checkpoint_clean_epoch_ms
+            for row in (reference, entry, exit_book)
+        )
+    )
     causal_books = all(row.get("causal_observation") is True for row in (reference, entry, exit_book))
     if require_causal_books and not causal_books:
         return None, "NON_CAUSAL_FORWARD_BOOK"
@@ -302,6 +334,9 @@ def execute_metaorder(
         "causal_books_eligible": causal_books,
         "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
         "book_binding_method": book_binding_method,
+        "checkpoint_writer_run_id": checkpoint_writer_run_id,
+        "checkpoint_clean_epoch_ms": checkpoint_clean_epoch_ms,
+        "all_checkpoints_post_clean_epoch": all_checkpoints_post_clean_epoch,
         "reference_ts_ms": reference["ts_ms"],
         "regime_id": regime_id,
         "regime_source": "REFERENCE_BOOK_PRE_SIGNAL",

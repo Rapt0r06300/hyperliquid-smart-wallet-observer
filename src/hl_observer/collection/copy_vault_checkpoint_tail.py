@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import time
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -24,10 +25,11 @@ from hl_observer.backtesting.copy_vault_executable import (
     classify_live_entry_action,
     expected_open_direction,
 )
+from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_WRITER_STATE_SCHEMA
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
-SCHEMA_VERSION = "hypersmart.copy_vault_checkpoint_tail.v1"
+SCHEMA_VERSION = CHECKPOINT_WRITER_STATE_SCHEMA
 COMPANION_PROTOCOL = CHECKPOINT_COLLECTOR_PROTOCOL
 INPUT_RELPATH = Path("runtime") / "data" / "vault_fills_live.jsonl"
 OUTPUT_RELPATH = Path("runtime") / "data" / "copy_vault_l2_tape.jsonl"
@@ -104,14 +106,17 @@ def fetch_hyperliquid_l2_book(coin: str, *, timeout_s: float = 2.0) -> dict[str,
     return payload if isinstance(payload, dict) else None
 
 
-def _default_state(*, offset: int, now_ms: int) -> dict[str, Any]:
+def _default_state(*, offset: int, output_offset: int, now_ms: int) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,
         "paper_read_only": True,
         "real_execution": False,
         "protocol": COMPANION_PROTOCOL,
         "initialized_at_ms": int(now_ms),
+        "writer_run_id": "copy-writer-" + secrets.token_hex(8),
+        "clean_epoch_ms": int(now_ms),
         "input_offset": max(0, int(offset)),
+        "output_start_offset": max(0, int(output_offset)),
         "recent_event_ids": [],
         "captured_checkpoint_ids": [],
         "metaorder_state": {},
@@ -212,7 +217,9 @@ class CopyVaultCheckpointTail:
             if not isinstance(counters, dict):
                 counters = {}
                 loaded["counters"] = counters
-            defaults = _default_state(offset=0, now_ms=self.clock_ms())["counters"]
+            defaults = _default_state(
+                offset=0, output_offset=0, now_ms=self.clock_ms()
+            )["counters"]
             for name, value in defaults.items():
                 counters.setdefault(name, value)
             return loaded
@@ -220,7 +227,13 @@ class CopyVaultCheckpointTail:
             offset = self.input_path.stat().st_size
         except OSError:
             offset = 0
-        state = _default_state(offset=offset, now_ms=self.clock_ms())
+        try:
+            output_offset = self.output_path.stat().st_size
+        except OSError:
+            output_offset = 0
+        state = _default_state(
+            offset=offset, output_offset=output_offset, now_ms=self.clock_ms()
+        )
         _atomic_write(self.state_path, state)
         return state
 
@@ -458,6 +471,8 @@ class CopyVaultCheckpointTail:
                 "checkpoint_id": checkpoint_id,
                 "metaorder_id": str(checkpoint["metaorder_id"]),
                 "collector_protocol": COMPANION_PROTOCOL,
+                "writer_run_id": str(self.state["writer_run_id"]),
+                "clean_epoch_ms": int(self.state["clean_epoch_ms"]),
             }
             _append_jsonl(self.output_path, row)
             captured_ids.append(checkpoint_id)

@@ -11,6 +11,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.backtesting.cross_venue_certified import (
     FOUR_FILL_CONTRACT_VERSION,
     SOURCE_MODE as CROSS_CERTIFIED_SOURCE_MODE,
@@ -90,6 +91,40 @@ def _validate_cross_provenance(evidence: Mapping[str, Any], issues: list[str]) -
         issues.append("CROSS_VENUE_FOUR_FILL_CONTRACT_MISSING")
 
 
+def _validate_copy_checkpoint_integrity(
+    evidence: Mapping[str, Any], issues: list[str]
+) -> None:
+    integrity = evidence.get("copy_checkpoint_integrity")
+    oos = evidence.get("oos")
+    forward = evidence.get("forward")
+    expected_proof_count = (
+        int(_number(oos.get("sample_count")) or 0)
+        + int(_number(forward.get("sample_count")) or 0)
+        if isinstance(oos, Mapping) and isinstance(forward, Mapping)
+        else 0
+    )
+    clean = bool(
+        isinstance(integrity, Mapping)
+        and integrity.get("schema_version")
+        == CHECKPOINT_INTEGRITY_SCHEMA
+        and integrity.get("receipt_valid") is True
+        and integrity.get("writer_role") == "BOUND_WRITER"
+        and bool(str(integrity.get("writer_run_id") or "").strip())
+        and int(_number(integrity.get("clean_epoch_ms")) or 0) > 0
+        and _number(integrity.get("duplicate_checkpoint_ids")) == 0
+        and _number(integrity.get("quarantined_checkpoint_metaorders")) == 0
+        and expected_proof_count > 0
+        and _number(integrity.get("proof_trade_count")) == expected_proof_count
+        and _number(integrity.get("expected_proof_trade_count"))
+        == expected_proof_count
+        and integrity.get("all_proof_trades_exact_checkpoint_bound") is True
+        and integrity.get("all_proof_trades_same_writer_run") is True
+        and integrity.get("all_proof_trades_post_clean_epoch") is True
+    )
+    if not clean:
+        issues.append("COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN")
+
+
 def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = TARGET_NET_USD) -> dict[str, Any]:
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
@@ -110,6 +145,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
             issues.append("CROSS_VENUE_TWO_LEG_CLOSE_PROOF_MISSING")
         _validate_cross_provenance(evidence, issues)
     if family == "copy_vault":
+        _validate_copy_checkpoint_integrity(evidence, issues)
         generalisation = evidence.get("vault_generalization")
         if not isinstance(generalisation, Mapping):
             issues.append("COPY_HELDOUT_VAULT_PROOF_MISSING")
@@ -176,7 +212,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if proof_net is None or proof_net < float(target_net_usd):
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
-    return {"family": family, "target_net_usd": float(target_net_usd), "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
+    return {"family": family, "target_net_usd": float(target_net_usd), "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
 __all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "canonical_family", "evaluate_objective"]

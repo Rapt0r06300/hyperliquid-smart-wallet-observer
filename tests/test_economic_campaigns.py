@@ -200,6 +200,33 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         "economic_contract": economic_contract,
         "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
         "metaorder_audit": {"metaorders": 3},
+        "book_meta": {
+            "clean_epoch_receipt": {
+                "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+                "receipt_valid": True,
+                "writer_role": "BOUND_WRITER",
+                "writer_run_id": "copy-writer-clean",
+                "clean_epoch_ms": 10,
+                "duplicate_checkpoint_ids": 0,
+                "quarantined_checkpoint_metaorders": 0,
+            }
+        },
+        "trades": [
+            {
+                "walk_forward_segment": "oos",
+                "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+                "checkpoint_writer_run_id": "copy-writer-clean",
+                "checkpoint_clean_epoch_ms": 10,
+                "all_checkpoints_post_clean_epoch": True,
+            },
+            {
+                "walk_forward_segment": "forward",
+                "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+                "checkpoint_writer_run_id": "copy-writer-clean",
+                "checkpoint_clean_epoch_ms": 10,
+                "all_checkpoints_post_clean_epoch": True,
+            },
+        ],
         "summary": {
             "positions_ouvertes": 2,
             "positions_fermees": 2,
@@ -256,6 +283,7 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
     assert campaign["net_pnl_usd"] == 4.4
     assert campaign["liquidatable_net"] is True
     assert campaign["objective_status"] == "ATTEINT"
+    assert campaign["copy_checkpoint_integrity"]["proof_trade_count"] == 2
 
 
 def test_executable_copy_campaign_zero_closed_is_non_mesurable() -> None:

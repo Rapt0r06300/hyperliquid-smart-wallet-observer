@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
 from hl_observer.simulation.economic_campaign_provenance import (
     dataset_provenance,
@@ -144,6 +145,75 @@ def _finish(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _copy_checkpoint_integrity(report: Mapping[str, Any]) -> dict[str, Any]:
+    book_meta = report.get("book_meta")
+    book_meta = book_meta if isinstance(book_meta, Mapping) else {}
+    receipt = book_meta.get("clean_epoch_receipt")
+    receipt = receipt if isinstance(receipt, Mapping) else {}
+    temporal = report.get("temporal_evidence")
+    temporal = temporal if isinstance(temporal, Mapping) else {}
+    expected_proof_count = sum(
+        int(segment.get("sample_count") or 0)
+        for name in ("oos", "forward")
+        for segment in [temporal.get(name)]
+        if isinstance(segment, Mapping)
+    )
+    trades = report.get("trades")
+    trades = trades if isinstance(trades, list) else []
+    proof_trades = [
+        trade
+        for trade in trades
+        if isinstance(trade, Mapping)
+        and trade.get("walk_forward_segment") in {"oos", "forward"}
+    ]
+    writer_run_id = str(receipt.get("writer_run_id") or "").strip()
+    try:
+        clean_epoch_ms = int(receipt.get("clean_epoch_ms") or 0)
+    except (TypeError, ValueError, OverflowError):
+        clean_epoch_ms = 0
+    complete_count = bool(
+        expected_proof_count > 0 and len(proof_trades) == expected_proof_count
+    )
+    return {
+        "schema_version": CHECKPOINT_INTEGRITY_SCHEMA,
+        "receipt_valid": receipt.get("receipt_valid") is True,
+        "writer_role": receipt.get("writer_role"),
+        "writer_run_id": writer_run_id or None,
+        "clean_epoch_ms": clean_epoch_ms or None,
+        "duplicate_checkpoint_ids": receipt.get("duplicate_checkpoint_ids"),
+        "quarantined_checkpoint_metaorders": receipt.get(
+            "quarantined_checkpoint_metaorders"
+        ),
+        "proof_trade_count": len(proof_trades),
+        "expected_proof_trade_count": expected_proof_count,
+        "all_proof_trades_exact_checkpoint_bound": bool(
+            complete_count
+            and all(
+                trade.get("book_binding_method") == "EXACT_METAORDER_CHECKPOINTS"
+                for trade in proof_trades
+            )
+        ),
+        "all_proof_trades_same_writer_run": bool(
+            complete_count
+            and writer_run_id
+            and clean_epoch_ms > 0
+            and all(
+                str(trade.get("checkpoint_writer_run_id") or "") == writer_run_id
+                and int(trade.get("checkpoint_clean_epoch_ms") or 0)
+                == clean_epoch_ms
+                for trade in proof_trades
+            )
+        ),
+        "all_proof_trades_post_clean_epoch": bool(
+            complete_count
+            and all(
+                trade.get("all_checkpoints_post_clean_epoch") is True
+                for trade in proof_trades
+            )
+        ),
+    }
+
+
 def build_copy_campaign(
     report: Mapping[str, Any],
     *,
@@ -220,6 +290,7 @@ def build_copy_campaign(
                     "canonical_input_audit": report.get("canonical_input_audit"),
                     "metaorder_audit": metaorder_audit,
                 },
+                "copy_checkpoint_integrity": _copy_checkpoint_integrity(report),
             }
         )
         executable_generalization = (

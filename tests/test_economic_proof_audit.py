@@ -149,6 +149,10 @@ def _trade(
         "entry_target_lag_ms": 10.0,
         "exit_target_lag_ms": 10.0,
         "observed_latency_ms": 10.0,
+        "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+        "checkpoint_writer_run_id": "copy-writer-clean",
+        "checkpoint_clean_epoch_ms": 500,
+        "all_checkpoints_post_clean_epoch": True,
     }
 
 
@@ -190,6 +194,20 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
         "forward": forward,
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 1.0},
+        "copy_checkpoint_integrity": {
+            "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "copy-writer-clean",
+            "clean_epoch_ms": 500,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 2,
+            "expected_proof_trade_count": 2,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        },
     }
     campaign.update(evaluate_objective(campaign))
     raw = {

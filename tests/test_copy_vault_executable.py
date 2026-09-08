@@ -497,6 +497,8 @@ def _checkpoint_book(
         "checkpoint_id": f"{metaorder_id}:{checkpoint_suffix}",
         "checkpoint_target_ms": target_ms,
         "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "writer_run_id": "copy-writer-clean",
+        "clean_epoch_ms": 500,
     }
 
 
@@ -514,6 +516,9 @@ def test_executeur_lie_les_trois_books_au_metaordre_exact() -> None:
     assert reason == "LIQUIDATABLE_NET"
     assert trade is not None
     assert trade["book_binding_method"] == "EXACT_METAORDER_CHECKPOINTS"
+    assert trade["checkpoint_writer_run_id"] == "copy-writer-clean"
+    assert trade["checkpoint_clean_epoch_ms"] == 500
+    assert trade["all_checkpoints_post_clean_epoch"] is True
 
 
 def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:

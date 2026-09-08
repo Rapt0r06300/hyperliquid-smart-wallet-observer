@@ -116,8 +116,17 @@ git commit -m "Impose un seul redacteur de checkpoints Copy-Vault"
 ### Task 3: Clean-epoch verification and campaign replay
 
 **Files:**
-- Modify: `tools/run_economic_objective_campaigns.py`
+- Modify: `src/hl_observer/backtesting/copy_vault_protocol.py`
+- Modify: `src/hl_observer/collection/copy_vault_checkpoint_tail.py`
+- Modify: `src/hl_observer/backtesting/copy_vault_book_loader.py`
+- Modify: `src/hl_observer/backtesting/copy_vault_executable.py`
+- Modify: `src/hl_observer/simulation/economic_campaigns.py`
+- Modify: `src/hl_observer/simulation/economic_objective.py`
+- Test: `tests/test_copy_vault_checkpoint_tail.py`
+- Test: `tests/test_copy_vault_executable.py`
+- Test: `tests/test_economic_campaigns.py`
 - Test: `tests/test_economic_objective.py`
+- Test: `tests/test_economic_proof_audit.py`
 
 **Interfaces:**
 - Consumes: loader duplicate-quarantine counters and collector ownership state.
@@ -137,9 +146,10 @@ Expected: FAIL because the proof gate is absent.
 
 - [ ] **Step 3: Add the integrity proof gate**
 
-Bind a clean epoch to the elected writer run ID and require all proof trades to
-use non-quarantined checkpoint rows at or after that epoch. Preserve the OOS
-seal and existing family separation.
+Migrate the companion state to a new clean epoch, bind every new checkpoint to
+the elected writer run ID, propagate that binding into executable trades, and
+require all OOS/forward proof trades to use non-quarantined checkpoint rows at
+or after that epoch. Preserve the OOS seal and existing family separation.
 
 - [ ] **Step 4: Verify Copy-Vault and proof suites**
 
@@ -150,7 +160,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tools/run_economic_objective_campaigns.py tests/test_economic_objective.py
+git add src/hl_observer/backtesting/copy_vault_protocol.py src/hl_observer/collection/copy_vault_checkpoint_tail.py src/hl_observer/backtesting/copy_vault_book_loader.py src/hl_observer/backtesting/copy_vault_executable.py src/hl_observer/simulation/economic_campaigns.py src/hl_observer/simulation/economic_objective.py tests/test_copy_vault_checkpoint_tail.py tests/test_copy_vault_executable.py tests/test_economic_campaigns.py tests/test_economic_objective.py tests/test_economic_proof_audit.py
 git commit -m "Bloque la preuve Copy-Vault hors epoque propre"
 ```
 

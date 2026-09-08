@@ -67,6 +67,20 @@ def _proof(**overrides):
         ),
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
+        "copy_checkpoint_integrity": {
+            "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "writer-clean-1",
+            "clean_epoch_ms": 1_000,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 4,
+            "expected_proof_trade_count": 4,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        },
     }
     row.update(overrides)
     return row
@@ -202,3 +216,22 @@ def test_preuve_dupliquee_reste_non_certifiable():
     assert result["objective_status"] == "NON_ATTEINT"
     assert result["eligible_net_pnl_usd"] is None
     assert "DUPLICATE_TRADE_IDENTITIES" in result["objective_reasons"]
+
+
+def test_copy_checkpoint_integrity_gate_fails_closed_without_clean_epoch() -> None:
+    missing = evaluate_objective(_proof(copy_checkpoint_integrity=None))
+    assert missing["objective_status"] == "NON_ATTEINT"
+    assert "COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN" in missing["objective_reasons"]
+
+    quarantined = evaluate_objective(
+        _proof(
+            copy_checkpoint_integrity={
+                **_proof()["copy_checkpoint_integrity"],
+                "duplicate_checkpoint_ids": 1,
+                "quarantined_checkpoint_metaorders": 1,
+                "all_proof_trades_post_clean_epoch": False,
+            }
+        )
+    )
+    assert quarantined["objective_status"] == "NON_ATTEINT"
+    assert "COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN" in quarantined["objective_reasons"]

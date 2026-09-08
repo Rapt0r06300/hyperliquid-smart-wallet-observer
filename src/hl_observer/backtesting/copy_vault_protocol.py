@@ -17,6 +17,8 @@ from hl_observer.economics.families import build_copy_vault_contract
 
 PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
 UNBOUND_L2_SOURCE_PROTOCOL = "copy_vault_unbound_ws_l2_v1"
+CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v2"
+CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
     f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
@@ -92,6 +94,8 @@ def protocol_signature() -> dict[str, Any]:
         "unbound_l2_source_protocol": UNBOUND_L2_SOURCE_PROTOCOL,
         "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
         "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "checkpoint_writer_state_schema": CHECKPOINT_WRITER_STATE_SCHEMA,
+        "checkpoint_integrity_schema": CHECKPOINT_INTEGRITY_SCHEMA,
         "metaorder_identity_policy": "immutable_first_observed_fill",
         "checkpoint_binding_policy": "exact_metaorder_stage_and_protocol",
         "metaorder_gap_ms": METAORDER_GAP_MS,
@@ -118,6 +122,8 @@ def protocol_signature() -> dict[str, Any]:
 
 __all__ = [
     "CHECKPOINT_COLLECTOR_PROTOCOL",
+    "CHECKPOINT_INTEGRITY_SCHEMA",
+    "CHECKPOINT_WRITER_STATE_SCHEMA",
     "COPYABLE_ENTRY_ACTIONS",
     "COPY_DELAY_MS",
     "HORIZONS_MS",
