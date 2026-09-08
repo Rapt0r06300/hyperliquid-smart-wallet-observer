@@ -26,6 +26,11 @@ def test_pairwise_couvre_toutes_les_paires_et_reduit():
     assert len(cas) < 16
 
 
+def test_pairwise_gere_zero_ou_un_parametre():
+    assert cas_pairwise({}) == []
+    assert cas_pairwise({"a": [1, 2]}) == [{"a": 1}, {"a": 2}]
+
+
 def test_rapport_couverture_publie():
     params = {"a": [1, 2], "b": ["x", "y"]}
     cas = cas_pairwise(params)
