@@ -196,9 +196,17 @@ def execute_metaorder(
     direction = int(metaorder["direction"]) * (1 if int(direction_multiplier) >= 0 else -1)
     if direction not in (-1, 1):
         return None, "INVALID_DIRECTION"
+    reference_mid = (float(reference["bid"]) + float(reference["ask"])) / 2.0
+    reference_spread_bps = (
+        (float(reference["ask"]) - float(reference["bid"])) / reference_mid * 10_000.0
+    )
+    regime_id = (
+        "REF_SPREAD_TIGHT_LE_10BPS"
+        if reference_spread_bps <= 10.0
+        else "REF_SPREAD_WIDE_GT_10BPS"
+    )
     entry_mid = (float(entry["bid"]) + float(entry["ask"])) / 2.0
     exit_mid = (float(exit_book["bid"]) + float(exit_book["ask"])) / 2.0
-    reference_mid = (float(reference["bid"]) + float(reference["ask"])) / 2.0
     entry_exec = float(entry["ask"] if direction > 0 else entry["bid"])
     exit_exec = float(exit_book["bid"] if direction > 0 else exit_book["ask"])
     quantity = float(notional_usd) / entry_exec
@@ -295,6 +303,10 @@ def execute_metaorder(
         "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
         "book_binding_method": book_binding_method,
         "reference_ts_ms": reference["ts_ms"],
+        "regime_id": regime_id,
+        "regime_source": "REFERENCE_BOOK_PRE_SIGNAL",
+        "regime_reference_ts_ms": int(reference["ts_ms"]),
+        "regime_reference_spread_bps": round(reference_spread_bps, 8),
         "entry_ts_ms": entry["ts_ms"],
         "exit_ts_ms": exit_book["ts_ms"],
         "reference_lag_ms": reference_lag,
