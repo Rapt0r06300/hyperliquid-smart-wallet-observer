@@ -7,6 +7,7 @@ changed here.
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -23,6 +24,27 @@ CHECKPOINT_COLLECTOR_PROTOCOL = (
 CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v2"
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 CHECKPOINT_STATE_RELPATH = "runtime/data/copy_vault_checkpoint_tail_state.json"
+
+
+def _observed_levels(value: Any) -> list[list[float]] | None:
+    """Normalize a recorded L2 side without inventing missing liquidity."""
+
+    if not isinstance(value, list) or not value:
+        return None
+    levels: list[list[float]] = []
+    try:
+        for raw_level in value:
+            if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
+                return None
+            price, quantity = float(raw_level[0]), float(raw_level[1])
+            if not math.isfinite(price) or not math.isfinite(quantity):
+                return None
+            if price <= 0.0 or quantity <= 0.0:
+                return None
+            levels.append([price, quantity])
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return levels
 
 
 def load_observed_books(
@@ -86,6 +108,8 @@ def load_observed_books(
     def add_row(
         *, coin: str, ts_ms: int, bid: float, ask: float, capacity_usd: float,
         source: str, source_line: int, causal_observation: bool,
+        bids5: list[list[float]] | None = None,
+        asks5: list[list[float]] | None = None,
         metaorder_id: str | None = None,
         checkpoint_stage: str | None = None,
         checkpoint_id: str | None = None,
@@ -117,6 +141,9 @@ def load_observed_books(
             "source_line": source_line,
             "causal_observation": causal_observation,
         }
+        if bids5 is not None and asks5 is not None:
+            row["bids5"] = bids5
+            row["asks5"] = asks5
         if checkpoint_id:
             row.update({
                 "metaorder_id": metaorder_id,
@@ -309,6 +336,8 @@ def load_observed_books(
                         source=str(raw["source"]),
                         source_line=line_number,
                         causal_observation=True,
+                        bids5=_observed_levels(raw.get("bids5")),
+                        asks5=_observed_levels(raw.get("asks5")),
                         metaorder_id=metaorder_id,
                         checkpoint_stage=checkpoint_stage,
                         checkpoint_id=checkpoint_id,
@@ -354,7 +383,9 @@ def load_observed_books(
         "causal_forward_rows": (
             source_counts["causal_ws"] + source_counts["causal_info_checkpoint"]
         ),
-        "capacity_semantics": "minimum_USD_across_HL_and_reference_venue_bid_ask",
+        "capacity_semantics": (
+            "legacy_minimum_side_capacity;certification_uses_side_specific_observed_l2_vwap"
+        ),
     }
 
 

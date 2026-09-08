@@ -90,6 +90,8 @@ def _book(
         "bid": bid,
         "ask": ask,
         "capacity_usd": capacity,
+        "bids5": [[bid, capacity / bid]],
+        "asks5": [[ask, capacity / ask]],
         "source_line": line,
         "causal_observation": causal,
     }
@@ -266,6 +268,8 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
         "schema_version": "hypersmart.copy_vault_l2.v1",
         "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
         "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "bids5": [[100.0, 2.0], [99.0, 5.0]],
+        "asks5": [[102.0, 2.0], [103.0, 5.0]],
         "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
         "data_origin": "REAL_OBSERVED", "causal_observation": True,
         "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
@@ -279,6 +283,8 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     books, audit = load_observed_books(tmp_path, coins={"BTC"})
 
     assert books["BTC"][0]["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert books["BTC"][0]["bids5"] == [[100.0, 2.0], [99.0, 5.0]]
+    assert books["BTC"][0]["asks5"] == [[102.0, 2.0], [103.0, 5.0]]
     assert audit["source_counts"]["causal_info_checkpoint"] == 1
     assert audit["causal_forward_rows"] == 1
 
@@ -543,7 +549,7 @@ def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
     assert trade["economic_contract"]["certification"]["ready"] is True
     assert len(trade["assumption_snapshot_hash"]) == 64
     assert trade["cost_component_receipts"]["slippage"]["zero_reason"] == (
-        "NOT_APPLICABLE"
+        "MEASURED_ZERO"
     )
 
 
@@ -603,8 +609,10 @@ def test_long_and_short_use_marketable_prices_and_reconcile_costs() -> None:
 
     assert long_reason == short_reason == "LIQUIDATABLE_NET"
     assert long_trade is not None and short_trade is not None
-    assert long_trade["entry_price"] == 102.0 and long_trade["exit_price"] == 109.0
-    assert short_trade["entry_price"] == 100.0 and short_trade["exit_price"] == 111.0
+    assert long_trade["entry_price"] == pytest.approx(102.0)
+    assert long_trade["exit_price"] == pytest.approx(109.0)
+    assert short_trade["entry_price"] == pytest.approx(100.0)
+    assert short_trade["exit_price"] == pytest.approx(111.0)
     for trade in (long_trade, short_trade):
         expected = (
             trade["gross_pnl_usd"]
@@ -616,6 +624,82 @@ def test_long_and_short_use_marketable_prices_and_reconcile_costs() -> None:
         assert math.isclose(expected, trade["net_pnl_usd"], abs_tol=1e-8)
         assert trade["liquidatable_net"] is True
         assert trade["paper_read_only"] is True and trade["real_execution"] is False
+
+
+def test_certifiable_walks_each_l2_side_and_receipts_observed_slippage() -> None:
+    books = [
+        _book(1_000, 99.0, 101.0, line=1),
+        {
+            **_book(61_000, 100.0, 102.0, line=2),
+            "bids5": [[100.0, 0.5], [99.0, 2.0]],
+            "asks5": [[102.0, 0.5], [104.0, 2.0]],
+        },
+        {
+            **_book(361_000, 109.0, 111.0, line=3),
+            "bids5": [[109.0, 0.5], [108.0, 2.0]],
+            "asks5": [[111.0, 0.5], [113.0, 2.0]],
+        },
+    ]
+    metaorder = cluster_metaorders([_entry("walk", 1_000)])[0][0]
+
+    trade, reason = execute_metaorder(
+        metaorder,
+        books,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["entry_price"] > 102.0
+    assert trade["exit_price"] < 109.0
+    assert trade["slippage_cost_usd"] > 0.0
+    assert trade["slippage_zero_reason"] is None
+    assert trade["cost_component_receipts"]["slippage"]["zero_reason"] is None
+    assert trade["cost_component_receipts"]["slippage"]["formula_id"] == (
+        "copy_vault.observed_l2_vwap.v1"
+    )
+    assert math.isclose(
+        trade["gross_pnl_usd"]
+        - trade["fees_usd"]
+        - trade["spread_cost_usd"]
+        - trade["slippage_cost_usd"]
+        - trade["latency_cost_usd"],
+        trade["net_pnl_usd"],
+        abs_tol=1e-8,
+    )
+
+
+def test_certifiable_refuses_missing_or_insufficient_exact_l2_depth() -> None:
+    metaorder = cluster_metaorders([_entry("depth", 1_000)])[0][0]
+    missing_levels = [
+        {key: value for key, value in _book(1_000, 99.0, 101.0).items() if key not in {"bids5", "asks5"}},
+        {key: value for key, value in _book(61_000, 100.0, 102.0).items() if key not in {"bids5", "asks5"}},
+        {key: value for key, value in _book(361_000, 109.0, 111.0).items() if key not in {"bids5", "asks5"}},
+    ]
+    trade, reason = execute_metaorder(
+        metaorder,
+        missing_levels,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert trade is None and reason == "MISSING_EXACT_L2_LEVELS"
+
+    insufficient_exit = [
+        _book(1_000, 99.0, 101.0),
+        _book(61_000, 100.0, 102.0),
+        {
+            **_book(361_000, 109.0, 111.0),
+            "bids5": [[109.0, 0.1]],
+        },
+    ]
+    trade, reason = execute_metaorder(
+        metaorder,
+        insufficient_exit,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert trade is None and reason == "INSUFFICIENT_OBSERVED_EXIT_DEPTH"
 
 
 def test_capacity_and_duplicate_trade_guards_fail_closed() -> None:
