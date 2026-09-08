@@ -193,3 +193,20 @@ def test_copy_vnext_counts_each_metaorder_only_once_for_train_statistics() -> No
     )
 
     assert result["train_rows_seen"] == 1
+
+
+def test_copy_vnext_persists_causal_economic_entity_key_for_concentration() -> None:
+    base = 2_200_000_000_000
+    first = {**_row(ts=base, vault="0xa1"), "public_entity_id": "entity-a"}
+    independent = {**_row(ts=base + 1_000, vault="0xb"), "public_entity_id": "entity-b"}
+    same_entity = {**_row(ts=base + 2_000, vault="0xa2"), "public_entity_id": "entity-a"}
+
+    admitted, reasons = admit_consensus_train_rows(
+        [first, independent, same_entity],
+        window_ms=30_000,
+        minimum_distinct_wallets=2,
+    )
+
+    assert reasons["ADMITTED"] >= 2
+    assert admitted[-1]["entity_concentration_key_at_signal"] == "public:entity-a"
+    assert admitted[-1]["entity_cluster_id_at_signal"].startswith("entity-")
