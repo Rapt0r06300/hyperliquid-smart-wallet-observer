@@ -259,6 +259,18 @@ def test_audit_economic_proof_reconcilie_une_preuve_positive_complete():
     }
 
 
+def test_audit_daily_empty_and_unpublished_are_equivalent_missing_proof() -> None:
+    campaign, raw = _positive_copy_evidence()
+    raw["trades"] = []
+    campaign["daily_evidence"] = None
+    campaign.update(evaluate_objective(campaign))
+
+    result = _audit(campaign, raw)
+
+    assert "DAILY_EVIDENCE_NOT_REPRODUCIBLE" not in result["issues"]
+    assert "DAILY_NET_PROOF_MISSING" in result["objective_reasons"]
+
+
 def test_audit_economic_proof_refuse_un_trade_forward_anterieur_au_gel():
     campaign, raw = _positive_copy_evidence()
     raw["trades"][1]["signal_ts_ms"] = 999

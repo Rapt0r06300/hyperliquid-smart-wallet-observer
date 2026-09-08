@@ -233,9 +233,13 @@ def audit_family(
 
     objective_input = dict(campaign)
     if campaign.get("daily_target_required") is True:
-        if campaign.get("daily_evidence") != daily_evidence:
+        published_daily = campaign.get("daily_evidence")
+        recomputed_daily = (
+            daily_evidence if int(daily_evidence.get("sample_count") or 0) > 0 else None
+        )
+        if published_daily != recomputed_daily:
             issues.append("DAILY_EVIDENCE_NOT_REPRODUCIBLE")
-        objective_input["daily_evidence"] = daily_evidence
+        objective_input["daily_evidence"] = recomputed_daily
     recomputed_objective = evaluate_objective(
         objective_input, target_net_usd=target_net_usd
     )
