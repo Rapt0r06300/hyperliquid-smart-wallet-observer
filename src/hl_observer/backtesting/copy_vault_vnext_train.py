@@ -156,6 +156,37 @@ def _identity_vote(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _causal_entity_keys(
+    row: Mapping[str, Any], identity: Mapping[str, Any]
+) -> tuple[str | None, str | None]:
+    """Return the current wallet's causal economic entity key and inferred cluster."""
+
+    current_vault = str(row.get("vault") or "").strip().lower()
+    if not current_vault:
+        return None, None
+    cluster_id: str | None = None
+    for cluster in identity.get("clusters") or []:
+        if not isinstance(cluster, Mapping):
+            continue
+        wallets = {
+            str(wallet).strip().lower()
+            for wallet in (cluster.get("wallets") or [])
+            if str(wallet).strip()
+        }
+        if current_vault in wallets:
+            candidate = str(cluster.get("cluster_id") or "").strip()
+            if candidate:
+                cluster_id = candidate
+            break
+    if not cluster_id:
+        return None, None
+    public_entity_id = str(row.get("public_entity_id") or "").strip()
+    concentration_key = (
+        f"public:{public_entity_id}" if public_entity_id else f"cluster:{cluster_id}"
+    )
+    return concentration_key, cluster_id
+
+
 def admit_consensus_train_rows(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -205,6 +236,10 @@ def admit_consensus_train_rows(
         if identity.get("decision") != "ALLOW_SHADOW":
             reasons["ENTITY_INDEPENDENCE_NOT_PROVEN"] += 1
             continue
+        concentration_key, cluster_id = _causal_entity_keys(row, identity)
+        if not concentration_key or not cluster_id:
+            reasons["ENTITY_CLUSTER_ASSIGNMENT_NOT_PROVEN"] += 1
+            continue
         admitted.append(
             {
                 **row,
@@ -216,6 +251,8 @@ def admit_consensus_train_rows(
                 "effective_independent_votes_at_signal": float(identity["effective_independent_votes"]),
                 "entity_independence_measurable": bool(identity["independence_measurable"]),
                 "entity_consensus_warnings": list(identity.get("warnings") or []),
+                "entity_concentration_key_at_signal": concentration_key,
+                "entity_cluster_id_at_signal": cluster_id,
                 "consensus_observation_policy": "STRICTLY_PRIOR_ENTITY_NORMALIZED_SAME_COIN_DIRECTION",
             }
         )
@@ -266,7 +303,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             family_alpha=FAMILY_ALPHA,
         )
         coin_share = _concentration(admitted, "coin")
-        vault_share = _concentration(admitted, "vault")
+        entity_share = _concentration(admitted, "entity_concentration_key_at_signal")
         distinct_regimes = _distinct_regimes(admitted)
         net = float(stats.get("net_pnl_usd") or 0.0)
         pf = stats.get("profit_factor")
@@ -281,7 +318,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             and lcb is not None
             and float(lcb) > 0.0
             and coin_share <= MAX_COIN_TRADE_SHARE
-            and vault_share <= MAX_VAULT_TRADE_SHARE
+            and entity_share <= MAX_VAULT_TRADE_SHARE
             and float(stats.get("top_positive_trade_share") or 1.0) <= MAX_TOP_POSITIVE_SHARE
         )
         variants.append(
@@ -292,7 +329,9 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
                 "distinct_regimes": distinct_regimes,
                 "minimum_distinct_regimes": MIN_DISTINCT_REGIMES,
                 "largest_coin_trade_share": coin_share,
-                "largest_vault_trade_share": vault_share,
+                "largest_vault_trade_share": entity_share,
+                "largest_entity_trade_share": entity_share,
+                "concentration_unit": "CAUSAL_ECONOMIC_ENTITY",
                 "diagnostics": diagnostics,
                 "train_statistics_eligible": train_statistics_eligible,
                 "eligible": train_statistics_eligible and not physical_freeze_blocked,
