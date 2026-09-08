@@ -202,3 +202,42 @@ def test_preuve_writers_arretes_fail_closed_registre_incomplet(tmp_path):
     p.write_text(_j.dumps({"role": "launcher"}), encoding="utf-8")   # pas de cle 'collecteurs' = corrompu
     arretes, motifs = SH.preuve_writers_arretes(tmp_path)
     assert arretes is False and "REGISTRE_INCOMPLET" in motifs
+
+
+def _ecrire_registre_brut(root, payload):
+    import json as _j
+    from hl_observer.ops.registre_pids import REGISTRE_RELPATH
+    p = Path(root) / REGISTRE_RELPATH
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_j.dumps(payload), encoding="utf-8")
+
+
+def test_preuve_writers_arretes_refuse_registres_corrompus(tmp_path):
+    _ecrire_registre_brut(tmp_path, {"collecteurs": []})
+    assert SH.preuve_writers_arretes(tmp_path) == (False, ["REGISTRE_CORROMPU"])
+
+    _ecrire_registre_brut(tmp_path, {"collecteurs": {}, "composants": []})
+    assert SH.preuve_writers_arretes(tmp_path) == (False, ["REGISTRE_COMPOSANTS_CORROMPU"])
+
+
+def test_preuve_writers_arretes_controle_writer_historique_racine(tmp_path):
+    _ecrire_registre_brut(tmp_path, {"collecteurs": {}, "ui": {"pid": 4242}})
+    arretes, vivants = SH.preuve_writers_arretes(tmp_path, pid_vivant=lambda pid: pid == 4242)
+    assert arretes is False
+    assert vivants == ["ui"]
+
+
+def test_preuve_writers_arretes_fail_closed_si_probe_pid_leve(tmp_path):
+    _ecrire_registre_brut(tmp_path, {"collecteurs": {}, "composants": {"ui": 4242}})
+
+    def probe_en_echec(_pid):
+        raise RuntimeError("probe indisponible")
+
+    arretes, vivants = SH.preuve_writers_arretes(tmp_path, pid_vivant=probe_en_echec)
+    assert arretes is False
+    assert vivants == ["ui?"]
+
+
+def test_pid_composant_refuse_pid_non_entier():
+    assert SH._pid_composant({"pid": "4242"}) is None
+    assert SH._pid_composant(object()) is None
