@@ -24,7 +24,11 @@ from hl_observer.backtesting.lead_lag_shadow_temporal import (
 )
 from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
-from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.assumptions import (
+    CostComponentReceipt,
+    EconomicRunMode,
+    ZeroCostReason,
+)
 from hl_observer.economics.families import build_lead_lag_contract
 
 CAMPAIGN_HORIZON_MS = _base.CAMPAIGN_HORIZON_MS
@@ -157,6 +161,49 @@ def episodes_par_horizon(
             if not math.isclose(net_pnl, executable_before_fees - fees, abs_tol=1e-8):
                 continue
             net_bps = net_pnl / requested * 1e4 if requested > 0 else 0.0
+            cost_component_receipts = {
+                "fees": CostComponentReceipt(
+                    component="fees",
+                    amount_usd=fees,
+                    zero_reason=ZeroCostReason.MEASURED_ZERO if fees == 0.0 else None,
+                    formula_id="lead_lag.round_trip_fee.v1",
+                    reality_model_version="lead_lag_delayed_executable_bbo.v2",
+                    provenance_ids=(
+                        "lead_lag.round_trip_fee_bps",
+                        "lead_lag.paper_notional_usd",
+                    ),
+                ).as_dict(),
+                "spread": CostComponentReceipt(
+                    component="spread",
+                    amount_usd=spread_cost,
+                    zero_reason=(
+                        ZeroCostReason.MEASURED_ZERO if spread_cost == 0.0 else None
+                    ),
+                    formula_id="lead_lag.executable_bid_ask_spread.v1",
+                    reality_model_version="lead_lag_delayed_executable_bbo.v2",
+                    provenance_ids=("entry_book.bid_ask", "exit_book.bid_ask"),
+                ).as_dict(),
+                "slippage": CostComponentReceipt(
+                    component="slippage",
+                    amount_usd=slippage_cost,
+                    zero_reason=ZeroCostReason.NOT_APPLICABLE,
+                    formula_id="lead_lag.full_top_capacity.v1",
+                    reality_model_version="lead_lag_delayed_executable_bbo.v2",
+                    provenance_ids=("entry_capacity_usd", "exit_capacity_usd"),
+                ).as_dict(),
+                "latency": CostComponentReceipt(
+                    component="latency",
+                    amount_usd=latency_cost,
+                    zero_reason=(
+                        ZeroCostReason.EMBEDDED_IN_EXECUTABLE_PRICE
+                        if latency_cost == 0.0
+                        else None
+                    ),
+                    formula_id="lead_lag.delayed_entry_price.v1",
+                    reality_model_version="lead_lag_delayed_executable_bbo.v2",
+                    provenance_ids=("reference_mid", "entry_mid"),
+                ).as_dict(),
+            }
             identity = "|".join(
                 (
                     str(coin).upper(),
@@ -215,6 +262,7 @@ def episodes_par_horizon(
                     "spread_cost_usd": spread_cost,
                     "slippage_cost_usd": slippage_cost,
                     "latency_cost_usd": latency_cost,
+                    "cost_component_receipts": cost_component_receipts,
                     "latency_signed_usd": signed_latency,
                     "latency_benefit_in_gross_usd": latency_benefit,
                     "latency_cost_method": (
