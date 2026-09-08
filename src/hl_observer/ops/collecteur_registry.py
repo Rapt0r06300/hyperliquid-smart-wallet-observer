@@ -49,7 +49,8 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     # (fraîcheur du fichier), JAMAIS au log (sinon faux STALL + le watchdog dupliquerait un collecteur vivant).
     {"nom": "userfills-live", "script": "tools/collecter_userfills_vaults.py",
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
-     "heartbeat": "runtime/data/userfills_live.lock"},
+     "heartbeat": "runtime/data/userfills_live.lock",
+     "copy_vault_checkpoint_role": "UNBOUND_SOURCE"},
     {"nom": "bbo-collector", "script": "tools/collecter_bbo.py",
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/data/bbo_heartbeat.json"},
@@ -85,6 +86,7 @@ COLLECTEURS_CAMPAGNE: tuple[dict[str, Any], ...] = (
         "args": (),
         "limite_minutes": 5.0,
         "heartbeat": "runtime/research_lab/heartbeats/copy-vault-checkpoints.json",
+        "copy_vault_checkpoint_role": "BOUND_WRITER",
     },
 )
 

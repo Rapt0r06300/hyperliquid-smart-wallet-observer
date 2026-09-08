@@ -31,9 +31,11 @@ from hl_observer.backtesting.copy_vault_executable import (  # noqa: E402
     COPY_DELAY_MS as COPY_VAULT_DELAY_MS,
     HORIZONS_MS as COPY_VAULT_HORIZONS_MS,
     MAX_TARGET_LAG_MS as COPY_VAULT_MAX_TARGET_LAG_MS,
-    PROTOCOL_NAME as COPY_VAULT_PROTOCOL,
     canonical_metaorder_id,
     classify_live_entry_action,
+)
+from hl_observer.backtesting.copy_vault_protocol import (  # noqa: E402
+    UNBOUND_L2_SOURCE_PROTOCOL,
 )
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id  # noqa: E402
 from hl_observer.experimental import cohortes as CO  # noqa: E402
@@ -943,7 +945,7 @@ async def _heartbeat(root: Path, info: dict, *, intervalle_s: float = 10.0) -> N
                 "reconnects": int(_HEARTBEAT_WS["reconnects"]),
                 "stale": False,
             },
-            protocol=COPY_VAULT_PROTOCOL,
+            protocol=UNBOUND_L2_SOURCE_PROTOCOL,
         )
         derniers_messages = messages
         await asyncio.sleep(intervalle_s)
@@ -1670,10 +1672,7 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
     from hl_observer.experimental import metaorder_l2_tape as T
     en_attente: list = []
     exits: list = []
-    checkpoints: list = []
-    checkpointed_metaorders: dict[str, float] = {}
     meta_etat: dict = {}                                          # (vault,coin) -> métaordre live (id/sens/last_ft)
-    checkpoint_meta_state: dict = {}
     await asyncio.sleep(15.0)
     while True:
         try:
@@ -1693,54 +1692,12 @@ async def _tape_consumer(root: Path, *, horizon_ms: float = 300_000.0, post_wind
                 entree = T.etat_entree(buf, it["frm"], it["fill"].get("ts_ms"))
                 posts = T.etats_post(buf, entree["recv_mono"], n=3) if entree else []
                 mo, stade = T.stade_live(meta_etat, it["fill"])
-                checkpoint_mo, checkpoint_stage = _copy_vault_checkpoint_metaorder(
-                    checkpoint_meta_state, it["fill"]
-                )
-                if (
-                    checkpoint_stage == "FIRST_SLICE"
-                    and checkpoint_mo
-                    and checkpoint_mo not in checkpointed_metaorders
-                ):
-                    checkpoints.extend(
-                        _new_metaorder_checkpoints(
-                            it["fill"], recv_mono_ms=it["frm"], metaorder_id=checkpoint_mo,
-                        )
-                    )
-                    checkpointed_metaorders[checkpoint_mo] = mono
                 l = T.ligne_fill(it["fill"], metaorder_id=mo, stade=stade, pre=pre, entree=entree,
                                  posts=posts, fill_recv_mono=it["frm"])
                 if l:
                     lignes.append(l)
                     exits.append({"fill": it["fill"], "frm": it["frm"], "due": it["frm"] + horizon_ms})
             en_attente = reste
-            remaining_checkpoints: list = []
-            new_exit_checkpoints: list = []
-            for checkpoint in checkpoints:
-                if mono < float(checkpoint["target_mono_ms"]):
-                    remaining_checkpoints.append(checkpoint)
-                    continue
-                result = await _capture_copy_vault_checkpoint(root, checkpoint)
-                status = str(result.get("status") or "")
-                if status.startswith("CAPTURED_"):
-                    if checkpoint["stage"] == "ENTRY":
-                        new_exit_checkpoints.extend(_exit_metaorder_checkpoints(result))
-                    continue
-                if status in {
-                    "NOT_DUE", "RETRY_NO_BOOK", "RETRY_NO_RECEIVE_TIME",
-                    "RETRY_CLOCK_SKEW", "RETRY_STORE_REJECTED",
-                }:
-                    checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
-                    if mono - float(checkpoint["target_mono_ms"]) <= COPY_VAULT_MAX_TARGET_LAG_MS:
-                        remaining_checkpoints.append(checkpoint)
-            checkpoints = remaining_checkpoints + new_exit_checkpoints
-            checkpoint_retention_ms = (
-                COPY_VAULT_DELAY_MS
-                + max(COPY_VAULT_HORIZONS_MS)
-                + COPY_VAULT_MAX_TARGET_LAG_MS
-            )
-            for metaorder_id, registered_mono in list(checkpointed_metaorders.items()):
-                if mono - registered_mono > checkpoint_retention_ms:
-                    checkpointed_metaorders.pop(metaorder_id, None)
             reste_ex: list = []
             for ex in exits:
                 if mono < ex["due"]:

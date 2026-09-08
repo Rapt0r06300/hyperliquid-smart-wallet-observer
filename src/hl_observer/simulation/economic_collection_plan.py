@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME as COPY_VAULT_PROTOCOL
+from hl_observer.backtesting.copy_vault_protocol import UNBOUND_L2_SOURCE_PROTOCOL
 from hl_observer.collection.copy_vault_checkpoint_tail import (
     COMPANION_PROTOCOL as COPY_VAULT_COMPANION_PROTOCOL,
 )
@@ -195,6 +196,21 @@ def _copy_state(
     protocols = _mapping(collector.get("protocols"))
     active_protocol = str(protocols.get("userfills-live") or "")
     companion_protocol = str(protocols.get("copy-vault-checkpoints") or "")
+    legacy_userfills_bound_writer = bool(
+        "userfills-live" in active_collectors
+        and active_protocol == COPY_VAULT_PROTOCOL
+    )
+    companion_bound_writer = bool(
+        "copy-vault-checkpoints" in active_collectors
+        and companion_protocol == COPY_VAULT_COMPANION_PROTOCOL
+    )
+    checkpoint_writer_conflict = bool(
+        legacy_userfills_bound_writer and companion_bound_writer
+    )
+    unbound_source_ready = bool(
+        "userfills-live" in active_collectors
+        and active_protocol == UNBOUND_L2_SOURCE_PROTOCOL
+    )
     collector_protocol_ready: bool | None = None
     protocol_collectors_active = bool(
         "userfills-live" in active_collectors
@@ -202,14 +218,9 @@ def _copy_state(
     )
     if protocol_collectors_active:
         collector_protocol_ready = bool(
-            (
-                "userfills-live" in active_collectors
-                and active_protocol == COPY_VAULT_PROTOCOL
-            )
-            or (
-                "copy-vault-checkpoints" in active_collectors
-                and companion_protocol == COPY_VAULT_COMPANION_PROTOCOL
-            )
+            unbound_source_ready
+            and companion_bound_writer
+            and not checkpoint_writer_conflict
         )
     data_only = bool(
         schema_ready
@@ -227,6 +238,8 @@ def _copy_state(
     state = (
         "PROVEN"
         if objective_met
+        else "CHECKPOINT_WRITER_CONFLICT"
+        if checkpoint_writer_conflict
         else "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
         if v5_data_only and collector_protocol_ready is False
         else "NEW_HYPOTHESIS_V5_FUTURE_CAUSAL_DATA_REQUIRED"
@@ -279,10 +292,12 @@ def _copy_state(
             "training_selection_eligible": training_selection_eligible,
             "parameters_frozen": parameters_frozen,
             "closed_liquidatable_episodes": closed,
-            "expected_collector_protocol": COPY_VAULT_PROTOCOL,
+            "expected_collector_protocol": UNBOUND_L2_SOURCE_PROTOCOL,
             "active_collector_protocol": active_protocol or None,
             "expected_companion_protocol": COPY_VAULT_COMPANION_PROTOCOL,
             "active_companion_protocol": companion_protocol or None,
+            "checkpoint_writer_conflict": checkpoint_writer_conflict,
+            "legacy_bound_userfills_protocol": COPY_VAULT_PROTOCOL,
             **temporal_progress,
             "placebo_beaten": placebos.get("beaten") is True,
             "next_hypothesis_v3": next_hypothesis,
@@ -306,6 +321,13 @@ def _copy_state(
             "runtime/data/copy_vault_l2_tape.jsonl",
         ],
         "exact_missing_evidence": (
+            [
+                "stop the legacy bound checkpoint scheduler in userfills-live",
+                "restart userfills-live with the unbound L2 source protocol",
+                "keep copy-vault-checkpoints as the sole bound checkpoint writer",
+            ]
+            if checkpoint_writer_conflict
+            else
             [
                 "the frozen canonical Copy-Vault rule remains killed in valid purged OOS",
                 "V5 is a separate TRAIN-only lifecycle hypothesis and cannot reuse that old OOS",

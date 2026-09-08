@@ -16,6 +16,7 @@ from typing import Any
 from hl_observer.economics.families import build_copy_vault_contract
 
 PROTOCOL_NAME = "copy_vault_executable_walk_forward_v7_exact_checkpoint_binding"
+UNBOUND_L2_SOURCE_PROTOCOL = "copy_vault_unbound_ws_l2_v1"
 TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
     f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
@@ -88,6 +89,7 @@ def protocol_signature() -> dict[str, Any]:
     )
     return {
         "calibration_protocol": PROTOCOL_NAME,
+        "unbound_l2_source_protocol": UNBOUND_L2_SOURCE_PROTOCOL,
         "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
         "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
         "metaorder_identity_policy": "immutable_first_observed_fill",
@@ -128,6 +130,7 @@ __all__ = [
     "PROTOCOL_NAME",
     "TRAIN_ECONOMIC_GATE_VERSION",
     "TRAIN_FRACTION",
+    "UNBOUND_L2_SOURCE_PROTOCOL",
     "VALIDATION_FRACTION",
     "canonical_metaorder_id",
     "classify_live_entry_action",
