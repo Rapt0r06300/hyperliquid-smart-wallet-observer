@@ -219,7 +219,7 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
                 "checkpoint_clean_epoch_ms": 10,
                 "all_checkpoints_post_clean_epoch": True,
                 "exit_ts_ms": 1_725_571_200_000,
-                "net_pnl_usd": 2.1,
+                "net_pnl_usd": 4.1,
                 "liquidatable_net": True,
             },
             {
@@ -228,21 +228,21 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
                 "checkpoint_writer_run_id": "copy-writer-clean",
                 "checkpoint_clean_epoch_ms": 10,
                 "all_checkpoints_post_clean_epoch": True,
-                "exit_ts_ms": 1_725_571_200_100,
-                "net_pnl_usd": 2.3,
+                "exit_ts_ms": 1_725_657_600_100,
+                "net_pnl_usd": 4.3,
                 "liquidatable_net": True,
             },
         ],
         "summary": {
             "positions_ouvertes": 2,
             "positions_fermees": 2,
-            "gross_pnl_usd": 5.0,
+            "gross_pnl_usd": 9.0,
             "fees_usd": 0.2,
             "spread_cost_usd": 0.3,
             "slippage_cost_usd": 0.0,
             "latency_cost_usd": 0.1,
-            "net_pnl_usd": 4.4,
-            "roi_pct": 0.44,
+            "net_pnl_usd": 8.4,
+            "roi_pct": 0.84,
             "max_drawdown_usd": 0.1,
             "hit_rate": 1.0,
             "profit_factor": float("inf"),
@@ -253,12 +253,12 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         },
         "temporal_evidence": {
             "oos": {
-                "gross_pnl_usd": 2.3,
+                "gross_pnl_usd": 4.3,
                 "fees_usd": 0.05,
                 "spread_cost_usd": 0.05,
                 "slippage_cost_usd": 0.05,
                 "latency_cost_usd": 0.05,
-                "net_pnl_usd": 2.1,
+                "net_pnl_usd": 4.1,
                 "sample_count": 1,
                 "liquidatable_net": True,
                 "duplicate_trade_ids": 0,
@@ -267,12 +267,12 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
                 "no_lookahead": True,
             },
             "forward": {
-                "gross_pnl_usd": 2.5,
+                "gross_pnl_usd": 4.5,
                 "fees_usd": 0.05,
                 "spread_cost_usd": 0.05,
                 "slippage_cost_usd": 0.05,
                 "latency_cost_usd": 0.05,
-                "net_pnl_usd": 2.3,
+                "net_pnl_usd": 4.3,
                 "sample_count": 1,
                 "liquidatable_net": True,
                 "duplicate_trade_ids": 0,
@@ -288,11 +288,11 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         report, freeze=freeze, datasets=datasets, require_daily=True
     )
 
-    assert campaign["net_pnl_usd"] == 4.4
+    assert campaign["net_pnl_usd"] == 8.4
     assert campaign["liquidatable_net"] is True
     assert campaign["objective_status"] == "ATTEINT"
     assert campaign["copy_checkpoint_integrity"]["proof_trade_count"] == 2
-    assert campaign["daily_evidence"]["min_daily_net_pnl_usd"] == 4.4
+    assert campaign["daily_evidence"]["min_daily_net_pnl_usd"] == 4.1
 
 
 def test_executable_copy_campaign_zero_closed_is_non_mesurable() -> None:
@@ -445,6 +445,12 @@ def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
                     "walk_forward_segment": "oos",
                 },
                 {
+                    "exit_ts_ns": 1_725_657_600_000_000_000,
+                    "net_pnl_usd": 4.1,
+                    "liquidatable_net": True,
+                    "walk_forward_segment": "forward",
+                },
+                {
                     "exit_ts_ns": 1_725_571_200_000_000_000,
                     "net_pnl_usd": 99.5,
                     "liquidatable_net": False,
@@ -461,7 +467,7 @@ def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
         require_daily=True,
     )
 
-    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 4.5
+    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 8.6
     assert campaign["daily_evidence"]["all_days_at_or_above_target"] is True
 
 

@@ -20,6 +20,7 @@ from hl_observer.backtesting.cross_venue_certified import (
 
 TARGET_NET_USD = 4.0
 TARGET_NET_USD_PER_DAY = 4.0
+MIN_PROOF_DAYS = 2
 STARTING_CAPITAL_USD = 1000.0
 COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
@@ -124,6 +125,7 @@ def evaluate_daily_net(
     return {
         "schema_version": "hypersmart.daily_net_evidence.v1",
         "target_net_usd_per_day": float(target),
+        "minimum_required_days": MIN_PROOF_DAYS,
         "sample_count": len(values),
         "observed_trade_count": observed_trades,
         "missing_trade_timestamps": missing_trade_timestamps,
@@ -136,6 +138,7 @@ def evaluate_daily_net(
         "min_daily_net_pnl_usd": round(min(values), 8) if values else None,
         "all_days_at_or_above_target": bool(
             values
+            and len(values) >= MIN_PROOF_DAYS
             and missing_trade_timestamps == 0
             and missing_trade_net == 0
             and min(values) >= target
@@ -313,19 +316,23 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if daily_target_required:
         if not isinstance(daily_evidence, Mapping):
             issues.append("DAILY_NET_PROOF_MISSING")
-        elif not (
-            daily_evidence.get("schema_version")
-            == "hypersmart.daily_net_evidence.v1"
-            and _number(daily_evidence.get("target_net_usd_per_day"))
-            == TARGET_NET_USD_PER_DAY
-            and (_number(daily_evidence.get("sample_count")) or 0) > 0
-            and _number(daily_evidence.get("missing_trade_timestamps")) == 0
-            and _number(daily_evidence.get("missing_trade_net")) == 0
-            and (_number(daily_evidence.get("min_daily_net_pnl_usd")) or -math.inf)
-            >= TARGET_NET_USD_PER_DAY
-            and daily_evidence.get("all_days_at_or_above_target") is True
-        ):
-            issues.append("DAILY_NET_TARGET_NOT_REACHED")
+        else:
+            daily_sample_count = _number(daily_evidence.get("sample_count")) or 0
+            if daily_sample_count < MIN_PROOF_DAYS:
+                issues.append("DAILY_NET_PROOF_TOO_SHORT")
+            if not (
+                daily_evidence.get("schema_version")
+                == "hypersmart.daily_net_evidence.v1"
+                and _number(daily_evidence.get("target_net_usd_per_day"))
+                == TARGET_NET_USD_PER_DAY
+                and daily_sample_count > 0
+                and _number(daily_evidence.get("missing_trade_timestamps")) == 0
+                and _number(daily_evidence.get("missing_trade_net")) == 0
+                and (_number(daily_evidence.get("min_daily_net_pnl_usd")) or -math.inf)
+                >= TARGET_NET_USD_PER_DAY
+                and daily_evidence.get("all_days_at_or_above_target") is True
+            ):
+                issues.append("DAILY_NET_TARGET_NOT_REACHED")
     proof_economics = None
     if oos_economics is not None and forward_economics is not None:
         proof_economics = {key: round(float(oos_economics[key]) + float(forward_economics[key]), 8) for key in _ECONOMIC_KEYS}
@@ -339,4 +346,4 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     return {"family": family, "target_net_usd": float(target_net_usd), "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
-__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]
+__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

@@ -66,7 +66,7 @@ def _hash_ids(*trade_ids: str) -> str:
 
 def _segment(trade_id: str, net: float) -> dict:
     return {
-        "gross_pnl_usd": 3.0,
+        "gross_pnl_usd": net + 0.5,
         "fees_usd": 0.25,
         "spread_cost_usd": 0.25,
         "slippage_cost_usd": 0.0,
@@ -134,13 +134,13 @@ def _trade(
         "signal_ts_ms": signal_ms,
         "entry_ts_ms": signal_ms + 10,
         "exit_ts_ms": signal_ms + 100,
-        "gross_pnl_usd": 3.0,
+        "gross_pnl_usd": 5.0,
         "fees_usd": 0.25,
         "spread_cost_usd": 0.25,
         "slippage_cost_usd": 0.0,
         "latency_cost_usd": 0.0,
         "cost_component_receipts": cost_component_receipts,
-        "net_pnl_usd": 2.5,
+        "net_pnl_usd": 4.5,
         "liquidatable_net": True,
         "paper_read_only": True,
         "real_execution": False,
@@ -159,8 +159,8 @@ def _trade(
 def _positive_copy_evidence() -> tuple[dict, dict]:
     oos_id = "oos-trade"
     forward_id = "forward-trade"
-    oos = {**_segment(oos_id, 2.5), "no_lookahead": True}
-    forward = {**_segment(forward_id, 2.5), "post_freeze": True}
+    oos = {**_segment(oos_id, 4.5), "no_lookahead": True}
+    forward = {**_segment(forward_id, 4.5), "post_freeze": True}
     economic_contract = build_copy_vault_contract(
         mode=EconomicRunMode.CERTIFIABLE,
         notional_usd=150.0,
@@ -180,12 +180,12 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
         "parameter_freeze": {"campaign_id": "freeze-1", "frozen_at_ms": 1_000},
         "opened_positions": 2,
         "closed_positions": 2,
-        "gross_pnl_usd": 6.0,
+        "gross_pnl_usd": 10.0,
         "fees_usd": 0.5,
         "spread_cost_usd": 0.5,
         "slippage_cost_usd": 0.0,
         "latency_cost_usd": 0.0,
-        "net_pnl_usd": 5.0,
+        "net_pnl_usd": 9.0,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
         "trade_ids_count": 2,
@@ -223,7 +223,7 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
             _trade(
                 forward_id,
                 "forward",
-                1_100,
+                86_401_100,
                 assumption_snapshot_hash=snapshot_hash,
             ),
         ],
@@ -242,8 +242,8 @@ def test_audit_economic_proof_reconcilie_une_preuve_positive_complete():
     assert result["ledger_valid"] is True
     assert result["classification"] == "VALID_POSITIVE"
     assert result["objective_status"] == "ATTEINT"
-    assert result["proof_net_pnl_usd"] == 5.0
-    assert result["aggregate_recomputed"]["net_pnl_usd"] == 5.0
+    assert result["proof_net_pnl_usd"] == 9.0
+    assert result["aggregate_recomputed"]["net_pnl_usd"] == 9.0
     independent = result["independent_economic_audit"]
     assert independent["schema_version"] == INDEPENDENT_AUDIT_SCHEMA
     assert independent["ready"] is True
@@ -294,7 +294,7 @@ def test_audit_economic_proof_refuse_les_identites_dupliquees():
 
 def test_audit_economic_proof_detecte_un_resume_desynchronise_du_ledger():
     campaign, raw = _positive_copy_evidence()
-    campaign["net_pnl_usd"] = 9.0
+    campaign["net_pnl_usd"] = 8.9
 
     result = _audit(campaign, raw)
 
