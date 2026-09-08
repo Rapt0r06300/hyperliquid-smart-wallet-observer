@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import runpy
 from pathlib import Path
 
 from hl_observer.datasets.research_lab_stream import REPORT_JSON
@@ -90,3 +91,28 @@ def test_cli_plan_experience_retourne_3_si_aucune_source_ne_correspond(tmp_path:
 def test_cli_plan_experience_retourne_2_si_workspace_absent(tmp_path: Path) -> None:
     code = main(["--root", str(tmp_path / "absent")])
     assert code == 2
+
+
+def test_module_entrypoint_retourne_le_code_main(tmp_path: Path, monkeypatch) -> None:
+    _profile_only_workspace(tmp_path)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "dataset_experiment_plan",
+            "--root",
+            str(tmp_path),
+            "--family",
+            "lead_lag",
+            "--coin",
+            "BTC",
+            "--metric",
+            "net_pnl_usd",
+        ],
+    )
+
+    try:
+        runpy.run_module("hl_observer.ops.dataset_experiment_plan", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("l'entrypoint module doit lever SystemExit")
