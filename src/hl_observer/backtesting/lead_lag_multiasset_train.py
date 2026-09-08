@@ -166,6 +166,7 @@ def load_multiasset_train_tape(
     train_ranges, split_meta = _training_ranges(project_root)
     tapes: dict[str, list[tuple[int, float, float]]] = {coin: [] for coin in sorted(allowed)}
     books: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}
+    source_ids = {coin: {"TRADE": set(), "HL_BOOK": set()} for coin in sorted(allowed)}
     seen_trades: set[tuple[Any, ...]] = set()
     seen_books: set[tuple[Any, ...]] = set()
     consumed: list[str] = []
@@ -178,9 +179,8 @@ def load_multiasset_train_tape(
         path = path.resolve()
         if not path.is_file():
             continue
-        consumed.append(
-            path.relative_to(project_root).as_posix() if path.is_relative_to(project_root) else str(path)
-        )
+        source_id = path.relative_to(project_root).as_posix() if path.is_relative_to(project_root) else str(path)
+        consumed.append(source_id)
         for line in _lines(path):
             lines_read += 1
             if "BIN_TRADE" not in line and '"venue":"HL"' not in line and '"venue": "HL"' not in line:
@@ -259,6 +259,7 @@ def load_multiasset_train_tape(
                         "real_execution": False,
                     }
                 )
+                source_ids[coin]["HL_BOOK"].add(source_id)
                 continue
             if venue != "BIN_TRADE":
                 continue
@@ -287,12 +288,13 @@ def load_multiasset_train_tape(
                 continue
             seen_trades.add(identity)
             tapes[coin].append((int(timestamp_ms) * 1_000_000, float(price), direction))
+            source_ids[coin]["TRADE"].add(source_id)
     result: dict[str, dict[str, list]] = {}
     for coin, rows in tapes.items():
         rows.sort()
         books[coin].sort(key=lambda row: int(row["ts_ms"]))
         if rows:
-            result[coin] = {"HL": [], "BIN": [], "TRADE": rows, "HL_BOOK": books[coin]}
+            result[coin] = {"HL": [], "BIN": [], "TRADE": rows, "HL_BOOK": books[coin], "TRADE_SOURCE_IDS": sorted(source_ids[coin]["TRADE"]), "HL_BOOK_SOURCE_IDS": sorted(source_ids[coin]["HL_BOOK"])}
     return result, {
         "schema_version": "hypersmart.lead_lag_multiasset_train_tape.v1",
         **split_meta,
@@ -591,11 +593,7 @@ def explore_lead_lag_multiasset_train(
         * len(hypothesis["shock_windows_ms"])
         for hypothesis in TRAIN_HYPOTHESES
     )
-    cross_combinations_per_pair = (
-        len(CROSS_ASSET_SHOCK_THRESHOLDS_BPS)
-        * len(CROSS_ASSET_HORIZONS_MS)
-        * len(CROSS_ASSET_SHOCK_WINDOWS_MS)
-    )
+    cross_combinations_per_pair = len(CROSS_ASSET_SHOCK_THRESHOLDS_BPS) * len(CROSS_ASSET_HORIZONS_MS) * len(CROSS_ASSET_SHOCK_WINDOWS_MS)
     trial_count = max(
         1,
         len(candidate_coins) * combinations_per_coin + len(planned_cross_pairs) * cross_combinations_per_pair,
@@ -649,12 +647,13 @@ def explore_lead_lag_multiasset_train(
                             )
                         )
     for leader, follower in planned_cross_pairs:
-        leader_streams = tape.get(leader)
-        follower_streams = tape.get(follower)
+        leader_streams, follower_streams = tape.get(leader), tape.get(follower)
         if not leader_streams or not follower_streams:
             continue
-        follower_books = list(follower_streams.get("HL_BOOK") or [])
-        if not follower_books:
+        if not (follower_books := list(follower_streams.get("HL_BOOK") or [])):
+            continue
+        shared_sources = sorted(set(leader_streams.get("TRADE_SOURCE_IDS") or ()) & set(follower_streams.get("HL_BOOK_SOURCE_IDS") or ()))
+        if not shared_sources:
             continue
         synthetic_tape = {
             follower: {
@@ -702,6 +701,7 @@ def explore_lead_lag_multiasset_train(
                         {
                             "leader_coin": leader,
                             "follower_coin": follower,
+                            "aligned_source_ids": shared_sources,
                             "direction_policy": "CROSS_ASSET_MAJOR_TO_ALT_CONTINUATION",
                         }
                     )
@@ -724,6 +724,7 @@ def explore_lead_lag_multiasset_train(
             "coin": selected["coin"],
             "leader_coin": selected.get("leader_coin"),
             "follower_coin": selected.get("follower_coin"),
+            "aligned_source_ids": selected.get("aligned_source_ids"),
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
             "shock_window_ms": selected["shock_window_ms"],

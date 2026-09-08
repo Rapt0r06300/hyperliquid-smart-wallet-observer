@@ -148,6 +148,8 @@ def test_multiasset_loader_conserve_le_bbo_hl_causal_du_meme_shard(tmp_path: Pat
     assert books[0]["ask_top_usd"] == pytest.approx(300.3)
     assert books[0]["data_origin"] == "RECORDED_REAL"
     assert books[0]["real_execution"] is False
+    assert tape["ETH"]["TRADE_SOURCE_IDS"] == ["aligned.jsonl"]
+    assert tape["ETH"]["HL_BOOK_SOURCE_IDS"] == ["aligned.jsonl"]
     assert meta["hl_book_rows"] == 1
     assert meta["hl_book_rows_outside_frozen_train"] == 1
     assert meta["heldout_loaded"] is False
@@ -300,8 +302,8 @@ def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path:
         "ask_top_usd": 1_000.0,
     }
     tape = {
-        "BTC": {"TRADE": btc_trades, "HL_BOOK": [btc_book]},
-        "SOL": {"TRADE": sol_trades, "HL_BOOK": [sol_book]},
+        "BTC": {"TRADE": btc_trades, "HL_BOOK": [btc_book], "TRADE_SOURCE_IDS": ["shared.jsonl"], "HL_BOOK_SOURCE_IDS": ["shared.jsonl"]},
+        "SOL": {"TRADE": sol_trades, "HL_BOOK": [sol_book], "TRADE_SOURCE_IDS": ["shared.jsonl"], "HL_BOOK_SOURCE_IDS": ["shared.jsonl"]},
     }
     monkeypatch.setattr(
         module,
@@ -363,6 +365,7 @@ def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path:
     variant = report["variants"][0]
     assert variant["leader_coin"] == "BTC"
     assert variant["follower_coin"] == "SOL"
+    assert variant["aligned_source_ids"] == ["shared.jsonl"]
     assert variant["direction_policy"] == "CROSS_ASSET_MAJOR_TO_ALT_CONTINUATION"
     assert report["heldout_evaluated"] is False
     assert report["real_execution"] is False
