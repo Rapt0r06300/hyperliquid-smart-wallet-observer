@@ -16,6 +16,7 @@ def _row(
         "direction": 1,
         "signal_ts_ms": ts,
         "walk_forward_segment": segment,
+        "regime_id": "trend" if (ts // 86_400_000) % 2 == 0 else "range",
         "liquidatable_net": True,
         "public_entity_id": f"entity-{vault.lower()}",
         "entry_price": 2_000.0,

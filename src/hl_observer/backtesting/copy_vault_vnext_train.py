@@ -27,6 +27,7 @@ CONSENSUS_WINDOWS_MS = (30_000, 120_000, 300_000)
 MIN_DISTINCT_WALLETS = (2, 3)
 MIN_TRAIN_TRADES = 8
 MIN_DISTINCT_DAYS = 3
+MIN_DISTINCT_REGIMES = 2
 MAX_COIN_TRADE_SHARE = 0.65
 MAX_VAULT_TRADE_SHARE = 0.50
 MAX_TOP_POSITIVE_SHARE = 0.60
@@ -227,6 +228,18 @@ def _concentration(rows: Sequence[Mapping[str, Any]], field: str) -> float:
     return max(counts.values(), default=0) / max(1, len(rows))
 
 
+def _distinct_regimes(rows: Sequence[Mapping[str, Any]]) -> int:
+    """Count explicit TRAIN regime labels; missing evidence contributes no regime."""
+
+    return len(
+        {
+            regime
+            for row in rows
+            if (regime := str(row.get("regime_id") or "").strip())
+        }
+    )
+
+
 def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
     """Select a consensus freeze candidate without reopening heldout outcomes."""
 
@@ -254,12 +267,14 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
         )
         coin_share = _concentration(admitted, "coin")
         vault_share = _concentration(admitted, "vault")
+        distinct_regimes = _distinct_regimes(admitted)
         net = float(stats.get("net_pnl_usd") or 0.0)
         pf = stats.get("profit_factor")
         lcb = stats.get("total_lcb_usd")
         train_statistics_eligible = bool(
             len(admitted) >= MIN_TRAIN_TRADES
             and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
+            and distinct_regimes >= MIN_DISTINCT_REGIMES
             and net > 0.0
             and pf is not None
             and float(pf) > 1.0
@@ -274,6 +289,8 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
                 "consensus_window_ms": int(window),
                 "minimum_distinct_wallets": int(minimum),
                 "statistics": stats,
+                "distinct_regimes": distinct_regimes,
+                "minimum_distinct_regimes": MIN_DISTINCT_REGIMES,
                 "largest_coin_trade_share": coin_share,
                 "largest_vault_trade_share": vault_share,
                 "diagnostics": diagnostics,
@@ -306,6 +323,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
             "mechanism": MECHANISM,
             "consensus_window_ms": selected["consensus_window_ms"],
             "minimum_distinct_wallets": selected["minimum_distinct_wallets"],
+            "minimum_distinct_regimes": MIN_DISTINCT_REGIMES,
             "identity_claim": IDENTITY_CLAIM,
             "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
         }
@@ -337,6 +355,7 @@ def explore_copy_vault_vnext_train(report: Mapping[str, Any]) -> dict[str, Any]:
         "fixed_grid": {
             "consensus_windows_ms": list(CONSENSUS_WINDOWS_MS),
             "minimum_distinct_wallets": list(MIN_DISTINCT_WALLETS),
+            "minimum_distinct_regimes": MIN_DISTINCT_REGIMES,
             "trial_count": trial_count,
         },
         "selected": selected,
