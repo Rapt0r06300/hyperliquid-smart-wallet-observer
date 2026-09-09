@@ -113,6 +113,35 @@ def _first_book_at_or_after(
     return row
 
 
+def _entry_book_for_decision(
+    books: Sequence[Mapping[str, Any]],
+    timestamps: Sequence[int],
+    target_ms: float,
+    *,
+    max_age_or_delay_ms: int,
+) -> tuple[Mapping[str, Any], int, str] | None:
+    """Return the freshest book causally known when the paper order can be sent."""
+
+    decision_ms = int(math.ceil(target_ms))
+    previous_index = bisect.bisect_right(timestamps, decision_ms) - 1
+    if previous_index >= 0:
+        previous = books[previous_index]
+        age_ms = decision_ms - int(previous.get("ts_ms") or 0)
+        if 0 <= age_ms <= max(0, int(max_age_or_delay_ms)):
+            return previous, decision_ms, "LATEST_KNOWN_FRESH_BOOK_AT_DECISION"
+
+    later = _first_book_at_or_after(
+        books,
+        timestamps,
+        target_ms,
+        max_delay_ms=max_age_or_delay_ms,
+    )
+    if later is None:
+        return None
+    observed_ms = int(later.get("ts_ms") or 0)
+    return later, observed_ms, "FIRST_CAUSAL_BOOK_AFTER_DECISION"
+
+
 def _matching_public_trades(
     trades: Sequence[Mapping[str, Any]],
     timestamps: Sequence[int],
@@ -153,6 +182,8 @@ def _economic_row(
     shock: Mapping[str, Any],
     direction: int,
     entry_book: Mapping[str, Any],
+    entry_ts_ms: int,
+    entry_decision_policy: str,
     fill_trade: Mapping[str, Any],
     exit_book: Mapping[str, Any],
     queue_events: list[dict[str, float]],
@@ -205,7 +236,7 @@ def _economic_row(
         "coin": REQUIRED_COIN,
         "trigger_ts_ms": int(shock["trigger_ts_ms"]),
         "direction": int(direction),
-        "entry_ts_ms": int(entry_book["ts_ms"]),
+        "entry_ts_ms": int(entry_ts_ms),
         "fill_ts_ms": int(fill_trade["ts_ms"]),
         "exit_ts_ms": int(exit_book["ts_ms"]),
         "placebo": bool(placebo),
@@ -217,7 +248,9 @@ def _economic_row(
         "side": "LONG" if direction > 0 else "SHORT",
         "lead_shock_bps": float(shock["lead_shock_bps"]),
         "trigger_ts_ms": int(shock["trigger_ts_ms"]),
-        "entry_ts_ms": int(entry_book["ts_ms"]),
+        "entry_ts_ms": int(entry_ts_ms),
+        "entry_book_ts_ms": int(entry_book["ts_ms"]),
+        "entry_decision_policy": str(entry_decision_policy),
         "fill_ts_ms": int(fill_trade["ts_ms"]),
         "exit_ts_ms": int(exit_book["ts_ms"]),
         "entry_price": entry_price,
@@ -277,14 +310,15 @@ def _replay_one(
     placebo: bool,
 ) -> tuple[dict[str, Any] | None, str]:
     target_ms = int(shock["trigger_ts_ms"]) + float(latency_ms)
-    entry_book = _first_book_at_or_after(
+    entry_decision = _entry_book_for_decision(
         books,
         book_timestamps,
         target_ms,
-        max_delay_ms=max_book_delay_ms,
+        max_age_or_delay_ms=max_book_delay_ms,
     )
-    if entry_book is None:
+    if entry_decision is None:
         return None, "MISSING_CAUSAL_ENTRY_BOOK"
+    entry_book, entry_ts_ms, entry_decision_policy = entry_decision
     entry_price = float(entry_book["bid"] if direction > 0 else entry_book["ask"])
     initial_ahead = float(entry_book["bid_size"] if direction > 0 else entry_book["ask_size"])
     if entry_price <= 0 or initial_ahead <= 0:
@@ -295,8 +329,8 @@ def _replay_one(
     matching = _matching_public_trades(
         public_trades,
         trade_timestamps,
-        start_ms=int(entry_book["ts_ms"]),
-        end_ms=int(entry_book["ts_ms"]) + int(maker_lifetime_ms),
+        start_ms=entry_ts_ms,
+        end_ms=entry_ts_ms + int(maker_lifetime_ms),
         price=entry_price,
         passive_direction=direction,
         earliest_exchange_ms=int(earliest_exchange) if earliest_exchange is not None else None,
@@ -334,6 +368,8 @@ def _replay_one(
             shock=shock,
             direction=direction,
             entry_book=entry_book,
+            entry_ts_ms=entry_ts_ms,
+            entry_decision_policy=entry_decision_policy,
             fill_trade=fill_trade,
             exit_book=exit_book,
             queue_events=queue_events,

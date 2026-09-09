@@ -135,6 +135,24 @@ def test_queue_replay_uses_only_correct_aggressor_side_and_exact_price() -> None
     assert row["full_fill"] is True
 
 
+def test_queue_replay_uses_the_fresh_book_known_at_order_decision_time() -> None:
+    tape, books, trades = _positive_scenario()
+    books["ETH"][0]["ts_ms"] = 2_050
+    books["ETH"][0]["exchange_ts_ms"] = 2_045
+
+    report = replay_lead_lag_queue_maker(
+        tape,
+        books,
+        trades,
+        latency_evidence={"measured": True, "p95_ms": 100.0},
+    )
+
+    row = report["maker_queue_candidates"][0]
+    assert row["entry_book_ts_ms"] == 2_050
+    assert row["entry_ts_ms"] == 2_100
+    assert row["entry_decision_policy"] == "LATEST_KNOWN_FRESH_BOOK_AT_DECISION"
+
+
 def test_queue_replay_accounts_exact_fees_and_causal_exit() -> None:
     tape, books, trades = _positive_scenario()
 
