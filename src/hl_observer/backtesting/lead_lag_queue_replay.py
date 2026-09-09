@@ -18,6 +18,12 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from hl_observer.economics.assumptions import (
+    CostComponentReceipt,
+    EconomicRunMode,
+    ZeroCostReason,
+)
+from hl_observer.economics.families import build_lead_lag_maker_contract
 from hl_observer.fees.hyperliquid_fees import nos_frais
 
 SCHEMA_VERSION = "hypersmart.lead_lag_queue_replay.v1"
@@ -267,7 +273,10 @@ def _economic_row(
     quantity = float(paper_order_qty)
     entry_notional = quantity * entry_price
     exit_notional = quantity * exit_price
-    gross_pnl = float(direction) * (exit_mid - entry_mid) * quantity
+    # A passive fill captures the entry-side spread.  Treat that measured
+    # execution benefit as part of gross PnL so every cost receipt remains a
+    # non-negative cost; the taker exit spread is then charged explicitly.
+    gross_pnl = float(direction) * (exit_mid - entry_price) * quantity
     executable_before_fees = float(direction) * (exit_price - entry_price) * quantity
     spread_cost = gross_pnl - executable_before_fees
     fees = nos_frais("perp")
@@ -450,10 +459,30 @@ def _replay_one(
     )
 
 
-def _assign_shock_segments(shocks: list[dict[str, Any]]) -> None:
+def _assign_shock_segments(
+    shocks: list[dict[str, Any]],
+    segment_bounds: Mapping[str, tuple[int | None, int | None]] | None = None,
+) -> None:
     """Freeze chronological segments before knowing which orders fill."""
 
     shocks.sort(key=lambda row: int(row["trigger_ts_ms"]))
+    if segment_bounds is not None:
+        for row in shocks:
+            timestamp = int(row["trigger_ts_ms"])
+            matches = [
+                str(segment)
+                for segment, bounds in segment_bounds.items()
+                if bounds is not None
+                and len(bounds) == 2
+                and bounds[0] is not None
+                and bounds[1] is not None
+                and int(bounds[0]) <= timestamp <= int(bounds[1])
+            ]
+            if len(matches) > 1:
+                raise ValueError("OVERLAPPING_EXPLICIT_SEGMENT_BOUNDS")
+            row["walk_forward_segment"] = matches[0] if matches else "excluded"
+        return
+
     count = len(shocks)
     train_end = int(count * 0.60)
     validation_end = int(count * 0.80)
@@ -496,6 +525,7 @@ def replay_lead_lag_queue_maker(
     hold_ms: int = HOLD_MS,
     notional_usd: float = NOTIONAL_USD,
     max_book_delay_ms: int = MAX_BOOK_DELAY_MS,
+    segment_bounds: Mapping[str, tuple[int | None, int | None]] | None = None,
 ) -> dict[str, Any]:
     """Replay the immutable maker hypothesis and its same-time placebo."""
 
@@ -510,7 +540,13 @@ def replay_lead_lag_queue_maker(
         threshold_bps=shock_threshold_bps,
         cooldown_ms=shock_cooldown_ms,
     )
-    _assign_shock_segments(shocks)
+    _assign_shock_segments(shocks, segment_bounds)
+    if segment_bounds is not None:
+        shocks = [
+            shock
+            for shock in shocks
+            if shock.get("walk_forward_segment") != "excluded"
+        ]
     books = sorted(
         [dict(row) for row in l2_history.get(selected_coin, ())],
         key=lambda row: int(row.get("ts_ms") or 0),
@@ -577,13 +613,13 @@ def replay_lead_lag_queue_maker(
         segment: _summary(
             [row for row in rows if row.get("walk_forward_segment") == segment]
         )
-        for segment in ("train", "validation", "oos")
+        for segment in ("train", "validation", "oos", "forward")
     }
     placebo_summaries = {
         segment: _summary(
             [row for row in placebo_rows if row.get("walk_forward_segment") == segment]
         )
-        for segment in ("train", "validation", "oos")
+        for segment in ("train", "validation", "oos", "forward")
     }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -607,6 +643,14 @@ def replay_lead_lag_queue_maker(
         "latency_evidence": dict(latency_evidence),
         "latency_measured": measured,
         "applied_latency_ms": applied_latency,
+        "segment_bounds": (
+            {
+                str(name): list(bounds)
+                for name, bounds in segment_bounds.items()
+            }
+            if segment_bounds is not None
+            else None
+        ),
         "diagnostics": diagnostics,
         "data_sources": {
             "lead": "recorded Binance public trades",
@@ -621,8 +665,225 @@ def replay_lead_lag_queue_maker(
     }
 
 
+def _valid_sha256(value: object) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
+
+
+def _validate_frozen_maker(
+    frozen_parameters: Mapping[str, Any], *, frozen_at_ms: int
+) -> float:
+    signature = maker_protocol_signature()
+    if any(frozen_parameters.get(key) != value for key, value in signature.items()):
+        raise ValueError("FROZEN_MAKER_PROTOCOL_MISMATCH")
+    if frozen_parameters.get("training_selection_eligible") is not True:
+        raise ValueError("TRAINING_SELECTION_NOT_ELIGIBLE")
+    selection_cutoff = _number(frozen_parameters.get("selection_cutoff_ms"))
+    if (
+        selection_cutoff is None
+        or selection_cutoff <= 0
+        or selection_cutoff >= int(frozen_at_ms)
+    ):
+        raise ValueError("INVALID_SELECTION_CUTOFF")
+    train_ranges = frozen_parameters.get("train_ranges")
+    if not isinstance(train_ranges, Sequence) or not train_ranges:
+        raise ValueError("INVALID_TRAIN_RANGES")
+    for bounds in train_ranges:
+        if (
+            not isinstance(bounds, Sequence)
+            or len(bounds) != 2
+            or _number(bounds[0]) is None
+            or _number(bounds[1]) is None
+            or float(bounds[0]) > float(bounds[1])
+            or float(bounds[1]) > selection_cutoff
+        ):
+            raise ValueError("INVALID_TRAIN_RANGES")
+    for key in (
+        "latency_evidence_sha256",
+        "training_selection_evidence_sha256",
+    ):
+        if not _valid_sha256(frozen_parameters.get(key)):
+            raise ValueError("INVALID_FROZEN_EVIDENCE_HASH")
+    latency = _number(frozen_parameters.get("applied_latency_ms"))
+    if latency is None or latency < 0:
+        raise ValueError("INVALID_FROZEN_LATENCY")
+    return float(latency)
+
+
+def _maker_cost_receipts(
+    row: Mapping[str, Any], *, reality_model_version: str
+) -> dict[str, dict[str, Any]]:
+    fees = float(row.get("fees_usd") or 0.0)
+    spread = float(row.get("spread_cost_usd") or 0.0)
+    slippage = float(row.get("slippage_cost_usd") or 0.0)
+    latency = float(row.get("latency_cost_usd") or 0.0)
+    return {
+        "fees": CostComponentReceipt(
+            component="fees",
+            amount_usd=fees,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if fees == 0.0 else None,
+            formula_id="lead_lag.maker_entry_taker_exit_fee.v1",
+            reality_model_version=reality_model_version,
+            provenance_ids=(
+                "fee.maker.hyperliquid.bps",
+                "fee.taker.hyperliquid.bps",
+                "lead_lag.paper_notional_usd",
+            ),
+        ).as_dict(),
+        "spread": CostComponentReceipt(
+            component="spread",
+            amount_usd=spread,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if spread == 0.0 else None,
+            formula_id="lead_lag.maker_entry_taker_exit_spread.v1",
+            reality_model_version=reality_model_version,
+            provenance_ids=("entry_book.bid_ask", "exit_book.bid_ask"),
+        ).as_dict(),
+        "slippage": CostComponentReceipt(
+            component="slippage",
+            amount_usd=slippage,
+            zero_reason=ZeroCostReason.MEASURED_ZERO if slippage == 0.0 else None,
+            formula_id="lead_lag.full_fifo_and_top_capacity.v1",
+            reality_model_version=reality_model_version,
+            provenance_ids=(
+                "initial_qty_ahead",
+                "queue_traded_qty",
+                "exit_top_capacity_usd",
+            ),
+        ).as_dict(),
+        "latency": CostComponentReceipt(
+            component="latency",
+            amount_usd=latency,
+            zero_reason=(
+                ZeroCostReason.EMBEDDED_IN_EXECUTABLE_PRICE
+                if latency == 0.0
+                else None
+            ),
+            formula_id="lead_lag.frozen_measured_p95_entry.v1",
+            reality_model_version=reality_model_version,
+            provenance_ids=("latency_evidence_sha256", "entry_book_ts_ms"),
+        ).as_dict(),
+    }
+
+
+def evaluate_frozen_maker(
+    tape: Mapping[str, Mapping[str, list]],
+    l2_history: Mapping[str, Sequence[Mapping[str, Any]]],
+    public_trade_history: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    frozen_parameters: Mapping[str, Any],
+    frozen_at_ms: int,
+    evaluated_at_ms: int,
+    economic_mode: EconomicRunMode | str = EconomicRunMode.CERTIFIABLE,
+) -> dict[str, Any]:
+    """Evaluate only complete UTC days strictly after a valid maker freeze."""
+
+    applied_latency = _validate_frozen_maker(
+        frozen_parameters, frozen_at_ms=int(frozen_at_ms)
+    )
+    proof_window = post_freeze_proof_window(
+        frozen_at_ms=int(frozen_at_ms), evaluated_at_ms=int(evaluated_at_ms)
+    )
+    segment_bounds = {
+        "train": (None, None),
+        "validation": (None, None),
+        **dict(proof_window["segments"]),
+    }
+    replay = replay_lead_lag_queue_maker(
+        tape,
+        l2_history,
+        public_trade_history,
+        latency_evidence={
+            "measured": True,
+            "p95_ms": applied_latency,
+            "sha256": frozen_parameters["latency_evidence_sha256"],
+            "frozen": True,
+        },
+        coin=str(frozen_parameters["coin"]),
+        shock_window_ms=int(frozen_parameters["shock_window_ms"]),
+        shock_threshold_bps=float(frozen_parameters["shock_threshold_bps"]),
+        shock_cooldown_ms=int(frozen_parameters["shock_cooldown_ms"]),
+        maker_lifetime_ms=int(frozen_parameters["maker_lifetime_ms"]),
+        hold_ms=int(frozen_parameters["hold_ms"]),
+        notional_usd=float(frozen_parameters["notional_usd"]),
+        max_book_delay_ms=int(frozen_parameters["max_book_age_or_delay_ms"]),
+        segment_bounds=segment_bounds,
+    )
+    contract = build_lead_lag_maker_contract(
+        mode=economic_mode,
+        notional_usd=float(frozen_parameters["notional_usd"]),
+        max_book_age_ms=float(frozen_parameters["max_book_age_or_delay_ms"]),
+    )
+    economic_receipt = contract.receipt()
+    rows: list[dict[str, Any]] = []
+    for raw in replay["maker_queue_candidates"]:
+        row = dict(raw)
+        row["assumption_snapshot_hash"] = contract.registry.snapshot_hash()
+        row["economic_contract"] = economic_receipt
+        row["cost_component_receipts"] = _maker_cost_receipts(
+            row, reality_model_version=contract.reality_model_version
+        )
+        rows.append(row)
+
+    summaries = {
+        segment: _summary(
+            [row for row in rows if row.get("walk_forward_segment") == segment]
+        )
+        for segment in ("oos", "forward")
+    }
+    placebo_rows = list(replay["placebo_candidates"])
+    placebo_oos = _summary(
+        [row for row in placebo_rows if row.get("walk_forward_segment") == "oos"]
+    )
+    oos_net = summaries["oos"]["net_pnl_usd"]
+    forward_net = summaries["forward"]["net_pnl_usd"]
+    temporal_evidence = {
+        "oos": {
+            **summaries["oos"],
+            "no_lookahead": True,
+            "purged": True,
+        },
+        "forward": {
+            **summaries["forward"],
+            "post_freeze": all(
+                int(row["trigger_ts_ms"]) > int(frozen_at_ms)
+                for row in rows
+                if row.get("walk_forward_segment") == "forward"
+            ),
+            "causal_live_only": True,
+        },
+        "placebos": {
+            "candidate_net_usd": oos_net,
+            "placebo_net_usd": placebo_oos["net_pnl_usd"],
+            "beaten": (
+                summaries["oos"]["sample_count"] > 0
+                and placebo_oos["sample_count"] > 0
+                and float(oos_net) > float(placebo_oos["net_pnl_usd"])
+            ),
+            "method": "same_shocks_inverted_direction_full_fifo",
+        },
+    }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "mechanism": replay["mechanism"],
+        "frozen_at_ms": int(frozen_at_ms),
+        "evaluated_at_ms": int(evaluated_at_ms),
+        "frozen_parameters": dict(frozen_parameters),
+        "proof_window": proof_window,
+        "trades": rows,
+        "segment_summaries": summaries,
+        "temporal_evidence": temporal_evidence,
+        "economic_contract": economic_receipt,
+        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
+        "diagnostics": dict(replay["diagnostics"]),
+        "proof_net_pnl_usd": round(float(oos_net) + float(forward_net), 8),
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "detect_rolling_shocks",
+    "evaluate_frozen_maker",
     "maker_protocol_signature",
     "post_freeze_proof_window",
     "replay_lead_lag_queue_maker",

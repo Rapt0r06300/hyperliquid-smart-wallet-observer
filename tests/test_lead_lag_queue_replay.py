@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from hl_observer.backtesting import lead_lag_queue_replay as replay_module
 from hl_observer.backtesting.lead_lag_queue_replay import (
     detect_rolling_shocks,
     replay_lead_lag_queue_maker,
@@ -167,6 +168,8 @@ def test_queue_replay_accounts_exact_fees_and_causal_exit() -> None:
     assert row["entry_price"] == pytest.approx(2_000.0)
     assert row["exit_price"] == pytest.approx(2_010.0)
     assert row["exit_ts_ms"] == 7_300
+    assert row["gross_pnl_usd"] == pytest.approx(0.13125)
+    assert row["spread_cost_usd"] == pytest.approx(0.00625)
     assert row["fees_usd"] == pytest.approx(0.01505625)
     assert row["net_pnl_usd"] == pytest.approx(0.10994375)
     assert row["economic_reconciliation_ok"] is True
@@ -220,3 +223,134 @@ def test_segments_are_frozen_on_shocks_before_fill_outcome() -> None:
     assert report["segment_summaries"]["oos"]["sample_count"] == 1
     assert report["forward_status"] == "NOT_STARTED_POST_FREEZE"
     assert report["real_execution"] is False
+
+
+def test_explicit_time_segments_do_not_move_when_future_shocks_are_appended() -> None:
+    initial_tape, initial_books, initial_trades = _positive_scenario(count=5)
+    grown_tape, grown_books, grown_trades = _positive_scenario(count=7)
+    bounds = {
+        "train": (0, 15_000),
+        "validation": (None, None),
+        "oos": (40_000, 49_999),
+        "forward": (None, None),
+    }
+
+    initial = replay_lead_lag_queue_maker(
+        initial_tape,
+        initial_books,
+        initial_trades,
+        latency_evidence={"measured": True, "p95_ms": 100.0},
+        segment_bounds=bounds,
+    )
+    grown = replay_lead_lag_queue_maker(
+        grown_tape,
+        grown_books,
+        grown_trades,
+        latency_evidence={"measured": True, "p95_ms": 100.0},
+        segment_bounds=bounds,
+    )
+
+    initial_segments = {
+        row["trade_id"]: row["walk_forward_segment"]
+        for row in initial["maker_queue_candidates"]
+    }
+    grown_segments = {
+        row["trade_id"]: row["walk_forward_segment"]
+        for row in grown["maker_queue_candidates"]
+        if row["trade_id"] in initial_segments
+    }
+    assert initial_segments == grown_segments
+
+
+def _shift_scenario(delta_ms: int):
+    tape, books, trades = _positive_scenario()
+    tape["ETH"]["TRADE"] = [
+        (timestamp_ns + delta_ms * 1_000_000, price, direction)
+        for timestamp_ns, price, direction in tape["ETH"]["TRADE"]
+    ]
+    for row in [*books["ETH"], *trades["ETH"]]:
+        row["ts_ms"] = int(row["ts_ms"]) + delta_ms
+        row["exchange_ts_ms"] = int(row["exchange_ts_ms"]) + delta_ms
+    return tape, books, trades
+
+
+def test_frozen_maker_uses_first_two_complete_post_freeze_days() -> None:
+    day_ms = 86_400_000
+    first = _shift_scenario(11 * day_ms)
+    second = _shift_scenario(12 * day_ms)
+    tape = {"ETH": {"TRADE": [*first[0]["ETH"]["TRADE"], *second[0]["ETH"]["TRADE"]]}}
+    books = {"ETH": [*first[1]["ETH"], *second[1]["ETH"]]}
+    trades = {"ETH": [*first[2]["ETH"], *second[2]["ETH"]]}
+    frozen = {
+        **replay_module.maker_protocol_signature(),
+        "selection_cutoff_ms": 10 * day_ms,
+        "train_ranges": [[1, 10 * day_ms]],
+        "applied_latency_ms": 100.0,
+        "latency_evidence_sha256": "a" * 64,
+        "training_selection_evidence_sha256": "b" * 64,
+        "training_selection_eligible": True,
+    }
+
+    report = replay_module.evaluate_frozen_maker(
+        tape,
+        books,
+        trades,
+        frozen_parameters=frozen,
+        frozen_at_ms=10 * day_ms + 1,
+        evaluated_at_ms=13 * day_ms + 1,
+    )
+
+    assert report["proof_window"]["complete_days_available"] == 2
+    assert report["temporal_evidence"]["oos"]["sample_count"] == 1
+    assert report["temporal_evidence"]["oos"]["no_lookahead"] is True
+    assert report["temporal_evidence"]["forward"]["sample_count"] == 1
+    assert report["temporal_evidence"]["forward"]["post_freeze"] is True
+    assert {row["walk_forward_segment"] for row in report["trades"]} == {
+        "oos",
+        "forward",
+    }
+    for row in report["trades"]:
+        assert row["economic_contract"]["reality_model_version"] == (
+            "lead_lag_queue_maker_taker.v1"
+        )
+        assert set(row["cost_component_receipts"]) == {
+            "fees",
+            "spread",
+            "slippage",
+            "latency",
+        }
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"execution_model": "legacy-taker"}, "FROZEN_MAKER_PROTOCOL_MISMATCH"),
+        ({"selection_cutoff_ms": 11 * 86_400_000}, "INVALID_SELECTION_CUTOFF"),
+        ({"latency_evidence_sha256": "short"}, "INVALID_FROZEN_EVIDENCE_HASH"),
+        ({"training_selection_eligible": False}, "TRAINING_SELECTION_NOT_ELIGIBLE"),
+    ],
+)
+def test_frozen_maker_fails_closed_on_invalid_freeze(
+    override: dict[str, object], message: str
+) -> None:
+    day_ms = 86_400_000
+    frozen = {
+        **replay_module.maker_protocol_signature(),
+        "selection_cutoff_ms": 10 * day_ms,
+        "train_ranges": [[1, 10 * day_ms]],
+        "applied_latency_ms": 100.0,
+        "latency_evidence_sha256": "a" * 64,
+        "training_selection_evidence_sha256": "b" * 64,
+        "training_selection_eligible": True,
+        **override,
+    }
+
+    with pytest.raises(ValueError, match=message):
+        replay_module.evaluate_frozen_maker(
+            {"ETH": {"TRADE": []}},
+            {"ETH": []},
+            {"ETH": []},
+            frozen_parameters=frozen,
+            frozen_at_ms=10 * day_ms + 1,
+            evaluated_at_ms=13 * day_ms + 1,
+        )

@@ -392,7 +392,6 @@ def load_train_public_trade_history(
     after_ms: int = 17_000,
 ) -> tuple[
     dict[str, list[dict[str, Any]]],
-    dict[str, list[dict[str, Any]]],
     dict[str, Any],
 ]:
     """Backward-compatible trade-only view of the TRAIN-clamped loader."""

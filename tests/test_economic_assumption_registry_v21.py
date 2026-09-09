@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import pytest
 
+from hl_observer.config import frais_venues as frais_module
 from hl_observer.config.frais_venues import hypothese_frais_taker
 from hl_observer.economics.assumptions import (
     AssumptionClassification,
@@ -14,6 +15,7 @@ from hl_observer.economics.assumptions import (
     ZeroCostReason,
     make_assumption,
 )
+from hl_observer.economics import families as family_module
 from hl_observer.economics.families import (
     build_copy_vault_contract,
     build_cross_venue_contract,
@@ -101,9 +103,34 @@ def test_copy_contract_declares_observed_l2_vwap_execution() -> None:
         "entry_top_price",
         "exit_top_price",
         "exact_l2_vwap_observed",
-    }.issubset(
-        receipt["direct_measured_fields"]
+    }.issubset(receipt["direct_measured_fields"])
+
+
+def test_lead_lag_maker_contract_charges_one_maker_and_one_taker_fill() -> None:
+    maker_fee = frais_module.hypothese_frais_maker(
+        "HYPERLIQUID", mode=EconomicRunMode.CERTIFIABLE
     )
+    contract = family_module.build_lead_lag_maker_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=25.0,
+        max_book_age_ms=750.0,
+    )
+    receipt = contract.receipt()
+
+    assert maker_fee.value == 1.5
+    assert contract.registry.get("lead_lag.maker_round_trip_fee_bps").value == 6.0
+    assert receipt["certification"]["ready"] is True
+    assert receipt["reality_model_version"] == "lead_lag_queue_maker_taker.v1"
+    assert receipt["reality_model_components"]["fee_treatment"] == (
+        "lead_lag.maker_entry_taker_exit_fee.v1"
+    )
+    assert {
+        "initial_qty_ahead",
+        "paper_order_qty",
+        "queue_traded_qty",
+        "entry_price",
+        "exit_price",
+    }.issubset(receipt["direct_measured_fields"])
 
 
 def test_override_explicite_invalide_echoue_en_certifiable(monkeypatch) -> None:

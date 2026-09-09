@@ -25,6 +25,11 @@ DEFAUTS_TAKER_BPS: dict[str, float] = {
     "BINANCE": 5.0,
 }
 
+#: Défauts maker (bps). Même règle de provenance que les frais taker.
+DEFAUTS_MAKER_BPS: dict[str, float] = {
+    "HYPERLIQUID": 1.5,
+}
+
 _ALIAS = {
     "HL": "HYPERLIQUID", "HYPERLIQUID": "HYPERLIQUID", "HYPER": "HYPERLIQUID",
     "BIN": "BINANCE", "BINANCE": "BINANCE",
@@ -38,6 +43,13 @@ _SOURCE_REF = {
     "BINANCE": (
         "https://www.binance.com/en-AU/support/faq/detail/360033544231"
         "#regular-user-usds-m-taker-read-2026-09-09"
+    ),
+}
+
+_MAKER_SOURCE_REF = {
+    "HYPERLIQUID": (
+        "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees"
+        "#perps-tier-0-maker-read-2026-09-09"
     ),
 }
 
@@ -178,6 +190,84 @@ def hypothese_frais_taker(
     )
 
 
+def hypothese_frais_maker(
+    venue: object,
+    *,
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+) -> EconomicAssumption:
+    """Resolve a maker fee with explicit, certifiable provenance."""
+
+    certifiable = is_certifiable_mode(mode)
+    v = _ALIAS.get(str(venue or "").strip().upper())
+    if v not in DEFAUTS_MAKER_BPS:
+        if certifiable:
+            raise EconomicConfigError(
+                f"venue de frais maker inconnue: {venue!r}",
+                field=str(venue),
+            )
+        v = "HYPERLIQUID"
+        eligible = False
+        reason = f"UNKNOWN_MAKER_VENUE:{venue!r}"
+    else:
+        eligible = True
+        reason = "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT"
+
+    env_key = f"HYPERSMART_FEE_{v}_MAKER_BPS"
+    raw = os.environ.get(env_key)
+    if raw is not None:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError, OverflowError) as exc:
+            if certifiable:
+                raise EconomicConfigError(
+                    f"{env_key} invalide: {raw!r}", field=env_key
+                ) from exc
+            value = DEFAUTS_MAKER_BPS[v]
+            eligible = False
+            reason = f"INVALID_EXPLICIT_OVERRIDE:{env_key}"
+        else:
+            if not math.isfinite(value) or value < 0.0:
+                if certifiable:
+                    raise EconomicConfigError(
+                        f"{env_key} doit etre un nombre fini positif ou nul",
+                        field=env_key,
+                    )
+                value = DEFAUTS_MAKER_BPS[v]
+                eligible = False
+                reason = f"INVALID_EXPLICIT_OVERRIDE:{env_key}"
+            else:
+                return make_assumption(
+                    assumption_id=f"fee.maker.{v.lower()}.bps",
+                    name=f"Frais maker {v} par fill",
+                    value=value,
+                    unit="bps_per_fill",
+                    family_scope=("LEAD_LAG", "CROSS_VENUE"),
+                    classification=AssumptionClassification.CONFIGURED,
+                    source_ref=f"env:{env_key}",
+                    effective_from="run_bootstrap",
+                    owner="HyperSmart/operator-config",
+                    certification_eligible=True,
+                )
+    else:
+        value = DEFAUTS_MAKER_BPS[v]
+
+    temporal = _SOURCE_TEMPORAL.get(v, {})
+    return make_assumption(
+        assumption_id=f"fee.maker.{v.lower()}.bps",
+        name=f"Frais maker {v} par fill",
+        value=float(value),
+        unit="bps_per_fill",
+        family_scope=("LEAD_LAG", "CROSS_VENUE"),
+        classification=AssumptionClassification.CONSERVATIVE_DEFAULT,
+        source_ref=_MAKER_SOURCE_REF[v],
+        observed_at=temporal.get("observed_at"),
+        revalidate_after=temporal.get("revalidate_after"),
+        fallback_reason=reason,
+        certification_eligible=eligible,
+        owner="HyperSmart/economic-config",
+    )
+
+
 def frais_taker_bps(
     venue: object,
     *,
@@ -196,4 +286,10 @@ def frais_taker_bps(
     )
 
 
-__all__ = ["DEFAUTS_TAKER_BPS", "frais_taker_bps", "hypothese_frais_taker"]
+__all__ = [
+    "DEFAUTS_MAKER_BPS",
+    "DEFAUTS_TAKER_BPS",
+    "frais_taker_bps",
+    "hypothese_frais_maker",
+    "hypothese_frais_taker",
+]

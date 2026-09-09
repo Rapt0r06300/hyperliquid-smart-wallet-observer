@@ -6,7 +6,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from hl_observer.config.frais_venues import hypothese_frais_taker
+from hl_observer.config.frais_venues import (
+    hypothese_frais_maker,
+    hypothese_frais_taker,
+)
 from hl_observer.economics.assumptions import (
     AssumptionClassification,
     EconomicAssumptionRegistry,
@@ -331,6 +334,91 @@ def build_lead_lag_contract(
     )
 
 
+def build_lead_lag_maker_contract(
+    *,
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+    notional_usd: float = 25.0,
+    max_book_age_ms: float = 750.0,
+) -> FamilyEconomicContract:
+    """Economic contract for one passive entry and one taker exit on HL."""
+
+    family = "LEAD_LAG"
+    reality = "lead_lag_queue_maker_taker.v1"
+    registry = EconomicAssumptionRegistry()
+    registry.register(hypothese_frais_maker("HYPERLIQUID", mode=mode))
+    registry.register(hypothese_frais_taker("HYPERLIQUID", mode=mode))
+    registry.register_formula(
+        FormulaDefinition(
+            formula_id="lead_lag.maker_entry_taker_exit_fee.v1",
+            output_assumption_id="lead_lag.maker_round_trip_fee_bps",
+            parent_ids=(
+                "fee.maker.hyperliquid.bps",
+                "fee.taker.hyperliquid.bps",
+            ),
+            expression=(
+                "1*fee.maker.hyperliquid.bps + "
+                "1*fee.taker.hyperliquid.bps"
+            ),
+            unit="bps_round_trip",
+            version="v1",
+            reality_model_version=reality,
+        ),
+        lambda values: float(values["fee.maker.hyperliquid.bps"])
+        + float(values["fee.taker.hyperliquid.bps"]),
+        name="Frais maker entree et taker sortie Lead-Lag",
+        family_scope=(family,),
+    )
+    _register_constant(
+        registry,
+        assumption_id="lead_lag.paper_notional_usd",
+        name="Notionnel paper maker",
+        value=notional_usd,
+        unit="USD",
+        family=family,
+        source_ref="project:backtesting/lead_lag_queue_replay.py#NOTIONAL_USD",
+    )
+    _register_constant(
+        registry,
+        assumption_id="lead_lag.max_book_age_ms",
+        name="Age maximal carnet maker",
+        value=max_book_age_ms,
+        unit="ms",
+        family=family,
+        source_ref="project:backtesting/lead_lag_queue_replay.py#MAX_BOOK_DELAY_MS",
+    )
+    required = (
+        "fee.maker.hyperliquid.bps",
+        "fee.taker.hyperliquid.bps",
+        "lead_lag.maker_round_trip_fee_bps",
+        "lead_lag.paper_notional_usd",
+        "lead_lag.max_book_age_ms",
+    )
+    return FamilyEconomicContract(
+        family=family,
+        run_mode=EconomicRunMode(str(mode).strip().upper()),
+        registry=registry,
+        required_ids=required,
+        direct_measured_fields=(
+            "runtime_latency_p95_ms",
+            "initial_qty_ahead",
+            "paper_order_qty",
+            "queue_traded_qty",
+            "entry_price",
+            "exit_price",
+            "exit_top_capacity_usd",
+        ),
+        reality_model_version=reality,
+        reality_model_components=(
+            ("fee_treatment", "lead_lag.maker_entry_taker_exit_fee.v1"),
+            ("fill_count", "lead_lag.one_maker_one_taker_fill.v1"),
+            ("funding_treatment", "lead_lag.no_funding_settlement_in_closed_cycle.v1"),
+            ("latency_treatment", "lead_lag.frozen_measured_p95_entry.v1"),
+            ("slippage_capacity_treatment", "lead_lag.full_fifo_and_top_capacity.v1"),
+            ("spread_treatment", "lead_lag.maker_entry_taker_exit_prices.v1"),
+        ),
+    )
+
+
 def build_copy_vault_contract(
     *,
     mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
@@ -436,4 +524,5 @@ __all__ = [
     "build_copy_vault_contract",
     "build_cross_venue_contract",
     "build_lead_lag_contract",
+    "build_lead_lag_maker_contract",
 ]
