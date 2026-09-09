@@ -63,8 +63,8 @@ def test_cross_v3_rejoue_impulsion_puis_entree_retardee_et_quatre_fills() -> Non
     assert trade["two_leg"] is True
     assert trade["LIQUIDATABLE_NET"] is True
     assert trade["economic_reconciliation_ok"] is True
-    assert trade["fees_round_trip_bps"] == 18.0
-    assert trade["fees_usd"] == 15.0 * 18.0 / 10_000.0
+    assert trade["fees_round_trip_bps"] == 19.0
+    assert trade["fees_usd"] == 15.0 * 19.0 / 10_000.0
     assert trade["entry_executable_edge_bps"] > FEES_ROUND_TRIP_BPS
     assert trade["real_execution"] is False
 
@@ -108,8 +108,8 @@ def test_cross_v3_accepte_la_source_bbo_atomique_certifiee() -> None:
     assert result["instrument_normalization_verified"] is True
     assert result["cost_contract"] == {
         "fee_bps_hyperliquid_per_fill": 4.5,
-        "fee_bps_binance_per_fill": 4.5,
-        "fees_round_trip_bps": 18.0,
+        "fee_bps_binance_per_fill": 5.0,
+        "fees_round_trip_bps": 19.0,
         "fee_fill_count": 4,
         "spread_embedded_in_executable_prices": True,
         "entry_must_cover_fee_only_burden": True,

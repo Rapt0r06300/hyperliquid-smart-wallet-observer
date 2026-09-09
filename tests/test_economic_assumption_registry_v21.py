@@ -33,8 +33,8 @@ def test_cross_venue_formula_dag_recalcule_tous_les_descendants() -> None:
     registry = contract.registry
     initial_hash = registry.snapshot_hash()
     initial_notional = registry.get("cross_venue.paper_notional_usd").value
-    assert registry.get("cross_venue.round_trip_fee_bps").value == 18.0
-    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 30.0
+    assert registry.get("cross_venue.round_trip_fee_bps").value == 19.0
+    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 31.0
 
     registry.replace_parent(
         make_assumption(
@@ -53,8 +53,8 @@ def test_cross_venue_formula_dag_recalcule_tous_les_descendants() -> None:
         registry.assert_consistent()
 
     registry.recompute_all()
-    assert registry.get("cross_venue.round_trip_fee_bps").value == 21.0
-    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 33.0
+    assert registry.get("cross_venue.round_trip_fee_bps").value == 22.0
+    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 34.0
     assert registry.get("cross_venue.paper_notional_usd").value == initial_notional
     assert registry.snapshot_hash() != initial_hash
     assert registry.require_certifiable(contract.required_ids)["ready"] is True

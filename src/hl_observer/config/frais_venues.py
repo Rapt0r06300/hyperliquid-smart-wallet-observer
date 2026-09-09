@@ -22,7 +22,7 @@ from hl_observer.economics.assumptions import (
 #: Défauts taker (bps). À ajuster au tier réel via env ; NE PAS redéfinir ailleurs.
 DEFAUTS_TAKER_BPS: dict[str, float] = {
     "HYPERLIQUID": 4.5,
-    "BINANCE": 4.5,
+    "BINANCE": 5.0,
 }
 
 _ALIAS = {
@@ -35,7 +35,10 @@ _SOURCE_REF = {
         "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees"
         "#perps-tier-0-read-2026-07-13"
     ),
-    "BINANCE": "project:src/hl_observer/config/frais_venues.py#DEFAUTS_TAKER_BPS",
+    "BINANCE": (
+        "https://www.binance.com/en-AU/support/faq/detail/360033544231"
+        "#regular-user-usds-m-taker-read-2026-09-09"
+    ),
 }
 
 # The external fee page was read on the date already encoded in ``_SOURCE_REF``.
@@ -48,7 +51,8 @@ _SOURCE_TEMPORAL = {
         "revalidate_after": "2026-10-13T00:00:00Z",
     },
     "BINANCE": {
-        "effective_from": "project_source_revision",
+        "observed_at": "2026-09-09T00:00:00Z",
+        "revalidate_after": "2026-12-09T00:00:00Z",
     },
 }
 
