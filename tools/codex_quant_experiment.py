@@ -221,6 +221,10 @@ def run_experiment(
     run_optimizer = optimizer or _default_optimizer()
     run_id = _forced_run_id(spec.experiment_id) if force else spec.experiment_id
     run_dir = result_dir(runtime_root, run_id)
+    if not force and run_dir.exists() and any(run_dir.iterdir()):
+        raise SpecValidationError(
+            "existing experiment directory has no cache entry; refuse to overwrite evidence"
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
     spec_path = run_dir / "EXPERIMENT_SPEC.json"
     detail_path = run_dir / "OPTIMIZER_RESULT.json"
