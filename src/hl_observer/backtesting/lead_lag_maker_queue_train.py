@@ -146,7 +146,7 @@ def evaluate_measured_maker_queue_fill(
             "remaining_queue_ahead_qty": max(
                 0.0, float(queue_ahead_qty) - float(aggressive_qty)
             ),
-            "remaining_order_qty": float(state_qty),
+            "remaining_order_qty": max(0.0, min(float(order_qty), float(state_qty))),
             "fill_ts_ms": fill_ts_ms,
         }
     )

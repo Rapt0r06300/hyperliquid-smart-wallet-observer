@@ -138,6 +138,7 @@ def test_maker_queue_refuse_depletion_sans_flux_agressif_signe() -> None:
     assert decision["status"] == "NOT_FILLED_MEASURED_QUEUE"
     assert decision["queue_ahead_qty"] == 5.0
     assert decision["aggressive_qty_at_level"] == 0.0
+    assert decision["remaining_order_qty"] == 0.25
 
 
 def test_maker_queue_nutilise_jamais_un_trade_avant_observation() -> None:
