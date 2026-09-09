@@ -37,7 +37,10 @@ VERDICTS = frozenset({"REJECT", "ITERATE", "FREEZE_CANDIDATE", "BLOCKED"})
 _EXPERIMENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _HYPOTHESIS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-_EVALUATOR_RE = re.compile(r"^(hl_observer(?:\.[A-Za-z_][A-Za-z0-9_]*)*|tools(?:\.[A-Za-z_][A-Za-z0-9_]*)*):([A-Za-z_][A-Za-z0-9_]*)$")
+_EVALUATOR_RE = re.compile(
+    r"^(hl_observer(?:\.[A-Za-z_][A-Za-z0-9_]*)*|"
+    r"tools(?:\.[A-Za-z_][A-Za-z0-9_]*)*):([A-Za-z_][A-Za-z0-9_]*)$"
+)
 
 
 class SpecValidationError(ValueError):
@@ -106,7 +109,9 @@ def _validate_search_space(value: Any) -> dict[str, Any]:
             if upper < lower:
                 raise SpecValidationError(f"search_space.{name}.max must be >= min")
             continue
-        raise SpecValidationError(f"search_space.{name} must be a categorical list or min/max range")
+        raise SpecValidationError(
+            f"search_space.{name} must be a categorical list or min/max range"
+        )
     return space
 
 
@@ -116,7 +121,9 @@ def _validate_budget(value: Any) -> dict[str, Any]:
     if not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 1_000_000:
         raise SpecValidationError("budget.max_trials must be an integer in [1, 1000000]")
     wall = budget.get("max_wall_seconds")
-    if wall is not None and (not isinstance(wall, (int, float)) or isinstance(wall, bool) or wall <= 0):
+    if wall is not None and (
+        not isinstance(wall, (int, float)) or isinstance(wall, bool) or wall <= 0
+    ):
         raise SpecValidationError("budget.max_wall_seconds must be positive when provided")
     return budget
 
@@ -199,7 +206,9 @@ class ExperimentSpec:
 
         evaluator = payload["evaluator"]
         if not isinstance(evaluator, str) or not _EVALUATOR_RE.fullmatch(evaluator):
-            raise SpecValidationError("evaluator must be project-local module:function under hl_observer.* or tools.*")
+            raise SpecValidationError(
+                "evaluator must be project-local module:function under hl_observer.* or tools.*"
+            )
 
         engine = payload["engine"]
         if engine not in ENGINES:
@@ -253,7 +262,11 @@ class ExperimentSpec:
         }
 
     def scientific_payload(self) -> dict[str, Any]:
-        """Return every input that can change the numerical/scientific outcome."""
+        """Return every input that can change the numerical/scientific outcome.
+
+        Human labels (`experiment_id`) and notes (`metadata`) are intentionally excluded from
+        cache identity. Engine and trial budget are included because they change sampled candidates.
+        """
         return {
             "schema_version": self.schema_version,
             "family": self.family,
