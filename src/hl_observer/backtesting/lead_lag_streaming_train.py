@@ -320,20 +320,23 @@ def evaluate_streaming_threshold_feasibility(
     del budget
     experiment_context = dict(context or {})
     signature = str(experiment_context.get("signature") or "")
-    manifest = immutable_aligned_source_manifest(Path.cwd())
-    if manifest["data_fingerprint"] != experiment_context.get("data_fingerprint"):
-        raise ValueError("immutable TRAIN source fingerprint differs from experiment spec")
-    if manifest["data_cutoff_utc"] != experiment_context.get("data_cutoff_utc"):
-        raise ValueError("immutable TRAIN cutoff differs from experiment spec")
     if signature not in _FEASIBILITY_CACHE:
-        _FEASIBILITY_CACHE[signature] = scan_lead_shock_thresholds(
+        manifest = immutable_aligned_source_manifest(Path.cwd())
+        if manifest["data_fingerprint"] != experiment_context.get("data_fingerprint"):
+            raise ValueError("immutable TRAIN source fingerprint differs from experiment spec")
+        if manifest["data_cutoff_utc"] != experiment_context.get("data_cutoff_utc"):
+            raise ValueError("immutable TRAIN cutoff differs from experiment spec")
+        scan = scan_lead_shock_thresholds(
             Path.cwd(),
             manifest["source_paths"],
             market_windows=manifest["market_windows"],
             thresholds_bps=THRESHOLD_GRID_BPS,
             cutoff_ms=int(manifest["cutoff_ms"]),
         )
-    scan = _FEASIBILITY_CACHE[signature]
+        _FEASIBILITY_CACHE[signature] = {"manifest": manifest, "scan": scan}
+    cached = _FEASIBILITY_CACHE[signature]
+    manifest = cached["manifest"]
+    scan = cached["scan"]
     threshold = float(params.get("threshold_bps") or 0.0)
     threshold_row = dict(scan["thresholds"].get(_threshold_key(threshold)) or {})
     return {

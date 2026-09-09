@@ -115,13 +115,14 @@ def test_experiment_evaluator_scans_once_and_never_labels_pnl(monkeypatch, tmp_p
         "source_bytes": 42,
     }
     calls = {"count": 0}
+    manifest_calls = {"count": 0}
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        streaming_module,
-        "immutable_aligned_source_manifest",
-        lambda _root: manifest,
-    )
+    def fake_manifest(_root):
+        manifest_calls["count"] += 1
+        return manifest
+
+    monkeypatch.setattr(streaming_module, "immutable_aligned_source_manifest", fake_manifest)
 
     def fake_scan(*args, **kwargs):
         calls["count"] += 1
@@ -152,6 +153,7 @@ def test_experiment_evaluator_scans_once_and_never_labels_pnl(monkeypatch, tmp_p
     )
 
     assert calls["count"] == 1
+    assert manifest_calls["count"] == 1
     assert first["shock_count"] == 3
     assert second["shock_count"] == 1
     assert first["net_median_bps"] == 0.0
