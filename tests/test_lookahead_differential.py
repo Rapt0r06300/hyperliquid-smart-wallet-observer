@@ -141,6 +141,11 @@ def test_FUTUR_INVERSE_garde_les_horodatages_et_retourne_les_prix():
     assert prix_faux == prix_vrais[::-1]
 
 
+def test_mode_inconnu_preserve_le_chemin():
+    faux = torturer_les_marks(MARKS, coupure_ts=1000.0, mode="inconnu")
+    assert faux == MARKS
+
+
 def test_la_coupure_par_defaut_est_AVANT_le_premier_signal():
     """Sinon on ne detruirait le futur que d'une PARTIE des candidats -- et on se rassurerait
     a tort sur les autres."""
