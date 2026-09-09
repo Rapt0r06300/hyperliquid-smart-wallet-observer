@@ -1,91 +1,95 @@
 # Codex Goal Runbook — Alina SmartFlow
 
-Ce runbook complète `AGENTS.md`. Il décrit **comment chercher** l'edge sans dicter à Codex une stratégie fixe. Codex doit découvrir lui-même les meilleures hypothèses, expériences, backtests et tests statistiques adaptés aux données observées.
+Ce runbook complète `AGENTS.md`. Il explique **comment chercher** l'edge sans imposer une stratégie fixe. Codex doit découvrir lui-même les mécanismes, expériences, backtests et tests statistiques adaptés aux données.
 
 ## Résultat final
 
-Sur un même état certifié de `main`, obtenir séparément et sans compensation :
+Sur le même SHA certifié de `main`, obtenir séparément et sans compensation :
 
-- `copy_vault >= +4.00 USD NET PROUVÉS` ;
-- `lead_lag >= +4.00 USD NET PROUVÉS` ;
-- `cross_venue_dislocation_v2 >= +4.00 USD NET PROUVÉS`.
+- `copy_vault >= +4.00 USD NET/jour PROUVÉS` ;
+- `lead_lag >= +4.00 USD NET/jour PROUVÉS` ;
+- `cross_venue_dislocation_v2 >= +4.00 USD NET/jour PROUVÉS`.
 
-La gate économique canonique reste la définition exécutable de la réussite. Ne jamais redéfinir le succès, masquer un coût ou affaiblir une gate pour obtenir un PASS.
+La gate économique historique `economic_objective.py` reste la preuve de base. La définition finale du succès est `python tools/run_daily_economic_certification.py .` : base complète + au moins 86 400 secondes de forward strictement post-freeze observé + net forward normalisé >= +4.00 USD/jour pour chacune des trois familles. Durée absente ou non prouvée => `NO_GO`.
 
-## Principe directeur : local-first, information-first
+## Règle principale : conserver les tours modèle, pas le CPU
 
-Le quota modèle doit servir principalement à **choisir les expériences qui valent la peine**. Le calcul doit être déporté vers le PC autant que possible.
+Le quota GPT doit servir surtout à **choisir les expériences à forte valeur d'information, interpréter les résumés et décider la suite**. Tout calcul que le PC peut faire doit être exécuté localement : Python, numpy/scipy, pytest, replays, backtests, optimisations, bootstrap, permutations, Monte-Carlo, CPCV/CSCV, PBO, DSR/PSR, stress tests, profiling, agrégations et comparaisons.
 
-Avant toute recherche externe : inspecter le HEAD, les preuves récentes utiles, les données et scripts locaux concernés. Utiliser Python, pytest, replays, backtests, scripts de recherche, caches et artefacts locaux pour tester les hypothèses. Ne demander au modèle ni de lire ni de recopier d'énormes logs si un script peut les agréger en quelques métriques/JSON.
+Un calcul local peut prendre longtemps et utiliser fortement le CPU si l'expérience est bien conçue. Ne pas découper un calcul déterministe en dizaines de conversations Codex. Préférer **1 décision modèle -> gros batch local -> 1 résumé compact -> 1 nouvelle décision**.
 
-Travailler sur **une famille et un goulot principal à la fois**. Choisir l'expérience ayant le meilleur gain d'information attendu, pas celle qui produit le plus de runs.
+Le runner standard est CPU-first : `tools/codex_quant_experiment.py` masque CUDA/ROCm/HIP/JAX GPU et expose `ALINA_CPU_WORKERS`. Le GPU n'est pas interdit partout, mais il n'est jamais le choix par défaut ; ne l'utiliser hors runner que si le gain est réellement nécessaire et documenté.
 
-Boucle normale :
+Le parallélisme local est autorisé : threads, multiprocessing, batchs, workers CPU, vectorisation et jobs locaux ne sont **pas** des sous-agents. Éviter seulement l'oversubscription inutile ; mesurer avant de multiplier des processus qui utilisent chacun tous les cœurs.
 
-`preuve actuelle -> diagnostic -> hypothèse causale -> test train ciblé -> sensibilité/stabilité -> freeze -> OOS/walk-forward -> forward post-freeze -> stress/placebos -> certification ou rejet`.
+## Boucle Codex Quant locale
 
-Codex choisit lui-même les tests et peut en inventer/implémenter de nouveaux s'ils sont justifiés. La batterie ci-dessous est un **menu**, jamais une checklist aveugle.
+Utiliser en priorité `$alina-quant-research`.
 
-## Boucle locale Codex Quant V2
+Pour une seule campagne :
 
-Pour une campagne comportant plusieurs essais, utiliser en priorité le skill repo-local `$alina-quant-research`.
+`EXPERIMENT_SPEC.json -> python tools/codex_quant_experiment.py <spec> -> RESULT_SUMMARY.json`
 
-1. Choisir une hypothèse falsifiable et un évaluateur projet.
-2. Écrire un petit `EXPERIMENT_SPEC.json` selon `.agents/skills/alina-quant-research/references/experiment-spec.md`.
-3. Lancer localement `python tools/codex_quant_experiment.py <spec>`.
-4. Le runner réutilise `tools/outils_recherche.py` pour grid/random/QMC/TPE/CMA-ES/NSGA-II/Successive-Halving/Hyperband ; il ne réimplémente pas ces moteurs.
-5. Lire **d'abord uniquement** `RESULT_SUMMARY.json`. Ouvrir `OPTIMIZER_RESULT.json`, SQLite ou les logs seulement pour une anomalie/question précise.
-6. Une signature scientifique déjà terminée revient du cache au lieu de relancer les mêmes trials. `--force` exige une raison et ne rend jamais des données déjà vues « fraîches ».
-7. `runtime/codex_goal_state.json` sert uniquement d'état de reprise compact ; ce n'est pas une preuve économique.
+Pour plusieurs expériences déjà décidées :
 
-Le runner refuse un `base_sha` obsolète et n'écrase pas un répertoire d'expérience existant non réconcilié. Une infrastructure de recherche ne peut jamais s'auto-déclarer certifiée : la gate économique canonique reste souveraine.
+`BATCH_SPEC.json -> python tools/codex_quant_batch.py <batch> -> BATCH_SUMMARY.json`
+
+Le batch runner exécute toutes les expériences déclarées localement avant de revenir au modèle : **0 round-trip modèle à l'intérieur du batch**. Il les orchestre séquentiellement par défaut car chaque recherche peut déjà utiliser le CPU disponible ; Codex peut construire des scripts locaux parallèles plus spécialisés si un benchmark montre que c'est plus rapide.
+
+Les expériences réutilisent `tools/outils_recherche.py` : grid, random, QMC, TPE/Optuna, CMA-ES, NSGA-II, Successive-Halving et Hyperband. Une signature scientifique terminée vient du cache au lieu d'être recalculée. `--force` exige une justification et ne crée jamais une nouvelle preuve fraîche par magie.
+
+Toujours lire `RESULT_SUMMARY.json` / `BATCH_SUMMARY.json` en premier. Les trials détaillés, SQLite et gros logs restent sur disque et ne sont ouverts que pour une anomalie précise. Si un output est énorme, écrire un script local qui le réduit avant lecture par le modèle.
+
+## Funnel de recherche quantitative
+
+Codex choisit les méthodes adaptées ; ceci est un menu, pas une checklist obligatoire :
+
+1. **Faisabilité causale/économique** : mécanisme, timestamps, exécution, break-even après coûts.
+2. **Recherche train coarse-to-fine** : TPE/QMC/CMA-ES ou autre moteur adapté ; pruning, Successive-Halving/Hyperband pour tuer tôt les mauvaises régions.
+3. **Robustesse locale** : multi-seed si pertinent, voisinage/plateaux de paramètres, leave-one-coin/vault/regime-out, sous-échantillonnage, perturbations de seuils et coûts.
+4. **Anti-overfit** : purging/embargo, walk-forward, CPCV/CSCV/PBO, PSR/Deflated Sharpe, Reality Check si adapté, block/stationary bootstrap, permutations/placebos/nulls et correction du multiple testing.
+5. **Réalité d'exécution** : fees, bid/ask, profondeur/VWAP, slippage, latence, capacité, fill, stale data, liquidabilité et positions closes.
+6. **Freeze** du candidat sélectionné sans utiliser la future preuve.
+7. **OOS disjoint**, puis **forward strictement post-freeze**.
+8. **Certification quotidienne finale** sur une vraie durée forward mesurée, jamais extrapolée depuis quelques minutes.
+
+Le nombre réel de variantes essayées fait partie de la preuve. Enregistrer aussi les échecs. Chercher des plateaux/stabilité plutôt qu'un pic isolé. Un train excellent ou 10 000 trials ne valent rien sans preuve fraîche.
 
 ## Liberté de stratégie
 
-Codex peut modifier ou remplacer : seuils, fenêtres, filtres, features, scoring, univers, sizing paper, logique d'entrée/sortie, maker/taker paper, collecte, algorithmes, architecture et variantes de modules. Il peut tuer une piste, créer une vNext ou revenir à une solution plus simple si les mesures l'exigent.
+Codex peut modifier ou remplacer tout ce qui est une **hypothèse de recherche** : seuils, fenêtres, features, filtres, scoring, univers, sizing paper, logique entrée/sortie, maker/taker paper, collecteurs, algorithmes, architecture et versions de stratégie. Il peut abandonner une piste, créer une vNext ou revenir à une approche plus simple.
 
-Cette liberté ne s'étend pas aux garanties de preuve/sécurité : paper-only, coûts réalistes, liquidabilité, causalité/no-lookahead, provenance, positions closes, déduplication, OOS, forward post-freeze et contrôles requis restent non négociables.
+Cette liberté ne permet jamais de baisser une gate de sécurité/preuve pour fabriquer un PASS. Paper-only, coûts réalistes, causalité/no-lookahead, provenance, positions closes, identité/déduplication, liquidabilité, OOS, forward post-freeze et durée quotidienne réelle restent non négociables.
 
-Un paramètre peut être retuné après un échec. Mais si une donnée OOS/validation/forward déjà vue influence ce retuning, elle devient exploratoire/train : nouveau freeze puis nouvelle preuve future/disjointe.
+Si OOS/validation/forward déjà observé influence un retuning, ce segment devient exploratoire/train. Il faut alors refreeze puis obtenir une nouvelle preuve temporellement disjointe.
 
-## Recherche quantitative et anti-overfit
+## Recherche externe
 
-Réutiliser les validateurs déjà présents avant de réinventer, notamment `src/hl_observer/backtesting/anti_overfit_gate.py` et `validation_methods.py`.
+Local d'abord. Quand une information absente bloque une nouvelle hypothèse :
 
-Selon le mécanisme, la quantité de données et la dépendance temporelle, Codex peut employer : walk-forward rolling/anchored ; splits temporels purgés et embargo ; CPCV/CSCV et PBO ; PSR/Deflated Sharpe ; White's Reality Check ; stationary/block bootstrap ; intervalles de confiance ; permutations/shuffles/placebos/nulls ; tests de sensibilité ; recherche de plateaux plutôt que pics de paramètres ; stabilité inter-régimes ; stress frais/spread/slippage/latence/profondeur/VWAP/capacité/fill ; sous-échantillonnage/Monte-Carlo ; audits timestamps/causalité/lookahead/provenance ; minimum de trades et longueur de track-record.
+- **Exa + Parallel Search** : microstructure, praticiens, bots/repos comparables, Hyperliquid/perps, exécution et nouvelles pistes ;
+- **Consensus** : littérature scientifique sur microstructure, causalité, validation et multiple testing ;
+- **GitHub** : code/CI/artifacts/repos précis ;
+- **Superpowers** : systematic-debugging, TDD et verification utiles au problème courant.
 
-Le nombre **réel** d'essais fait partie de la preuve. Enregistrer les variantes testées, y compris les échecs, pour que les corrections de multiplicité restent honnêtes. Préférer une recherche coarse-to-fine, successive-halving/pruning ou une exploration guidée par information à un sweep exhaustif aveugle.
-
-Une forte performance train seule ne vaut rien. Une performance sélectionnée après de nombreux essais sans correction de multiplicité ne vaut pas une certification.
-
-## Recherche externe : seulement pour créer de nouvelles hypothèses testables
-
-Quand les données/repo locaux ne suffisent plus à proposer une piste nouvelle :
-
-- **Exa + Parallel Search** : recherches groupées et complémentaires sur microstructure Hyperliquid/perps, smart-money/copy trading, lead-lag, dislocations/arbitrage, coûts d'exécution, repos/bots comparables et retours de praticiens ;
-- **Consensus** : littérature scientifique sur microstructure, causalité, validation, overfitting, multiple testing et méthodes quantitatives ;
-- **GitHub** : état du repo/CI/artifacts et code open source précis lorsqu'il peut produire une hypothèse ou une implémentation mesurable ;
-- **Superpowers** : systematic debugging, TDD et verification quand utiles. Ne jamais utiliser ses workflows qui exigent des sous-agents pour ce Goal.
-
-Ne pas appeler tous les plugins « au cas où ». Définir d'abord la question exacte, lancer le minimum de recherches complémentaires, dédupliquer, extraire quelques hypothèses falsifiables, puis revenir immédiatement aux tests locaux.
+Ne jamais appeler tous les plugins par réflexe. Formuler la question précise, rechercher en batch, dédupliquer, extraire quelques hypothèses falsifiables, puis revenir au PC.
 
 ## Politique quota Plus
 
-Le Goal utilise **un seul agent principal**. Aucun spawn, sous-agent, fan-out ou reviewer-agent.
+**Un seul agent LLM principal.** Aucun sous-agent, spawn, fan-out ou reviewer-agent. Cette règle n'interdit aucun calcul local non-LLM.
 
-- GPT-5.6 Sol **High/Élevé** en continu ; Standard, pas Fast.
-- XHigh/Très élevé est réservé à une phase de Plan explicitement ouverte pour un problème exceptionnellement difficile ; il n'est pas le défaut du Goal.
-- Sorties courtes et machine-readable ; éviter les narrations de commandes.
-- Tests unitaires/ciblés pendant l'itération ; suite globale/CI lourde aux checkpoints utiles.
-- Grouper les lectures indépendantes et limiter les fichiers aux surfaces directement concernées.
-- Ne pas relire l'historique Git, les 775 tâches ou tous les rapports à chaque reprise.
-- Ne jamais relancer un gros run identique si code, données, paramètres et hypothèse n'ont pas changé.
-- Réutiliser les datasets/caches/collecteurs existants et résumer localement les gros outputs avant lecture par le modèle.
+- GPT-5.6 Sol **High/Élevé**, Standard, Fast OFF.
+- XHigh seulement pour une réflexion exceptionnelle réellement difficile, pas pour exécuter/tester.
+- Grouper les lectures et commandes indépendantes.
+- Sorties modèle courtes ; résultats lourds machine-readable sur disque.
+- Pas de relecture systématique des 775 tâches, de l'historique complet ou de tous les rapports.
+- Pas de gros run identique sans changement de code, données, hypothèse ou objectif de reproductibilité.
+- Si 1 000 ou 100 000 calculs peuvent être exécutés par un script local sans décision intermédiaire du modèle, préférer ce script/batch aux 1 000 tours Codex.
 
-Après deux expériences coûteuses consécutives sans information nouvelle, ne pas faire une troisième répétition : reformuler le mécanisme, changer de piste, auditer le pipeline ou rechercher une nouvelle hypothèse. Si seule l'arrivée de nouvelles données/du temps peut fournir la prochaine preuve, conserver un état de reprise précis et arrêter les runs inutiles.
+Le calcul local lui-même ne consomme pas de tokens modèle ; Codex consomme encore du quota pour décider quoi lancer et pour interpréter les résultats. Le but est donc de maximiser la quantité de science locale utile entre deux appels au modèle.
 
 ## Done
 
-DONE uniquement si les trois familles passent séparément la certification économique canonique avec coûts complets, liquidabilité, causalité, OOS, forward post-freeze, placebos/contrôles, provenance et positions closes, puis les gates techniques finales requises sont vertes sur le même SHA de `main`.
+DONE uniquement lorsque `python tools/run_daily_economic_certification.py .` certifie les trois familles séparément à >= +4.00 USD NET/jour avec la preuve complète, puis que les gates techniques finales requises sont vertes sur le même SHA de `main`.
 
-Un rapport, un backtest isolé, un train excellent, un résultat synthétique ou un ancien artifact ne suffit jamais.
+Si la seule chose manquante est du temps/données forward, laisser les collecteurs locaux nécessaires travailler et arrêter les tours modèle inutiles. Un ancien artifact, un résultat synthétique, un train positif ou une extrapolation de courte durée ne vaut jamais certification.
