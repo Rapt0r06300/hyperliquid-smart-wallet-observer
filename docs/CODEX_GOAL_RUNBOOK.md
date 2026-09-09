@@ -26,6 +26,20 @@ Boucle normale :
 
 Codex choisit lui-même les tests et peut en inventer/implémenter de nouveaux s'ils sont justifiés. La batterie ci-dessous est un **menu**, jamais une checklist aveugle.
 
+## Boucle locale Codex Quant V2
+
+Pour une campagne comportant plusieurs essais, utiliser en priorité le skill repo-local `$alina-quant-research`.
+
+1. Choisir une hypothèse falsifiable et un évaluateur projet.
+2. Écrire un petit `EXPERIMENT_SPEC.json` selon `.agents/skills/alina-quant-research/references/experiment-spec.md`.
+3. Lancer localement `python tools/codex_quant_experiment.py <spec>`.
+4. Le runner réutilise `tools/outils_recherche.py` pour grid/random/QMC/TPE/CMA-ES/NSGA-II/Successive-Halving/Hyperband ; il ne réimplémente pas ces moteurs.
+5. Lire **d'abord uniquement** `RESULT_SUMMARY.json`. Ouvrir `OPTIMIZER_RESULT.json`, SQLite ou les logs seulement pour une anomalie/question précise.
+6. Une signature scientifique déjà terminée revient du cache au lieu de relancer les mêmes trials. `--force` exige une raison et ne rend jamais des données déjà vues « fraîches ».
+7. `runtime/codex_goal_state.json` sert uniquement d'état de reprise compact ; ce n'est pas une preuve économique.
+
+Le runner refuse un `base_sha` obsolète et n'écrase pas un répertoire d'expérience existant non réconcilié. Une infrastructure de recherche ne peut jamais s'auto-déclarer certifiée : la gate économique canonique reste souveraine.
+
 ## Liberté de stratégie
 
 Codex peut modifier ou remplacer : seuils, fenêtres, filtres, features, scoring, univers, sizing paper, logique d'entrée/sortie, maker/taker paper, collecte, algorithmes, architecture et variantes de modules. Il peut tuer une piste, créer une vNext ou revenir à une solution plus simple si les mesures l'exigent.
