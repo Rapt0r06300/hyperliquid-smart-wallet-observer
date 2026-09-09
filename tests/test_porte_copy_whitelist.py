@@ -13,12 +13,59 @@ import time
 from pathlib import Path
 
 from hl_observer.signals.porte_copy_whitelist import (
-    AGE_MAX_WHITELIST_H, CHEMIN_WHITELIST, MOTIF_ABSENTE, MOTIF_HORS_LISTE,
-    MOTIF_ILLISIBLE, MOTIF_PERIMEE, MOTIF_SANS_ADRESSE, MOTIF_VIDE,
-    signal_copy_autorise,
+    AGE_MAX_WHITELIST_H, CHEMIN_CERTIFICATION_VNEXT, CHEMIN_WHITELIST,
+    MOTIF_ABSENTE, MOTIF_HORS_LISTE, MOTIF_ILLISIBLE, MOTIF_PERIMEE,
+    MOTIF_SANS_ADRESSE, MOTIF_VIDE, signal_copy_autorise,
 )
+from hl_observer.simulation import vnext_promotion_protocol as protocol
 
 A1, A2 = "0xAAA1", "0xbbb2"
+
+_REQUIRED_PROOFS = (
+    "costs_complete",
+    "liquidability_complete",
+    "provenance_complete",
+    "positions_flat",
+    "economic_reconciliation_ok",
+    "validation_without_recalibration",
+    "temporal_disjointness_ok",
+    "forward_post_freeze_complete",
+    "placebo_complete",
+)
+
+
+def _ecrire_certification_vnext(root: Path):
+    manifest = protocol.build_freeze_manifest(
+        family="copy_vault",
+        freeze_candidate={"variant": "test"},
+        dataset_fingerprint="d" * 64,
+        config={"capital_usd": 1000.0, "paper_read_only": True},
+        frozen_at_ms=1_000,
+    )
+    freeze_hash = str(manifest["freeze_hash"])
+    preuve = {
+        "certification_status": "CERTIFICATION_READY",
+        "freeze_manifest": manifest,
+        "freeze_hash": freeze_hash,
+        "post_freeze_oos_consumed": True,
+        "consumed_freeze_hash": freeze_hash,
+        "paper_read_only": True,
+        "real_execution": False,
+        "frozen_at_ms": 1_000,
+        "temporal_windows": {
+            "validation": {"start_ms": 1_100, "end_ms": 1_200},
+            "oos": {"start_ms": 1_200, "end_ms": 1_300},
+            "forward": {"start_ms": 1_300, "end_ms": 1_400},
+            "placebo": {"start_ms": 1_400, "end_ms": 1_500},
+        },
+        **{field: True for field in _REQUIRED_PROOFS},
+    }
+    p = root / CHEMIN_CERTIFICATION_VNEXT
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        json.dumps({"family": "copy_vault", "vnext_promotion": preuve}),
+        encoding="utf-8",
+    )
 
 
 def _ecrire(root: Path, gardes, genere_ts=None, brut=None):
@@ -29,6 +76,7 @@ def _ecrire(root: Path, gardes, genere_ts=None, brut=None):
     else:
         p.write_text(json.dumps({"genere_ts": genere_ts if genere_ts is not None else time.time(),
                                  "gardes": gardes, "rejetes": 0, "regle": "test"}), encoding="utf-8")
+        _ecrire_certification_vnext(root)
 
 
 # ------------------------------------------------ deny-by-default : chaque etat degrade refuse

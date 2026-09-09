@@ -10,22 +10,30 @@ sélectionne (deny-by-default : peu d'événements → rejeté) dans
 `runtime/data/copy_whitelist.json`.
 
 CE MODULE = la porte qui impose : même si le verrou d'edge s'ouvrait un jour, on ne suit
-QUE des leaders individuellement prouvés. Une whitelist n'invente jamais un edge — elle
-RESTREINT. Les deux verrous sont en SÉRIE, jamais en parallèle.
+QUE des leaders individuellement prouvés ET une campagne Copy-Vault vNext frozen
+explicitement certifiée. La whitelist legacy ne peut plus ouvrir la promotion : elle
+RESTREINT seulement une preuve économique vNext valide.
 
 DENY-BY-DEFAULT ABSOLU : fichier absent, vide, périmé, illisible, signal sans adresse,
-ou leaders hors liste → REFUS motivé. Aucun de ces cas n'est une exception silencieuse.
+leader hors liste, campagne vNext absente/illisible/invalide ou famille différente →
+REFUS motivé. Aucun de ces cas n'est une exception silencieuse.
 """
 from __future__ import annotations
 
 import json
 import time
+from collections.abc import Mapping
 from pathlib import Path
+
+from hl_observer.simulation.vnext_promotion_protocol import validate_certification_entry
 
 #: au-delà, la liste est PÉRIMÉE : un markout mesuré il y a 3 jours ne vaut plus permission
 AGE_MAX_WHITELIST_H = 24.0
 
 CHEMIN_WHITELIST = Path("runtime") / "data" / "copy_whitelist.json"
+CHEMIN_CERTIFICATION_VNEXT = (
+    Path("runtime") / "reports" / "economic_campaigns" / "copy_vault.json"
+)
 
 MOTIF_ABSENTE = "COPY_WHITELIST_ABSENTE"
 MOTIF_ILLISIBLE = "COPY_WHITELIST_ILLISIBLE"
@@ -33,6 +41,7 @@ MOTIF_VIDE = "COPY_WHITELIST_VIDE_VERROUILLEE"
 MOTIF_PERIMEE = "COPY_WHITELIST_PERIMEE"
 MOTIF_SANS_ADRESSE = "COPY_SIGNAL_SANS_ADRESSE"
 MOTIF_HORS_LISTE = "COPY_LEADERS_HORS_WHITELIST"
+MOTIF_CERTIFICATION_VNEXT_INVALIDE = "COPY_CERTIFICATION_VNEXT_ABSENTE_OU_INVALIDE"
 
 
 def charger_whitelist(root: str | Path = ".", *, now: float | None = None) -> dict:
@@ -53,18 +62,43 @@ def charger_whitelist(root: str | Path = ".", *, now: float | None = None) -> di
         str(g.get("adresse") or "").lower() for g in gardes if g.get("adresse")
     )
     if not adresses:
-        # liste vide = verrouillé PAR CONSTRUCTION (aucun leader prouvé -> personne à suivre)
         return {"adresses": frozenset(), "motif_indispo": MOTIF_VIDE}
     return {"adresses": adresses, "motif_indispo": None}
 
 
+def _certification_vnext_copy_valide(root: str | Path) -> bool:
+    """Vérifie la preuve canonique frozen ; toute ambiguïté refuse la promotion."""
+    chemin = Path(root) / CHEMIN_CERTIFICATION_VNEXT
+    try:
+        campagne = json.loads(chemin.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(campagne, Mapping):
+        return False
+    if str(campagne.get("family") or "").strip().lower() != "copy_vault":
+        return False
+    preuve = campagne.get("vnext_promotion")
+    if not isinstance(preuve, Mapping):
+        return False
+    freeze = preuve.get("freeze_manifest")
+    if not isinstance(freeze, Mapping):
+        return False
+    if str(freeze.get("family") or "").strip().lower() != "copy_vault":
+        return False
+    try:
+        return bool(validate_certification_entry(preuve))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
 def signal_copy_autorise(adresses_votantes, root: str | Path = ".", *,
                          now: float | None = None) -> tuple[bool, str | None]:
-    """(autorise, motif_de_refus). TOUS les votants gagnants doivent être whitelistés.
+    """(autorise, motif_de_refus). Whitelist restrictive + preuve vNext obligatoire.
 
-    Pourquoi TOUS et pas « au moins un » : le consensus C14 compte des voix ; si une seule
-    voix vient d'un leader non prouvé, le consensus est contaminé par du bruit contrarien
-    mesuré. On ne moyenne pas un leader prouvé avec un leader réfuté."""
+    TOUS les votants gagnants doivent être whitelistés. Ensuite seulement, la campagne
+    Copy-Vault frozen doit porter une entrée vNext certifiable liée à la même famille.
+    Une whitelist legacy fraîche, même parfaite, n'est donc jamais une autorisation seule.
+    """
     votants = [str(a or "").lower() for a in (adresses_votantes or []) if a]
     if not votants:
         return False, MOTIF_SANS_ADRESSE
@@ -74,9 +108,14 @@ def signal_copy_autorise(adresses_votantes, root: str | Path = ".", *,
     hors = [a for a in votants if a not in wl["adresses"]]
     if hors:
         return False, MOTIF_HORS_LISTE
+    if not _certification_vnext_copy_valide(root):
+        return False, MOTIF_CERTIFICATION_VNEXT_INVALIDE
     return True, None
 
 
-__all__ = ["charger_whitelist", "signal_copy_autorise", "AGE_MAX_WHITELIST_H",
-           "CHEMIN_WHITELIST", "MOTIF_ABSENTE", "MOTIF_ILLISIBLE", "MOTIF_VIDE",
-           "MOTIF_PERIMEE", "MOTIF_SANS_ADRESSE", "MOTIF_HORS_LISTE"]
+__all__ = [
+    "charger_whitelist", "signal_copy_autorise", "AGE_MAX_WHITELIST_H",
+    "CHEMIN_WHITELIST", "CHEMIN_CERTIFICATION_VNEXT", "MOTIF_ABSENTE",
+    "MOTIF_ILLISIBLE", "MOTIF_VIDE", "MOTIF_PERIMEE", "MOTIF_SANS_ADRESSE",
+    "MOTIF_HORS_LISTE", "MOTIF_CERTIFICATION_VNEXT_INVALIDE",
+]
