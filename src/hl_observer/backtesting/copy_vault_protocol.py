@@ -20,6 +20,9 @@ UNBOUND_L2_SOURCE_PROTOCOL = "copy_vault_unbound_ws_l2_v1"
 CHECKPOINT_WRITER_STATE_SCHEMA = "hypersmart.copy_vault_checkpoint_tail.v2"
 CHECKPOINT_INTEGRITY_SCHEMA = "hypersmart.copy_vault_checkpoint_integrity.v1"
 TRAIN_ECONOMIC_GATE_VERSION = "copy_vault_train_economic_gate_v2"
+EXECUTION_PRICING_POLICY = "observed_side_specific_l2_vwap_full_size_v1"
+MIN_COMPLETE_PROOF_DAYS = 2
+POST_FREEZE_PROOF_POLICY = "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
 CHECKPOINT_COLLECTOR_PROTOCOL = (
     f"copy_vault_checkpoint_companion_v2_for_{PROTOCOL_NAME}"
 )
@@ -93,6 +96,9 @@ def protocol_signature() -> dict[str, Any]:
         "calibration_protocol": PROTOCOL_NAME,
         "unbound_l2_source_protocol": UNBOUND_L2_SOURCE_PROTOCOL,
         "train_economic_gate": TRAIN_ECONOMIC_GATE_VERSION,
+        "execution_pricing_policy": EXECUTION_PRICING_POLICY,
+        "minimum_complete_proof_days": MIN_COMPLETE_PROOF_DAYS,
+        "post_freeze_proof_policy": POST_FREEZE_PROOF_POLICY,
         "checkpoint_collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
         "checkpoint_writer_state_schema": CHECKPOINT_WRITER_STATE_SCHEMA,
         "checkpoint_integrity_schema": CHECKPOINT_INTEGRITY_SCHEMA,
@@ -126,14 +132,17 @@ __all__ = [
     "CHECKPOINT_WRITER_STATE_SCHEMA",
     "COPYABLE_ENTRY_ACTIONS",
     "COPY_DELAY_MS",
+    "EXECUTION_PRICING_POLICY",
     "HORIZONS_MS",
     "MAX_OPEN_POSITIONS",
     "MAX_REFERENCE_LAG_MS",
     "MAX_TARGET_LAG_MS",
     "METAORDER_GAP_MS",
+    "MIN_COMPLETE_PROOF_DAYS",
     "MIN_TRAIN_TRADES",
     "NOTIONAL_USD",
     "PROTOCOL_NAME",
+    "POST_FREEZE_PROOF_POLICY",
     "TRAIN_ECONOMIC_GATE_VERSION",
     "TRAIN_FRACTION",
     "UNBOUND_L2_SOURCE_PROTOCOL",

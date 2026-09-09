@@ -175,6 +175,12 @@ def audit_family(
     segment_audits = {
         name: (_aggregate(rows) if rows else None) for name, rows in segment_rows.items()
     }
+    published_daily_evidence = campaign.get("daily_evidence")
+    published_daily_as_of_ms = (
+        _number(published_daily_evidence.get("evaluated_at_ms"))
+        if isinstance(published_daily_evidence, Mapping)
+        else None
+    )
     daily_evidence = evaluate_daily_net(
         [
             {
@@ -186,6 +192,7 @@ def audit_family(
             for row in segment_rows[name]
         ],
         target_net_usd_per_day=TARGET_NET_USD_PER_DAY,
+        as_of_ms=published_daily_as_of_ms,
     )
     segment_id_sets = {
         name: {row["trade_id"] for row in rows} for name, rows in segment_rows.items()
@@ -233,7 +240,7 @@ def audit_family(
 
     objective_input = dict(campaign)
     if campaign.get("daily_target_required") is True:
-        published_daily = campaign.get("daily_evidence")
+        published_daily = published_daily_evidence
         recomputed_daily = (
             daily_evidence if int(daily_evidence.get("sample_count") or 0) > 0 else None
         )

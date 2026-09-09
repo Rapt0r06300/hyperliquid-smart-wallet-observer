@@ -87,7 +87,7 @@ def _trade(
     *,
     assumption_snapshot_hash: str,
 ) -> dict:
-    reality_model_version = "copy_vault_exact_checkpoint_executable_bbo.v2"
+    reality_model_version = "copy_vault_exact_checkpoint_observed_l2_vwap.v3"
     cost_component_receipts = {
         "fees": {
             "component": "fees",

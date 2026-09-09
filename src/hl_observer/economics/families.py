@@ -340,7 +340,7 @@ def build_copy_vault_contract(
     max_target_lag_ms: float,
 ) -> FamilyEconomicContract:
     family = "COPY_VAULT"
-    reality = "copy_vault_exact_checkpoint_executable_bbo.v2"
+    reality = "copy_vault_exact_checkpoint_observed_l2_vwap.v3"
     registry = EconomicAssumptionRegistry()
     registry.register(hypothese_frais_taker("HYPERLIQUID", mode=mode))
     _register_round_trip_fee(
@@ -410,6 +410,11 @@ def build_copy_vault_contract(
             "entry_ask",
             "exit_bid",
             "exit_ask",
+            "entry_price",
+            "exit_price",
+            "entry_top_price",
+            "exit_top_price",
+            "exact_l2_vwap_observed",
         ),
         reality_model_version=reality,
         reality_model_components=(
@@ -419,7 +424,7 @@ def build_copy_vault_contract(
             ("latency_treatment", "copy_vault.adverse_latency.v1"),
             (
                 "slippage_capacity_treatment",
-                "copy_vault.full_top_capacity_or_reject.v1",
+                "copy_vault.observed_side_specific_l2_vwap_full_size.v1",
             ),
             ("spread_treatment", "copy_vault.executable_bid_ask_spread.v1"),
         ),

@@ -15,6 +15,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     evaluate_frozen,
     execute_metaorder,
     load_observed_books,
+    protocol_signature,
     replay_metaorders,
     select_causal_protocol_inputs,
     select_observed_continuations,
@@ -794,6 +795,76 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
         for trade in evaluation["trades"]["forward"]
     )
     assert temporal["placebos"]["beaten"] is True
+
+
+def test_new_proof_policy_uses_only_complete_utc_days_after_freeze(monkeypatch) -> None:
+    day_ms = 86_400_000
+    frozen_at_ms = 1_725_571_200_000 + 12 * 60 * 60 * 1000
+    proof_start_ms = ((frozen_at_ms // day_ms) + 1) * day_ms
+    as_of_ms = proof_start_ms + 2 * day_ms + 12 * 60 * 60 * 1000
+    calls = []
+
+    def recording_replay(*args, start_ms=None, end_ms=None, **kwargs):
+        del args, kwargs
+        calls.append((start_ms, end_ms))
+        return [], {"metaorders_considered": 0, "completed_positions": 0}
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.copy_vault_executable.replay_metaorders",
+        recording_replay,
+    )
+    result = evaluate_frozen(
+        [],
+        {},
+        frozen_parameters={
+            "selected_horizon_ms": 300_000,
+            "walk_forward_bounds": {
+                "train_start_ms": 1,
+                "train_end_ms": 2,
+                "validation_start_ms": 3,
+                "validation_end_ms": 4,
+                "oos_start_ms": 5,
+                "oos_end_ms": 6,
+            },
+            "post_freeze_proof_policy": "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1",
+            "causal_observation_required_all_segments": True,
+        },
+        frozen_at_ms=frozen_at_ms,
+        evaluated_at_ms=as_of_ms,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert calls[:4] == [
+        (1, 2),
+        (3, 4),
+        (proof_start_ms, proof_start_ms + day_ms - 1),
+        (proof_start_ms + day_ms, proof_start_ms + 2 * day_ms - 1),
+    ]
+    assert calls[4] == (proof_start_ms, proof_start_ms + day_ms - 1)
+    assert result["proof_window"] == {
+        "policy": "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1",
+        "frozen_at_ms": frozen_at_ms,
+        "evaluated_at_ms": as_of_ms,
+        "proof_start_ms": proof_start_ms,
+        "completed_cutoff_exclusive_ms": proof_start_ms + 2 * day_ms,
+        "complete_days_available": 2,
+        "oos_day_start_ms": proof_start_ms,
+        "oos_day_end_ms": proof_start_ms + day_ms - 1,
+        "forward_start_ms": proof_start_ms + day_ms,
+        "forward_end_ms": proof_start_ms + 2 * day_ms - 1,
+    }
+
+
+def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> None:
+    signature = protocol_signature()
+
+    assert signature["execution_pricing_policy"] == (
+        "observed_side_specific_l2_vwap_full_size_v1"
+    )
+    assert signature["minimum_complete_proof_days"] == 2
+    assert signature["post_freeze_proof_policy"] == (
+        "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
+    )
 
 
 def test_calibration_uses_candidate_horizon_specific_purge() -> None:

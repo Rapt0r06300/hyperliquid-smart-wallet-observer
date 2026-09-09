@@ -80,6 +80,32 @@ def test_les_trois_familles_partagent_la_meme_autorite_de_frais() -> None:
     assert copy.registry.get("copy_vault.round_trip_fee_bps").value == 9.0
 
 
+def test_copy_contract_declares_observed_l2_vwap_execution() -> None:
+    receipt = build_copy_vault_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=150.0,
+        copy_delay_ms=60_000.0,
+        max_reference_lag_ms=30_000.0,
+        max_target_lag_ms=30_000.0,
+    ).receipt()
+
+    assert receipt["reality_model_version"] == (
+        "copy_vault_exact_checkpoint_observed_l2_vwap.v3"
+    )
+    assert receipt["reality_model_components"]["slippage_capacity_treatment"] == (
+        "copy_vault.observed_side_specific_l2_vwap_full_size.v1"
+    )
+    assert {
+        "entry_price",
+        "exit_price",
+        "entry_top_price",
+        "exit_top_price",
+        "exact_l2_vwap_observed",
+    }.issubset(
+        receipt["direct_measured_fields"]
+    )
+
+
 def test_override_explicite_invalide_echoue_en_certifiable(monkeypatch) -> None:
     monkeypatch.setenv("HYPERSMART_FEE_HYPERLIQUID_BPS", "invalide")
     exploratory = hypothese_frais_taker("HL", mode=EconomicRunMode.EXPLORATORY)

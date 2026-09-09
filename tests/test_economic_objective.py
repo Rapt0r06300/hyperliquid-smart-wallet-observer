@@ -90,6 +90,7 @@ def _proof(**overrides):
         "daily_evidence": {
             "schema_version": "hypersmart.daily_net_evidence.v1",
             "target_net_usd_per_day": 4.0,
+            "complete_utc_days_only": True,
             "sample_count": 2,
             "observed_trade_count": 4,
             "missing_trade_timestamps": 0,
@@ -307,6 +308,29 @@ def test_daily_net_accepts_nanosecond_close_timestamps() -> None:
     assert result["all_days_at_or_above_target"] is False
 
 
+def test_daily_net_excludes_the_open_utc_day_from_proof() -> None:
+    day_ms = 86_400_000
+    day_one = 1_725_580_800_000
+    day_two = day_one + day_ms
+    current_day = day_two + day_ms
+
+    result = evaluate_daily_net(
+        [
+            {"exit_ts_ms": day_one + 1, "net_pnl_usd": 4.1},
+            {"exit_ts_ms": day_two + 1, "net_pnl_usd": 4.2},
+            {"exit_ts_ms": current_day + 1, "net_pnl_usd": -20.0},
+        ],
+        as_of_ms=current_day + 12 * 60 * 60 * 1000,
+    )
+
+    assert result["complete_utc_days_only"] is True
+    assert result["sample_count"] == 2
+    assert result["excluded_incomplete_trade_count"] == 1
+    assert result["excluded_incomplete_days_utc"] == ["2024-09-08"]
+    assert result["min_daily_net_pnl_usd"] == 4.1
+    assert result["all_days_at_or_above_target"] is True
+
+
 def test_daily_target_refuse_une_seule_journee_positive() -> None:
     one_day = {
         **_proof()["daily_evidence"],
@@ -322,6 +346,20 @@ def test_daily_target_refuse_une_seule_journee_positive() -> None:
 
     assert result["objective_status"] == "NON_ATTEINT"
     assert "DAILY_NET_PROOF_TOO_SHORT" in result["objective_reasons"]
+
+
+def test_daily_target_refuses_evidence_that_includes_an_open_utc_day() -> None:
+    result = evaluate_objective(
+        _proof(
+            daily_evidence={
+                **_proof()["daily_evidence"],
+                "complete_utc_days_only": False,
+            }
+        )
+    )
+
+    assert result["objective_status"] == "NON_ATTEINT"
+    assert "DAILY_NET_PROOF_HAS_INCOMPLETE_DAY" in result["objective_reasons"]
 
 
 def test_daily_target_is_a_strict_per_family_gate() -> None:

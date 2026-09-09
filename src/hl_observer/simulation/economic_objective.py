@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Iterable
@@ -44,14 +45,23 @@ def evaluate_daily_net(
     trades: Iterable[Mapping[str, Any]],
     *,
     target_net_usd_per_day: float = TARGET_NET_USD_PER_DAY,
+    as_of_ms: int | float | None = None,
+    complete_utc_days_only: bool = True,
 ) -> dict[str, Any]:
-    """Aggregate supplied closed-trade net PnL by UTC exit day, fail closed."""
+    """Aggregate closed-trade net PnL over completed UTC days, fail closed."""
 
     target = _number(target_net_usd_per_day)
     if target is None:
         raise ValueError("target_net_usd_per_day must be finite")
+    evaluated_at = _number(time.time() * 1000 if as_of_ms is None else as_of_ms)
+    if evaluated_at is None:
+        raise ValueError("as_of_ms must be finite")
+    day_ms = 86_400_000
+    completed_cutoff_exclusive_ms = int(evaluated_at // day_ms) * day_ms
     daily: dict[str, float] = {}
     counts: dict[str, int] = {}
+    excluded_incomplete_trade_count = 0
+    excluded_incomplete_days: set[str] = set()
     missing_trade_timestamps = 0
     missing_trade_net = 0
     observed_trades = 0
@@ -109,6 +119,10 @@ def evaluate_daily_net(
         except (OSError, OverflowError, ValueError):
             missing_trade_timestamps += 1
             continue
+        if complete_utc_days_only and timestamp >= completed_cutoff_exclusive_ms:
+            excluded_incomplete_trade_count += 1
+            excluded_incomplete_days.add(day)
+            continue
         daily[day] = daily.get(day, 0.0) + net
         counts[day] = counts.get(day, 0) + 1
 
@@ -126,6 +140,11 @@ def evaluate_daily_net(
         "schema_version": "hypersmart.daily_net_evidence.v1",
         "target_net_usd_per_day": float(target),
         "minimum_required_days": MIN_PROOF_DAYS,
+        "evaluated_at_ms": int(evaluated_at),
+        "completed_cutoff_exclusive_ms": completed_cutoff_exclusive_ms,
+        "complete_utc_days_only": bool(complete_utc_days_only),
+        "excluded_incomplete_trade_count": excluded_incomplete_trade_count,
+        "excluded_incomplete_days_utc": sorted(excluded_incomplete_days),
         "sample_count": len(values),
         "observed_trade_count": observed_trades,
         "missing_trade_timestamps": missing_trade_timestamps,
@@ -320,11 +339,14 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
             daily_sample_count = _number(daily_evidence.get("sample_count")) or 0
             if daily_sample_count < MIN_PROOF_DAYS:
                 issues.append("DAILY_NET_PROOF_TOO_SHORT")
+            if daily_evidence.get("complete_utc_days_only") is not True:
+                issues.append("DAILY_NET_PROOF_HAS_INCOMPLETE_DAY")
             if not (
                 daily_evidence.get("schema_version")
                 == "hypersmart.daily_net_evidence.v1"
                 and _number(daily_evidence.get("target_net_usd_per_day"))
                 == TARGET_NET_USD_PER_DAY
+                and daily_evidence.get("complete_utc_days_only") is True
                 and daily_sample_count > 0
                 and _number(daily_evidence.get("missing_trade_timestamps")) == 0
                 and _number(daily_evidence.get("missing_trade_net")) == 0

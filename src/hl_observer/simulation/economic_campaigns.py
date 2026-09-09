@@ -190,7 +190,9 @@ def _attach_daily_evidence(
         in {"oos", "forward"}
     ]
     row["daily_target_required"] = bool(require_daily)
-    row["daily_observed"] = evaluate_daily_net(liquidatable)
+    row["daily_observed"] = evaluate_daily_net(
+        liquidatable, complete_utc_days_only=False
+    )
     row["daily_evidence"] = evaluate_daily_net(proof_trades) if proof_trades else None
 
 

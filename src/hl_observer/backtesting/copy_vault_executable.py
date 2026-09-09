@@ -5,6 +5,7 @@ import bisect
 import hashlib
 import json
 import math
+import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -24,6 +25,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     METAORDER_GAP_MS,
     MIN_TRAIN_TRADES,
     NOTIONAL_USD,
+    POST_FREEZE_PROOF_POLICY,
     PROTOCOL_NAME,
     TRAIN_ECONOMIC_GATE_VERSION,
     TRAIN_FRACTION,
@@ -691,6 +693,7 @@ def evaluate_frozen(
     *,
     frozen_parameters: Mapping[str, Any],
     frozen_at_ms: int,
+    evaluated_at_ms: int | None = None,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     contract = build_copy_vault_contract(
@@ -703,12 +706,42 @@ def evaluate_frozen(
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
     horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
     causal_all_segments = frozen_parameters.get("causal_observation_required_all_segments") is True
-    segments = {
-        "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
-        "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
-        "oos": (bounds.get("oos_start_ms"), bounds.get("oos_end_ms")),
-        "forward": (max(int(frozen_at_ms) + 1, int(bounds.get("oos_end_ms") or 0) + 1), None),
-    }
+    proof_policy = str(frozen_parameters.get("post_freeze_proof_policy") or "")
+    proof_window = None
+    if proof_policy == POST_FREEZE_PROOF_POLICY:
+        day_ms = 86_400_000
+        evaluated_at = int(time.time() * 1000) if evaluated_at_ms is None else int(evaluated_at_ms)
+        proof_start = ((int(frozen_at_ms) // day_ms) + 1) * day_ms
+        completed_cutoff = (evaluated_at // day_ms) * day_ms
+        complete_days = max(0, (completed_cutoff - proof_start) // day_ms)
+        oos_end = min(proof_start + day_ms, completed_cutoff) - 1
+        forward_start = proof_start + day_ms
+        forward_end = completed_cutoff - 1
+        segments = {
+            "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
+            "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
+            "oos": (proof_start, oos_end),
+            "forward": (forward_start, forward_end),
+        }
+        proof_window = {
+            "policy": proof_policy,
+            "frozen_at_ms": int(frozen_at_ms),
+            "evaluated_at_ms": evaluated_at,
+            "proof_start_ms": proof_start,
+            "completed_cutoff_exclusive_ms": completed_cutoff,
+            "complete_days_available": complete_days,
+            "oos_day_start_ms": proof_start,
+            "oos_day_end_ms": oos_end,
+            "forward_start_ms": forward_start,
+            "forward_end_ms": forward_end,
+        }
+    else:
+        segments = {
+            "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
+            "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
+            "oos": (bounds.get("oos_start_ms"), bounds.get("oos_end_ms")),
+            "forward": (max(int(frozen_at_ms) + 1, int(bounds.get("oos_end_ms") or 0) + 1), None),
+        }
     result: dict[str, Any] = {
         "horizon_ms": horizon,
         "bounds": bounds,
@@ -717,6 +750,8 @@ def evaluate_frozen(
         "economic_contract": contract.receipt(),
         "assumption_snapshot_hash": contract.registry.snapshot_hash(),
     }
+    if proof_window is not None:
+        result["proof_window"] = proof_window
     all_trades: list[dict[str, Any]] = []
     for name, (start_ms, end_ms) in segments.items():
         trades, diagnostics = replay_metaorders(
@@ -728,9 +763,10 @@ def evaluate_frozen(
         result["trades"][name] = trades
         all_trades.extend(trades)
     result["combined_summary"] = summarize(all_trades)
+    oos_start_ms, oos_end_ms = segments["oos"]
     inverted, inverted_diag = replay_metaorders(
         metaorders, books_by_coin, horizon_ms=horizon,
-        start_ms=bounds.get("oos_start_ms"), end_ms=bounds.get("oos_end_ms"),
+        start_ms=oos_start_ms, end_ms=oos_end_ms,
         direction_multiplier=-1, require_causal_observation=causal_all_segments,
         economic_mode=economic_mode,
     )
