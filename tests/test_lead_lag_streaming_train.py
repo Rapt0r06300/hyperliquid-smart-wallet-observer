@@ -7,7 +7,9 @@ from hl_observer.backtesting import lead_lag_streaming_train as streaming_module
 from hl_observer.backtesting.lead_lag_source_alignment import SourceWindow
 from hl_observer.backtesting.lead_lag_streaming_train import (
     evaluate_streaming_threshold_feasibility,
+    load_pinned_source_manifest,
     scan_lead_shock_thresholds,
+    write_immutable_source_manifest,
 )
 
 
@@ -159,3 +161,53 @@ def test_experiment_evaluator_scans_once_and_never_labels_pnl(monkeypatch, tmp_p
     assert first["net_median_bps"] == 0.0
     assert "net_usd" not in first
     assert first["candidate_verdict"] == "ITERATE"
+
+
+def test_pinned_manifest_survives_new_runtime_shards(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source.jsonl.gz"
+    market = tmp_path / "market.jsonl.gz"
+    source.write_bytes(b"source")
+    market.write_bytes(b"market")
+    source_stat = source.stat()
+    market_stat = market.stat()
+    dynamic = {
+        "schema_version": "hypersmart.lead_lag_streaming_manifest.v1",
+        "data_fingerprint": "sha256:will-be-recomputed",
+        "data_cutoff_utc": "2020-09-13T12:28:20Z",
+        "cutoff_ms": 1_600_000_100_000,
+        "source_count": 1,
+        "source_bytes": source_stat.st_size,
+        "market_window_count": 1,
+        "source_records": [
+            {
+                "path": source.name,
+                "size": source_stat.st_size,
+                "mtime_ns": source_stat.st_mtime_ns,
+            }
+        ],
+        "market_window_records": [
+            {
+                "path": market.name,
+                "start_ms": 1_600_000_000_000,
+                "end_ms": 1_600_000_100_000,
+                "size": market_stat.st_size,
+                "mtime_ns": market_stat.st_mtime_ns,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        streaming_module, "immutable_aligned_source_manifest", lambda _root: dynamic
+    )
+    target = tmp_path / "runtime" / "pinned.json"
+
+    written = write_immutable_source_manifest(tmp_path, target)
+    (tmp_path / "new-shard.jsonl.gz").write_bytes(b"new")
+    loaded = load_pinned_source_manifest(
+        tmp_path,
+        target,
+        expected_manifest_sha256=written["manifest_sha256"],
+    )
+
+    assert loaded["source_paths"] == [source]
+    assert loaded["market_windows"][0].path == market
+    assert loaded["data_fingerprint"].startswith("sha256:")

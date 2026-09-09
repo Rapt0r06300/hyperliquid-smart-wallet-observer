@@ -244,6 +244,20 @@ def _relative(root: Path, path: Path) -> str:
     return path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
 
 
+def _manifest_fingerprint(
+    source_rows: Sequence[dict[str, Any]],
+    window_rows: Sequence[dict[str, Any]],
+) -> str:
+    payload = {
+        "schema_version": "hypersmart.lead_lag_streaming_manifest.v1",
+        "sources": list(source_rows),
+        "market_windows": list(window_rows),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def immutable_aligned_source_manifest(root: str | Path) -> dict[str, Any]:
     """Fingerprint immutable BBO and market-window inputs for one TRAIN scan."""
 
@@ -277,16 +291,8 @@ def immutable_aligned_source_manifest(root: str | Path) -> dict[str, Any]:
                 "mtime_ns": stat.st_mtime_ns,
             }
         )
-    fingerprint_payload = {
-        "schema_version": "hypersmart.lead_lag_streaming_manifest.v1",
-        "sources": source_rows,
-        "market_windows": window_rows,
-    }
-    digest = hashlib.sha256(
-        json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        )
-    ).hexdigest()
+    schema_version = "hypersmart.lead_lag_streaming_manifest.v1"
+    digest = _manifest_fingerprint(source_rows, window_rows)
     cutoff_ms = max((row.end_ms for row in market_windows), default=0)
     cutoff_utc = (
         datetime.fromtimestamp(cutoff_ms / 1000.0, tz=UTC)
@@ -296,7 +302,7 @@ def immutable_aligned_source_manifest(root: str | Path) -> dict[str, Any]:
         else "1970-01-01T00:00:00Z"
     )
     return {
-        "schema_version": fingerprint_payload["schema_version"],
+        "schema_version": schema_version,
         "data_fingerprint": f"sha256:{digest}",
         "data_cutoff_utc": cutoff_utc,
         "cutoff_ms": cutoff_ms,
@@ -304,7 +310,108 @@ def immutable_aligned_source_manifest(root: str | Path) -> dict[str, Any]:
         "source_bytes": sum(int(row["size"]) for row in source_rows),
         "market_window_count": len(market_windows),
         "alignment": alignment,
+        "source_records": source_rows,
+        "market_window_records": window_rows,
         "source_paths": sources,
+        "market_windows": market_windows,
+    }
+
+
+def write_immutable_source_manifest(
+    root: str | Path, target: str | Path
+) -> dict[str, Any]:
+    """Persist the exact immutable inputs before the experiment starts."""
+
+    project_root = Path(root).resolve()
+    manifest = immutable_aligned_source_manifest(project_root)
+    source_rows = list(manifest["source_records"])
+    window_rows = list(manifest["market_window_records"])
+    data_fingerprint = f"sha256:{_manifest_fingerprint(source_rows, window_rows)}"
+    payload = {
+        "schema_version": "hypersmart.lead_lag_streaming_manifest.v1",
+        "data_fingerprint": data_fingerprint,
+        "data_cutoff_utc": manifest["data_cutoff_utc"],
+        "cutoff_ms": manifest["cutoff_ms"],
+        "sources": source_rows,
+        "market_windows": window_rows,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    manifest_sha256 = hashlib.sha256(canonical).hexdigest()
+    path = Path(target)
+    if not path.is_absolute():
+        path = project_root / path
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
+    return {
+        "path": path,
+        "manifest_sha256": manifest_sha256,
+        "data_fingerprint": data_fingerprint,
+        "data_cutoff_utc": manifest["data_cutoff_utc"],
+        "source_count": len(source_rows),
+        "source_bytes": sum(int(row["size"]) for row in source_rows),
+    }
+
+
+def load_pinned_source_manifest(
+    root: str | Path,
+    manifest_path: str | Path,
+    *,
+    expected_manifest_sha256: str,
+) -> dict[str, Any]:
+    """Load and verify the exact immutable manifest named by an experiment spec."""
+
+    project_root = Path(root).resolve()
+    path = Path(manifest_path)
+    if not path.is_absolute():
+        path = project_root / path
+    path = path.resolve()
+    if not path.is_relative_to(project_root):
+        raise ValueError("pinned TRAIN manifest must stay inside the project root")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    actual_manifest_sha256 = hashlib.sha256(canonical).hexdigest()
+    if actual_manifest_sha256 != str(expected_manifest_sha256):
+        raise ValueError("pinned TRAIN manifest hash mismatch")
+    source_rows = list(payload.get("sources") or [])
+    window_rows = list(payload.get("market_windows") or [])
+    expected_fingerprint = f"sha256:{_manifest_fingerprint(source_rows, window_rows)}"
+    if payload.get("data_fingerprint") != expected_fingerprint:
+        raise ValueError("pinned TRAIN data fingerprint mismatch")
+
+    def checked_path(row: dict[str, Any]) -> Path:
+        candidate = (project_root / str(row.get("path") or "")).resolve()
+        if not candidate.is_relative_to(project_root):
+            raise ValueError("pinned TRAIN source escapes project root")
+        stat = candidate.stat()
+        if stat.st_size != int(row.get("size") or -1):
+            raise ValueError(f"pinned TRAIN source size changed: {candidate}")
+        if stat.st_mtime_ns != int(row.get("mtime_ns") or -1):
+            raise ValueError(f"pinned TRAIN source mtime changed: {candidate}")
+        return candidate
+
+    source_paths = [checked_path(row) for row in source_rows]
+    market_windows = [
+        SourceWindow(
+            checked_path(row),
+            int(row["start_ms"]),
+            int(row["end_ms"]),
+        )
+        for row in window_rows
+    ]
+    return {
+        "schema_version": payload.get("schema_version"),
+        "data_fingerprint": expected_fingerprint,
+        "data_cutoff_utc": str(payload.get("data_cutoff_utc") or ""),
+        "cutoff_ms": int(payload.get("cutoff_ms") or 0),
+        "source_count": len(source_paths),
+        "source_bytes": sum(int(row["size"]) for row in source_rows),
+        "market_window_count": len(market_windows),
+        "source_paths": source_paths,
         "market_windows": market_windows,
     }
 
@@ -321,7 +428,18 @@ def evaluate_streaming_threshold_feasibility(
     experiment_context = dict(context or {})
     signature = str(experiment_context.get("signature") or "")
     if signature not in _FEASIBILITY_CACHE:
-        manifest = immutable_aligned_source_manifest(Path.cwd())
+        split_config = dict(experiment_context.get("split_config") or {})
+        pinned_path = split_config.get("pinned_manifest_path")
+        pinned_hash = split_config.get("pinned_manifest_sha256")
+        manifest = (
+            load_pinned_source_manifest(
+                Path.cwd(),
+                str(pinned_path),
+                expected_manifest_sha256=str(pinned_hash or ""),
+            )
+            if pinned_path
+            else immutable_aligned_source_manifest(Path.cwd())
+        )
         if manifest["data_fingerprint"] != experiment_context.get("data_fingerprint"):
             raise ValueError("immutable TRAIN source fingerprint differs from experiment spec")
         if manifest["data_cutoff_utc"] != experiment_context.get("data_cutoff_utc"):
@@ -366,5 +484,7 @@ __all__ = [
     "THRESHOLD_GRID_BPS",
     "evaluate_streaming_threshold_feasibility",
     "immutable_aligned_source_manifest",
+    "load_pinned_source_manifest",
     "scan_lead_shock_thresholds",
+    "write_immutable_source_manifest",
 ]
