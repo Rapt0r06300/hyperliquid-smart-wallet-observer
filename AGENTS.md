@@ -10,7 +10,7 @@ Ordre de priorité en cas de contradiction :
 
 1. code, tests, gates et registres machine du **HEAD exact** ;
 2. `docs/CURRENT_STATE.md` ;
-3. ce fichier et `SECURITY.md` ;
+3. ce fichier, `docs/CODEX_GOAL_RUNBOOK.md` et `SECURITY.md` ;
 4. `docs/LOIS_MESUREES.md` pour les hypothèses déjà tranchées ;
 5. documents historiques uniquement si nécessaires à une investigation ciblée.
 
@@ -67,14 +67,15 @@ Contrat Git : **`main` uniquement**. Ne pas créer de branche de travail finale.
    régressions transversales et certifications.
 6. Ne jamais relancer exactement le même gros run si ni code, ni données, ni hypothèse n'ont changé.
 7. Ne pas relire toute l'histoire Git, les 775 optimisations ou tous les audits à chaque reprise.
-8. Recherche web, MCP, plugins et sous-agents seulement pour combler un manque **précis** que le repo
-   et les données locales ne peuvent pas résoudre. Revenir ensuite immédiatement au test falsifiable.
-9. Sous-agents uniquement pour des tâches réellement indépendantes ; pas de fan-out redondant.
+8. Recherche web, MCP et plugins seulement pour combler un manque **précis** que le repo et les données
+   locales ne peuvent pas résoudre. Revenir ensuite immédiatement au test falsifiable local.
+9. **Sous-agents interdits pour ce Goal** : agent principal unique ; aucun spawn/fan-out/reviewer-agent.
 10. Si la prochaine preuve dépend uniquement de nouvelles données, d'un délai réel, d'un runner ou
     d'une intervention utilisateur : arrêter le travail inutile et signaler clairement le blocage.
 
-Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à recommencer. Les réauditer
-seulement lorsqu'une modification actuelle menace explicitement leur contrat.
+Pour la boucle de recherche quantitative, les tests possibles et le routage des outils, suivre
+`docs/CODEX_GOAL_RUNBOOK.md`. Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à
+recommencer. Les réauditer seulement lorsqu'une modification actuelle menace explicitement leur contrat.
 
 ## 6. Discipline scientifique de la preuve
 
