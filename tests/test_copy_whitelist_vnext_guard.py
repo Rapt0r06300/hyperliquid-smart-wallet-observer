@@ -9,11 +9,16 @@ def test_whitelist_legacy_seule_ne_peut_pas_autoriser(tmp_path) -> None:
     whitelist = tmp_path / "runtime" / "data" / "copy_whitelist.json"
     whitelist.parent.mkdir(parents=True, exist_ok=True)
     whitelist.write_text(
-        json.dumps({"generated_ts": 1_000.0, "vaults": ["0xabc"]}),
+        json.dumps(
+            {
+                "genere_ts": 1_000.0,
+                "gardes": [{"adresse": "0xabc"}],
+            }
+        ),
         encoding="utf-8",
     )
 
-    decision = signal_copy_autorise(root=tmp_path, vault="0xabc", now_ts=1_001.0)
+    autorise, motif = signal_copy_autorise(["0xabc"], root=tmp_path, now=1_001.0)
 
-    assert decision.autorise is False
-    assert decision.motif == "COPY_CERTIFICATION_VNEXT_ABSENTE_OU_INVALIDE"
+    assert autorise is False
+    assert motif == "COPY_CERTIFICATION_VNEXT_ABSENTE_OU_INVALIDE"
