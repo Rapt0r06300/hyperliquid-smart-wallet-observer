@@ -1,7 +1,7 @@
 # Alina SmartFlow — Codex Quant Research V2
 
 Date : 2026-09-09
-Statut : design approuvé conceptuellement par l'utilisateur ; implémentation bloquée jusqu'à revue de ce spec.
+Statut : design validé puis révisé par l'utilisateur ; **implémentation repo-only**. Les automatisations ChatGPT planifiées sont hors périmètre et ne doivent pas être modifiées sans demande humaine explicite.
 
 ## 1. But
 
@@ -18,34 +18,21 @@ La cible économique et les garanties de preuve restent celles de `AGENTS.md`, `
 - OOS/forward observé puis utilisé pour retuner => ce segment perd son statut de preuve et un nouveau freeze + nouveau segment disjoint sont requis.
 - Tous les essais de recherche sont comptabilisés pour les corrections de multiplicité.
 - Aucun run lourd identique si code, données, coûts, paramètres et hypothèse n'ont pas changé.
+- Les automatisations ChatGPT existantes restent inchangées dans cette V2.
 
 ## 3. Architecture retenue
 
-### 3.1 Single-writer : un SHA expérimental stable
+### 3.1 SHA expérimental stable sans modifier les automatisations
 
-Pendant une campagne Goal active, Codex devient le seul écrivain du code/protocole sur `main`. Les autres automatisations/agents peuvent lire, auditer et rechercher, mais ne doivent pas pousser de commit qui déplace `main` tant que la lease est active.
+La V2 **n'implémente pas** de writer lease et ne touche à aucune tâche planifiée. La stabilité scientifique est assurée au niveau de chaque expérience :
 
-Créer `coordination/CODEX_WRITER_LEASE.json`, petit registre versionné avec :
+1. `EXPERIMENT_SPEC.json` contient le `base_sha` exact.
+2. Le runner compare ce SHA au HEAD local avant tout trial.
+3. Si le HEAD a changé, l'expérience est refusée fail-closed ; Codex resynchronise puis produit un nouveau spec au nouveau SHA au lieu de mélanger deux états de code.
+4. Un répertoire d'expérience existant sans cache cohérent n'est jamais écrasé.
+5. `main` reste l'unique état livré/certifié ; un worktree local temporaire peut être utilisé par Codex si son environnement en crée un, mais aucune branche finale parallèle n'est requise par ce protocole.
 
-- `schema_version` ;
-- `status`: `active|released` ;
-- `writer`: `codex_goal` ;
-- `session_id` non secret ;
-- `base_sha` ;
-- `started_at_utc` ;
-- `expires_at_utc` ;
-- `goal`: identifiant court ;
-- `note`.
-
-Règles :
-
-1. Codex acquiert/rafraîchit la lease avant une campagne d'écriture.
-2. Les automatismes ChatGPT doivent vérifier la lease avant tout push : `active` => recherche/audit seulement, zéro commit ; `released/expired` => écriture permise selon leur propre contrat.
-3. Codex travaille contre un `base_sha` figé pendant une expérience. Si `origin/main` avance malgré la lease, il ne boucle pas en fetch/rebase : il termine/abandonne proprement l'expérience, produit un état de reprise puis resynchronise une seule fois.
-4. `main-only` signifie : état livré et certifié sur `main`. Un worktree local éphémère de Codex est autorisé s'il évite les collisions ; aucune branche finale parallèle n'est conservée.
-5. La lease ne contient ni secret ni lock système. C'est un protocole de coordination auditable ; sa violation doit être visible et fail-closed côté Goal.
-
-La mise à jour des prompts des automatisations ChatGPT existantes fera partie de l'implémentation afin qu'elles respectent cette lease.
+Une coordination inter-automatisations plus stricte pourra être conçue séparément uniquement sur demande explicite de l'utilisateur.
 
 ### 3.2 Skill repo-local `alina-quant-research`
 
@@ -102,9 +89,9 @@ Codex lit d'abord uniquement `RESULT_SUMMARY.json`. Il n'ouvre les preuves volum
 
 ### 3.5 Déduplication et cache expérimental
 
-Calculer une `experiment_signature` déterministe à partir de :
+Calculer une `experiment_signature` déterministe à partir de toutes les entrées qui peuvent modifier le résultat scientifique, notamment :
 
-`base_sha + family + hypothesis + evaluator + search_space + data_fingerprint + cost_model + split_config + seed`.
+`base_sha + family + hypothesis + phase + evaluator + search_space + engine + budget + data_fingerprint + data_cutoff + cost_model + split_config + seed`.
 
 Si une signature complète existe déjà, l'orchestrateur retourne le résultat mis en cache au lieu de relancer le calcul. Un `--force` n'est accepté qu'avec une raison enregistrée et ne permet pas de requalifier une ancienne validation en nouvelle preuve.
 
@@ -128,7 +115,7 @@ Une hypothèse faible doit mourir tôt. Successive Halving/Hyperband/TPE sont pr
 
 ## 4. État de reprise compact
 
-Créer `runtime/codex_goal_state.json` (runtime local, non utilisé comme preuve à lui seul) contenant uniquement l'état nécessaire à la prochaine décision : SHA, famille, hypothèse, phase, data cutoff, freeze, compteur d'essais, dernier résultat, blocage et prochaine expérience.
+Créer `runtime/codex_goal_state.json` (runtime local, non utilisé comme preuve à lui seul) contenant uniquement l'état nécessaire à la prochaine décision : SHA, famille, hypothèse, phase, data cutoff, dernier résultat, blocage et prochaine action.
 
 À la reprise, Codex lit ce fichier + les autorités minimales du repo, pas l'ensemble de l'historique Git/775 tâches/anciens rapports.
 
@@ -143,13 +130,12 @@ Créer `runtime/codex_goal_state.json` (runtime local, non utilisé comme preuve
 
 ## 6. Changements de documentation/config prévus
 
-Après validation de ce spec :
-
-- ajuster `AGENTS.md` pour le sens exact de `main-only`, la lease single-writer et l'orchestrateur ;
+- ajuster `AGENTS.md` pour router la recherche multi-trials vers le skill/runner ;
 - ajuster `docs/CODEX_GOAL_RUNBOOK.md` pour faire du skill + `EXPERIMENT_SPEC.json` la boucle normale ;
 - conserver `.codex/config.toml` High/Plan-XHigh/low-verbosity/sans sous-agents ;
-- créer le skill et le protocole Python ;
-- mettre à jour les automatisations ChatGPT existantes afin qu'elles ne poussent pas pendant une lease active.
+- créer le skill, le protocole Python, la CLI et les tests ;
+- ignorer dans Git les artefacts `runtime/codex_experiments/` et l'état `runtime/codex_goal_state.json` ;
+- **ne modifier aucune automatisation ChatGPT planifiée**.
 
 ## 7. Erreurs et fail-closed
 
@@ -160,7 +146,8 @@ L'orchestrateur refuse une expérience si :
 - data fingerprint ou contrat de coûts exigé manque ;
 - output dir tente de sortir du répertoire runtime autorisé ;
 - un evaluateur hors namespace projet est demandé ;
-- une signature identique a déjà été exécutée sans `--force` justifié.
+- une signature identique a déjà été exécutée sans `--force` justifié ;
+- un répertoire d'expérience existant risquerait d'être écrasé sans cache réconcilié.
 
 Une erreur de trial n'efface pas les autres trials ; elle est comptée et exposée. Aucun champ manquant n'est converti silencieusement en zéro.
 
@@ -175,13 +162,14 @@ Tests ciblés obligatoires :
 - cache/déduplication ;
 - refus `base_sha` incohérent ;
 - refus d'évaluateur hors projet ;
-- intégration avec un faux évaluateur déterministe et `tools/outils_recherche.py` ;
+- intégration avec un faux évaluateur déterministe et un optimiseur compatible `tools/outils_recherche.py` ;
 - propagation seed/budget ;
 - `RESULT_SUMMARY.json` compact et stable ;
 - état de reprise atomique ;
+- préservation d'anciens artefacts non réconciliés ;
 - aucune capacité d'ordre réel/clé/signature ajoutée.
 
-Critère V2 terminé : Codex peut, à partir d'un spec minuscule, lancer une campagne locale bornée comportant plusieurs trials, obtenir un seul résumé JSON utile, reprendre sans répéter une signature déjà terminée, et travailler sur un SHA stable sans être perturbé par les automatisations concurrentes.
+Critère V2 terminé : Codex peut, à partir d'un spec minuscule, lancer une campagne locale bornée comportant plusieurs trials, obtenir un seul résumé JSON utile et reprendre sans répéter une signature déjà terminée, tout en refusant automatiquement un SHA devenu obsolète.
 
 ## 9. Hors périmètre V2
 
@@ -189,5 +177,6 @@ Critère V2 terminé : Codex peut, à partir d'un spec minuscule, lancer une cam
 - Aucun nouveau moteur de trading autonome.
 - Aucun cluster distribué/GPU obligatoire.
 - Aucun sous-agent.
+- Aucune modification des automatisations ChatGPT existantes.
 - Aucune garantie qu'un edge de +4 USD existe ; la V2 optimise la qualité et le débit de recherche, pas le marché.
 - Pas de réécriture des optimiseurs/validateurs déjà présents si une adaptation suffit.
