@@ -5,6 +5,7 @@ import argparse
 import importlib
 import inspect
 import json
+import os
 import subprocess
 import sys
 import time
@@ -36,6 +37,32 @@ Evaluator = Callable[..., Mapping[str, Any]]
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _configure_cpu_first_local_compute() -> dict[str, Any]:
+    """Prefer local CPU throughput and keep accelerators hidden from quant runs.
+
+    Codex still decides which experiment to run, but the numerical work happens
+    inside this local process.  We intentionally leave one logical CPU free on
+    machines with more than two CPUs so the desktop remains responsive.
+    """
+
+    logical_cpus = max(1, int(os.cpu_count() or 1))
+    workers = logical_cpus if logical_cpus <= 2 else logical_cpus - 1
+    os.environ["ALINA_CPU_WORKERS"] = str(workers)
+    for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ[name] = str(workers)
+    for name in ("CUDA_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES"):
+        os.environ[name] = ""
+    os.environ["JAX_PLATFORM_NAME"] = "cpu"
+    os.environ["JAX_PLATFORMS"] = "cpu"
+    return {
+        "local_compute": True,
+        "device": "cpu",
+        "gpu_allowed": False,
+        "cpu_logical_count": logical_cpus,
+        "cpu_workers": workers,
+    }
 
 
 def _git_sha(repo_root: Path) -> str:
@@ -217,6 +244,7 @@ def run_experiment(
             returned["cache_hit"] = True
             return returned
 
+    compute_policy = _configure_cpu_first_local_compute()
     evaluator = resolve_evaluator(spec)
     run_optimizer = optimizer or _default_optimizer()
     run_id = _forced_run_id(spec.experiment_id) if force else spec.experiment_id
@@ -274,6 +302,7 @@ def run_experiment(
         "completed_at_utc": _utc_now(),
         "duration_s": duration_s,
         "budget": _compact(spec.budget),
+        "compute_policy": compute_policy,
         "wall_budget_enforced": False,
         "trials": trials,
         "best_candidate": best,
