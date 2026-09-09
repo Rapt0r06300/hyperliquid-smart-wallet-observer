@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import runpy
+import sys
 from pathlib import Path
+
+import pytest
 
 from hl_observer.datasets.research_lab_stream import REPORT_JSON
 from hl_observer.ops.dataset_research_select import main
@@ -86,3 +90,19 @@ def test_cli_research_select_refuse_si_le_profil_n_existe_pas(tmp_path: Path) ->
 
 def test_cli_research_select_refuse_un_workspace_absent(tmp_path: Path) -> None:
     assert main(["--root", str(tmp_path / "absent")]) == 2
+
+
+def test_module_research_select_propage_le_code_sortie_du_main(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module_name = "hl_observer.ops.dataset_research_select"
+    monkeypatch.setattr(sys, "argv", [module_name, "--root", str(tmp_path / "absent")])
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_module(module_name, run_name="__main__")
+
+    assert exc_info.value.code == 2
+    assert "RESEARCH_SELECT_NO_GO" in capsys.readouterr().out
