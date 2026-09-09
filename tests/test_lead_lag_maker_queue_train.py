@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from hl_observer.backtesting import lead_lag_maker_queue_train as module
 
 
@@ -12,6 +14,28 @@ def _book(ts_ms: int, *, bid: float, ask: float, bid_size: float, ask_size: floa
         "ask_size": ask_size,
         "bid_top_usd": bid * bid_size,
         "ask_top_usd": ask * ask_size,
+        "data_origin": "RECORDED_REAL",
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
+def _signed_trade(*, ts_ms: int, trade_id: str) -> dict:
+    return {
+        "coin": "ETH",
+        "ts_ms": ts_ms,
+        "received_ts_ms": ts_ms - 2,
+        "written_ts_ms": ts_ms,
+        "observable_at_ms": ts_ms,
+        "exchange_ts_ms": ts_ms - 5,
+        "side": "A",
+        "px": 100.0,
+        "sz": 1.25,
+        "trade_id": trade_id,
+        "feed_quality_score": 1.0,
+        "data_gate_ready": True,
+        "quality_reasons": [],
+        "source": "hyperliquid:recorded:trades",
         "data_origin": "RECORDED_REAL",
         "read_only": True,
         "real_execution": False,
@@ -113,3 +137,80 @@ def test_maker_queue_nutilise_jamais_un_trade_avant_observation() -> None:
     assert decision["status"] == "NOT_FILLED_MEASURED_QUEUE"
     assert decision["queue_ahead_qty"] == 5.0
     assert decision["aggressive_qty_at_level"] == 0.1
+
+
+def test_train_public_trade_loader_clamps_source_windows_before_heldout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    start_ms = 1_800_000_000_000
+    train_end_ms = start_ms + 2_000
+    event_ms = start_ms + 1_500
+    calls: list[tuple[int, int]] = []
+
+    def fake_history(_root, *, start_ms, end_ms, **_kwargs):
+        calls.append((int(start_ms), int(end_ms)))
+        assert int(end_ms) <= train_end_ms
+        return (
+            {},
+            {
+                "ETH": [
+                    _signed_trade(ts_ms=event_ms + 100, trade_id="train-1"),
+                    _signed_trade(ts_ms=train_end_ms + 1, trade_id="heldout-must-not-pass"),
+                ]
+            },
+            {"source_time_filter_applied": True, "real_execution": False},
+        )
+
+    monkeypatch.setattr(module, "load_market_microstructure_history", fake_history)
+
+    trades, meta = module.load_train_public_trade_history(
+        tmp_path,
+        [event_ms],
+        train_ranges=[(start_ms, train_end_ms)],
+        before_ms=100,
+        after_ms=5_000,
+    )
+
+    assert calls == [(event_ms - 100, train_end_ms)]
+    assert [row["trade_id"] for row in trades["ETH"]] == ["train-1"]
+    assert trades["ETH"][0]["side"] == "A"
+    assert meta["selection_scope"] == "TRAIN_ONLY_PRE_FREEZE"
+    assert meta["heldout_loaded"] is False
+    assert meta["rows_rejected_outside_train"] == 1
+    assert meta["source_windows"] == [[event_ms - 100, train_end_ms]]
+    assert meta["paper_read_only"] is True
+    assert meta["real_execution"] is False
+
+
+def test_train_public_trade_loader_fails_closed_on_non_recorded_or_unsigned_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    start_ms = 1_800_000_000_000
+    end_ms = start_ms + 10_000
+    valid = _signed_trade(ts_ms=start_ms + 1_000, trade_id="valid")
+    duplicate = dict(valid)
+    unsigned = {**valid, "trade_id": "unsigned", "side": ""}
+    synthetic = {**valid, "trade_id": "synthetic", "data_origin": "SYNTHETIC"}
+    real_execution = {**valid, "trade_id": "real", "real_execution": True}
+
+    monkeypatch.setattr(
+        module,
+        "load_market_microstructure_history",
+        lambda *_args, **_kwargs: (
+            {},
+            {"ETH": [valid, duplicate, unsigned, synthetic, real_execution]},
+            {"source_time_filter_applied": True, "real_execution": False},
+        ),
+    )
+
+    trades, meta = module.load_train_public_trade_history(
+        tmp_path,
+        [start_ms + 1_000],
+        train_ranges=[(start_ms, end_ms)],
+    )
+
+    assert [row["trade_id"] for row in trades["ETH"]] == ["valid"]
+    assert meta["duplicate_trades_rejected"] == 1
+    assert meta["invalid_or_unsafe_trades_rejected"] == 3
