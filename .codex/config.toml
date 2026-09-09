@@ -20,6 +20,8 @@ project_doc_max_bytes = 12000
 multi_agent = false
 # Fast consomme davantage d'allocation ; l'endurance prime.
 fast_mode = false
+# Les campagnes CPU locales peuvent durer longtemps : éviter la mise en veille pendant leur exécution.
+prevent_idle_sleep = true
 
 [agents]
 # Verrou supplémentaire : aucun sous-agent/spawn/fan-out.
