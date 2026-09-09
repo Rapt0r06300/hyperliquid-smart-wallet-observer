@@ -269,3 +269,22 @@ def test_atomic_writer_accepts_numpy_scalars_without_stringifying_numbers(tmp_pa
     write_summary_atomic(path, {"count": np.int64(7), "score": np.float64(1.25)})
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload == {"count": 7, "score": 1.25}
+
+
+def test_existing_uncached_run_directory_is_not_overwritten(tmp_path: Path) -> None:
+    _install_fake_evaluator()
+    spec = ExperimentSpec.from_mapping(spec_payload())
+    root = tmp_path / "codex_experiments"
+    run_dir = root / spec.experiment_id
+    run_dir.mkdir(parents=True)
+    sentinel = run_dir / "OPTIMIZER_RESULT.json"
+    sentinel.write_text('{"old": true}\n', encoding="utf-8")
+
+    with pytest.raises(SpecValidationError, match="existing experiment directory"):
+        run_experiment(
+            spec,
+            runtime_root=root,
+            optimizer=lambda *a, **k: {},
+            current_sha="a" * 40,
+        )
+    assert json.loads(sentinel.read_text(encoding="utf-8")) == {"old": True}
