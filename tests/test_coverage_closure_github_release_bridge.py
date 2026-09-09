@@ -120,6 +120,7 @@ def test_manifest_iteration_select_and_assets(tmp_path) -> None:
     records=list(bridge.iter_manifest_records(manifest))
     assert [r.relative_path for r in records]==["a.json","b.csv"]
     assert [r.relative_path for r in bridge.select_records(records,contains=["a."],suffixes=["json"])]==["a.json"]
+    assert [r.relative_path for r in bridge.select_records(records,suffixes=["json"])]==["a.json"]
     assert len(bridge.select_records(records,limit=1))==1
     assert bridge.assets_for_records(records)==("p1","p2","z.zip")
     with gzip.open(manifest,"wt",encoding="utf-8") as f:f.write("bad\n")
