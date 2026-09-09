@@ -73,6 +73,10 @@ Contrat Git : **`main` uniquement**. Ne pas créer de branche de travail finale.
 10. Si la prochaine preuve dépend uniquement de nouvelles données, d'un délai réel, d'un runner ou
     d'une intervention utilisateur : arrêter le travail inutile et signaler clairement le blocage.
 
+Pour une recherche multi-trials, préférer le skill `$alina-quant-research` et
+`python tools/codex_quant_experiment.py <spec>` : le PC exécute les essais, Codex lit d'abord
+`RESULT_SUMMARY.json` et n'ouvre les artefacts détaillés que pour une anomalie précise.
+
 Pour la boucle de recherche quantitative, les tests possibles et le routage des outils, suivre
 `docs/CODEX_GOAL_RUNBOOK.md`. Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à
 recommencer. Les réauditer seulement lorsqu'une modification actuelle menace explicitement leur contrat.
