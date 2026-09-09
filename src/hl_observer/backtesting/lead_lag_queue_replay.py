@@ -500,14 +500,54 @@ def _summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     nets = [float(row.get("net_pnl_usd") or 0.0) for row in rows]
     wins = sum(value for value in nets if value > 0)
     losses = -sum(value for value in nets if value < 0)
+    trade_ids = [str(row.get("trade_id") or "") for row in rows]
+    duplicate_ids = len(trade_ids) - len(set(trade_ids))
+    cumulative = peak = max_drawdown = 0.0
+    for value in nets:
+        cumulative += value
+        peak = max(peak, cumulative)
+        max_drawdown = min(max_drawdown, cumulative - peak)
+    total_notional = sum(float(row.get("notional_usd") or 0.0) for row in rows)
+    liquidatable_count = sum(row.get("LIQUIDATABLE_NET") is True for row in rows)
+    closed_positions = sum(row.get("closed_position") is True for row in rows)
     return {
         "sample_count": len(rows),
+        "positions_ouvertes": len(rows),
+        "positions_fermees": closed_positions,
+        "gross_pnl_usd": round(
+            sum(float(row.get("gross_pnl_usd") or 0.0) for row in rows), 8
+        ),
+        "fees_usd": round(
+            sum(float(row.get("fees_usd") or 0.0) for row in rows), 8
+        ),
+        "spread_cost_usd": round(
+            sum(float(row.get("spread_cost_usd") or 0.0) for row in rows), 8
+        ),
+        "slippage_cost_usd": round(
+            sum(float(row.get("slippage_cost_usd") or 0.0) for row in rows), 8
+        ),
+        "latency_cost_usd": round(
+            sum(float(row.get("latency_cost_usd") or 0.0) for row in rows), 8
+        ),
         "net_pnl_usd": round(sum(nets), 8),
+        "roi_pct": round(sum(nets) / total_notional * 100.0, 8)
+        if total_notional > 0
+        else None,
+        "max_drawdown_usd": round(abs(max_drawdown), 8),
+        "hit_rate": sum(value > 0 for value in nets) / len(nets) if nets else None,
         "profit_factor": (
             float("inf") if wins > 0 and losses <= 1e-12 else (wins / losses if losses > 0 else None)
         ),
-        "liquidatable_count": sum(row.get("LIQUIDATABLE_NET") is True for row in rows),
-        "closed_positions": sum(row.get("closed_position") is True for row in rows),
+        "liquidatable_count": liquidatable_count,
+        "closed_positions": closed_positions,
+        "LIQUIDATABLE_NET": bool(rows)
+        and liquidatable_count == len(rows)
+        and closed_positions == len(rows),
+        "trade_ids_count": len(set(trade_ids)),
+        "duplicate_trade_ids": duplicate_ids,
+        "trade_ids_sha256": hashlib.sha256(
+            "\n".join(sorted(trade_ids)).encode("utf-8")
+        ).hexdigest(),
     }
 
 
@@ -870,6 +910,7 @@ def evaluate_frozen_maker(
         "frozen_parameters": dict(frozen_parameters),
         "proof_window": proof_window,
         "trades": rows,
+        "summary": _summary(rows),
         "segment_summaries": summaries,
         "temporal_evidence": temporal_evidence,
         "economic_contract": economic_receipt,

@@ -305,6 +305,14 @@ def test_frozen_maker_uses_first_two_complete_post_freeze_days() -> None:
     assert report["temporal_evidence"]["oos"]["no_lookahead"] is True
     assert report["temporal_evidence"]["forward"]["sample_count"] == 1
     assert report["temporal_evidence"]["forward"]["post_freeze"] is True
+    assert report["summary"]["positions_ouvertes"] == 2
+    assert report["summary"]["positions_fermees"] == 2
+    assert report["summary"]["trade_ids_count"] == 2
+    assert report["summary"]["duplicate_trade_ids"] == 0
+    assert report["summary"]["LIQUIDATABLE_NET"] is True
+    assert report["summary"]["net_pnl_usd"] == pytest.approx(
+        sum(row["net_pnl_usd"] for row in report["trades"])
+    )
     assert {row["walk_forward_segment"] for row in report["trades"]} == {
         "oos",
         "forward",

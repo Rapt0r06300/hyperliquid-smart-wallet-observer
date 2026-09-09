@@ -6,6 +6,7 @@ import pytest
 
 from hl_observer.config import frais_venues as frais_module
 from hl_observer.config.frais_venues import hypothese_frais_taker
+from hl_observer.economics import families as family_module
 from hl_observer.economics.assumptions import (
     AssumptionClassification,
     CostComponentReceipt,
@@ -15,7 +16,6 @@ from hl_observer.economics.assumptions import (
     ZeroCostReason,
     make_assumption,
 )
-from hl_observer.economics import families as family_module
 from hl_observer.economics.families import (
     build_copy_vault_contract,
     build_cross_venue_contract,

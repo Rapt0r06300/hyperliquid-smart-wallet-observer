@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +42,15 @@ from hl_observer.backtesting.lead_lag_causal_diagnostic import (  # noqa: E402
 )
 from hl_observer.backtesting.lead_lag_certified_clock import (  # noqa: E402
     backtest_with_certified_wall_clock,
-    certified_protocol_signature,
+)
+from hl_observer.backtesting.lead_lag_maker_queue_train import (  # noqa: E402
+    load_train_microstructure_history,
 )
 from hl_observer.backtesting.lead_lag_queue_replay import (  # noqa: E402
     detect_rolling_shocks,
+    evaluate_frozen_maker,
+    maker_protocol_signature,
+    post_freeze_proof_window,
     replay_lead_lag_queue_maker,
 )
 from hl_observer.backtesting.lead_lag_source_alignment import (  # noqa: E402
@@ -57,6 +64,7 @@ from hl_observer.datasets.source_discovery import (  # noqa: E402
     write_family_source_manifest,
 )
 from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
+from hl_observer.economics.families import build_lead_lag_maker_contract  # noqa: E402
 from hl_observer.ops.bounded_collection import (  # noqa: E402
     ensure_bounded_collectors,
     inspect_bounded_collectors,
@@ -68,9 +76,7 @@ from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     build_lead_lag_campaign,
     dataset_provenance,
     find_oldest_parameter_freeze,
-    freeze_parameters,
     freeze_train_selected_parameters,
-    merge_sources_with_frozen_provenance,
     render_campaign_report,
     write_campaign,
 )
@@ -117,6 +123,31 @@ def _write_raw(root: Path, name: str, payload: dict[str, Any]) -> Path:
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temporary, target)
     return target
+
+
+def _stable_json_sha256(payload: object) -> str:
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _microstructure_source_paths(metadata: object) -> list[str]:
+    """Extract only local paths actually inspected by the L2/trade loader."""
+
+    if not isinstance(metadata, dict):
+        return []
+    rows = [metadata]
+    nested = metadata.get("source_metadata")
+    if isinstance(nested, list):
+        rows.extend(item for item in nested if isinstance(item, dict))
+    return list(
+        dict.fromkeys(
+            str(path)
+            for row in rows
+            for path in (row.get("sources") or [])
+            if isinstance(path, str) and path.strip()
+        )
+    )
 
 
 def _lead_trade_window_ms(
@@ -331,127 +362,232 @@ def run_campaigns(
             include_history=True,
             max_history_sources=max(0, int(lead_history_sources)),
         )
-    # Economic proof gets a new protocol fingerprint: old freezes that allowed
-    # process-local recu_ns fallback can never be silently reused.
-    lead_protocol = certified_protocol_signature()
+    aligned_lead_sources, lead_alignment_meta = select_aligned_bbo_sources(
+        root,
+        candidates=selected_lead_sources,
+    )
+    lead_tape, aligned_lead_meta = load_aligned_binance_trade_tape(
+        root,
+        aligned_lead_sources,
+    )
+    lead_trade_rows = (lead_tape.get("ETH") or {}).get("TRADE") or ()
+    lead_trade_timestamps_ms = sorted(
+        int(float(row[0])) // 1_000_000
+        for row in lead_trade_rows
+        if isinstance(row, (list, tuple)) and row and float(row[0]) > 0
+    )
+    lead_shocks = detect_rolling_shocks(lead_trade_rows)
+    diagnostic_shocks = detect_rolling_shocks(
+        lead_trade_rows,
+        threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
+    )
+    latency_evidence = load_runtime_latency_evidence(root)
+
+    # The maker signature is intentionally distinct from every legacy taker
+    # freeze.  Only queue-proven, profitable TRAIN fills may create it.
+    lead_protocol = maker_protocol_signature()
+    maker_contract = build_lead_lag_maker_contract(mode=EconomicRunMode.CERTIFIABLE)
+    maker_economic_receipt = maker_contract.receipt()
     lead_freeze = find_oldest_parameter_freeze(
         root,
         "lead_lag",
         required_parameters=lead_protocol,
     )
-    lead_calibration = None
-    if lead_freeze is None:
-        calibration_tape = lead_lag_shadow.charger_tape(
-            root,
-            sources=selected_lead_sources,
-        )
-        lead_calibration = lead_lag_shadow.calibrate_freeze_readiness(
-            calibration_tape,
-            horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
-            frais_slippage_bps=lead_lag_shadow.FRAIS_SLIPPAGE_BPS,
-            seuil_choc_bps=lead_lag_shadow.SEUIL_CHOC_BPS,
-            notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
-        )
-        if lead_calibration.get("selection_eligible") is True:
-            initial_lead_data = dataset_provenance(root, selected_lead_sources)
-            lead_freeze = freeze_parameters(
+    lead_calibration: dict[str, Any] | None = None
+    maker_queue_replay: dict[str, Any] | None = None
+    maker_evaluation: dict[str, Any] | None = None
+    microstructure_meta: dict[str, Any] = {
+        "status": "NO_LEAD_TRADE_HISTORY",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    l2_history: dict[str, list[dict[str, Any]]] = {}
+    public_trade_history: dict[str, list[dict[str, Any]]] = {}
+
+    if lead_freeze is None and lead_trade_timestamps_ms:
+        selection_cutoff_ms = max(lead_trade_timestamps_ms)
+        train_ranges = [(min(lead_trade_timestamps_ms), selection_cutoff_ms)]
+        train_event_timestamps = [
+            int(shock["trigger_ts_ms"])
+            for shock in lead_shocks
+            if train_ranges[0][0]
+            <= int(shock["trigger_ts_ms"])
+            <= train_ranges[0][1]
+        ]
+        l2_history, public_trade_history, microstructure_meta = (
+            load_train_microstructure_history(
                 root,
-                "lead_lag",
-                {
-                    **lead_protocol,
-                    "history_sources_at_freeze": len(selected_lead_sources),
-                    "dataset_workspace_all_sources": dataset_mode,
-                    "structural_calibration": lead_calibration,
-                },
-                initial_lead_data,
+                train_event_timestamps,
+                train_ranges=train_ranges,
             )
-    lead_sources = (
-        merge_sources_with_frozen_provenance(root, selected_lead_sources, lead_freeze)
-        if lead_freeze is not None
-        else list(selected_lead_sources)
+        )
+        maker_queue_replay = replay_lead_lag_queue_maker(
+            lead_tape,
+            l2_history,
+            public_trade_history,
+            latency_evidence=latency_evidence,
+            segment_bounds={
+                "train": train_ranges[0],
+                "validation": (None, None),
+                "oos": (None, None),
+                "forward": (None, None),
+            },
+        )
+        lead_calibration = qualify_lead_lag_queue_maker_train_only(
+            {
+                "maker_queue_candidates": maker_queue_replay[
+                    "maker_queue_candidates"
+                ],
+                "maker_queue_replay": maker_queue_replay,
+            }
+        )
+        selection_eligible = bool(
+            lead_calibration.get("selection_eligible") is True
+            and latency_evidence.get("measured") is True
+        )
+        lead_parameters = {
+            **lead_protocol,
+            "selection_cutoff_ms": selection_cutoff_ms,
+            "train_ranges": [list(bounds) for bounds in train_ranges],
+            "applied_latency_ms": latency_evidence.get("p95_ms"),
+            "latency_evidence_sha256": _stable_json_sha256(latency_evidence),
+            "training_selection_evidence_sha256": lead_calibration.get(
+                "selection_evidence_sha256"
+            ),
+            "training_selection_eligible": selection_eligible,
+            "selection_status": lead_calibration.get("status"),
+        }
+        freeze_source_paths = [
+            *aligned_lead_sources,
+            *_microstructure_source_paths(microstructure_meta),
+            root / "runtime" / "data" / "lead_lag_event_decisions.jsonl",
+        ]
+        initial_lead_data = dataset_provenance(root, freeze_source_paths)
+        lead_freeze = freeze_train_selected_parameters(
+            root,
+            "lead_lag",
+            lead_parameters,
+            initial_lead_data,
+            selection_eligible=selection_eligible,
+        )
+    elif lead_freeze is None:
+        lead_calibration = {
+            "status": "NO_PREDECLARED_STRONG_SHOCK_HISTORY",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+        }
+
+    if lead_freeze is not None:
+        lead_parameters = dict(lead_freeze["parameters"])
+        evaluated_at_ms = int(time.time() * 1000)
+        maker_window = post_freeze_proof_window(
+            frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
+            evaluated_at_ms=evaluated_at_ms,
+        )
+        proof_segments = dict(maker_window.get("segments") or {})
+        proof_event_timestamps = [
+            int(shock["trigger_ts_ms"])
+            for shock in [*lead_shocks, *diagnostic_shocks]
+            if any(
+                start_ms is not None
+                and end_ms is not None
+                and int(start_ms) <= int(shock["trigger_ts_ms"]) <= int(end_ms)
+                for start_ms, end_ms in proof_segments.values()
+            )
+        ]
+        l2_history, public_trade_history, microstructure_meta = (
+            load_market_microstructure_event_windows(
+                root,
+                sorted(set(proof_event_timestamps)),
+            )
+        )
+        maker_evaluation = evaluate_frozen_maker(
+            lead_tape,
+            l2_history,
+            public_trade_history,
+            frozen_parameters=lead_parameters,
+            frozen_at_ms=int(lead_freeze["frozen_at_ms"]),
+            evaluated_at_ms=evaluated_at_ms,
+            economic_mode=EconomicRunMode.CERTIFIABLE,
+        )
+
+    lead_sources = list(
+        dict.fromkeys(
+            [
+                *aligned_lead_sources,
+                *_microstructure_source_paths(microstructure_meta),
+            ]
+        )
     )
     lead_data = dataset_provenance(root, lead_sources)
-    provisional_lead_cutoff_ms = (
-        int((lead_calibration or {}).get("provisional_frozen_at_ms") or 0) or None
-    )
     lead_raw = backtest_with_certified_wall_clock(
         root,
-        sources=lead_sources,
-        economic_frozen_at_ms=(
-            int(lead_freeze["frozen_at_ms"])
-            if lead_freeze is not None
-            else provisional_lead_cutoff_ms
-        ),
+        sources=aligned_lead_sources,
+        economic_frozen_at_ms=None,
         economic_horizon_ms=lead_lag_shadow.CAMPAIGN_HORIZON_MS,
         economic_notional_usd=lead_lag_shadow.CAMPAIGN_NOTIONAL_USD,
         economic_mode=EconomicRunMode.CERTIFIABLE,
     )
     if isinstance(lead_raw, dict):
+        # Never let the legacy taker campaign remain the canonical proof path.
+        lead_raw.pop("executable_campaign", None)
+        # Keep the canonical maker cost contract visible even before a physical
+        # freeze exists, so a missing proof cannot be confused with missing costs.
+        lead_raw["economic_contract"] = maker_economic_receipt
+        lead_raw["assumption_snapshot_hash"] = maker_contract.registry.snapshot_hash()
         lead_raw["calibration"] = lead_calibration
+        lead_raw["canonical_mechanism"] = lead_protocol["execution_model"]
         lead_raw["provisional_without_physical_freeze"] = lead_freeze is None
         lead_raw["dataset_workspace"] = dataset_mode
         lead_raw["dataset_manifest_source_count"] = len(selected_lead_sources)
         lead_raw["dataset_source_manifest"] = (
             str(dataset_manifest_path) if dataset_manifest_path is not None else None
         )
-        aligned_lead_sources, lead_alignment_meta = select_aligned_bbo_sources(
-            root,
-            candidates=lead_sources if dataset_mode else None,
+        if maker_queue_replay is None and maker_evaluation is not None:
+            maker_queue_replay = maker_evaluation
+        lead_raw["maker_queue_candidates"] = (
+            list(maker_queue_replay.get("maker_queue_candidates") or [])
+            if isinstance(maker_queue_replay, dict)
+            else []
         )
-        lead_tape, aligned_lead_meta = load_aligned_binance_trade_tape(
-            root,
-            aligned_lead_sources,
-        )
-        lead_trade_rows = (lead_tape.get("ETH") or {}).get("TRADE") or ()
-        # The frozen economic mechanism remains at its predeclared 20 bps threshold.
-        # The separate 8 bps sample below exists ONLY to diagnose source coverage
-        # around the two weaker shocks already observed by Codex; it cannot create
-        # trades, freeze parameters, alter OOS or certify PnL.
-        lead_shocks = detect_rolling_shocks(lead_trade_rows)
-        diagnostic_shocks = detect_rolling_shocks(
-            lead_trade_rows,
-            threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
-        )
-        event_timestamps = sorted(
-            {
-                int(shock["trigger_ts_ms"])
-                for shock in [*lead_shocks, *diagnostic_shocks]
-            }
-        )
-        l2_history, public_trade_history, microstructure_meta = (
-            load_market_microstructure_event_windows(
-                root,
-                event_timestamps,
+        lead_raw["maker_queue_replay"] = maker_queue_replay
+        if maker_evaluation is not None:
+            lead_raw["executable_campaign"] = maker_evaluation
+            lead_raw["economic_contract"] = maker_evaluation.get(
+                "economic_contract"
             )
-        )
+            lead_raw["assumption_snapshot_hash"] = maker_evaluation.get(
+                "assumption_snapshot_hash"
+            )
         microstructure_meta["frozen_shock_count"] = len(lead_shocks)
         microstructure_meta["diagnostic_shock_count"] = len(diagnostic_shocks)
-        microstructure_meta["diagnostic_threshold_bps"] = DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+        microstructure_meta["diagnostic_threshold_bps"] = (
+            DIAGNOSTIC_SHOCK_THRESHOLD_BPS
+        )
         causal_availability = diagnose_causal_book_availability(
             diagnostic_shocks,
             l2_history,
             diagnostic_threshold_bps=DIAGNOSTIC_SHOCK_THRESHOLD_BPS,
         )
-        latency_evidence = load_runtime_latency_evidence(root)
-        maker_queue_replay = replay_lead_lag_queue_maker(
-            lead_tape,
-            l2_history,
-            public_trade_history,
-            latency_evidence=latency_evidence,
-        )
-        lead_raw["maker_queue_candidates"] = maker_queue_replay[
-            "maker_queue_candidates"
-        ]
-        lead_raw["maker_queue_replay"] = maker_queue_replay
         lead_raw["lead_lag_microstructure_history"] = microstructure_meta
         lead_raw["lead_lag_causal_availability_diagnostic"] = causal_availability
         lead_raw["lead_lag_source_alignment"] = {
             **lead_alignment_meta,
             "aligned_lead_tape": aligned_lead_meta,
         }
-        lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
-            lead_raw
-        )
+        if lead_freeze is None:
+            lead_raw["next_hypothesis_v3"] = qualify_lead_lag_queue_maker_train_only(
+                lead_raw
+            )
+        else:
+            lead_raw["next_hypothesis_v3"] = {
+                "status": "FROZEN_MAKER_EVALUATION_ACTIVE",
+                "selection_eligible": True,
+                "physical_freeze_allowed": True,
+                "selection_evidence_sha256": lead_parameters.get(
+                    "training_selection_evidence_sha256"
+                ),
+            }
     lead_raw_path = _write_raw(root, "lead_lag", lead_raw)
     lead_campaign = build_lead_lag_campaign(
         lead_raw, freeze=lead_freeze, datasets=lead_data, require_daily=True
