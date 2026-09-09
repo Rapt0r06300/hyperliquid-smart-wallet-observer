@@ -388,6 +388,27 @@ def load_pinned_source_manifest(
         if not candidate.is_absolute():
             candidate = project_root / candidate
         candidate = candidate.resolve()
+        if not candidate.is_file():
+            relocation_roots = (
+                project_root / "runtime" / "data" / "bbo_shards_archive",
+                project_root / "runtime" / "data" / "bbo_shards",
+                project_root / "runtime" / "data" / "market_ticks",
+                project_root / "runtime" / "data" / "market_ticks" / "shards",
+            )
+            relocated = [
+                (directory / candidate.name).resolve()
+                for directory in relocation_roots
+                if (directory / candidate.name).is_file()
+            ]
+            matching = [
+                path
+                for path in relocated
+                if path.stat().st_size == int(row.get("size") or -1)
+                and path.stat().st_mtime_ns == int(row.get("mtime_ns") or -1)
+            ]
+            if not matching:
+                raise ValueError(f"pinned TRAIN source missing after archive lookup: {candidate}")
+            candidate = matching[0]
         stat = candidate.stat()
         if stat.st_size != int(row.get("size") or -1):
             raise ValueError(f"pinned TRAIN source size changed: {candidate}")

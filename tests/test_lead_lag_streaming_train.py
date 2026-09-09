@@ -215,3 +215,55 @@ def test_pinned_manifest_survives_new_runtime_shards(monkeypatch, tmp_path: Path
     assert loaded["source_paths"] == [source]
     assert loaded["market_windows"][0].path == market
     assert loaded["data_fingerprint"].startswith("sha256:")
+
+
+def test_pinned_manifest_follows_same_shard_into_archive(monkeypatch, tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    live = project / "runtime" / "data" / "bbo_shards"
+    archive = project / "runtime" / "data" / "bbo_shards_archive"
+    market_dir = project / "runtime" / "data" / "market_ticks"
+    live.mkdir(parents=True)
+    archive.mkdir(parents=True)
+    market_dir.mkdir(parents=True)
+    source = live / "bbo_tape_1600000100000000000.jsonl.gz"
+    market = market_dir / "hyperliquid_market_ticks.1600000000000-1600000100000.1.jsonl.gz"
+    source.write_bytes(b"immutable-source")
+    market.write_bytes(b"immutable-market")
+    source_stat = source.stat()
+    market_stat = market.stat()
+    dynamic = {
+        "schema_version": "hypersmart.lead_lag_streaming_manifest.v1",
+        "data_cutoff_utc": "2020-09-13T12:28:20Z",
+        "cutoff_ms": 1_600_000_100_000,
+        "source_records": [
+            {
+                "path": str(source),
+                "size": source_stat.st_size,
+                "mtime_ns": source_stat.st_mtime_ns,
+            }
+        ],
+        "market_window_records": [
+            {
+                "path": str(market),
+                "start_ms": 1_600_000_000_000,
+                "end_ms": 1_600_000_100_000,
+                "size": market_stat.st_size,
+                "mtime_ns": market_stat.st_mtime_ns,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        streaming_module, "immutable_aligned_source_manifest", lambda _root: dynamic
+    )
+    target = project / "runtime" / "pinned.json"
+    written = write_immutable_source_manifest(project, target)
+    archived = archive / source.name
+    source.replace(archived)
+
+    loaded = load_pinned_source_manifest(
+        project,
+        target,
+        expected_manifest_sha256=written["manifest_sha256"],
+    )
+
+    assert loaded["source_paths"] == [archived]
