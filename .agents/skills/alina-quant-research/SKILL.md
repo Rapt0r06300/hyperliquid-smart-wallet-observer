@@ -18,10 +18,11 @@ The final target is **>= +4.00 USD NET per observed forward day for each canonic
 3. Prefer an existing project evaluator. Create/change an evaluator only when the current code cannot express the hypothesis.
 4. Write a small `EXPERIMENT_SPEC.json` using `references/experiment-spec.md`.
 5. Run `python tools/codex_quant_experiment.py <spec>` locally. It is CPU-first and hides CUDA/ROCm/HIP/JAX accelerators by default. Let grid/random/QMC/TPE/CMA-ES/NSGA-II/Successive-Halving/Hyperband do repetitive search locally.
-6. When useful, create local scripts that batch many related checks in one process: walk-forward, purge/embargo, CPCV/CSCV, PBO, DSR/PSR, bootstrap, permutation/placebo/null tests, Monte-Carlo, sensitivity plateaus, regime splits, stress costs/slippage/latency/capacity and parameter perturbations. Prefer one long local computation plus one compact result over many model round-trips.
-7. Local parallelism is allowed: multiprocessing, threads, CPU workers, vectorized numpy/scipy, SQLite-backed Optuna and queued batches may use the machine heavily. Avoid GPU unless CPU is genuinely impractical; if used outside the standard runner, record why.
-8. Read `RESULT_SUMMARY.json` first. Open detailed trial/log artifacts only for a specific anomaly or scientific question. Aggregate huge outputs locally before the model reads them.
-9. Decide:
+6. If several experiments can be fully specified before seeing intermediate results, put them in one `BATCH_SPEC.json` and run `python tools/codex_quant_batch.py <batch>`. Do not return to the model between those experiments; read only the resulting `BATCH_SUMMARY.json` afterward.
+7. When useful, create local scripts that batch many related checks in one process: walk-forward, purge/embargo, CPCV/CSCV, PBO, DSR/PSR, bootstrap, permutation/placebo/null tests, Monte-Carlo, sensitivity plateaus, regime splits, stress costs/slippage/latency/capacity and parameter perturbations. Prefer one long local computation plus one compact result over many model round-trips.
+8. Local parallelism is allowed: multiprocessing, threads, CPU workers, vectorized numpy/scipy, SQLite-backed Optuna and queued batches may use the machine heavily. Avoid GPU unless CPU is genuinely impractical; if used outside the standard runner, record why.
+9. Read `RESULT_SUMMARY.json` or `BATCH_SUMMARY.json` first. Open detailed trial/log artifacts only for a specific anomaly or scientific question. Aggregate huge outputs locally before the model reads them.
+10. Decide:
    - `REJECT`: change mechanism, not cosmetic thresholds;
    - `ITERATE`: next train-only experiment with higher information value;
    - `FREEZE_CANDIDATE`: freeze before untouched OOS/forward validation;
