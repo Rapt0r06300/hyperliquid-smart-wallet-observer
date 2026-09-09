@@ -1,6 +1,7 @@
 # AGENTS.md — Alina SmartFlow
 
 > **Version compacte active — 2026-09-09.** Ce fichier doit rester court : Codex le charge automatiquement.
+> Dernière mise à jour : **2026-09-09**
 > L'ancien guide verbeux est archivé dans `docs/archive/AGENTS_LEGACY_20260909.md` et ne doit être lu
 > que si une question historique précise l'exige.
 
