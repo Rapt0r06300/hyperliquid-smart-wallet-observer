@@ -36,6 +36,7 @@ def test_leave_one_out_generalise():
 
 
 def test_borne_basse_nette():
+    assert borne_basse_nette([]) == {"borne_basse": None, "moyenne": None, "alpha": 0.05}
     assert borne_basse_nette([1.0] * 100)["borne_basse"] > 0
     assert borne_basse_nette([-5.0, 5.0] * 50)["borne_basse"] < 0
 
