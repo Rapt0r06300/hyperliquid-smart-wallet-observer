@@ -164,8 +164,12 @@ def test_experiment_evaluator_scans_once_and_never_labels_pnl(monkeypatch, tmp_p
 
 
 def test_pinned_manifest_survives_new_runtime_shards(monkeypatch, tmp_path: Path) -> None:
-    source = tmp_path / "source.jsonl.gz"
-    market = tmp_path / "market.jsonl.gz"
+    project = tmp_path / "project"
+    shared = tmp_path / "shared-runtime"
+    project.mkdir()
+    shared.mkdir()
+    source = shared / "source.jsonl.gz"
+    market = shared / "market.jsonl.gz"
     source.write_bytes(b"source")
     market.write_bytes(b"market")
     source_stat = source.stat()
@@ -180,14 +184,14 @@ def test_pinned_manifest_survives_new_runtime_shards(monkeypatch, tmp_path: Path
         "market_window_count": 1,
         "source_records": [
             {
-                "path": source.name,
+                "path": str(source),
                 "size": source_stat.st_size,
                 "mtime_ns": source_stat.st_mtime_ns,
             }
         ],
         "market_window_records": [
             {
-                "path": market.name,
+                "path": str(market),
                 "start_ms": 1_600_000_000_000,
                 "end_ms": 1_600_000_100_000,
                 "size": market_stat.st_size,
@@ -198,12 +202,12 @@ def test_pinned_manifest_survives_new_runtime_shards(monkeypatch, tmp_path: Path
     monkeypatch.setattr(
         streaming_module, "immutable_aligned_source_manifest", lambda _root: dynamic
     )
-    target = tmp_path / "runtime" / "pinned.json"
+    target = project / "runtime" / "pinned.json"
 
-    written = write_immutable_source_manifest(tmp_path, target)
+    written = write_immutable_source_manifest(project, target)
     (tmp_path / "new-shard.jsonl.gz").write_bytes(b"new")
     loaded = load_pinned_source_manifest(
-        tmp_path,
+        project,
         target,
         expected_manifest_sha256=written["manifest_sha256"],
     )

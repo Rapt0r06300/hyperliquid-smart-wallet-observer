@@ -384,9 +384,10 @@ def load_pinned_source_manifest(
         raise ValueError("pinned TRAIN data fingerprint mismatch")
 
     def checked_path(row: dict[str, Any]) -> Path:
-        candidate = (project_root / str(row.get("path") or "")).resolve()
-        if not candidate.is_relative_to(project_root):
-            raise ValueError("pinned TRAIN source escapes project root")
+        candidate = Path(str(row.get("path") or ""))
+        if not candidate.is_absolute():
+            candidate = project_root / candidate
+        candidate = candidate.resolve()
         stat = candidate.stat()
         if stat.st_size != int(row.get("size") or -1):
             raise ValueError(f"pinned TRAIN source size changed: {candidate}")
