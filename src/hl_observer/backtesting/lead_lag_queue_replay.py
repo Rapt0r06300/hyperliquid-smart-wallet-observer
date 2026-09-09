@@ -30,6 +30,71 @@ HOLD_MS = 5_000
 NOTIONAL_USD = 25.0
 MAX_BOOK_DELAY_MS = 750
 DIAGNOSTIC_LATENCY_MS = 750.0
+MIN_COMPLETE_PROOF_DAYS = 2
+POST_FREEZE_PROOF_POLICY = "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
+MAKER_PROTOCOL_NAME = "lead_lag_queue_maker_walk_forward_v1"
+MAKER_EXECUTION_MODEL = (
+    "causal_eth_strong_shock_full_fifo_maker_entry_taker_exit_v1"
+)
+
+
+def maker_protocol_signature() -> dict[str, Any]:
+    """Return the immutable maker strategy fields, excluding measured data."""
+
+    return {
+        "calibration_protocol": MAKER_PROTOCOL_NAME,
+        "execution_model": MAKER_EXECUTION_MODEL,
+        "coin": REQUIRED_COIN,
+        "shock_window_ms": SHOCK_WINDOW_MS,
+        "shock_threshold_bps": SHOCK_THRESHOLD_BPS,
+        "shock_cooldown_ms": SHOCK_COOLDOWN_MS,
+        "maker_lifetime_ms": MAKER_LIFETIME_MS,
+        "hold_ms": HOLD_MS,
+        "notional_usd": NOTIONAL_USD,
+        "max_book_age_or_delay_ms": MAX_BOOK_DELAY_MS,
+        "queue_rule": (
+            "FIFO_PUBLIC_TRADES_CONSUME_AHEAD_PLUS_COMPLETE_OWN_QUANTITY"
+        ),
+        "cancellation_rule": "CANCELLATIONS_DO_NOT_ADVANCE_QUEUE",
+        "entry_decision_policy": (
+            "LATEST_KNOWN_FRESH_BOOK_OR_FIRST_CAUSAL_BOOK_AFTER_DECISION"
+        ),
+        "latency_policy": "FROZEN_MEASURED_RUNTIME_P95",
+        "post_freeze_proof_policy": POST_FREEZE_PROOF_POLICY,
+        "minimum_complete_proof_days": MIN_COMPLETE_PROOF_DAYS,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
+def post_freeze_proof_window(
+    *, frozen_at_ms: int, evaluated_at_ms: int
+) -> dict[str, Any]:
+    """Return immutable OOS/forward bounds over complete post-freeze UTC days."""
+
+    day_ms = 86_400_000
+    proof_start = ((int(frozen_at_ms) // day_ms) + 1) * day_ms
+    completed_cutoff = (int(evaluated_at_ms) // day_ms) * day_ms
+    complete_days = max(0, (completed_cutoff - proof_start) // day_ms)
+    if complete_days <= 0:
+        segments = {"oos": (None, None), "forward": (None, None)}
+    else:
+        oos_end = proof_start + day_ms - 1
+        forward = (
+            (proof_start + day_ms, completed_cutoff - 1)
+            if complete_days >= 2
+            else (None, None)
+        )
+        segments = {"oos": (proof_start, oos_end), "forward": forward}
+    return {
+        "policy": POST_FREEZE_PROOF_POLICY,
+        "frozen_at_ms": int(frozen_at_ms),
+        "evaluated_at_ms": int(evaluated_at_ms),
+        "proof_start_ms": proof_start,
+        "completed_cutoff_exclusive_ms": completed_cutoff,
+        "complete_days_available": complete_days,
+        "segments": segments,
+    }
 
 
 def _number(value: object) -> float | None:
@@ -558,5 +623,7 @@ def replay_lead_lag_queue_maker(
 
 __all__ = [
     "detect_rolling_shocks",
+    "maker_protocol_signature",
+    "post_freeze_proof_window",
     "replay_lead_lag_queue_maker",
 ]

@@ -241,3 +241,55 @@ def test_train_public_trade_loader_fails_closed_on_non_recorded_or_unsigned_rows
     assert [row["trade_id"] for row in trades["ETH"]] == ["valid"]
     assert meta["duplicate_trades_rejected"] == 1
     assert meta["invalid_or_unsafe_trades_rejected"] == 3
+
+
+def test_train_microstructure_loader_clamps_books_and_trades_to_train(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    start_ms = 1_800_000_000_000
+    train_end_ms = start_ms + 2_000
+    event_ms = start_ms + 1_500
+
+    valid_book = {
+        "coin": "ETH",
+        "ts_ms": event_ms + 50,
+        "bid": 100.0,
+        "ask": 100.1,
+        "bid_size": 2.0,
+        "ask_size": 3.0,
+        "source": "hyperliquid:recorded:l2Book",
+        "data_origin": "RECORDED_REAL",
+        "read_only": True,
+        "real_execution": False,
+    }
+    heldout_book = {**valid_book, "ts_ms": train_end_ms + 1}
+
+    def fake_history(_root, *, start_ms, end_ms, **_kwargs):
+        assert int(end_ms) == train_end_ms
+        return (
+            {"ETH": [valid_book, heldout_book]},
+            {
+                "ETH": [
+                    _signed_trade(ts_ms=event_ms + 100, trade_id="train"),
+                    _signed_trade(ts_ms=train_end_ms + 1, trade_id="heldout"),
+                ]
+            },
+            {"source_time_filter_applied": True, "real_execution": False},
+        )
+
+    monkeypatch.setattr(module, "load_market_microstructure_history", fake_history)
+
+    books, trades, meta = module.load_train_microstructure_history(
+        tmp_path,
+        [event_ms],
+        train_ranges=[(start_ms, train_end_ms)],
+        before_ms=100,
+        after_ms=5_000,
+    )
+
+    assert [row["ts_ms"] for row in books["ETH"]] == [event_ms + 50]
+    assert [row["trade_id"] for row in trades["ETH"]] == ["train"]
+    assert meta["heldout_loaded"] is False
+    assert meta["book_rows_rejected_outside_train"] == 1
+    assert meta["trade_rows_rejected_outside_train"] == 1
