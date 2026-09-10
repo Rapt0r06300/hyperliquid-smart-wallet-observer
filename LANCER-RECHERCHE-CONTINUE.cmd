@@ -55,7 +55,7 @@ echo ============================================================
 echo.
 
 echo [1/4] Precontrole securite, disque et dependances...
-"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dry-run
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py peut-reprendre
 if errorlevel 1 (
   echo.
   echo [ECHEC] Le precontrole a refuse le demarrage. Aucun calcul n'a ete lance.
@@ -66,7 +66,7 @@ if errorlevel 1 (
 echo [OK] Precontrole valide.
 echo.
 
-echo [2/4] Recherche d'un run incomplet a reprendre avec peut-reprendre...
+echo [2/4] Recherche d'un run incomplet a reprendre...
 "%HYPERSMART_PYTHON%" -u tools\recherche_continue.py peut-reprendre
 if errorlevel 1 (
   echo [INFO] Aucun run incomplet: creation d'un nouveau laboratoire.
