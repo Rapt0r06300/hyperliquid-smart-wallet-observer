@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
-from hl_observer.research.hypothesis_ledger import FAMILIES, load_records
-from hl_observer.research.process_memory import load_process_records
-from hl_observer.research.semantic_discovery import (
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_SRC = REPO_ROOT / "src"
+for _path in (_SRC, REPO_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
+
+from hl_observer.research.hypothesis_ledger import FAMILIES, load_records  # noqa: E402
+from hl_observer.research.process_memory import load_process_records  # noqa: E402
+from hl_observer.research.semantic_discovery import (  # noqa: E402
     generate_semantic_plans,
     load_catalog,
     rank_semantic_plans,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = (
     REPO_ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
 )
@@ -33,7 +39,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     parser.add_argument("--process-memory", type=Path, default=DEFAULT_PROCESS_MEMORY)
     parser.add_argument("--out", type=Path)
+    parser.add_argument(
+        "--status-out",
+        type=Path,
+        default=DEFAULT_STATUS,
+        help="machine-readable search-accounting sidecar",
+    )
     return parser
+
+
+def _output_path(path: Path) -> Path:
+    return path if path.is_absolute() else REPO_ROOT / "runtime/codex_research" / path.name
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -61,17 +77,13 @@ def main() -> int:
         "network_io": False,
         "certifying": False,
     }
-    _atomic_json(DEFAULT_STATUS, status)
+    _atomic_json(_output_path(args.status_out), status)
     payload = {**status, "shortlist": ranked}
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if args.out is None:
         print(encoded)
         return 0
-    output = (
-        args.out
-        if args.out.is_absolute()
-        else REPO_ROOT / "runtime/codex_research" / args.out.name
-    )
+    output = _output_path(args.out)
     _atomic_json(output, payload)
     print(str(output))
     return 0
