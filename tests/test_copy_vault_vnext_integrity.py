@@ -93,6 +93,26 @@ def test_incomplete_correlation_coverage_clears_freeze_candidate(monkeypatch) ->
     assert gated["universe_integrity"]["eligible"] is False
 
 
+def test_malformed_cohort_and_nonfinite_correlation_fail_closed(monkeypatch) -> None:
+    def evaluate(**kwargs):
+        for row in kwargs["cohort"]:
+            row.get("wallet")
+        return {"eligible": True, "reasons": []}
+
+    monkeypatch.setattr(module, "evaluate_copy_vault_universe_integrity", evaluate)
+    raw = _valid_raw()
+    raw["universe_integrity"]["cohort"] = ["not-a-row"]  # type: ignore[index]
+    raw["universe_integrity"]["correlations"] = [  # type: ignore[index]
+        {"left": "A", "right": "B", "correlation": float("nan")}
+    ]
+
+    evidence = module.evaluate_copy_vault_vnext_integrity(raw)
+
+    assert evidence["eligible"] is False
+    assert "COHORT_EVIDENCE_INVALID" in evidence["reasons"]
+    assert "CORRELATION_EVIDENCE_INVALID" in evidence["reasons"]
+
+
 def test_economic_pack_wires_integrity_before_copy_reports() -> None:
     root = Path(__file__).resolve().parents[1]
     text = (root / "src" / "hl_observer" / "backtesting" / "economic_vnext_pack.py").read_text(
