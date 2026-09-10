@@ -11,7 +11,7 @@ from hl_observer.research import cost_model as C  # noqa: E402
 
 def test_fees_roundtrip_source_unique():
     assert C.fees_roundtrip_taker_bps("HL") == 9.0            # 4.5 + 4.5 depuis frais_venues
-    assert C.fees_roundtrip_taker_bps("HL", "BIN") == 9.0     # cross-venue = deux venues
+    assert C.fees_roundtrip_taker_bps("HL", "BIN") == 9.5     # cross-venue = 4.5 + 5.0
 
 
 def test_decomposer_total_et_incomplet():
