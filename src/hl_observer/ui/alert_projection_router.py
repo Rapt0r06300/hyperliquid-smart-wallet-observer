@@ -12,6 +12,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from hl_observer.alerts.coverage import load_source_coverage_universe
+from hl_observer.alerts.coverage_runtime import build_runtime_coverage_report
 from hl_observer.alerts.read_model import materialized_read_model_hash
 from hl_observer.alerts.spine import PROJECTION_SCHEMA
 from hl_observer.config.settings import Settings
@@ -249,6 +251,8 @@ def create_alert_projection_router(
     *,
     clock_ms: Callable[[], int] | None = None,
     dashboard_path: str | Path | None = None,
+    coverage_root: str | Path | None = None,
+    coverage_universe_path: str | Path | None = None,
 ) -> APIRouter:
     """Expose projection and capabilities without any writer or ledger handle."""
 
@@ -258,6 +262,13 @@ def create_alert_projection_router(
         "static"
     ) / "alerts_v26.html"
     router = APIRouter()
+    coverage_enabled = coverage_root is not None or coverage_universe_path is not None
+    runtime_root = Path(coverage_root).resolve() if coverage_root else Path.cwd().resolve()
+    universe_path = (
+        Path(coverage_universe_path)
+        if coverage_universe_path
+        else runtime_root / "config" / "alerts" / "source_coverage_universe.json"
+    )
 
     @router.get("/api/alerts/projection")
     def alert_projection() -> dict[str, Any]:
@@ -276,6 +287,20 @@ def create_alert_projection_router(
     @router.get("/api/alerts/capabilities")
     def alert_capabilities() -> dict[str, Any]:
         return alert_dashboard_capability_manifest()
+
+    if coverage_enabled:
+
+        @router.get("/api/alerts/coverage")
+        def alert_coverage() -> dict[str, Any]:
+            try:
+                universe = load_source_coverage_universe(universe_path)
+                return build_runtime_coverage_report(
+                    runtime_root,
+                    universe,
+                    evaluated_at_ms=int(now_ms()),
+                )
+            except (OSError, ValueError) as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.get("/alerts", include_in_schema=False)
     def alert_dashboard() -> FileResponse:

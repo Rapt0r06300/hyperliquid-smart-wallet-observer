@@ -7,6 +7,7 @@ import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
+from urllib.parse import urldefrag
 
 from hl_observer.alerts.freshness import project_alert_freshness
 
@@ -281,6 +282,137 @@ def _research_summaries(
     }
 
 
+def _lineage_tokens(event: Mapping[str, Any]) -> set[tuple[str, str]]:
+    tokens: set[tuple[str, str]] = set()
+
+    def add_receipt(receipt: object) -> None:
+        if not isinstance(receipt, Mapping):
+            return
+        uri = str(receipt.get("source_uri") or "").strip()
+        content_hash = str(
+            receipt.get("source_content_hash") or receipt.get("content_hash") or ""
+        ).strip().lower()
+        if uri:
+            tokens.add(("SOURCE_URI", urldefrag(uri)[0]))
+        if len(content_hash) == 64 and all(c in "0123456789abcdef" for c in content_hash):
+            tokens.add(("CONTENT_HASH", content_hash))
+
+    add_receipt(event.get("source_receipt"))
+    refs = event.get("evidence_refs")
+    if isinstance(refs, list):
+        for receipt in refs:
+            add_receipt(receipt)
+    return tokens
+
+
+def _source_lineage(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    returned_event_ids: set[str],
+    limit: int,
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    count = len(events)
+    parents = list(range(count))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parents[max(left_root, right_root)] = min(left_root, right_root)
+
+    token_owners: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for index, event in enumerate(events):
+        for token in _lineage_tokens(event):
+            token_owners[token].append(index)
+    for owners in token_owners.values():
+        for owner in owners[1:]:
+            union(owners[0], owner)
+
+    members_by_root: dict[int, list[int]] = defaultdict(list)
+    for index in range(count):
+        members_by_root[find(index)].append(index)
+    reasons_by_root: dict[int, set[str]] = defaultdict(set)
+    for (kind, _value), owners in token_owners.items():
+        if len(owners) > 1:
+            reasons_by_root[find(owners[0])].add(f"SHARED_{kind}")
+
+    full_groups: list[dict[str, Any]] = []
+    annotations: dict[str, dict[str, Any]] = {}
+    for indexes in members_by_root.values():
+        full_ids = [str(events[index]["event_id"]) for index in indexes]
+        full_sources = sorted({str(events[index]["source_id"]) for index in indexes})
+        returned_indexes = [
+            index
+            for index in sorted(
+                indexes,
+                key=lambda item: int(events[item]["ledger_sequence"]),
+                reverse=True,
+            )
+            if str(events[index]["event_id"]) in returned_event_ids
+        ]
+        returned_ids = [str(events[index]["event_id"]) for index in returned_indexes]
+        returned_sources = sorted(
+            {str(events[index]["source_id"]) for index in returned_indexes}
+        )
+        group_id = hashlib.sha256(
+            "\n".join(sorted(full_ids)).encode("utf-8")
+        ).hexdigest()
+        correlated = len(indexes) > 1
+        group = {
+            "group_id": group_id,
+            "lineage_state": "CORRELATED" if correlated else "LINEAGE_UNKNOWN",
+            "correlation_reasons": sorted(reasons_by_root[find(indexes[0])]),
+            "total_alerts": len(indexes),
+            "returned_alerts": len(returned_ids),
+            "omitted_alerts": len(indexes) - len(returned_ids),
+            "event_ids": returned_ids,
+            "total_sources": len(full_sources),
+            "returned_sources": len(returned_sources),
+            "omitted_sources": len(full_sources) - len(returned_sources),
+            "source_ids": returned_sources,
+            "latest_ledger_sequence": max(
+                int(events[index]["ledger_sequence"]) for index in indexes
+            ),
+        }
+        full_groups.append(group)
+        for event_id in full_ids:
+            annotations[event_id] = {
+                "group_id": group_id,
+                "lineage_state": group["lineage_state"],
+                "independence_state": "NOT_PROVEN",
+                "corroboration_weight_upper_bound": round(1.0 / len(indexes), 12),
+            }
+    ranked = sorted(
+        full_groups,
+        key=lambda group: (-int(group["latest_ledger_sequence"]), str(group["group_id"])),
+    )
+    selected = [group for group in ranked if group["returned_alerts"] > 0][:limit]
+    for group in selected:
+        group.pop("latest_ledger_sequence", None)
+    correlated_alerts = sum(
+        int(group["total_alerts"])
+        for group in full_groups
+        if group["lineage_state"] == "CORRELATED"
+    )
+    unknown_alerts = count - correlated_alerts
+    return {
+        "independence_state": "NOT_PROVEN",
+        "independent_confirmation_count": None,
+        "confirmation_count_upper_bound": len(full_groups),
+        "total_groups": len(full_groups),
+        "returned_groups": len(selected),
+        "omitted_groups": len(full_groups) - len(selected),
+        "correlated_alert_count": correlated_alerts,
+        "unknown_lineage_alert_count": unknown_alerts,
+        "groups": selected,
+    }, annotations
+
+
 def build_materialized_alert_read_model(
     events: Sequence[Mapping[str, Any]],
     *,
@@ -305,6 +437,12 @@ def build_materialized_alert_read_model(
             raise AlertReadModelError("READ_MODEL_PAPER_READ_ONLY_REQUIRED")
         seen_ids.add(event_id)
     latest = list(reversed(replayed[-bounded_limit:]))
+    returned_event_ids = {str(event["event_id"]) for event in latest}
+    source_lineage, lineage_annotations = _source_lineage(
+        replayed,
+        returned_event_ids=returned_event_ids,
+        limit=bounded_limit,
+    )
     deterministic_freshness = project_alert_freshness(
         replayed,
         projected_at_ms=max(
@@ -328,8 +466,15 @@ def build_materialized_alert_read_model(
             "total_alerts": len(replayed),
             "returned_alerts": len(latest),
             "omitted_alerts": max(0, len(replayed) - len(latest)),
-            "alerts": [_alert_summary(event) for event in latest],
+            "alerts": [
+                {
+                    **_alert_summary(event),
+                    "source_lineage": lineage_annotations[str(event["event_id"])],
+                }
+                for event in latest
+            ],
         },
+        "source_lineage": source_lineage,
         "alerts_by_family": _bounded_index(
             replayed,
             keys=lambda event: (_family(event),),
