@@ -2,6 +2,8 @@
 
 Dernière mise à jour : **2026-09-10**.
 
+État technique et runtime revalidé contre le SHA exact **`c40263c8a5188fb6c39d5a92b149635243c6155e`**. Cette ancre désigne le code effectivement audité au moment de cette mise à jour ; un commit ultérieur purement documentaire ne doit pas être interprété comme une nouvelle certification du code.
+
 Ce document est la **source de vérité lisible actuelle** pour l'état du projet. Il ne remplace pas les contrats exécutables : en cas de divergence, le code, les tests, les gates CI et les registres machine gagnent toujours.
 
 ## 1. Périmètre économique actif
