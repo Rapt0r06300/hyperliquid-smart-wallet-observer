@@ -111,7 +111,12 @@ def _scope_like(name: str) -> bool:
 
 
 def discover_scope_relevant_defaults(path: Path) -> dict[str, str]:
-    return {key: value for key, value in _parse_env_defaults(path).items() if _scope_like(key)}
+    defaults = _parse_env_defaults(path)
+    return {
+        key: value
+        for key, value in defaults.items()
+        if key in SCOPE_FLAG_RECORDS or _scope_like(key)
+    }
 
 
 def classified_entrypoints() -> dict[str, FlagDisposition]:
