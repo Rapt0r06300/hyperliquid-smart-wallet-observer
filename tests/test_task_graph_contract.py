@@ -216,3 +216,19 @@ def test_done_contract_rejects_invalid_commit_sha() -> None:
         commit_sha="not-a-sha",
     )
     assert "commit_sha" in validate_done_contract(evidence)
+
+
+def test_empty_current_token_is_rejected_via_canonical_fail_closed_path() -> None:
+    lease = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+
+    assert can_mutate_task(lease, owner="agent-a", token="", now=_now()) is False
+    with pytest.raises(PermissionError, match="active ownership credential required"):
+        transfer_ownership(
+            lease,
+            current_owner="agent-a",
+            current_token="",
+            new_owner="agent-b",
+            now=_now() + timedelta(seconds=10),
+            ttl_seconds=90,
+            new_token="new",
+        )
