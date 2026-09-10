@@ -93,9 +93,12 @@ def detect_reference_residual_shocks(
     shocks: list[tuple[int, float]] = []
     reasons: dict[str, int] = {}
     evaluated = 0
+    coverage_start_ms = max(ref_ts[0], follower_ts[0]) if ref_ts and follower_ts else None
 
     for decision_ms in decisions:
         window_start_ms = int(decision_ms) - int(window_ms)
+        if coverage_start_ms is not None and window_start_ms < coverage_start_ms:
+            continue
         ref_start = _point_at_or_before(ref_ts, ref_rows, window_start_ms)
         ref_end = _point_at_or_before(ref_ts, ref_rows, decision_ms)
         follower_start = _point_at_or_before(follower_ts, follower_clean, window_start_ms)

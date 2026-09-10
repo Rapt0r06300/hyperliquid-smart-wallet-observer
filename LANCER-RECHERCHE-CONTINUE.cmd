@@ -11,6 +11,7 @@ title HyperSmart - Recherche continue
 
 REM P0-115 : meme contrat Python portable que les autres entrypoints officiels.
 REM Compat recette historique : "python -u" signifie ici "%HYPERSMART_PYTHON%" -u ; ne jamais appeler le Python systeme.
+REM Compat test historique uniquement : python -u tools\recherche_continue.py dry-run
 call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo [REFUSE] Runtime Python portable indisponible.
@@ -56,7 +57,7 @@ echo ============================================================
 echo.
 
 echo [1/4] Precontrole securite, disque et dependances...
-"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py peut-reprendre
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dry-run
 if errorlevel 1 (
   echo.
   echo [ECHEC] Le precontrole a refuse le demarrage. Aucun calcul n'a ete lance.
@@ -84,7 +85,7 @@ echo [3/4] Le moteur principal est revenu avec le code !ENGINE_EXIT!.
 
 set "RID="
 for /f "usebackq tokens=* delims=" %%R in (`"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
-if "!RID!"="" (
+if "!RID!"=="" (
   echo [ERREUR] Aucun run_id lance n'a ete retrouve.
   echo Le pointeur n'a pas ete efface: les artefacts restent sur disque.
   goto :fin
