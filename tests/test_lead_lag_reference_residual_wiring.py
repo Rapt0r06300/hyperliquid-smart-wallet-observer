@@ -52,6 +52,15 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
     other = "other.jsonl"
     btc_trades = [(base_ms * 1_000_000, 100.0, 1.0), (trigger_ns, 101.0, 1.0)]
     sol_trades = [(base_ms * 1_000_000, 10.0, 1.0), (trigger_ns, 10.2, 1.0)]
+    btc_book = {
+        "coin": "BTC",
+        "ts_ms": base_ms + 1_000,
+        "bid": 100.9,
+        "ask": 101.1,
+        "bid_top_usd": 1_000.0,
+        "ask_top_usd": 1_000.0,
+        "source_id": shared,
+    }
     tape = {
         "BTC": {
             "TRADE": btc_trades,
@@ -60,9 +69,9 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
                 {"observable_at_ms": base_ms + 1_000, "price": 101.0, "source_id": shared},
                 {"observable_at_ms": base_ms + 1_000, "price": 999.0, "source_id": other},
             ],
-            "HL_BOOK": [],
+            "HL_BOOK": [btc_book],
             "TRADE_SOURCE_IDS": [other, shared],
-            "HL_BOOK_SOURCE_IDS": [],
+            "HL_BOOK_SOURCE_IDS": [shared],
         },
         "SOL": {
             "TRADE": sol_trades,
@@ -86,7 +95,11 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
             "HL_BOOK_SOURCE_IDS": [shared],
         },
     }
-    monkeypatch.setattr(module, "load_multiasset_train_tape", lambda *_args, **_kwargs: (tape, {"heldout_loaded": False, "full_start_ms": base_ms}))
+    monkeypatch.setattr(
+        module,
+        "load_multiasset_train_tape",
+        lambda *_args, **_kwargs: (tape, {"heldout_loaded": False, "full_start_ms": base_ms}),
+    )
     monkeypatch.setattr(module, "load_runtime_latency_evidence", lambda _root: {"measured": True, "p95_ms": 1.0})
     monkeypatch.setattr(module, "TRAIN_HYPOTHESES", ())
     monkeypatch.setattr(module, "CROSS_ASSET_LEADERS", ("BTC",))
@@ -96,7 +109,11 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_WINDOWS_MS", (1_000,))
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_THRESHOLDS_BPS", (4.0,))
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_HORIZONS_MS", (5_000,))
-    monkeypatch.setattr(module, "REFERENCE_RESIDUAL_DIRECTION_POLICIES", (("REFERENCE_RESIDUAL_CONTINUATION", 1), ("REFERENCE_RESIDUAL_MEAN_REVERSION", -1)))
+    monkeypatch.setattr(
+        module,
+        "REFERENCE_RESIDUAL_DIRECTION_POLICIES",
+        (("REFERENCE_RESIDUAL_CONTINUATION", 1), ("REFERENCE_RESIDUAL_MEAN_REVERSION", -1)),
+    )
 
     detector_calls: list[tuple[list[dict], list[dict], dict]] = []
 
@@ -132,9 +149,14 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
     assert len(replay_calls) == 2
     assert {call["direction_multiplier"] for call in replay_calls} == {-1, 1}
     assert all(call["precomputed_shocks"] == {"SOL": [(trigger_ns, 1.0)]} for call in replay_calls)
-    residual_variants = [row for row in report["variants"] if row["mechanism"] == module.REFERENCE_RESIDUAL_MECHANISM]
+    residual_variants = [
+        row for row in report["variants"] if row["mechanism"] == module.REFERENCE_RESIDUAL_MECHANISM
+    ]
     assert len(residual_variants) == 2
-    assert {row["direction_policy"] for row in residual_variants} == {"REFERENCE_RESIDUAL_CONTINUATION", "REFERENCE_RESIDUAL_MEAN_REVERSION"}
+    assert {row["direction_policy"] for row in residual_variants} == {
+        "REFERENCE_RESIDUAL_CONTINUATION",
+        "REFERENCE_RESIDUAL_MEAN_REVERSION",
+    }
     assert all(row["aligned_source_ids"] == [shared] for row in residual_variants)
     assert all(row["reference_beta"] == 1.0 for row in residual_variants)
     assert report["heldout_evaluated"] is False
