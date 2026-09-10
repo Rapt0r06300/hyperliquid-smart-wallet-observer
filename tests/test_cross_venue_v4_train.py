@@ -115,8 +115,8 @@ def test_cross_v4_recalcule_frais_et_edge_depuis_le_registre(monkeypatch) -> Non
     )
 
     assert result["cost_contract"]["fee_bps_hyperliquid_per_fill"] == 6.0
-    assert result["cost_contract"]["fees_round_trip_bps"] == 21.0
-    assert result["fixed_grid"]["minimum_entry_executable_edge_bps"] == 33.0
+    assert result["cost_contract"]["fees_round_trip_bps"] == 22.0
+    assert result["fixed_grid"]["minimum_entry_executable_edge_bps"] == 34.0
     assert result["economic_contract"]["values"][
         "cross_venue.paper_notional_usd"
     ] == 15.0

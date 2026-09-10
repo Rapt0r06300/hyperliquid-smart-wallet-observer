@@ -91,6 +91,20 @@ def _certified_campaign(family: str) -> dict:
     }
     if family == "copy_vault":
         row["vault_generalization"] = {"sample_count": 20, "net_bps": 1.0}
+        row["copy_checkpoint_integrity"] = {
+            "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "writer-fixture",
+            "clean_epoch_ms": 1,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 2,
+            "expected_proof_trade_count": 2,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        }
     if family == "cross_venue_dislocation_v2":
         row["all_positions_two_leg_closed"] = True
         row["period"] = {

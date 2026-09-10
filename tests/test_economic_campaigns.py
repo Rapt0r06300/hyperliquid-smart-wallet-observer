@@ -200,16 +200,49 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         "economic_contract": economic_contract,
         "vault_generalization": {"sample_count": 20, "net_bps": 3.0},
         "metaorder_audit": {"metaorders": 3},
+        "book_meta": {
+            "clean_epoch_receipt": {
+                "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+                "receipt_valid": True,
+                "writer_role": "BOUND_WRITER",
+                "writer_run_id": "copy-writer-clean",
+                "clean_epoch_ms": 10,
+                "duplicate_checkpoint_ids": 0,
+                "quarantined_checkpoint_metaorders": 0,
+            }
+        },
+        "trades": [
+            {
+                "walk_forward_segment": "oos",
+                "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+                "checkpoint_writer_run_id": "copy-writer-clean",
+                "checkpoint_clean_epoch_ms": 10,
+                "all_checkpoints_post_clean_epoch": True,
+                "exit_ts_ms": 1_725_571_200_000,
+                "net_pnl_usd": 4.1,
+                "liquidatable_net": True,
+            },
+            {
+                "walk_forward_segment": "forward",
+                "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+                "checkpoint_writer_run_id": "copy-writer-clean",
+                "checkpoint_clean_epoch_ms": 10,
+                "all_checkpoints_post_clean_epoch": True,
+                "exit_ts_ms": 1_725_657_600_100,
+                "net_pnl_usd": 4.3,
+                "liquidatable_net": True,
+            },
+        ],
         "summary": {
             "positions_ouvertes": 2,
             "positions_fermees": 2,
-            "gross_pnl_usd": 5.0,
+            "gross_pnl_usd": 9.0,
             "fees_usd": 0.2,
             "spread_cost_usd": 0.3,
             "slippage_cost_usd": 0.0,
             "latency_cost_usd": 0.1,
-            "net_pnl_usd": 4.4,
-            "roi_pct": 0.44,
+            "net_pnl_usd": 8.4,
+            "roi_pct": 0.84,
             "max_drawdown_usd": 0.1,
             "hit_rate": 1.0,
             "profit_factor": float("inf"),
@@ -220,12 +253,12 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         },
         "temporal_evidence": {
             "oos": {
-                "gross_pnl_usd": 2.3,
+                "gross_pnl_usd": 4.3,
                 "fees_usd": 0.05,
                 "spread_cost_usd": 0.05,
                 "slippage_cost_usd": 0.05,
                 "latency_cost_usd": 0.05,
-                "net_pnl_usd": 2.1,
+                "net_pnl_usd": 4.1,
                 "sample_count": 1,
                 "liquidatable_net": True,
                 "duplicate_trade_ids": 0,
@@ -234,12 +267,12 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
                 "no_lookahead": True,
             },
             "forward": {
-                "gross_pnl_usd": 2.5,
+                "gross_pnl_usd": 4.5,
                 "fees_usd": 0.05,
                 "spread_cost_usd": 0.05,
                 "slippage_cost_usd": 0.05,
                 "latency_cost_usd": 0.05,
-                "net_pnl_usd": 2.3,
+                "net_pnl_usd": 4.3,
                 "sample_count": 1,
                 "liquidatable_net": True,
                 "duplicate_trade_ids": 0,
@@ -251,11 +284,15 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
         },
     }
 
-    campaign = build_copy_campaign(report, freeze=freeze, datasets=datasets)
+    campaign = build_copy_campaign(
+        report, freeze=freeze, datasets=datasets, require_daily=True
+    )
 
-    assert campaign["net_pnl_usd"] == 4.4
+    assert campaign["net_pnl_usd"] == 8.4
     assert campaign["liquidatable_net"] is True
     assert campaign["objective_status"] == "ATTEINT"
+    assert campaign["copy_checkpoint_integrity"]["proof_trade_count"] == 2
+    assert campaign["daily_evidence"]["min_daily_net_pnl_usd"] == 4.1
 
 
 def test_executable_copy_campaign_zero_closed_is_non_mesurable() -> None:
@@ -396,6 +433,44 @@ def test_lead_lag_without_sized_closed_episodes_remains_unmeasured() -> None:
     assert "UNMEASURED:net_pnl_usd" in campaign["objective_reasons"]
 
 
+def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
+    report = {
+        "statut": "PROMETTEUR",
+        "executable_campaign": {
+            "trades": [
+                {
+                    "exit_ts_ns": 1_725_571_200_000_000_000,
+                    "net_pnl_usd": 4.5,
+                    "liquidatable_net": True,
+                    "walk_forward_segment": "oos",
+                },
+                {
+                    "exit_ts_ns": 1_725_657_600_000_000_000,
+                    "net_pnl_usd": 4.1,
+                    "liquidatable_net": True,
+                    "walk_forward_segment": "forward",
+                },
+                {
+                    "exit_ts_ns": 1_725_571_200_000_000_000,
+                    "net_pnl_usd": 99.5,
+                    "liquidatable_net": False,
+                    "walk_forward_segment": "oos",
+                },
+            ],
+        },
+    }
+
+    campaign = build_lead_lag_campaign(
+        report,
+        freeze=None,
+        datasets={"files": []},
+        require_daily=True,
+    )
+
+    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 8.6
+    assert campaign["daily_evidence"]["all_days_at_or_above_target"] is True
+
+
 def test_cross_campaign_keeps_unmeasured_slippage_and_two_leg_proof(tmp_path: Path) -> None:
     datasets = {"dataset_fingerprint": "d" * 64, "files": []}
     freeze = freeze_parameters(
@@ -500,9 +575,9 @@ def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
     ]
     report = render_campaign_report(rows)
 
-    assert "Copy-Vault - OBJECTIF +4 USD : NON_ATTEINT" in report
-    assert "Lead-Lag - OBJECTIF +4 USD : NON_ATTEINT" in report
-    assert "Cross-Venue Dislocation v2 - OBJECTIF +4 USD : NON_ATTEINT" in report
+    assert "Copy-Vault - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
+    assert "Cross-Venue (Lead-Lag) - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
+    assert "Arbitrage (Cross-Venue Dislocation v2) - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
     assert "Carry OFF" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
 
@@ -526,7 +601,7 @@ def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
 
     assert "PnL net observe (diagnostic): +9.000000 USD" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
-    assert "OBJECTIF +4 USD : ATTEINT" not in report
+    assert "OBJECTIF +4 USD / JOUR : ATTEINT" not in report
 
 
 def test_markdown_separe_les_couts_de_preuve_des_couts_globaux() -> None:

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from hl_observer.backtesting.copy_vault_executable import PROTOCOL_NAME
+from hl_observer.backtesting.copy_vault_protocol import UNBOUND_L2_SOURCE_PROTOCOL
 from hl_observer.collection.copy_vault_checkpoint_tail import COMPANION_PROTOCOL
 from hl_observer.simulation.economic_collection_plan import (
     build_collection_plan,
@@ -166,14 +167,14 @@ def test_copy_plan_requires_running_causal_checkpoint_protocol() -> None:
         _raw_reports(),
         collector_state={
             "actifs": {"userfills-live": 42},
-            "protocols": {"userfills-live": PROTOCOL_NAME},
+            "protocols": {"userfills-live": UNBOUND_L2_SOURCE_PROTOCOL},
         },
         now_ms=123,
     )
     copy = next(row for row in current["families"] if row["family"] == "copy_vault")
-    assert copy["evidence_state"] == "FUTURE_CAUSAL_BOOK_AND_VAULT_DATA_REQUIRED"
-    assert copy["running_collector_protocol_ready"] is True
-    assert copy["progress"]["active_collector_protocol"] == PROTOCOL_NAME
+    assert copy["evidence_state"] == "CAUSAL_COLLECTOR_PROTOCOL_RESTART_REQUIRED"
+    assert copy["running_collector_protocol_ready"] is False
+    assert copy["progress"]["active_collector_protocol"] == UNBOUND_L2_SOURCE_PROTOCOL
 
     companion = build_collection_plan(
         campaigns,
@@ -184,6 +185,7 @@ def test_copy_plan_requires_running_causal_checkpoint_protocol() -> None:
                 "copy-vault-checkpoints": 43,
             },
             "protocols": {
+                "userfills-live": UNBOUND_L2_SOURCE_PROTOCOL,
                 "copy-vault-checkpoints": COMPANION_PROTOCOL,
             },
         },
@@ -194,6 +196,26 @@ def test_copy_plan_requires_running_causal_checkpoint_protocol() -> None:
     assert copy["running_collector_protocol_ready"] is True
     assert copy["progress"]["active_companion_protocol"] == COMPANION_PROTOCOL
     assert "copy-vault-checkpoints" in copy["required_collectors"]
+
+    conflict = build_collection_plan(
+        campaigns,
+        _raw_reports(),
+        collector_state={
+            "actifs": {
+                "userfills-live": 42,
+                "copy-vault-checkpoints": 43,
+            },
+            "protocols": {
+                "userfills-live": PROTOCOL_NAME,
+                "copy-vault-checkpoints": COMPANION_PROTOCOL,
+            },
+        },
+        now_ms=123,
+    )
+    copy = next(row for row in conflict["families"] if row["family"] == "copy_vault")
+    assert copy["evidence_state"] == "CHECKPOINT_WRITER_CONFLICT"
+    assert copy["running_collector_protocol_ready"] is False
+    assert copy["progress"]["checkpoint_writer_conflict"] is True
 
 
 def test_plan_kills_frozen_lead_lag_negative_oos_and_forward() -> None:
@@ -312,8 +334,11 @@ def test_plan_continue_v5_distinct_sans_reparer_l_ancien_oos() -> None:
         campaigns,
         raw,
         collector_state={
-            "actifs": {"userfills-live": 42},
-            "protocols": {"userfills-live": PROTOCOL_NAME},
+            "actifs": {"userfills-live": 42, "copy-vault-checkpoints": 43},
+            "protocols": {
+                "userfills-live": UNBOUND_L2_SOURCE_PROTOCOL,
+                "copy-vault-checkpoints": COMPANION_PROTOCOL,
+            },
         },
         now_ms=123,
     )

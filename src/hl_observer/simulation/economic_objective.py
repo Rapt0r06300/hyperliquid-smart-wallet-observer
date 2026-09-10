@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import hashlib
 import math
+import time
 from collections.abc import Mapping
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Iterable
 
+from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.backtesting.cross_venue_certified import (
     FOUR_FILL_CONTRACT_VERSION,
     SOURCE_MODE as CROSS_CERTIFIED_SOURCE_MODE,
 )
 
 TARGET_NET_USD = 4.0
+TARGET_NET_USD_PER_DAY = 4.0
+MIN_PROOF_DAYS = 2
 STARTING_CAPITAL_USD = 1000.0
 COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
@@ -34,6 +39,130 @@ _COST_KEYS = ("fees_usd", "spread_cost_usd", "slippage_cost_usd", "latency_cost_
 def canonical_family(value: object) -> str:
     normalized = str(value or "").strip().lower().replace(" ", "_")
     return _ALIASES.get(normalized, normalized)
+
+
+def evaluate_daily_net(
+    trades: Iterable[Mapping[str, Any]],
+    *,
+    target_net_usd_per_day: float = TARGET_NET_USD_PER_DAY,
+    as_of_ms: int | float | None = None,
+    complete_utc_days_only: bool = True,
+) -> dict[str, Any]:
+    """Aggregate closed-trade net PnL over completed UTC days, fail closed."""
+
+    target = _number(target_net_usd_per_day)
+    if target is None:
+        raise ValueError("target_net_usd_per_day must be finite")
+    evaluated_at = _number(time.time() * 1000 if as_of_ms is None else as_of_ms)
+    if evaluated_at is None:
+        raise ValueError("as_of_ms must be finite")
+    day_ms = 86_400_000
+    completed_cutoff_exclusive_ms = int(evaluated_at // day_ms) * day_ms
+    daily: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    excluded_incomplete_trade_count = 0
+    excluded_incomplete_days: set[str] = set()
+    missing_trade_timestamps = 0
+    missing_trade_net = 0
+    observed_trades = 0
+    for trade in trades:
+        observed_trades += 1
+        if not isinstance(trade, Mapping):
+            missing_trade_timestamps += 1
+            missing_trade_net += 1
+            continue
+        timestamp = next(
+            (
+                value
+                for key in ("exit_ts_ms", "ts_out", "close_ts_ms", "timestamp_ms")
+                for value in [_number(trade.get(key))]
+                if value is not None
+            ),
+            None,
+        )
+        if timestamp is None:
+            timestamp_ns = next(
+                (
+                    value
+                    for key in (
+                        "exit_ts_ns",
+                        "ts_out_ns",
+                        "close_ts_ns",
+                        "timestamp_ns",
+                    )
+                    for value in [_number(trade.get(key))]
+                    if value is not None
+                ),
+                None,
+            )
+            if timestamp_ns is not None:
+                timestamp = timestamp_ns / 1_000_000.0
+        net = next(
+            (
+                value
+                for key in ("net_pnl_usd", "net_usd", "net")
+                for value in [_number(trade.get(key))]
+                if value is not None
+            ),
+            None,
+        )
+        if timestamp is None:
+            missing_trade_timestamps += 1
+        if net is None:
+            missing_trade_net += 1
+        if timestamp is None or net is None:
+            continue
+        try:
+            day = datetime.fromtimestamp(
+                timestamp / 1000.0, tz=timezone.utc
+            ).date().isoformat()
+        except (OSError, OverflowError, ValueError):
+            missing_trade_timestamps += 1
+            continue
+        if complete_utc_days_only and timestamp >= completed_cutoff_exclusive_ms:
+            excluded_incomplete_trade_count += 1
+            excluded_incomplete_days.add(day)
+            continue
+        daily[day] = daily.get(day, 0.0) + net
+        counts[day] = counts.get(day, 0) + 1
+
+    days = [
+        {
+            "date_utc": day,
+            "net_pnl_usd": round(value, 8),
+            "trade_count": counts[day],
+            "at_or_above_target": value >= target,
+        }
+        for day, value in sorted(daily.items())
+    ]
+    values = [float(row["net_pnl_usd"]) for row in days]
+    return {
+        "schema_version": "hypersmart.daily_net_evidence.v1",
+        "target_net_usd_per_day": float(target),
+        "minimum_required_days": MIN_PROOF_DAYS,
+        "evaluated_at_ms": int(evaluated_at),
+        "completed_cutoff_exclusive_ms": completed_cutoff_exclusive_ms,
+        "complete_utc_days_only": bool(complete_utc_days_only),
+        "excluded_incomplete_trade_count": excluded_incomplete_trade_count,
+        "excluded_incomplete_days_utc": sorted(excluded_incomplete_days),
+        "sample_count": len(values),
+        "observed_trade_count": observed_trades,
+        "missing_trade_timestamps": missing_trade_timestamps,
+        "missing_trade_net": missing_trade_net,
+        "days": days,
+        "total_net_pnl_usd": round(sum(values), 8) if values else None,
+        "mean_daily_net_pnl_usd": (
+            round(sum(values) / len(values), 8) if values else None
+        ),
+        "min_daily_net_pnl_usd": round(min(values), 8) if values else None,
+        "all_days_at_or_above_target": bool(
+            values
+            and len(values) >= MIN_PROOF_DAYS
+            and missing_trade_timestamps == 0
+            and missing_trade_net == 0
+            and min(values) >= target
+        ),
+    }
 
 
 def _number(value: object) -> float | None:
@@ -90,6 +219,40 @@ def _validate_cross_provenance(evidence: Mapping[str, Any], issues: list[str]) -
         issues.append("CROSS_VENUE_FOUR_FILL_CONTRACT_MISSING")
 
 
+def _validate_copy_checkpoint_integrity(
+    evidence: Mapping[str, Any], issues: list[str]
+) -> None:
+    integrity = evidence.get("copy_checkpoint_integrity")
+    oos = evidence.get("oos")
+    forward = evidence.get("forward")
+    expected_proof_count = (
+        int(_number(oos.get("sample_count")) or 0)
+        + int(_number(forward.get("sample_count")) or 0)
+        if isinstance(oos, Mapping) and isinstance(forward, Mapping)
+        else 0
+    )
+    clean = bool(
+        isinstance(integrity, Mapping)
+        and integrity.get("schema_version")
+        == CHECKPOINT_INTEGRITY_SCHEMA
+        and integrity.get("receipt_valid") is True
+        and integrity.get("writer_role") == "BOUND_WRITER"
+        and bool(str(integrity.get("writer_run_id") or "").strip())
+        and int(_number(integrity.get("clean_epoch_ms")) or 0) > 0
+        and _number(integrity.get("duplicate_checkpoint_ids")) == 0
+        and _number(integrity.get("quarantined_checkpoint_metaorders")) == 0
+        and expected_proof_count > 0
+        and _number(integrity.get("proof_trade_count")) == expected_proof_count
+        and _number(integrity.get("expected_proof_trade_count"))
+        == expected_proof_count
+        and integrity.get("all_proof_trades_exact_checkpoint_bound") is True
+        and integrity.get("all_proof_trades_same_writer_run") is True
+        and integrity.get("all_proof_trades_post_clean_epoch") is True
+    )
+    if not clean:
+        issues.append("COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN")
+
+
 def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = TARGET_NET_USD) -> dict[str, Any]:
     issues: list[str] = []
     family = canonical_family(evidence.get("family"))
@@ -110,6 +273,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
             issues.append("CROSS_VENUE_TWO_LEG_CLOSE_PROOF_MISSING")
         _validate_cross_provenance(evidence, issues)
     if family == "copy_vault":
+        _validate_copy_checkpoint_integrity(evidence, issues)
         generalisation = evidence.get("vault_generalization")
         if not isinstance(generalisation, Mapping):
             issues.append("COPY_HELDOUT_VAULT_PROOF_MISSING")
@@ -146,6 +310,8 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     forward_net = _number(forward.get("net_pnl_usd")) if isinstance(forward, Mapping) else None; forward_count = _number(forward.get("sample_count")) if isinstance(forward, Mapping) else None
     oos_economics = _segment_economics(oos if isinstance(oos, Mapping) else None, label="OOS", issues=issues)
     forward_economics = _segment_economics(forward if isinstance(forward, Mapping) else None, label="FORWARD", issues=issues)
+    if oos_economics is not None and forward_economics is not None and oos_economics["trade_ids_sha256"] == forward_economics["trade_ids_sha256"]:
+        issues.append("OOS_FORWARD_TRADE_IDENTITY_COLLISION")
     if not isinstance(oos, Mapping) or oos_net is None:
         issues.append("OOS_PROOF_MISSING")
     elif oos_count is None or oos_count <= 0:
@@ -164,6 +330,31 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
         issues.append("FORWARD_NOT_PROVEN_POST_FREEZE")
     if not isinstance(placebos, Mapping) or placebos.get("beaten") is not True:
         issues.append("PLACEBO_NOT_BEATEN")
+    daily_evidence = evidence.get("daily_evidence")
+    daily_target_required = evidence.get("daily_target_required") is True
+    if daily_target_required:
+        if not isinstance(daily_evidence, Mapping):
+            issues.append("DAILY_NET_PROOF_MISSING")
+        else:
+            daily_sample_count = _number(daily_evidence.get("sample_count")) or 0
+            if daily_sample_count < MIN_PROOF_DAYS:
+                issues.append("DAILY_NET_PROOF_TOO_SHORT")
+            if daily_evidence.get("complete_utc_days_only") is not True:
+                issues.append("DAILY_NET_PROOF_HAS_INCOMPLETE_DAY")
+            if not (
+                daily_evidence.get("schema_version")
+                == "hypersmart.daily_net_evidence.v1"
+                and _number(daily_evidence.get("target_net_usd_per_day"))
+                == TARGET_NET_USD_PER_DAY
+                and daily_evidence.get("complete_utc_days_only") is True
+                and daily_sample_count > 0
+                and _number(daily_evidence.get("missing_trade_timestamps")) == 0
+                and _number(daily_evidence.get("missing_trade_net")) == 0
+                and (_number(daily_evidence.get("min_daily_net_pnl_usd")) or -math.inf)
+                >= TARGET_NET_USD_PER_DAY
+                and daily_evidence.get("all_days_at_or_above_target") is True
+            ):
+                issues.append("DAILY_NET_TARGET_NOT_REACHED")
     proof_economics = None
     if oos_economics is not None and forward_economics is not None:
         proof_economics = {key: round(float(oos_economics[key]) + float(forward_economics[key]), 8) for key in _ECONOMIC_KEYS}
@@ -174,7 +365,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     if proof_net is None or proof_net < float(target_net_usd):
         issues.append("TARGET_NET_USD_NOT_REACHED")
     unique_issues = list(dict.fromkeys(issues))
-    return {"family": family, "target_net_usd": float(target_net_usd), "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
+    return {"family": family, "target_net_usd": float(target_net_usd), "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
-__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "canonical_family", "evaluate_objective"]
+__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

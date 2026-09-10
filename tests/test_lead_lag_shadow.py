@@ -152,6 +152,21 @@ def test_episode_reconcilie_tous_les_couts_en_dollars():
     assert row["gross_pnl_usd"] - row["fees_usd"] - row["spread_cost_usd"] \
         - row["slippage_cost_usd"] - row["latency_cost_usd"] \
         == pytest.approx(row["net_pnl_usd"])
+    assert set(row["cost_component_receipts"]) == {
+        "fees",
+        "spread",
+        "slippage",
+        "latency",
+    }
+    for component, amount_key in {
+        "fees": "fees_usd",
+        "spread": "spread_cost_usd",
+        "slippage": "slippage_cost_usd",
+        "latency": "latency_cost_usd",
+    }.items():
+        assert row["cost_component_receipts"][component]["amount_usd"] == pytest.approx(
+            row[amount_key]
+        )
 
     summary = summarize_executable_episodes([row])
     assert summary["positions_ouvertes"] == summary["positions_fermees"] == 1

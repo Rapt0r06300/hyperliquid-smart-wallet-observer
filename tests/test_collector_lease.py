@@ -12,6 +12,7 @@ from hl_observer.ops.bounded_collection import (
 )
 from hl_observer.ops.collecteur_registry import (
     COLLECTEURS_CAMPAGNE,
+    REGISTRE,
     collecteurs_pour_profil,
 )
 from hl_observer.ops.collector_lease import (
@@ -36,6 +37,20 @@ def test_checkpoint_companion_is_campaign_only_and_never_in_launcher_profiles() 
         assert "copy-vault-checkpoints" not in {
             row["nom"] for row in collecteurs_pour_profil(profile)
         }
+
+
+def test_checkpoint_roles_designent_un_seul_redacteur_lie() -> None:
+    roles = {
+        row["nom"]: row.get("copy_vault_checkpoint_role")
+        for row in REGISTRE + COLLECTEURS_CAMPAGNE
+        if row["nom"] in {"userfills-live", "copy-vault-checkpoints"}
+    }
+
+    assert roles == {
+        "userfills-live": "UNBOUND_SOURCE",
+        "copy-vault-checkpoints": "BOUND_WRITER",
+    }
+    assert list(roles.values()).count("BOUND_WRITER") == 1
 
 
 def test_lease_is_bounded_replaced_and_never_publicly_exposes_token(tmp_path: Path) -> None:

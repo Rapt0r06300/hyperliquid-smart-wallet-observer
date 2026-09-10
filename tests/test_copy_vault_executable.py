@@ -15,6 +15,7 @@ from hl_observer.backtesting.copy_vault_executable import (
     evaluate_frozen,
     execute_metaorder,
     load_observed_books,
+    protocol_signature,
     replay_metaorders,
     select_causal_protocol_inputs,
     select_observed_continuations,
@@ -90,6 +91,8 @@ def _book(
         "bid": bid,
         "ask": ask,
         "capacity_usd": capacity,
+        "bids5": [[bid, capacity / bid]],
+        "asks5": [[ask, capacity / ask]],
         "source_line": line,
         "causal_observation": causal,
     }
@@ -266,6 +269,8 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
         "schema_version": "hypersmart.copy_vault_l2.v1",
         "coin": "BTC", "received_at_ms": 2_010, "exchange_ts_ms": 2_000,
         "bid": 100.0, "ask": 102.0, "capacity_usd": 700.0,
+        "bids5": [[100.0, 2.0], [99.0, 5.0]],
+        "asks5": [[102.0, 2.0], [103.0, 5.0]],
         "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
         "data_origin": "REAL_OBSERVED", "causal_observation": True,
         "checkpoint_stage": "ENTRY", "checkpoint_target_ms": 2_005,
@@ -279,8 +284,100 @@ def test_loader_accepte_checkpoint_info_causal_frais(tmp_path) -> None:
     books, audit = load_observed_books(tmp_path, coins={"BTC"})
 
     assert books["BTC"][0]["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT"
+    assert books["BTC"][0]["bids5"] == [[100.0, 2.0], [99.0, 5.0]]
+    assert books["BTC"][0]["asks5"] == [[102.0, 2.0], [103.0, 5.0]]
     assert audit["source_counts"]["causal_info_checkpoint"] == 1
     assert audit["causal_forward_rows"] == 1
+
+
+def test_loader_quarantaine_tout_metaordre_avec_checkpoint_duplique(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+
+    def checkpoint(
+        metaorder_id: str,
+        stage: str,
+        checkpoint_id: str,
+        received_at_ms: int,
+    ) -> dict:
+        return {
+            "schema_version": "hypersmart.copy_vault_l2.v1",
+            "coin": "BTC",
+            "received_at_ms": received_at_ms,
+            "exchange_ts_ms": received_at_ms - 10,
+            "bid": 100.0,
+            "ask": 102.0,
+            "capacity_usd": 700.0,
+            "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+            "data_origin": "REAL_OBSERVED",
+            "causal_observation": True,
+            "checkpoint_stage": stage,
+            "checkpoint_target_ms": received_at_ms - 5,
+            "checkpoint_id": checkpoint_id,
+            "metaorder_id": metaorder_id,
+            "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        }
+
+    rows = [
+        checkpoint("mo-bad", "REFERENCE", "mo-bad:REFERENCE", 2_010),
+        checkpoint("mo-bad", "ENTRY", "mo-bad:ENTRY", 2_020),
+        checkpoint("mo-bad", "ENTRY", "mo-bad:ENTRY", 2_030),
+        checkpoint("mo-good", "ENTRY", "mo-good:ENTRY", 2_040),
+    ]
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert [row["metaorder_id"] for row in books["BTC"]] == ["mo-good"]
+    assert audit["duplicate_checkpoint_ids"] == 1
+    assert audit["duplicate_checkpoint_rows"] == 1
+    assert audit["quarantined_checkpoint_metaorders"] == 1
+    assert audit["quarantined_checkpoint_rows"] == 3
+
+
+def test_loader_quarantaine_chaque_metaordre_partageant_un_checkpoint_id(tmp_path) -> None:
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+
+    def checkpoint(metaorder_id: str, checkpoint_id: str, received_at_ms: int) -> dict:
+        return {
+            "schema_version": "hypersmart.copy_vault_l2.v1",
+            "coin": "BTC",
+            "received_at_ms": received_at_ms,
+            "exchange_ts_ms": received_at_ms - 10,
+            "bid": 100.0,
+            "ask": 102.0,
+            "capacity_usd": 700.0,
+            "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
+            "data_origin": "REAL_OBSERVED",
+            "causal_observation": True,
+            "checkpoint_stage": "ENTRY",
+            "checkpoint_target_ms": received_at_ms - 5,
+            "checkpoint_id": checkpoint_id,
+            "metaorder_id": metaorder_id,
+            "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        }
+
+    rows = [
+        checkpoint("mo-a", "shared:ENTRY", 2_010),
+        checkpoint("mo-b", "shared:ENTRY", 2_020),
+        checkpoint("mo-good", "mo-good:ENTRY", 2_030),
+    ]
+    (data / "copy_vault_l2_tape.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+
+    books, audit = load_observed_books(tmp_path, coins={"BTC"})
+
+    assert [row["metaorder_id"] for row in books["BTC"]] == ["mo-good"]
+    assert audit["duplicate_checkpoint_ids"] == 1
+    assert audit["duplicate_checkpoint_rows"] == 1
+    assert audit["quarantined_checkpoint_metaorders"] == 2
+    assert audit["quarantined_checkpoint_rows"] == 2
 
 
 def test_loader_refuse_checkpoint_ancien_protocole(tmp_path) -> None:
@@ -407,6 +504,8 @@ def _checkpoint_book(
         "checkpoint_id": f"{metaorder_id}:{checkpoint_suffix}",
         "checkpoint_target_ms": target_ms,
         "collector_protocol": CHECKPOINT_COLLECTOR_PROTOCOL,
+        "writer_run_id": "copy-writer-clean",
+        "clean_epoch_ms": 500,
     }
 
 
@@ -424,6 +523,9 @@ def test_executeur_lie_les_trois_books_au_metaordre_exact() -> None:
     assert reason == "LIQUIDATABLE_NET"
     assert trade is not None
     assert trade["book_binding_method"] == "EXACT_METAORDER_CHECKPOINTS"
+    assert trade["checkpoint_writer_run_id"] == "copy-writer-clean"
+    assert trade["checkpoint_clean_epoch_ms"] == 500
+    assert trade["all_checkpoints_post_clean_epoch"] is True
 
 
 def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
@@ -448,7 +550,7 @@ def test_executeur_certifiable_lie_frais_et_raisons_zero_canoniques() -> None:
     assert trade["economic_contract"]["certification"]["ready"] is True
     assert len(trade["assumption_snapshot_hash"]) == 64
     assert trade["cost_component_receipts"]["slippage"]["zero_reason"] == (
-        "NOT_APPLICABLE"
+        "MEASURED_ZERO"
     )
 
 
@@ -508,8 +610,10 @@ def test_long_and_short_use_marketable_prices_and_reconcile_costs() -> None:
 
     assert long_reason == short_reason == "LIQUIDATABLE_NET"
     assert long_trade is not None and short_trade is not None
-    assert long_trade["entry_price"] == 102.0 and long_trade["exit_price"] == 109.0
-    assert short_trade["entry_price"] == 100.0 and short_trade["exit_price"] == 111.0
+    assert long_trade["entry_price"] == pytest.approx(102.0)
+    assert long_trade["exit_price"] == pytest.approx(109.0)
+    assert short_trade["entry_price"] == pytest.approx(100.0)
+    assert short_trade["exit_price"] == pytest.approx(111.0)
     for trade in (long_trade, short_trade):
         expected = (
             trade["gross_pnl_usd"]
@@ -521,6 +625,82 @@ def test_long_and_short_use_marketable_prices_and_reconcile_costs() -> None:
         assert math.isclose(expected, trade["net_pnl_usd"], abs_tol=1e-8)
         assert trade["liquidatable_net"] is True
         assert trade["paper_read_only"] is True and trade["real_execution"] is False
+
+
+def test_certifiable_walks_each_l2_side_and_receipts_observed_slippage() -> None:
+    books = [
+        _book(1_000, 99.0, 101.0, line=1),
+        {
+            **_book(61_000, 100.0, 102.0, line=2),
+            "bids5": [[100.0, 0.5], [99.0, 2.0]],
+            "asks5": [[102.0, 0.5], [104.0, 2.0]],
+        },
+        {
+            **_book(361_000, 109.0, 111.0, line=3),
+            "bids5": [[109.0, 0.5], [108.0, 2.0]],
+            "asks5": [[111.0, 0.5], [113.0, 2.0]],
+        },
+    ]
+    metaorder = cluster_metaorders([_entry("walk", 1_000)])[0][0]
+
+    trade, reason = execute_metaorder(
+        metaorder,
+        books,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["entry_price"] > 102.0
+    assert trade["exit_price"] < 109.0
+    assert trade["slippage_cost_usd"] > 0.0
+    assert trade["slippage_zero_reason"] is None
+    assert trade["cost_component_receipts"]["slippage"]["zero_reason"] is None
+    assert trade["cost_component_receipts"]["slippage"]["formula_id"] == (
+        "copy_vault.observed_l2_vwap.v1"
+    )
+    assert math.isclose(
+        trade["gross_pnl_usd"]
+        - trade["fees_usd"]
+        - trade["spread_cost_usd"]
+        - trade["slippage_cost_usd"]
+        - trade["latency_cost_usd"],
+        trade["net_pnl_usd"],
+        abs_tol=1e-8,
+    )
+
+
+def test_certifiable_refuses_missing_or_insufficient_exact_l2_depth() -> None:
+    metaorder = cluster_metaorders([_entry("depth", 1_000)])[0][0]
+    missing_levels = [
+        {key: value for key, value in _book(1_000, 99.0, 101.0).items() if key not in {"bids5", "asks5"}},
+        {key: value for key, value in _book(61_000, 100.0, 102.0).items() if key not in {"bids5", "asks5"}},
+        {key: value for key, value in _book(361_000, 109.0, 111.0).items() if key not in {"bids5", "asks5"}},
+    ]
+    trade, reason = execute_metaorder(
+        metaorder,
+        missing_levels,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert trade is None and reason == "MISSING_EXACT_L2_LEVELS"
+
+    insufficient_exit = [
+        _book(1_000, 99.0, 101.0),
+        _book(61_000, 100.0, 102.0),
+        {
+            **_book(361_000, 109.0, 111.0),
+            "bids5": [[109.0, 0.1]],
+        },
+    ]
+    trade, reason = execute_metaorder(
+        metaorder,
+        insufficient_exit,
+        horizon_ms=300_000,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+    assert trade is None and reason == "INSUFFICIENT_OBSERVED_EXIT_DEPTH"
 
 
 def test_capacity_and_duplicate_trade_guards_fail_closed() -> None:
@@ -615,6 +795,76 @@ def test_walk_forward_selects_on_train_and_forward_is_strictly_post_freeze() -> 
         for trade in evaluation["trades"]["forward"]
     )
     assert temporal["placebos"]["beaten"] is True
+
+
+def test_new_proof_policy_uses_only_complete_utc_days_after_freeze(monkeypatch) -> None:
+    day_ms = 86_400_000
+    frozen_at_ms = 1_725_571_200_000 + 12 * 60 * 60 * 1000
+    proof_start_ms = ((frozen_at_ms // day_ms) + 1) * day_ms
+    as_of_ms = proof_start_ms + 2 * day_ms + 12 * 60 * 60 * 1000
+    calls = []
+
+    def recording_replay(*args, start_ms=None, end_ms=None, **kwargs):
+        del args, kwargs
+        calls.append((start_ms, end_ms))
+        return [], {"metaorders_considered": 0, "completed_positions": 0}
+
+    monkeypatch.setattr(
+        "hl_observer.backtesting.copy_vault_executable.replay_metaorders",
+        recording_replay,
+    )
+    result = evaluate_frozen(
+        [],
+        {},
+        frozen_parameters={
+            "selected_horizon_ms": 300_000,
+            "walk_forward_bounds": {
+                "train_start_ms": 1,
+                "train_end_ms": 2,
+                "validation_start_ms": 3,
+                "validation_end_ms": 4,
+                "oos_start_ms": 5,
+                "oos_end_ms": 6,
+            },
+            "post_freeze_proof_policy": "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1",
+            "causal_observation_required_all_segments": True,
+        },
+        frozen_at_ms=frozen_at_ms,
+        evaluated_at_ms=as_of_ms,
+        economic_mode=EconomicRunMode.CERTIFIABLE,
+    )
+
+    assert calls[:4] == [
+        (1, 2),
+        (3, 4),
+        (proof_start_ms, proof_start_ms + day_ms - 1),
+        (proof_start_ms + day_ms, proof_start_ms + 2 * day_ms - 1),
+    ]
+    assert calls[4] == (proof_start_ms, proof_start_ms + day_ms - 1)
+    assert result["proof_window"] == {
+        "policy": "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1",
+        "frozen_at_ms": frozen_at_ms,
+        "evaluated_at_ms": as_of_ms,
+        "proof_start_ms": proof_start_ms,
+        "completed_cutoff_exclusive_ms": proof_start_ms + 2 * day_ms,
+        "complete_days_available": 2,
+        "oos_day_start_ms": proof_start_ms,
+        "oos_day_end_ms": proof_start_ms + day_ms - 1,
+        "forward_start_ms": proof_start_ms + day_ms,
+        "forward_end_ms": proof_start_ms + 2 * day_ms - 1,
+    }
+
+
+def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> None:
+    signature = protocol_signature()
+
+    assert signature["execution_pricing_policy"] == (
+        "observed_side_specific_l2_vwap_full_size_v1"
+    )
+    assert signature["minimum_complete_proof_days"] == 2
+    assert signature["post_freeze_proof_policy"] == (
+        "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
+    )
 
 
 def test_calibration_uses_candidate_horizon_specific_purge() -> None:

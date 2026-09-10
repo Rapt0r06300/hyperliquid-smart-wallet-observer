@@ -4,7 +4,9 @@ from copy import deepcopy
 
 import pytest
 
+from hl_observer.config import frais_venues as frais_module
 from hl_observer.config.frais_venues import hypothese_frais_taker
+from hl_observer.economics import families as family_module
 from hl_observer.economics.assumptions import (
     AssumptionClassification,
     CostComponentReceipt,
@@ -33,8 +35,8 @@ def test_cross_venue_formula_dag_recalcule_tous_les_descendants() -> None:
     registry = contract.registry
     initial_hash = registry.snapshot_hash()
     initial_notional = registry.get("cross_venue.paper_notional_usd").value
-    assert registry.get("cross_venue.round_trip_fee_bps").value == 18.0
-    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 30.0
+    assert registry.get("cross_venue.round_trip_fee_bps").value == 19.0
+    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 31.0
 
     registry.replace_parent(
         make_assumption(
@@ -53,8 +55,8 @@ def test_cross_venue_formula_dag_recalcule_tous_les_descendants() -> None:
         registry.assert_consistent()
 
     registry.recompute_all()
-    assert registry.get("cross_venue.round_trip_fee_bps").value == 21.0
-    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 33.0
+    assert registry.get("cross_venue.round_trip_fee_bps").value == 22.0
+    assert registry.get("cross_venue.minimum_entry_edge_bps").value == 34.0
     assert registry.get("cross_venue.paper_notional_usd").value == initial_notional
     assert registry.snapshot_hash() != initial_hash
     assert registry.require_certifiable(contract.required_ids)["ready"] is True
@@ -78,6 +80,57 @@ def test_les_trois_familles_partagent_la_meme_autorite_de_frais() -> None:
     assert cross.registry.get("fee.taker.hyperliquid.bps").value == 4.5
     assert lead.registry.get("lead_lag.round_trip_fee_bps").value == 9.0
     assert copy.registry.get("copy_vault.round_trip_fee_bps").value == 9.0
+
+
+def test_copy_contract_declares_observed_l2_vwap_execution() -> None:
+    receipt = build_copy_vault_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=150.0,
+        copy_delay_ms=60_000.0,
+        max_reference_lag_ms=30_000.0,
+        max_target_lag_ms=30_000.0,
+    ).receipt()
+
+    assert receipt["reality_model_version"] == (
+        "copy_vault_exact_checkpoint_observed_l2_vwap.v3"
+    )
+    assert receipt["reality_model_components"]["slippage_capacity_treatment"] == (
+        "copy_vault.observed_side_specific_l2_vwap_full_size.v1"
+    )
+    assert {
+        "entry_price",
+        "exit_price",
+        "entry_top_price",
+        "exit_top_price",
+        "exact_l2_vwap_observed",
+    }.issubset(receipt["direct_measured_fields"])
+
+
+def test_lead_lag_maker_contract_charges_one_maker_and_one_taker_fill() -> None:
+    maker_fee = frais_module.hypothese_frais_maker(
+        "HYPERLIQUID", mode=EconomicRunMode.CERTIFIABLE
+    )
+    contract = family_module.build_lead_lag_maker_contract(
+        mode=EconomicRunMode.CERTIFIABLE,
+        notional_usd=25.0,
+        max_book_age_ms=750.0,
+    )
+    receipt = contract.receipt()
+
+    assert maker_fee.value == 1.5
+    assert contract.registry.get("lead_lag.maker_round_trip_fee_bps").value == 6.0
+    assert receipt["certification"]["ready"] is True
+    assert receipt["reality_model_version"] == "lead_lag_queue_maker_taker.v1"
+    assert receipt["reality_model_components"]["fee_treatment"] == (
+        "lead_lag.maker_entry_taker_exit_fee.v1"
+    )
+    assert {
+        "initial_qty_ahead",
+        "paper_order_qty",
+        "queue_traded_qty",
+        "entry_price",
+        "exit_price",
+    }.issubset(receipt["direct_measured_fields"])
 
 
 def test_override_explicite_invalide_echoue_en_certifiable(monkeypatch) -> None:

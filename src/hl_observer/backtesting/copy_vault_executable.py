@@ -5,6 +5,7 @@ import bisect
 import hashlib
 import json
 import math
+import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -24,6 +25,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     METAORDER_GAP_MS,
     MIN_TRAIN_TRADES,
     NOTIONAL_USD,
+    POST_FREEZE_PROOF_POLICY,
     PROTOCOL_NAME,
     TRAIN_ECONOMIC_GATE_VERSION,
     TRAIN_FRACTION,
@@ -43,6 +45,78 @@ from hl_observer.economics.assumptions import (
 from hl_observer.economics.families import build_copy_vault_contract
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
+
+
+def _book_side(
+    book: Mapping[str, Any],
+    field: str,
+    *,
+    expected_best: float,
+    descending: bool,
+) -> list[tuple[float, float]] | None:
+    """Validate one recorded side exactly as observed; never extend its depth."""
+
+    raw_levels = book.get(field)
+    if not isinstance(raw_levels, list) or not raw_levels:
+        return None
+    levels: list[tuple[float, float]] = []
+    try:
+        for raw_level in raw_levels:
+            if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
+                return None
+            price, quantity = float(raw_level[0]), float(raw_level[1])
+            if not all(math.isfinite(value) for value in (price, quantity)):
+                return None
+            if price <= 0.0 or quantity <= 0.0:
+                return None
+            levels.append((price, quantity))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isclose(levels[0][0], float(expected_best), abs_tol=1e-12):
+        return None
+    prices = [price for price, _ in levels]
+    ordered = all(
+        left >= right if descending else left <= right
+        for left, right in zip(prices, prices[1:])
+    )
+    return levels if ordered else None
+
+
+def _walk_quote_notional(
+    levels: list[tuple[float, float]], target_quote_usd: float
+) -> tuple[float, float] | None:
+    """Return (VWAP, base quantity) after consuming an exact quote notional."""
+
+    remaining_quote = float(target_quote_usd)
+    filled_quantity = 0.0
+    for price, available_quantity in levels:
+        available_quote = price * available_quantity
+        taken_quote = min(remaining_quote, available_quote)
+        filled_quantity += taken_quote / price
+        remaining_quote -= taken_quote
+        if remaining_quote <= 1e-10:
+            break
+    if remaining_quote > 1e-8 or filled_quantity <= 0.0:
+        return None
+    return float(target_quote_usd) / filled_quantity, filled_quantity
+
+
+def _walk_base_quantity(
+    levels: list[tuple[float, float]], target_quantity: float
+) -> float | None:
+    """Return VWAP for an exact base quantity, failing on visible-depth exhaustion."""
+
+    remaining_quantity = float(target_quantity)
+    filled_quote = 0.0
+    for price, available_quantity in levels:
+        taken_quantity = min(remaining_quantity, available_quantity)
+        filled_quote += price * taken_quantity
+        remaining_quantity -= taken_quantity
+        if remaining_quantity <= 1e-12:
+            break
+    if remaining_quantity > 1e-10 or target_quantity <= 0.0:
+        return None
+    return filled_quote / float(target_quantity)
 
 
 
@@ -188,6 +262,38 @@ def execute_metaorder(
         if exit_book is None:
             return None, "STALE_OR_MISSING_EXIT_BOOK"
         book_binding_method = "CONTINUOUS_CAUSAL_BOOK"
+    checkpoint_writer_ids = {
+        str(row.get("writer_run_id") or "").strip()
+        for row in (reference, entry, exit_book)
+        if str(row.get("writer_run_id") or "").strip()
+    }
+    checkpoint_clean_epochs = {
+        int(row.get("clean_epoch_ms") or 0)
+        for row in (reference, entry, exit_book)
+        if int(row.get("clean_epoch_ms") or 0) > 0
+    }
+    checkpoint_writer_run_id = (
+        next(iter(checkpoint_writer_ids))
+        if book_binding_method == "EXACT_METAORDER_CHECKPOINTS"
+        and len(checkpoint_writer_ids) == 1
+        else None
+    )
+    checkpoint_clean_epoch_ms = (
+        next(iter(checkpoint_clean_epochs))
+        if book_binding_method == "EXACT_METAORDER_CHECKPOINTS"
+        and len(checkpoint_clean_epochs) == 1
+        else None
+    )
+    all_checkpoints_post_clean_epoch = bool(
+        checkpoint_writer_run_id
+        and checkpoint_clean_epoch_ms
+        and all(
+            int(row["ts_ms"]) >= checkpoint_clean_epoch_ms
+            and str(row.get("writer_run_id") or "") == checkpoint_writer_run_id
+            and int(row.get("clean_epoch_ms") or 0) == checkpoint_clean_epoch_ms
+            for row in (reference, entry, exit_book)
+        )
+    )
     causal_books = all(row.get("causal_observation") is True for row in (reference, entry, exit_book))
     if require_causal_books and not causal_books:
         return None, "NON_CAUSAL_FORWARD_BOOK"
@@ -207,22 +313,55 @@ def execute_metaorder(
     )
     entry_mid = (float(entry["bid"]) + float(entry["ask"])) / 2.0
     exit_mid = (float(exit_book["bid"]) + float(exit_book["ask"])) / 2.0
-    entry_exec = float(entry["ask"] if direction > 0 else entry["bid"])
-    exit_exec = float(exit_book["bid"] if direction > 0 else exit_book["ask"])
-    quantity = float(notional_usd) / entry_exec
+    top_entry_exec = float(entry["ask"] if direction > 0 else entry["bid"])
+    top_exit_exec = float(exit_book["bid"] if direction > 0 else exit_book["ask"])
+    entry_levels = _book_side(
+        entry,
+        "asks5" if direction > 0 else "bids5",
+        expected_best=top_entry_exec,
+        descending=direction < 0,
+    )
+    exit_levels = _book_side(
+        exit_book,
+        "bids5" if direction > 0 else "asks5",
+        expected_best=top_exit_exec,
+        descending=direction > 0,
+    )
+    exact_l2_observed = entry_levels is not None and exit_levels is not None
+    if is_certifiable_mode(economic_mode) and not exact_l2_observed:
+        return None, "MISSING_EXACT_L2_LEVELS"
+    if exact_l2_observed:
+        entry_fill = _walk_quote_notional(entry_levels, float(notional_usd))
+        if entry_fill is None:
+            return None, "INSUFFICIENT_OBSERVED_ENTRY_DEPTH"
+        entry_exec, quantity = entry_fill
+        walked_exit = _walk_base_quantity(exit_levels, quantity)
+        if walked_exit is None:
+            return None, "INSUFFICIENT_OBSERVED_EXIT_DEPTH"
+        exit_exec = walked_exit
+    else:
+        entry_exec = top_entry_exec
+        exit_exec = top_exit_exec
+        quantity = float(notional_usd) / entry_exec
     gross_from_reference = quantity * direction * (exit_mid - reference_mid)
     signed_latency_usd = quantity * direction * (entry_mid - reference_mid)
     latency = max(0.0, signed_latency_usd)
     latency_benefit = max(0.0, -signed_latency_usd)
     gross_pnl = gross_from_reference + latency_benefit
+    top_executable_before_fees = quantity * direction * (
+        top_exit_exec - top_entry_exec
+    )
     executable_before_fees = quantity * direction * (exit_exec - entry_exec)
     delayed_mid_pnl = quantity * direction * (exit_mid - entry_mid)
-    spread_cost = delayed_mid_pnl - executable_before_fees
+    spread_cost = delayed_mid_pnl - top_executable_before_fees
     if spread_cost < -1e-8:
         return None, "NEGATIVE_SPREAD_COST_INVARIANT"
     spread_cost = max(0.0, spread_cost)
+    slippage = top_executable_before_fees - executable_before_fees
+    if slippage < -1e-8:
+        return None, "NEGATIVE_SLIPPAGE_COST_INVARIANT"
+    slippage = max(0.0, slippage)
     fees = (abs(quantity * entry_exec) + abs(quantity * exit_exec)) * rate_bps / 10_000.0
-    slippage = 0.0
     net = gross_pnl - spread_cost - fees - slippage - latency
     expected = executable_before_fees - fees
     if not math.isclose(net, expected, abs_tol=1e-8):
@@ -240,6 +379,13 @@ def execute_metaorder(
         if latency == 0.0 and signed_latency_usd < 0.0
         else ZeroCostReason.MEASURED_ZERO
         if latency == 0.0
+        else None
+    )
+    slippage_zero_reason = (
+        ZeroCostReason.MEASURED_ZERO
+        if exact_l2_observed and slippage == 0.0
+        else ZeroCostReason.NOT_APPLICABLE
+        if not exact_l2_observed
         else None
     )
     cost_component_receipts = {
@@ -262,10 +408,14 @@ def execute_metaorder(
         "slippage": CostComponentReceipt(
             component="slippage",
             amount_usd=slippage,
-            zero_reason=ZeroCostReason.NOT_APPLICABLE,
-            formula_id="copy_vault.full_top_capacity.v1",
+            zero_reason=slippage_zero_reason,
+            formula_id=(
+                "copy_vault.observed_l2_vwap.v1"
+                if exact_l2_observed
+                else "copy_vault.legacy_top_only.v1"
+            ),
             reality_model_version=contract.reality_model_version,
-            provenance_ids=("entry_capacity_usd", "exit_capacity_usd"),
+            provenance_ids=("entry_book.bids5_asks5", "exit_book.bids5_asks5"),
         ).as_dict(),
         "latency": CostComponentReceipt(
             component="latency",
@@ -302,6 +452,9 @@ def execute_metaorder(
         "causal_books_eligible": causal_books,
         "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
         "book_binding_method": book_binding_method,
+        "checkpoint_writer_run_id": checkpoint_writer_run_id,
+        "checkpoint_clean_epoch_ms": checkpoint_clean_epoch_ms,
+        "all_checkpoints_post_clean_epoch": all_checkpoints_post_clean_epoch,
         "reference_ts_ms": reference["ts_ms"],
         "regime_id": regime_id,
         "regime_source": "REFERENCE_BOOK_PRE_SIGNAL",
@@ -319,6 +472,9 @@ def execute_metaorder(
         "latency_cost_method": "adverse_only;favourable_component_in_gross;exact_reconciliation",
         "entry_price": entry_exec,
         "exit_price": exit_exec,
+        "entry_top_price": top_entry_exec,
+        "exit_top_price": top_exit_exec,
+        "exact_l2_vwap_observed": exact_l2_observed,
         "quantity": quantity,
         "notional_usd": float(notional_usd),
         "entry_capacity_usd": float(entry["capacity_usd"]),
@@ -329,7 +485,9 @@ def execute_metaorder(
         "slippage_cost_usd": slippage,
         "latency_cost_usd": latency,
         "cost_component_receipts": cost_component_receipts,
-        "slippage_zero_reason": ZeroCostReason.NOT_APPLICABLE.value,
+        "slippage_zero_reason": (
+            slippage_zero_reason.value if slippage_zero_reason is not None else None
+        ),
         "latency_zero_reason": (
             latency_zero_reason.value if latency_zero_reason is not None else None
         ),
@@ -535,6 +693,7 @@ def evaluate_frozen(
     *,
     frozen_parameters: Mapping[str, Any],
     frozen_at_ms: int,
+    evaluated_at_ms: int | None = None,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     contract = build_copy_vault_contract(
@@ -547,12 +706,42 @@ def evaluate_frozen(
     bounds = dict(frozen_parameters.get("walk_forward_bounds") or {})
     horizon = int(frozen_parameters.get("selected_horizon_ms") or HORIZONS_MS[0])
     causal_all_segments = frozen_parameters.get("causal_observation_required_all_segments") is True
-    segments = {
-        "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
-        "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
-        "oos": (bounds.get("oos_start_ms"), bounds.get("oos_end_ms")),
-        "forward": (max(int(frozen_at_ms) + 1, int(bounds.get("oos_end_ms") or 0) + 1), None),
-    }
+    proof_policy = str(frozen_parameters.get("post_freeze_proof_policy") or "")
+    proof_window = None
+    if proof_policy == POST_FREEZE_PROOF_POLICY:
+        day_ms = 86_400_000
+        evaluated_at = int(time.time() * 1000) if evaluated_at_ms is None else int(evaluated_at_ms)
+        proof_start = ((int(frozen_at_ms) // day_ms) + 1) * day_ms
+        completed_cutoff = (evaluated_at // day_ms) * day_ms
+        complete_days = max(0, (completed_cutoff - proof_start) // day_ms)
+        oos_end = min(proof_start + day_ms, completed_cutoff) - 1
+        forward_start = proof_start + day_ms
+        forward_end = completed_cutoff - 1
+        segments = {
+            "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
+            "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
+            "oos": (proof_start, oos_end),
+            "forward": (forward_start, forward_end),
+        }
+        proof_window = {
+            "policy": proof_policy,
+            "frozen_at_ms": int(frozen_at_ms),
+            "evaluated_at_ms": evaluated_at,
+            "proof_start_ms": proof_start,
+            "completed_cutoff_exclusive_ms": completed_cutoff,
+            "complete_days_available": complete_days,
+            "oos_day_start_ms": proof_start,
+            "oos_day_end_ms": oos_end,
+            "forward_start_ms": forward_start,
+            "forward_end_ms": forward_end,
+        }
+    else:
+        segments = {
+            "train": (bounds.get("train_start_ms"), bounds.get("train_end_ms")),
+            "validation": (bounds.get("validation_start_ms"), bounds.get("validation_end_ms")),
+            "oos": (bounds.get("oos_start_ms"), bounds.get("oos_end_ms")),
+            "forward": (max(int(frozen_at_ms) + 1, int(bounds.get("oos_end_ms") or 0) + 1), None),
+        }
     result: dict[str, Any] = {
         "horizon_ms": horizon,
         "bounds": bounds,
@@ -561,6 +750,8 @@ def evaluate_frozen(
         "economic_contract": contract.receipt(),
         "assumption_snapshot_hash": contract.registry.snapshot_hash(),
     }
+    if proof_window is not None:
+        result["proof_window"] = proof_window
     all_trades: list[dict[str, Any]] = []
     for name, (start_ms, end_ms) in segments.items():
         trades, diagnostics = replay_metaorders(
@@ -572,9 +763,10 @@ def evaluate_frozen(
         result["trades"][name] = trades
         all_trades.extend(trades)
     result["combined_summary"] = summarize(all_trades)
+    oos_start_ms, oos_end_ms = segments["oos"]
     inverted, inverted_diag = replay_metaorders(
         metaorders, books_by_coin, horizon_ms=horizon,
-        start_ms=bounds.get("oos_start_ms"), end_ms=bounds.get("oos_end_ms"),
+        start_ms=oos_start_ms, end_ms=oos_end_ms,
         direction_multiplier=-1, require_causal_observation=causal_all_segments,
         economic_mode=economic_mode,
     )

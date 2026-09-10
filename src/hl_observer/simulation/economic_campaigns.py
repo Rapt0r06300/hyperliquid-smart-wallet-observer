@@ -14,6 +14,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import CHECKPOINT_INTEGRITY_SCHEMA
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
 from hl_observer.simulation.economic_campaign_provenance import (
     dataset_provenance,
@@ -27,6 +28,7 @@ from hl_observer.simulation.economic_campaign_provenance import (
 from .economic_objective import (
     STARTING_CAPITAL_USD,
     canonical_family,
+    evaluate_daily_net,
     evaluate_objective,
 )
 
@@ -144,11 +146,130 @@ def _finish(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
+def _trade_rows(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    direct = payload.get("trades")
+    if isinstance(direct, list):
+        return [dict(item) for item in direct if isinstance(item, Mapping)]
+    for container_key in ("walk_forward", "executable_campaign"):
+        container = payload.get(container_key)
+        if not isinstance(container, Mapping):
+            continue
+        nested = container.get("trades")
+        if isinstance(nested, list):
+            return [dict(item) for item in nested if isinstance(item, Mapping)]
+        if isinstance(nested, Mapping):
+            flattened: list[dict[str, Any]] = []
+            for segment, values in nested.items():
+                if not isinstance(values, list):
+                    continue
+                for item in values:
+                    if isinstance(item, Mapping):
+                        trade = dict(item)
+                        trade.setdefault("walk_forward_segment", str(segment))
+                        flattened.append(trade)
+            return flattened
+    return []
+
+
+def _attach_daily_evidence(
+    row: dict[str, Any], payload: Mapping[str, Any], *, require_daily: bool
+) -> None:
+    trades = _trade_rows(payload)
+    liquidatable = [
+        trade
+        for trade in trades
+        if trade.get("liquidatable_net") is True
+        or trade.get("LIQUIDATABLE_NET") is True
+    ]
+    proof_trades = [
+        trade
+        for trade in liquidatable
+        if str(
+            trade.get("walk_forward_segment") or trade.get("segment") or ""
+        ).lower()
+        in {"oos", "forward"}
+    ]
+    row["daily_target_required"] = bool(require_daily)
+    row["daily_observed"] = evaluate_daily_net(
+        liquidatable, complete_utc_days_only=False
+    )
+    row["daily_evidence"] = evaluate_daily_net(proof_trades) if proof_trades else None
+
+
+def _copy_checkpoint_integrity(report: Mapping[str, Any]) -> dict[str, Any]:
+    book_meta = report.get("book_meta")
+    book_meta = book_meta if isinstance(book_meta, Mapping) else {}
+    receipt = book_meta.get("clean_epoch_receipt")
+    receipt = receipt if isinstance(receipt, Mapping) else {}
+    temporal = report.get("temporal_evidence")
+    temporal = temporal if isinstance(temporal, Mapping) else {}
+    expected_proof_count = sum(
+        int(segment.get("sample_count") or 0)
+        for name in ("oos", "forward")
+        for segment in [temporal.get(name)]
+        if isinstance(segment, Mapping)
+    )
+    trades = _trade_rows(report)
+    proof_trades = [
+        trade
+        for trade in trades
+        if isinstance(trade, Mapping)
+        and trade.get("walk_forward_segment") in {"oos", "forward"}
+    ]
+    writer_run_id = str(receipt.get("writer_run_id") or "").strip()
+    try:
+        clean_epoch_ms = int(receipt.get("clean_epoch_ms") or 0)
+    except (TypeError, ValueError, OverflowError):
+        clean_epoch_ms = 0
+    complete_count = bool(
+        expected_proof_count > 0 and len(proof_trades) == expected_proof_count
+    )
+    return {
+        "schema_version": CHECKPOINT_INTEGRITY_SCHEMA,
+        "receipt_valid": receipt.get("receipt_valid") is True,
+        "writer_role": receipt.get("writer_role"),
+        "writer_run_id": writer_run_id or None,
+        "clean_epoch_ms": clean_epoch_ms or None,
+        "duplicate_checkpoint_ids": receipt.get("duplicate_checkpoint_ids"),
+        "quarantined_checkpoint_metaorders": receipt.get(
+            "quarantined_checkpoint_metaorders"
+        ),
+        "proof_trade_count": len(proof_trades),
+        "expected_proof_trade_count": expected_proof_count,
+        "all_proof_trades_exact_checkpoint_bound": bool(
+            complete_count
+            and all(
+                trade.get("book_binding_method") == "EXACT_METAORDER_CHECKPOINTS"
+                for trade in proof_trades
+            )
+        ),
+        "all_proof_trades_same_writer_run": bool(
+            complete_count
+            and writer_run_id
+            and clean_epoch_ms > 0
+            and all(
+                str(trade.get("checkpoint_writer_run_id") or "") == writer_run_id
+                and int(trade.get("checkpoint_clean_epoch_ms") or 0)
+                == clean_epoch_ms
+                for trade in proof_trades
+            )
+        ),
+        "all_proof_trades_post_clean_epoch": bool(
+            complete_count
+            and all(
+                trade.get("all_checkpoints_post_clean_epoch") is True
+                for trade in proof_trades
+            )
+        ),
+    }
+
+
 def build_copy_campaign(
     report: Mapping[str, Any],
     *,
     freeze: Mapping[str, Any] | None,
     datasets: Mapping[str, Any],
+    require_daily: bool = False,
 ) -> dict[str, Any]:
     row = _base(
         "copy_vault",
@@ -220,6 +341,7 @@ def build_copy_campaign(
                     "canonical_input_audit": report.get("canonical_input_audit"),
                     "metaorder_audit": metaorder_audit,
                 },
+                "copy_checkpoint_integrity": _copy_checkpoint_integrity(report),
             }
         )
         executable_generalization = (
@@ -232,6 +354,7 @@ def build_copy_campaign(
             if executable_generalization is not None
             else None
         )
+        _attach_daily_evidence(row, report, require_daily=require_daily)
         return _finish(row)
 
     measure = report.get("mesure") if isinstance(report.get("mesure"), Mapping) else {}
@@ -306,6 +429,7 @@ def build_copy_campaign(
             "placebo_net_bps": oos_measure.get("placebo_bps"),
         }
     row["forward"] = None  # Must be collected after the physical freeze.
+    _attach_daily_evidence(row, report, require_daily=require_daily)
     return _finish(row)
 
 
@@ -314,6 +438,7 @@ def build_lead_lag_campaign(
     *,
     freeze: Mapping[str, Any] | None,
     datasets: Mapping[str, Any],
+    require_daily: bool = False,
 ) -> dict[str, Any]:
     row = _base(
         "lead_lag",
@@ -335,6 +460,7 @@ def build_lead_lag_campaign(
         else None
     )
     if not executable:
+        _attach_daily_evidence(row, analysis, require_daily=require_daily)
         return _finish(row)
     summary = executable.get("summary") if isinstance(executable.get("summary"), Mapping) else {}
     temporal = (
@@ -392,6 +518,7 @@ def build_lead_lag_campaign(
             },
         }
     )
+    _attach_daily_evidence(row, analysis, require_daily=require_daily)
     return _finish(row)
 
 
@@ -400,6 +527,7 @@ def build_cross_campaign(
     *,
     freeze: Mapping[str, Any] | None,
     datasets: Mapping[str, Any],
+    require_daily: bool = False,
 ) -> dict[str, Any]:
     row = _base(
         "cross_venue_dislocation_v2",
@@ -460,6 +588,7 @@ def build_cross_campaign(
             ),
         }
     )
+    _attach_daily_evidence(row, report, require_daily=require_daily)
     return _finish(row)
 
 
@@ -474,13 +603,13 @@ def write_campaign(root: str | Path, evidence: Mapping[str, Any]) -> Path:
 def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
     labels = {
         "copy_vault": "Copy-Vault",
-        "lead_lag": "Lead-Lag",
-        "cross_venue_dislocation_v2": "Cross-Venue Dislocation v2",
+        "lead_lag": "Cross-Venue (Lead-Lag)",
+        "cross_venue_dislocation_v2": "Arbitrage (Cross-Venue Dislocation v2)",
     }
     lines = [
         "# Campagnes economiques HyperSmart",
         "",
-        "Capital paper consolide: 1 000 USD. Carry OFF. Cross-Venue v1 OFF.",
+        "Capital paper consolide: 1 000 USD. Cible: +4 USD nets par jour et par module. Carry OFF. Cross-Venue v1 OFF.",
         "Chaque resultat est separe; aucun PnL latent ou inter-famille n'est additionne.",
         "",
     ]
@@ -523,7 +652,7 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
         )
         lines.extend(
             [
-                f"## {labels.get(family, family)} - OBJECTIF +4 USD : {status}",
+                f"## {labels.get(family, family)} - OBJECTIF +4 USD / JOUR : {status}",
                 "",
                 f"- PnL net observe (diagnostic): {net_text}",
                 f"- PnL net de preuve OOS + forward: {campaign.get('proof_net_pnl_usd')}",
@@ -553,6 +682,9 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
                 f"- Hash des trades: {campaign.get('trade_ids_sha256')}",
                 f"- OOS: n={oos.get('sample_count')} net={oos.get('net_pnl_usd')} no-lookahead={oos.get('no_lookahead')}",
                 f"- Forward post-gel: n={forward.get('sample_count')} net={forward.get('net_pnl_usd')} post-freeze={forward.get('post_freeze')}",
+                f"- Cible journaliere requise: {campaign.get('daily_target_required')}",
+                f"- Preuve journaliere: jours={((campaign.get('daily_evidence') or {}).get('sample_count'))} moyenne={((campaign.get('daily_evidence') or {}).get('mean_daily_net_pnl_usd'))} minimum={((campaign.get('daily_evidence') or {}).get('min_daily_net_pnl_usd'))} tous_jours>=4={((campaign.get('daily_evidence') or {}).get('all_days_at_or_above_target'))}",
+                f"- Jours observes (diagnostic): {((campaign.get('daily_observed') or {}).get('sample_count'))} moyenne={((campaign.get('daily_observed') or {}).get('mean_daily_net_pnl_usd'))}",
                 f"- Placebo battu: {placebos.get('beaten')}",
                 f"- Raisons: {', '.join(campaign.get('objective_reasons') or [])}",
                 "",

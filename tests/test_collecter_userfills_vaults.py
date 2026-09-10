@@ -542,13 +542,16 @@ def test_checkpoint_add_continue_et_open_explicite_redemarre() -> None:
     assert reopened_stage == "FIRST_SLICE" and reopened_id != first_id
 
 
-def test_collecteur_branche_checkpoints_causaux_dans_consommateur():
+def test_collecteur_userfills_ne_planifie_plus_les_checkpoints_lies():
     source = (RACINE / "tools" / "collecter_userfills_vaults.py").read_text(encoding="utf-8")
     consumer = source.split("async def _tape_consumer", 1)[1].split("def _git_commit", 1)[0]
-    assert "_new_metaorder_checkpoints(" in consumer
-    assert "await _capture_copy_vault_checkpoint(root, checkpoint)" in consumer
-    assert "_exit_metaorder_checkpoints(result)" in consumer
-    assert "checkpointed_metaorders.pop(metaorder_id, None)" in consumer
+    assert "_new_metaorder_checkpoints(" not in consumer
+    assert "await _capture_copy_vault_checkpoint(root, checkpoint)" not in consumer
+    assert "_exit_metaorder_checkpoints(result)" not in consumer
+    tape_buffer = source.split("async def _tape_l2_buffer", 1)[1].split(
+        "async def _tape_consumer", 1
+    )[0]
+    assert "_append_copy_vault_book(" in tape_buffer
 
 
 def test_vaults_et_roles(tmp_path):

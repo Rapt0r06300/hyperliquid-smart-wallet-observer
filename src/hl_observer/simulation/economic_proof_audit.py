@@ -46,7 +46,9 @@ from .economic_campaigns import REPORT_DIR
 from .economic_objective import (
     CANONICAL_FAMILIES,
     TARGET_NET_USD,
+    TARGET_NET_USD_PER_DAY,
     canonical_family,
+    evaluate_daily_net,
     evaluate_objective,
 )
 
@@ -173,6 +175,25 @@ def audit_family(
     segment_audits = {
         name: (_aggregate(rows) if rows else None) for name, rows in segment_rows.items()
     }
+    published_daily_evidence = campaign.get("daily_evidence")
+    published_daily_as_of_ms = (
+        _number(published_daily_evidence.get("evaluated_at_ms"))
+        if isinstance(published_daily_evidence, Mapping)
+        else None
+    )
+    daily_evidence = evaluate_daily_net(
+        [
+            {
+                **row,
+                "exit_ts_ms": row.get("exit_ts_ms_audit"),
+                "net_pnl_usd": row.get("net_pnl_usd"),
+            }
+            for name in ("oos", "forward")
+            for row in segment_rows[name]
+        ],
+        target_net_usd_per_day=TARGET_NET_USD_PER_DAY,
+        as_of_ms=published_daily_as_of_ms,
+    )
     segment_id_sets = {
         name: {row["trade_id"] for row in rows} for name, rows in segment_rows.items()
     }
@@ -217,7 +238,18 @@ def audit_family(
         if name == "forward" and published.get("post_freeze") is not True:
             issues.append("FORWARD_POST_FREEZE_FLAG_MISSING")
 
-    recomputed_objective = evaluate_objective(campaign, target_net_usd=target_net_usd)
+    objective_input = dict(campaign)
+    if campaign.get("daily_target_required") is True:
+        published_daily = published_daily_evidence
+        recomputed_daily = (
+            daily_evidence if int(daily_evidence.get("sample_count") or 0) > 0 else None
+        )
+        if published_daily != recomputed_daily:
+            issues.append("DAILY_EVIDENCE_NOT_REPRODUCIBLE")
+        objective_input["daily_evidence"] = recomputed_daily
+    recomputed_objective = evaluate_objective(
+        objective_input, target_net_usd=target_net_usd
+    )
     if recomputed_objective["objective_status"] != campaign.get("objective_status"):
         issues.append("OBJECTIVE_STATUS_NOT_REPRODUCIBLE")
     if recomputed_objective["proof_net_pnl_usd"] != campaign.get("proof_net_pnl_usd"):
@@ -279,6 +311,7 @@ def audit_family(
         "issues": list(dict.fromkeys(issues)),
         "warnings": list(dict.fromkeys(warnings)),
         "objective_reasons": recomputed_objective.get("objective_reasons"),
+        "daily_evidence": daily_evidence,
         "economic_binding": economic_binding,
         "independent_economic_audit": independent_audit,
         "economics": {
@@ -377,6 +410,7 @@ def audit_reports(
         "paper_read_only": True,
         "real_execution": False,
         "target_net_usd_per_family": TARGET_NET_USD,
+        "target_net_usd_per_day": TARGET_NET_USD_PER_DAY,
         "families": families,
         "missing_families": missing,
         "all_ledgers_valid": (
@@ -412,7 +446,8 @@ def render_markdown(audit: Mapping[str, Any]) -> str:
             [
                 f"## {row.get('family')} - {row.get('classification')}",
                 "",
-                f"- Objectif +4 USD: **{row.get('objective_status')}**",
+                f"- Objectif +4 USD nets / jour: **{row.get('objective_status')}**",
+                f"- Preuve journaliere recalculee: jours={((row.get('daily_evidence') or {}).get('sample_count'))} moyenne={((row.get('daily_evidence') or {}).get('mean_daily_net_pnl_usd'))} minimum={((row.get('daily_evidence') or {}).get('min_daily_net_pnl_usd'))} tous_jours>=4={((row.get('daily_evidence') or {}).get('all_days_at_or_above_target'))}",
                 f"- PnL net diagnostic recalcule: {row.get('diagnostic_net_pnl_usd')}",
                 f"- PnL net de preuve OOS + forward: {row.get('proof_net_pnl_usd')}",
                 f"- Trades bruts/liquidatables/exclus: {row.get('raw_trade_count')} / {row.get('liquidatable_trade_count')} / {row.get('excluded_non_liquidatable_count')}",

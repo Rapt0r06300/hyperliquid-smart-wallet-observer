@@ -5,6 +5,7 @@ from pathlib import Path
 
 from hl_observer.backtesting.copy_vault_executable import (
     cluster_metaorders,
+    load_observed_books,
     select_observed_continuations,
 )
 from hl_observer.collection.copy_vault_checkpoint_tail import (
@@ -119,6 +120,8 @@ def test_first_start_baselines_existing_fills_without_replaying_history(tmp_path
     state = json.loads((tmp_path / STATE_RELPATH).read_text(encoding="utf-8"))
     assert state["input_offset"] == input_path.stat().st_size
     assert state["protocol"] == COMPANION_PROTOCOL
+    assert state["writer_run_id"].startswith("copy-writer-")
+    assert state["clean_epoch_ms"] == 2_000
 
 
 def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
@@ -157,11 +160,21 @@ def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
     assert len({row["checkpoint_id"] for row in rows}) == 3
     assert all(row["source"] == "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT" for row in rows)
     assert all(row["collector_protocol"] == COMPANION_PROTOCOL for row in rows)
+    assert all(row["writer_run_id"] == engine.state["writer_run_id"] for row in rows)
+    assert all(row["clean_epoch_ms"] == engine.state["clean_epoch_ms"] for row in rows)
     assert all(row["paper_read_only"] is True and row["real_execution"] is False for row in rows)
     assert all(
         0 <= row["received_at_ms"] - row["checkpoint_target_ms"] <= MAX_TARGET_LAG_MS
         for row in rows
     )
+
+    _, audit = load_observed_books(tmp_path, coins={"BTC"})
+    receipt = audit["clean_epoch_receipt"]
+    assert receipt["receipt_valid"] is True
+    assert receipt["writer_run_id"] == engine.state["writer_run_id"]
+    assert receipt["checkpoint_rows"] == 3
+    assert receipt["duplicate_checkpoint_ids"] == 0
+    assert receipt["quarantined_checkpoint_metaorders"] == 0
 
 
 def test_partial_duplicate_stale_and_continuation_fills_cannot_fabricate_checkpoints(

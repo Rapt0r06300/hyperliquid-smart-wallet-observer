@@ -13,7 +13,7 @@ from hl_observer.economics.hardcode_scanner import (
 from hl_observer.economics.hardcode_scanner import (
     SCHEMA_VERSION as HARDCODE_SCAN_SCHEMA,
 )
-from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import evaluate_daily_net, evaluate_objective
 from hl_observer.simulation.economic_proof_audit import (
     INDEPENDENT_AUDIT_SCHEMA,
     audit_family,
@@ -66,7 +66,7 @@ def _hash_ids(*trade_ids: str) -> str:
 
 def _segment(trade_id: str, net: float) -> dict:
     return {
-        "gross_pnl_usd": 3.0,
+        "gross_pnl_usd": net + 0.5,
         "fees_usd": 0.25,
         "spread_cost_usd": 0.25,
         "slippage_cost_usd": 0.0,
@@ -87,7 +87,7 @@ def _trade(
     *,
     assumption_snapshot_hash: str,
 ) -> dict:
-    reality_model_version = "copy_vault_exact_checkpoint_executable_bbo.v2"
+    reality_model_version = "copy_vault_exact_checkpoint_observed_l2_vwap.v3"
     cost_component_receipts = {
         "fees": {
             "component": "fees",
@@ -134,13 +134,13 @@ def _trade(
         "signal_ts_ms": signal_ms,
         "entry_ts_ms": signal_ms + 10,
         "exit_ts_ms": signal_ms + 100,
-        "gross_pnl_usd": 3.0,
+        "gross_pnl_usd": 5.0,
         "fees_usd": 0.25,
         "spread_cost_usd": 0.25,
         "slippage_cost_usd": 0.0,
         "latency_cost_usd": 0.0,
         "cost_component_receipts": cost_component_receipts,
-        "net_pnl_usd": 2.5,
+        "net_pnl_usd": 4.5,
         "liquidatable_net": True,
         "paper_read_only": True,
         "real_execution": False,
@@ -149,14 +149,18 @@ def _trade(
         "entry_target_lag_ms": 10.0,
         "exit_target_lag_ms": 10.0,
         "observed_latency_ms": 10.0,
+        "book_binding_method": "EXACT_METAORDER_CHECKPOINTS",
+        "checkpoint_writer_run_id": "copy-writer-clean",
+        "checkpoint_clean_epoch_ms": 500,
+        "all_checkpoints_post_clean_epoch": True,
     }
 
 
 def _positive_copy_evidence() -> tuple[dict, dict]:
     oos_id = "oos-trade"
     forward_id = "forward-trade"
-    oos = {**_segment(oos_id, 2.5), "no_lookahead": True}
-    forward = {**_segment(forward_id, 2.5), "post_freeze": True}
+    oos = {**_segment(oos_id, 4.5), "no_lookahead": True}
+    forward = {**_segment(forward_id, 4.5), "post_freeze": True}
     economic_contract = build_copy_vault_contract(
         mode=EconomicRunMode.CERTIFIABLE,
         notional_usd=150.0,
@@ -176,12 +180,12 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
         "parameter_freeze": {"campaign_id": "freeze-1", "frozen_at_ms": 1_000},
         "opened_positions": 2,
         "closed_positions": 2,
-        "gross_pnl_usd": 6.0,
+        "gross_pnl_usd": 10.0,
         "fees_usd": 0.5,
         "spread_cost_usd": 0.5,
         "slippage_cost_usd": 0.0,
         "latency_cost_usd": 0.0,
-        "net_pnl_usd": 5.0,
+        "net_pnl_usd": 9.0,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
         "trade_ids_count": 2,
@@ -190,8 +194,21 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
         "forward": forward,
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 1.0},
+        "copy_checkpoint_integrity": {
+            "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "copy-writer-clean",
+            "clean_epoch_ms": 500,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 2,
+            "expected_proof_trade_count": 2,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        },
     }
-    campaign.update(evaluate_objective(campaign))
     raw = {
         "schema_version": "hypersmart.copy_vault_executable_campaign.v1",
         "paper_read_only": True,
@@ -206,11 +223,14 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
             _trade(
                 forward_id,
                 "forward",
-                1_100,
+                86_401_100,
                 assumption_snapshot_hash=snapshot_hash,
             ),
         ],
     }
+    campaign["daily_target_required"] = True
+    campaign["daily_evidence"] = evaluate_daily_net(raw["trades"])
+    campaign.update(evaluate_objective(campaign))
     return campaign, raw
 
 
@@ -222,8 +242,8 @@ def test_audit_economic_proof_reconcilie_une_preuve_positive_complete():
     assert result["ledger_valid"] is True
     assert result["classification"] == "VALID_POSITIVE"
     assert result["objective_status"] == "ATTEINT"
-    assert result["proof_net_pnl_usd"] == 5.0
-    assert result["aggregate_recomputed"]["net_pnl_usd"] == 5.0
+    assert result["proof_net_pnl_usd"] == 9.0
+    assert result["aggregate_recomputed"]["net_pnl_usd"] == 9.0
     independent = result["independent_economic_audit"]
     assert independent["schema_version"] == INDEPENDENT_AUDIT_SCHEMA
     assert independent["ready"] is True
@@ -237,6 +257,18 @@ def test_audit_economic_proof_reconcilie_une_preuve_positive_complete():
         "dependency_mismatch",
         "source_freshness",
     }
+
+
+def test_audit_daily_empty_and_unpublished_are_equivalent_missing_proof() -> None:
+    campaign, raw = _positive_copy_evidence()
+    raw["trades"] = []
+    campaign["daily_evidence"] = None
+    campaign.update(evaluate_objective(campaign))
+
+    result = _audit(campaign, raw)
+
+    assert "DAILY_EVIDENCE_NOT_REPRODUCIBLE" not in result["issues"]
+    assert "DAILY_NET_PROOF_MISSING" in result["objective_reasons"]
 
 
 def test_audit_economic_proof_refuse_un_trade_forward_anterieur_au_gel():
@@ -262,7 +294,7 @@ def test_audit_economic_proof_refuse_les_identites_dupliquees():
 
 def test_audit_economic_proof_detecte_un_resume_desynchronise_du_ledger():
     campaign, raw = _positive_copy_evidence()
-    campaign["net_pnl_usd"] = 9.0
+    campaign["net_pnl_usd"] = 8.9
 
     result = _audit(campaign, raw)
 
