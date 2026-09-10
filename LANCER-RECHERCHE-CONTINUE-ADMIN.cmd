@@ -11,7 +11,7 @@ set "PYTHONPATH=%CD%\src;%CD%\tools"
 set "PYTHONIOENCODING=utf-8"
 set "PYTHONUNBUFFERED=1"
 set "ACTION=%~1"
-if not "%ACTION%"=="" goto :dispatch
+if not "%ACTION%"="" goto :dispatch
 
 :menu
 cls
