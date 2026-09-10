@@ -163,4 +163,3 @@ Expected: PASS.
 git add src/hl_observer/backtesting/copy_vault_protocol.py src/hl_observer/collection/copy_vault_checkpoint_tail.py src/hl_observer/backtesting/copy_vault_book_loader.py src/hl_observer/backtesting/copy_vault_executable.py src/hl_observer/simulation/economic_campaigns.py src/hl_observer/simulation/economic_objective.py tests/test_copy_vault_checkpoint_tail.py tests/test_copy_vault_executable.py tests/test_economic_campaigns.py tests/test_economic_objective.py tests/test_economic_proof_audit.py
 git commit -m "Bloque la preuve Copy-Vault hors epoque propre"
 ```
-

@@ -55,4 +55,3 @@ two-tier atomic BBO universe: the current full-channel core plus BBO-only extras
 selected from TRAIN liquidity, frozen before validation. Re-estimate executable
 opportunity multiplicity and only formulate a new mechanism if the expanded
 universe produces enough positive two-leg edges after all costs.
-
