@@ -1,47 +1,90 @@
 ---
 name: alina-quant-research
-description: Use when researching Alina SmartFlow edge, designing or running backtests, tuning strategy parameters, or validating/certifying copy_vault, lead_lag, or cross_venue_dislocation_v2.
+description: Use when researching Alina SmartFlow edge, discovering new mechanisms, designing/running backtests, tuning strategy parameters, or validating/certifying copy_vault, lead_lag, or cross_venue_dislocation_v2.
 ---
 
-# Alina Quant Research
+# Alina Quant Research — Discovery V3
 
 ## Core rule
 
-Use model reasoning to choose **which experiment is worth running**; use the local PC for every calculation the PC can do. One LLM agent only: never spawn/fan-out. Local CPU processes/threads/batches are not subagents and are encouraged.
+Use the model as a **single quantitative research controller**. Use the local PC for every deterministic or numerical operation the PC can perform. Never spawn/fan-out to LLM subagents. Local Python processes, threads, multiprocessing, vectorized CPU jobs and long batch searches are encouraged.
 
-The final target is **>= +4.00 USD NET per observed forward day for each canonical family**, separately. The final gate is `python tools/run_daily_economic_certification.py .`.
+The final target is **>= +4.00 USD NET per day for each canonical family separately**. The machine contract currently also requires at least **2 complete UTC proof days** in the canonical daily evidence plus the strict post-freeze forward/coverage gate. `python tools/run_daily_economic_certification.py .` remains the final authority.
 
-## Workflow
+## Start / resume cheaply
 
-1. Read only the minimum authority needed: `AGENTS.md`, `docs/CURRENT_STATE.md`, `docs/CODEX_GOAL_RUNBOOK.md`, the active family code, and `runtime/codex_goal_state.json` if present.
-2. Pick **one family + one falsifiable mechanism + one primary bottleneck**.
-3. Prefer an existing project evaluator. Create/change an evaluator only when the current code cannot express the hypothesis.
-4. Write a small `EXPERIMENT_SPEC.json` using `references/experiment-spec.md`.
-5. Run `python tools/codex_quant_experiment.py <spec>` locally. It is CPU-first and hides CUDA/ROCm/HIP/JAX accelerators by default. Let grid/random/QMC/TPE/CMA-ES/NSGA-II/Successive-Halving/Hyperband do repetitive search locally.
-6. If several experiments can be fully specified before seeing intermediate results, put them in one `BATCH_SPEC.json` and run `python tools/codex_quant_batch.py <batch>`. Do not return to the model between those experiments; read only the resulting `BATCH_SUMMARY.json` afterward.
-7. When useful, create local scripts that batch many related checks in one process: walk-forward, purge/embargo, CPCV/CSCV, PBO, DSR/PSR, bootstrap, permutation/placebo/null tests, Monte-Carlo, sensitivity plateaus, regime splits, stress costs/slippage/latency/capacity and parameter perturbations. Prefer one long local computation plus one compact result over many model round-trips.
-8. Local parallelism is allowed: multiprocessing, threads, CPU workers, vectorized numpy/scipy, SQLite-backed Optuna and queued batches may use the machine heavily. Avoid GPU unless CPU is genuinely impractical; if used outside the standard runner, record why.
-9. Read `RESULT_SUMMARY.json` or `BATCH_SUMMARY.json` first. Open detailed trial/log artifacts only for a specific anomaly or scientific question. Aggregate huge outputs locally before the model reads them.
-10. Decide:
-   - `REJECT`: change mechanism, not cosmetic thresholds;
-   - `ITERATE`: next train-only experiment with higher information value;
-   - `FREEZE_CANDIDATE`: freeze before untouched OOS/forward validation;
-   - `BLOCKED`: identify the missing data/code/dependency and stop wasteful model turns.
+1. Read only `AGENTS.md`, `docs/CURRENT_STATE.md`, `docs/CODEX_GOAL_RUNBOOK.md`, the active family code and compact runtime research state.
+2. Run `python tools/codex_hypothesis_ledger.py status --family <family>`.
+3. If the ledger is empty, bootstrap it from the **current HEAD**, `docs/LOIS_MESUREES.md`, `tools/recherche_14h_mecanismes.py` and only the recent economic/research commits needed to represent already-tested mechanisms. Register those records with `baseline=true`.
+4. If HEAD advanced since the latest recorded `base_sha`, inspect only the new relevant commits and register genuinely new/revised mechanism lineages before scoring novelty. Do not rescan all Git history.
+5. Recent Lead-Lag maker/taker/streaming work, Cross-Venue V5 and current Copy-Vault proof/strategy lineages are existing work, not automatic novelty merely because the V3 ledger started later.
 
-## Search budget discipline
+## Controller loop
 
-Do **not** conserve CPU merely to conserve model quota. If a well-designed local experiment needs hundreds, thousands or more trials, run them locally. Conserve model turns, not useful computation.
+The controller chooses one of `IMPROVE`, `COMBINE`, `PIVOT`, `STOP` from evidence, never from narrative momentum.
 
-Use a funnel: cheap feasibility -> coarse search -> pruning/Successive-Halving/Hyperband -> local robustness gauntlet -> freeze -> untouched OOS -> strict post-freeze forward -> final daily certification. Kill weak hypotheses early; spend large CPU budgets only on mechanisms that survived cheaper falsification.
+### DISCOVERY
 
-Cache every scientific signature. Never rerun an identical expensive experiment without a changed hypothesis, code, data, seed/budget or explicit reproducibility reason.
+Enter Discovery at the start of a fresh family cycle or when `needs-rediscovery` says so.
+
+- Generate **at least 8 structurally distinct hypotheses**, not 8 thresholds of one signal.
+- Each hypothesis must specify mechanism, data surfaces, temporal operator, conditioning/regime, prediction target, executable translation, rationale and a falsification test.
+- Register/score it with `tools/codex_hypothesis_ledger.py`; semantic duplicates do not count toward the 8.
+- The ten mechanisms in `tools/recherche_14h_mecanismes.py` are historical baselines. Existing maker/taker timing, streaming, Cross-Venue V5 and Copy-Vault lineages are also baselines unless the new hypothesis changes the mechanism materially.
+- A Discovery cycle may proactively run one grouped external research pass when useful: Exa + Parallel Search for practitioner/web evidence, Consensus for literature, GitHub for code/repositories, and CoinGecko only for current-regime context. External context must become a local falsifiable hypothesis; it is never economic proof.
+
+Good search regions include, without limiting the controller: wallet informativeness/toxicity and cross-venue anticipation; wallet × L2/order-flow interactions; asynchronous price discovery; cross-asset spillovers; event-time representations; Hawkes/VAR/VECM/transfer-entropy when data supports them; regime-conditioned microstructure; liquidation/OI/basis/funding interactions; simple and nonlinear CPU models whose incremental OOS value can be measured.
+
+### TOURNAMENT
+
+Before a large search budget, cheaply falsify/rank the new hypotheses on **novelty, causal plausibility, data availability, executable headroom after costs, expected information gain and falsification cost**.
+
+Use local scripts/batches. Prefer evidence that a mechanism predicts an actionable future distribution: direction, move probability/magnitude, horizon/timing and expected **NET** edge after execution. Accuracy/R²/IC alone never wins a tournament.
+
+### EXPLOIT
+
+Spend large local CPU budgets only on tournament survivors.
+
+For one campaign:
+`EXPERIMENT_SPEC.json -> python tools/codex_quant_experiment.py <spec> -> RESULT_SUMMARY.json`
+
+For several predeclared campaigns:
+`BATCH_SPEC.json -> python tools/codex_quant_batch.py <batch> -> BATCH_SUMMARY.json`
+
+Use existing grid/random/QMC/TPE/Optuna/CMA-ES/NSGA-II/Successive-Halving/Hyperband and any justified project-local CPU analysis. Batch walk-forward, purge/embargo, CPCV/CSCV, PBO, DSR/PSR, bootstrap, permutations/placebos/nulls, Monte-Carlo, sensitivity plateaus, regime splits and execution stress when scientifically relevant. The PC may run hundreds, thousands or more trials. Do not return to the model between trials that can be predeclared.
+
+Read compact summaries first. Keep detailed trials, SQLite and large logs on disk; aggregate locally before model inspection.
+
+### REDISCOVERY / ANTI-LOOP
+
+After each material result, record the experiment IDs/signatures/trial count and economic progress in the ledger.
+
+Run:
+`python tools/codex_hypothesis_ledger.py needs-rediscovery <hypothesis_id>`
+
+Return to Discovery when:
+- two consecutive comparable iterations are only `PARAMETER_ONLY` without positive economic progress;
+- two consecutive evaluations retain non-positive executable headroom or reject the mechanism;
+- a candidate is a semantic duplicate of exhausted history;
+- the controller has no new causal reason for another retune.
+
+When progress is real, `IMPROVE` may continue. `COMBINE` may recombine complementary mechanisms/data surfaces while keeping final family attribution and certification separate. `PIVOT` opens a new mechanism. `STOP` ends only the exhausted lineage, not the global +4/day mission.
 
 ## Scientific constraints
 
-Count all attempted variants. Never retune on validation/OOS/forward and keep calling that segment fresh evidence. Full fees/spread/slippage/latency/capacity/liquidatability remain mandatory. `--force` is only for a recorded reproducibility/anomaly reason; a forced rerun is never automatically fresh evidence.
+Count **all** tried variants. Search feedback must remain disjoint from final held-out evidence. Validation/OOS/forward observed and then used for retuning becomes exploratory; refreeze and obtain new disjoint evidence.
 
-The +4 USD/day claim requires a real forward wall-clock duration. Never annualize or daily-normalize a few minutes of activity as proof. Missing `forward.observation_seconds`, a forward interval shorter than 86,400 seconds, or a rate below +4 USD/day => `NO_GO`.
+Full fees, spread, slippage, latency, capacity, fill/liquidatability, positions closed, provenance and no-lookahead remain mandatory. Never lower a safety/economic gate to create a PASS.
 
-Use external tools only for a precise missing fact/hypothesis: Exa + Parallel Search for web/practitioner evidence, Consensus for research literature, GitHub for exact code/CI/repositories. Return immediately to a local falsifiable test.
+The canonical objective currently requires at least 2 completed UTC proof days at the daily threshold; the final daily certification additionally requires verified strict post-freeze forward wall-clock coverage and rate. Always follow the exact current machine gates if they evolve.
 
-Never lower safety/economic gates to manufacture PnL. Economic certification remains owned by the machine gates, not this runner.
+## Quota / compute policy
+
+Conserve **model turns**, not CPU.
+
+- GPT-5.6 Sol High/Élevé, Standard, Fast OFF.
+- One LLM controller only; no subagents/reviewer agents.
+- CPU-first. The standard runner hides CUDA/ROCm/HIP/JAX accelerators by default.
+- Use GPU only when CPU is demonstrably impractical and the reason is recorded.
+- If 1,000 calculations can run locally without an intermediate decision, run them in one script/batch.
+- Cache scientific signatures; do not repeat identical heavy runs without changed code/data/hypothesis/seed/budget or a recorded reproducibility reason.

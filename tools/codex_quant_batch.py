@@ -47,13 +47,22 @@ def _validate_batch(payload: Mapping[str, Any]) -> tuple[str, list[ExperimentSpe
 
 
 def _compact_result(result: Mapping[str, Any]) -> dict[str, Any]:
-    compute = result.get("compute_policy") if isinstance(result.get("compute_policy"), Mapping) else {}
+    compute = (
+        result.get("compute_policy")
+        if isinstance(result.get("compute_policy"), Mapping)
+        else {}
+    )
+    trials = result.get("trials") if isinstance(result.get("trials"), Mapping) else {}
     return {
         "experiment_id": result.get("experiment_id"),
         "signature": result.get("signature"),
+        "family": result.get("family"),
+        "hypothesis_id": result.get("hypothesis_id"),
+        "phase": result.get("phase"),
         "verdict": result.get("verdict"),
         "cache_hit": result.get("cache_hit") is True,
         "duration_s": result.get("duration_s"),
+        "trials": dict(trials),
         "best_candidate": result.get("best_candidate"),
         "compute_policy": dict(compute),
     }
@@ -69,13 +78,12 @@ def run_batch(
 ) -> dict[str, Any]:
     """Run all predeclared experiments locally before returning to the model.
 
-    Experiments are intentionally sequential at this orchestration layer.  Each
+    Experiments are intentionally sequential at this orchestration layer. Each
     underlying experiment may already use all configured CPU workers; launching
     several such searches concurrently would usually oversubscribe the machine.
     Codex can split lighter jobs into multiple batches if local profiling proves
     parallel batches are beneficial.
     """
-
     batch_id, specs = _validate_batch(payload)
     if current_sha is not None:
         expected = current_sha.lower()
@@ -138,7 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         summary = run_batch(_load_batch(args.batch), runtime_root=args.runtime_root)
     except SpecValidationError as exc:
-        print(json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        print(
+            json.dumps({"status": "BLOCKED", "error": str(exc)}, ensure_ascii=False),
+            file=sys.stderr,
+        )
         return 2
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     return 0
