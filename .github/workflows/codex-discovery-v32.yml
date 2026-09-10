@@ -1,6 +1,17 @@
 name: codex-discovery-v32
 
 on:
+  push:
+    branches: [main, codex-discovery-v32]
+    paths:
+      - 'src/hl_observer/research/**'
+      - 'tools/codex_*'
+      - 'tests/test_codex_*'
+      - 'docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl'
+      - 'AGENTS.md'
+      - 'docs/CODEX_GOAL_RUNBOOK.md'
+      - '.agents/skills/alina-quant-research/**'
+      - '.github/workflows/codex-discovery-v32.yml'
   pull_request:
     branches: [main]
     paths:
