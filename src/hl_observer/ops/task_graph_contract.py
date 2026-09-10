@@ -11,6 +11,8 @@ import re
 import tempfile
 from typing import Iterable
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 
 SCHEMA_VERSION = 1
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
@@ -251,8 +253,8 @@ def write_task_graph_atomic(path: str | Path, nodes: Iterable[TaskGraphNode]) ->
     except BaseException:
         try:
             os.unlink(tmp_name)
-        except FileNotFoundError:
-            pass
+        except FileNotFoundError as exc:
+            _noter_echec("hl_observer/ops/task_graph_contract.py:atomic_cleanup", exc)
         raise
 
 
