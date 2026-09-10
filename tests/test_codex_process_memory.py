@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from hl_observer.research.process_memory import (
@@ -41,6 +43,17 @@ def test_schema_validation_and_append_only(tmp_path):
     assert len(path.read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_append_inserts_separator_for_nonterminated_jsonl(tmp_path):
+    path = tmp_path / "memory.jsonl"
+    first = validate_process_record(_record(record_id="PM-A"))
+    path.write_text(json.dumps(first, ensure_ascii=False), encoding="utf-8")
+
+    second = append_process_record(path, _record(record_id="PM-B"))
+
+    assert load_process_records(path) == [first, second]
+    assert "}\n{" in path.read_text(encoding="utf-8")
+
+
 def test_process_memory_can_never_be_marked_certifying():
     with pytest.raises(ProcessMemoryValidationError, match="cannot certify"):
         validate_process_record(_record(certifying=True))
@@ -75,3 +88,14 @@ def test_compact_summary_reports_veto_motifs():
     summary = process_memory_summary(records, family="lead_lag")
     assert summary["records"] == 2
     assert "binance-bbo-leads-hl" in summary["high_confidence_veto_motifs"]
+
+
+def test_compact_summary_does_not_merge_disjoint_contexts_into_veto():
+    records = [
+        _record(record_id="PM-A", context=["high-liquidity"]),
+        _record(record_id="PM-B", context=["thin-book"]),
+    ]
+
+    summary = process_memory_summary(records, family="lead_lag")
+
+    assert "binance-bbo-leads-hl" not in summary["high_confidence_veto_motifs"]
