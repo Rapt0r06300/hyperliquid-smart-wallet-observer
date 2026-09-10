@@ -27,8 +27,7 @@ Alina SmartFlow cherche un edge **paper** honnête sur Hyperliquid. Familles can
 
 `src/hl_observer/simulation/economic_objective.py` est la gate économique de base.
 La cible finale est **au moins +4.00 USD NET PROUVÉS PAR JOUR par famille**, séparément, sans compensation.
-Toujours suivre les constantes/gates du HEAD exact : le contrat courant exige aussi la preuve quotidienne
-canonique sur plusieurs jours (`MIN_PROOF_DAYS`) et la certification finale via
+Toujours suivre les constantes/gates du HEAD exact et la certification finale via
 `python tools/run_daily_economic_certification.py .`.
 
 Ambition maximale pour **chercher** l'edge ; honnêteté maximale pour **le certifier**. `KILL`,
@@ -55,76 +54,50 @@ Un signal ou paper-trade n'est jamais un ordre. Donnée incertaine, stale, incom
 Contrat Git : **`main` uniquement** à la clôture. Ne jamais faire de `reset --hard`, `clean` destructeur
 ou écrasement de données locales non sauvegardées.
 
-## 5. Workflow obligatoire, Discovery V3 et quota
+## 5. Workflow obligatoire, Discovery V3.1 et quota
 
-Le moteur de recherche Codex est **Discovery V3**. Utiliser `$alina-quant-research` et
-`docs/CODEX_GOAL_RUNBOOK.md`. Le ledger local est piloté par
-`python tools/codex_hypothesis_ledger.py ...`.
+Le moteur de recherche Codex est **Discovery V3.1**. Utiliser `$alina-quant-research`,
+`docs/CODEX_GOAL_RUNBOOK.md` et `python tools/codex_hypothesis_ledger.py ...`.
 
 Principes :
 
 1. Inspecter le SHA/état Git et les preuves récentes utiles ; ne pas relire tout l'historique.
 2. Avant un gros run, distinguer une vraie nouvelle hypothèse d'un simple retuning.
-3. Au début d'un cycle Discovery ou après stagnation, générer plusieurs mécanismes structurellement
-   distincts, les enregistrer/scorer, puis faire un tournament local avant d'exploiter les survivants.
-4. Deux retunings `PARAMETER_ONLY` sans progrès économique, ou une lignée à headroom non positif,
-   doivent provoquer un `PIVOT`/Rediscovery plutôt qu'une boucle cosmétique.
-5. Tout calcul faisable localement doit être fait par le PC : Python, numpy/scipy, pytest, replays,
-   backtests, bootstrap, permutations, Monte-Carlo, optimisation, profiling et agrégation.
-6. Le calcul lourd est **CPU-first**. `tools/codex_quant_experiment.py` masque CUDA/ROCm/HIP/JAX GPU
-   par défaut. GPU seulement si un besoin mesuré le justifie.
-7. Parallélisme **local** autorisé : processus, threads, multiprocessing, batchs et workers CPU.
-8. Pour plusieurs expériences pré-définies, préférer `python tools/codex_quant_batch.py <batch>` :
-   pas de round-trip modèle à l'intérieur du batch.
+3. En Discovery, viser **12 hypothèses structurellement distinctes** (minimum 8) couvrant plusieurs archétypes, les scorer/enregistrer puis faire un tournament local.
+4. Deux retunings `PARAMETER_ONLY` sans progrès économique ou une lignée à headroom non positif imposent `PIVOT`/Rediscovery.
+5. Après **3 `IMPROVE` consécutifs sans FREEZE**, exécuter `needs-challenger` et confronter l'incumbent à >=4 challengers orthogonaux avant une quatrième amélioration locale.
+6. Tout calcul faisable localement doit être fait par le PC : Python, numpy/scipy, pytest, replays, backtests, optimisation, bootstrap, permutations, Monte-Carlo, causalité temporelle, profiling et agrégation.
+7. Calcul lourd **CPU-first**. `tools/codex_quant_experiment.py` masque CUDA/ROCm/HIP/JAX GPU par défaut. GPU seulement si un besoin mesuré le justifie.
+8. Parallélisme local autorisé : processus, threads, multiprocessing, batchs et workers CPU. Pour plusieurs expériences, préférer `python tools/codex_quant_batch.py <batch>` sans round-trip modèle interne.
 9. Lire d'abord `RESULT_SUMMARY.json` / `BATCH_SUMMARY.json`; garder gros logs/trials sur disque.
-10. Tests ciblés pendant l'itération ; suites globales lourdes aux jalons et certifications.
-11. Cache/déduplication : ne pas relancer un gros run identique sans changement scientifique.
-12. Recherche externe proactive mais bornée au début d'un cycle Discovery si elle élargit réellement
-    l'espace : Exa/Parallel/Consensus/GitHub selon besoin, puis retour immédiat au calcul local.
-13. **Sous-agents IA interdits pour ce Goal** : agent principal unique ; aucun spawn/fan-out/reviewer-agent.
-14. Si seule l'accumulation de nouvelles données/temps peut débloquer la preuve, arrêter les tours modèle
-    inutiles et laisser les collecteurs locaux nécessaires travailler.
+10. Cache/déduplication : ne pas relancer un gros run identique sans changement scientifique.
+11. Recherche externe proactive mais bornée au début d'un cycle Discovery si elle élargit réellement l'espace : Exa/Parallel/Consensus/GitHub selon besoin, puis retour immédiat au calcul local.
+12. **Sous-agents IA interdits pour ce Goal** : agent principal unique ; aucun spawn/fan-out/reviewer-agent.
+13. Si seule l'accumulation de nouvelles données/temps peut débloquer la preuve, arrêter les tours modèle inutiles et laisser les collecteurs locaux nécessaires travailler.
 
 Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à recommencer.
 
 ## 6. Discipline scientifique
 
-Une amélioration économique n'est admissible que si elle survit aux coûts applicables : frais, spread,
-slippage, latence, capacité et coûts de copie/exécution pertinents.
+Une amélioration économique n'est admissible que si elle survit aux frais, spread, slippage, latence,
+capacité et coûts d'exécution pertinents.
 
-Obligatoire pour une certification :
-
-- données réelles avec provenance ;
-- positions entièrement fermées et PnL réconcilié ;
-- `LIQUIDATABLE_NET` ;
-- identités de trades/événements uniques ;
-- séparation temporelle et absence de lookahead ;
-- paramètres figés avant preuve finale ;
-- OOS ;
-- forward strictement post-freeze ;
-- durée/couverture forward mesurées ;
-- placebos/contrôles requis ;
-- aucune compensation entre familles.
+Certification : données réelles avec provenance ; positions fermées ; `LIQUIDATABLE_NET` ; identités uniques ; séparation temporelle/no-lookahead ; paramètres figés ; OOS ; forward strict post-freeze ; durée/couverture mesurées ; placebos ; aucune compensation entre familles.
 
 Tous les essais distincts doivent être comptés. Validation/OOS/forward observé puis utilisé pour retuner
-devient exploratoire : refreeze puis nouvelle preuve disjointe. Ne pas rouvrir une loi mesurée sans
-nouvelle donnée ou nouveau mécanisme réel.
-
-Jamais de donnée fabriquée présentée comme réelle. `None` n'est pas `0`. `LIVE`, `BACKTEST`, `REPLAY`
-et `TEST_FIXTURE` ne se mélangent pas. Le latent/non réalisé reste séparé du net.
+devient exploratoire : refreeze puis nouvelle preuve disjointe. Jamais de donnée fabriquée présentée comme réelle. `None` n'est pas `0`; `LIVE`, `BACKTEST`, `REPLAY` et `TEST_FIXTURE` restent séparés.
 
 ## 7. Qualité du code
 
-- Petits modules cohérents et importables ; réutiliser l'architecture existante.
-- Nouveau comportement => test de régression dans le même mouvement.
+- Petits modules cohérents ; réutiliser l'architecture existante.
+- Nouveau comportement => test de régression.
 - Feature DONE seulement si codée, testée et câblée, ou explicitement partielle.
 - Ne pas supprimer/xfail/skip des tests ni baisser une gate pour fabriquer du vert.
-- Respecter les lanceurs existants.
 - Éviter les collecteurs lourds dupliqués.
 
 ## 8. Définition de fin
 
-La mission économique n'est terminée que lorsque le **même état certifié de `main`** prouve séparément :
+La mission n'est terminée que lorsque le **même état certifié de `main`** prouve séparément :
 
 - `copy_vault >= +4.00 USD NET/jour PROUVÉS` ;
 - `lead_lag >= +4.00 USD NET/jour PROUVÉS` ;
@@ -132,12 +105,11 @@ La mission économique n'est terminée que lorsque le **même état certifié de
 
 avec les exigences exactes du HEAD courant, puis les gates techniques finales requises vertes.
 `python tools/run_daily_economic_certification.py .` doit certifier les trois familles.
-Aucun document narratif ne peut surclasser les gates machine.
 
 ## 9. Rapport final
 
 Répondre de façon concise en français : fichiers modifiés, preuve/diagnostic, tests, statut économique,
-blocages et prochaine action. Éviter les longs historiques non nécessaires.
+blocages et prochaine action.
 
 Terminer les livraisons touchant runtime/stratégie par :
 
