@@ -71,7 +71,7 @@ def _behavioral_fingerprint_evidence(
             "complete": False,
             "related_wallet_groups": [],
             "unresolved_related_groups": [],
-        }, []
+        }, ["BEHAVIORAL_FINGERPRINT_EVIDENCE_MISSING"]
     if not isinstance(raw, Mapping):
         return {
             "present": True,
