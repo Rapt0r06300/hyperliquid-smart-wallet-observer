@@ -15,6 +15,7 @@ SEMANTIC_STATUS = Path("runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json")
 _FAMILY_ORDER = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _DATA_HINTS = (
     "data/bbo_synchro.jsonl",
+    "runtime/data/bbo_synchro.jsonl",
     "runtime/bbo_synchro.jsonl",
     "runtime/codex_research/HYPOTHESIS_LEDGER.jsonl",
     "runtime/codex_research/PROCESS_MEMORY.jsonl",
@@ -37,6 +38,38 @@ def _git_dir(repo_root: Path) -> Path | None:
     return None
 
 
+def _common_git_dir(git_dir: Path) -> Path:
+    marker = git_dir / "commondir"
+    if not marker.exists():
+        return git_dir
+    raw = marker.read_text(encoding="utf-8", errors="replace").strip()
+    if not raw:
+        return git_dir
+    path = Path(raw)
+    return path if path.is_absolute() else (git_dir / path).resolve()
+
+
+def _valid_sha(value: str) -> bool:
+    return len(value) == 40 and all(char in "0123456789abcdefABCDEF" for char in value)
+
+
+def _read_ref_from_dir(directory: Path, ref: str) -> str | None:
+    ref_path = directory / ref
+    if ref_path.exists():
+        value = ref_path.read_text(encoding="utf-8", errors="replace").strip()
+        if _valid_sha(value):
+            return value.lower()
+    packed = directory / "packed-refs"
+    if packed.exists():
+        for line in packed.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith(("#", "^")):
+                continue
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == ref and _valid_sha(parts[0]):
+                return parts[0].lower()
+    return None
+
+
 def _read_head(repo_root: Path) -> str:
     git_dir = _git_dir(repo_root)
     if git_dir is None:
@@ -45,24 +78,16 @@ def _read_head(repo_root: Path) -> str:
     if not head_path.exists():
         return "UNKNOWN"
     head = head_path.read_text(encoding="utf-8", errors="replace").strip()
-    if len(head) == 40 and all(char in "0123456789abcdefABCDEF" for char in head):
+    if _valid_sha(head):
         return head.lower()
     if not head.startswith("ref:"):
         return "UNKNOWN"
     ref = head.split(":", 1)[1].strip()
-    ref_path = git_dir / ref
-    if ref_path.exists():
-        value = ref_path.read_text(encoding="utf-8", errors="replace").strip()
-        if len(value) == 40:
-            return value.lower()
-    packed = git_dir / "packed-refs"
-    if packed.exists():
-        for line in packed.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith(("#", "^")):
-                continue
-            parts = line.split()
-            if len(parts) == 2 and parts[1] == ref and len(parts[0]) == 40:
-                return parts[0].lower()
+    common_dir = _common_git_dir(git_dir)
+    for directory in dict.fromkeys((git_dir, common_dir)):
+        resolved = _read_ref_from_dir(directory, ref)
+        if resolved is not None:
+            return resolved
     return "UNKNOWN"
 
 
