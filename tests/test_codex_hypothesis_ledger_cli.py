@@ -46,6 +46,7 @@ def test_register_then_status_round_trip(tmp_path: Path, capsys) -> None:
     status = json.loads(capsys.readouterr().out)
     assert status["records"] == 1
     assert status["unique_hypotheses"] == 1
+    assert status["challenger_required"] is False
 
 
 def test_score_does_not_write_and_detects_duplicate(tmp_path: Path, capsys) -> None:
@@ -83,6 +84,27 @@ def test_needs_rediscovery_reports_machine_boolean(tmp_path: Path, capsys) -> No
         "hypothesis_id": "H-1",
         "rediscovery_required": True,
         "status": "REDISCOVERY_REQUIRED",
+    }
+
+
+def test_needs_challenger_after_three_improves(tmp_path: Path, capsys) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    for idx in range(1, 4):
+        p = payload(record_id=f"R-{idx}")
+        p["stage"] = "EXPLOIT"
+        p["change_class"] = "MODEL"
+        p["controller_action"] = "IMPROVE"
+        p["created_at_utc"] = f"2026-09-10T12:0{idx}:00Z"
+        candidate = tmp_path / f"challenger-{idx}.json"
+        candidate.write_text(json.dumps(p), encoding="utf-8")
+        assert main(["--ledger", str(ledger), "register", str(candidate)]) == 0
+        capsys.readouterr()
+    assert main(["--ledger", str(ledger), "needs-challenger", "H-1"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result == {
+        "challenger_required": True,
+        "hypothesis_id": "H-1",
+        "status": "CHALLENGER_REQUIRED",
     }
 
 
