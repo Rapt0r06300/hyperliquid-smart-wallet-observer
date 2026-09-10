@@ -77,7 +77,7 @@ def _segment_economics(segment: Mapping[str, Any] | None, *, label: str, issues:
 
 def _validate_cross_provenance(evidence: Mapping[str, Any], issues: list[str]) -> None:
     period = evidence.get("period"); period = period if isinstance(period, Mapping) else {}
-    meta = period.get("collection_meta"); meta = meta if isinstance(meta, Mapping) else {}
+    meta = period.get("collection_meta"); meta = meta if isinstance(period, Mapping) else {}
     if meta.get("source_mode") != CROSS_CERTIFIED_SOURCE_MODE:
         issues.append("CROSS_VENUE_CERTIFIED_ATOMIC_SOURCE_MISSING")
     if int(_number(meta.get("certified_snapshots")) or 0) <= 0:
@@ -146,6 +146,8 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     forward_net = _number(forward.get("net_pnl_usd")) if isinstance(forward, Mapping) else None; forward_count = _number(forward.get("sample_count")) if isinstance(forward, Mapping) else None
     oos_economics = _segment_economics(oos if isinstance(oos, Mapping) else None, label="OOS", issues=issues)
     forward_economics = _segment_economics(forward if isinstance(forward, Mapping) else None, label="FORWARD", issues=issues)
+    if oos_economics is not None and forward_economics is not None and oos_economics["trade_ids_sha256"] == forward_economics["trade_ids_sha256"]:
+        issues.append("OOS_FORWARD_TRADE_IDENTITY_COLLISION")
     if not isinstance(oos, Mapping) or oos_net is None:
         issues.append("OOS_PROOF_MISSING")
     elif oos_count is None or oos_count <= 0:
