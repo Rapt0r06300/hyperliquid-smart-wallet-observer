@@ -6,18 +6,25 @@ from hl_observer.backtesting import lead_lag_multiasset_train as module
 
 
 def test_residual_family_is_counted_before_any_replay(tmp_path: Path, monkeypatch) -> None:
+    book = {
+        "ts_ms": 1_800_000_000_000,
+        "bid": 9.99,
+        "ask": 10.01,
+        "bid_top_usd": 1_000.0,
+        "ask_top_usd": 1_000.0,
+    }
     tape = {
         "BTC": {
             "TRADE": [(1_800_000_000_000_000_000, 100.0, 1.0)],
-            "HL_BOOK": [],
+            "HL_BOOK": [dict(book, coin="BTC")],
             "TRADE_SOURCE_IDS": ["shared.jsonl"],
-            "HL_BOOK_SOURCE_IDS": [],
+            "HL_BOOK_SOURCE_IDS": ["shared.jsonl"],
         },
         "SOL": {
             "TRADE": [(1_800_000_000_000_000_000, 10.0, 1.0)],
-            "HL_BOOK": [],
+            "HL_BOOK": [dict(book, coin="SOL")],
             "TRADE_SOURCE_IDS": ["shared.jsonl"],
-            "HL_BOOK_SOURCE_IDS": [],
+            "HL_BOOK_SOURCE_IDS": ["shared.jsonl"],
         },
     }
     monkeypatch.setattr(
@@ -31,11 +38,6 @@ def test_residual_family_is_counted_before_any_replay(tmp_path: Path, monkeypatc
     monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", ())
     monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_WINDOWS_MS", ())
     monkeypatch.setattr(module, "CROSS_ASSET_HORIZONS_MS", ())
-    monkeypatch.setattr(
-        module,
-        "load_market_microstructure_event_windows",
-        lambda *_args, **_kwargs: ({}, [], {"status": "NO_DATA"}),
-    )
     monkeypatch.setattr(
         module,
         "load_runtime_latency_evidence",
