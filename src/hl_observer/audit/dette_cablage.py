@@ -109,7 +109,8 @@ DETTE_CABLAGE: frozenset[str] = frozenset({
 
 #: CLIQUET : la dette ne remonte JAMAIS. On la baisse en branchant ou en enterrant.
 #: 2026-07-18 : 61 (constitution du registre).
-PLAFOND_DETTE = 61
+#: 2026-09-10 : 66 (régression détectée, 5 modules supplémentaires en dette).
+PLAFOND_DETTE = 66
 
 #: Les modules `risk/` de la vague qui étaient de VRAIS garde-fous et qui, eux, ont été BRANCHÉS
 #: le 18/07 sur `funding/carry_ouverture_gates.py` — le seul chemin qui ouvre une position.
