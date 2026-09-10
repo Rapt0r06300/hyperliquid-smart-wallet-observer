@@ -66,6 +66,7 @@ After each material result, record the experiment IDs/signatures/trial count and
 
 Run:
 `python tools/codex_hypothesis_ledger.py needs-rediscovery <hypothesis_id>`
+`python tools/codex_hypothesis_ledger.py needs-challenger <hypothesis_id>`
 
 Return to Discovery when:
 - two consecutive comparable iterations are only `PARAMETER_ONLY` without positive economic progress;
