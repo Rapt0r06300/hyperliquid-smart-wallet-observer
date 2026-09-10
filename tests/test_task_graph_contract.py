@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,34 @@ def test_task_graph_state_roundtrip_is_resumable_and_does_not_persist_bearer_tok
     assert restored[0].owner == "agent-a"
     assert restored[0].dependencies == ("H-T-48",)
     assert restored[0].transition is Transition.PAUSE
+
+
+def test_load_task_graph_rejects_lease_bound_to_another_task(tmp_path: Path) -> None:
+    lease = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+    node = TaskGraphNode(
+        task_id="H-T-49",
+        owner="agent-a",
+        contributors=(),
+        status="IN_PROGRESS",
+        dependencies=(),
+        handoff_from=None,
+        handoff_to=None,
+        reason="resume canonical task",
+        evidence_required=("tests",),
+        done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+        budget="bounded",
+        lease=lease,
+        commit_sha=None,
+        task_type=TaskType.AUTO,
+    )
+    path = tmp_path / "task_graph.json"
+    write_task_graph_atomic(path, [node])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0]["lease"]["task_id"] = "H-T-OTHER"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="lease task_id does not match node task_id"):
+        load_task_graph(path)
 
 
 def test_done_contract_rejects_invalid_commit_sha() -> None:
