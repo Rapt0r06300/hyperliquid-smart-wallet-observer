@@ -306,6 +306,11 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("lease task_id does not match node task_id")
         if lease.owner != node_owner:
             raise ValueError("lease owner does not match node owner")
+        raw_commit_sha = row.get("commit_sha")
+        if raw_commit_sha is not None and (
+            not isinstance(raw_commit_sha, str) or not _SHA40.fullmatch(raw_commit_sha)
+        ):
+            raise ValueError("commit_sha must be an exact 40-character lowercase hex SHA")
         transition = row.get("transition")
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
@@ -320,7 +325,7 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             done_contract=str(row.get("done_contract", "")),
             budget=str(row.get("budget", "")),
             lease=lease,
-            commit_sha=None if row.get("commit_sha") is None else str(row["commit_sha"]),
+            commit_sha=raw_commit_sha,
             task_type=TaskType(str(row["task_type"])),
             transition=None if transition is None else Transition(str(transition)),
         ))
