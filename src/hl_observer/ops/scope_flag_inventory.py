@@ -37,8 +37,10 @@ def _r(name: str, default: str, disposition: FlagDisposition = FlagDisposition.A
     return ScopeFlagRecord(name, disposition, default, expands, False, reason)
 
 
-# Every current capability/scope switch advertised by .env.example. Numeric tuning knobs
-# are intentionally excluded. No environment flag is authoritative for strategy scope.
+# Every current capability/scope switch advertised by .env.example. Numeric tuning knobs are
+# normally excluded; thresholds whose names contain scope-like tokens are classified explicitly
+# so the fail-closed discovery audit cannot mistake them for unreviewed authority. No environment
+# flag is authoritative for strategy scope.
 _SCOPE_FLAG_RECORD_LIST = (
     _r("HL_ENV", "paper", reason="official environment"),
     _r("HL_ENABLE_MAINNET_EXECUTION", "false", expands=True, reason="mainnet execution tripwire"),
@@ -60,8 +62,10 @@ _SCOPE_FLAG_RECORD_LIST = (
     _r("HYPERSMART_SCORE_REQUIRE_NET_PNL", "true", reason="net-PnL scoring invariant"),
     _r("HYPERSMART_SCORE_STORE_REJECTED", "true", reason="negative-evidence retention"),
     _r("HYPERSMART_ENABLE_PAPER_TRADING", "true", reason="paper-only economic materialization"),
+    _r("HYPERSMART_PAPER_MAX_DRAWDOWN_ALLOWED", "0.25", reason="paper drawdown threshold; not scope authority"),
     _r("HYPERSMART_PAPER_REQUIRE_SCORED_WALLET", "true", reason="copy-vault paper gate"),
     _r("HYPERSMART_PAPER_STORE_REFUSALS", "true", reason="refusal evidence retention"),
+    _r("HYPERSMART_COPY_MIN_EDGE_REQUIRED_BPS", "8", reason="paper copy edge threshold; not scope authority"),
     _r("HYPERSMART_RUNTIME_MODE", "paper", reason="official runtime mode"),
     _r("HYPERSMART_REAL_ORDERS_ENABLED", "false", expands=True, reason="real-order tripwire"),
     _r("HYPERSMART_EXCHANGE_ENDPOINT_ENABLED", "false", expands=True, reason="exchange endpoint tripwire"),
@@ -75,7 +79,10 @@ _SCOPE_FLAG_RECORD_LIST = (
     _r("HYPERSMART_V26_FUNDING_POLLER", "0", reason="public info poller"),
     _r("HYPERSMART_V26_VOL_BARRIERS", "0", reason="paper volatility barrier"),
     _r("HYPERSMART_V26_AUTO_UNSTUCK", "0", reason="paper position-management experiment"),
+    _r("HYPERSMART_V26_UNSTUCK_BUDGET_USD", "10", reason="paper unstuck budget; not scope authority"),
     _r("HYPERSMART_V26_GRADED_HALT", "0", reason="paper halt experiment"),
+    _r("HYPERSMART_V26_HALT_AMBER_LOSS_USD", "12", reason="paper amber halt threshold; not scope authority"),
+    _r("HYPERSMART_V26_HALT_RED_LOSS_USD", "25", reason="paper red halt threshold; not scope authority"),
     _r("HYPERSMART_V26_PROTECTIONS", "0", reason="paper protection experiment"),
     _r("HYPERSMART_V26_KELLY_LEADER", "0", reason="paper sizing experiment"),
     _r("HYPERSMART_V26_TIER_COST_BUDGET", "0", reason="paper cost-budget experiment"),
