@@ -1,0 +1,19 @@
+MODE OBJECTIF — Alina SmartFlow.
+
+But final : sur le même SHA de `main`, certifier séparément en PAPER `copy_vault`, `lead_lag` et `cross_venue_dislocation_v2` à >= +4.00 USD NET/jour chacune, sans compensation. Les gates machine du HEAD font foi ; `python tools/run_daily_economic_certification.py .` est l’autorité finale.
+
+Au démarrage/reprise, lis `AGENTS.md`, `docs/CURRENT_STATE.md`, `docs/CODEX_GOAL_RUNBOOK.md`, `$alina-quant-research`, le ledger compact et le code de la famille active. Reprends l’existant ; ne repars pas de zéro et ne rescannes pas les 775/Git entier.
+
+PRIORITÉ = DÉCOUVRIR DE L’EDGE, pas polir une piste. Tu peux créer/modifier/remplacer features, signaux, seuils, modèles, algorithmes, collecteurs, exécution PAPER, sizing et tests. En DISCOVERY, vise 12 hypothèses structurellement différentes (minimum 8, plusieurs archétypes), score-les dans le ledger puis lance un tournoi local de falsification. Cherche aussi des mécanismes que je ne connais pas ; utilise le playbook V3.1 du skill et ne te limite pas aux idées déjà présentes dans le repo.
+
+ANTI-BOUCLE : après chaque résultat matériel, exécute `needs-rediscovery`. Deux retunings PARAMETER_ONLY sans progrès économique ou deux évaluations sans headroom => PIVOT. Exécute aussi `needs-challenger` : après 3 IMPROVE consécutifs sans FREEZE, confronte l’incumbent à >=4 challengers orthogonaux avant une quatrième amélioration. Une piste rejetée devient mémoire négative sauf nouvelle donnée/surface/mécanisme causal.
+
+CALCUL = LOCAL. Tout ce que mon PC peut calculer doit l’être localement : Python/numpy/scipy, processus/threads/multiprocessing, replays, backtests, optimisation, modèles CPU, walk-forward, CPCV/CSCV/PBO, DSR/PSR, bootstrap, permutations/placebos, Monte-Carlo, ablations, sensibilité/régimes et stress d’exécution selon pertinence. Utilise `tools/codex_quant_batch.py` pour les campagnes pré-définies sans retour modèle entre les trials. CPU-first ; GPU non préféré. Garde les gros artefacts sur disque et lis d’abord les résumés compacts. Des milliers de calculs locaux sont autorisés s’ils apportent de l’information.
+
+Le modèle sert à INVENTER, CHOISIR et INTERPRÉTER, pas au calcul déterministe. Agent LLM principal UNIQUE : aucun sous-agent/spawn/fan-out/reviewer-agent. Fast OFF, sorties courtes. Recherche externe proactive au début de Discovery si elle élargit l’espace : Exa + Parallel Search, Consensus, GitHub ; CoinGecko uniquement pour contexte de régime. Regroupe/déduplique puis transforme les trouvailles en tests locaux falsifiables.
+
+Ne stoppe pas un batch local parce que `origin/main` avance : termine-le puis inspecte seulement le delta Git utile. Ne relance pas un gros run identique sans changement scientifique.
+
+Toute validation/OOS/forward observée puis utilisée pour retuner devient exploratoire : refreeze puis preuve disjointe. Compte tous les essais. Ne baisse jamais coûts, sécurité, causalité, liquidabilité ou gates pour fabriquer un PASS.
+
+DONE uniquement quand les 3 familles passent la certification complète >= +4.00 USD NET/jour avec OOS, forward post-freeze, couverture/durée, coûts complets, positions closes, identités uniques, placebos/no-lookahead et gates techniques finales vertes. Si seul du temps/de nouvelles données manque, laisse les collecteurs locaux travailler et cesse les tours modèle inutiles.
