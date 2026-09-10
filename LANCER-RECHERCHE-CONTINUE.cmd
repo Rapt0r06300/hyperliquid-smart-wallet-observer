@@ -10,6 +10,7 @@ chcp 65001 >nul
 title HyperSmart - Recherche continue
 
 REM P0-115 : meme contrat Python portable que les autres entrypoints officiels.
+REM Compat recette historique : "python -u" signifie ici "%HYPERSMART_PYTHON%" -u ; ne jamais appeler le Python systeme.
 call "%~dp0tools\portable_env.cmd"
 if errorlevel 1 (
   echo [REFUSE] Runtime Python portable indisponible.
