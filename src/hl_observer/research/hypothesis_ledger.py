@@ -1,4 +1,4 @@
-"""Append-only local research memory for Codex Discovery V3.
+"""Append-only local research memory for Codex Discovery V3.1.
 
 This module stores *research hypotheses and experiment metadata*, not economic
 certification. It performs no network I/O and never routes orders.
@@ -428,6 +428,31 @@ def rediscovery_required(history: Iterable[Mapping[str, Any]], hypothesis_id: st
     return False
 
 
+def challenger_required(history: Iterable[Mapping[str, Any]], hypothesis_id: str) -> bool:
+    """Require a novelty check after three consecutive IMPROVE decisions.
+
+    This does not reject the incumbent. It only forces a small orthogonal
+    champion-challenger Discovery pass before a fourth local improvement.
+    """
+    normalized = [validate_record(item) for item in history]
+    if not normalized:
+        return False
+    ids = _lineage_ids(normalized, hypothesis_id)
+    lineage = [item for item in normalized if item["hypothesis_id"] in ids]
+    lineage.sort(key=lambda item: (item["created_at_utc"], item["record_id"]))
+    consecutive_improves = 0
+    for item in reversed(lineage):
+        if item["stage"] == "FREEZE":
+            break
+        if item.get("controller_action") == "IMPROVE":
+            consecutive_improves += 1
+            if consecutive_improves >= 3:
+                return True
+            continue
+        break
+    return False
+
+
 def compact_status(history: Iterable[Mapping[str, Any]], family: str | None = None) -> dict[str, Any]:
     """Return a compact machine-readable research-state summary."""
     if family is not None and family not in FAMILIES:
@@ -475,6 +500,9 @@ def compact_status(history: Iterable[Mapping[str, Any]], family: str | None = No
         "rediscovery_required": (
             rediscovery_required(records, latest_id) if latest_id is not None else False
         ),
+        "challenger_required": (
+            challenger_required(records, latest_id) if latest_id is not None else False
+        ),
     }
 
 
@@ -486,6 +514,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "STAGES",
     "append_record",
+    "challenger_required",
     "compact_status",
     "load_records",
     "novelty_score",
