@@ -41,13 +41,25 @@ def evaluate_copy_vault_universe_integrity(
         for wallet, group in entity_groups.items()
         if _wallet(wallet)
     }
-    normalized_correlations = {
-        (_wallet(a), _wallet(b)): float(value)
-        for (a, b), value in correlations.items()
-        if _wallet(a) and _wallet(b)
-    }
+    normalized_correlations: dict[tuple[str, str], float] = {}
+    invalid_correlation_evidence = False
+    for pair, value in correlations.items():
+        try:
+            left, right = pair
+            numeric = float(value)
+        except (TypeError, ValueError, OverflowError):
+            invalid_correlation_evidence = True
+            continue
+        left_wallet = _wallet(left)
+        right_wallet = _wallet(right)
+        if not left_wallet or not right_wallet:
+            invalid_correlation_evidence = True
+            continue
+        normalized_correlations[(left_wallet, right_wallet)] = numeric
 
     reasons: list[str] = []
+    if invalid_correlation_evidence:
+        reasons.append("CORRELATION_EVIDENCE_INVALID")
     if not universe:
         reasons.append("UNIVERSE_NOT_DECLARED")
 

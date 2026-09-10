@@ -62,3 +62,15 @@ def test_univers_complet_survivorship_corrige_et_sybil_normalise_est_eligible() 
     assert result["survivorship"]["disparus"] == ["c"]
     assert result["cohort_liquidation_evidence"]["n_liquides"] == 1
     assert result["sybil_detection"]["n"] == 1
+
+
+def test_correlation_malformee_fail_closed_sans_exception() -> None:
+    result = evaluate_copy_vault_universe_integrity(
+        complete_universe=["A", "B"],
+        observed_survivors=["A", "B"],
+        cohort=[{"wallet": "A", "liquide": False}, {"wallet": "B", "liquide": True}],
+        correlations={("a", "b"): "not-a-number"},  # type: ignore[dict-item]
+        entity_groups={"a": "entity-1", "b": "entity-2"},
+    )
+    assert result["eligible"] is False
+    assert "CORRELATION_EVIDENCE_INVALID" in result["reasons"]
