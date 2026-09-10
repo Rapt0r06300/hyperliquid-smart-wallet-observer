@@ -551,6 +551,74 @@ def _summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _validated_precomputed_shocks(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    window_ms: int,
+    threshold_bps: float,
+    cooldown_ms: int,
+) -> list[dict[str, Any]]:
+    """Validate a causal streaming index before using it in the queue replay."""
+
+    shocks: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for raw in rows:
+        trigger = _number(raw.get("trigger_ts_ms"))
+        window_start = _number(raw.get("window_start_ts_ms"))
+        start_price = _number(raw.get("lead_start_price"))
+        trigger_price = _number(raw.get("lead_trigger_price"))
+        recorded_bps = _number(raw.get("lead_shock_bps"))
+        if (
+            trigger is None
+            or window_start is None
+            or start_price is None
+            or trigger_price is None
+            or recorded_bps is None
+            or trigger <= 0
+            or window_start <= 0
+            or start_price <= 0
+            or trigger_price <= 0
+            or window_start > trigger
+            or trigger - window_start > max(1, int(window_ms))
+        ):
+            raise ValueError("INVALID_PRECOMPUTED_SHOCK")
+        recomputed_bps = (trigger_price - start_price) / start_price * 10_000.0
+        direction = 1 if recomputed_bps > 0 else -1
+        if (
+            not math.isclose(recomputed_bps, recorded_bps, rel_tol=1e-10, abs_tol=1e-10)
+            or int(raw.get("direction") or 0) != direction
+            or abs(recomputed_bps) < float(threshold_bps)
+        ):
+            raise ValueError("INCONSISTENT_PRECOMPUTED_SHOCK")
+        identity = (
+            int(trigger),
+            int(window_start),
+            float(start_price),
+            float(trigger_price),
+        )
+        if identity in seen:
+            raise ValueError("DUPLICATE_PRECOMPUTED_SHOCK")
+        seen.add(identity)
+        shocks.append(
+            {
+                "trigger_ts_ms": int(trigger),
+                "window_start_ts_ms": int(window_start),
+                "lead_start_price": float(start_price),
+                "lead_trigger_price": float(trigger_price),
+                "lead_shock_bps": float(recorded_bps),
+                "direction": direction,
+            }
+        )
+    shocks.sort(key=lambda row: int(row["trigger_ts_ms"]))
+    previous = -10**18
+    for row in shocks:
+        trigger = int(row["trigger_ts_ms"])
+        if trigger - previous < max(0, int(cooldown_ms)):
+            raise ValueError("PRECOMPUTED_SHOCK_COOLDOWN_VIOLATION")
+        previous = trigger
+    return shocks
+
+
 def replay_lead_lag_queue_maker(
     tape: Mapping[str, Mapping[str, list]],
     l2_history: Mapping[str, Sequence[Mapping[str, Any]]],
@@ -566,6 +634,7 @@ def replay_lead_lag_queue_maker(
     notional_usd: float = NOTIONAL_USD,
     max_book_delay_ms: int = MAX_BOOK_DELAY_MS,
     segment_bounds: Mapping[str, tuple[int | None, int | None]] | None = None,
+    precomputed_shocks: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Replay the immutable maker hypothesis and its same-time placebo."""
 
@@ -574,11 +643,25 @@ def replay_lead_lag_queue_maker(
         raise ValueError(f"predeclared Lead-Lag V3 coin is {REQUIRED_COIN}, got {selected_coin}")
     streams = tape.get(selected_coin) or {}
     lead_trades = list(streams.get("TRADE") or [])
-    shocks = detect_rolling_shocks(
-        lead_trades,
-        window_ms=shock_window_ms,
-        threshold_bps=shock_threshold_bps,
-        cooldown_ms=shock_cooldown_ms,
+    shocks = (
+        detect_rolling_shocks(
+            lead_trades,
+            window_ms=shock_window_ms,
+            threshold_bps=shock_threshold_bps,
+            cooldown_ms=shock_cooldown_ms,
+        )
+        if precomputed_shocks is None
+        else _validated_precomputed_shocks(
+            precomputed_shocks,
+            window_ms=shock_window_ms,
+            threshold_bps=shock_threshold_bps,
+            cooldown_ms=shock_cooldown_ms,
+        )
+    )
+    shock_source = (
+        "DETECTED_FROM_RECORDED_TAPE"
+        if precomputed_shocks is None
+        else "PRECOMPUTED_CAUSAL_STREAMING_INDEX"
     )
     _assign_shock_segments(shocks, segment_bounds)
     if segment_bounds is not None:
@@ -675,6 +758,7 @@ def replay_lead_lag_queue_maker(
             "max_book_delay_ms": int(max_book_delay_ms),
         },
         "strong_shocks_seen": len(shocks),
+        "shock_source": shock_source,
         "maker_queue_candidates": rows,
         "placebo_candidates": placebo_rows,
         "segment_summaries": segment_summaries,

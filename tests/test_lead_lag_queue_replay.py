@@ -176,6 +176,25 @@ def test_queue_replay_accounts_exact_fees_and_causal_exit() -> None:
     assert row["LIQUIDATABLE_NET"] is True
 
 
+def test_queue_replay_accepts_precomputed_causal_shocks() -> None:
+    tape, books, trades = _positive_scenario()
+    shocks = detect_rolling_shocks(tape["ETH"]["TRADE"])
+
+    report = replay_lead_lag_queue_maker(
+        {"ETH": {"TRADE": []}},
+        books,
+        trades,
+        latency_evidence={"measured": True, "p95_ms": 100.0},
+        precomputed_shocks=shocks,
+    )
+
+    assert report["strong_shocks_seen"] == 1
+    assert report["shock_source"] == "PRECOMPUTED_CAUSAL_STREAMING_INDEX"
+    assert report["maker_queue_candidates"][0]["net_pnl_usd"] == pytest.approx(
+        0.10994375
+    )
+
+
 @pytest.mark.parametrize(
     ("latency_evidence", "ready"),
     [

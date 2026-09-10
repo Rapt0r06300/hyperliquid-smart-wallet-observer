@@ -17,16 +17,28 @@ from collections import deque
 from collections.abc import Iterable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import median
 from typing import Any
 
+from hl_observer.backtesting.economic_hypotheses_v3 import (
+    qualify_lead_lag_queue_maker_train_only,
+)
+from hl_observer.backtesting.lead_lag_maker_queue_train import (
+    load_train_microstructure_history,
+)
+from hl_observer.backtesting.lead_lag_queue_replay import replay_lead_lag_queue_maker
 from hl_observer.backtesting.lead_lag_source_alignment import (
     SourceWindow,
     discover_market_tick_windows,
     select_aligned_bbo_sources,
 )
+from hl_observer.simulation.lead_lag_measured_replay import (
+    load_runtime_latency_evidence,
+)
 
 THRESHOLD_GRID_BPS = (4.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0)
 _FEASIBILITY_CACHE: dict[str, dict[str, Any]] = {}
+_MAKER_REPLAY_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _lines(path: Path) -> Iterator[str]:
@@ -108,6 +120,7 @@ def scan_lead_shock_thresholds(
             "max_abs_shock_bps": 0.0,
             "first_trigger_ms": None,
             "last_trigger_ms": None,
+            "events": [],
         }
         for value in thresholds
     }
@@ -196,6 +209,16 @@ def scan_lead_shock_thresholds(
                     )
                     row["first_trigger_ms"] = row["first_trigger_ms"] or timestamp_ms
                     row["last_trigger_ms"] = timestamp_ms
+                    row["events"].append(
+                        {
+                            "trigger_ts_ms": int(timestamp_ms),
+                            "window_start_ts_ms": int(active[0][0]),
+                            "lead_start_price": float(base_price),
+                            "lead_trigger_price": float(price),
+                            "lead_shock_bps": float(shock_bps),
+                            "direction": 1 if shock_bps > 0 else -1,
+                        }
+                    )
                     last_trigger[threshold] = timestamp_ms
             active.append((timestamp_ms, float(price)))
             max_window_points = max(max_window_points, len(active))
@@ -450,18 +473,7 @@ def evaluate_streaming_threshold_feasibility(
     experiment_context = dict(context or {})
     signature = str(experiment_context.get("signature") or "")
     if signature not in _FEASIBILITY_CACHE:
-        split_config = dict(experiment_context.get("split_config") or {})
-        pinned_path = split_config.get("pinned_manifest_path")
-        pinned_hash = split_config.get("pinned_manifest_sha256")
-        manifest = (
-            load_pinned_source_manifest(
-                Path.cwd(),
-                str(pinned_path),
-                expected_manifest_sha256=str(pinned_hash or ""),
-            )
-            if pinned_path
-            else immutable_aligned_source_manifest(Path.cwd())
-        )
+        manifest = _manifest_from_context(Path.cwd(), experiment_context)
         if manifest["data_fingerprint"] != experiment_context.get("data_fingerprint"):
             raise ValueError("immutable TRAIN source fingerprint differs from experiment spec")
         if manifest["data_cutoff_utc"] != experiment_context.get("data_cutoff_utc"):
@@ -502,8 +514,215 @@ def evaluate_streaming_threshold_feasibility(
     }
 
 
+def _manifest_from_context(root: Path, context: dict[str, Any]) -> dict[str, Any]:
+    split_config = dict(context.get("split_config") or {})
+    pinned_path = split_config.get("pinned_manifest_path")
+    if pinned_path:
+        return load_pinned_source_manifest(
+            root,
+            str(pinned_path),
+            expected_manifest_sha256=str(
+                split_config.get("pinned_manifest_sha256") or ""
+            ),
+        )
+    return immutable_aligned_source_manifest(root)
+
+
+def _compact_thresholds(scan: dict[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): {name: value for name, value in dict(row).items() if name != "events"}
+        for key, row in dict(scan.get("thresholds") or {}).items()
+    }
+
+
+def _write_maker_detail(
+    root: Path,
+    context: dict[str, Any],
+    threshold: float,
+    payload: dict[str, Any],
+) -> tuple[Path, str]:
+    experiment_id = str(context.get("experiment_id") or "lead-lag-maker")
+    target = (
+        root
+        / "runtime"
+        / "codex_experiments"
+        / experiment_id
+        / f"MAKER_REPLAY_{_threshold_key(threshold)}BPS.json"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8"
+    )
+    temporary.replace(target)
+    return target.resolve(), digest
+
+
+def evaluate_streaming_maker_replay(
+    params: dict[str, Any],
+    *,
+    budget: float = 1.0,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Replay queue-proven TRAIN maker fills for a predeclared shock grid."""
+
+    del budget
+    root = Path.cwd()
+    experiment_context = dict(context or {})
+    signature = str(experiment_context.get("signature") or "")
+    if signature not in _MAKER_REPLAY_CACHE:
+        manifest = _manifest_from_context(root, experiment_context)
+        if manifest["data_fingerprint"] != experiment_context.get("data_fingerprint"):
+            raise ValueError("immutable TRAIN source fingerprint differs from experiment spec")
+        if manifest["data_cutoff_utc"] != experiment_context.get("data_cutoff_utc"):
+            raise ValueError("immutable TRAIN cutoff differs from experiment spec")
+        scan = scan_lead_shock_thresholds(
+            root,
+            manifest["source_paths"],
+            market_windows=manifest["market_windows"],
+            thresholds_bps=THRESHOLD_GRID_BPS,
+            cutoff_ms=int(manifest["cutoff_ms"]),
+        )
+        minimum_events = list(scan["thresholds"][_threshold_key(6.0)]["events"])
+        train_ranges = _merge_ranges(manifest["market_windows"])
+        books, public_trades, microstructure = load_train_microstructure_history(
+            root,
+            [int(row["trigger_ts_ms"]) for row in minimum_events],
+            train_ranges=train_ranges,
+        )
+        _MAKER_REPLAY_CACHE[signature] = {
+            "manifest": manifest,
+            "scan": scan,
+            "train_ranges": train_ranges,
+            "books": books,
+            "public_trades": public_trades,
+            "microstructure": microstructure,
+            "latency": load_runtime_latency_evidence(root),
+        }
+    cached = _MAKER_REPLAY_CACHE[signature]
+    manifest = cached["manifest"]
+    scan = cached["scan"]
+    threshold = float(params.get("threshold_bps") or 0.0)
+    threshold_row = dict(scan["thresholds"].get(_threshold_key(threshold)) or {})
+    events = list(threshold_row.get("events") or [])
+    train_ranges = list(cached["train_ranges"])
+    segment_bounds = {
+        "train": (
+            min((start for start, _ in train_ranges), default=None),
+            max((end for _, end in train_ranges), default=None),
+        ),
+        "validation": (None, None),
+        "oos": (None, None),
+        "forward": (None, None),
+    }
+    replay = replay_lead_lag_queue_maker(
+        {"ETH": {"TRADE": []}},
+        cached["books"],
+        cached["public_trades"],
+        latency_evidence=cached["latency"],
+        shock_threshold_bps=threshold,
+        segment_bounds=segment_bounds,
+        precomputed_shocks=events,
+    )
+    qualification = qualify_lead_lag_queue_maker_train_only(
+        {
+            "maker_queue_candidates": replay["maker_queue_candidates"],
+            "maker_queue_replay": replay,
+        },
+        minimum_abs_shock_bps=threshold,
+    )
+    rows = list(replay.get("maker_queue_candidates") or [])
+    per_trade_net_bps = [
+        float(row.get("net_pnl_usd") or 0.0)
+        / float(row.get("notional_usd") or 1.0)
+        * 10_000.0
+        for row in rows
+        if float(row.get("notional_usd") or 0.0) > 0
+    ]
+    nets = [float(row.get("net_pnl_usd") or 0.0) for row in rows]
+    total_notional = sum(float(row.get("notional_usd") or 0.0) for row in rows)
+    total_cost = sum(
+        sum(
+            float(row.get(name) or 0.0)
+            for name in (
+                "fees_usd",
+                "spread_cost_usd",
+                "slippage_cost_usd",
+                "latency_cost_usd",
+            )
+        )
+        for row in rows
+    )
+    cumulative = peak = maximum_drawdown = 0.0
+    for value in nets:
+        cumulative += value
+        peak = max(peak, cumulative)
+        maximum_drawdown = max(maximum_drawdown, peak - cumulative)
+    summary = dict((replay.get("segment_summaries") or {}).get("train") or {})
+    raw_pf = summary.get("profit_factor")
+    finite_pf = float(raw_pf) if isinstance(raw_pf, (int, float)) and math.isfinite(raw_pf) else None
+    detail = {
+        "schema_version": "hypersmart.lead_lag_streaming_maker_train.v1",
+        "base_sha": experiment_context.get("base_sha"),
+        "data_fingerprint": experiment_context.get("data_fingerprint"),
+        "data_cutoff_utc": experiment_context.get("data_cutoff_utc"),
+        "threshold_bps": threshold,
+        "shock_events": events,
+        "replay": replay,
+        "qualification": qualification,
+        "microstructure": cached["microstructure"],
+        "latency": cached["latency"],
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    detail_path, detail_sha256 = _write_maker_detail(
+        root, experiment_context, threshold, detail
+    )
+    eligible = qualification.get("selection_eligible") is True
+    return {
+        "net_median_bps": round(median(per_trade_net_bps), 8)
+        if per_trade_net_bps
+        else 0.0,
+        "roi_immobilise_pct": round(sum(nets) / total_notional * 100.0, 8)
+        if total_notional > 0
+        else 0.0,
+        "pf": finite_pf,
+        "profit_factor_infinite": raw_pf == float("inf"),
+        "drawdown_bps": round(maximum_drawdown / total_notional * 10_000.0, 8)
+        if total_notional > 0
+        else 0.0,
+        "cout_bps": round(total_cost / total_notional * 10_000.0, 8)
+        if total_notional > 0
+        else 0.0,
+        "regularite": sum(value > 0 for value in nets) / len(nets) if nets else 0.0,
+        "candidate_verdict": "FREEZE_CANDIDATE" if eligible else "ITERATE",
+        "threshold_bps": threshold,
+        "shock_count": len(events),
+        "queue_proven_fills": int(qualification.get("queue_proven_fills") or 0),
+        "train_net_pnl_usd": round(sum(nets), 8),
+        "qualification_status": qualification.get("status"),
+        "selection_evidence_sha256": qualification.get("selection_evidence_sha256"),
+        "diagnostics": replay.get("diagnostics"),
+        "threshold_scan": _compact_thresholds(scan),
+        "source_time_filter_verified": cached["microstructure"].get(
+            "source_time_filter_verified"
+        ),
+        "detail_artifact": str(detail_path),
+        "detail_sha256": detail_sha256,
+        "source_count": manifest["source_count"],
+        "source_bytes": manifest["source_bytes"],
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 __all__ = [
     "THRESHOLD_GRID_BPS",
+    "evaluate_streaming_maker_replay",
     "evaluate_streaming_threshold_feasibility",
     "immutable_aligned_source_manifest",
     "load_pinned_source_manifest",

@@ -6,6 +6,7 @@ from pathlib import Path
 from hl_observer.backtesting import lead_lag_streaming_train as streaming_module
 from hl_observer.backtesting.lead_lag_source_alignment import SourceWindow
 from hl_observer.backtesting.lead_lag_streaming_train import (
+    evaluate_streaming_maker_replay,
     evaluate_streaming_threshold_feasibility,
     load_pinned_source_manifest,
     scan_lead_shock_thresholds,
@@ -58,6 +59,9 @@ def test_streaming_scan_counts_each_threshold_with_bounded_state(tmp_path: Path)
     assert result["rows_outside_execution_windows"] == 1
     assert result["max_window_points"] <= 2
     assert result["thresholds"]["5"]["shock_count"] == 2
+    assert [
+        row["trigger_ts_ms"] for row in result["thresholds"]["5"]["events"]
+    ] == [1_600_000_000_500, 1_600_000_002_500]
     assert result["thresholds"]["15"]["shock_count"] == 1
     assert result["thresholds"]["25"]["shock_count"] == 0
 
@@ -267,3 +271,107 @@ def test_pinned_manifest_follows_same_shard_into_archive(monkeypatch, tmp_path: 
     )
 
     assert loaded["source_paths"] == [archived]
+
+
+def test_maker_experiment_reuses_scan_and_reports_real_train_economics(
+    monkeypatch, tmp_path: Path
+) -> None:
+    streaming_module._MAKER_REPLAY_CACHE.clear()
+    manifest = {
+        "data_fingerprint": "sha256:maker",
+        "data_cutoff_utc": "2020-09-13T12:28:20Z",
+        "cutoff_ms": 1_600_000_100_000,
+        "source_paths": [tmp_path / "source.gz"],
+        "market_windows": [
+            SourceWindow(tmp_path / "market.gz", 1_600_000_000_000, 1_600_000_100_000)
+        ],
+        "source_count": 1,
+        "source_bytes": 42,
+    }
+    event = {
+        "trigger_ts_ms": 1_600_000_010_000,
+        "window_start_ts_ms": 1_600_000_009_000,
+        "lead_start_price": 100.0,
+        "lead_trigger_price": 100.1,
+        "lead_shock_bps": 10.0,
+        "direction": 1,
+    }
+    calls = {"scan": 0, "load": 0}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        streaming_module, "immutable_aligned_source_manifest", lambda _root: manifest
+    )
+
+    def fake_scan(*args, **kwargs):
+        calls["scan"] += 1
+        return {
+            "thresholds": {
+                "6": {"shock_count": 1, "events": [event]},
+                "8": {"shock_count": 1, "events": [event]},
+            },
+            "lines_read": 10,
+            "lead_trades": 5,
+            "covered_wall_ms": 100_001,
+            "max_window_points": 3,
+            "memory_policy": "ROLLING_WINDOW_PLUS_SCALAR_COUNTS",
+        }
+
+    def fake_load(*args, **kwargs):
+        calls["load"] += 1
+        return {}, {}, {"source_time_filter_verified": True}
+
+    row = {
+        "notional_usd": 25.0,
+        "net_pnl_usd": 0.10,
+        "gross_pnl_usd": 0.12,
+        "fees_usd": 0.015,
+        "spread_cost_usd": 0.005,
+        "slippage_cost_usd": 0.0,
+        "latency_cost_usd": 0.0,
+    }
+    monkeypatch.setattr(streaming_module, "scan_lead_shock_thresholds", fake_scan)
+    monkeypatch.setattr(streaming_module, "load_train_microstructure_history", fake_load)
+    monkeypatch.setattr(
+        streaming_module,
+        "load_runtime_latency_evidence",
+        lambda _root: {"measured": True, "p95_ms": 1.0},
+    )
+    monkeypatch.setattr(
+        streaming_module,
+        "replay_lead_lag_queue_maker",
+        lambda *args, **kwargs: {
+            "maker_queue_candidates": [row],
+            "segment_summaries": {
+                "train": {"net_pnl_usd": 0.10, "profit_factor": 2.0}
+            },
+            "diagnostics": {},
+        },
+    )
+    monkeypatch.setattr(
+        streaming_module,
+        "qualify_lead_lag_queue_maker_train_only",
+        lambda *args, **kwargs: {
+            "selection_eligible": True,
+            "status": "TRAIN_ELIGIBLE",
+            "queue_proven_fills": 1,
+            "selection_evidence_sha256": "a" * 64,
+        },
+    )
+    context = {
+        "signature": "maker-signature",
+        "experiment_id": "maker-test",
+        "base_sha": "b" * 40,
+        "data_fingerprint": "sha256:maker",
+        "data_cutoff_utc": "2020-09-13T12:28:20Z",
+        "split_config": {},
+    }
+
+    first = evaluate_streaming_maker_replay({"threshold_bps": 6.0}, context=context)
+    second = evaluate_streaming_maker_replay({"threshold_bps": 8.0}, context=context)
+
+    assert calls == {"scan": 1, "load": 1}
+    assert first["net_median_bps"] == 40.0
+    assert first["candidate_verdict"] == "FREEZE_CANDIDATE"
+    assert first["queue_proven_fills"] == 1
+    assert second["threshold_bps"] == 8.0
+    assert Path(first["detail_artifact"]).is_file()
