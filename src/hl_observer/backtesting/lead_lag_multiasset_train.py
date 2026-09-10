@@ -21,6 +21,16 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting import lead_lag_shadow
+from hl_observer.backtesting.lead_lag_reference_residual_grid import (
+    REFERENCE_RESIDUAL_BETAS,
+    REFERENCE_RESIDUAL_DIRECTION_POLICIES,
+    REFERENCE_RESIDUAL_HORIZONS_MS,
+    REFERENCE_RESIDUAL_MECHANISM,
+    REFERENCE_RESIDUAL_MIN_TRAIN_FILLS,
+    REFERENCE_RESIDUAL_THRESHOLDS_BPS,
+    REFERENCE_RESIDUAL_WINDOWS_MS,
+    research_family_trial_count,
+)
 from hl_observer.backtesting.lead_lag_source_alignment import (
     _lines,
     _merge_ranges,
@@ -594,10 +604,11 @@ def explore_lead_lag_multiasset_train(
         for hypothesis in TRAIN_HYPOTHESES
     )
     cross_combinations_per_pair = len(CROSS_ASSET_SHOCK_THRESHOLDS_BPS) * len(CROSS_ASSET_HORIZONS_MS) * len(CROSS_ASSET_SHOCK_WINDOWS_MS)
-    trial_count = max(
+    base_trial_count = max(
         1,
         len(candidate_coins) * combinations_per_coin + len(planned_cross_pairs) * cross_combinations_per_pair,
     )
+    trial_count = research_family_trial_count(base_trial_count, len(planned_cross_pairs))
     for hypothesis in TRAIN_HYPOTHESES:
         for coin in candidate_coins:
             selected_coin = str(coin).upper()
@@ -775,6 +786,18 @@ def explore_lead_lag_multiasset_train(
                 "shock_windows_ms": list(CROSS_ASSET_SHOCK_WINDOWS_MS),
                 "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
                 "minimum_train_fills": CROSS_ASSET_MIN_TRAIN_FILLS,
+            },
+            "reference_residual_hypothesis": {
+                "mechanism": REFERENCE_RESIDUAL_MECHANISM,
+                "planned_pairs": [list(pair) for pair in planned_cross_pairs],
+                "betas": list(REFERENCE_RESIDUAL_BETAS),
+                "direction_policies": [policy for policy, _multiplier in REFERENCE_RESIDUAL_DIRECTION_POLICIES],
+                "shock_thresholds_bps": list(REFERENCE_RESIDUAL_THRESHOLDS_BPS),
+                "horizons_ms": list(REFERENCE_RESIDUAL_HORIZONS_MS),
+                "shock_windows_ms": list(REFERENCE_RESIDUAL_WINDOWS_MS),
+                "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
+                "minimum_train_fills": REFERENCE_RESIDUAL_MIN_TRAIN_FILLS,
+                "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             },
         },
         "selected": selected,
