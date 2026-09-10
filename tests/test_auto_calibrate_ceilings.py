@@ -42,7 +42,8 @@ def test_auto_calibrate_refuses_to_raise_a_ceiling(
         file_path=guard_file,
         variable_name="LIMIT",
     )
-    monkeypatch.setattr(auto_calibrate_ceilings, "check_ceilings", lambda _state: [regression])
+    monkeypatch.setattr(auto_calibrate_ceilings, "check_regressions", lambda _state: [regression])
+    monkeypatch.setattr(auto_calibrate_ceilings, "check_ceilings", lambda _state: [])
 
     def _git_must_not_run(*_args, **_kwargs):
         pytest.fail("regressions must fail closed before any git command")
