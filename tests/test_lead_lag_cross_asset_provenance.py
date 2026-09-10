@@ -62,7 +62,7 @@ def test_cross_asset_refuse_des_shards_disjoints_sans_reduire_trial_count(tmp_pa
     report = module.explore_lead_lag_multiasset_train(tmp_path, [], candidate_coins=("BTC", "SOL"))
 
     assert report["variants"] == []
-    assert report["fixed_grid"]["trial_count"] == 1
+    assert report["fixed_grid"]["trial_count"] == module.research_family_trial_count(1, 1)
     assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     assert report["selection_eligible"] is False
     assert report["physical_freeze_allowed"] is False
@@ -99,4 +99,4 @@ def test_cross_asset_accepte_uniquement_une_source_alignee_commune(tmp_path: Pat
 
     assert len(report["variants"]) == 1
     assert report["variants"][0]["aligned_source_ids"] == ["shared.jsonl"]
-    assert report["fixed_grid"]["trial_count"] == 1
+    assert report["fixed_grid"]["trial_count"] == module.research_family_trial_count(1, 1)
