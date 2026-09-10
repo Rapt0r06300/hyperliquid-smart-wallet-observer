@@ -13,7 +13,18 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from hl_observer.backtesting.copy_vault_vnext_train import explore_copy_vault_vnext_train
+from hl_observer.backtesting.copy_vault_hypothesis_registry import (
+    copy_vault_hypothesis_ledger,
+    require_runnable_copy_vault_hypothesis,
+)
+from hl_observer.backtesting.copy_vault_vnext_integrity import (
+    evaluate_copy_vault_vnext_integrity,
+    gate_copy_vault_candidate,
+)
+from hl_observer.backtesting.copy_vault_vnext_train import (
+    MECHANISM as COPY_VAULT_VNEXT_MECHANISM,
+    explore_copy_vault_vnext_train,
+)
 from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
 from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
 from hl_observer.backtesting.cross_venue_v5_persistence_train import (
@@ -89,6 +100,7 @@ def run_economic_vnext_pack(
     )
     cross_v5["certified_source_meta"] = cross_meta
 
+    copy_hypothesis = require_runnable_copy_vault_hypothesis(COPY_VAULT_VNEXT_MECHANISM)
     copy_raw = _load_copy_raw(project_root)
     if copy_raw is None:
         copy = {
@@ -133,6 +145,9 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    copy_integrity = evaluate_copy_vault_vnext_integrity(copy_raw)
+    copy = gate_copy_vault_candidate(copy, copy_integrity)
+    copy_v5 = gate_copy_vault_candidate(copy_v5, copy_integrity)
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -172,6 +187,11 @@ def run_economic_vnext_pack(
             }
             for family, value in families.items()
         },
+        "copy_vault_hypothesis_registry": {
+            "active_selector": copy_hypothesis,
+            "ledger": copy_vault_hypothesis_ledger(),
+        },
+        "copy_vault_universe_integrity": copy_integrity,
         "lead_source_alignment": lead_alignment,
         "research_variants": {
             "cross_venue_persistence_v5": {

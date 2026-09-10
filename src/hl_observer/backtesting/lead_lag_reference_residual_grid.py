@@ -40,6 +40,12 @@ def reference_residual_trial_count(pair_count: int) -> int:
     )
 
 
+def research_family_trial_count(base_trial_count: int, residual_pair_count: int) -> int:
+    """Add residual hypotheses to the predeclared family before any replay."""
+
+    return max(0, int(base_trial_count)) + reference_residual_trial_count(residual_pair_count)
+
+
 def _normalise_rows(rows: Sequence[Mapping[str, Any]]) -> tuple[list[int], list[dict[str, Any]]]:
     normalised: list[dict[str, Any]] = []
     for row in rows:
@@ -154,4 +160,5 @@ __all__ = [
     "SCHEMA_VERSION",
     "detect_reference_residual_shocks",
     "reference_residual_trial_count",
+    "research_family_trial_count",
 ]

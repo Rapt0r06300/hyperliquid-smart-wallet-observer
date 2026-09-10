@@ -43,6 +43,8 @@ def test_handoff_invalidates_old_owner_and_grants_new_owner() -> None:
     old = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="old")
     new, receipt = transfer_ownership(
         old,
+        current_owner="agent-a",
+        current_token="old",
         new_owner="agent-b",
         now=_now() + timedelta(seconds=10),
         ttl_seconds=90,
@@ -178,6 +180,30 @@ def test_load_task_graph_rejects_lease_owned_by_another_agent(tmp_path: Path) ->
         load_task_graph(path)
 
 
+def test_load_task_graph_rejects_duplicate_task_ids(tmp_path: Path) -> None:
+    first = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+    second = acquire_ownership("H-T-49", "agent-b", now=_now(), ttl_seconds=60, token="secret-b")
+    nodes = [
+        TaskGraphNode(
+            task_id="H-T-49", owner="agent-a", contributors=(), status="IN_PROGRESS",
+            dependencies=(), handoff_from=None, handoff_to=None, reason="first canonical row",
+            evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+            budget="bounded", lease=first, commit_sha=None, task_type=TaskType.AUTO,
+        ),
+        TaskGraphNode(
+            task_id="H-T-49", owner="agent-b", contributors=(), status="PAUSED",
+            dependencies=(), handoff_from=None, handoff_to=None, reason="ambiguous duplicate row",
+            evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+            budget="bounded", lease=second, commit_sha=None, task_type=TaskType.AUTO,
+        ),
+    ]
+    path = tmp_path / "task_graph.json"
+    write_task_graph_atomic(path, nodes)
+
+    with pytest.raises(ValueError, match="duplicate task_id"):
+        load_task_graph(path)
+
+
 def test_done_contract_rejects_invalid_commit_sha() -> None:
     evidence = DoneContractEvidence(
         code=True,
@@ -190,3 +216,19 @@ def test_done_contract_rejects_invalid_commit_sha() -> None:
         commit_sha="not-a-sha",
     )
     assert "commit_sha" in validate_done_contract(evidence)
+
+
+def test_empty_current_token_is_rejected_via_canonical_fail_closed_path() -> None:
+    lease = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+
+    assert can_mutate_task(lease, owner="agent-a", token="", now=_now()) is False
+    with pytest.raises(PermissionError, match="active ownership credential required"):
+        transfer_ownership(
+            lease,
+            current_owner="agent-a",
+            current_token="",
+            new_owner="agent-b",
+            now=_now() + timedelta(seconds=10),
+            ttl_seconds=90,
+            new_token="new",
+        )

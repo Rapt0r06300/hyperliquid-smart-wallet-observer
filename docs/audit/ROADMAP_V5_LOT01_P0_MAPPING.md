@@ -1,18 +1,33 @@
 # H—T-36 — Mapping P0 V5 lot 01
 
-Baseline auditée : `52e5ddde10ae8211a5b2583caa60681632121545` (`main`).
+Baseline historique V5 : `81069e7f0af0690c5dfc268cb95bc89d2fe76a57`.
+Baseline de ce lot : `52e5ddde10ae8211a5b2583caa60681632121545` (`main`).
+Dernier HEAD audité avant ce checkpoint : `e1ebcc5305e11ae03e70673f1833bed21b9f055f` (`main`).
 Source de scope : `HYPERSMART_MASTER_ROADMAP_CODING_AGENTS_V5_2026-08-30.md` + améliorations 776+ validées ensuite.
 Ce document est un checkpoint de preuve ; il ne remplace ni `SECURITY.md`, ni `docs/HYPERSMART_CONSTITUTION.md`, ni les contrats machine du HEAD exact.
 
 ## Classification
 
-| Exigence | État au baseline | Preuve vérifiée | Reste exact |
+| Exigence | État courant | Preuve vérifiée | Reste exact |
 |---|---|---|---|
-| P0-001 — rebaseline exacte | CORRIGÉ / PARTIEL | HEAD exact relu ; `docs/CURRENT_STATE.md` distingue la roadmap technique V5/776+ de `pre-run-775`; `main` reste l’unique branche persistante. | Compléter le receipt final H—T-36 avec delta explicite vs baseline historique V5 `81069e7f0af0690c5dfc268cb95bc89d2fe76a57` et états CI/workflows du SHA final. |
-| P0-050 — Constitution unique et précédence | CORRIGÉ | `docs/HYPERSMART_CONSTITUTION.md`; `src/hl_observer/ops/document_authority.py`; `tests/test_document_authority.py`; `tools/check_document_authority.py`. | Vérifier les gates CI au SHA final et conserver la hiérarchie sans régression. |
-| P0-110 — inventaire flags/entrypoints | BLOCKED / MANQUANT | Aucun registre utilisant la taxonomie V5 `ACTIVE`, `LEGACY_COMPAT`, `DEAD`, `HISTORICAL_COMMENT_ONLY`, `AMBIGUOUS` n’a été trouvé au baseline ; plusieurs lanceurs `.cmd` existent encore à la racine. | Produire un inventaire machine-readable exhaustif des flags/entrypoints et classifier chacun ; aucun testnet/scope historique ne doit redevenir actif. |
-| P0-115 — audit de tous les `.cmd` | BLOCKED / MANQUANT | Lanceurs racine présents, notamment `ANALYSER_BACKTESTS_REPLAYS.cmd`, `ANALYSER_DONNEES_HYPERSMART.cmd`, `ANALYSE_HISTORIQUE_COMPLETE.cmd`; aucune preuve d’un inventaire canonique complet n’a été trouvée au baseline. | Retester/classifier tous les `.cmd`, imposer un rôle opérationnel = un entrypoint canonique, vérifier Python portable/no-execution et absence de collecteurs dupliqués. |
-| P0-120 — Empirical Memory Registry | À CORRIGER | `src/hl_observer/research/lois_mesurees.py` est la source unique de `docs/LOIS_MESUREES.md`, mais le modèle `Loi` ne porte que clé/titre/verdict/chiffre/date/condition/mots-clés/où-vérifier. | Ajouter provenance structurée, hash de preuve, freshness/revalidation explicites et fail-closed pour une loi non revalidable/stale ; `LOIS_MESUREES` ne doit jamais devenir autorité d’ACTIVE_SCOPE. |
+| P0-001 — rebaseline exacte | CORRIGÉ / PARTIEL | HEAD exact relu ; `docs/CURRENT_STATE.md` distingue la roadmap technique V5/776+ de `pre-run-775`; `main` reste l’unique branche persistante. Le delta depuis la baseline historique V5 est explicitement ancré ci-dessus. | Produire le Completion Receipt final H—T-36 au SHA de fermeture avec états CI/workflows exacts. |
+| P0-050 — Constitution unique et précédence | CORRIGÉ | `docs/HYPERSMART_CONSTITUTION.md`; `src/hl_observer/ops/document_authority.py`; `tests/test_document_authority.py`; `tools/check_document_authority.py`. Au SHA `e1ebcc53`, `hypersmart/security-quality` est GREEN, y compris le job Gouvernance du dépôt. | Conserver la hiérarchie sans régression jusqu’au SHA final. |
+| P0-110 — inventaire flags/entrypoints | CORRIGÉ / À REVALIDER CIBLÉ | `src/hl_observer/ops/scope_flag_inventory.py` expose la taxonomie V5 ACTIVE/LEGACY_COMPAT/DEAD/HISTORICAL_COMMENT_ONLY/AMBIGUOUS et un audit fail-closed. Les cinq seuils/budgets révélés par CI sont désormais classés explicitement comme non autoritaires. | Obtenir une preuve fraîche du test ciblé `tests/test_scope_flag_inventory.py` sur le SHA final ; ne pas assimiler le GREEN sécurité global à ce test ciblé. |
+| P0-115 — audit de tous les `.cmd` | DÉJÀ-IMPLÉMENTÉ / À REVALIDER CIBLÉ | `src/hl_observer/ops/entrypoint_topology.py` inventorie les lanceurs racine, impose un entrypoint officiel unique par rôle, Python portable, verrous mainnet/testnet et absence de duplication runtime/recherche ; `tests/test_entrypoint_topology.py` couvre les dérives fail-closed. | Obtenir une preuve fraîche du test ciblé au SHA final et conserver l’inventaire exhaustif si un `.cmd` est ajouté/supprimé. |
+| P0-120 — Empirical Memory Registry | CORRIGÉ / À REVALIDER CIBLÉ | Historique : `empirical_memory.py` conserve preuves URI/SHA-256/freshness et `EMPIRICAL_MEMORY_IS_ACTIVE_SCOPE_AUTHORITY = False`. Extension V5 au commit `9b850a72fcfafba04178ec1b9a8caeb08c391575` : `empirical_law_registry.py` expose une vue machine-readable fail-closed avec law_id, hypothesis_family, verdict, measured_value/measured_at, dataset/hash, experiment/git_sha/cost_model, sources/hash, evidence_quality, last_verified/retest_after, invalidated_if, scope_status, conservation des REFUTE et gate de réouverture. | Revalider `tests/test_empirical_law_registry.py` sur le SHA final. Le rouge security-quality de `9b850a72` venait d’une annulation/failure d’upload-artifact pendant l’installation, pas d’une preuve de défaut fonctionnel P0-120 ; au HEAD `e1ebcc53`, security-quality est GREEN après correction CI. |
+
+## Incident P0-110 — cause racine conservée
+
+- Le run CI du commit `91ee2af2e289a490424475f245436938f3548205` a échoué sur 2 tests de `tests/test_scope_flag_inventory.py` ; 455 autres tests du shard étaient verts.
+- Cause racine : `.env.example` contenait cinq paramètres à noms scope-like absents du registre restauré.
+- Le HEAD les contient désormais dans `SCOPE_FLAG_RECORDS` comme seuils/budgets explicitement non autoritaires pour le scope. Aucun correctif concurrent n’est dupliqué.
+
+## Validation CI fraîche disponible
+
+- SHA audité : `e1ebcc5305e11ae03e70673f1833bed21b9f055f`.
+- `hypersmart/security-quality` : GREEN ; gouvernance, supply-chain et analyse statique sont vertes.
+- `hypersmart/coverage-parallel-probe` : RED. Cette dette n’est pas masquée et n’est pas utilisée pour prétendre que les tests ciblés P0-110/P0-115/P0-120 sont verts.
+- Aucun gate/coverage n’a été abaissé dans ce lot.
 
 ## Invariants conservés
 
@@ -21,9 +36,8 @@ Ce document est un checkpoint de preuve ; il ne remplace ni `SECURITY.md`, ni `d
 - Aucun test, coverage ou gate ne peut être affaibli pour fermer le lot.
 - Les éléments historiques restent conservés et classés ; ils ne sont jamais réactivés implicitement.
 
-## Ordre de fermeture recommandé
+## Ordre de fermeture
 
-1. P0-110/P0-115 : construire l’inventaire exhaustif flags + entrypoints et les tests de cohérence.
-2. P0-120 : étendre le registre empirique avec provenance/hash/freshness/revalidation en TDD.
-3. P0-001 : produire le Completion Receipt exact-SHA final avec delta baseline et CI.
-4. Rejouer le gate d’autorité documentaire et la régression pertinente avant passage Testing/Review.
+1. Revalider les tests ciblés P0-110/P0-115/P0-120 sur un SHA frais.
+2. Produire le Completion Receipt P0-001 exact-SHA avec delta baseline + CI.
+3. Rejouer le gate d’autorité documentaire et la régression pertinente avant Testing/Review.

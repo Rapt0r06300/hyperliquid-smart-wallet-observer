@@ -140,7 +140,7 @@ def can_mutate_task(
         return False
     if current < lease.lease_started or current >= lease.lease_expires:
         return False
-    if owner != lease.owner:
+    if owner != lease.owner or not token:
         return False
     return _token_hash(token) == lease.token_hash
 
@@ -148,16 +148,21 @@ def can_mutate_task(
 def transfer_ownership(
     lease: OwnershipLease,
     *,
+    current_owner: str,
+    current_token: str,
     new_owner: str,
     now: datetime,
     ttl_seconds: int,
     new_token: str,
 ) -> tuple[OwnershipLease, HandoffReceipt]:
     released = _utc(now)
-    if lease.released_at is not None:
-        raise ValueError("ownership lease already released")
-    if released < lease.lease_started:
-        raise ValueError("handoff cannot predate lease")
+    if not can_mutate_task(
+        lease,
+        owner=current_owner,
+        token=current_token,
+        now=released,
+    ):
+        raise PermissionError("active ownership credential required")
     lease.released_at = released
     new_lease = acquire_ownership(
         lease.task_id,
@@ -275,11 +280,15 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
     if not isinstance(rows, list):
         raise ValueError("task graph tasks must be a list")
     nodes: list[TaskGraphNode] = []
+    seen_task_ids: set[str] = set()
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("lease"), dict):
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
         node_task_id = str(row["task_id"])
+        if node_task_id in seen_task_ids:
+            raise ValueError(f"duplicate task_id: {node_task_id}")
+        seen_task_ids.add(node_task_id)
         node_owner = str(row["owner"])
         lease = OwnershipLease(
             task_id=str(raw_lease["task_id"]),
