@@ -1,6 +1,6 @@
 # H—T-42 — Cross‑Venue runtime/test mapping
 
-Exact audit baseline: `a7d323ccd273cc9b6ddd3cef59b6efe9dd3d6f4c`.
+Audit baseline refreshed against `29aa4bc2628d4559a653a1cf2430b8385f3fd9a3` before this write.
 
 Scope: Cross‑Venue technical completion only. Paper/read-only remains mandatory; this document does not certify profitability and does not revive the historical taker‑taker hypothesis.
 
@@ -17,14 +17,14 @@ Scope: Cross‑Venue technical completion only. Paper/read-only remains mandator
 | Multipliers / quote / settlement currency | `mapping_record` exposes `contract_multiplier`, `quote_currency`, `settlement_currency`, `unit_equivalent`; multiplier-1000 contracts are not marked exact | ALREADY_IMPLEMENTED / FAIL_CLOSED |
 | Mapping tests | `tests/test_cross_venue_instruments_mapping.py` covers BTC exact mapping, unsupported HYPE, wrong symbol and 1000× PEPE non-equivalence | ALREADY_IMPLEMENTED |
 | Snapshot freshness | Cross‑Venue passes `max_book_age_ms` into canonical execution; strict execution truth rejects observations outside the age budget | ALREADY_IMPLEMENTED, targeted Cross‑Venue characterization still desirable |
-| Full-cost accounting | Canonical execution exposes fees/slippage/latency cost fields; Cross‑Venue residual unwind PnL is reconciled in the paper ledger | ALREADY_IMPLEMENTED, exact four-fill round-trip certification still OPEN |
-| Four-fill accounting when applicable | Entry legs are modeled; residual unwind is modeled. A complete matched position round-trip needs explicit exit-leg evidence before technical Done | OPEN |
+| Full four-fill accounting | `src/hl_observer/backtesting/cross_venue_certified.py::build_four_fill_cycle` builds an all-or-none four-fill paper cycle from certified entry/exit snapshots, applies explicit `fees_bps_total`, and withholds economic PnL on incomplete fills | ALREADY_IMPLEMENTED |
+| Four-fill tests | `tests/test_cross_venue_certified.py::test_cycle_certifie_exige_exactement_quatre_fills_complets` requires exactly four complete fills; partial liquidity becomes naked-leg risk with `net_pnl_usd=None` | ALREADY_IMPLEMENTED |
+| Cost sensitivity / invalid fees | Cross‑Venue certification scenarios verify positive fees reduce net PnL and negative fees fail closed as `INVALID_FEES` | ALREADY_IMPLEMENTED / FAIL_CLOSED |
 | Historical taker-taker KILL | No claim in this mapping re-labels the killed micro-edge as executable alpha | HISTORICAL/KILLED preserved |
 
 ## Remaining Done-contract gaps
 
-1. Add/identify an exact Cross‑Venue test proving stale delayed books are rejected fail-closed at the lane boundary.
-2. Prove complete matched-position exit accounting with four executable fills when a round trip is evaluated, including fees/slippage/depth and final flat state.
-3. Run targeted Cross‑Venue tests and relevant regression at the exact delivery SHA; only then check the corresponding AgiFlow acceptance criteria.
+1. Add or identify an exact Cross‑Venue test proving stale/delayed books are rejected fail-closed at the lane boundary, rather than relying only on the canonical execution layer contract.
+2. Run targeted Cross‑Venue tests and relevant regression at the exact delivery SHA; only then check the corresponding AgiFlow acceptance criteria.
 
-No criterion should be closed from this document alone when runtime/test evidence is still marked OPEN.
+No criterion should be closed from this document alone when runtime/test evidence is still unverified at the exact delivery SHA.
