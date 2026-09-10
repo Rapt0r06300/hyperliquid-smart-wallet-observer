@@ -72,3 +72,13 @@ def test_reference_residual_trial_count_inclut_toutes_les_politiques_predeclaree
 
     assert module.reference_residual_trial_count(2) == 2 * expected_per_pair
     assert module.reference_residual_trial_count(0) == 0
+
+
+def test_research_family_trial_count_ajoute_le_residual_avant_replay() -> None:
+    base_trials = 17
+    pair_count = 3
+
+    combined = module.research_family_trial_count(base_trials, pair_count)
+
+    assert combined == base_trials + module.reference_residual_trial_count(pair_count)
+    assert module.research_family_trial_count(base_trials, 0) == base_trials
