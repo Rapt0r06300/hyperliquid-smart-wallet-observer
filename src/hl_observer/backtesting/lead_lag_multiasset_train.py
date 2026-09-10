@@ -29,6 +29,7 @@ from hl_observer.backtesting.lead_lag_reference_residual_grid import (
     REFERENCE_RESIDUAL_MIN_TRAIN_FILLS,
     REFERENCE_RESIDUAL_THRESHOLDS_BPS,
     REFERENCE_RESIDUAL_WINDOWS_MS,
+    detect_reference_residual_shocks,
     research_family_trial_count,
 )
 from hl_observer.backtesting.lead_lag_source_alignment import (
@@ -175,6 +176,7 @@ def load_multiasset_train_tape(
     allowed = {str(coin).upper() for coin in coins}
     train_ranges, split_meta = _training_ranges(project_root)
     tapes: dict[str, list[tuple[int, float, float]]] = {coin: [] for coin in sorted(allowed)}
+    trade_observations: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}
     books: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}
     source_ids = {coin: {"TRADE": set(), "HL_BOOK": set()} for coin in sorted(allowed)}
     seen_trades: set[tuple[Any, ...]] = set()
@@ -263,6 +265,7 @@ def load_multiasset_train_tape(
                         "feed_quality_score": row.get("feed_quality_score"),
                         "data_gate_ready": row.get("data_gate_ready"),
                         "event_id": row.get("event_id"),
+                        "source_id": source_id,
                         "source": "hyperliquid:recorded:aligned_bbo",
                         "data_origin": "RECORDED_REAL",
                         "read_only": True,
@@ -298,13 +301,31 @@ def load_multiasset_train_tape(
                 continue
             seen_trades.add(identity)
             tapes[coin].append((int(timestamp_ms) * 1_000_000, float(price), direction))
+            trade_observations[coin].append(
+                {
+                    "observable_at_ms": int(timestamp_ms),
+                    "price": float(price),
+                    "source_id": source_id,
+                }
+            )
             source_ids[coin]["TRADE"].add(source_id)
     result: dict[str, dict[str, list]] = {}
     for coin, rows in tapes.items():
         rows.sort()
+        trade_observations[coin].sort(
+            key=lambda row: (int(row["observable_at_ms"]), str(row["source_id"]), float(row["price"]))
+        )
         books[coin].sort(key=lambda row: int(row["ts_ms"]))
         if rows:
-            result[coin] = {"HL": [], "BIN": [], "TRADE": rows, "HL_BOOK": books[coin], "TRADE_SOURCE_IDS": sorted(source_ids[coin]["TRADE"]), "HL_BOOK_SOURCE_IDS": sorted(source_ids[coin]["HL_BOOK"])}
+            result[coin] = {
+                "HL": [],
+                "BIN": [],
+                "TRADE": rows,
+                "TRADE_OBS": trade_observations[coin],
+                "HL_BOOK": books[coin],
+                "TRADE_SOURCE_IDS": sorted(source_ids[coin]["TRADE"]),
+                "HL_BOOK_SOURCE_IDS": sorted(source_ids[coin]["HL_BOOK"]),
+            }
     return result, {
         "schema_version": "hypersmart.lead_lag_multiasset_train_tape.v1",
         **split_meta,
@@ -717,6 +738,95 @@ def explore_lead_lag_multiasset_train(
                         }
                     )
                     variants.append(scored)
+    for leader, follower in planned_cross_pairs:
+        leader_streams, follower_streams = tape.get(leader), tape.get(follower)
+        if not leader_streams or not follower_streams:
+            continue
+        shared_sources = sorted(
+            set(leader_streams.get("TRADE_SOURCE_IDS") or ())
+            & set(follower_streams.get("TRADE_SOURCE_IDS") or ())
+            & set(follower_streams.get("HL_BOOK_SOURCE_IDS") or ())
+        )
+        if not shared_sources:
+            continue
+        source_id = shared_sources[0]
+        reference_rows = [
+            dict(row)
+            for row in (leader_streams.get("TRADE_OBS") or [])
+            if str(row.get("source_id") or "") == source_id
+        ]
+        follower_rows = [
+            dict(row)
+            for row in (follower_streams.get("TRADE_OBS") or [])
+            if str(row.get("source_id") or "") == source_id
+        ]
+        follower_books = [
+            dict(row)
+            for row in (follower_streams.get("HL_BOOK") or [])
+            if str(row.get("source_id") or "") == source_id
+        ]
+        if not reference_rows or not follower_rows or not follower_books:
+            continue
+        residual_tape = {
+            follower: {
+                "HL": [],
+                "BIN": [],
+                "TRADE": list(follower_streams.get("TRADE") or []),
+            }
+        }
+        for beta in REFERENCE_RESIDUAL_BETAS:
+            for shock_window_ms in REFERENCE_RESIDUAL_WINDOWS_MS:
+                for threshold in REFERENCE_RESIDUAL_THRESHOLDS_BPS:
+                    shocks, residual_diagnostics = detect_reference_residual_shocks(
+                        reference_rows,
+                        follower_rows,
+                        window_ms=int(shock_window_ms),
+                        threshold_bps=float(threshold),
+                        beta=float(beta),
+                        beta_asof_ms=0,
+                    )
+                    for direction_policy, direction_multiplier in REFERENCE_RESIDUAL_DIRECTION_POLICIES:
+                        for horizon in REFERENCE_RESIDUAL_HORIZONS_MS:
+                            report = replay_measured_lead_lag(
+                                residual_tape,
+                                {follower: follower_books},
+                                shock_threshold_bps=float(threshold),
+                                horizon_ms=int(horizon),
+                                latency_evidence=latency,
+                                notional_usd=NOTIONAL_USD,
+                                min_history=5,
+                                min_expected_net_bps=0.0,
+                                min_episodes=1,
+                                direction_multiplier=int(direction_multiplier),
+                                shock_window_ms=float(shock_window_ms),
+                                admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                                precomputed_shocks={follower: shocks},
+                                inputs_sorted=True,
+                            )
+                            scored = _score_report(
+                                report,
+                                coin=follower,
+                                threshold_bps=float(threshold),
+                                horizon_ms=int(horizon),
+                                trial_count=trial_count,
+                                mechanism=REFERENCE_RESIDUAL_MECHANISM,
+                                direction_multiplier=int(direction_multiplier),
+                                min_train_fills=REFERENCE_RESIDUAL_MIN_TRAIN_FILLS,
+                                shock_window_ms=float(shock_window_ms),
+                                admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                            )
+                            scored.update(
+                                {
+                                    "leader_coin": leader,
+                                    "follower_coin": follower,
+                                    "aligned_source_ids": [source_id],
+                                    "direction_policy": str(direction_policy),
+                                    "reference_beta": float(beta),
+                                    "reference_beta_asof_ms": 0,
+                                    "reference_residual_diagnostics": dict(residual_diagnostics),
+                                }
+                            )
+                            variants.append(scored)
     eligible = [row for row in variants if row["eligible"]]
     selected = max(
         eligible,
@@ -736,6 +846,8 @@ def explore_lead_lag_multiasset_train(
             "leader_coin": selected.get("leader_coin"),
             "follower_coin": selected.get("follower_coin"),
             "aligned_source_ids": selected.get("aligned_source_ids"),
+            "reference_beta": selected.get("reference_beta"),
+            "reference_beta_asof_ms": selected.get("reference_beta_asof_ms"),
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
             "shock_window_ms": selected["shock_window_ms"],
