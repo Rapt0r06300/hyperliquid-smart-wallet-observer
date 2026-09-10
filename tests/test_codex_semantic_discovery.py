@@ -1,4 +1,11 @@
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 from hl_observer.research.semantic_discovery import generate_semantic_plans, rank_semantic_plans
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _catalog():
@@ -122,3 +129,34 @@ def test_ranking_filters_near_semantic_duplicate_from_ledger():
     )
     ranked = rank_semantic_plans([right], [_ledger_record(left)], [], 1)
     assert ranked == []
+
+
+def test_semantic_cli_runs_from_clean_interpreter_without_touching_repo_runtime(tmp_path):
+    output = tmp_path / "shortlist.json"
+    status = tmp_path / "status.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(ROOT / "tools/codex_semantic_discovery.py"),
+            "--family",
+            "lead_lag",
+            "--pool-size",
+            "40",
+            "--shortlist",
+            "5",
+            "--out",
+            str(output),
+            "--status-out",
+            str(status),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    accounting = json.loads(status.read_text(encoding="utf-8"))
+    assert payload["certifying"] is False
+    assert accounting["filtered_before_llm"] == accounting["generated"] - 5

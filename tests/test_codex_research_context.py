@@ -1,6 +1,11 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 from hl_observer.research.research_context import build_research_context
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_context_auto_selects_underworked_family_and_stays_compact(tmp_path):
@@ -56,3 +61,17 @@ def test_context_reports_semantic_candidates_filtered_before_llm(tmp_path):
     assert context["trial_accounting"]["semantic_candidates_filtered_before_llm"] == 1988
     assert "raw_records" not in context
     assert "raw_logs" not in context
+
+
+def test_context_cli_runs_from_clean_isolated_interpreter():
+    result = subprocess.run(
+        [sys.executable, "-I", str(ROOT / "tools/codex_research_context.py"), "--auto"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["network_io"] is False
+    assert payload["quota_policy"]["resume_source"] == "compact_context_only"
