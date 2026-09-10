@@ -1,4 +1,4 @@
-"""Local CLI for the append-only Codex Discovery V3 hypothesis ledger."""
+"""Local CLI for the append-only Codex Discovery V3.1 hypothesis ledger."""
 from __future__ import annotations
 
 import argparse
@@ -16,6 +16,7 @@ for _path in (_SRC, _REPO_ROOT):
 from hl_observer.research.hypothesis_ledger import (  # noqa: E402
     HypothesisValidationError,
     append_record,
+    challenger_required,
     compact_status,
     load_records,
     novelty_score,
@@ -47,7 +48,7 @@ def _emit(payload: Mapping[str, Any], *, stream=None) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Manage the local Codex Discovery V3 hypothesis ledger"
+        description="Manage the local Codex Discovery V3.1 hypothesis ledger"
     )
     parser.add_argument(
         "--ledger",
@@ -74,6 +75,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Check whether a research lineage must pivot back to Discovery",
     )
     rediscovery.add_argument("hypothesis_id")
+
+    challenger = sub.add_parser(
+        "needs-challenger",
+        help="Check whether an improving lineage must face orthogonal challengers",
+    )
+    challenger.add_argument("hypothesis_id")
     return parser
 
 
@@ -125,6 +132,17 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "REDISCOVERY_REQUIRED" if required else "CONTINUE",
                     "hypothesis_id": args.hypothesis_id,
                     "rediscovery_required": required,
+                }
+            )
+            return 0
+
+        if args.command == "needs-challenger":
+            required = challenger_required(history, args.hypothesis_id)
+            _emit(
+                {
+                    "status": "CHALLENGER_REQUIRED" if required else "CONTINUE",
+                    "hypothesis_id": args.hypothesis_id,
+                    "challenger_required": required,
                 }
             )
             return 0
