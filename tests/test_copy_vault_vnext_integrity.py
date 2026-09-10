@@ -113,6 +113,33 @@ def test_malformed_cohort_and_nonfinite_correlation_fail_closed(monkeypatch) -> 
     assert "CORRELATION_EVIDENCE_INVALID" in evidence["reasons"]
 
 
+def test_behaviorally_related_wallets_require_same_declared_entity() -> None:
+    raw = _valid_raw()
+    raw["universe_integrity"]["behavioral_fingerprint"] = {  # type: ignore[index]
+        "complete": True,
+        "wallet_fills": {
+            "A": [
+                {"ts_ms": 0, "coin": "BTC", "maker": True},
+                {"ts_ms": 1_000, "coin": "ETH", "maker": False},
+                {"ts_ms": 2_000, "coin": "BTC", "maker": True},
+                {"ts_ms": 3_000, "coin": "ETH", "maker": False},
+            ],
+            "B": [
+                {"ts_ms": 100, "coin": "BTC", "maker": True},
+                {"ts_ms": 1_100, "coin": "ETH", "maker": False},
+                {"ts_ms": 2_100, "coin": "BTC", "maker": True},
+                {"ts_ms": 3_100, "coin": "ETH", "maker": False},
+            ],
+        },
+    }
+
+    evidence = module.evaluate_copy_vault_vnext_integrity(raw)
+
+    assert evidence["eligible"] is False
+    assert "BEHAVIORAL_ENTITY_NORMALIZATION_MISSING" in evidence["reasons"]
+    assert evidence["behavioral_fingerprint"]["related_wallet_groups"] == [["a", "b"]]
+
+
 def test_economic_pack_wires_integrity_before_copy_reports() -> None:
     root = Path(__file__).resolve().parents[1]
     text = (root / "src" / "hl_observer" / "backtesting" / "economic_vnext_pack.py").read_text(
