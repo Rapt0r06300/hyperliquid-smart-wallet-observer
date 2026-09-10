@@ -26,6 +26,7 @@ DEFAULT_CATALOG = (
 )
 DEFAULT_LEDGER = REPO_ROOT / "runtime/codex_research/HYPOTHESIS_LEDGER.jsonl"
 DEFAULT_PROCESS_MEMORY = REPO_ROOT / "runtime/codex_research/PROCESS_MEMORY.jsonl"
+DEFAULT_HISTORICAL_PROCESS_MEMORY = REPO_ROOT / "docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl"
 DEFAULT_STATUS = REPO_ROOT / "runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json"
 
 
@@ -38,6 +39,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--ledger", type=Path, default=DEFAULT_LEDGER)
     parser.add_argument("--process-memory", type=Path, default=DEFAULT_PROCESS_MEMORY)
+    parser.add_argument(
+        "--historical-process-memory",
+        type=Path,
+        default=DEFAULT_HISTORICAL_PROCESS_MEMORY,
+        help="stable historical process-memory seed loaded before runtime memory",
+    )
+    parser.add_argument(
+        "--retest-evidence",
+        action="append",
+        default=[],
+        help="verified evidence satisfying a documented retest condition; repeatable",
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--status-out",
@@ -64,8 +77,15 @@ def main() -> int:
     args = _parser().parse_args()
     catalog = load_catalog(args.catalog)
     plans = generate_semantic_plans(catalog, args.family, args.pool_size, args.seed)
+    if args.retest_evidence:
+        plans = [
+            {**plan, "retest_evidence": list(args.retest_evidence)}
+            for plan in plans
+        ]
     ledger = load_records(args.ledger)
-    process = load_process_records(args.process_memory)
+    historical = load_process_records(args.historical_process_memory)
+    runtime = load_process_records(args.process_memory)
+    process = [*historical, *runtime]
     ranked = rank_semantic_plans(plans, ledger, process, args.shortlist)
     filtered = max(0, len(plans) - len(ranked))
     status = {
@@ -74,6 +94,8 @@ def main() -> int:
         "generated": len(plans),
         "shortlisted": len(ranked),
         "filtered_before_llm": filtered,
+        "historical_memory_records": len(historical),
+        "runtime_memory_records": len(runtime),
         "network_io": False,
         "certifying": False,
     }
