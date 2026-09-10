@@ -5,6 +5,8 @@ performance and this module performs no network or exchange I/O.
 """
 from __future__ import annotations
 
+import hashlib
+import itertools
 import json
 import math
 import uuid
@@ -23,6 +25,7 @@ _HIGH_CONFIDENCE = 0.90
 _HIGH_EVIDENCE = 5
 _POSITIVE_BOOST_CAP = 0.25
 _CONSTRAINT_PREFIX = "constraint:"
+_SEMANTIC_GRID_PREFIX = "semantic-grid:"
 _CONSTRAINT_FIELDS = frozenset(
     {
         "event",
@@ -34,6 +37,7 @@ _CONSTRAINT_FIELDS = frozenset(
         "execution",
     }
 )
+_SEMANTIC_GRID_FIELDS = ("event", "data_surface", "target", "execution")
 
 
 class ProcessMemoryValidationError(ValueError):
@@ -246,7 +250,7 @@ def _retest_satisfied(condition: str | None, evidence: set[str]) -> bool:
 
 
 def _constraint_signature_matches(signature: str, candidate: Mapping[str, Any]) -> bool:
-    """Match stable historical memory to structured semantic candidates without fuzzy guessing."""
+    """Match explicit structured constraints without fuzzy text inference."""
     folded = signature.casefold()
     if not folded.startswith(_CONSTRAINT_PREFIX):
         return False
@@ -279,6 +283,54 @@ def _constraint_signature_matches(signature: str, candidate: Mapping[str, Any]) 
     return True
 
 
+def _semantic_signature(
+    family: str, event: str, data_surface: str, target: str, execution: str
+) -> str:
+    joined = "\x1f".join(
+        item.casefold().strip()
+        for item in (family, event, data_surface, target, execution)
+    )
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def _semantic_grid_signature_matches(signature: str, candidate: Mapping[str, Any]) -> bool:
+    """Bridge stable human-readable seed regions to V3.2 hashed mechanism signatures."""
+    folded = signature.casefold()
+    if not folded.startswith(_SEMANTIC_GRID_PREFIX):
+        return False
+    family = candidate.get("family")
+    mechanism = candidate.get("mechanism_signature")
+    if family not in FAMILIES or not isinstance(mechanism, str):
+        return False
+
+    raw_fields: dict[str, tuple[str, ...]] = {}
+    body = signature[len(_SEMANTIC_GRID_PREFIX) :]
+    for part in body.split(";"):
+        if "=" not in part:
+            return False
+        key, raw_value = part.split("=", 1)
+        key = key.strip().casefold()
+        values = tuple(
+            value.strip()
+            for value in raw_value.split("|")
+            if value.strip()
+        )
+        if key not in _SEMANTIC_GRID_FIELDS or not values:
+            return False
+        raw_fields[key] = values
+    if set(raw_fields) != set(_SEMANTIC_GRID_FIELDS):
+        return False
+
+    expected = mechanism.casefold()
+    axes = [raw_fields[key] for key in _SEMANTIC_GRID_FIELDS]
+    for event, data_surface, target, execution in itertools.product(*axes):
+        if _semantic_signature(
+            family, event, data_surface, target, execution
+        ) == expected:
+            return True
+    return False
+
+
 def candidate_memory_effect(
     candidate: Mapping[str, Any], records: Iterable[Mapping[str, Any]]
 ) -> dict[str, Any]:
@@ -291,9 +343,12 @@ def candidate_memory_effect(
         if record["family"] != family:
             continue
         signature = record["mechanism_signature"]
-        if signature.casefold() != mechanism and not _constraint_signature_matches(
-            signature, candidate
-        ):
+        compatible = (
+            signature.casefold() == mechanism
+            or _constraint_signature_matches(signature, candidate)
+            or _semantic_grid_signature_matches(signature, candidate)
+        )
+        if not compatible:
             continue
         if not _context_matches(context, record_context):
             continue
