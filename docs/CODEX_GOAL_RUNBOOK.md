@@ -1,6 +1,6 @@
-# Codex Goal Runbook — Alina SmartFlow Discovery V3
+# Codex Goal Runbook — Alina SmartFlow Discovery V3.1
 
-Ce runbook complète `AGENTS.md`. Il définit **comment découvrir puis tester** l'edge sans imposer une stratégie fixe. Codex doit agir comme un chercheur quantitatif autonome : explorer des mécanismes réellement différents, les falsifier localement, concentrer le CPU sur les survivants, puis revenir à Discovery dès qu'une lignée stagne.
+Ce runbook complète `AGENTS.md`. Codex agit comme **un seul agent LLM** contrôleur de recherche quantitative : il invente/choisit les expériences ; le PC exécute tout calcul déterministe ou numérique faisable localement. **Aucun sous-agent** IA, spawn, fan-out ou reviewer-agent.
 
 ## Résultat final et vérité machine
 
@@ -10,140 +10,95 @@ Sur le même SHA certifié de `main`, obtenir séparément et sans compensation 
 - `lead_lag >= +4.00 USD NET/jour PROUVÉS` ;
 - `cross_venue_dislocation_v2 >= +4.00 USD NET/jour PROUVÉS`.
 
-Toujours relire les gates du HEAD exact. Au HEAD V3 de conception, `economic_objective.py` impose `TARGET_NET_USD_PER_DAY=4.0` et `MIN_PROOF_DAYS=2` : la preuve quotidienne canonique requiert donc au moins **2 jours UTC complets** et chaque jour doit atteindre la cible. La certification finale `python tools/run_daily_economic_certification.py .` ajoute le forward strictement post-freeze, au moins 86 400 secondes de temps mur vérifié, couverture >= 0,99 et taux net >= +4.00 USD/jour. Si les contrats machine évoluent, ils priment sur ce texte.
+Toujours suivre les gates du HEAD exact. Le contrat courant exige notamment au moins **2 jours UTC complets** dans la preuve quotidienne canonique et la certification finale `python tools/run_daily_economic_certification.py .`, avec forward strict post-freeze, couverture >= **0.99**, coûts complets et taux net >= +4.00 USD/jour.
 
-## Principe : Codex invente et décide, le PC calcule
+## Principe quota : le modèle décide, le PC calcule
 
-Le quota modèle sert à choisir des hypothèses à forte valeur d'information, décider `IMPROVE / COMBINE / PIVOT / STOP`, interpréter les résumés et concevoir la prochaine expérience. Tout calcul faisable localement doit l'être : Python, numpy/scipy, pytest, replays, backtests, optimisation, estimation, bootstrap, permutations, Monte-Carlo, causalité temporelle, profiling et agrégation.
+Conserver les tours modèle, pas le CPU. Préférer :
 
-Un calcul CPU peut durer longtemps. Préférer :
+`1 décision modèle -> gros batch local -> résumé compact -> 1 décision modèle`
 
-`1 décision modèle -> gros travail local -> résumé compact -> 1 nouvelle décision`
+à des dizaines de tours autour de calculs reproductibles.
 
-au lieu de dizaines de tours modèle autour de calculs déterministes.
+Tout calcul faisable sur le PC doit être local : Python, numpy/scipy, pytest, replays, backtests, optimisation, estimation, bootstrap, permutations, Monte-Carlo, causalité temporelle, profiling et agrégation. Le runner est CPU-first ; CUDA/ROCm/HIP/JAX sont masqués par défaut. Threads, multiprocessing, batchs et workers CPU sont autorisés. GPU seulement si le CPU est réellement inadéquat et la raison est mesurée.
 
-Le runner standard est CPU-first : `tools/codex_quant_experiment.py` masque CUDA/ROCm/HIP/JAX GPU et expose `ALINA_CPU_WORKERS`. Threads, multiprocessing, batchs et workers locaux ne sont pas des sous-agents. Le GPU n'est pas préféré et ne doit être utilisé que si le CPU est réellement inadéquat.
+Pour une expérience :
+`EXPERIMENT_SPEC.json -> python tools/codex_quant_experiment.py <spec> -> RESULT_SUMMARY.json`
 
-## Mémoire V3 : ne pas oublier ni rebaptiser l'ancien travail
+Pour plusieurs expériences pré-définies :
+`BATCH_SPEC.json -> python tools/codex_quant_batch.py <batch> -> BATCH_SUMMARY.json`
 
-Le ledger canonique local est :
+Le batch doit finir **sans round-trip modèle interne**. Si 1 000 ou 10 000 calculs indépendants peuvent être pré-définis, les lancer localement avant le prochain tour modèle. Les gros logs/trials/SQLite restent sur disque ; lire d'abord les résumés compacts.
 
-`runtime/codex_research/HYPOTHESIS_LEDGER.jsonl`
+## Mémoire : ne pas oublier ni rebaptiser l'ancien travail
 
-Interface :
+Ledger local append-only : `runtime/codex_research/HYPOTHESIS_LEDGER.jsonl`.
+
+Commandes :
 
 - `python tools/codex_hypothesis_ledger.py register <record.json>`
 - `python tools/codex_hypothesis_ledger.py score <record.json>`
 - `python tools/codex_hypothesis_ledger.py status --family <family>`
 - `python tools/codex_hypothesis_ledger.py needs-rediscovery <hypothesis_id>`
+- `python tools/codex_hypothesis_ledger.py needs-challenger <hypothesis_id>`
 
-Le ledger est append-only, n'est jamais une preuve de PnL et conserve hypothèse, lignée, sémantique, essais, signatures et progrès économique.
+Au premier cycle, bootstrapper l'historique utile comme `baseline=true` depuis le HEAD, `docs/LOIS_MESUREES.md`, `tools/recherche_14h_mecanismes.py` et uniquement les commits économiques/recherche récents nécessaires. **Lead-Lag maker/taker/streaming**, **Cross-Venue V5** et les lignées **Copy-Vault** courantes sont du travail existant, pas de la nouveauté automatique.
 
-Au premier cycle V3, si le ledger est vide, créer un **bootstrap baseline** compact depuis le HEAD courant, `docs/LOIS_MESUREES.md`, `tools/recherche_14h_mecanismes.py` et les derniers commits économiques pertinents. Marquer `baseline=true`. Les dix mécanismes historiques, les lignées Lead-Lag maker/taker/streaming, Cross-Venue V5 et les lignées Copy-Vault déjà présentes au HEAD ne deviennent pas « nouvelles » simplement parce que le ledger est neuf.
+Chaque record peut porter `base_sha`. Si HEAD avance, inspecter seulement le **delta Git** pertinent et enregistrer les nouvelles lignées/baselines. Ne pas rescanner tout l'historique.
 
-Chaque record peut porter `base_sha`. Si HEAD change depuis le dernier record, inspecter seulement le delta Git pertinent et ajouter les nouvelles lignées/baselines nécessaires. Ne jamais rescanner tout l'historique à chaque reprise.
+## Boucle obligatoire : DISCOVERY -> TOURNAMENT -> EXPLOIT -> FREEZE / REDISCOVERY
 
-## Boucle obligatoire : DISCOVERY -> TOURNAMENT -> EXPLOIT -> FREEZE/REDISCOVERY
+### DISCOVERY
 
-### 1. DISCOVERY
+Lire `.agents/skills/alina-quant-research/references/discovery-v31.md` uniquement pendant Discovery/champion-challenger.
 
-Entrer en Discovery au démarrage d'une nouvelle lignée et dès qu'une stagnation est détectée.
+Par défaut produire **12 hypothèses structurellement distinctes** ; minimum dur 8 ; viser au moins **5 archétypes de mécanisme**. Un changement de seuil, fenêtre, seed, horizon ou hyperparamètre ne compte pas comme nouvelle hypothèse.
 
-Générer **>=8 hypothèses structurellement distinctes** avant une nouvelle grosse campagne CPU. Un changement de seuil, fenêtre ou hyperparamètre ne compte pas comme nouvelle hypothèse.
+Chaque hypothèse précise : mécanisme causal, surfaces de données, opérateur temporel/event-time, conditionnement/régime, cible future actionnable, traduction paper, raison causale et test de falsification. Scorer/enregistrer les candidats ; un doublon sémantique ne compte pas.
 
-Chaque hypothèse doit préciser au minimum :
+Recherche externe proactive autorisée au début d'un cycle lorsque cela élargit l'espace : Exa + Parallel Search pour web/praticiens, Consensus pour littérature, GitHub pour code/repos, CoinGecko seulement pour contexte de régime. Chercher des **mécanismes absents du ledger**, pas une confirmation de l'incumbent. Toute trouvaille doit devenir une hypothèse locale falsifiable.
 
-- mécanisme économique ;
-- surfaces de données ;
-- opérateur temporel/event-time ;
-- conditionnement/régime ;
-- cible future prédite ;
-- traduction en exécution paper ;
-- rationale causale ;
-- test qui la falsifie.
+Espaces possibles, non limitatifs : wallet informativeness/toxicité/anticipation cross-venue ; wallet × L2/order-flow ; price discovery asynchrone ; event-time/queue/absorption/depletion ; spillovers cross-asset ; Hawkes/VAR/VECM/transfer-entropy ; liquidations/OI/basis/funding ; régimes/changepoints ; micro-saisonnalité ; targets probabilistes/quantiles/hazard ; interactions non linéaires CPU.
 
-Enregistrer/scorer les candidats avec le ledger. Le score de nouveauté est local et déterministe ; il mesure la distance structurelle aux hypothèses déjà évaluées. Un doublon sémantique ne compte pas parmi les 8.
+### TOURNAMENT
 
-Une passe externe proactive est autorisée **une fois au début d'un cycle Discovery lorsqu'elle peut élargir l'espace de recherche** : Exa + Parallel Search pour web/praticiens, Consensus pour littérature, GitHub pour code/repos, CoinGecko seulement pour contexte de régime courant. Regrouper/dédupliquer la recherche et convertir rapidement les résultats en hypothèses locales falsifiables. Une page web ou un prix CoinGecko n'est jamais une preuve économique.
+Falsifier à bas coût avant de consacrer un gros budget. Classer par nouveauté, plausibilité causale, données réellement disponibles, horizon exploitable, headroom NET après coûts, gain d'information attendu et coût de falsification.
 
-Espaces possibles, non obligatoires : wallet informativeness/toxicité/anticipation cross-venue ; wallet × L2/order-flow ; price discovery asynchrone ; représentations stationnaires/event-time ; spillovers cross-asset ; Hawkes/VAR/VECM/transfer-entropy ; liquidations/OI/basis/funding ; régimes de liquidité/volatilité ; micro-saisonnalité ; modèles linéaires ou non linéaires CPU si leur valeur incrémentale est mesurable.
+Le bon candidat prédit une quantité actionnable : distribution/quantiles du markout futur, probabilité/taille d'un move couvrant les coûts, temps/hazard jusqu'au move, probabilité de fill/adverse selection, ou expected NET edge. Accuracy, R², IC ou Sharpe train ne remplacent jamais l'économie OOS.
 
-### 2. TOURNAMENT
+### EXPLOIT
 
-Avant de dépenser un gros budget, falsifier les candidats à bas coût puis classer les survivants sur plusieurs dimensions :
+Sur les survivants seulement, utiliser massivement le CPU local : grid/random/QMC/TPE/Optuna/CMA-ES/NSGA-II/Successive-Halving/Hyperband, recherche coarse-to-fine, multi-seed, walk-forward, purge/embargo, CPCV/CSCV/PBO, PSR/DSR, Reality Check, block/stationary bootstrap, permutations/placebos/nulls, Monte-Carlo, ablations, sensibilité/plateaux, leave-one-coin/wallet/regime-out et stress fees/spread/slippage/latence/capacité/fill selon pertinence.
 
-- nouveauté/non-redondance ;
-- plausibilité causale ;
-- données réellement disponibles et horodatées ;
-- horizon exploitable ;
-- headroom NET après coûts/exécution ;
-- gain d'information attendu ;
-- coût de falsification.
+Escalader les modèles seulement si les baselines survivent : event studies/conditional statistics -> modèles linéaires/probabilistes -> méthodes temporelles/microstructure -> modèles non linéaires CPU -> ensembles/régimes. Toute complexité doit ajouter une valeur économique OOS incrémentale après coûts.
 
-Ne pas sélectionner le gagnant sur le meilleur backtest brut. Une hypothèse utile doit viser une quantité actionnable : direction, probabilité/taille du move, timing/horizon et **edge net attendu après exécution**. Accuracy, R², IC ou Sharpe train ne remplacent jamais le PnL exécutable.
+### ANTI-BOUCLE / REDISCOVERY / CHAMPION-CHALLENGER
 
-### 3. EXPLOIT
+Après chaque résultat matériel, enregistrer `experiment_ids`, signatures, `trial_count`, verdict, progrès économique et `controller_action`.
 
-Pour un survivant, consacrer autant de calcul local que scientifiquement utile.
+Exécuter `needs-rediscovery`. Deux retunings `PARAMETER_ONLY` sans progrès comparable positif, deux évaluations à headroom non positif/rejetées, un doublon épuisé ou l'absence de nouvelle raison causale imposent `PIVOT` vers Discovery.
 
-Une campagne :
-`EXPERIMENT_SPEC.json -> python tools/codex_quant_experiment.py <spec> -> RESULT_SUMMARY.json`
+Exécuter aussi `needs-challenger`. Après **3 décisions `IMPROVE` consécutives sans FREEZE**, lancer un mini-Discovery de >=4 challengers orthogonaux avant une quatrième amélioration locale. L'incumbent n'est pas automatiquement tué : il doit simplement battre les challengers.
 
-Plusieurs campagnes pré-définies :
-`BATCH_SPEC.json -> python tools/codex_quant_batch.py <batch> -> BATCH_SUMMARY.json`
+`IMPROVE` = progrès économique réel ; `COMBINE` = complémentarité OOS mesurée ; `PIVOT` = nouveau mécanisme ; `STOP` = lignée épuisée, jamais fin de la mission globale.
 
-Le batch doit finir localement sans round-trip modèle entre les expériences. Réutiliser grid, random, QMC, TPE/Optuna, CMA-ES, NSGA-II, Successive-Halving, Hyperband et les évaluateurs existants. Codex peut écrire des scripts locaux spécialisés pour lancer des campagnes beaucoup plus complexes lorsque nécessaire.
+## Anti-overfit / preuve finale
 
-Menu de validation selon pertinence : walk-forward ; purging/embargo ; CPCV/CSCV/PBO ; PSR/Deflated Sharpe ; Reality Check ; block/stationary bootstrap ; permutation/placebo/null ; Monte-Carlo ; multi-seed ; sensibilité/plateaux ; leave-one-coin/wallet/regime-out ; stress fees/spread/slippage/latence/capacité/fill ; ablations ; comparaison de modèles simples/non-linéaires.
+Tous les essais distincts comptent. Le search/feedback window est adaptatif ; la preuve finale ne l'est pas. Toute validation/OOS/forward observée puis utilisée pour retuner devient exploratoire : refreeze puis preuve temporellement disjointe.
 
-Le PC peut exécuter des centaines, milliers ou davantage de trials. Les gros artefacts restent sur disque. Lire `RESULT_SUMMARY.json`/`BATCH_SUMMARY.json` en premier et agréger localement avant d'ouvrir les détails.
+Chercher des plateaux robustes, pas un optimum ponctuel. Conserver les baselines simples. Ne jamais abaisser sécurité, coûts, liquidabilité ou gates pour obtenir un PASS.
 
-Après chaque résultat matériel, ajouter au ledger les `experiment_ids`, signatures scientifiques, `trial_count`, verdict et progrès économique comparable.
-
-### 4. ANTI-BOUCLE / REDISCOVERY
-
-Après chaque itération, exécuter :
-
-`python tools/codex_hypothesis_ledger.py needs-rediscovery <hypothesis_id>`
-
-`PIVOT` vers Discovery si deux itérations consécutives sont seulement `PARAMETER_ONLY` sans progrès économique comparable positif, ou si deux évaluations consécutives conservent un headroom exécutable non positif/rejettent la lignée.
-
-Ne pas confondre « j'ai modifié du code / ajouté une gate / obtenu un meilleur fit » avec un progrès économique.
-
-`IMPROVE` : améliore une lignée qui montre un progrès réel.
-`COMBINE` : recombine des mécanismes complémentaires, en gardant la certification finale de chaque famille séparée.
-`PIVOT` : ouvre un nouveau mécanisme.
-`STOP` : ferme une lignée épuisée ; ne termine pas la mission globale.
-
-## Freeze, test final et anti-overfit
-
-Le search/feedback window est adaptatif ; la preuve finale ne l'est pas. Tous les essais distincts sont comptés.
-
-Si une validation/OOS/forward observée influence ensuite une modification, elle devient exploratoire. Refreeze puis utiliser une preuve temporellement disjointe. Ne jamais permettre au moteur de recherche d'optimiser directement la fenêtre qu'il présentera comme test final.
-
-Chercher des plateaux et des mécanismes robustes plutôt qu'un optimum ponctuel. Conserver les baselines simples. Toute complexité supplémentaire doit démontrer une valeur incrémentale OOS après coûts.
-
-## Recherche externe et marché courant
-
-Les outils externes servent à **élargir ou préciser les hypothèses**, pas à rester dans une boucle de browsing. Une seule passe groupée par Discovery est la norme ; une seconde passe exige une lacune précise issue des premiers tests.
-
-CoinGecko peut aider à identifier le régime actuel à utiliser comme contexte/stratification future, mais ne doit jamais transformer une observation du jour en règle optimisée rétrospectivement.
-
-## Politique quota Plus
-
-**Un seul agent LLM principal. Aucun sous-agent, spawn, fan-out ou reviewer-agent.**
+## Quota Plus
 
 - GPT-5.6 Sol High/Élevé, Standard, Fast OFF.
-- XHigh seulement pour une réflexion scientifique/architecturale exceptionnelle.
+- Un seul agent LLM ; aucun sous-agent.
+- XHigh seulement pour un verrou scientifique/architectural exceptionnel.
 - Parallélisme local non-LLM libre.
-- Sorties modèle courtes ; état et preuves machine-readable sur disque.
-- Pas de relecture systématique des 775, de tout Git ou de tous les rapports.
-- Cache/déduplication des signatures.
-- Pas de gros run identique sans changement scientifique ou raison de reproductibilité.
-- Si 1 000 calculs peuvent être pré-définis, les lancer localement avant le prochain tour modèle.
+- Sorties courtes ; état machine-readable sur disque.
+- Cache/déduplication des signatures ; pas de gros run identique sans changement scientifique ou raison de reproductibilité.
 
 ## Done
 
-DONE uniquement lorsque `python tools/run_daily_economic_certification.py .` certifie les trois familles séparément sur le même SHA avec le contrat machine courant : au minimum la preuve quotidienne canonique (actuellement >=2 jours UTC complets à >=+4 USD NET/jour), la preuve OOS/forward requise, le forward strict post-freeze vérifié et les coûts/liquidabilité/identités/placebos/causalité exigés, puis les gates techniques finales vertes.
+DONE uniquement lorsque `python tools/run_daily_economic_certification.py .` certifie les trois familles séparément sur le même SHA avec le contrat machine courant : >=2 jours UTC complets à >=+4 USD NET/jour, OOS/forward requis, forward strict post-freeze, coûts/liquidabilité/identités/placebos/causalité, puis gates techniques finales vertes.
 
 Si seul du temps ou de nouvelles données manque, laisser les collecteurs locaux nécessaires tourner et cesser les tours modèle inutiles.
