@@ -17,11 +17,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      - name: Archive exact HEAD
-        run: git archive --format=zip --output=repo-head.zip HEAD
+      - name: Archive source and tests from exact HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files \
+            | grep -Ev '^(runtime/|data/|artifacts/|reports/|runs/|logs/|replays/|output/|outputs/|\.venv/|venv/)' \
+            | zip -q repo-source.zip -@
+          printf '%s\n' "$(git rev-parse HEAD)" > BUNDLE_HEAD_SHA.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: repo-head
-          path: repo-head.zip
+          name: repo-source
+          path: |
+            repo-source.zip
+            BUNDLE_HEAD_SHA.txt
           if-no-files-found: error
           retention-days: 1
