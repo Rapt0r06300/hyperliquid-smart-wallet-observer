@@ -140,7 +140,7 @@ def can_mutate_task(
         return False
     if current < lease.lease_started or current >= lease.lease_expires:
         return False
-    if owner != lease.owner:
+    if owner != lease.owner or not token:
         return False
     return _token_hash(token) == lease.token_hash
 
