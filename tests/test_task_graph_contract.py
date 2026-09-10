@@ -43,6 +43,8 @@ def test_handoff_invalidates_old_owner_and_grants_new_owner() -> None:
     old = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="old")
     new, receipt = transfer_ownership(
         old,
+        current_owner="agent-a",
+        current_token="old",
         new_owner="agent-b",
         now=_now() + timedelta(seconds=10),
         ttl_seconds=90,
