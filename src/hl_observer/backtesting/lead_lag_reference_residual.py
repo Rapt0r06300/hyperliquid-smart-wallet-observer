@@ -18,12 +18,19 @@ from typing import Any
 SCHEMA_VERSION = "hypersmart.lead_lag_reference_residual.v1"
 
 
-def _unmeasurable(reason: str, *, decision_ms: int, window_ms: int) -> dict[str, Any]:
+def _safe_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _unmeasurable(reason: str, *, decision_ms: Any, window_ms: Any) -> dict[str, Any]:
     return {
         "status": "UNMEASURABLE",
         "reason": reason,
-        "decision_ms": int(decision_ms),
-        "window_ms": int(window_ms),
+        "decision_ms": _safe_int(decision_ms),
+        "window_ms": _safe_int(window_ms),
         "paper_read_only": True,
         "real_execution": False,
         "heldout_loaded": False,
@@ -60,8 +67,13 @@ def compute_reference_residual(
 ) -> dict[str, Any]:
     """Return follower log-return residual after removing causal reference move."""
 
-    decision_ms = int(decision_ms)
-    window_ms = int(window_ms)
+    raw_decision_ms = decision_ms
+    raw_window_ms = window_ms
+    try:
+        decision_ms = int(decision_ms)
+        window_ms = int(window_ms)
+    except (TypeError, ValueError, OverflowError):
+        return _unmeasurable("INVALID_WINDOW", decision_ms=raw_decision_ms, window_ms=raw_window_ms)
     window_start_ms = decision_ms - window_ms
     try:
         beta_value = float(beta)

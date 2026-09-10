@@ -64,3 +64,17 @@ def test_reference_residual_fails_closed_without_common_aligned_source():
     )
     assert result["status"] == "UNMEASURABLE"
     assert result["reason"] == "NO_COMMON_ALIGNED_SOURCE"
+
+
+def test_reference_residual_invalid_decision_fails_closed_instead_of_raising():
+    rows = [_row(1_000, 100.0), _row(2_000, 101.0)]
+    result = compute_reference_residual(
+        rows,
+        rows,
+        decision_ms="bad",
+        window_ms=1_000,
+        beta=1.0,
+        beta_asof_ms=900,
+    )
+    assert result["status"] == "UNMEASURABLE"
+    assert result["reason"] == "INVALID_WINDOW"
