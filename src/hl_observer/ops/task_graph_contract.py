@@ -279,6 +279,7 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         if not isinstance(row, dict) or not isinstance(row.get("lease"), dict):
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
+        node_task_id = str(row["task_id"])
         lease = OwnershipLease(
             task_id=str(raw_lease["task_id"]),
             owner=str(raw_lease["owner"]),
@@ -289,9 +290,11 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         )
         if lease.lease_started is None or lease.lease_expires is None:
             raise ValueError("lease timestamps are required")
+        if lease.task_id != node_task_id:
+            raise ValueError("lease task_id does not match node task_id")
         transition = row.get("transition")
         nodes.append(TaskGraphNode(
-            task_id=str(row["task_id"]),
+            task_id=node_task_id,
             owner=str(row["owner"]),
             contributors=tuple(str(value) for value in row.get("contributors", [])),
             status=str(row["status"]),
