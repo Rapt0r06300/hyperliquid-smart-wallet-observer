@@ -72,10 +72,11 @@ Principes :
 9. Lire d'abord `RESULT_SUMMARY.json` / `BATCH_SUMMARY.json`; garder gros logs/trials sur disque.
 10. Cache/déduplication : ne pas relancer un gros run identique sans changement scientifique.
 11. Recherche externe proactive mais bornée au début d'un cycle Discovery si elle élargit réellement l'espace : Exa/Parallel/Consensus/GitHub selon besoin, puis retour immédiat au calcul local.
-12. **Sous-agents IA interdits pour ce Goal** : agent principal unique ; aucun spawn/fan-out/reviewer-agent.
+12. **Sous-agents IA :** interdits à l'intérieur d'une même campagne Discovery/expérience économique afin de préserver reproductibilité, attribution et séparation des preuves. Ils sont autorisés pour la **roadmap technique V5/776+**, les audits/code/CI indépendants et les revues, à condition d'utiliser des surfaces disjointes, des checkpoints durables, une intégration vérifiée et un writer unique sur `main`.
 13. Si seule l'accumulation de nouvelles données/temps peut débloquer la preuve, arrêter les tours modèle inutiles et laisser les collecteurs locaux nécessaires travailler.
 
 Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à recommencer.
+La **roadmap technique cumulative V5/776+** est un chantier distinct : son Done dépend de l'implémentation et des preuves techniques de ses exigences, pas de l'obtention de +4 USD.
 
 ## 6. Discipline scientifique
 
@@ -97,7 +98,7 @@ devient exploratoire : refreeze puis nouvelle preuve disjointe. Jamais de donné
 
 ## 8. Définition de fin
 
-La mission n'est terminée que lorsque le **même état certifié de `main`** prouve séparément :
+La **mission économique** n'est terminée que lorsque le **même état certifié de `main`** prouve séparément :
 
 - `copy_vault >= +4.00 USD NET/jour PROUVÉS` ;
 - `lead_lag >= +4.00 USD NET/jour PROUVÉS` ;
@@ -105,6 +106,8 @@ La mission n'est terminée que lorsque le **même état certifié de `main`** pr
 
 avec les exigences exactes du HEAD courant, puis les gates techniques finales requises vertes.
 `python tools/run_daily_economic_certification.py .` doit certifier les trois familles.
+
+Cette définition économique ne remplace pas le contrat de clôture de la roadmap technique V5/776+.
 
 ## 9. Rapport final
 
