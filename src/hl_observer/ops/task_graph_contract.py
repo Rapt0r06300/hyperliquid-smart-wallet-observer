@@ -280,6 +280,7 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
         node_task_id = str(row["task_id"])
+        node_owner = str(row["owner"])
         lease = OwnershipLease(
             task_id=str(raw_lease["task_id"]),
             owner=str(raw_lease["owner"]),
@@ -292,10 +293,12 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("lease timestamps are required")
         if lease.task_id != node_task_id:
             raise ValueError("lease task_id does not match node task_id")
+        if lease.owner != node_owner:
+            raise ValueError("lease owner does not match node owner")
         transition = row.get("transition")
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
-            owner=str(row["owner"]),
+            owner=node_owner,
             contributors=tuple(str(value) for value in row.get("contributors", [])),
             status=str(row["status"]),
             dependencies=tuple(str(value) for value in row.get("dependencies", [])),
