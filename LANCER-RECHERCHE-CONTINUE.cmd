@@ -8,10 +8,27 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul
 title HyperSmart - Recherche continue
+
+REM P0-115 : meme contrat Python portable que les autres entrypoints officiels.
+call "%~dp0tools\portable_env.cmd"
+if errorlevel 1 (
+  echo [REFUSE] Runtime Python portable indisponible.
+  endlocal & exit /b 30
+)
+if not defined HYPERSMART_PYTHON (
+  echo [REFUSE] HYPERSMART_PYTHON non defini par portable_env.
+  endlocal & exit /b 31
+)
+
 set "PYTHONPATH=%CD%\src;%CD%\tools"
 set "PYTHONIOENCODING=utf-8"
 set "PYTHONUTF8=1"
 set "PYTHONUNBUFFERED=1"
+set "HL_ENV=paper"
+set "HL_ENABLE_MAINNET_EXECUTION=0"
+set "HL_ENABLE_TESTNET_EXECUTION=0"
+set "REAL_MAINNET_TRADING=false"
+set "TESTNET_ONLY=true"
 set "HYPERSMART_DASHBOARD_FULLSCREEN=1"
 set "HYPERSMART_DASHBOARD_REFRESH_MS=1000"
 set "HYPERSMART_18H_MAX_CPU_PERCENT=45"
@@ -38,7 +55,7 @@ echo ============================================================
 echo.
 
 echo [1/4] Precontrole securite, disque et dependances...
-python -u tools\recherche_continue.py dry-run
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dry-run
 if errorlevel 1 (
   echo.
   echo [ECHEC] Le precontrole a refuse le demarrage. Aucun calcul n'a ete lance.
@@ -50,22 +67,22 @@ echo [OK] Precontrole valide.
 echo.
 
 echo [2/4] Recherche d'un run incomplet a reprendre...
-python -u tools\recherche_continue.py peut-reprendre
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py peut-reprendre
 if errorlevel 1 (
   echo [INFO] Aucun run incomplet: creation d'un nouveau laboratoire.
   echo [INFO] Le tableau de bord va afficher chaque sous-tache et son pourcentage.
-  python -u tools\recherche_continue.py start
+  "%HYPERSMART_PYTHON%" -u tools\recherche_continue.py start
 ) else (
   echo [INFO] Run incomplet detecte: reprise exacte des artefacts existants.
   echo [INFO] Aucun ancien rapport ni resultat n'est supprime.
-  python -u tools\recherche_continue.py resume
+  "%HYPERSMART_PYTHON%" -u tools\recherche_continue.py resume
 )
 set "ENGINE_EXIT=!ERRORLEVEL!"
 echo.
 echo [3/4] Le moteur principal est revenu avec le code !ENGINE_EXIT!.
 
 set "RID="
-for /f "usebackq tokens=* delims=" %%R in (`python -u tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
+for /f "usebackq tokens=* delims=" %%R in (`"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
 if "!RID!"=="" (
   echo [ERREUR] Aucun run_id lance n'a ete retrouve.
   echo Le pointeur n'a pas ete efface: les artefacts restent sur disque.
@@ -74,16 +91,16 @@ if "!RID!"=="" (
 
 echo [INFO] Run verifie: !RID!
 echo [4/4] Verification du rapport et de toutes les empreintes SHA-256...
-python -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
 set "FINAL_EXIT=!ERRORLEVEL!"
 
 if not "!FINAL_EXIT!"=="0" (
   echo.
   echo [ATTENTION] La finalisation complete n'est pas encore confirmee.
   echo [SECOURS] Le processus principal est revenu; demande de finalisation du meme run...
-  python -u tools\recherche_continue.py stop --run-id "!RID!"
+  "%HYPERSMART_PYTHON%" -u tools\recherche_continue.py stop --run-id "!RID!"
   timeout /t 2 /nobreak >nul
-  python -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
+  "%HYPERSMART_PYTHON%" -u tools\recherche_continue.py verifier-finalisation --run-id "!RID!"
   set "FINAL_EXIT=!ERRORLEVEL!"
 )
 
