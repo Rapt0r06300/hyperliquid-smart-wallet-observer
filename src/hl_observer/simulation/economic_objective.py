@@ -77,7 +77,7 @@ def _segment_economics(segment: Mapping[str, Any] | None, *, label: str, issues:
 
 def _validate_cross_provenance(evidence: Mapping[str, Any], issues: list[str]) -> None:
     period = evidence.get("period"); period = period if isinstance(period, Mapping) else {}
-    meta = period.get("collection_meta"); meta = meta if isinstance(period, Mapping) else {}
+    meta = period.get("collection_meta"); meta = meta if isinstance(meta, Mapping) else {}
     if meta.get("source_mode") != CROSS_CERTIFIED_SOURCE_MODE:
         issues.append("CROSS_VENUE_CERTIFIED_ATOMIC_SOURCE_MISSING")
     if int(_number(meta.get("certified_snapshots")) or 0) <= 0:
