@@ -52,6 +52,16 @@ def test_runbook_preserves_machine_daily_contract() -> None:
     assert "needs-challenger" in text
 
 
+def test_runbook_preserves_model_budget_policy_without_bloating_agents() -> None:
+    runbook = _text("docs/CODEX_GOAL_RUNBOOK.md")
+    agents = _text("AGENTS.md")
+    assert "gpt-5.6 sol" in runbook
+    assert "high" in runbook or "élevé" in runbook
+    assert "fast off" in runbook
+    assert "xhigh" in runbook and "exception" in runbook
+    assert "gpt-5.6 sol" not in agents
+
+
 def test_runbook_treats_recent_head_mechanisms_as_existing_baselines() -> None:
     text = _text("docs/CODEX_GOAL_RUNBOOK.md")
     assert "lead-lag maker/taker/streaming" in text
