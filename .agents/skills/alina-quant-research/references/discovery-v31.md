@@ -8,6 +8,8 @@ Lire cette référence **uniquement** à l'entrée d'un cycle Discovery, d'un mi
 
 ## 1. Diversité du pool
 
+Contrat canonique/CI : `12 candidates`, `5 archetypes`.
+
 Par défaut proposer **12 candidats** ; le minimum dur reste 8. Un pool sain couvre au moins **5 archétypes de mécanisme** et plusieurs combinaisons de surfaces/opérateurs temporels. Des variantes de seuil, fenêtre, seed, horizon ou hyperparamètre d'une même mécanique ne sont pas des candidats distincts.
 
 Archétypes possibles, non exhaustifs :
@@ -58,7 +60,7 @@ Une architecture plus complexe perd contre une baseline simple si son gain dispa
 
 ## 5. Recherche locale massive
 
-Le CPU n'est pas le quota. Une fois les décisions nécessaires prises, pré-déclarer le maximum de calculs indépendants dans un script ou `tools/codex_quant_batch.py` et **ne pas retourner au modèle entre les trials**.
+Le CPU n'est pas le quota (`the CPU is not quota`). Une fois les décisions nécessaires prises, pré-déclarer le maximum de calculs indépendants dans un script ou `tools/codex_quant_batch.py` et **ne pas retourner au modèle entre les trials**.
 
 Utiliser selon pertinence : QMC, TPE/Optuna, CMA-ES, NSGA-II, Successive-Halving, Hyperband, recherche coarse-to-fine, multi-seed, bootstrap, permutations/placebos, Monte-Carlo, walk-forward, purge/embargo, CPCV/CSCV, PBO, DSR/PSR, Reality Check, ablations, leave-one-regime/coin/wallet-out et stress d'exécution.
 
