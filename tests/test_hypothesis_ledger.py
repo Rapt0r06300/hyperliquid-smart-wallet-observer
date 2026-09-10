@@ -8,6 +8,7 @@ import pytest
 from hl_observer.research.hypothesis_ledger import (
     HypothesisValidationError,
     append_record,
+    challenger_required,
     compact_status,
     load_records,
     novelty_score,
@@ -35,6 +36,7 @@ def record(
     economic_progress: dict | None = None,
     baseline: bool = False,
     created_at_utc: str = "2026-09-10T12:00:00Z",
+    controller_action: str | None = None,
 ) -> dict:
     return {
         "schema_version": 1,
@@ -61,6 +63,7 @@ def record(
         "economic_progress": economic_progress or {},
         "notes": None,
         "baseline": baseline,
+        "controller_action": controller_action,
     }
 
 
@@ -223,6 +226,42 @@ def test_two_nonpositive_headroom_evaluations_force_rediscovery_across_lineage()
     assert rediscovery_required(history, "H-child") is True
 
 
+def test_three_consecutive_improves_require_champion_challenger() -> None:
+    history = [
+        record(
+            record_id=f"R-{i}",
+            stage="EXPLOIT",
+            change_class="MODEL",
+            controller_action="IMPROVE",
+            economic_progress={"comparable": True, "delta_net_usd_per_day": 0.1 * i},
+            created_at_utc=f"2026-09-10T12:0{i}:00Z",
+        )
+        for i in range(1, 4)
+    ]
+    assert challenger_required(history, "H-1") is True
+
+
+def test_freeze_or_pivot_resets_champion_challenger_counter() -> None:
+    improves = [
+        record(
+            record_id=f"R-{i}",
+            stage="EXPLOIT",
+            change_class="MODEL",
+            controller_action="IMPROVE",
+            created_at_utc=f"2026-09-10T12:0{i}:00Z",
+        )
+        for i in range(1, 4)
+    ]
+    frozen = record(
+        record_id="R-4",
+        stage="FREEZE",
+        change_class="MODEL",
+        controller_action="STOP",
+        created_at_utc="2026-09-10T12:04:00Z",
+    )
+    assert challenger_required([*improves, frozen], "H-1") is False
+
+
 def test_compact_status_counts_baselines_trials_and_latest() -> None:
     history = [
         {**record(record_id="R-1", baseline=True), "trial_count": 10},
@@ -244,6 +283,7 @@ def test_compact_status_counts_baselines_trials_and_latest() -> None:
     assert result["trial_count"] == 17
     assert result["latest"]["hypothesis_id"] == "H-2"
     assert isinstance(result["rediscovery_required"], bool)
+    assert isinstance(result["challenger_required"], bool)
 
 
 def test_ledger_is_jsonl_machine_readable(tmp_path: Path) -> None:
