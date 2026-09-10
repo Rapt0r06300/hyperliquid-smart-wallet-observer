@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from hl_observer.research.empirical_memory import EmpiricalEvidence
+
 VERDICT_REFUTE = "REFUTE"          # mesuré perdant / sans edge
 VERDICT_CONFIRME = "CONFIRME"      # mesuré positif, en production
 VERDICT_LIMITE = "LIMITE"          # marche, mais moins que ses coûts / trop mince pour agir
@@ -44,6 +46,10 @@ class Loi:
     condition_de_reouverture: str   # quelle DONNÉE nouvelle justifierait d'y revenir
     mots_cles: tuple[str, ...] = field(default_factory=tuple)
     ou_verifier: str = ""
+    # P0-120: structured, immutable evidence pointers. Historical laws intentionally
+    # remain empty until their evidence has been revalidated; empty means UNVERIFIABLE,
+    # never silently trusted.
+    evidence: tuple[EmpiricalEvidence, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         if self.verdict not in VERDICTS:
