@@ -8,7 +8,15 @@
       "temporal_operators": ["immediate", "lag-250ms", "event-sequence"],
       "regimes": ["normal", "high-vol", "thin-book"],
       "targets": ["leader-follow-markout", "leader-exit-markout"],
-      "executions": ["paper-taker", "paper-depth-aware"]
+      "executions": ["paper-taker", "paper-depth-aware"],
+      "invalid_combinations": [
+        {"event": "leader-exit", "target": "leader-follow-markout"}
+      ],
+      "priority_hints": {
+        "data_feasibility": {"user-fills": 1.0, "leader-position-state": 0.9, "hl-bbo": 1.0},
+        "falsification_cost": {"leader-open": 0.2, "leader-add": 0.3, "leader-reduce": 0.3, "leader-exit": 0.2},
+        "executable_headroom": {"paper-taker": 0.0, "paper-depth-aware": 0.2}
+      }
     },
     "lead_lag": {
       "events": ["external-bbo-move", "external-trade-burst", "microprice-shock"],
@@ -17,7 +25,15 @@
       "temporal_operators": ["lag-100ms", "lag-250ms", "lag-500ms"],
       "regimes": ["normal", "high-vol", "high-flow"],
       "targets": ["hl-markout-500ms", "hl-markout-1s"],
-      "executions": ["paper-taker", "paper-depth-aware"]
+      "executions": ["paper-taker", "paper-depth-aware"],
+      "invalid_combinations": [
+        {"event": "external-trade-burst", "data_surface": "hl-bbo"}
+      ],
+      "priority_hints": {
+        "data_feasibility": {"binance-bbo": 1.0, "hl-bbo": 1.0, "synchronized-trades": 0.7},
+        "falsification_cost": {"external-bbo-move": 0.15, "external-trade-burst": 0.35, "microprice-shock": 0.25},
+        "executable_headroom": {"paper-taker": 0.0, "paper-depth-aware": 0.2}
+      }
     },
     "cross_venue_dislocation_v2": {
       "events": ["executable-spread-open", "spread-widening", "spread-convergence"],
@@ -26,7 +42,15 @@
       "temporal_operators": ["instantaneous", "persist-250ms", "persist-1s"],
       "regimes": ["normal", "high-vol", "thin-book"],
       "targets": ["net-convergence", "net-executable-headroom"],
-      "executions": ["paper-taker-taker", "paper-depth-aware"]
+      "executions": ["paper-taker-taker", "paper-depth-aware"],
+      "invalid_combinations": [
+        {"context": "fee-headroom", "execution": "paper-taker-taker", "target": "net-convergence"}
+      ],
+      "priority_hints": {
+        "data_feasibility": {"hl-bbo": 1.0, "external-bbo": 1.0, "synchronized-depth": 0.6},
+        "falsification_cost": {"executable-spread-open": 0.15, "spread-widening": 0.25, "spread-convergence": 0.25},
+        "executable_headroom": {"paper-taker-taker": -0.8, "paper-depth-aware": 0.1}
+      }
     }
   }
 }

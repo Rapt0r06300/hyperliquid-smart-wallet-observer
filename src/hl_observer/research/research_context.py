@@ -1,6 +1,7 @@
 """Compact, local-only resume context for Codex Discovery V3.2."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from hl_observer.research.process_memory import load_process_records, process_me
 DEFAULT_LEDGER = Path("runtime/codex_research/HYPOTHESIS_LEDGER.jsonl")
 DEFAULT_PROCESS_MEMORY = Path("runtime/codex_research/PROCESS_MEMORY.jsonl")
 HISTORICAL_PROCESS_MEMORY = Path("docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl")
+SEMANTIC_STATUS = Path("runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json")
 _FAMILY_ORDER = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _DATA_HINTS = (
     "data/bbo_synchro.jsonl",
@@ -56,7 +58,7 @@ def _read_head(repo_root: Path) -> str:
     packed = git_dir / "packed-refs"
     if packed.exists():
         for line in packed.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("#") or line.startswith("^"):
+            if line.startswith(("#", "^")):
                 continue
             parts = line.split()
             if len(parts) == 2 and parts[1] == ref and len(parts[0]) == 40:
@@ -95,6 +97,33 @@ def _next_actions(status: dict[str, Any]) -> list[str]:
     return ["continue_v31_controller", "generate_semantic_shortlist"]
 
 
+def _semantic_status(repo_root: Path, family: str) -> dict[str, Any]:
+    path = repo_root / SEMANTIC_STATUS
+    empty = {
+        "available": False,
+        "family": family,
+        "generated": 0,
+        "shortlisted": 0,
+        "filtered_before_llm": 0,
+    }
+    if not path.exists():
+        return empty
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(payload, dict) or payload.get("family") != family:
+        return empty
+
+    values: dict[str, int] = {}
+    for key in ("generated", "shortlisted", "filtered_before_llm"):
+        value = payload.get(key, 0)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            return empty
+        values[key] = value
+    return {"available": True, "family": family, **values}
+
+
 def build_research_context(
     repo_root: str | Path,
     family: str | None = None,
@@ -122,6 +151,7 @@ def build_research_context(
     parameter_only = all_status["change_class_counts"].get("PARAMETER_ONLY", 0)
     rejected = all_status["stage_counts"].get("REJECTED", 0)
     blocked = all_status["stage_counts"].get("BLOCKED", 0)
+    semantic = _semantic_status(root, selected_family)
     data_hints = [item for item in _DATA_HINTS if (root / item).exists()]
 
     return {
@@ -129,6 +159,13 @@ def build_research_context(
         "head": _read_head(root),
         "family": selected_family,
         "network_io": False,
+        "quota_policy": {
+            "resume_source": "compact_context_only",
+            "full_history_scan": False,
+            "sealed_775_scan": False,
+            "raw_log_scan": False,
+            "model_roundtrips": "decision_only",
+        },
         "ledger": selected_status,
         "process_memory": memory,
         "trial_accounting": {
@@ -136,7 +173,9 @@ def build_research_context(
             "unique_hypotheses": all_status["unique_hypotheses"],
             "parameter_only_records": parameter_only,
             "rejected_or_blocked_records": rejected + blocked,
+            "semantic_candidates_filtered_before_llm": semantic["filtered_before_llm"],
         },
+        "semantic_discovery": semantic,
         "memory_sources": {
             "historical_records": len(historical_memory),
             "runtime_records": len(runtime_memory),
@@ -150,5 +189,6 @@ __all__ = [
     "DEFAULT_LEDGER",
     "DEFAULT_PROCESS_MEMORY",
     "HISTORICAL_PROCESS_MEMORY",
+    "SEMANTIC_STATUS",
     "build_research_context",
 ]

@@ -15,9 +15,12 @@ from hl_observer.research.semantic_discovery import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CATALOG = REPO_ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
+DEFAULT_CATALOG = (
+    REPO_ROOT / ".agents/skills/alina-quant-research/references/semantic-catalog-v32.json"
+)
 DEFAULT_LEDGER = REPO_ROOT / "runtime/codex_research/HYPOTHESIS_LEDGER.jsonl"
 DEFAULT_PROCESS_MEMORY = REPO_ROOT / "runtime/codex_research/PROCESS_MEMORY.jsonl"
+DEFAULT_STATUS = REPO_ROOT / "runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -33,6 +36,14 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _atomic_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(encoded + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
 def main() -> int:
     args = _parser().parse_args()
     catalog = load_catalog(args.catalog)
@@ -40,21 +51,28 @@ def main() -> int:
     ledger = load_records(args.ledger)
     process = load_process_records(args.process_memory)
     ranked = rank_semantic_plans(plans, ledger, process, args.shortlist)
-    payload = {
+    filtered = max(0, len(plans) - len(ranked))
+    status = {
         "schema_version": 1,
         "family": args.family,
         "generated": len(plans),
-        "shortlist": ranked,
+        "shortlisted": len(ranked),
+        "filtered_before_llm": filtered,
         "network_io": False,
         "certifying": False,
     }
+    _atomic_json(DEFAULT_STATUS, status)
+    payload = {**status, "shortlist": ranked}
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if args.out is None:
         print(encoded)
         return 0
-    output = args.out if args.out.is_absolute() else REPO_ROOT / "runtime/codex_research" / args.out.name
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(encoded + "\n", encoding="utf-8")
+    output = (
+        args.out
+        if args.out.is_absolute()
+        else REPO_ROOT / "runtime/codex_research" / args.out.name
+    )
+    _atomic_json(output, payload)
     print(str(output))
     return 0
 
