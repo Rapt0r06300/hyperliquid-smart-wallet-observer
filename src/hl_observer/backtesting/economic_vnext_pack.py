@@ -13,7 +13,14 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from hl_observer.backtesting.copy_vault_vnext_train import explore_copy_vault_vnext_train
+from hl_observer.backtesting.copy_vault_hypothesis_registry import (
+    copy_vault_hypothesis_ledger,
+    require_runnable_copy_vault_hypothesis,
+)
+from hl_observer.backtesting.copy_vault_vnext_train import (
+    MECHANISM as COPY_VAULT_VNEXT_MECHANISM,
+    explore_copy_vault_vnext_train,
+)
 from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
 from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
 from hl_observer.backtesting.cross_venue_v5_persistence_train import (
@@ -89,6 +96,7 @@ def run_economic_vnext_pack(
     )
     cross_v5["certified_source_meta"] = cross_meta
 
+    copy_hypothesis = require_runnable_copy_vault_hypothesis(COPY_VAULT_VNEXT_MECHANISM)
     copy_raw = _load_copy_raw(project_root)
     if copy_raw is None:
         copy = {
@@ -171,6 +179,10 @@ def run_economic_vnext_pack(
                 "freeze_candidate_sha256": value.get("freeze_candidate_sha256"),
             }
             for family, value in families.items()
+        },
+        "copy_vault_hypothesis_registry": {
+            "active_selector": copy_hypothesis,
+            "ledger": copy_vault_hypothesis_ledger(),
         },
         "lead_source_alignment": lead_alignment,
         "research_variants": {
