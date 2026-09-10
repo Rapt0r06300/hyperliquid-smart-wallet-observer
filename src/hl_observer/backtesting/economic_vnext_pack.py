@@ -17,6 +17,10 @@ from hl_observer.backtesting.copy_vault_hypothesis_registry import (
     copy_vault_hypothesis_ledger,
     require_runnable_copy_vault_hypothesis,
 )
+from hl_observer.backtesting.copy_vault_vnext_integrity import (
+    evaluate_copy_vault_vnext_integrity,
+    gate_copy_vault_candidate,
+)
 from hl_observer.backtesting.copy_vault_vnext_train import (
     MECHANISM as COPY_VAULT_VNEXT_MECHANISM,
     explore_copy_vault_vnext_train,
@@ -141,6 +145,9 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    copy_integrity = evaluate_copy_vault_vnext_integrity(copy_raw)
+    copy = gate_copy_vault_candidate(copy, copy_integrity)
+    copy_v5 = gate_copy_vault_candidate(copy_v5, copy_integrity)
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -184,6 +191,7 @@ def run_economic_vnext_pack(
             "active_selector": copy_hypothesis,
             "ledger": copy_vault_hypothesis_ledger(),
         },
+        "copy_vault_universe_integrity": copy_integrity,
         "lead_source_alignment": lead_alignment,
         "research_variants": {
             "cross_venue_persistence_v5": {
