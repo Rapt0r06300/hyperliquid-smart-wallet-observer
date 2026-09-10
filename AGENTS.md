@@ -74,7 +74,7 @@ Principes :
 9. Lire d'abord `RESULT_SUMMARY.json` / `BATCH_SUMMARY.json`; garder gros logs/trials sur disque.
 10. Cache/déduplication : ne pas relancer un gros run identique sans changement scientifique.
 11. Recherche externe proactive mais bornée au début d'un cycle Discovery si elle élargit réellement l'espace : Exa/Parallel/Consensus/GitHub selon besoin, puis retour immédiat au calcul local.
-12. **Sous-agents IA :** interdits à l'intérieur d'une même campagne Discovery/expérience économique afin de préserver reproductibilité, attribution et séparation des preuves. Ils sont autorisés pour la **roadmap technique V5/776+**, les audits/code/CI indépendants et les revues, à condition d'utiliser des surfaces disjointes, des checkpoints durables, une intégration vérifiée et un writer unique sur `main`.
+12. **Sous-agents IA interdits** à l'intérieur d'une même campagne Discovery/expérience économique afin de préserver reproductibilité, attribution et séparation des preuves. Ils sont autorisés pour la **roadmap technique V5/776+**, les audits/code/CI indépendants et les revues, à condition d'utiliser des surfaces disjointes, des checkpoints durables, une intégration vérifiée et un writer unique sur `main`.
 13. Si seule l'accumulation de nouvelles données/temps peut débloquer la preuve, arrêter les tours modèle inutiles et laisser les collecteurs locaux nécessaires travailler.
 
 Les **775 optimisations pré-run déjà scellées** ne sont pas une backlog à recommencer.
