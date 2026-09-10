@@ -180,6 +180,30 @@ def test_load_task_graph_rejects_lease_owned_by_another_agent(tmp_path: Path) ->
         load_task_graph(path)
 
 
+def test_load_task_graph_rejects_duplicate_task_ids(tmp_path: Path) -> None:
+    first = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+    second = acquire_ownership("H-T-49", "agent-b", now=_now(), ttl_seconds=60, token="secret-b")
+    nodes = [
+        TaskGraphNode(
+            task_id="H-T-49", owner="agent-a", contributors=(), status="IN_PROGRESS",
+            dependencies=(), handoff_from=None, handoff_to=None, reason="first canonical row",
+            evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+            budget="bounded", lease=first, commit_sha=None, task_type=TaskType.AUTO,
+        ),
+        TaskGraphNode(
+            task_id="H-T-49", owner="agent-b", contributors=(), status="PAUSED",
+            dependencies=(), handoff_from=None, handoff_to=None, reason="ambiguous duplicate row",
+            evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+            budget="bounded", lease=second, commit_sha=None, task_type=TaskType.AUTO,
+        ),
+    ]
+    path = tmp_path / "task_graph.json"
+    write_task_graph_atomic(path, nodes)
+
+    with pytest.raises(ValueError, match="duplicate task_id"):
+        load_task_graph(path)
+
+
 def test_done_contract_rejects_invalid_commit_sha() -> None:
     evidence = DoneContractEvidence(
         code=True,
