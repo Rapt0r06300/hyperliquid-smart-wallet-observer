@@ -22,6 +22,18 @@ PROVENANCE = frozenset({"runtime", "historical"})
 _HIGH_CONFIDENCE = 0.90
 _HIGH_EVIDENCE = 5
 _POSITIVE_BOOST_CAP = 0.25
+_CONSTRAINT_PREFIX = "constraint:"
+_CONSTRAINT_FIELDS = frozenset(
+    {
+        "event",
+        "context",
+        "data_surface",
+        "temporal_operator",
+        "regime",
+        "target",
+        "execution",
+    }
+)
 
 
 class ProcessMemoryValidationError(ValueError):
@@ -183,6 +195,13 @@ def append_process_record(path: str | Path, payload: Mapping[str, Any]) -> dict[
     existing = {item["record_id"] for item in load_process_records(target)}
     if record["record_id"] in existing:
         raise ProcessMemoryValidationError(f"record_id already exists: {record['record_id']}")
+
+    needs_separator = False
+    if target.exists() and target.stat().st_size > 0:
+        with target.open("rb") as existing_handle:
+            existing_handle.seek(-1, 2)
+            needs_separator = existing_handle.read(1) not in {b"\n", b"\r"}
+
     encoded = json.dumps(
         record,
         ensure_ascii=False,
@@ -191,6 +210,8 @@ def append_process_record(path: str | Path, payload: Mapping[str, Any]) -> dict[
         allow_nan=False,
     )
     with target.open("a", encoding="utf-8", newline="\n") as handle:
+        if needs_separator:
+            handle.write("\n")
         handle.write(encoded + "\n")
         handle.flush()
     return record
@@ -224,6 +245,40 @@ def _retest_satisfied(condition: str | None, evidence: set[str]) -> bool:
     return any(needle in item or item in needle for item in evidence)
 
 
+def _constraint_signature_matches(signature: str, candidate: Mapping[str, Any]) -> bool:
+    """Match stable historical memory to structured semantic candidates without fuzzy guessing."""
+    folded = signature.casefold()
+    if not folded.startswith(_CONSTRAINT_PREFIX):
+        return False
+    body = signature[len(_CONSTRAINT_PREFIX) :]
+    constraints: dict[str, str] = {}
+    for part in body.split(";"):
+        if "=" not in part:
+            return False
+        key, raw_value = part.split("=", 1)
+        key = key.strip().casefold()
+        value = raw_value.strip().casefold()
+        if key not in _CONSTRAINT_FIELDS or not value:
+            return False
+        constraints[key] = value
+    if not constraints:
+        return False
+
+    for key, expected in constraints.items():
+        if key == "context":
+            actual = {
+                item.casefold()
+                for item in _strings(candidate.get("context", []), "context")
+            }
+            if expected not in actual:
+                return False
+            continue
+        actual = candidate.get(key)
+        if not isinstance(actual, str) or actual.strip().casefold() != expected:
+            return False
+    return True
+
+
 def candidate_memory_effect(
     candidate: Mapping[str, Any], records: Iterable[Mapping[str, Any]]
 ) -> dict[str, Any]:
@@ -235,7 +290,10 @@ def candidate_memory_effect(
         record_context = {item.casefold() for item in record["context"]}
         if record["family"] != family:
             continue
-        if record["mechanism_signature"].casefold() != mechanism:
+        signature = record["mechanism_signature"]
+        if signature.casefold() != mechanism and not _constraint_signature_matches(
+            signature, candidate
+        ):
             continue
         if not _context_matches(context, record_context):
             continue
@@ -289,14 +347,23 @@ def process_memory_summary(
         normalized = [item for item in normalized if item["family"] == family]
     normalized.sort(key=lambda item: (item["created_at_utc"], item["record_id"]))
 
-    high_failures = Counter(
-        item["mechanism_signature"]
+    high_failure_records = [
+        item
         for item in normalized
         if item["outcome"] in {"FAILURE", "BLOCKED"}
         and item["confidence"] >= _HIGH_CONFIDENCE
         and item["evidence_count"] >= _HIGH_EVIDENCE
-    )
-    veto_motifs = sorted(motif for motif, count in high_failures.items() if count >= 2)
+    ]
+    veto_motifs: set[str] = set()
+    for index, left in enumerate(high_failure_records):
+        left_context = {item.casefold() for item in left["context"]}
+        for right in high_failure_records[index + 1 :]:
+            if right["mechanism_signature"] != left["mechanism_signature"]:
+                continue
+            right_context = {item.casefold() for item in right["context"]}
+            if _context_matches(left_context, right_context):
+                veto_motifs.add(left["mechanism_signature"])
+
     outcome_counts = Counter(item["outcome"] for item in normalized)
     useful = [
         {
@@ -313,7 +380,7 @@ def process_memory_summary(
         "family": family,
         "records": len(normalized),
         "outcomes": {key: outcome_counts.get(key, 0) for key in sorted(OUTCOMES)},
-        "high_confidence_veto_motifs": veto_motifs,
+        "high_confidence_veto_motifs": sorted(veto_motifs),
         "recent_useful": useful,
     }
 
