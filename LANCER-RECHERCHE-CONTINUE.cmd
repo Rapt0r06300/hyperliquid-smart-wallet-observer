@@ -56,7 +56,7 @@ echo ============================================================
 echo.
 
 echo [1/4] Precontrole securite, disque et dependances...
-"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py peut-reprendre
+"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dry-run
 if errorlevel 1 (
   echo.
   echo [ECHEC] Le precontrole a refuse le demarrage. Aucun calcul n'a ete lance.
@@ -84,7 +84,7 @@ echo [3/4] Le moteur principal est revenu avec le code !ENGINE_EXIT!.
 
 set "RID="
 for /f "usebackq tokens=* delims=" %%R in (`"%HYPERSMART_PYTHON%" -u tools\recherche_continue.py dernier-run-lance`) do set "RID=%%R"
-if "!RID!"="" (
+if "!RID!"=="" (
   echo [ERREUR] Aucun run_id lance n'a ete retrouve.
   echo Le pointeur n'a pas ete efface: les artefacts restent sur disque.
   goto :fin
