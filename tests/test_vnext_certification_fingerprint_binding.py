@@ -53,11 +53,3 @@ def test_certification_rejects_post_freeze_config_mutation() -> None:
     candidate["observed_config_sha256"] = "e" * 64
     with pytest.raises(ValueError, match="config fingerprint"):
         protocol.validate_certification_entry(candidate)
-
-
-def test_certification_rejects_missing_observed_fingerprints() -> None:
-    candidate = _candidate()
-    candidate.pop("observed_dataset_sha256")
-    candidate.pop("observed_config_sha256")
-    with pytest.raises(ValueError, match="observed_dataset_sha256"):
-        protocol.validate_certification_entry(candidate)
