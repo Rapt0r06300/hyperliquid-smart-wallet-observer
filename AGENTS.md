@@ -9,13 +9,15 @@
 
 Ordre de priorité en cas de contradiction :
 
-1. code, tests, gates et registres machine du **HEAD exact** ;
-2. `docs/CURRENT_STATE.md` ;
-3. ce fichier, `docs/CODEX_GOAL_RUNBOOK.md` et `SECURITY.md` ;
-4. `docs/LOIS_MESUREES.md` pour les hypothèses déjà tranchées ;
-5. documents historiques uniquement si nécessaires à une investigation ciblée.
+1. `SECURITY.md` ;
+2. `docs/HYPERSMART_CONSTITUTION.md` ;
+3. code, tests, gates, `schema/active_scope.json`, manifests et registres machine du **HEAD exact** ;
+4. ce fichier et `docs/CODEX_GOAL_RUNBOOK.md` ;
+5. `docs/LOIS_MESUREES.md` pour les hypothèses déjà tranchées ;
+6. `docs/CURRENT_STATE.md` comme état descriptif ;
+7. documents historiques uniquement si nécessaires à une investigation ciblée.
 
-Ne jamais présenter un ancien chiffre de PnL, verdict, tasklist ou statut CI comme actuel sans preuve liée au HEAD courant.
+Un document de rang inférieur ne peut jamais assouplir la sécurité ou un contrat machine de rang supérieur. Ne jamais présenter un ancien chiffre de PnL, verdict, tasklist ou statut CI comme actuel sans preuve liée au HEAD courant.
 
 ## 2. Mission économique
 
