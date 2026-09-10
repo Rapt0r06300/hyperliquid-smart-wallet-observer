@@ -1,6 +1,6 @@
 # Alina SmartFlow — état courant autoritatif
 
-Dernière mise à jour : **2026-08-19**.
+Dernière mise à jour : **2026-09-10**.
 
 Ce document est la **source de vérité lisible actuelle** pour l'état du projet. Il ne remplace pas les contrats exécutables : en cas de divergence, le code, les tests, les gates CI et les registres machine gagnent toujours.
 
@@ -8,11 +8,13 @@ Ce document est la **source de vérité lisible actuelle** pour l'état du proje
 
 Le périmètre canonique est défini par `src/hl_observer/strategies/active_scope.py`.
 
-Familles économiques paper actives :
+Familles économiques paper actives au niveau du runtime :
 
 - `copy_vault` ;
 - `lead_lag` ;
 - `cross_venue_dislocation`.
+
+La famille Cross-Venue est nommée `cross_venue_dislocation` dans le registre runtime `active_scope.py`, tandis que la campagne/gate économique V2 utilise encore l'identifiant `cross_venue_dislocation_v2`. Cette différence de nom ne crée pas une quatrième famille et ne doit pas servir à dupliquer une stratégie, un PnL ou une preuve.
 
 `funding_carry` et les autres familles historiques ne doivent pas réapparaître comme moteurs économiques actifs sans changement explicite du scope canonique et tests associés.
 
@@ -35,6 +37,20 @@ La politique de signalement est dans `SECURITY.md`.
 Le registre canonique des **775 optimisations pré-run est scellé 775/775**. Il n'est pas permis de renuméroter, supprimer ou recycler les identifiants 1–775. Toute découverte réellement nouvelle commence à 776+.
 
 La gate `.github/workflows/pre-run-321-775.yml` est désormais la gate technique principale : elle revalide les 775 puis impose aussi gouvernance, audit de vulnérabilités, analyse statique, suite complète et cliquet de couverture avant de publier le vert.
+
+### 3.1 Roadmap technique cumulative V5 / 776+
+
+La roadmap AgiFlow cumulative qui ré-audite et implémente le patrimoine `HYPERSMART_MASTER_ROADMAP_CODING_AGENTS_V5_2026-08-30.md` et les améliorations 776+ est distincte du statut historique `pre-run-775`.
+
+Pour cette roadmap technique :
+
+- un macro-lot est `Done` lorsque ses exigences techniques sont implémentées ou explicitement classées (`déjà-implémenté`, `corrigé`, `SUPERSEDED`, `DUPLICATE`, `KILLED`, `HISTORICAL`, `REJECTED` ou `BLOCKED`) avec preuves adaptées ;
+- une stratégie peut rester `KILL`, `MORE_DATA`, négative ou non certifiée économiquement sans empêcher la fermeture d'un lot technique correctement réalisé ;
+- **+4 USD, 3×4 USD, PnL positif ou toute autre cible de profit ne sont jamais des critères de Done de cette roadmap technique** ;
+- les coûts, l'OOS, le forward, la liquidatabilité, la causalité et les autres invariants scientifiques restent obligatoires lorsqu'un lot touche ces surfaces ;
+- aucune idée V5/776+ ne peut disparaître silencieusement : toute exigence doit garder une disposition traçable.
+
+Cette séparation ne modifie pas la mission économique du produit : elle empêche seulement de confondre la complétion d'ingénierie avec la réussite d'une stratégie de trading.
 
 ## 4. Vérité économique
 
