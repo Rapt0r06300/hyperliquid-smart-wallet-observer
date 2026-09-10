@@ -148,16 +148,21 @@ def can_mutate_task(
 def transfer_ownership(
     lease: OwnershipLease,
     *,
+    current_owner: str,
+    current_token: str,
     new_owner: str,
     now: datetime,
     ttl_seconds: int,
     new_token: str,
 ) -> tuple[OwnershipLease, HandoffReceipt]:
     released = _utc(now)
-    if lease.released_at is not None:
-        raise ValueError("ownership lease already released")
-    if released < lease.lease_started:
-        raise ValueError("handoff cannot predate lease")
+    if not can_mutate_task(
+        lease,
+        owner=current_owner,
+        token=current_token,
+        now=released,
+    ):
+        raise PermissionError("active ownership credential required")
     lease.released_at = released
     new_lease = acquire_ownership(
         lease.task_id,
