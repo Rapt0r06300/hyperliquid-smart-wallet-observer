@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from math import isfinite
 from typing import Any
 
 from hl_observer.backtesting.copy_vault_universe_integrity import (
@@ -31,6 +32,9 @@ def _correlation_rows(value: object) -> tuple[dict[tuple[str, str], float], bool
         except (TypeError, ValueError, OverflowError):
             valid = False
             continue
+        if not isfinite(score):
+            valid = False
+            continue
         if not left or not right:
             valid = False
             continue
@@ -38,20 +42,32 @@ def _correlation_rows(value: object) -> tuple[dict[tuple[str, str], float], bool
     return correlations, valid
 
 
+def _cohort_rows(value: object) -> tuple[list[Mapping[str, Any]], bool]:
+    if not _is_sequence(value):
+        return [], False
+    rows: list[Mapping[str, Any]] = []
+    valid = True
+    for row in value:
+        if not isinstance(row, Mapping):
+            valid = False
+            continue
+        rows.append(row)
+    return rows, valid
+
+
 def evaluate_copy_vault_vnext_integrity(copy_raw: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Evaluate JSON-safe Copy-Vault universe evidence, failing closed on gaps."""
     raw = copy_raw.get("universe_integrity") if isinstance(copy_raw, Mapping) else None
     payload = raw if isinstance(raw, Mapping) else {}
     correlations, correlations_valid = _correlation_rows(payload.get("correlations"))
     complete_universe = payload.get("complete_universe")
     observed_survivors = payload.get("observed_survivors")
-    cohort = payload.get("cohort")
+    cohort, cohort_valid = _cohort_rows(payload.get("cohort"))
     entity_groups = payload.get("entity_groups")
 
     evidence = evaluate_copy_vault_universe_integrity(
         complete_universe=complete_universe if _is_sequence(complete_universe) else (),
         observed_survivors=observed_survivors if _is_sequence(observed_survivors) else (),
-        cohort=cohort if _is_sequence(cohort) else (),
+        cohort=cohort,
         correlations=correlations,
         entity_groups=entity_groups if isinstance(entity_groups, Mapping) else {},
     )
@@ -64,6 +80,8 @@ def evaluate_copy_vault_vnext_integrity(copy_raw: Mapping[str, Any] | None) -> d
         reasons.append("CORRELATION_COVERAGE_UNPROVEN")
     if not correlations_valid:
         reasons.append("CORRELATION_EVIDENCE_INVALID")
+    if not cohort_valid:
+        reasons.append("COHORT_EVIDENCE_INVALID")
     reasons = list(dict.fromkeys(str(reason) for reason in reasons))
     return {
         **evidence,
@@ -82,7 +100,6 @@ def gate_copy_vault_candidate(
     candidate: Mapping[str, Any],
     evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Attach integrity evidence and clear any candidate when the gate is not green."""
     gated = dict(candidate)
     gated["universe_integrity"] = dict(evidence)
     if evidence.get("eligible") is not True:
