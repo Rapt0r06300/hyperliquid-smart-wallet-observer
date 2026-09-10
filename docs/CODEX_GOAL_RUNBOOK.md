@@ -12,6 +12,16 @@ Lire ce **résumé compact** avant toute autre exploration. Il contient HEAD/fam
 Règle de quota : **1 décision modèle -> gros batch local -> résumé compact -> 1 décision modèle**.
 Pas de scan de l'historique Git complet, pas de scan des 775 optimisations scellées, pas de gros raw logs/trials pour reconstruire l'état. Si `base_sha` diffère de HEAD : inspecter seulement le **delta Git** pertinent. `docs/CURRENT_STATE.md` ou d'autres docs ne sont lus que si le context pack laisse une ambiguïté ciblée.
 
+### Politique modèle / quota Plus
+
+- Contrôleur : **GPT-5.6 Sol**, raisonnement **High / Élevé**, mode Standard, **Fast OFF**.
+- **XHigh** est réservé à une exception clairement justifiée : verrou scientifique ou architectural que High ne résout pas proprement. Revenir ensuite à High.
+- Ne jamais consommer un tour modèle pour une opération déterministe, une agrégation, un tri, une génération combinatoire, un test, un backtest ou une lecture massive que le PC peut effectuer localement.
+- Grouper les décisions : préparer en local toutes les données, métriques, candidats et diagnostics nécessaires avant le prochain appel modèle.
+- Préférer les sorties machine compactes ; ne charger les détails que sur anomalie ciblée.
+- Toute boucle qui peut continuer sans nouvelle décision s'exécute localement jusqu'à un checkpoint scientifique matériel.
+- Si la seule variable manquante est le temps ou de nouvelles données, arrêter les tours modèle et laisser les collecteurs locaux travailler.
+
 ## 2. Mission et preuve machine
 
 Même SHA certifié de `main`, sans compensation :
