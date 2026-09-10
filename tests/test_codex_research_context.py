@@ -43,6 +43,38 @@ def test_context_reads_exact_head_without_shelling_out(tmp_path):
     assert context["head"] == sha
 
 
+def test_context_reads_exact_head_from_linked_worktree_common_dir(tmp_path):
+    worktree_git_dir = tmp_path / "git-meta/worktrees/codex"
+    common_git_dir = tmp_path / "git-meta"
+    worktree_git_dir.mkdir(parents=True)
+    (common_git_dir / "refs/heads").mkdir(parents=True)
+    (tmp_path / ".git").write_text(
+        "gitdir: git-meta/worktrees/codex\n", encoding="utf-8"
+    )
+    (worktree_git_dir / "HEAD").write_text(
+        "ref: refs/heads/codex-discovery-v32\n", encoding="utf-8"
+    )
+    (worktree_git_dir / "commondir").write_text("../..\n", encoding="utf-8")
+    sha = "2" * 40
+    (common_git_dir / "refs/heads/codex-discovery-v32").write_text(
+        sha + "\n", encoding="utf-8"
+    )
+
+    context = build_research_context(tmp_path)
+
+    assert context["head"] == sha
+
+
+def test_context_reports_canonical_runtime_data_bbo_surface(tmp_path):
+    bbo = tmp_path / "runtime/data/bbo_synchro.jsonl"
+    bbo.parent.mkdir(parents=True)
+    bbo.write_text("{}\n", encoding="utf-8")
+
+    context = build_research_context(tmp_path)
+
+    assert "runtime/data/bbo_synchro.jsonl" in context["data_surface_hints"]
+
+
 def test_context_reports_semantic_candidates_filtered_before_llm(tmp_path):
     status = tmp_path / "runtime/codex_research/SEMANTIC_DISCOVERY_STATUS.json"
     status.parent.mkdir(parents=True)
