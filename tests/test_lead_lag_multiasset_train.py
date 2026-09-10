@@ -360,7 +360,7 @@ def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path:
     assert l2_history == {"SOL": [sol_book]}
     assert kwargs["precomputed_shocks"] == {"SOL": [(trigger_ns, 1.0)]}
     assert kwargs["admission_policy"] == module.ADMISSION_PREDECLARED_ALL_SIGNALS
-    assert report["fixed_grid"]["trial_count"] == 1
+    assert report["fixed_grid"]["trial_count"] == module.research_family_trial_count(1, 1)
     assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     variant = report["variants"][0]
     assert variant["leader_coin"] == "BTC"
