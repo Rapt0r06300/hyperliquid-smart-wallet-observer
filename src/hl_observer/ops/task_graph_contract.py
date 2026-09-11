@@ -348,6 +348,8 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("lease expiration must be after start")
         if lease.released_at is not None and lease.released_at < lease.lease_started:
             raise ValueError("released_at must not precede lease start")
+        if lease.released_at is not None and lease.released_at >= lease.lease_expires:
+            raise ValueError("released_at must precede lease expiration")
         if lease.task_id != node_task_id:
             raise ValueError("lease task_id does not match node task_id")
         if lease.owner != node_owner:
