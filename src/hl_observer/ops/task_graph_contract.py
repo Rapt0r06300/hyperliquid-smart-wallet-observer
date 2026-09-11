@@ -356,7 +356,8 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             not isinstance(raw_commit_sha, str) or not _SHA40.fullmatch(raw_commit_sha)
         ):
             raise ValueError("commit_sha must be an exact 40-character lowercase hex SHA")
-        transition = row.get("transition")
+        raw_task_type = _parse_string_scalar(row, "task_type")
+        raw_transition = _parse_optional_string_scalar(row, "transition")
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
             owner=node_owner,
@@ -371,7 +372,7 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             budget=_parse_string_scalar(row, "budget"),
             lease=lease,
             commit_sha=raw_commit_sha,
-            task_type=TaskType(str(row["task_type"])),
-            transition=None if transition is None else Transition(str(transition)),
+            task_type=TaskType(raw_task_type),
+            transition=None if raw_transition is None else Transition(raw_transition),
         ))
     return nodes
