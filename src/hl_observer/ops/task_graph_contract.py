@@ -286,18 +286,30 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         if not isinstance(row, dict) or not isinstance(row.get("lease"), dict):
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
-        node_task_id = str(row["task_id"])
+        raw_task_id = row.get("task_id")
+        if not isinstance(raw_task_id, str):
+            raise ValueError("task_id must be a string")
+        node_task_id = raw_task_id
         if not node_task_id:
             raise ValueError("task_id must not be empty")
         if node_task_id in seen_task_ids:
             raise ValueError(f"duplicate task_id: {node_task_id}")
         seen_task_ids.add(node_task_id)
-        node_owner = str(row["owner"])
+        raw_owner = row.get("owner")
+        if not isinstance(raw_owner, str):
+            raise ValueError("owner must be a string")
+        node_owner = raw_owner
         if not node_owner:
             raise ValueError("owner must not be empty")
+        raw_lease_task_id = raw_lease.get("task_id")
+        if not isinstance(raw_lease_task_id, str):
+            raise ValueError("task_id must be a string")
+        raw_lease_owner = raw_lease.get("owner")
+        if not isinstance(raw_lease_owner, str):
+            raise ValueError("owner must be a string")
         lease = OwnershipLease(
-            task_id=str(raw_lease["task_id"]),
-            owner=str(raw_lease["owner"]),
+            task_id=raw_lease_task_id,
+            owner=raw_lease_owner,
             token_hash=str(raw_lease["token_hash"]),
             lease_started=_parse_datetime(raw_lease["lease_started"]),  # type: ignore[arg-type]
             lease_expires=_parse_datetime(raw_lease["lease_expires"]),  # type: ignore[arg-type]
