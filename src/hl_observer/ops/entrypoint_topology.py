@@ -23,6 +23,7 @@ ENTRYPOINT_ROLES: dict[str, EntrypointRole] = {
     "DIAGNOSTIC_LANCEUR.cmd": EntrypointRole.MAINTENANCE,
     "INSTALLER_ALINA_RUNNER_FINAL_V1.cmd": EntrypointRole.MAINTENANCE,
     "INSTALLER_ALINA_RUNNER_WINDOWS.cmd": EntrypointRole.COMPAT,
+    "LANCER-CODEX-RESEARCH.cmd": EntrypointRole.MAINTENANCE,
     "LANCER-RECHERCHE-14H.cmd": EntrypointRole.COMPAT,
     "LANCER-RECHERCHE-18H.cmd": EntrypointRole.COMPAT,
     "LANCER-RECHERCHE-CONTINUE-ADMIN.cmd": EntrypointRole.COMPAT,
