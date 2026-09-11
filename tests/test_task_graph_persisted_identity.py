@@ -48,3 +48,21 @@ def test_load_task_graph_rejects_empty_persisted_identity(tmp_path: Path, field:
 
     with pytest.raises(ValueError, match=message):
         load_task_graph(path)
+
+
+@pytest.mark.parametrize("field", ["task_id", "owner"])
+@pytest.mark.parametrize("invalid_value", [None, 7])
+def test_load_task_graph_rejects_non_string_persisted_identity(
+    tmp_path: Path,
+    field: str,
+    invalid_value: object,
+) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0][field] = invalid_value
+    payload["tasks"][0]["lease"][field] = invalid_value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{field} must be a string"):
+        load_task_graph(path)
