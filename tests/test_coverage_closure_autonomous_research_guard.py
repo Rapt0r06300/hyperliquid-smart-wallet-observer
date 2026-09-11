@@ -8,6 +8,18 @@ from pathlib import Path
 from hl_observer.ops import autonomous_research_guard as guard
 
 
+class _FakeTime:
+    def __init__(self, ticks: list[float]):
+        self._ticks = iter(ticks)
+
+    def monotonic(self) -> float:
+        return next(self._ticks)
+
+    @staticmethod
+    def sleep(_seconds: float) -> None:
+        return None
+
+
 def test_request_identity_reads_fields_and_falls_back_on_invalid_json(tmp_path: Path) -> None:
     request = tmp_path / "fallback-name.json"
     request.write_text(
@@ -197,8 +209,7 @@ def test_run_guarded_returns_worker_code_and_low_level_success(monkeypatch, tmp_
 
     processes = iter([Process(7), Process(0)])
     monkeypatch.setattr(guard.subprocess, "Popen", lambda *args, **kwargs: next(processes))
-    ticks = iter([0.0, 1.0, 2.0, 3.0])
-    monkeypatch.setattr(guard.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(guard, "time", _FakeTime([0.0, 1.0, 2.0, 3.0]))
     request = tmp_path / "request.json"
     request.write_text("{}", encoding="utf-8")
 
@@ -220,8 +231,7 @@ def test_run_guarded_success_calls_completion_when_roots_are_present(monkeypatch
             return 0
 
     monkeypatch.setattr(guard.subprocess, "Popen", lambda *args, **kwargs: Process())
-    ticks = iter([0.0, 1.0])
-    monkeypatch.setattr(guard.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(guard, "time", _FakeTime([0.0, 1.0]))
     monkeypatch.setattr(guard, "_finalize_success", lambda **kwargs: 24)
     request = tmp_path / "request.json"
     request.write_text("{}", encoding="utf-8")
