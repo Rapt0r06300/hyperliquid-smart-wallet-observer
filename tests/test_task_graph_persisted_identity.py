@@ -125,3 +125,15 @@ def test_load_task_graph_rejects_non_string_persisted_enum_fields(
 
     with pytest.raises(ValueError, match=rf"{field} must be a string"):
         load_task_graph(path)
+
+
+@pytest.mark.parametrize("invalid_value", [True, 1.0])
+def test_load_task_graph_rejects_non_integer_schema_version(tmp_path: Path, invalid_value: object) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["schema_version"] = invalid_value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unsupported task graph schema"):
+        load_task_graph(path)
