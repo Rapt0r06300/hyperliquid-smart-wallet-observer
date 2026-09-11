@@ -280,6 +280,22 @@ def _parse_string_list(row: dict[str, object], field: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _parse_string_scalar(row: dict[str, object], field: str, *, default: str = "") -> str:
+    value = row.get(field, default)
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _parse_optional_string_scalar(row: dict[str, object], field: str) -> str | None:
+    value = row.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
 def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema_version") != SCHEMA_VERSION:
@@ -342,14 +358,14 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             task_id=node_task_id,
             owner=node_owner,
             contributors=_parse_string_list(row, "contributors"),
-            status=str(row["status"]),
+            status=_parse_string_scalar(row, "status"),
             dependencies=_parse_string_list(row, "dependencies"),
-            handoff_from=None if row.get("handoff_from") is None else str(row["handoff_from"]),
-            handoff_to=None if row.get("handoff_to") is None else str(row["handoff_to"]),
-            reason=str(row.get("reason", "")),
+            handoff_from=_parse_optional_string_scalar(row, "handoff_from"),
+            handoff_to=_parse_optional_string_scalar(row, "handoff_to"),
+            reason=_parse_string_scalar(row, "reason"),
             evidence_required=_parse_string_list(row, "evidence_required"),
-            done_contract=str(row.get("done_contract", "")),
-            budget=str(row.get("budget", "")),
+            done_contract=_parse_string_scalar(row, "done_contract"),
+            budget=_parse_string_scalar(row, "budget"),
             lease=lease,
             commit_sha=raw_commit_sha,
             task_type=TaskType(str(row["task_type"])),
