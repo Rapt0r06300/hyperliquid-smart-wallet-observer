@@ -287,10 +287,14 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
         node_task_id = str(row["task_id"])
+        if not node_task_id:
+            raise ValueError("task_id must not be empty")
         if node_task_id in seen_task_ids:
             raise ValueError(f"duplicate task_id: {node_task_id}")
         seen_task_ids.add(node_task_id)
         node_owner = str(row["owner"])
+        if not node_owner:
+            raise ValueError("owner must not be empty")
         lease = OwnershipLease(
             task_id=str(raw_lease["task_id"]),
             owner=str(raw_lease["owner"]),
