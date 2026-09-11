@@ -6,19 +6,28 @@ Scope: ASF-E5 only (CI, reproducibility, supply-chain, Windows and release evide
 
 ## Fresh baseline
 
-- Exact `main` SHA audited before this evidence update: `3428ebe559bb79e125e77955b8e8ce291aabf3a3`.
+- Exact `main` SHA audited before this evidence update: `38aa5b4dca1fc6248c83d75e64191f206a033a7a`.
 - `main` is protected, but required status checks are not enforced (`enforcement_level=off`, no required contexts/checks).
 - `hypersmart/security-quality`: **GREEN** on the audited SHA.
+- `hypersmart/coverage-closure-fast`: **GREEN** on the audited SHA.
 - `hypersmart/coverage-parallel-probe`: **RED** on the audited SHA.
+
+The latest commit before this evidence refresh (`38aa5b4d...`, `test(ci): isolate autonomous guard monotonic clock`) changes only `tests/test_coverage_closure_autonomous_research_guard.py`; no E2/E3/E4 business surface is touched by that commit.
 
 ## Coverage disposition
 
-The coverage workflow infrastructure itself completed all 32 shard jobs successfully. The aggregate ratchet alone failed:
+The current exact-SHA workflow produced **33 artifacts**: one aggregate `coverage-parallel-probe-<sha>` artifact plus **32 `coverage-shard-*` artifacts**. The aggregate artifact is therefore based on a complete 32-shard collection; the red verdict remains the 100% aggregate ratchet, not missing shard evidence.
 
-- measured coverage: **93.2398%**;
+Fresh aggregate from artifact `coverage-parallel-probe-38aa5b4dca1fc6248c83d75e64191f206a033a7a`:
+
+- measured coverage: **93.20829853113636%**;
 - baseline/required coverage: **100%**;
-- missing lines: **7,968** across **750** files;
-- the gate explicitly keeps `max_missing=0` and must not be weakened.
+- covered statements: **110,477 / 118,527**;
+- missing lines: **8,050**;
+- files with gaps: **754**;
+- aggregate completeness flag: **false**.
+
+Compared with the previous documented baseline (`3428ebe5...`: 93.2398%, 7,968 missing lines across 750 files), the debt increased by **82 missing lines** and **4 files with gaps**. This is a real coverage movement and must remain visible; it is not grounds to weaken the ratchet.
 
 Disposition: **BLOCKED outside ASF-E5 ownership for business-code coverage closure**. E5 must not lower the threshold, exclude files, add skips/xfails, or modify E2/E3/E4-owned business surfaces merely to manufacture green CI.
 
@@ -40,8 +49,9 @@ The Windows portable workflow is structurally fail-closed and reproducible at in
 
 - CI action pinning / paper-read-only execution: **CORRIGÉ / implemented**.
 - Security-quality on audited exact SHA: **GREEN**.
-- 32-way coverage sharding infrastructure: **GREEN**.
-- Aggregate 100% coverage ratchet: **BLOCKED** by real uncovered code, not by shard infrastructure.
+- Coverage-closure-fast on audited exact SHA: **GREEN smoke only; not release evidence for 100%**.
+- 32-way coverage collection: **GREEN / complete artifact set**.
+- Aggregate 100% coverage ratchet: **BLOCKED** by real uncovered code; fresh exact-SHA value is 93.20829853113636% with 8,050 missing lines.
 - Windows portable offline/hash validation path: **implemented**.
 - Portable requirements lock freshness: **BLOCKED / STALE** pending canonical regeneration path.
 - Required status-check enforcement on protected `main`: **BLOCKED / not configured**.
