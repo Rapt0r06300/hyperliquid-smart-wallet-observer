@@ -110,3 +110,18 @@ def test_load_task_graph_rejects_non_string_persisted_token_hash(tmp_path: Path)
 
     with pytest.raises(ValueError, match=r"token_hash must be a string"):
         load_task_graph(path)
+
+
+@pytest.mark.parametrize("field", ["task_type", "transition"])
+def test_load_task_graph_rejects_non_string_persisted_enum_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0][field] = 7
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{field} must be a string"):
+        load_task_graph(path)
