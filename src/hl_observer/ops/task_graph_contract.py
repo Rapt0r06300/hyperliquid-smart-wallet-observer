@@ -330,10 +330,13 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         raw_lease_owner = raw_lease.get("owner")
         if not isinstance(raw_lease_owner, str):
             raise ValueError("owner must be a string")
+        raw_token_hash = raw_lease.get("token_hash")
+        if not isinstance(raw_token_hash, str):
+            raise ValueError("token_hash must be a string")
         lease = OwnershipLease(
             task_id=raw_lease_task_id,
             owner=raw_lease_owner,
-            token_hash=str(raw_lease["token_hash"]),
+            token_hash=raw_token_hash,
             lease_started=_parse_datetime(raw_lease["lease_started"]),  # type: ignore[arg-type]
             lease_expires=_parse_datetime(raw_lease["lease_expires"]),  # type: ignore[arg-type]
             released_at=_parse_datetime(raw_lease.get("released_at")),
