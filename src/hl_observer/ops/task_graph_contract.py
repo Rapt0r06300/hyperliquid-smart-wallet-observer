@@ -298,7 +298,8 @@ def _parse_optional_string_scalar(row: dict[str, object], field: str) -> str | N
 
 def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema_version") != SCHEMA_VERSION:
+    raw_schema_version = payload.get("schema_version")
+    if type(raw_schema_version) is not int or raw_schema_version != SCHEMA_VERSION:
         raise ValueError("unsupported task graph schema")
     rows = payload.get("tasks")
     if not isinstance(rows, list):
