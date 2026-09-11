@@ -18,6 +18,10 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from hl_observer.backtesting.copy_vault_protocol import (
+    MAX_REFERENCE_LAG_MS,
+    MAX_TARGET_LAG_MS,
+)
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
 from hl_observer.following.entity_consensus import entity_consensus_gate
 
@@ -87,6 +91,12 @@ def _execution_evidence_complete(row: Mapping[str, Any]) -> bool:
     if any(value is None or value <= 0.0 for value in positive.values()):
         return False
     if any(value is None or value < 0.0 for value in nonnegative.values()):
+        return False
+    if (
+        float(nonnegative["reference_lag_ms"]) > MAX_REFERENCE_LAG_MS
+        or float(nonnegative["entry_target_lag_ms"]) > MAX_TARGET_LAG_MS
+        or float(nonnegative["exit_target_lag_ms"]) > MAX_TARGET_LAG_MS
+    ):
         return False
     notional = float(positive["notional_usd"])
     return (
