@@ -137,7 +137,15 @@ def validate_process_record(payload: Mapping[str, Any]) -> dict[str, Any]:
     record_id = _text(payload.get("record_id") or f"PM-{uuid.uuid4().hex}", "record_id", max_len=160)
     mechanism = _text(payload.get("mechanism_signature"), "mechanism_signature", max_len=1000)
     change_motif = _text(payload.get("change_motif"), "change_motif", max_len=1000)
+    failure_reason = _text(payload.get("failure_reason"), "failure_reason", optional=True)
+    success_evidence = _text(payload.get("success_evidence"), "success_evidence", optional=True)
     assert record_id is not None and mechanism is not None and change_motif is not None
+    if outcome in {"FAILURE", "BLOCKED"} and failure_reason is None:
+        raise ProcessMemoryValidationError(
+            "failure_reason is required for FAILURE or BLOCKED outcomes"
+        )
+    if outcome == "SUCCESS" and success_evidence is None:
+        raise ProcessMemoryValidationError("success_evidence is required for SUCCESS outcomes")
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -150,10 +158,8 @@ def validate_process_record(payload: Mapping[str, Any]) -> dict[str, Any]:
         "outcome": outcome,
         "evidence_count": evidence_count,
         "confidence": round(float(confidence), 6),
-        "failure_reason": _text(payload.get("failure_reason"), "failure_reason", optional=True),
-        "success_evidence": _text(
-            payload.get("success_evidence"), "success_evidence", optional=True
-        ),
+        "failure_reason": failure_reason,
+        "success_evidence": success_evidence,
         "provenance": provenance,
         "certifying": False,
         "retest_condition": _text(
@@ -189,6 +195,23 @@ def load_process_records(path: str | Path, family: str | None = None) -> list[di
         if family is None or record["family"] == family:
             records.append(record)
     return records
+
+
+def combine_process_records(
+    *sources: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine validated sources while rejecting cross-source duplicate record IDs."""
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in sources:
+        for raw in source:
+            record = validate_process_record(raw)
+            record_id = record["record_id"]
+            if record_id in seen:
+                raise ProcessMemoryValidationError(f"duplicate record_id {record_id} across sources")
+            seen.add(record_id)
+            output.append(record)
+    return output
 
 
 def append_process_record(path: str | Path, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -236,7 +259,7 @@ def _normalized_candidate(candidate: Mapping[str, Any]) -> tuple[str, str, set[s
 
 def _context_matches(candidate: set[str], historical: set[str]) -> bool:
     if not candidate or not historical:
-        return True
+        return False
     intersection = len(candidate & historical)
     union = len(candidate | historical)
     return union > 0 and (intersection / union) >= 0.5
@@ -245,8 +268,8 @@ def _context_matches(candidate: set[str], historical: set[str]) -> bool:
 def _retest_satisfied(condition: str | None, evidence: set[str]) -> bool:
     if not condition or not evidence:
         return False
-    needle = condition.casefold()
-    return any(needle in item or item in needle for item in evidence)
+    needle = " ".join(condition.split()).casefold()
+    return needle in evidence
 
 
 def _constraint_signature_matches(signature: str, candidate: Mapping[str, Any]) -> bool:
@@ -412,12 +435,13 @@ def process_memory_summary(
     veto_motifs: set[str] = set()
     for index, left in enumerate(high_failure_records):
         left_context = {item.casefold() for item in left["context"]}
+        left_signature = left["mechanism_signature"].casefold()
         for right in high_failure_records[index + 1 :]:
-            if right["mechanism_signature"] != left["mechanism_signature"]:
+            if right["mechanism_signature"].casefold() != left_signature:
                 continue
             right_context = {item.casefold() for item in right["context"]}
             if _context_matches(left_context, right_context):
-                veto_motifs.add(left["mechanism_signature"])
+                veto_motifs.add(left_signature)
 
     outcome_counts = Counter(item["outcome"] for item in normalized)
     useful = [
@@ -447,6 +471,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "append_process_record",
     "candidate_memory_effect",
+    "combine_process_records",
     "load_process_records",
     "process_memory_summary",
     "validate_process_record",

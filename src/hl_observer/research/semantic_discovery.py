@@ -23,7 +23,6 @@ _COMPONENTS = (
     ("executions", "execution"),
 )
 _SEMANTIC_FIELDS = {singular for _, singular in _COMPONENTS}
-_NEAR_DUPLICATE_DISTANCE = (1.0 / len(_COMPONENTS)) + 1e-9
 
 
 def _clean_values(value: Any, name: str) -> list[str]:
@@ -52,6 +51,13 @@ def _bounded_number(value: Any, name: str, low: float, high: float) -> float:
 
 
 def _validate_optional_metadata(family: str, components: Mapping[str, Any]) -> None:
+    allowed_by_field = {
+        singular: {
+            value.casefold()
+            for value in _clean_values(components.get(plural), f"{family}.{plural}")
+        }
+        for plural, singular in _COMPONENTS
+    }
     rules = components.get("invalid_combinations", [])
     if not isinstance(rules, list):
         raise ValueError(f"{family}.invalid_combinations must be a list")
@@ -63,6 +69,11 @@ def _validate_optional_metadata(family: str, components: Mapping[str, Any]) -> N
         for key, value in rule.items():
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{family}.invalid_combinations.{key} must be text")
+            normalized = " ".join(value.split()).casefold()
+            if normalized not in allowed_by_field[key]:
+                raise ValueError(
+                    f"{family}.invalid_combinations.{key} must use a declared axis value"
+                )
 
     hints = components.get("priority_hints", {})
     if not isinstance(hints, Mapping):
@@ -214,27 +225,42 @@ def _casefold_list(value: Any) -> set[str]:
     }
 
 
-def _semantic_distance_to_ledger(
+def _semantic_mismatch_fields(
     plan: Mapping[str, Any], record: Mapping[str, Any]
-) -> float:
+) -> set[str]:
     if record.get("family") != plan.get("family"):
-        return 1.0
+        return set(_SEMANTIC_FIELDS)
     mechanism = str(record.get("mechanism") or "").casefold()
     surfaces = _casefold_list(record.get("data_surfaces", []))
     conditioning = _casefold_list(record.get("conditioning", []))
-    mismatches = [
-        str(plan["event"]).casefold() not in mechanism,
-        str(plan["data_surface"]).casefold() not in surfaces,
-        str(plan["temporal_operator"]).casefold()
-        != str(record.get("temporal_operator") or "").casefold(),
-        str(plan["context"]).casefold() not in conditioning,
-        str(plan["regime"]).casefold() not in conditioning,
-        str(plan["target"]).casefold()
-        != str(record.get("prediction_target") or "").casefold(),
-        str(plan["execution"]).casefold()
-        != str(record.get("execution_translation") or "").casefold(),
-    ]
-    return sum(bool(item) for item in mismatches) / len(mismatches)
+    mismatches: set[str] = set()
+    if str(plan["event"]).casefold() not in mechanism:
+        mismatches.add("event")
+    if str(plan["data_surface"]).casefold() not in surfaces:
+        mismatches.add("data_surface")
+    if str(plan["temporal_operator"]).casefold() != str(
+        record.get("temporal_operator") or ""
+    ).casefold():
+        mismatches.add("temporal_operator")
+    if str(plan["context"]).casefold() not in conditioning:
+        mismatches.add("context")
+    if str(plan["regime"]).casefold() not in conditioning:
+        mismatches.add("regime")
+    if str(plan["target"]).casefold() != str(
+        record.get("prediction_target") or ""
+    ).casefold():
+        mismatches.add("target")
+    if str(plan["execution"]).casefold() != str(
+        record.get("execution_translation") or ""
+    ).casefold():
+        mismatches.add("execution")
+    return mismatches
+
+
+def _semantic_distance_to_ledger(
+    plan: Mapping[str, Any], record: Mapping[str, Any]
+) -> float:
+    return len(_semantic_mismatch_fields(plan, record)) / len(_COMPONENTS)
 
 
 def _novelty(plan: Mapping[str, Any], ledger: list[Mapping[str, Any]]) -> float:
@@ -242,6 +268,18 @@ def _novelty(plan: Mapping[str, Any], ledger: list[Mapping[str, Any]]) -> float:
     if not same_family:
         return 1.0
     return min(_semantic_distance_to_ledger(plan, item) for item in same_family)
+
+
+def _is_parameter_only_duplicate(
+    plan: Mapping[str, Any], ledger: list[Mapping[str, Any]]
+) -> bool:
+    for record in ledger:
+        if record.get("family") != plan.get("family"):
+            continue
+        mismatches = _semantic_mismatch_fields(plan, record)
+        if not mismatches or mismatches <= {"temporal_operator"}:
+            return True
+    return False
 
 
 def rank_semantic_plans(
@@ -271,14 +309,14 @@ def rank_semantic_plans(
             continue
         seen.add(key)
 
-        novelty = _novelty(plan, ledger)
-        if novelty <= _NEAR_DUPLICATE_DISTANCE:
+        if _is_parameter_only_duplicate(plan, ledger):
             continue
+        novelty = _novelty(plan, ledger)
         effect = candidate_memory_effect(
             {
                 "family": plan["family"],
                 "mechanism_signature": plan["mechanism_signature"],
-                "context": [plan["context"]],
+                "context": [plan["context"], plan["regime"]],
                 "retest_evidence": plan.get("retest_evidence", []),
             },
             process,

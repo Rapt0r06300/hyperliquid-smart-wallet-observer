@@ -29,18 +29,24 @@ if not "%~1"=="" goto usage
 exit /b %ERRORLEVEL%
 
 :semantic
-shift
-"%HYPERSMART_PYTHON%" -u tools\codex_semantic_discovery.py %*
+set "CODEX_FORWARD_ARGS=%*"
+set "CODEX_FORWARD_ARGS=%CODEX_FORWARD_ARGS:* =%"
+if "%~2"=="" set "CODEX_FORWARD_ARGS="
+"%HYPERSMART_PYTHON%" -u tools\codex_semantic_discovery.py %CODEX_FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :campaigns
-shift
-"%HYPERSMART_PYTHON%" -u tools\run_dataset_economic_campaigns.py %*
+set "CODEX_FORWARD_ARGS=%*"
+set "CODEX_FORWARD_ARGS=%CODEX_FORWARD_ARGS:* =%"
+if "%~2"=="" set "CODEX_FORWARD_ARGS="
+"%HYPERSMART_PYTHON%" -u tools\run_dataset_economic_campaigns.py %CODEX_FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :bbo
-shift
-"%HYPERSMART_PYTHON%" -u tools\collecter_bbo.py %*
+set "CODEX_FORWARD_ARGS=%*"
+set "CODEX_FORWARD_ARGS=%CODEX_FORWARD_ARGS:* =%"
+if "%~2"=="" set "CODEX_FORWARD_ARGS="
+"%HYPERSMART_PYTHON%" -u tools\collecter_bbo.py %CODEX_FORWARD_ARGS%
 exit /b %ERRORLEVEL%
 
 :usage

@@ -14,7 +14,11 @@ for _path in (_SRC, REPO_ROOT):
         sys.path.insert(0, str(_path))
 
 from hl_observer.research.hypothesis_ledger import FAMILIES, load_records  # noqa: E402
-from hl_observer.research.process_memory import load_process_records  # noqa: E402
+from hl_observer.research.process_memory import (  # noqa: E402
+    combine_process_records,
+    load_process_records,
+)
+from hl_observer.research.research_context import read_repository_head  # noqa: E402
 from hl_observer.research.semantic_discovery import (  # noqa: E402
     generate_semantic_plans,
     load_catalog,
@@ -73,23 +77,41 @@ def _atomic_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def _load_aggregate_status(path: Path, head: str) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 2
+        or payload.get("head") != head
+        or not isinstance(payload.get("families"), dict)
+    ):
+        return {}
+    output: dict[str, dict] = {}
+    for family, value in payload["families"].items():
+        if family in FAMILIES and isinstance(value, dict) and value.get("family") == family:
+            output[family] = value
+    return output
+
+
 def main() -> int:
     args = _parser().parse_args()
     catalog = load_catalog(args.catalog)
     plans = generate_semantic_plans(catalog, args.family, args.pool_size, args.seed)
     if args.retest_evidence:
-        plans = [
-            {**plan, "retest_evidence": list(args.retest_evidence)}
-            for plan in plans
-        ]
+        plans = [{**plan, "retest_evidence": list(args.retest_evidence)} for plan in plans]
     ledger = load_records(args.ledger)
     historical = load_process_records(args.historical_process_memory)
     runtime = load_process_records(args.process_memory)
-    process = [*historical, *runtime]
+    process = combine_process_records(historical, runtime)
     ranked = rank_semantic_plans(plans, ledger, process, args.shortlist)
     filtered = max(0, len(plans) - len(ranked))
-    status = {
-        "schema_version": 1,
+    head = read_repository_head(REPO_ROOT)
+    family_status = {
         "family": args.family,
         "generated": len(plans),
         "shortlisted": len(ranked),
@@ -99,8 +121,23 @@ def main() -> int:
         "network_io": False,
         "certifying": False,
     }
-    _atomic_json(_output_path(args.status_out), status)
-    payload = {**status, "shortlist": ranked}
+    status_path = _output_path(args.status_out)
+    families = _load_aggregate_status(status_path, head)
+    families[args.family] = family_status
+    _atomic_json(
+        status_path,
+        {
+            "schema_version": 2,
+            "head": head,
+            "families": families,
+        },
+    )
+    payload = {
+        "schema_version": 2,
+        "head": head,
+        **family_status,
+        "shortlist": ranked,
+    }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if args.out is None:
         print(encoded)

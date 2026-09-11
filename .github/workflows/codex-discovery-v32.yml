@@ -5,9 +5,11 @@ on:
     branches: [main, codex-discovery-v32]
     paths:
       - 'src/hl_observer/research/**'
+      - 'src/hl_observer/ops/entrypoint_topology.py'
       - 'tools/codex_*'
       - 'tests/test_codex_*'
       - 'docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl'
+      - 'LANCER-CODEX-RESEARCH.cmd'
       - 'AGENTS.md'
       - 'docs/CODEX_GOAL_RUNBOOK.md'
       - '.agents/skills/alina-quant-research/**'
@@ -16,9 +18,11 @@ on:
     branches: [main]
     paths:
       - 'src/hl_observer/research/**'
+      - 'src/hl_observer/ops/entrypoint_topology.py'
       - 'tools/codex_*'
       - 'tests/test_codex_*'
       - 'docs/quant/HISTORICAL_EXPERIMENT_MEMORY.jsonl'
+      - 'LANCER-CODEX-RESEARCH.cmd'
       - 'AGENTS.md'
       - 'docs/CODEX_GOAL_RUNBOOK.md'
       - '.agents/skills/alina-quant-research/**'
@@ -34,6 +38,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'

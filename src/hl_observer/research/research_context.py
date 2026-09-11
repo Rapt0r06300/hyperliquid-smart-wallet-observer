@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from hl_observer.research.hypothesis_ledger import FAMILIES, compact_status, load_records
-from hl_observer.research.process_memory import load_process_records, process_memory_summary
+from hl_observer.research.process_memory import (
+    combine_process_records,
+    load_process_records,
+    process_memory_summary,
+)
 
 DEFAULT_LEDGER = Path("runtime/codex_research/HYPOTHESIS_LEDGER.jsonl")
 DEFAULT_PROCESS_MEMORY = Path("runtime/codex_research/PROCESS_MEMORY.jsonl")
@@ -23,6 +28,14 @@ _DATA_HINTS = (
     "runtime/lead_lag",
     "runtime/cross_venue",
 )
+_BBO_HINTS = frozenset(
+    {
+        "data/bbo_synchro.jsonl",
+        "runtime/data/bbo_synchro.jsonl",
+        "runtime/bbo_synchro.jsonl",
+    }
+)
+_BBO_MAX_AGE_SECONDS = 300.0
 
 
 def _git_dir(repo_root: Path) -> Path | None:
@@ -91,6 +104,11 @@ def _read_head(repo_root: Path) -> str:
     return "UNKNOWN"
 
 
+def read_repository_head(repo_root: str | Path) -> str:
+    """Read the exact local repository HEAD without invoking git or the network."""
+    return _read_head(Path(repo_root).resolve())
+
+
 def _resolve(repo_root: Path, value: str | Path | None, default: Path) -> Path:
     path = Path(value) if value is not None else default
     return path if path.is_absolute() else repo_root / path
@@ -122,7 +140,7 @@ def _next_actions(status: dict[str, Any]) -> list[str]:
     return ["continue_v31_controller", "generate_semantic_shortlist"]
 
 
-def _semantic_status(repo_root: Path, family: str) -> dict[str, Any]:
+def _semantic_status(repo_root: Path, family: str, head: str) -> dict[str, Any]:
     path = repo_root / SEMANTIC_STATUS
     empty = {
         "available": False,
@@ -131,22 +149,74 @@ def _semantic_status(repo_root: Path, family: str) -> dict[str, Any]:
         "shortlisted": 0,
         "filtered_before_llm": 0,
     }
-    if not path.exists():
+    if not path.exists() or head == "UNKNOWN":
         return empty
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return empty
-    if not isinstance(payload, dict) or payload.get("family") != family:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 2
+        or payload.get("head") != head
+        or not isinstance(payload.get("families"), dict)
+    ):
+        return empty
+    family_payload = payload["families"].get(family)
+    if not isinstance(family_payload, dict) or family_payload.get("family") != family:
         return empty
 
     values: dict[str, int] = {}
     for key in ("generated", "shortlisted", "filtered_before_llm"):
-        value = payload.get(key, 0)
+        value = family_payload.get(key, 0)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             return empty
         values[key] = value
     return {"available": True, "family": family, **values}
+
+
+def _last_nonblank_json_object(path: Path) -> bool:
+    """Validate only the bounded JSONL tail so large captures stay cheap to inspect."""
+    try:
+        size = path.stat().st_size
+        if size <= 0:
+            return False
+        with path.open("rb") as handle:
+            handle.seek(max(0, size - 8192))
+            tail = handle.read().decode("utf-8", errors="replace").splitlines()
+        last = next((line.strip() for line in reversed(tail) if line.strip()), None)
+        if last is None:
+            return False
+        return isinstance(json.loads(last), dict)
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _fresh_bbo_hint(path: Path, *, now: float | None = None) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    if not path.is_file() or stat.st_size <= 0:
+        return False
+    current = time.time() if now is None else now
+    age = current - stat.st_mtime
+    if age < -5.0 or age > _BBO_MAX_AGE_SECONDS:
+        return False
+    return _last_nonblank_json_object(path)
+
+
+def _data_surface_hints(root: Path) -> list[str]:
+    hints: list[str] = []
+    for item in _DATA_HINTS:
+        target = root / item
+        if item in _BBO_HINTS:
+            if _fresh_bbo_hint(target):
+                hints.append(item)
+            continue
+        if target.exists():
+            hints.append(item)
+    return hints
 
 
 def build_research_context(
@@ -169,19 +239,19 @@ def build_research_context(
     runtime_memory = load_process_records(process_target)
     historical_target = root / HISTORICAL_PROCESS_MEMORY
     historical_memory = load_process_records(historical_target) if historical_target.exists() else []
-    combined_memory = [*historical_memory, *runtime_memory]
+    combined_memory = combine_process_records(historical_memory, runtime_memory)
     memory = process_memory_summary(combined_memory, family=selected_family)
 
     all_status = compact_status(ledger_records)
     parameter_only = all_status["change_class_counts"].get("PARAMETER_ONLY", 0)
     rejected = all_status["stage_counts"].get("REJECTED", 0)
     blocked = all_status["stage_counts"].get("BLOCKED", 0)
-    semantic = _semantic_status(root, selected_family)
-    data_hints = [item for item in _DATA_HINTS if (root / item).exists()]
+    head = _read_head(root)
+    semantic = _semantic_status(root, selected_family, head)
 
     return {
         "schema_version": 1,
-        "head": _read_head(root),
+        "head": head,
         "family": selected_family,
         "network_io": False,
         "quota_policy": {
@@ -205,7 +275,7 @@ def build_research_context(
             "historical_records": len(historical_memory),
             "runtime_records": len(runtime_memory),
         },
-        "data_surface_hints": data_hints,
+        "data_surface_hints": _data_surface_hints(root),
         "next_actions": _next_actions(selected_status),
     }
 
@@ -216,4 +286,5 @@ __all__ = [
     "HISTORICAL_PROCESS_MEMORY",
     "SEMANTIC_STATUS",
     "build_research_context",
+    "read_repository_head",
 ]
