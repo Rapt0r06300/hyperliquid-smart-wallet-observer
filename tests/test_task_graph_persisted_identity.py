@@ -81,3 +81,21 @@ def test_load_task_graph_rejects_non_string_entries_in_persisted_string_lists(
 
     with pytest.raises(ValueError, match=rf"{field} must be a list of strings"):
         load_task_graph(path)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["status", "reason", "done_contract", "budget", "handoff_from", "handoff_to"],
+)
+def test_load_task_graph_rejects_non_string_persisted_scalar_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0][field] = 7
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{field} must be a string"):
+        load_task_graph(path)
