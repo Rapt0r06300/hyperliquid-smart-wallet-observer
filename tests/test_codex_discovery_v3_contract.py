@@ -98,3 +98,23 @@ def test_v32_runbook_and_skill_make_context_first_and_model_turns_sparse() -> No
     assert "résumé compact" in runbook
     assert "cpu" in reference and "semantic" in reference
     assert "retest" in reference and "veto" in reference
+
+
+def test_v32_workflow_does_not_persist_checkout_credentials() -> None:
+    text = _text(".github/workflows/codex-discovery-v32.yml")
+    assert "persist-credentials: false" in text
+
+
+def test_windows_research_launcher_forwards_only_arguments_after_mode() -> None:
+    text = _text("LANCER-CODEX-RESEARCH.cmd")
+    assert "shift" not in text
+    assert "codex_forward_args=%*" in text
+    assert "codex_forward_args=%codex_forward_args:* =%" in text
+    assert "codex_semantic_discovery.py %codex_forward_args%" in text
+    assert "run_dataset_economic_campaigns.py %codex_forward_args%" in text
+    assert "collecter_bbo.py %codex_forward_args%" in text
+
+
+def test_windows_research_launcher_is_registered_as_maintenance() -> None:
+    text = _text("src/hl_observer/ops/entrypoint_topology.py")
+    assert '"lancer-codex-research.cmd": entrypointrole.maintenance' in text
