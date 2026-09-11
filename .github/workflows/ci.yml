@@ -39,7 +39,7 @@ jobs:
           cache: pip
       - name: Dependances fail-closed
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install -e ".[dev]"
       - name: Imports du runtime canonique
         run: |
@@ -103,7 +103,7 @@ jobs:
           cache: pip
       - name: Dependances fail-closed
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install -e ".[dev]"
           python -m pip install -r requirements-recherche.txt
       - name: pytest shard ${{ matrix.shard }}/6
@@ -136,7 +136,7 @@ jobs:
       - name: Dependances fail-closed
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install -e ".[dev]"
       - name: Tests critiques Windows
         shell: pwsh
@@ -204,7 +204,7 @@ jobs:
           cache: pip
       - name: Dependances fail-closed
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install -e ".[dev]"
       - name: Preuves replay = forward (pipeline canonique, producer/consumer, parite causale)
         run: |
