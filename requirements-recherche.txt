@@ -1,17 +1,18 @@
 # Dépendances OPTIONNELLES du laboratoire de recherche continu (Flo, FX-3).
 # Le labo FONCTIONNE sans elles : grid / random / QMC (Halton) sont purs Python et toujours disponibles.
-# Ces paquets ACTIVENT les optimiseurs avancés d'Optuna (samplers + pruners) :
-#   - TPESampler, CmaEsSampler, QMCSampler, NSGAIISampler (multi-objectifs)
-#   - SuccessiveHalvingPruner, HyperbandPruner (passés en pruner=)
-# Absents => ces outils sont marqués `disponible=False` HONNÊTEMENT (jamais comptés parce que le nom existe).
+# Ces paquets ACTIVENT les optimiseurs avancés d'Optuna (samplers + pruners).
 #
-# Installation :  python -m pip install -r requirements-recherche.txt
+# Autorité reproductible H—T-50 : versions exactes et SHA-256 alignés sur
+# requirements-portable.txt. Toute mise à jour doit être volontaire, réauditée et
+# propagée dans les deux autorités de dépendances.
+#
+# Installation : python -m pip install --require-hashes -r requirements-recherche.txt
 #
 # SÉCURITÉ : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait. Paper-only, read-only.
 
-optuna>=3.6
-cmaes>=0.10        # backend de CmaEsSampler
-scipy>=1.11        # QMC/qmc et certains samplers
-numpy>=1.24
-pyarrow>=15
-lz4>=4          # compression holdout historique (test_historical_holdout)
+optuna==4.9.0 --hash=sha256:f52f3be6148654850c92a5860d398fd88ec6b2c84ab68d9c3d07dcff02e7afee
+cmaes==0.13.0 --hash=sha256:ccf61c73d5792cf44b50672b63f28c590082d1c1f5ab5155e2dd6e5305427cad
+scipy==1.18.0 --hash=sha256:2d8bbdc6c817f5b4006a54d799d4f5bab6f910193cbb9a1ff310833d4d270f61
+numpy==2.5.1 --hash=sha256:24d0eb82c0541d3415a33425db64ae439dffccd7b4dbcb30e7c35120205c506a
+pyarrow==25.0.0 --hash=sha256:2e093efbecb5317372f819228fa4b4e6157eee48d3f0a7b0303705ebf81a7104
+lz4==4.4.5 --hash=sha256:92159782a4502858a21e0079d77cdcaade23e8a5d252ddf46b0652604300d7be
