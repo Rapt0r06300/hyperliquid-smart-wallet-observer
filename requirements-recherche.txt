@@ -2,10 +2,12 @@
 # Le labo FONCTIONNE sans elles : grid / random / QMC (Halton) sont purs Python et toujours disponibles.
 # Ces paquets ACTIVENT les optimiseurs avancés d'Optuna (samplers + pruners).
 #
-# Reproductibilité H—T-50 : versions directes exactes, alignées sur
-# requirements-portable.txt. Ceci stabilise la résolution directe sans prétendre
-# à un hash-lock transitif complet ; le lock portable reste l'autorité hashée.
-# Toute mise à jour doit être volontaire, réauditée et propagée aux deux surfaces.
+# Reproductibilité H—T-50 : versions directes exactes et déterministes par
+# version Python supportée. Python 3.11 reste supporté par le projet et la CI ;
+# NumPy 2.5.x / SciPy 1.18.x exigent Python >=3.12, donc 3.11 reçoit des pins
+# compatibles dédiés. Pour Python >=3.12, les pins restent alignés sur le lock
+# portable CPython 3.14. Ceci ne prétend pas être un hash-lock transitif complet.
+# Toute mise à jour doit être volontaire, réauditée et propagée aux surfaces concernées.
 #
 # Installation : python -m pip install -r requirements-recherche.txt
 #
@@ -13,7 +15,9 @@
 
 optuna==4.9.0
 cmaes==0.13.0
-scipy==1.18.0
-numpy==2.5.1
+scipy==1.17.1; python_version < "3.12"
+scipy==1.18.0; python_version >= "3.12"
+numpy==2.4.2; python_version < "3.12"
+numpy==2.5.1; python_version >= "3.12"
 pyarrow==25.0.0
 lz4==4.4.5
