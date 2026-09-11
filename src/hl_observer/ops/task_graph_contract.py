@@ -273,6 +273,13 @@ def _parse_datetime(value: object) -> datetime | None:
     return _utc(parsed)
 
 
+def _parse_string_list(row: dict[str, object], field: str) -> tuple[str, ...]:
+    value = row.get(field, [])
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    return tuple(value)
+
+
 def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if payload.get("schema_version") != SCHEMA_VERSION:
@@ -334,13 +341,13 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
             owner=node_owner,
-            contributors=tuple(str(value) for value in row.get("contributors", [])),
+            contributors=_parse_string_list(row, "contributors"),
             status=str(row["status"]),
-            dependencies=tuple(str(value) for value in row.get("dependencies", [])),
+            dependencies=_parse_string_list(row, "dependencies"),
             handoff_from=None if row.get("handoff_from") is None else str(row["handoff_from"]),
             handoff_to=None if row.get("handoff_to") is None else str(row["handoff_to"]),
             reason=str(row.get("reason", "")),
-            evidence_required=tuple(str(value) for value in row.get("evidence_required", [])),
+            evidence_required=_parse_string_list(row, "evidence_required"),
             done_contract=str(row.get("done_contract", "")),
             budget=str(row.get("budget", "")),
             lease=lease,
