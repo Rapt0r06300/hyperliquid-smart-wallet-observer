@@ -363,12 +363,15 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("commit_sha must be an exact 40-character lowercase hex SHA")
         raw_task_type = _parse_string_scalar(row, "task_type")
         raw_transition = _parse_optional_string_scalar(row, "transition")
+        dependencies = _parse_string_list(row, "dependencies")
+        if node_task_id in dependencies:
+            raise ValueError("task must not depend on itself")
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
             owner=node_owner,
             contributors=_parse_string_list(row, "contributors"),
             status=_parse_string_scalar(row, "status"),
-            dependencies=_parse_string_list(row, "dependencies"),
+            dependencies=dependencies,
             handoff_from=_parse_optional_string_scalar(row, "handoff_from"),
             handoff_to=_parse_optional_string_scalar(row, "handoff_to"),
             reason=_parse_string_scalar(row, "reason"),
