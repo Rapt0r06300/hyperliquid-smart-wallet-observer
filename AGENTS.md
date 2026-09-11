@@ -2,6 +2,9 @@
 
 > Routeur compact chargé automatiquement. Les détails restent lazy-load pour économiser au maximum le quota modèle.
 
+Dernière mise à jour : 2026-09-11
+Runtime actif : `src/hl_observer/`. Repère des résultats déjà tranchés par la mesure : `docs/LOIS_MESUREES.md`.
+
 ## Autorité
 
 Priorité : `SECURITY.md` > `docs/HYPERSMART_CONSTITUTION.md` > code/tests/gates/manifests du HEAD exact > ce fichier > docs ciblées. Un texte historique ne peut jamais assouplir sécurité, provenance ou gate machine.
