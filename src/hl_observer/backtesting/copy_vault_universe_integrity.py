@@ -75,6 +75,8 @@ def evaluate_copy_vault_universe_integrity(
 
     survivorship = correction_survivorship(universe, survivors)
     liquidation_evidence = inclure_wallets_liquides(cohort_rows)
+    if liquidation_evidence.get("cohorte_suspecte") is True:
+        reasons.append("LIQUIDATED_WALLET_COVERAGE_UNPROVEN")
     sybils = detecter_sybils(normalized_correlations)
     unresolved_sybil_pairs: list[tuple[str, str]] = []
     for left, right in sybils["sybils_suspects"]:
