@@ -15,7 +15,7 @@ from hl_observer.ops.task_graph_contract import (
 )
 
 
-def test_load_task_graph_rejects_release_before_lease_start(tmp_path: Path) -> None:
+def _write_persisted_lease(tmp_path: Path) -> tuple[Path, datetime]:
     path = tmp_path / "task_graph.json"
     started = datetime(2026, 9, 11, 10, 0, tzinfo=timezone.utc)
     lease = acquire_ownership(
@@ -42,12 +42,28 @@ def test_load_task_graph_rejects_release_before_lease_start(tmp_path: Path) -> N
         task_type=TaskType.AUTO,
     )
     write_task_graph_atomic(path, [node])
+    return path, started
 
+
+def _set_release(path: Path, released_at: datetime) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    payload["tasks"][0]["lease"]["released_at"] = (
-        started - timedelta(seconds=1)
-    ).isoformat()
+    payload["tasks"][0]["lease"]["released_at"] = released_at.isoformat()
     path.write_text(json.dumps(payload), encoding="utf-8")
 
+
+def test_load_task_graph_rejects_release_before_lease_start(tmp_path: Path) -> None:
+    path, started = _write_persisted_lease(tmp_path)
+    _set_release(path, started - timedelta(seconds=1))
+
     with pytest.raises(ValueError, match=r"released_at must not precede lease start"):
+        load_task_graph(path)
+
+
+def test_load_task_graph_rejects_release_at_or_after_lease_expiration(
+    tmp_path: Path,
+) -> None:
+    path, started = _write_persisted_lease(tmp_path)
+    _set_release(path, started + timedelta(seconds=60))
+
+    with pytest.raises(ValueError, match=r"released_at must precede lease expiration"):
         load_task_graph(path)
