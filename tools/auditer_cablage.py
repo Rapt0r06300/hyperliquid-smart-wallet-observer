@@ -91,7 +91,8 @@ def main() -> int:
     # Lecon : la liste des portes doit suivre les portes, sinon l'audit ment sans le savoir.
     lanceurs = _collecter(("*.cmd", "tools/**/*.cmd", "tools/**/*.ps1",
                            "outils de test/**/*.cmd", "outils de test/**/*.ps1",
-                           "*.ps1", "*.sh", "config/**/*.yaml", "config/**/*.yml"))
+                           "*.ps1", "*.sh", "config/**/*.yaml", "config/**/*.yml",
+                           ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"))
 
     print("\n" + "=" * 78)
     print(" T3 -- AUDIT DE CABLAGE   (%d fichiers .py, %d outils, %d lanceurs)"

@@ -13,7 +13,6 @@ freeze; it never upgrades the canonical Lead-Lag campaign by itself.
 
 from __future__ import annotations
 
-import bisect
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -21,6 +20,24 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting import lead_lag_shadow
+from hl_observer.backtesting.lead_lag_multiasset_ranges import (
+    in_ranges as _in_ranges_impl,
+)
+from hl_observer.backtesting.lead_lag_multiasset_ranges import (
+    training_ranges as _training_ranges_impl,
+)
+from hl_observer.backtesting.lead_lag_multiasset_scoring import (
+    independent_train_rows as _independent_train_rows_impl,
+)
+from hl_observer.backtesting.lead_lag_multiasset_scoring import (
+    rows_from_ledgers as _rows_from_ledgers_impl,
+)
+from hl_observer.backtesting.lead_lag_multiasset_scoring import (
+    score_report as _score_report_impl,
+)
+from hl_observer.backtesting.lead_lag_multiasset_scoring import (
+    shock_timestamps as _shock_timestamps_impl,
+)
 from hl_observer.backtesting.lead_lag_reference_residual_grid import (
     REFERENCE_RESIDUAL_BETAS,
     REFERENCE_RESIDUAL_DIRECTION_POLICIES,
@@ -34,7 +51,6 @@ from hl_observer.backtesting.lead_lag_reference_residual_grid import (
 )
 from hl_observer.backtesting.lead_lag_source_alignment import (
     _lines,
-    _merge_ranges,
     _wall_ms,
     discover_market_tick_windows,
 )
@@ -120,43 +136,13 @@ def _planned_cross_asset_pairs(candidate_coins: Sequence[str]) -> list[tuple[str
     ]
 
 
-def _in_ranges(timestamp_ms: int, ranges: Sequence[tuple[int, int]]) -> bool:
-    if not ranges:
-        return False
-    starts = [item[0] for item in ranges]
-    index = bisect.bisect_right(starts, int(timestamp_ms)) - 1
-    return index >= 0 and int(timestamp_ms) <= ranges[index][1]
+_in_ranges = _in_ranges_impl
 
 
 def _training_ranges(root: str | Path) -> tuple[list[tuple[int, int]], dict[str, Any]]:
-    windows = discover_market_tick_windows(root)
-    merged = _merge_ranges(windows)
-    if not merged:
-        return [], {
-            "status": "NO_MARKET_WINDOWS",
-            "full_start_ms": None,
-            "full_end_ms": None,
-            "train_end_ms": None,
-            "train_fraction": TRAIN_FRACTION,
-        }
-    start_ms = merged[0][0]
-    end_ms = merged[-1][1]
-    train_end = int(start_ms + (end_ms - start_ms) * TRAIN_FRACTION)
-    train_ranges: list[tuple[int, int]] = []
-    for start, end in merged:
-        if start > train_end:
-            break
-        train_ranges.append((start, min(end, train_end)))
-    return train_ranges, {
-        "status": "TRAIN_CUT_FROZEN_FROM_WALL_CLOCK",
-        "full_start_ms": start_ms,
-        "full_end_ms": end_ms,
-        "train_end_ms": train_end,
-        "train_fraction": TRAIN_FRACTION,
-        "full_merged_ranges": [list(item) for item in merged],
-        "train_ranges": [list(item) for item in train_ranges],
-        "heldout_start_ms": train_end + 1,
-    }
+    return _training_ranges_impl(
+        root, train_fraction=TRAIN_FRACTION, window_discovery=discover_market_tick_windows
+    )
 
 
 def load_multiasset_train_tape(
@@ -352,50 +338,15 @@ def load_multiasset_train_tape(
 
 
 def _shock_timestamps(tape: Mapping[str, Mapping[str, list]]) -> list[int]:
-    timestamps: set[int] = set()
-    minimum_threshold = min(SHOCK_THRESHOLDS_BPS)
-    for streams in tape.values():
-        trades = list(streams.get("TRADE") or [])
-        for timestamp_ns, _direction in lead_lag_shadow.detecter_chocs(trades, seuil_bps=minimum_threshold):
-            timestamps.add(int(timestamp_ns // 1_000_000))
-    return sorted(timestamps)
+    return _shock_timestamps_impl(
+        tape,
+        minimum_threshold=min(SHOCK_THRESHOLDS_BPS),
+        detector=lead_lag_shadow.detecter_chocs,
+    )
 
 
 def _rows_from_ledgers(report: Mapping[str, Any]) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    ledgers = report.get("ledgers")
-    if not isinstance(ledgers, Mapping):
-        return result
-    for label in ("IS", "OOS", "FORWARD"):
-        rows = ledgers.get(label)
-        if not isinstance(rows, list):
-            continue
-        signals: dict[str, tuple[int, str]] = {}
-        for row in rows:
-            if not isinstance(row, Mapping):
-                continue
-            trade_id = str(row.get("trade_id") or "")
-            if not trade_id:
-                continue
-            if row.get("evt") == "SIGNAL":
-                signals[trade_id] = (int(row.get("ts") or 0), str(row.get("coin") or ""))
-            elif row.get("evt") == "PNL" and row.get("LIQUIDATABLE_NET") is True:
-                try:
-                    net = float(row.get("pnl_usd"))
-                except (TypeError, ValueError, OverflowError):
-                    continue
-                timestamp, coin = signals.get(trade_id, (0, ""))
-                if timestamp > 0:
-                    result.append(
-                        {
-                            "trade_id": trade_id,
-                            "timestamp_ms": timestamp,
-                            "coin": coin,
-                            "net_pnl_usd": net,
-                            "internal_train_fold": label,
-                        }
-                    )
-    return result
+    return _rows_from_ledgers_impl(report)
 
 
 def _independent_train_rows(
@@ -404,50 +355,11 @@ def _independent_train_rows(
     horizon_ms: int,
     shock_window_ms: float | None,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Keep a deterministic, outcome-blind set of non-overlapping episodes.
-
-    Events whose causal observation/holding windows overlap are not independent
-    evidence.  The first observable event is kept and later events on the same
-    coin are embargoed until the larger of the shock window and holding horizon
-    has elapsed.  Selection never inspects PnL when choosing which row survives.
-    """
-
-    minimum_separation_ms = max(
-        1,
-        int(horizon_ms),
-        int(math.ceil(float(shock_window_ms))) if shock_window_ms is not None else 0,
+    return _independent_train_rows_impl(
+        rows,
+        horizon_ms=horizon_ms,
+        shock_window_ms=shock_window_ms,
     )
-    ordered = sorted(
-        (dict(row) for row in rows),
-        key=lambda row: (
-            int(row.get("timestamp_ms") or 0),
-            str(row.get("coin") or ""),
-            str(row.get("trade_id") or ""),
-        ),
-    )
-    accepted: list[dict[str, Any]] = []
-    last_timestamp_by_coin: dict[str, int] = {}
-    rejected = 0
-    for row in ordered:
-        timestamp_ms = int(row.get("timestamp_ms") or 0)
-        coin = str(row.get("coin") or "").upper()
-        if timestamp_ms <= 0 or not coin:
-            rejected += 1
-            continue
-        previous = last_timestamp_by_coin.get(coin)
-        if previous is not None and timestamp_ms - previous < minimum_separation_ms:
-            rejected += 1
-            continue
-        accepted.append(row)
-        last_timestamp_by_coin[coin] = timestamp_ms
-    effective_days = len({int(row["timestamp_ms"]) // 86_400_000 for row in accepted})
-    return accepted, {
-        "raw_sample_count": len(rows),
-        "effective_sample_count": len(accepted),
-        "overlapping_events_rejected": rejected,
-        "minimum_separation_ms": minimum_separation_ms,
-        "effective_distinct_days": effective_days,
-    }
 
 
 def _score_report(
@@ -464,73 +376,26 @@ def _score_report(
     admission_policy: str = ADMISSION_PRIOR_MEAN_POSITIVE,
     economic_predeclaration_id: str | None = None,
 ) -> dict[str, Any]:
-    raw_rows = _rows_from_ledgers(report)
-    rows, independence = _independent_train_rows(
-        raw_rows,
+    return _score_report_impl(
+        report,
+        coin=coin,
+        threshold_bps=threshold_bps,
         horizon_ms=horizon_ms,
-        shock_window_ms=shock_window_ms,
-    )
-    stats = summarize_train_rows(
-        rows,
-        value_key="net_pnl_usd",
-        timestamp_key="timestamp_ms",
         trial_count=trial_count,
+        mechanism=mechanism,
+        direction_multiplier=direction_multiplier,
+        min_train_fills=min_train_fills,
+        shock_window_ms=shock_window_ms,
+        admission_policy=admission_policy,
+        economic_predeclaration_id=economic_predeclaration_id,
         family_alpha=FAMILY_ALPHA,
+        diagnostic_only_threshold_bps=DIAGNOSTIC_ONLY_SHOCK_THRESHOLD_BPS,
+        min_distinct_days=MIN_DISTINCT_DAYS,
+        max_top_positive_share=MAX_TOP_POSITIVE_SHARE,
+        rows_loader=_rows_from_ledgers,
+        independence_filter=_independent_train_rows,
+        summarizer=summarize_train_rows,
     )
-    segments = report.get("segments") if isinstance(report.get("segments"), Mapping) else {}
-    internal_fold_nets = {
-        label: float((segments.get(label) or {}).get("net") or 0.0) for label in ("IS", "OOS", "FORWARD")
-    }
-    placebo_net = float(report.get("placebo_net") or 0.0)
-    net = float(stats.get("net_pnl_usd") or 0.0)
-    pf = stats.get("profit_factor")
-    lcb = stats.get("total_lcb_usd")
-    economic_predeclaration = str(economic_predeclaration_id or "").strip() or None
-    economic_threshold_allowed = float(threshold_bps) != DIAGNOSTIC_ONLY_SHOCK_THRESHOLD_BPS or economic_predeclaration is not None
-    eligible = bool(
-        economic_threshold_allowed
-        and report.get("costs_measured") is True
-        and int(independence["effective_sample_count"]) >= int(min_train_fills)
-        and int(independence["effective_distinct_days"]) >= MIN_DISTINCT_DAYS
-        and int(stats.get("sample_count") or 0) >= int(min_train_fills)
-        and int(stats.get("distinct_days") or 0) >= MIN_DISTINCT_DAYS
-        and net > 0.0
-        and pf is not None
-        and float(pf) > 1.0
-        and lcb is not None
-        and float(lcb) > 0.0
-        and float(stats.get("top_positive_trade_share") or 1.0) <= MAX_TOP_POSITIVE_SHARE
-        and net > placebo_net + 1e-12
-        and all(value > 0.0 for value in internal_fold_nets.values())
-    )
-    return {
-        "mechanism": str(mechanism),
-        "direction_multiplier": int(direction_multiplier),
-        "direction_policy": (
-            "CUMULATIVE_WINDOW_CONTINUATION"
-            if shock_window_ms is not None and int(direction_multiplier) == 1
-            else ("SHOCK_CONTINUATION" if int(direction_multiplier) == 1 else "EXTREME_SHOCK_REVERSAL")
-        ),
-        "coin": str(coin).upper(),
-        "shock_threshold_bps": float(threshold_bps),
-        "threshold_role": "TRAIN_ECONOMIC_PREDECLARED" if economic_threshold_allowed else "DIAGNOSTIC_ONLY",
-        "economic_threshold_allowed": economic_threshold_allowed,
-        "economic_predeclaration_id": economic_predeclaration,
-        "horizon_ms": int(horizon_ms),
-        "shock_window_ms": (float(shock_window_ms) if shock_window_ms is not None else None),
-        "admission_policy": str(admission_policy),
-        "statistics": stats,
-        "independence": independence,
-        "internal_train_fold_nets": internal_fold_nets,
-        "placebo_net_pnl_usd": placebo_net,
-        "minimum_train_fills": int(min_train_fills),
-        "coverage": dict(report.get("coverage") or {}),
-        "signals": int(report.get("signals") or 0),
-        "decision_counts": dict(report.get("decision_counts") or {}),
-        "raw_observation_diagnostics": dict(report.get("raw_observation_diagnostics") or {}),
-        "raw_direction_flip_diagnostics": dict(report.get("raw_direction_flip_diagnostics") or {}),
-        "eligible": eligible,
-    }
 
 
 def explore_lead_lag_multiasset_train(

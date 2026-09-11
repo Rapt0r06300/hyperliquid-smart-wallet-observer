@@ -384,6 +384,16 @@ _OUTIL_DANS_UN_LANCEUR = re.compile(
     + r"""((?:tools|scripts)[/\\][\w\-./\\]+\.py)""",
     re.IGNORECASE,
 )
+_AFFECTATION_OUTIL_DANS_UN_LANCEUR = re.compile(
+    r"""\bset\s+["']?([A-Za-z_][A-Za-z0-9_]*)=(?:%~dp0|\.[\\/])?"""
+    r"""((?:tools|scripts)[/\\][\w\-./\\]+\.py)["']?""",
+    re.IGNORECASE,
+)
+_VARIABLE_OUTIL_INVOQUEE = re.compile(
+    _PYTHON_OUTIL_DANS_UN_LANCEUR
+    + r"""\s+(?:-\S+\s+)*["']?%([A-Za-z_][A-Za-z0-9_]*)%["']?""",
+    re.IGNORECASE,
+)
 
 
 def outils_demarres_par_les_lanceurs(lanceurs: dict[str, str]) -> list[str]:
@@ -396,6 +406,17 @@ def outils_demarres_par_les_lanceurs(lanceurs: dict[str, str]) -> list[str]:
     for _chemin, texte in (lanceurs or {}).items():
         for m in _OUTIL_DANS_UN_LANCEUR.findall(texte or ""):
             out.add(m.replace("\\", "/"))
+        # Les lanceurs Windows affectent parfois le runner selon un argument, puis executent
+        # ``python "%RUNNER%"``. Une affectation seule ne suffit pas : la variable doit aussi
+        # etre reellement invoquee dans ce meme lanceur.
+        affectations = {
+            variable.upper(): chemin
+            for variable, chemin in _AFFECTATION_OUTIL_DANS_UN_LANCEUR.findall(texte or "")
+        }
+        invoquees = {m.upper() for m in _VARIABLE_OUTIL_INVOQUEE.findall(texte or "")}
+        for variable in invoquees:
+            if variable in affectations:
+                out.add(affectations[variable].replace("\\", "/"))
     return sorted(out)
 
 
