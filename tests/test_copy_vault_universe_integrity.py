@@ -33,6 +33,22 @@ def test_survivor_hors_univers_et_couverture_incomplete_sont_refuses() -> None:
     assert result["missing_from_cohort"] == ["b"]
 
 
+def test_cohorte_historique_sans_wallet_liquide_fail_closed() -> None:
+    result = evaluate_copy_vault_universe_integrity(
+        complete_universe=["A", "B"],
+        observed_survivors=["A", "B"],
+        cohort=[
+            {"wallet": "A", "liquide": False},
+            {"wallet": "B", "liquide": False},
+        ],
+        correlations={},
+        entity_groups={"a": "entity-a", "b": "entity-b"},
+    )
+    assert result["cohort_liquidation_evidence"]["cohorte_suspecte"] is True
+    assert result["eligible"] is False
+    assert "LIQUIDATED_WALLET_COVERAGE_UNPROVEN" in result["reasons"]
+
+
 def test_sybil_suspect_doit_etre_normalise_dans_meme_entite() -> None:
     result = evaluate_copy_vault_universe_integrity(
         complete_universe=["A", "B"],
