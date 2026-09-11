@@ -16,6 +16,7 @@ from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = 1
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class TaskType(str, Enum):
@@ -306,6 +307,8 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
             raise ValueError("lease task_id does not match node task_id")
         if lease.owner != node_owner:
             raise ValueError("lease owner does not match node owner")
+        if not _SHA256.fullmatch(lease.token_hash):
+            raise ValueError("token_hash must be an exact 64-character lowercase hex SHA-256")
         raw_commit_sha = row.get("commit_sha")
         if raw_commit_sha is not None and (
             not isinstance(raw_commit_sha, str) or not _SHA40.fullmatch(raw_commit_sha)
