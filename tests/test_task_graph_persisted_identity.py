@@ -99,3 +99,14 @@ def test_load_task_graph_rejects_non_string_persisted_scalar_fields(
 
     with pytest.raises(ValueError, match=rf"{field} must be a string"):
         load_task_graph(path)
+
+
+def test_load_task_graph_rejects_non_string_persisted_token_hash(tmp_path: Path) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0]["lease"]["token_hash"] = int("1" * 64)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"token_hash must be a string"):
+        load_task_graph(path)
