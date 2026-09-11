@@ -56,6 +56,76 @@ def test_multiasset_loader_coupe_le_heldout_avant_de_lire_les_resultats(tmp_path
     assert meta["real_execution"] is False
 
 
+def test_multiasset_loader_fige_train_sur_intersection_des_shards_selectionnes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    market_start = 1_800_000_000_000
+    market_end = market_start + 100_000
+    source_start = market_start + 70_000
+    source_end = market_start + 90_000
+    dummy_market = tmp_path / "market.jsonl.gz"
+    monkeypatch.setattr(
+        module,
+        "discover_market_tick_windows",
+        lambda _root: [SourceWindow(dummy_market, market_start, market_end)],
+    )
+    source = (
+        tmp_path
+        / "runtime"
+        / "data"
+        / "bbo_shards"
+        / f"bbo_tape_{source_end * 1_000_000}.jsonl.gz"
+    )
+    source.parent.mkdir(parents=True)
+    import gzip
+
+    rows = [
+        {
+            "venue": "BIN_TRADE",
+            "coin": "ETH",
+            "px": 100.0,
+            "side": "BUY",
+            "sz": "1",
+            "event_id": "source-start",
+            "ts_wall_ms": source_start,
+        },
+        {
+            "venue": "BIN_TRADE",
+            "coin": "ETH",
+            "px": 101.0,
+            "side": "BUY",
+            "sz": "1",
+            "event_id": "source-train",
+            "ts_wall_ms": source_start + 10_000,
+        },
+        {
+            "venue": "BIN_TRADE",
+            "coin": "ETH",
+            "px": 102.0,
+            "side": "BUY",
+            "sz": "1",
+            "event_id": "source-heldout",
+            "ts_wall_ms": source_start + 15_000,
+        },
+    ]
+    with gzip.open(source, "wt", encoding="utf-8") as handle:
+        handle.write("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    tape, meta = module.load_multiasset_train_tape(
+        tmp_path,
+        [source],
+        coins=("ETH",),
+    )
+
+    assert [row[1] for row in tape["ETH"]["TRADE"]] == [100.0, 101.0]
+    assert meta["full_start_ms"] == source_start
+    assert meta["full_end_ms"] == source_end
+    assert meta["train_end_ms"] == source_start + 12_000
+    assert meta["heldout_start_ms"] == source_start + 12_001
+    assert meta["range_basis"] == "MARKET_AND_SELECTED_SOURCE_INTERSECTION"
+    assert meta["rows_outside_frozen_train"] == 1
+
+
 def test_score_report_expose_le_diagnostic_brut_sans_le_rendre_eligible() -> None:
     diagnostics = {
         "diagnostic_only": True,

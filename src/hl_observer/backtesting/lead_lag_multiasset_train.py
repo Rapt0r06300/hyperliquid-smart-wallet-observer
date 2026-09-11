@@ -53,6 +53,7 @@ from hl_observer.backtesting.lead_lag_source_alignment import (
     _lines,
     _wall_ms,
     discover_market_tick_windows,
+    infer_bbo_source_windows,
 )
 from hl_observer.backtesting.train_statistics import stable_hash, summarize_train_rows
 from hl_observer.simulation.lead_lag_l2_history import load_market_microstructure_event_windows
@@ -139,9 +140,15 @@ def _planned_cross_asset_pairs(candidate_coins: Sequence[str]) -> list[tuple[str
 _in_ranges = _in_ranges_impl
 
 
-def _training_ranges(root: str | Path) -> tuple[list[tuple[int, int]], dict[str, Any]]:
+def _training_ranges(
+    root: str | Path,
+    lead_sources: Sequence[str | Path] = (),
+) -> tuple[list[tuple[int, int]], dict[str, Any]]:
     return _training_ranges_impl(
-        root, train_fraction=TRAIN_FRACTION, window_discovery=discover_market_tick_windows
+        root,
+        train_fraction=TRAIN_FRACTION,
+        window_discovery=discover_market_tick_windows,
+        eligible_windows=infer_bbo_source_windows(root, lead_sources),
     )
 
 
@@ -160,7 +167,7 @@ def load_multiasset_train_tape(
 
     project_root = Path(root).resolve()
     allowed = {str(coin).upper() for coin in coins}
-    train_ranges, split_meta = _training_ranges(project_root)
+    train_ranges, split_meta = _training_ranges(project_root, sources)
     tapes: dict[str, list[tuple[int, float, float]]] = {coin: [] for coin in sorted(allowed)}
     trade_observations: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}
     books: dict[str, list[dict[str, Any]]] = {coin: [] for coin in sorted(allowed)}

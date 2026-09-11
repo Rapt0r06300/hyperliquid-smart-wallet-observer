@@ -160,6 +160,37 @@ def _candidate_bbo_sources(root: Path) -> list[Path]:
     return sorted(set(candidates), key=lambda path: path.as_posix())
 
 
+def infer_bbo_source_windows(
+    root: str | Path,
+    sources: Sequence[str | Path],
+) -> list[SourceWindow]:
+    """Infer causal wall-clock coverage for timestamped BBO shards.
+
+    Archived shards carry their end time in the filename.  Untimestamped
+    arbitrary files are deliberately ignored so callers can retain their
+    existing market-window fallback instead of inventing a coverage end.
+    """
+
+    project_root = Path(root).resolve()
+    windows: list[SourceWindow] = []
+    for value in sources:
+        path = Path(value)
+        if not path.is_absolute():
+            path = project_root / path
+        path = path.resolve()
+        if not path.is_file():
+            continue
+        start_ms = _first_wall_ms(path)
+        end_ms = _bbo_filename_end_ms(path)
+        if start_ms is None or end_ms is None or end_ms < start_ms:
+            continue
+        windows.append(SourceWindow(path, start_ms, end_ms))
+    return sorted(
+        windows,
+        key=lambda item: (item.start_ms, item.end_ms, item.path.as_posix()),
+    )
+
+
 def select_aligned_bbo_sources(
     root: str | Path,
     *,
@@ -328,6 +359,7 @@ def load_aligned_binance_trade_tape(
 __all__ = [
     "SourceWindow",
     "discover_market_tick_windows",
+    "infer_bbo_source_windows",
     "load_aligned_binance_trade_tape",
     "select_aligned_bbo_sources",
 ]
