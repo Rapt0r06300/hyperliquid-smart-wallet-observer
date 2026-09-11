@@ -174,8 +174,12 @@ def verdict():
     # (overfit_selection, H-181...). Aucune ligne de code n'avait bouge : deplacer un .cmd avait
     # suffi a faire mentir l'audit. Le perimetre doit SUIVRE les portes. (Meme correctif dans
     # tools/auditer_cablage.py, pour que l'outil et le test mesurent la MEME chose.)
+    # Les workflows GitHub sont eux aussi des lanceurs : plusieurs gardes ``python -m``
+    # n'existent volontairement qu'en CI. Les omettre les classait comme modules morts alors
+    # qu'ils sont executes a chaque push.
     lanceurs = _sources(("*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd",
-                         "outils de test/**/*.cmd", "outils de test/**/*.ps1"))
+                         "outils de test/**/*.cmd", "outils de test/**/*.ps1",
+                         ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"))
     # #597 : et SANS les outils, il declare morte TOUTE la recherche (`scenario_search` compris).
     outils = _sources(("tools/**/*.py",))
     v = auditer_les_modules(fichiers, lanceurs=lanceurs, outils=outils)
@@ -319,15 +323,21 @@ def test_le_moteur_de_RECHERCHE_n_est_PAS_declare_mort(verdict):
     cas, le plafond redevient faux.
     """
     morts = set(verdict.orphelins) | set(verdict.testes_non_branches)
-    for moteur in (
+    moteurs = (
         "hl_observer.backtesting.scenario_search",     # la recherche 150 M
         "hl_observer.backtesting.overfit_selection",   # H-181, la malediction du vainqueur
         "hl_observer.audit.couverture",                # le cliquet de couverture
-    ):
+    )
+    for moteur in moteurs:
         assert moteur not in morts, (
             "%s est declare MORT alors qu'un lanceur le demarre par `python tools\\...py`. "
             "L'audit ment -- et un audit qui ment est PIRE que pas d'audit." % moteur
         )
+
+    # ``scenario_search`` est aussi joignable depuis les workflows CI : il peut donc etre classe
+    # production (plus fort que OUTILLE). Ces deux moteurs restent des sentinelles exclusives de
+    # la porte ``python tools\\...py`` et prouvent que cette porte fonctionne toujours.
+    for moteur in moteurs[1:]:
         assert moteur in verdict.outilles, (
             "%s devrait etre classe OUTILLE (joignable depuis un outil de recherche lance par "
             "un .cmd). Il ne l'est pas : la porte des outils ne s'ouvre plus." % moteur

@@ -15,6 +15,12 @@ from hl_observer.backtesting.copy_vault_causal_selection import (
     select_causal_protocol_inputs,
     select_observed_continuations,
 )
+from hl_observer.backtesting.copy_vault_execution_math import (
+    _book_side,
+    _walk_base_quantity,
+    _walk_quote_notional,
+)
+from hl_observer.backtesting.copy_vault_evidence import temporal_evidence
 from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
@@ -45,79 +51,6 @@ from hl_observer.economics.assumptions import (
 from hl_observer.economics.families import build_copy_vault_contract
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
-
-
-def _book_side(
-    book: Mapping[str, Any],
-    field: str,
-    *,
-    expected_best: float,
-    descending: bool,
-) -> list[tuple[float, float]] | None:
-    """Validate one recorded side exactly as observed; never extend its depth."""
-
-    raw_levels = book.get(field)
-    if not isinstance(raw_levels, list) or not raw_levels:
-        return None
-    levels: list[tuple[float, float]] = []
-    try:
-        for raw_level in raw_levels:
-            if not isinstance(raw_level, (list, tuple)) or len(raw_level) != 2:
-                return None
-            price, quantity = float(raw_level[0]), float(raw_level[1])
-            if not all(math.isfinite(value) for value in (price, quantity)):
-                return None
-            if price <= 0.0 or quantity <= 0.0:
-                return None
-            levels.append((price, quantity))
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if not math.isclose(levels[0][0], float(expected_best), abs_tol=1e-12):
-        return None
-    prices = [price for price, _ in levels]
-    ordered = all(
-        left >= right if descending else left <= right
-        for left, right in zip(prices, prices[1:])
-    )
-    return levels if ordered else None
-
-
-def _walk_quote_notional(
-    levels: list[tuple[float, float]], target_quote_usd: float
-) -> tuple[float, float] | None:
-    """Return (VWAP, base quantity) after consuming an exact quote notional."""
-
-    remaining_quote = float(target_quote_usd)
-    filled_quantity = 0.0
-    for price, available_quantity in levels:
-        available_quote = price * available_quantity
-        taken_quote = min(remaining_quote, available_quote)
-        filled_quantity += taken_quote / price
-        remaining_quote -= taken_quote
-        if remaining_quote <= 1e-10:
-            break
-    if remaining_quote > 1e-8 or filled_quantity <= 0.0:
-        return None
-    return float(target_quote_usd) / filled_quantity, filled_quantity
-
-
-def _walk_base_quantity(
-    levels: list[tuple[float, float]], target_quantity: float
-) -> float | None:
-    """Return VWAP for an exact base quantity, failing on visible-depth exhaustion."""
-
-    remaining_quantity = float(target_quantity)
-    filled_quote = 0.0
-    for price, available_quantity in levels:
-        taken_quantity = min(remaining_quantity, available_quantity)
-        filled_quote += price * taken_quantity
-        remaining_quantity -= taken_quantity
-        if remaining_quantity <= 1e-12:
-            break
-    if remaining_quantity > 1e-10 or target_quantity <= 0.0:
-        return None
-    return filled_quote / float(target_quantity)
-
 
 
 def _first_at_or_after(
@@ -774,45 +707,6 @@ def evaluate_frozen(
         "summary": summarize(inverted), "diagnostics": inverted_diag,
     }
     return result
-
-
-def temporal_evidence(evaluation: Mapping[str, Any]) -> dict[str, Any]:
-    segments = evaluation.get("segments") if isinstance(evaluation.get("segments"), Mapping) else {}
-    oos_summary = (segments.get("oos") or {}).get("summary") or {}
-    forward_summary = (segments.get("forward") or {}).get("summary") or {}
-    placebo_summary = (evaluation.get("placebo_inverted_oos") or {}).get("summary") or {}
-    oos_count = int(oos_summary.get("positions_fermees") or 0)
-    forward_count = int(forward_summary.get("positions_fermees") or 0)
-    placebo_count = int(placebo_summary.get("positions_fermees") or 0)
-    oos_net = oos_summary.get("net_pnl_usd") if oos_count > 0 else None
-    placebo_net = placebo_summary.get("net_pnl_usd") if placebo_count > 0 else None
-    forward_trades = (
-        (evaluation.get("trades") or {}).get("forward") or []
-        if isinstance(evaluation.get("trades"), Mapping) else []
-    )
-    causal_forward = bool(forward_trades) and all(
-        row.get("causal_forward_eligible") is True for row in forward_trades
-    )
-
-    def proof_segment(summary: Mapping[str, Any], *, count: int) -> dict[str, Any]:
-        return {key: summary.get(key) for key in (
-            "gross_pnl_usd", "fees_usd", "spread_cost_usd", "slippage_cost_usd",
-            "latency_cost_usd", "net_pnl_usd", "trade_ids_count", "trade_ids_sha256",
-            "duplicate_trade_ids",
-        )} | {"sample_count": count, "liquidatable_net": summary.get("LIQUIDATABLE_NET") is True}
-
-    return {
-        "oos": {**proof_segment(oos_summary, count=oos_count), "no_lookahead": True, "purged": True},
-        "forward": {
-            **proof_segment(forward_summary, count=forward_count),
-            "post_freeze": causal_forward, "causal_live_only": causal_forward,
-        },
-        "placebos": {
-            "beaten": oos_net is not None and placebo_net is not None and float(oos_net) > float(placebo_net),
-            "candidate_net_usd": oos_net, "placebo_net_usd": placebo_net,
-            "method": "same_metaorders_inverted_direction",
-        },
-    }
 
 
 __all__ = [

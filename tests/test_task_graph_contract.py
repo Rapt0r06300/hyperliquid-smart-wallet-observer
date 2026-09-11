@@ -204,6 +204,24 @@ def test_load_task_graph_rejects_duplicate_task_ids(tmp_path: Path) -> None:
         load_task_graph(path)
 
 
+def test_load_task_graph_rejects_non_positive_lease_window(tmp_path: Path) -> None:
+    lease = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+    node = TaskGraphNode(
+        task_id="H-T-49", owner="agent-a", contributors=(), status="IN_PROGRESS",
+        dependencies=(), handoff_from=None, handoff_to=None, reason="resume canonical task",
+        evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+        budget="bounded", lease=lease, commit_sha=None, task_type=TaskType.AUTO,
+    )
+    path = tmp_path / "task_graph.json"
+    write_task_graph_atomic(path, [node])
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0]["lease"]["lease_expires"] = payload["tasks"][0]["lease"]["lease_started"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="lease expiration must be after start"):
+        load_task_graph(path)
+
+
 def test_done_contract_rejects_invalid_commit_sha() -> None:
     evidence = DoneContractEvidence(
         code=True,
@@ -232,3 +250,19 @@ def test_empty_current_token_is_rejected_via_canonical_fail_closed_path() -> Non
             ttl_seconds=90,
             new_token="new",
         )
+
+
+def test_load_task_graph_rejects_self_dependency(tmp_path: Path) -> None:
+    lease = acquire_ownership("H-T-49", "agent-a", now=_now(), ttl_seconds=60, token="secret-a")
+    node = TaskGraphNode(
+        task_id="H-T-49", owner="agent-a", contributors=(), status="IN_PROGRESS",
+        dependencies=("H-T-49",), handoff_from=None, handoff_to=None,
+        reason="self dependency would deadlock canonical execution",
+        evidence_required=("tests",), done_contract="CODE→CALL_PATH→TEST→EVIDENCE→COMMIT",
+        budget="bounded", lease=lease, commit_sha=None, task_type=TaskType.AUTO,
+    )
+    path = tmp_path / "task_graph.json"
+    write_task_graph_atomic(path, [node])
+
+    with pytest.raises(ValueError, match="task must not depend on itself"):
+        load_task_graph(path)

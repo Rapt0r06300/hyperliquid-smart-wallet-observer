@@ -196,6 +196,26 @@ def test_un_lanceur_avec_prefixe_pdp0_est_reconnu():
     assert outils_demarres_par_les_lanceurs({"L.cmd": "python -m hl_observer ui\n"}) == []
 
 
+def test_un_outil_lance_via_une_variable_cmd_est_une_porte():
+    """Un chemin affecte puis execute reste une vraie porte de lanceur Windows."""
+    from hl_observer.audit.cablage import outils_demarres_par_les_lanceurs
+
+    lanceurs = {
+        "ANALYSER.cmd": (
+            'set "ECONOMIC_RUNNER=%~dp0tools\\run_dataset_economic_campaigns.py"\n'
+            '"%HYPERSMART_PYTHON%" "%ECONOMIC_RUNNER%" --root data\n'
+        ),
+        "BROUILLON.cmd": (
+            'set "UNUSED_RUNNER=%~dp0tools\\jamais_lance.py"\n'
+            'echo %UNUSED_RUNNER%\n'
+        ),
+    }
+
+    assert outils_demarres_par_les_lanceurs(lanceurs) == [
+        "tools/run_dataset_economic_campaigns.py"
+    ]
+
+
 def test_le_MOTEUR_DE_RECHERCHE_n_est_plus_declare_MORT():
     """De bout en bout : sans les outils, la recherche est "morte". Avec, elle est OUTILLEE."""
     fichiers = {

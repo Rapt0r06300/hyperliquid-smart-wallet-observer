@@ -159,6 +159,7 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
     outils_conserves = {
         "LANCER_LABO.cmd",
         "LANCER_MICRO.cmd",
+        "LANCER-CODEX-RESEARCH.cmd",
         "LANCER-RECHERCHE-14H.cmd",
         "LANCER-RECHERCHE-18H.cmd",
         "LANCER-RECHERCHE-CONTINUE.cmd",

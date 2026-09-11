@@ -80,6 +80,22 @@ def is_archive_safe_path(path: Path) -> bool:
     return path.suffix.lower() not in EXCLUDED_SUFFIXES
 
 
+def is_archive_safe_source(root: Path, path: Path) -> bool:
+    """Return False for symlinks or sources resolving outside the project root."""
+    root = Path(root).resolve()
+    path = Path(path)
+    if path.is_symlink():
+        return False
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    if not is_archive_safe_path(relative):
+        return False
+    resolved = path.resolve()
+    return resolved == root or root in resolved.parents
+
+
 def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: str | None = None) -> ArchiveResult:
     root = root.resolve()
     output_dir = (output_dir or default_desktop_output_dir()).resolve()
@@ -101,8 +117,11 @@ def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: st
             source = root / include
             if not source.exists():
                 continue
+            if source.is_symlink():
+                warnings.append(f"excluded symlink: {include}")
+                continue
             if source.is_file():
-                if is_archive_safe_path(source.relative_to(root)):
+                if is_archive_safe_source(root, source):
                     target = staging / include
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(source, target)
@@ -112,8 +131,8 @@ def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: st
                 if not path.is_file():
                     continue
                 relative = path.relative_to(root)
-                if not is_archive_safe_path(relative):
-                    warnings.append(f"excluded runtime file: {relative.as_posix()}")
+                if not is_archive_safe_source(root, path):
+                    warnings.append(f"excluded unsafe source: {relative.as_posix()}")
                     continue
                 target = staging / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +149,7 @@ def archive_readiness(root: Path) -> dict[str, object]:
     # 23 Go de data/ ni les 3 Go de logs/.
     from hyper_smart_observer.audit.bounded_walk import bounded_walk
 
-    root = Path(root)
+    root = Path(root).resolve()
     walk = bounded_walk(root, extra_excluded_dirs={"logs"}, max_seconds=6.0, stat_sizes=False)
     unsafe: list[str] = []
     for path in walk.files:
@@ -138,7 +157,7 @@ def archive_readiness(root: Path) -> dict[str, object]:
             relative = path.relative_to(root)
         except ValueError:
             continue
-        if not is_archive_safe_path(relative):
+        if not is_archive_safe_source(root, path):
             unsafe.append(relative.as_posix())
     root_archives: list[str] = []
     for path in root.glob("*"):

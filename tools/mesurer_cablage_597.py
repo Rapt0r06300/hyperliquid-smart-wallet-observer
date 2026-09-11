@@ -32,7 +32,11 @@ from hl_observer.audit.cablage import (  # noqa: E402
 # ⚠️ MEME PERIMETRE QUE tests/test_risk_guards_no_limbo.py -- sinon les chiffres ne sont pas
 # comparables au plafond, et on reposerait un plafond FAUX.
 MOTIFS_CODE = ("src/**/*.py", "hyper_smart_observer/**/*.py", "tests/**/*.py")
-MOTIFS_LANCEURS = ("*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd")
+MOTIFS_LANCEURS = (
+    "*.cmd", "*.ps1", "*.sh", "tools/**/*.ps1", "tools/**/*.cmd",
+    "outils de test/**/*.cmd", "outils de test/**/*.ps1",
+    ".github/workflows/**/*.yml", ".github/workflows/**/*.yaml",
+)
 MOTIFS_OUTILS = ("tools/**/*.py",)
 
 

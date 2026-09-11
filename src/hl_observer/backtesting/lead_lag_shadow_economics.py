@@ -18,11 +18,11 @@ from typing import Any
 from hl_observer.backtesting import lead_lag_shadow as _base
 from hl_observer.backtesting.anti_overfit_gate import evaluer as evaluer_dsr
 from hl_observer.backtesting.anti_overfit_gate import sharpe
+from hl_observer.backtesting.lead_lag_shadow_metrics import _metriques
 from hl_observer.backtesting.lead_lag_shadow_temporal import (
     _placebo_direction,
     _temporal_bounds,
 )
-from hl_observer.backtesting.quant_methods import block_bootstrap
 from hl_observer.backtesting.robustesse_selection import pbo_cscv
 from hl_observer.economics.assumptions import (
     CostComponentReceipt,
@@ -670,40 +670,6 @@ def net_par_horizon(hl: list, chocs: list, *, frais_slippage_bps: float,
         horizon: [(row["net_bps"], row["top_capacity_usd"]) for row in rows]
         for horizon, rows in episodes.items()
     }
-
-def _metriques(nets: list[float], *, n_periodes: int) -> dict[str, Any]:
-    """Espérance, drawdown du cumul, et stabilité PAR PÉRIODE (pas le winrate)."""
-    esper = st.mean(nets)
-    cum, pic, dd = 0.0, 0.0, 0.0
-    for x in nets:
-        cum += x
-        pic = max(pic, cum)
-        dd = min(dd, cum - pic)
-    taille = max(1, len(nets) // n_periodes)
-    periodes = [nets[i:i + taille] for i in range(0, len(nets), taille)]
-    moys = [st.mean(p) for p in periodes if p]
-    bootstrap_totals = block_bootstrap(
-        nets,
-        block=max(1, int(math.sqrt(len(nets)))),
-        n=500,
-        seed=20260729,
-    )
-    bootstrap_means = sorted(total / len(nets) for total in bootstrap_totals)
-    lower_index = max(0, int(len(bootstrap_means) * 0.025) - 1)
-    upper_index = min(len(bootstrap_means) - 1, int(len(bootstrap_means) * 0.975))
-    bootstrap_ci = (
-        [round(bootstrap_means[lower_index], 3), round(bootstrap_means[upper_index], 3)]
-        if bootstrap_means
-        else [None, None]
-    )
-    return {"esperance_nette_bps": round(esper, 3), "n": len(nets),
-            "drawdown_cumule_bps": round(dd, 2),
-            "periodes_positives": (
-                f"{sum(1 for value in moys if value > 0)}/{len(moys)}"
-            ),
-            "moyennes_par_periode_bps": [round(value, 3) for value in moys],
-            "bootstrap_mean_ci95_bps": bootstrap_ci,
-            "stable": bool(moys) and all(m > 0 for m in moys)}
 
 def backtest(root: str | Path = ".", *, seuil_choc_bps: float = SEUIL_CHOC_BPS,
              frais_slippage_bps: float = FRAIS_SLIPPAGE_BPS, horizons_ms=HORIZONS_MS,

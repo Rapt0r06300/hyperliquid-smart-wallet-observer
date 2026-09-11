@@ -16,6 +16,7 @@ from hl_observer.ops.echec_silencieux import noter as _noter_echec
 
 SCHEMA_VERSION = 1
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class TaskType(str, Enum):
@@ -272,9 +273,33 @@ def _parse_datetime(value: object) -> datetime | None:
     return _utc(parsed)
 
 
+def _parse_string_list(row: dict[str, object], field: str) -> tuple[str, ...]:
+    value = row.get(field, [])
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValueError(f"{field} must be a list of strings")
+    return tuple(value)
+
+
+def _parse_string_scalar(row: dict[str, object], field: str, *, default: str = "") -> str:
+    value = row.get(field, default)
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
+def _parse_optional_string_scalar(row: dict[str, object], field: str) -> str | None:
+    value = row.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be a string")
+    return value
+
+
 def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    if payload.get("schema_version") != SCHEMA_VERSION:
+    raw_schema_version = payload.get("schema_version")
+    if type(raw_schema_version) is not int or raw_schema_version != SCHEMA_VERSION:
         raise ValueError("unsupported task graph schema")
     rows = payload.get("tasks")
     if not isinstance(rows, list):
@@ -285,41 +310,77 @@ def load_task_graph(path: str | Path) -> list[TaskGraphNode]:
         if not isinstance(row, dict) or not isinstance(row.get("lease"), dict):
             raise ValueError("invalid task graph node")
         raw_lease = row["lease"]
-        node_task_id = str(row["task_id"])
+        raw_task_id = row.get("task_id")
+        if not isinstance(raw_task_id, str):
+            raise ValueError("task_id must be a string")
+        node_task_id = raw_task_id
+        if not node_task_id:
+            raise ValueError("task_id must not be empty")
         if node_task_id in seen_task_ids:
             raise ValueError(f"duplicate task_id: {node_task_id}")
         seen_task_ids.add(node_task_id)
-        node_owner = str(row["owner"])
+        raw_owner = row.get("owner")
+        if not isinstance(raw_owner, str):
+            raise ValueError("owner must be a string")
+        node_owner = raw_owner
+        if not node_owner:
+            raise ValueError("owner must not be empty")
+        raw_lease_task_id = raw_lease.get("task_id")
+        if not isinstance(raw_lease_task_id, str):
+            raise ValueError("task_id must be a string")
+        raw_lease_owner = raw_lease.get("owner")
+        if not isinstance(raw_lease_owner, str):
+            raise ValueError("owner must be a string")
+        raw_token_hash = raw_lease.get("token_hash")
+        if not isinstance(raw_token_hash, str):
+            raise ValueError("token_hash must be a string")
         lease = OwnershipLease(
-            task_id=str(raw_lease["task_id"]),
-            owner=str(raw_lease["owner"]),
-            token_hash=str(raw_lease["token_hash"]),
+            task_id=raw_lease_task_id,
+            owner=raw_lease_owner,
+            token_hash=raw_token_hash,
             lease_started=_parse_datetime(raw_lease["lease_started"]),  # type: ignore[arg-type]
             lease_expires=_parse_datetime(raw_lease["lease_expires"]),  # type: ignore[arg-type]
             released_at=_parse_datetime(raw_lease.get("released_at")),
         )
         if lease.lease_started is None or lease.lease_expires is None:
             raise ValueError("lease timestamps are required")
+        if lease.lease_expires <= lease.lease_started:
+            raise ValueError("lease expiration must be after start")
+        if lease.released_at is not None and lease.released_at < lease.lease_started:
+            raise ValueError("released_at must not precede lease start")
+        if lease.released_at is not None and lease.released_at >= lease.lease_expires:
+            raise ValueError("released_at must precede lease expiration")
         if lease.task_id != node_task_id:
             raise ValueError("lease task_id does not match node task_id")
         if lease.owner != node_owner:
             raise ValueError("lease owner does not match node owner")
-        transition = row.get("transition")
+        if not _SHA256.fullmatch(lease.token_hash):
+            raise ValueError("token_hash must be an exact 64-character lowercase hex SHA-256")
+        raw_commit_sha = row.get("commit_sha")
+        if raw_commit_sha is not None and (
+            not isinstance(raw_commit_sha, str) or not _SHA40.fullmatch(raw_commit_sha)
+        ):
+            raise ValueError("commit_sha must be an exact 40-character lowercase hex SHA")
+        raw_task_type = _parse_string_scalar(row, "task_type")
+        raw_transition = _parse_optional_string_scalar(row, "transition")
+        dependencies = _parse_string_list(row, "dependencies")
+        if node_task_id in dependencies:
+            raise ValueError("task must not depend on itself")
         nodes.append(TaskGraphNode(
             task_id=node_task_id,
             owner=node_owner,
-            contributors=tuple(str(value) for value in row.get("contributors", [])),
-            status=str(row["status"]),
-            dependencies=tuple(str(value) for value in row.get("dependencies", [])),
-            handoff_from=None if row.get("handoff_from") is None else str(row["handoff_from"]),
-            handoff_to=None if row.get("handoff_to") is None else str(row["handoff_to"]),
-            reason=str(row.get("reason", "")),
-            evidence_required=tuple(str(value) for value in row.get("evidence_required", [])),
-            done_contract=str(row.get("done_contract", "")),
-            budget=str(row.get("budget", "")),
+            contributors=_parse_string_list(row, "contributors"),
+            status=_parse_string_scalar(row, "status"),
+            dependencies=dependencies,
+            handoff_from=_parse_optional_string_scalar(row, "handoff_from"),
+            handoff_to=_parse_optional_string_scalar(row, "handoff_to"),
+            reason=_parse_string_scalar(row, "reason"),
+            evidence_required=_parse_string_list(row, "evidence_required"),
+            done_contract=_parse_string_scalar(row, "done_contract"),
+            budget=_parse_string_scalar(row, "budget"),
             lease=lease,
-            commit_sha=None if row.get("commit_sha") is None else str(row["commit_sha"]),
-            task_type=TaskType(str(row["task_type"])),
-            transition=None if transition is None else Transition(str(transition)),
+            commit_sha=raw_commit_sha,
+            task_type=TaskType(raw_task_type),
+            transition=None if raw_transition is None else Transition(raw_transition),
         ))
     return nodes

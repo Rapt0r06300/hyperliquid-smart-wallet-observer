@@ -20,6 +20,21 @@ def _valid_raw() -> dict[str, object]:
                 {"left": "A", "right": "B", "correlation": 0.2},
             ],
             "entity_groups": {"A": "entity-a", "B": "entity-b"},
+            "behavioral_fingerprint": {
+                "complete": True,
+                "wallet_fills": {
+                    "A": [
+                        {"ts_ms": 0, "coin": "BTC", "maker": True},
+                        {"ts_ms": 1_000, "coin": "BTC", "maker": False},
+                        {"ts_ms": 2_000, "coin": "BTC", "maker": True},
+                    ],
+                    "B": [
+                        {"ts_ms": 0, "coin": "ETH", "maker": False},
+                        {"ts_ms": 5_000, "coin": "ETH", "maker": False},
+                        {"ts_ms": 10_000, "coin": "ETH", "maker": False},
+                    ],
+                },
+            },
         }
     }
 
@@ -37,6 +52,22 @@ def test_missing_integrity_evidence_fails_closed(monkeypatch) -> None:
     assert "UNIVERSE_INTEGRITY_INPUT_MISSING" in evidence["reasons"]
     assert evidence["paper_read_only"] is True
     assert evidence["real_execution"] is False
+
+
+def test_missing_behavioral_fingerprint_evidence_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        module,
+        "evaluate_copy_vault_universe_integrity",
+        lambda **_kwargs: {"eligible": True, "reasons": []},
+    )
+    raw = _valid_raw()
+    del raw["universe_integrity"]["behavioral_fingerprint"]  # type: ignore[index]
+
+    evidence = module.evaluate_copy_vault_vnext_integrity(raw)
+
+    assert evidence["eligible"] is False
+    assert "BEHAVIORAL_FINGERPRINT_EVIDENCE_MISSING" in evidence["reasons"]
+    assert evidence["behavioral_fingerprint"]["present"] is False
 
 
 def test_json_correlation_rows_are_adapted_and_candidate_stays_eligible(monkeypatch) -> None:
@@ -111,6 +142,33 @@ def test_malformed_cohort_and_nonfinite_correlation_fail_closed(monkeypatch) -> 
     assert evidence["eligible"] is False
     assert "COHORT_EVIDENCE_INVALID" in evidence["reasons"]
     assert "CORRELATION_EVIDENCE_INVALID" in evidence["reasons"]
+
+
+def test_behaviorally_related_wallets_require_same_declared_entity() -> None:
+    raw = _valid_raw()
+    raw["universe_integrity"]["behavioral_fingerprint"] = {  # type: ignore[index]
+        "complete": True,
+        "wallet_fills": {
+            "A": [
+                {"ts_ms": 0, "coin": "BTC", "maker": True},
+                {"ts_ms": 1_000, "coin": "ETH", "maker": False},
+                {"ts_ms": 2_000, "coin": "BTC", "maker": True},
+                {"ts_ms": 3_000, "coin": "ETH", "maker": False},
+            ],
+            "B": [
+                {"ts_ms": 100, "coin": "BTC", "maker": True},
+                {"ts_ms": 1_100, "coin": "ETH", "maker": False},
+                {"ts_ms": 2_100, "coin": "BTC", "maker": True},
+                {"ts_ms": 3_100, "coin": "ETH", "maker": False},
+            ],
+        },
+    }
+
+    evidence = module.evaluate_copy_vault_vnext_integrity(raw)
+
+    assert evidence["eligible"] is False
+    assert "BEHAVIORAL_ENTITY_NORMALIZATION_MISSING" in evidence["reasons"]
+    assert evidence["behavioral_fingerprint"]["related_wallet_groups"] == [["a", "b"]]
 
 
 def test_economic_pack_wires_integrity_before_copy_reports() -> None:
