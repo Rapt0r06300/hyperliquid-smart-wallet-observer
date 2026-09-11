@@ -30,6 +30,16 @@ def test_security_quality_workflow_is_fail_closed() -> None:
     assert "continue-on-error" not in text
 
 
+def test_research_dependency_pins_cover_supported_python_311() -> None:
+    text = (ROOT / "requirements-recherche.txt").read_text(encoding="utf-8")
+    assert 'numpy==2.4.2; python_version < "3.12"' in text
+    assert 'numpy==2.5.1; python_version >= "3.12"' in text
+    assert 'scipy==1.17.1; python_version < "3.12"' in text
+    assert 'scipy==1.18.0; python_version >= "3.12"' in text
+    assert "numpy==2.5.1\n" not in text
+    assert "scipy==1.18.0\n" not in text
+
+
 def test_pre_run_775_est_la_gate_parfaite_principale() -> None:
     text = (ROOT / ".github" / "workflows" / "pre-run-321-775.yml").read_text(encoding="utf-8")
     for marker in (
