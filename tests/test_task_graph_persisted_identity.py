@@ -66,3 +66,18 @@ def test_load_task_graph_rejects_non_string_persisted_identity(
 
     with pytest.raises(ValueError, match=rf"{field} must be a string"):
         load_task_graph(path)
+
+
+@pytest.mark.parametrize("field", ["contributors", "dependencies", "evidence_required"])
+def test_load_task_graph_rejects_non_string_entries_in_persisted_string_lists(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    path = tmp_path / "task_graph.json"
+    _write_canonical_graph(path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["tasks"][0][field] = ["valid", 7]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{field} must be a list of strings"):
+        load_task_graph(path)
