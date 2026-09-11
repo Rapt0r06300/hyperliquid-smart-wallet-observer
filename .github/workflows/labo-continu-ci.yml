@@ -29,7 +29,7 @@ jobs:
           python-version: "3.11"
       - name: pytest (+ optuna/cmaes OPTIONNELS)
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-ci-bootstrap.txt
           python -m pip install pytest
           # Optuna/cmaes optionnels : présents => samplers/pruners avancés ; absents => indisponibilité HONNÊTE
           python -m pip install -r requirements-recherche.txt || echo "optuna/cmaes non installes (ok, tests d'indisponibilite honnete)"
