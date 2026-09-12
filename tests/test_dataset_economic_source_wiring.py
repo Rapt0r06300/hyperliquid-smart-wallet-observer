@@ -82,3 +82,12 @@ def test_copy_vault_v5_est_branche_sur_les_evenements_lifecycle_causaux() -> Non
     assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
         'copy_raw["next_hypothesis_v5"]'
     )
+
+
+def test_copy_vault_v6_balanced_est_branche_sur_le_meme_flux_causal() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "explore_copy_vault_v6_balanced_train" in text
+    assert 'copy_raw["next_hypothesis_v6"]' in text
+    assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
+        'copy_raw["next_hypothesis_v6"]'
+    )

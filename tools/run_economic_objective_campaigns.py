@@ -25,6 +25,9 @@ from hl_observer.backtesting.copy_vault_v4_train import (  # noqa: E402
 from hl_observer.backtesting.copy_vault_v5_lifecycle_train import (  # noqa: E402
     explore_copy_vault_v5_train,
 )
+from hl_observer.backtesting.copy_vault_v6_balanced_train import (  # noqa: E402
+    explore_copy_vault_v6_balanced_train,
+)
 from hl_observer.backtesting.cross_venue_certified import (  # noqa: E402
     SOURCE_MODE as CERTIFIED_CROSS_SOURCE_MODE,
 )
@@ -251,6 +254,18 @@ def run_campaigns(
             "lifecycle": copy_lifecycle_audit,
         },
     )
+    copy_v6 = explore_copy_vault_v6_balanced_train(
+        copy_v4_metaorders,
+        copy_v4_books,
+        copy_lifecycle_events,
+        input_audit={
+            "canonical_input": copy_v4_input_audit,
+            "metaorders": copy_v4_metaorder_audit,
+            "books": copy_v4_book_meta,
+            "causal_protocol": copy_v4_protocol_audit,
+            "lifecycle": copy_lifecycle_audit,
+        },
+    )
     metaorder_audit = {
         **all_metaorder_audit,
         "all_metaorders": int(all_metaorder_audit.get("metaorders") or 0),
@@ -345,6 +360,7 @@ def run_campaigns(
     copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
     copy_raw["next_hypothesis_v4"] = copy_v4
     copy_raw["next_hypothesis_v5"] = copy_v5
+    copy_raw["next_hypothesis_v6"] = copy_v6
     copy_raw_path = _write_raw(root, "copy_vault", copy_raw)
     copy_campaign = build_copy_campaign(
         copy_raw, freeze=copy_freeze, datasets=copy_data, require_daily=True

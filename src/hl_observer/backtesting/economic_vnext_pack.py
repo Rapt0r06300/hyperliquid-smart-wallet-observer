@@ -23,6 +23,8 @@ from hl_observer.backtesting.copy_vault_vnext_integrity import (
 )
 from hl_observer.backtesting.copy_vault_vnext_train import (
     MECHANISM as COPY_VAULT_VNEXT_MECHANISM,
+)
+from hl_observer.backtesting.copy_vault_vnext_train import (
     explore_copy_vault_vnext_train,
 )
 from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
@@ -145,9 +147,25 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    raw_copy_v6 = copy_raw.get("next_hypothesis_v6") if copy_raw is not None else None
+    copy_v6 = (
+        dict(raw_copy_v6)
+        if isinstance(raw_copy_v6, dict)
+        else {
+            "schema_version": "hypersmart.copy_vault_v6_balanced_train.v1",
+            "status": "COPY_VAULT_V6_REPORT_MISSING",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "heldout_evaluated": False,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
     copy_integrity = evaluate_copy_vault_vnext_integrity(copy_raw)
     copy = gate_copy_vault_candidate(copy, copy_integrity)
     copy_v5 = gate_copy_vault_candidate(copy_v5, copy_integrity)
+    copy_v6 = gate_copy_vault_candidate(copy_v6, copy_integrity)
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -163,6 +181,9 @@ def run_economic_vnext_pack(
         ),
         "copy_vault_lifecycle_v5": _write_json(
             project_root, "copy_vault_v5_lifecycle_train", copy_v5
+        ),
+        "copy_vault_balanced_v6": _write_json(
+            project_root, "copy_vault_v6_balanced_train", copy_v6
         ),
     }
     families = {
@@ -214,7 +235,14 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": copy_v5.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": copy_v5.get("freeze_candidate_sha256"),
                 "heldout_evaluated": copy_v5.get("heldout_evaluated") is True,
-            }
+            },
+            "copy_vault_balanced_v6": {
+                "status": copy_v6.get("status"),
+                "selection_eligible": copy_v6.get("selection_eligible") is True,
+                "physical_freeze_allowed": copy_v6.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": copy_v6.get("freeze_candidate_sha256"),
+                "heldout_evaluated": copy_v6.get("heldout_evaluated") is True,
+            },
         },
         "reports": {
             key: path.relative_to(project_root).as_posix() for key, path in paths.items()
