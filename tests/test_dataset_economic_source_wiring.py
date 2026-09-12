@@ -91,3 +91,12 @@ def test_copy_vault_v6_balanced_est_branche_sur_le_meme_flux_causal() -> None:
     assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
         'copy_raw["next_hypothesis_v6"]'
     )
+
+
+def test_copy_vault_v7_exit_flow_est_branche_sur_le_meme_flux_causal() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "explore_copy_vault_v7_exit_flow_train" in text
+    assert 'copy_raw["next_hypothesis_v7"]' in text
+    assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
+        'copy_raw["next_hypothesis_v7"]'
+    )

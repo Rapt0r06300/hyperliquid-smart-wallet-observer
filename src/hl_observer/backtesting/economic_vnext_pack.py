@@ -162,10 +162,26 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    raw_copy_v7 = copy_raw.get("next_hypothesis_v7") if copy_raw is not None else None
+    copy_v7 = (
+        dict(raw_copy_v7)
+        if isinstance(raw_copy_v7, dict)
+        else {
+            "schema_version": "hypersmart.copy_vault_v7_exit_flow_train.v1",
+            "status": "COPY_VAULT_V7_REPORT_MISSING",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "heldout_evaluated": False,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
     copy_integrity = evaluate_copy_vault_vnext_integrity(copy_raw)
     copy = gate_copy_vault_candidate(copy, copy_integrity)
     copy_v5 = gate_copy_vault_candidate(copy_v5, copy_integrity)
     copy_v6 = gate_copy_vault_candidate(copy_v6, copy_integrity)
+    copy_v7 = gate_copy_vault_candidate(copy_v7, copy_integrity)
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -184,6 +200,9 @@ def run_economic_vnext_pack(
         ),
         "copy_vault_balanced_v6": _write_json(
             project_root, "copy_vault_v6_balanced_train", copy_v6
+        ),
+        "copy_vault_exit_flow_v7": _write_json(
+            project_root, "copy_vault_v7_exit_flow_train", copy_v7
         ),
     }
     families = {
@@ -242,6 +261,13 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": copy_v6.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": copy_v6.get("freeze_candidate_sha256"),
                 "heldout_evaluated": copy_v6.get("heldout_evaluated") is True,
+            },
+            "copy_vault_exit_flow_v7": {
+                "status": copy_v7.get("status"),
+                "selection_eligible": copy_v7.get("selection_eligible") is True,
+                "physical_freeze_allowed": copy_v7.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": copy_v7.get("freeze_candidate_sha256"),
+                "heldout_evaluated": copy_v7.get("heldout_evaluated") is True,
             },
         },
         "reports": {
