@@ -105,6 +105,7 @@ def test_residual_replay_utilise_uniquement_observations_du_shard_partage(tmp_pa
     monkeypatch.setattr(module, "CROSS_ASSET_LEADERS", ("BTC",))
     monkeypatch.setattr(module, "CROSS_ASSET_FOLLOWERS", ("SOL",))
     monkeypatch.setattr(module, "CROSS_ASSET_SHOCK_THRESHOLDS_BPS", ())
+    monkeypatch.setattr(module, "BOOK_CONFIRMATION_SHOCK_WINDOWS_MS", ())
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_BETAS", (1.0,))
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_WINDOWS_MS", (1_000,))
     monkeypatch.setattr(module, "REFERENCE_RESIDUAL_THRESHOLDS_BPS", (4.0,))

@@ -57,7 +57,7 @@ def test_residual_family_is_counted_before_any_replay(tmp_path: Path, monkeypatc
         candidate_coins=("BTC", "SOL"),
     )
 
-    assert report["fixed_grid"]["trial_count"] == 37
+    assert report["fixed_grid"]["trial_count"] == 109
     assert report["fixed_grid"]["reference_residual_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     assert report["heldout_evaluated"] is False
     assert report["paper_read_only"] is True

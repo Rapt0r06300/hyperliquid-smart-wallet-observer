@@ -300,7 +300,9 @@ def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(tmp_path: Pa
         250.0,
         1_000.0,
     }
-    assert report["fixed_grid"]["trial_count"] == expected_calls
+    assert report["fixed_grid"]["trial_count"] == (
+        expected_calls + module.book_confirmation_trial_count(1)
+    )
     assert {hypothesis["direction_policy"] for hypothesis in report["fixed_grid"]["hypotheses"]} == {
         "SHOCK_CONTINUATION",
         "EXTREME_SHOCK_REVERSAL",
@@ -430,7 +432,10 @@ def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path:
     assert l2_history == {"SOL": [sol_book]}
     assert kwargs["precomputed_shocks"] == {"SOL": [(trigger_ns, 1.0)]}
     assert kwargs["admission_policy"] == module.ADMISSION_PREDECLARED_ALL_SIGNALS
-    assert report["fixed_grid"]["trial_count"] == module.research_family_trial_count(1, 1)
+    assert report["fixed_grid"]["trial_count"] == (
+        module.research_family_trial_count(1, 1)
+        + module.book_confirmation_trial_count(2)
+    )
     assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     variant = report["variants"][0]
     assert variant["leader_coin"] == "BTC"

@@ -20,6 +20,31 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.backtesting import lead_lag_shadow
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    HORIZONS_MS as BOOK_CONFIRMATION_HORIZONS_MS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    IMBALANCE_THRESHOLDS as BOOK_CONFIRMATION_IMBALANCE_THRESHOLDS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    MAX_BOOK_AGE_MS as BOOK_CONFIRMATION_MAX_BOOK_AGE_MS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    MECHANISM as BOOK_CONFIRMATION_MECHANISM,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    MIN_TRAIN_FILLS as BOOK_CONFIRMATION_MIN_TRAIN_FILLS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    SHOCK_THRESHOLDS_BPS as BOOK_CONFIRMATION_SHOCK_THRESHOLDS_BPS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    SHOCK_WINDOWS_MS as BOOK_CONFIRMATION_SHOCK_WINDOWS_MS,
+)
+from hl_observer.backtesting.lead_lag_book_confirmation import (
+    book_confirmation_trial_count,
+    confirm_shocks_with_causal_book,
+)
 from hl_observer.backtesting.lead_lag_multiasset_ranges import (
     in_ranges as _in_ranges_impl,
 )
@@ -501,7 +526,11 @@ def explore_lead_lag_multiasset_train(
         1,
         len(candidate_coins) * combinations_per_coin + len(planned_cross_pairs) * cross_combinations_per_pair,
     )
-    trial_count = research_family_trial_count(base_trial_count, len(planned_cross_pairs))
+    book_confirmation_trials = book_confirmation_trial_count(len(candidate_coins))
+    trial_count = (
+        research_family_trial_count(base_trial_count, len(planned_cross_pairs))
+        + book_confirmation_trials
+    )
     for hypothesis in TRAIN_HYPOTHESES:
         for coin in candidate_coins:
             selected_coin = str(coin).upper()
@@ -550,6 +579,96 @@ def explore_lead_lag_multiasset_train(
                                 admission_policy=str(hypothesis["admission_policy"]),
                             )
                         )
+    book_confirmation_cache: dict[
+        tuple[str, float, float, float], tuple[list[tuple[int, float]], dict[str, Any]]
+    ] = {}
+    for coin in candidate_coins:
+        selected_coin = str(coin).upper()
+        streams = tape.get(selected_coin)
+        if not streams:
+            continue
+        trades = list(streams.get("TRADE") or [])
+        trade_observations = list(streams.get("TRADE_OBS") or [])
+        follower_books = list(l2_history.get(selected_coin, ()))
+        if not trades or not trade_observations or not follower_books:
+            continue
+        aligned_source_ids = sorted(
+            set(streams.get("TRADE_SOURCE_IDS") or ())
+            & set(streams.get("HL_BOOK_SOURCE_IDS") or ())
+        )
+        if not aligned_source_ids:
+            continue
+        for shock_window_ms in BOOK_CONFIRMATION_SHOCK_WINDOWS_MS:
+            for threshold in BOOK_CONFIRMATION_SHOCK_THRESHOLDS_BPS:
+                shock_key = (selected_coin, float(threshold), float(shock_window_ms))
+                if shock_key not in shock_cache:
+                    shock_cache[shock_key] = lead_lag_shadow.detecter_chocs_fenetre(
+                        trades,
+                        seuil_bps=float(threshold),
+                        fenetre_ms=float(shock_window_ms),
+                    )
+                raw_shocks = shock_cache[shock_key]
+                for imbalance_threshold in BOOK_CONFIRMATION_IMBALANCE_THRESHOLDS:
+                    confirmation_key = (
+                        selected_coin,
+                        float(threshold),
+                        float(shock_window_ms),
+                        float(imbalance_threshold),
+                    )
+                    confirmed_shocks, confirmation_diagnostics = (
+                        confirm_shocks_with_causal_book(
+                            raw_shocks,
+                            follower_books,
+                            trade_observations,
+                            min_abs_imbalance=float(imbalance_threshold),
+                            max_book_age_ms=BOOK_CONFIRMATION_MAX_BOOK_AGE_MS,
+                        )
+                    )
+                    book_confirmation_cache[confirmation_key] = (
+                        confirmed_shocks,
+                        confirmation_diagnostics,
+                    )
+                    for horizon in BOOK_CONFIRMATION_HORIZONS_MS:
+                        report = replay_measured_lead_lag(
+                            {selected_coin: streams},
+                            {selected_coin: follower_books},
+                            shock_threshold_bps=float(threshold),
+                            horizon_ms=int(horizon),
+                            latency_evidence=latency,
+                            notional_usd=NOTIONAL_USD,
+                            min_history=5,
+                            min_expected_net_bps=0.0,
+                            min_episodes=1,
+                            direction_multiplier=1,
+                            shock_window_ms=float(shock_window_ms),
+                            admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                            precomputed_shocks={selected_coin: confirmed_shocks},
+                            inputs_sorted=True,
+                        )
+                        scored = _score_report(
+                            report,
+                            coin=selected_coin,
+                            threshold_bps=float(threshold),
+                            horizon_ms=int(horizon),
+                            trial_count=trial_count,
+                            mechanism=BOOK_CONFIRMATION_MECHANISM,
+                            direction_multiplier=1,
+                            min_train_fills=BOOK_CONFIRMATION_MIN_TRAIN_FILLS,
+                            shock_window_ms=float(shock_window_ms),
+                            admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                        )
+                        scored.update(
+                            {
+                                "direction_policy": "EXTERNAL_SHOCK_BOOK_IMBALANCE_AGREEMENT",
+                                "book_imbalance_threshold": float(imbalance_threshold),
+                                "max_confirmation_book_age_ms": BOOK_CONFIRMATION_MAX_BOOK_AGE_MS,
+                                "book_confirmation_diagnostics": dict(
+                                    confirmation_diagnostics
+                                ),
+                                "aligned_source_ids": aligned_source_ids,
+                            }
+                        )
+                        variants.append(scored)
     for leader, follower in planned_cross_pairs:
         leader_streams, follower_streams = tape.get(leader), tape.get(follower)
         if not leader_streams or not follower_streams:
@@ -720,6 +839,10 @@ def explore_lead_lag_multiasset_train(
             "aligned_source_ids": selected.get("aligned_source_ids"),
             "reference_beta": selected.get("reference_beta"),
             "reference_beta_asof_ms": selected.get("reference_beta_asof_ms"),
+            "book_imbalance_threshold": selected.get("book_imbalance_threshold"),
+            "max_confirmation_book_age_ms": selected.get(
+                "max_confirmation_book_age_ms"
+            ),
             "shock_threshold_bps": selected["shock_threshold_bps"],
             "horizon_ms": selected["horizon_ms"],
             "shock_window_ms": selected["shock_window_ms"],
@@ -783,6 +906,22 @@ def explore_lead_lag_multiasset_train(
                 "minimum_train_fills": REFERENCE_RESIDUAL_MIN_TRAIN_FILLS,
                 "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             },
+            "book_confirmation_hypothesis": {
+                "mechanism": BOOK_CONFIRMATION_MECHANISM,
+                "direction_multiplier": 1,
+                "direction_policy": "EXTERNAL_SHOCK_BOOK_IMBALANCE_AGREEMENT",
+                "shock_thresholds_bps": list(BOOK_CONFIRMATION_SHOCK_THRESHOLDS_BPS),
+                "horizons_ms": list(BOOK_CONFIRMATION_HORIZONS_MS),
+                "shock_windows_ms": list(BOOK_CONFIRMATION_SHOCK_WINDOWS_MS),
+                "book_imbalance_thresholds": list(
+                    BOOK_CONFIRMATION_IMBALANCE_THRESHOLDS
+                ),
+                "max_confirmation_book_age_ms": BOOK_CONFIRMATION_MAX_BOOK_AGE_MS,
+                "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
+                "minimum_train_fills": BOOK_CONFIRMATION_MIN_TRAIN_FILLS,
+                "trial_count": book_confirmation_trials,
+                "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            },
         },
         "selected": selected,
         "freeze_candidate": freeze_payload,
@@ -797,6 +936,10 @@ def explore_lead_lag_multiasset_train(
                 f"{coin}|{threshold:g}|{window if window is not None else 'consecutive'}": len(rows)
                 for (coin, threshold, window), rows in shock_cache.items()
             },
+            "reused_across_horizons": True,
+        },
+        "book_confirmation_cache": {
+            "unique_definitions": len(book_confirmation_cache),
             "reused_across_horizons": True,
         },
         "paper_read_only": True,
