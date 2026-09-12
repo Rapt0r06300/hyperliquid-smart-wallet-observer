@@ -48,8 +48,8 @@ def _number(value: object) -> float | None:
 def _metaorder_feature_index() -> dict[str, dict[str, float]]:
     """Rebuild causal prefix features from the canonical Copy-Vault loader once."""
 
-    from tools import pipeline_copie_reel
     from hl_observer.backtesting.copy_vault_causal_selection import cluster_metaorders
+    from tools import pipeline_copie_reel
 
     entries, _audit = pipeline_copie_reel.charger_entrees_alpha_avec_audit(ROOT)
     metaorders, _meta_audit = cluster_metaorders(entries)
@@ -122,10 +122,11 @@ def _enrich(
         spread = _number(row.get("regime_reference_spread_bps"))
         notional = _number(row.get("notional_usd"))
         entry_capacity = _number(row.get("entry_capacity_usd"))
-        exit_capacity = _number(row.get("exit_capacity_usd"))
         capacity_slack = (
-            min(entry_capacity, exit_capacity) / notional
-            if None not in (entry_capacity, exit_capacity, notional) and float(notional) > 0.0
+            entry_capacity / notional
+            if entry_capacity is not None
+            and notional is not None
+            and float(notional) > 0.0
             else None
         )
         execution_efficiency = (

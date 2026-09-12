@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from tools.copy_vault_discovery_evaluator import evaluate_feature_rows
+from tools.copy_vault_discovery_evaluator import _enrich, evaluate_feature_rows
 
 
 def _rows() -> list[dict]:
@@ -95,3 +95,15 @@ def test_feature_absente_echoue_ferme() -> None:
     assert result["candidate_verdict"] == "REJECT"
     assert "FEATURE_UNAVAILABLE" in result["candidate_reasons"]
 
+
+def test_entry_features_ne_lisent_pas_la_capacite_de_sortie_future() -> None:
+    base = _rows()[0]
+    low_exit = _enrich([{**base, "exit_capacity_usd": 1.0}])[0]
+    high_exit = _enrich([{**base, "exit_capacity_usd": 1_000_000.0}])[0]
+
+    assert low_exit["feature_execution_efficiency"] == high_exit[
+        "feature_execution_efficiency"
+    ]
+    assert low_exit["feature_l2_state_quality"] == high_exit[
+        "feature_l2_state_quality"
+    ]
