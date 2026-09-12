@@ -35,6 +35,10 @@ class ProcessHandle(Protocol):
 
 Spawner = Callable[[list[str], Path, Mapping[str, str]], ProcessHandle]
 
+_CREATE_NO_WINDOW = 0x08000000
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
 
 def _registry(*, campaign_only: bool = False) -> dict[str, dict[str, Any]]:
     rows = COLLECTEURS_CAMPAGNE if campaign_only else REGISTRE + COLLECTEURS_CAMPAGNE
@@ -74,21 +78,40 @@ def resolve_project_python(root: str | Path) -> Path:
     raise FileNotFoundError("no usable Python executable for bounded collection")
 
 
+def _background_creation_flags(platform_name: str = os.name) -> int:
+    if platform_name != "nt":
+        return 0
+    return _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB
+
+
 def _default_spawn(
     command: list[str], root: Path, environment: Mapping[str, str]
 ) -> ProcessHandle:
-    flags = 0
-    if os.name == "nt":
-        flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
-    return subprocess.Popen(  # noqa: S603 - fixed local runner and registry scripts
-        command,
-        cwd=str(root),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env=dict(environment),
-        creationflags=flags,
-    )
+    flags = _background_creation_flags()
+    kwargs = {
+        "cwd": str(root),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "env": dict(environment),
+    }
+    try:
+        return subprocess.Popen(  # noqa: S603 - fixed local runner and registry scripts
+            command,
+            creationflags=flags,
+            **kwargs,
+        )
+    except OSError as exc:
+        # Some locked-down Windows jobs forbid explicit breakaway. Collection
+        # can still run in the caller's job, so retry with the previous safe
+        # no-window/process-group contract instead of failing startup.
+        if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 87}:
+            raise
+        return subprocess.Popen(  # noqa: S603 - same fixed local command
+            command,
+            creationflags=flags & ~_CREATE_BREAKAWAY_FROM_JOB,
+            **kwargs,
+        )
 
 
 def _bounded_process_ids(processes: list[dict[str, Any]]) -> set[int]:

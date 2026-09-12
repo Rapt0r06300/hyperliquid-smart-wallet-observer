@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from hl_observer.ops.bounded_collection import (
+    _background_creation_flags,
     attach_bounded_collectors,
     ensure_bounded_collectors,
     inspect_bounded_collectors,
@@ -43,6 +44,18 @@ def test_resolve_project_python_uses_latest_backup_before_tools_runtime(
         executable.write_bytes(b"MZ")
 
     assert resolve_project_python(tmp_path) == latest.resolve()
+
+
+def test_windows_background_collectors_break_away_from_parent_job() -> None:
+    flags = _background_creation_flags("nt")
+
+    assert flags & 0x08000000  # CREATE_NO_WINDOW
+    assert flags & 0x00000200  # CREATE_NEW_PROCESS_GROUP
+    assert flags & 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+
+
+def test_non_windows_background_collectors_use_no_creation_flags() -> None:
+    assert _background_creation_flags("posix") == 0
 
 
 def test_checkpoint_companion_is_campaign_only_and_never_in_launcher_profiles() -> None:
