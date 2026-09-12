@@ -109,3 +109,12 @@ def test_copy_vault_v8_entry_efficiency_est_branche_sur_le_meme_flux_causal() ->
     assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
         'copy_raw["next_hypothesis_v8"]'
     )
+
+
+def test_copy_vault_v9_online_leader_quality_est_branche_sur_le_meme_flux_causal() -> None:
+    text = RUNNER.read_text(encoding="utf-8", errors="replace")
+    assert "explore_copy_vault_v9_online_leader_quality_train" in text
+    assert 'copy_raw["next_hypothesis_v9"]' in text
+    assert text.index("charger_evenements_lifecycle_avec_audit") < text.index(
+        'copy_raw["next_hypothesis_v9"]'
+    )

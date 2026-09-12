@@ -89,6 +89,12 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
                 "physical_freeze_allowed": False,
                 "heldout_evaluated": False,
             },
+            "next_hypothesis_v9": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
         },
     )
     monkeypatch.setattr(
@@ -138,6 +144,13 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
         is False
     )
     assert "copy_vault_entry_efficiency_v8" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_online_leader_quality_v9"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "copy_vault_online_leader_quality_v9" in result["reports"]
     assert (
         result["research_variants"]["cross_venue_persistence_v5"][
             "heldout_evaluated"

@@ -192,12 +192,28 @@ def run_economic_vnext_pack(
             "real_execution": False,
         }
     )
+    raw_copy_v9 = copy_raw.get("next_hypothesis_v9") if copy_raw is not None else None
+    copy_v9 = (
+        dict(raw_copy_v9)
+        if isinstance(raw_copy_v9, dict)
+        else {
+            "schema_version": "hypersmart.copy_vault_v9_online_leader_quality_train.v1",
+            "status": "COPY_VAULT_V9_REPORT_MISSING",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
+            "heldout_evaluated": False,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    )
     copy_integrity = evaluate_copy_vault_vnext_integrity(copy_raw)
     copy = gate_copy_vault_candidate(copy, copy_integrity)
     copy_v5 = gate_copy_vault_candidate(copy_v5, copy_integrity)
     copy_v6 = gate_copy_vault_candidate(copy_v6, copy_integrity)
     copy_v7 = gate_copy_vault_candidate(copy_v7, copy_integrity)
     copy_v8 = gate_copy_vault_candidate(copy_v8, copy_integrity)
+    copy_v9 = gate_copy_vault_candidate(copy_v9, copy_integrity)
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
@@ -222,6 +238,9 @@ def run_economic_vnext_pack(
         ),
         "copy_vault_entry_efficiency_v8": _write_json(
             project_root, "copy_vault_v8_entry_efficiency_train", copy_v8
+        ),
+        "copy_vault_online_leader_quality_v9": _write_json(
+            project_root, "copy_vault_v9_online_leader_quality_train", copy_v9
         ),
     }
     families = {
@@ -294,6 +313,13 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": copy_v8.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": copy_v8.get("freeze_candidate_sha256"),
                 "heldout_evaluated": copy_v8.get("heldout_evaluated") is True,
+            },
+            "copy_vault_online_leader_quality_v9": {
+                "status": copy_v9.get("status"),
+                "selection_eligible": copy_v9.get("selection_eligible") is True,
+                "physical_freeze_allowed": copy_v9.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": copy_v9.get("freeze_candidate_sha256"),
+                "heldout_evaluated": copy_v9.get("heldout_evaluated") is True,
             },
         },
         "reports": {
