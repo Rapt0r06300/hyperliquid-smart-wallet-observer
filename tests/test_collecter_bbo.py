@@ -85,6 +85,33 @@ def test_parser_bookticker_binance():
     assert m.parser_bookticker_binance({"x": 1}) is None
 
 
+def test_binance_bbo_tape_record_preserves_top_of_book_sizes():
+    m = _mod()
+    quote = {
+        "symbol": "BTCUSDT",
+        "bid": 100.0,
+        "ask": 100.1,
+        "bid_sz": 1.25,
+        "ask_sz": 2.5,
+        "ts_ex": 1234.0,
+        "update_id": 42,
+    }
+
+    row = m.build_binance_bbo_tape_record(
+        quote,
+        coin="BTC",
+        recu_ns=99,
+        recv_wall_ms=1235,
+        connection_id="bin-bbo-test",
+        sequence=7,
+    )
+
+    assert row["venue"] == "BIN"
+    assert row["bid_sz"] == 1.25
+    assert row["ask_sz"] == 2.5
+    assert row["event_id"] == "bin-bbo:BTCUSDT:42"
+
+
 _NS = 1_000_000_000                                            # 1 s en nanosecondes (horloge monotone)
 
 

@@ -254,6 +254,36 @@ def parser_bookticker_binance(msg: Any) -> dict | None:
             "ts_ex": float(d.get("T") or d.get("E") or 0.0), "update_id": d.get("u")}
 
 
+def build_binance_bbo_tape_record(
+    quote: dict[str, Any],
+    *,
+    coin: str,
+    recu_ns: int,
+    recv_wall_ms: int,
+    connection_id: str,
+    sequence: int,
+) -> dict[str, Any]:
+    """Materialize one raw Binance BBO row without dropping queue capacity."""
+
+    return {
+        "venue": "BIN",
+        "coin": coin,
+        "recu_ns": recu_ns,
+        "mid": (quote["bid"] + quote["ask"]) / 2,
+        "bid": quote["bid"],
+        "ask": quote["ask"],
+        "bid_sz": quote["bid_sz"],
+        "ask_sz": quote["ask_sz"],
+        "ts_wall_ms": recv_wall_ms,
+        "recv_wall_ts_ms": recv_wall_ms,
+        "connection_id": connection_id,
+        "sequence": sequence,
+        "event_id": f"bin-bbo:{quote['symbol']}:{quote.get('update_id') or recv_wall_ms}",
+        "ts_ex": quote["ts_ex"],
+        "update_id": quote.get("update_id"),
+    }
+
+
 def parser_aggtrade_binance(msg: Any) -> dict | None:
     """WS Binance `<sym>@trade` (ou `@aggTrade`) -> {symbol, px, sz, side, ts_ex}. Le CHOC exécutable
     (Flo : détecter le choc sur les TRADES, pas le mid). `m`=True -> l'agressif est le VENDEUR.
@@ -910,18 +940,16 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                 connection_id=connection_id,
                                 sequence=sequence,
                             )
-                            tape.append({"venue": "BIN", "coin": inv[q["symbol"]], "recu_ns": r,
-                                         "mid": (q["bid"] + q["ask"]) / 2, "bid": q["bid"], "ask": q["ask"],
-                                         "ts_wall_ms": recv_wall_ms,
-                                         "recv_wall_ts_ms": recv_wall_ms,
-                                         "connection_id": connection_id,
-                                         "sequence": sequence,
-                                         "event_id": "bin-bbo:%s:%s" % (
-                                             q["symbol"],
-                                             q.get("update_id") or recv_wall_ms,
-                                         ),
-                                         "ts_ex": q["ts_ex"],
-                                         "update_id": q.get("update_id")})
+                            tape.append(
+                                build_binance_bbo_tape_record(
+                                    q,
+                                    coin=coin_name,
+                                    recu_ns=r,
+                                    recv_wall_ms=recv_wall_ms,
+                                    connection_id=connection_id,
+                                    sequence=sequence,
+                                )
+                            )
             except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
                 stats["reconnexions_bin"] += 1
                 await asyncio.sleep(1.0)
