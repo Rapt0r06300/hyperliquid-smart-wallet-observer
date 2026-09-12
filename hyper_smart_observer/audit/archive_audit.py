@@ -34,10 +34,10 @@ def audit_zip_contents(zip_path: Path) -> tuple[bool, list[str]]:
 
 def write_archive_audit_report(root: Path, output: Path = Path("docs/release/HYPERSMART_ARCHIVE_AUDIT.md")) -> Path:
     ok, message = audit_archive_readiness(root)
-    desktop = Path.home() / "Desktop"
+    archive_dir = root.resolve() / "runtime" / "archives"
     latest_archive = None
-    if desktop.exists():
-        archives = sorted(desktop.glob("Projet_invest_clean_*.zip"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if archive_dir.exists():
+        archives = sorted(archive_dir.glob("Projet_invest_clean_*.zip"), key=lambda path: path.stat().st_mtime, reverse=True)
         latest_archive = archives[0] if archives else None
     zip_ok = None
     forbidden: list[str] = []
@@ -49,10 +49,10 @@ def write_archive_audit_report(root: Path, output: Path = Path("docs/release/HYP
         "",
         f"- status: {'OK' if ok else 'FAIL'}",
         f"- message: {message}",
-        f"- latest_desktop_archive: {latest_archive if latest_archive else 'none'}",
-        f"- latest_desktop_archive_clean: {zip_ok if zip_ok is not None else 'not_checked'}",
+        f"- latest_project_archive: {latest_archive if latest_archive else 'none'}",
+        f"- latest_project_archive_clean: {zip_ok if zip_ok is not None else 'not_checked'}",
         f"- forbidden_entries_in_latest_archive: {len(forbidden)}",
-        "- clean archives must be created outside the project, preferably Desktop.",
+        "- clean archives must stay under project runtime/archives.",
         "- root ZIP/7Z/RAR files are forbidden.",
         "- logs/, data/, .git/, SQLite, WAL/SHM, caches, .env and nested archives are excluded.",
     ]

@@ -665,7 +665,7 @@ def runtime_clean_report() -> None:
     report = scan_runtime_hygiene(settings)
     typer.echo(format_runtime_hygiene_report(report))
     typer.echo("clean archive command: .\\CREER_ARCHIVE_PROPRE.cmd or python -m hl_observer create-clean-archive")
-    typer.echo("clean archive output: Desktop\\Projet_invest_clean_YYYYMMDD_HHMMSS.zip")
+    typer.echo("clean archive output: runtime\\archives\\Projet_invest_clean_YYYYMMDD_HHMMSS.zip")
     typer.echo("no runtime file is deleted, killed, copied or zipped by this report")
 
 

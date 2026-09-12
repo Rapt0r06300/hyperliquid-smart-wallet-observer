@@ -7,7 +7,6 @@ from datetime import datetime
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
-
 INCLUDE_PATHS = [
     ".env.example",
     ".gitignore",
@@ -60,8 +59,8 @@ class ArchiveResult:
     entries: int = 0
 
 
-def default_desktop_output_dir() -> Path:
-    return Path.home() / "Desktop"
+def default_project_output_dir(root: Path) -> Path:
+    return Path(root).resolve() / "runtime" / "archives"
 
 
 def default_archive_name() -> str:
@@ -98,16 +97,17 @@ def is_archive_safe_source(root: Path, path: Path) -> bool:
 
 def create_clean_archive(root: Path, output_dir: Path | None = None, *, name: str | None = None) -> ArchiveResult:
     root = root.resolve()
-    output_dir = (output_dir or default_desktop_output_dir()).resolve()
+    archive_root = default_project_output_dir(root)
+    output_dir = (output_dir or archive_root).resolve()
     name = name or default_archive_name()
-    if output_dir == root or root in output_dir.parents:
-        raise RuntimeError("Clean archives must be created outside the project directory.")
+    if output_dir != archive_root and archive_root not in output_dir.parents:
+        raise RuntimeError("Clean archives must stay inside project runtime/archives.")
     if Path(name).name != name:
         raise RuntimeError("Archive name must be a file name, not a path.")
     output_dir.mkdir(parents=True, exist_ok=True)
     archive_path = output_dir / name
-    if archive_path == root / archive_path.name or root in archive_path.resolve().parents:
-        raise RuntimeError("Archive output path inside the project is refused.")
+    if archive_path.parent != archive_root and archive_root not in archive_path.parents:
+        raise RuntimeError("Archive output path must stay inside project runtime/archives.")
     warnings: list[str] = []
     files_copied = 0
     with tempfile.TemporaryDirectory(prefix="hypersmart-archive-") as temp_dir:

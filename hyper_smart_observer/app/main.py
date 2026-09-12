@@ -47,7 +47,7 @@ from hyper_smart_observer.realtime_monitor.stream_models import StreamType
 from hyper_smart_observer.realtime_monitor.subscriptions import Subscription
 from hyper_smart_observer.realtime_monitor.hot_watch_rotation import rotate_hot_watch
 from hyper_smart_observer.realtime_monitor.websocket_manager import WebSocketManager
-from hyper_smart_observer.runtime.archive import archive_readiness, create_clean_archive, default_desktop_output_dir
+from hyper_smart_observer.runtime.archive import archive_readiness, create_clean_archive
 from hyper_smart_observer.runtime.runtime_check import format_runtime_report, scan_runtime_files
 from hyper_smart_observer.scanner.missed_opportunity_logger import MissedOpportunityLogger
 from hyper_smart_observer.scoring.ranking_report import format_ranking_report
@@ -137,13 +137,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--runtime-clean-report", action="store_true", help="Explain runtime files excluded from archives.")
     parser.add_argument("--archive-readiness", action="store_true", help="Check clean source archive readiness.")
     parser.add_argument("--archive-audit", action="store_true", help="Write the archive hygiene audit report.")
-    parser.add_argument("--create-clean-archive", action="store_true", help="Create a clean source ZIP on Desktop.")
+    parser.add_argument("--create-clean-archive", action="store_true", help="Create a clean source ZIP under project runtime/archives.")
     parser.add_argument(
         "--archive-output-desktop",
         action="store_true",
-        help="Force clean archive output to the current user's Desktop.",
+        help="Deprecated: Desktop archive output is refused.",
     )
-    parser.add_argument("--archive-output-dir", default=None, help="Optional clean archive output directory outside the project.")
+    parser.add_argument("--archive-output-dir", default=None, help="Optional output directory under project runtime/archives.")
     parser.add_argument("--dashboard-export", action="store_true", help="Export the read-only HTML dashboard.")
     parser.add_argument("--audit-safety", action="store_true", help="Run HyperSmart automated safety audit.")
     parser.add_argument("--discover-wallets", action="store_true", help="Discover wallets from local/imported sources only.")
@@ -506,7 +506,9 @@ def main(argv: list[str] | None = None) -> int:
         print(str(archive_audit_path))
 
     if args.create_clean_archive:
-        output_dir = default_desktop_output_dir() if args.archive_output_desktop or not args.archive_output_dir else Path(args.archive_output_dir)
+        if args.archive_output_desktop:
+            raise SystemExit("Desktop archive output is disabled; use project runtime/archives.")
+        output_dir = Path(args.archive_output_dir) if args.archive_output_dir else None
         result = create_clean_archive(Path(config.runtime_root), output_dir)
         archive_audit_path = write_archive_audit_report(Path(config.runtime_root).resolve())
         print("Clean archive created")

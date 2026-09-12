@@ -142,9 +142,8 @@ function Test-ZipIsClean([string]$ZipPath) {
 }
 
 $root = Resolve-FullPath $ProjectRoot
-$desktop = [Environment]::GetFolderPath("Desktop")
 if ([string]::IsNullOrWhiteSpace($OutputDir)) {
-    $OutputDir = $desktop
+    $OutputDir = Join-Path $root "runtime\archives"
 }
 if ([string]::IsNullOrWhiteSpace($Name)) {
     $Name = "Projet_invest_clean_{0}.zip" -f (Get-Date -Format "yyyyMMdd_HHmmss")
@@ -152,8 +151,9 @@ if ([string]::IsNullOrWhiteSpace($Name)) {
 $output = Resolve-FullPath $OutputDir
 $rootFull = [System.IO.Path]::GetFullPath($root).TrimEnd("\", "/")
 $outputFull = [System.IO.Path]::GetFullPath($output).TrimEnd("\", "/")
-if ($outputFull.Equals($rootFull, [System.StringComparison]::OrdinalIgnoreCase) -or $outputFull.StartsWith($rootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refused: OutputDir is inside the project. Clean archives must be created on the Desktop or outside the project."
+$archiveRoot = [System.IO.Path]::GetFullPath((Join-Path $root "runtime\archives")).TrimEnd("\", "/")
+if (-not ($outputFull.Equals($archiveRoot, [System.StringComparison]::OrdinalIgnoreCase) -or $outputFull.StartsWith($archiveRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase))) {
+    throw "Refused: OutputDir must stay inside the project runtime\archives directory."
 }
 if ($Name -match '[\\/]') {
     throw "Refused: Name must be a file name, not a path."
@@ -161,8 +161,8 @@ if ($Name -match '[\\/]') {
 New-Item -ItemType Directory -Force -Path $output | Out-Null
 $zipPath = Join-Path $output $Name
 $zipFull = [System.IO.Path]::GetFullPath($zipPath)
-if ($zipFull.StartsWith($rootFull + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "Refused: archive path is inside the project."
+if (-not $zipFull.StartsWith($archiveRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refused: archive path must stay inside the project runtime\archives directory."
 }
 
 $stagingParent = Join-Path ([System.IO.Path]::GetTempPath()) ("projet-invest-archive-" + [System.Guid]::NewGuid().ToString("N"))
@@ -210,7 +210,7 @@ try {
     Write-Host ""
     Write-Host "Clean archive created successfully"
     Write-Host "Archive: $zipPath"
-    Write-Host "Desktop output policy: archives are created outside the project"
+    Write-Host "Project-local output policy: archives stay under runtime\archives"
     Write-Host "Files copied: $script:CopiedCount"
     Write-Host "Runtime files excluded/skipped: $script:ExcludedCount"
     Write-Host "Zip entries: $entries"
@@ -225,7 +225,7 @@ try {
         "- archive_path: $zipPath",
         "- files_copied: $script:CopiedCount",
         "- zip_entries: $entries",
-        "- output_policy: Desktop/outside project only",
+        "- output_policy: project runtime/archives only",
         "- excluded: logs/, data/, .git/, SQLite, WAL/SHM, .env, caches, nested archives"
     )
     Set-Content -Path $auditPath -Value $auditLines -Encoding UTF8

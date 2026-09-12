@@ -1,5 +1,6 @@
-import pytest
 from zipfile import ZipFile
+
+import pytest
 
 from hyper_smart_observer.runtime.archive import create_clean_archive, is_archive_safe_path
 
@@ -25,7 +26,8 @@ def test_clean_archive_excludes_logs_data_db(tmp_path):
     (root / "data" / "runtime.log").write_text("log", encoding="utf-8")
     (root / ".env").write_text("SECRET=never\n", encoding="utf-8")
 
-    result = create_clean_archive(root, tmp_path / "out", name="clean.zip")
+    output = root / "runtime" / "archives"
+    result = create_clean_archive(root, output, name="clean.zip")
 
     with ZipFile(result.archive_path) as zip_file:
         names = zip_file.namelist()
@@ -34,24 +36,34 @@ def test_clean_archive_excludes_logs_data_db(tmp_path):
     assert all(not name.startswith(("logs/", "data/")) for name in names)
     assert ".env" not in names
     assert all(not name.endswith((".sqlite3", ".sqlite3-wal", ".sqlite3-shm", ".db", ".log")) for name in names)
-    assert result.archive_path.parent == tmp_path / "out"
+    assert result.archive_path.parent == output
 
 
-def test_clean_archive_refuses_output_inside_project(tmp_path):
+def test_clean_archive_defaults_to_project_runtime_archives(tmp_path):
+    root = tmp_path / "repo"
+    (root / "hyper_smart_observer").mkdir(parents=True)
+    (root / "hyper_smart_observer" / "__init__.py").write_text("# ok\n", encoding="utf-8")
+
+    result = create_clean_archive(root, name="clean.zip")
+
+    assert result.archive_path == root / "runtime" / "archives" / "clean.zip"
+
+
+def test_clean_archive_refuses_output_outside_project(tmp_path):
     root = tmp_path / "repo"
     (root / "hyper_smart_observer").mkdir(parents=True)
     (root / "hyper_smart_observer" / "__init__.py").write_text("# ok\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError):
-        create_clean_archive(root, root, name="dirty.zip")
+        create_clean_archive(root, tmp_path / "outside", name="dirty.zip")
 
 
 def test_clean_archive_powershell_script_contains_safe_staging_rules():
     text = __import__("pathlib").Path("tools/create_clean_archive.ps1").read_text(encoding="utf-8")
 
     assert "Projet_invest_clean_" in text
-    assert "Desktop" in text
-    assert "Refused: OutputDir is inside the project" in text
+    assert 'Join-Path $root "runtime\\archives"' in text
+    assert "Refused: OutputDir must stay inside the project" in text
     assert "staging" in text.lower()
     assert '"logs"' in text
     assert '"data"' in text
