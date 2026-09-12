@@ -56,8 +56,15 @@ def resolve_project_python(root: str | Path) -> Path:
     """Prefer the embedded runtime so campaign processes remain portable."""
 
     project_root = Path(root).resolve()
+    portable_root = project_root / "portable_runtime"
+    backups = sorted(
+        portable_root.glob("python_backup_*/python.exe"),
+        key=lambda path: path.parent.name,
+        reverse=True,
+    )
     candidates = (
         project_root / "portable_runtime" / "python" / "python.exe",
+        *backups,
         project_root / "tools" / "python" / "python.exe",
         Path(sys.executable),
     )

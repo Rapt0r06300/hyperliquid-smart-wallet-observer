@@ -8,6 +8,7 @@ from hl_observer.ops.bounded_collection import (
     attach_bounded_collectors,
     ensure_bounded_collectors,
     inspect_bounded_collectors,
+    resolve_project_python,
     start_bounded_collectors,
 )
 from hl_observer.ops.collecteur_registry import (
@@ -29,6 +30,19 @@ class _FakeProcess:
 
     def poll(self) -> int | None:
         return self.returncode
+
+
+def test_resolve_project_python_uses_latest_backup_before_tools_runtime(
+    tmp_path: Path,
+) -> None:
+    older = tmp_path / "portable_runtime/python_backup_20260802_181823/python.exe"
+    latest = tmp_path / "portable_runtime/python_backup_20260813_224532/python.exe"
+    tools_runtime = tmp_path / "tools/python/python.exe"
+    for executable in (older, latest, tools_runtime):
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.write_bytes(b"MZ")
+
+    assert resolve_project_python(tmp_path) == latest.resolve()
 
 
 def test_checkpoint_companion_is_campaign_only_and_never_in_launcher_profiles() -> None:
