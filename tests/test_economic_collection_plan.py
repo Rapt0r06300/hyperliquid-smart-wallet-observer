@@ -104,6 +104,60 @@ def test_plan_distinguishes_future_data_from_killed_hypothesis() -> None:
     assert plan["real_execution"] is False
 
 
+def test_plan_recognizes_prefreeze_maker_queue_pipeline_as_data_only() -> None:
+    raw = _raw_reports()
+    raw["lead_lag"] = {
+        "canonical_mechanism": (
+            "causal_eth_strong_shock_full_fifo_maker_entry_taker_exit_v1"
+        ),
+        "provisional_without_physical_freeze": True,
+        "maker_queue_replay": {
+            "schema_version": "hypersmart.lead_lag_queue_replay.v1",
+            "mechanism": "lead_lag_v3_eth_strong_shock_queue_maker",
+            "strong_shocks_seen": 0,
+            "maker_queue_candidates": [],
+            "paper_read_only": True,
+            "real_execution": False,
+        },
+        "calibration": {
+            "status": "NO_PREDECLARED_STRONG_SHOCKS",
+            "queue_proven_fills": 0,
+        },
+        "next_hypothesis_v3": {
+            "mechanism": "lead_lag_v3_eth_strong_shock_queue_maker",
+            "status": "NO_PREDECLARED_STRONG_SHOCKS",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "exact_next_evidence": [
+                "ETH strong-shock candidates observed before any outcome is known",
+                "multi-level L2 snapshot plus incremental trades at the passive price",
+                "initial quantity ahead and queue replay proving each maker fill",
+            ],
+        },
+    }
+    campaigns = [
+        _campaign("copy_vault"),
+        _campaign("lead_lag"),
+        _campaign("cross_venue_dislocation_v2", closed_positions=20),
+    ]
+
+    plan = build_collection_plan(campaigns, raw, now_ms=123)
+    lead = next(row for row in plan["families"] if row["family"] == "lead_lag")
+
+    assert lead["software_pipeline_ready"] is True
+    assert lead["future_data_required_only"] is True
+    assert lead["collection_actionable"] is True
+    assert lead["evidence_state"] == "FUTURE_QUEUE_EVIDENCE_REQUIRED"
+    assert lead["methodology_action"] == "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
+    assert lead["progress"]["canonical_path"] == "MAKER_FIFO_QUEUE"
+    assert lead["progress"]["strong_shocks_seen"] == 0
+    assert lead["progress"]["queue_proven_fills"] == 0
+    assert "carnet-collector" in lead["required_collectors"]
+    assert "runtime/data/carnet_venues.jsonl" in lead["required_artifacts"]
+    assert not any("bid_sz" in item for item in lead["exact_missing_evidence"])
+    assert any("strong-shock" in item for item in lead["exact_missing_evidence"])
+
+
 def test_plan_records_exact_collectors_progress_and_freeze() -> None:
     campaigns = [
         _campaign("copy_vault"),

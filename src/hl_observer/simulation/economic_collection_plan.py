@@ -380,8 +380,26 @@ def _lead_state(
 ) -> dict[str, Any]:
     del collector_state
     executable = _mapping(raw.get("executable_campaign"))
-    diagnostics = _mapping(executable.get("diagnostics"))
-    temporal = _mapping(executable.get("temporal_evidence"))
+    maker_replay = _mapping(raw.get("maker_queue_replay"))
+    calibration = _mapping(raw.get("calibration"))
+    maker_schema_ready = bool(
+        raw.get("canonical_mechanism")
+        == "causal_eth_strong_shock_full_fifo_maker_entry_taker_exit_v1"
+        and maker_replay.get("schema_version")
+        == "hypersmart.lead_lag_queue_replay.v1"
+        and maker_replay.get("mechanism")
+        == "lead_lag_v3_eth_strong_shock_queue_maker"
+        and maker_replay.get("paper_read_only") is True
+        and maker_replay.get("real_execution") is False
+    )
+    diagnostics = _mapping(
+        maker_replay.get("diagnostics") if maker_schema_ready else executable.get("diagnostics")
+    )
+    temporal = _mapping(
+        maker_replay.get("temporal_evidence")
+        if maker_schema_ready
+        else executable.get("temporal_evidence")
+    )
     temporal_progress = _temporal_progress(temporal)
     next_hypothesis = _next_hypothesis(raw)
     placebos = _mapping(temporal.get("placebos"))
@@ -389,13 +407,14 @@ def _lead_state(
     liquidatable = _integer(diagnostics.get("liquidatable_observations"))
     missing_sizes = _integer(diagnostics.get("missing_top_sizes"))
     closed = _integer(campaign.get("closed_positions"))
-    schema_ready = (
+    legacy_schema_ready = (
         executable.get("schema_version") == "hypersmart.lead_lag_executable_campaign.v1"
         and executable.get("execution_model") in {
             "causal_marketable_top_v3",
             "causal_marketable_top_v4_horizon_bounded_freshness",
         }
     )
+    schema_ready = maker_schema_ready or legacy_schema_ready
     objective_met = campaign.get("objective_status") == "ATTEINT"
     oos_net = _number(temporal_progress["oos_net_pnl_usd"])
     forward_net = _number(temporal_progress["forward_net_pnl_usd"])
@@ -411,12 +430,20 @@ def _lead_state(
         and forward_net <= 0.0
     )
     data_only = bool(
-        schema_ready
-        and not objective_met
-        and not measured_negative
-        and closed == 0
-        and candidate > 0
-        and missing_sizes >= candidate
+        (
+            maker_schema_ready
+            and not objective_met
+            and not measured_negative
+            and closed == 0
+        )
+        or (
+            legacy_schema_ready
+            and not objective_met
+            and not measured_negative
+            and closed == 0
+            and candidate > 0
+            and missing_sizes >= candidate
+        )
     )
     state = (
         "PROVEN"
@@ -429,6 +456,8 @@ def _lead_state(
             else "HYPOTHESIS_KILLED_OOS"
         )
         if measured_negative
+        else "FUTURE_QUEUE_EVIDENCE_REQUIRED"
+        if data_only and maker_schema_ready
         else "FUTURE_SIZED_BBO_REQUIRED"
         if data_only
         else "CONTROLLED_BLOCKER_REMAINS"
@@ -446,6 +475,17 @@ def _lead_state(
         "objective_reasons": list(campaign.get("objective_reasons") or []),
         "freeze": _freeze(campaign),
         "progress": {
+            "canonical_path": "MAKER_FIFO_QUEUE" if maker_schema_ready else "LEGACY_TAKER",
+            "strong_shocks_seen": (
+                _integer(maker_replay.get("strong_shocks_seen"))
+                if maker_schema_ready
+                else None
+            ),
+            "queue_proven_fills": (
+                _integer(calibration.get("queue_proven_fills"))
+                if maker_schema_ready
+                else None
+            ),
             "candidate_observations": candidate,
             "liquidatable_observations": liquidatable,
             "missing_top_sizes": missing_sizes,
@@ -462,13 +502,14 @@ def _lead_state(
             "allmids-collector",
             *(
                 ["carnet-collector"]
-                if next_hypothesis["collection_actionable"]
+                if maker_schema_ready or next_hypothesis["collection_actionable"]
                 else []
             ),
         ],
         "required_artifacts": [
             "runtime/data/bbo_tape.jsonl",
             "runtime/data/bbo_shards/*.jsonl.gz",
+            *(["runtime/data/carnet_venues.jsonl"] if maker_schema_ready else []),
         ],
         "exact_missing_evidence": (
             [
@@ -478,18 +519,23 @@ def _lead_state(
                 "positive purged OOS and true post-freeze forward remain mandatory",
             ]
             if measured_negative
+            else next_hypothesis["exact_next_evidence"]
+            if maker_schema_ready
             else [
                 "at least 30 post-code shocks with observed bid_sz and ask_sz",
                 "causal pre-signal, entry and exit BBO for each certified episode",
                 "purged positive OOS, positive post-freeze forward, placebo beaten",
             ]
-        ) + next_hypothesis["exact_next_evidence"],
+        )
+        + ([] if maker_schema_ready else next_hypothesis["exact_next_evidence"]),
         "economic_prior_warning": (
-            "legacy observations without top sizes are diagnostic only and cannot certify edge"
+            "maker evidence remains provisional until queue-proven TRAIN selection and a physical freeze"
+            if maker_schema_ready
+            else "legacy observations without top sizes are diagnostic only and cannot certify edge"
         ),
         "methodology_action": (
             "COLLECT_PREDECLARED_V3_QUEUE_EVIDENCE"
-            if next_hypothesis["collection_actionable"]
+            if maker_schema_ready or next_hypothesis["collection_actionable"]
             else "KILL_CURRENT_FROZEN_HYPOTHESIS_OR_DECLARE_NEW_MECHANISM"
             if measured_negative
             else "CONTINUE_FROZEN_FORWARD_COLLECTION"
@@ -497,6 +543,8 @@ def _lead_state(
         "rerun_condition": (
             "do not promote by waiting: test only a new predeclared mechanism against the same ledger"
             if measured_negative
+            else "new ETH strong shocks have multi-level L2 and public-trade queue evidence"
+            if maker_schema_ready
             else "at least 30 new sized BBO shocks exist after the physical freeze boundary"
         ),
     }
