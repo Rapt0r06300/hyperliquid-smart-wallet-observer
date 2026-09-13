@@ -163,6 +163,11 @@ def liquidations_confirmees(fills: list[dict]) -> list[dict]:
             continue
         out.append({"vault": f.get("vault"), "coin": f.get("coin"), "px": f.get("px"), "sz": f.get("sz"),
                     "signe": f.get("signe"), "ts_ms": f.get("ts_ms"), "dir": f.get("dir"), "hash": f.get("hash"),
+                    "tid": f.get("tid"), "oid": f.get("oid"),
+                    "is_snapshot": bool(f.get("isSnapshot")),
+                    "frame_sequence": f.get("frame_sequence"),
+                    "event_index_in_frame": f.get("event_index_in_frame"),
+                    "stable_event_id": f.get("stable_event_id"),
                     "liquidatedUser": liq.get("liquidatedUser"), "markPx": liq.get("markPx"),
                     "method": liq.get("method"), "provenance": "REAL_LIQUIDATION",
                     "source": "userFills.liquidation"})

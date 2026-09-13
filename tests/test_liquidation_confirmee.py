@@ -42,8 +42,24 @@ def test_liquidations_confirmees_aplatit_et_marque_REAL_LIQUIDATION():
     c = conf[0]
     assert c["coin"] == "SOL" and c["provenance"] == "REAL_LIQUIDATION"
     assert c["source"] == "userFills.liquidation"
+    assert c["is_snapshot"] is False
     assert c["liquidatedUser"] == "0xabc" and c["markPx"] == "101.5" and c["method"] == "market"
     assert c["px"] == 100.0 and c["sz"] == 3.0 and c["ts_ms"] == 1700000000000
+
+
+def test_liquidation_snapshot_reste_explicitement_non_causale():
+    msg = _msg([
+        {
+            "coin": "SOL", "px": "100.0", "sz": "3", "side": "A",
+            "time": 1700000000000, "dir": "Close Long", "hash": "0xh",
+            "liquidation": {"liquidatedUser": "0xabc", "markPx": "101.5", "method": "market"},
+        },
+    ])
+    msg["data"]["isSnapshot"] = True
+
+    conf = UL.liquidations_confirmees(UL.parser_message_userfills(msg, vault="0xVAULT"))
+
+    assert conf[0]["is_snapshot"] is True
 
 
 def test_zero_confirmee_sur_flux_normal():

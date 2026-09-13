@@ -56,6 +56,28 @@ def test_journal_conserve_identite_vault_complete(tmp_path):
     assert saved["received_at_ms"] == 1010
 
 
+def test_journal_liquidation_separe_live_causal_et_snapshot(tmp_path, monkeypatch):
+    (tmp_path / "runtime" / "data").mkdir(parents=True)
+    monkeypatch.setattr(C.time, "time", lambda: 2_000.0)
+    monkeypatch.setattr(C.time, "monotonic_ns", lambda: 123_456)
+    recs = [
+        {"coin": "SOL", "ts_ms": 1_999_900, "is_snapshot": False, "provenance": "REAL_LIQUIDATION"},
+        {"coin": "ETH", "ts_ms": 1_000_000, "is_snapshot": True, "provenance": "REAL_LIQUIDATION"},
+    ]
+
+    C._journal_liquidations(tmp_path, recs, socket_id="A")
+
+    rows = [json.loads(line) for line in (tmp_path / C.LIQ_CONFIRMEES).read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["observed_at_ms"] == 2_000_000
+    assert rows[0]["event_age_at_observation_ms"] == 100
+    assert rows[0]["causal_forward_eligible"] is True
+    assert rows[0]["source"] == "userFills.liquidation"
+    assert rows[0]["transport_source"] == "LIVE_WS"
+    assert rows[0]["data_origin"] == "REAL_OBSERVED"
+    assert rows[1]["causal_forward_eligible"] is False
+    assert rows[1]["is_snapshot"] is True
+
+
 def _f(ts, snap=False):
     return {"coin": "SOL", "ts_ms": ts, "isSnapshot": snap, "hash": "h%d" % ts}
 

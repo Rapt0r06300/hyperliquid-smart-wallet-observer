@@ -357,11 +357,37 @@ def _journal_liquidations(root: Path, recs: list, *, socket_id: str = "") -> Non
             for r in recs:
                 # CAUSALITÉ (25/07) : recv_wall_ms = horloge WALL commune inter-processus (join avec la BBO) ;
                 # recv_mono_ns = monotone INTRA-processus (latence/provenance, PAS comparable à un autre process).
-                # source LIVE_WS -> éligible à un fade causal ; le backfill REST marque REST_BACKFILL (OOS only).
+                # Une trame WS non-snapshot fraîche est éligible ; un snapshot reste conservé mais explicitement exclu.
                 wall_ms = int(time.time() * 1000)
-                f.write(json.dumps({**r, "recu_ms": wall_ms, "recv_wall_ms": wall_ms,
-                                    "recv_mono_ns": time.monotonic_ns(), "source": "LIVE_WS",
-                                    "socket": socket_id, "run_id": RUN_ID}, ensure_ascii=False) + "\n")
+                try:
+                    event_age_ms = wall_ms - int(r.get("ts_ms"))
+                except (TypeError, ValueError):
+                    event_age_ms = None
+                is_snapshot = bool(r.get("is_snapshot"))
+                causal_forward = (
+                    not is_snapshot
+                    and event_age_ms is not None
+                    and 0 <= event_age_ms <= 30_000
+                )
+                f.write(json.dumps({
+                    **r,
+                    "recu_ms": wall_ms,
+                    "recv_wall_ms": wall_ms,
+                    "observed_at_ms": wall_ms,
+                    "event_age_at_observation_ms": event_age_ms,
+                    "recv_mono_ns": time.monotonic_ns(),
+                    "source": str(r.get("source") or "userFills.liquidation"),
+                    "transport_source": "LIVE_WS",
+                    "data_origin": "REAL_OBSERVED",
+                    "causal_forward_eligible": causal_forward,
+                    "causal_forward_reason": (
+                        "ELIGIBLE_LIVE_WS"
+                        if causal_forward
+                        else ("SNAPSHOT" if is_snapshot else "STALE_OR_INVALID_EXCHANGE_TIME")
+                    ),
+                    "socket": socket_id,
+                    "run_id": RUN_ID,
+                }, ensure_ascii=False) + "\n")
         for r in recs:
             print("[userfills] LIQUIDATION CONFIRMEE %s sz=%s px=%s method=%s user=%s" % (
                 r.get("coin"), r.get("sz"), r.get("px"), r.get("method"),
