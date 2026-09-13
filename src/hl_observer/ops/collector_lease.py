@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from hl_observer.ops.echec_silencieux import noter as _noter_echec
+
 SCHEMA_VERSION = "hypersmart.collector_lease.v1"
 PURPOSE = "economic_evidence_collection"
 DEFAULT_RELPATH = Path("runtime") / "data" / "economic_collection_lease.json"
@@ -45,9 +47,10 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
     finally:
         try:
             temporary.unlink(missing_ok=True)
-        except OSError:
-            # Cleanup must never hide the original write/replace failure.
-            pass
+        except OSError as exc:
+            # Cleanup remains best-effort, but the failure must stay observable
+            # without ever masking the original write/replace exception.
+            _noter_echec("ops/collector_lease.py:_atomic_write_cleanup", exc)
 
 
 def create_lease(
