@@ -27,10 +27,16 @@ from hl_observer.backtesting.copy_vault_vnext_train import (
 from hl_observer.backtesting.copy_vault_vnext_train import (
     explore_copy_vault_vnext_train,
 )
-from hl_observer.backtesting.cross_venue_certified import load_preferred_certified_atomic_series
+from hl_observer.backtesting.cross_venue_certified import (
+    load_certified_atomic_union_series,
+    load_preferred_certified_atomic_series,
+)
 from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_train
 from hl_observer.backtesting.cross_venue_v5_persistence_train import (
     explore_cross_venue_v5_train,
+)
+from hl_observer.backtesting.cross_venue_v6_coverage_union_train import (
+    explore_cross_venue_v6_train,
 )
 from hl_observer.backtesting.lead_lag_bbo_repricing_train import (
     explore_lead_lag_bbo_repricing_train,
@@ -108,6 +114,14 @@ def run_economic_vnext_pack(
         source_mode=str(cross_meta.get("source_mode") or ""),
     )
     cross_v5["certified_source_meta"] = cross_meta
+    union_series, union_depth, union_meta = load_certified_atomic_union_series(project_root)
+    cross_v6 = explore_cross_venue_v6_train(
+        union_series,
+        union_depth,
+        source_mode=str(union_meta.get("source_mode") or ""),
+        source_meta=union_meta,
+    )
+    cross_v6["certified_source_meta"] = union_meta
 
     copy_hypothesis = require_runnable_copy_vault_hypothesis(COPY_VAULT_VNEXT_MECHANISM)
     copy_raw = _load_copy_raw(project_root)
@@ -235,6 +249,11 @@ def run_economic_vnext_pack(
             "cross_venue_v5_persistence_train",
             cross_v5,
         ),
+        "cross_venue_coverage_union_v6": _write_json(
+            project_root,
+            "cross_venue_v6_coverage_union_train",
+            cross_v6,
+        ),
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
         "copy_vault_continuation_v4": _write_json(
             project_root, "copy_vault_v4_train", copy_v4
@@ -304,6 +323,13 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": cross_v5.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": cross_v5.get("freeze_candidate_sha256"),
                 "heldout_evaluated": cross_v5.get("heldout_evaluated") is True,
+            },
+            "cross_venue_coverage_union_v6": {
+                "status": cross_v6.get("status"),
+                "selection_eligible": cross_v6.get("selection_eligible") is True,
+                "physical_freeze_allowed": cross_v6.get("physical_freeze_allowed") is True,
+                "freeze_candidate_sha256": cross_v6.get("freeze_candidate_sha256"),
+                "heldout_evaluated": cross_v6.get("heldout_evaluated") is True,
             },
             "copy_vault_continuation_v4": {
                 "status": copy_v4.get("status"),

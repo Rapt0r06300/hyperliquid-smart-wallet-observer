@@ -7,11 +7,13 @@ from hl_observer.backtesting.cross_venue_certified import (
     BBO_SOURCE_MODE,
     FOUR_FILL_CONTRACT_VERSION,
     SOURCE_MODE,
+    UNION_SOURCE_MODE,
     build_four_fill_cycle,
     certify_atomic_bbo_row,
     certify_atomic_row,
     load_certified_atomic_bbo_series,
     load_certified_atomic_series,
+    load_certified_atomic_union_series,
     load_preferred_certified_atomic_series,
     vwap_for_notional,
 )
@@ -186,3 +188,30 @@ def test_loader_prefere_bbo_dense_et_replie_sur_l2_si_absent(tmp_path: Path):
     _, _, l2_meta = load_preferred_certified_atomic_series(tmp_path)
     assert l2_meta["source_mode"] == SOURCE_MODE
     assert l2_meta["preferred_bbo_source"]["certified_snapshots"] == 0
+
+
+def test_union_certifiee_donne_la_priorite_bbo_dans_sa_fenetre(tmp_path: Path):
+    l2_target = tmp_path / "runtime/data/carnet_venues.jsonl"
+    l2_target.parent.mkdir(parents=True)
+    l2_rows = []
+    for index, (hl_ms, bin_ms) in enumerate(((900.0, 950.0), (1050.0, 1100.0), (1200.0, 1250.0))):
+        row = _row(hl_ms=hl_ms, bin_ms=bin_ms)
+        row["observation_id"] = f"l2-{index}"
+        l2_rows.append(row)
+    l2_target.write_text(
+        "\n".join(json.dumps(row) for row in l2_rows) + "\n",
+        encoding="utf-8",
+    )
+    bbo_target = tmp_path / "runtime/data/cross_venue_atomic_bbo.jsonl"
+    bbo = _bbo_row()
+    bbo_target.write_text(json.dumps(bbo) + "\n", encoding="utf-8")
+
+    series, depth, meta = load_certified_atomic_union_series(tmp_path)
+
+    assert [row[0] for row in series["BTC"]] == [950.0, 1100.0, 1250.0]
+    assert [row[0] for row in depth["BTC"]] == [950.0, 1100.0, 1250.0]
+    assert series["BTC"][1][1] == "ATOMIC_BBO"
+    assert meta["source_mode"] == UNION_SOURCE_MODE
+    assert meta["l2_overlap_snapshots_excluded"] == 1
+    assert meta["mapping_verified"] is True
+    assert meta["sizes_normalized_to_usd_notional"] is True

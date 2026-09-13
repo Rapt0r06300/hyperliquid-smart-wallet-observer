@@ -170,6 +170,13 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     )
     assert "cross_venue_persistence_v5" in result["reports"]
     assert (
+        result["research_variants"]["cross_venue_coverage_union_v6"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "cross_venue_coverage_union_v6" in result["reports"]
+    assert (
         result["research_variants"]["lead_lag_bbo_repricing"]["heldout_evaluated"]
         is False
     )

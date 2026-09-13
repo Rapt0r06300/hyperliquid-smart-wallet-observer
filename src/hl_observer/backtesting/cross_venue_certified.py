@@ -25,6 +25,7 @@ from hl_observer.config.cross_venue_instruments import (
 
 SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
 BBO_SOURCE_MODE = ATOMIC_BBO_SOURCE_MODE
+UNION_SOURCE_MODE = "CERTIFIED_ATOMIC_FOUR_SIDE_UNION_V1"
 FOUR_FILL_CONTRACT_VERSION = "cross_four_fill_aon_v1"
 MAX_VENUE_SKEW_MS = 250.0
 MAX_SNAPSHOT_AGE_MS = 3_000.0
@@ -464,6 +465,82 @@ def load_preferred_certified_atomic_series(
     return book_series, book_depth, book_meta
 
 
+def load_certified_atomic_union_series(
+    root: str | Path,
+    *,
+    coins: Sequence[str] | None = None,
+) -> tuple[dict[str, list[tuple]], dict[str, list[tuple[float, float]]], dict[str, Any]]:
+    """Join certified BBO and L2 histories without mixing overlapping collectors.
+
+    For each coin, the denser event-driven BBO collector owns its complete
+    observed interval.  Certified L2 observations may extend that history only
+    before or after the BBO interval.  This rule depends solely on provenance
+    and timestamps, never on prices or PnL.
+    """
+
+    book_series, book_depth, book_meta = load_certified_atomic_series(root, coins=coins)
+    bbo_series, bbo_depth, bbo_meta = load_certified_atomic_bbo_series(root, coins=coins)
+    series: dict[str, list[tuple]] = {}
+    depth: dict[str, list[tuple[float, float]]] = {}
+    overlap_excluded = 0
+    for coin in sorted(set(book_series) | set(bbo_series)):
+        books = list(book_series.get(coin, ()))
+        book_capacity = list(book_depth.get(coin, ()))
+        bbos = list(bbo_series.get(coin, ()))
+        bbo_capacity = list(bbo_depth.get(coin, ()))
+        if bbos:
+            lower = float(bbos[0][0])
+            upper = float(bbos[-1][0])
+            retained_books = [
+                row for row in books if float(row[0]) < lower or float(row[0]) > upper
+            ]
+            retained_capacity = [
+                row
+                for row in book_capacity
+                if float(row[0]) < lower or float(row[0]) > upper
+            ]
+            overlap_excluded += len(books) - len(retained_books)
+            combined_rows = retained_books + bbos
+            combined_capacity = retained_capacity + bbo_capacity
+        else:
+            combined_rows = books
+            combined_capacity = book_capacity
+        combined_rows.sort(key=lambda row: float(row[0]))
+        combined_capacity.sort(key=lambda row: float(row[0]))
+        if combined_rows:
+            series[coin] = combined_rows
+        if combined_capacity:
+            depth[coin] = combined_capacity
+
+    used_meta = [
+        meta
+        for meta in (book_meta, bbo_meta)
+        if int(meta.get("certified_snapshots") or 0) > 0
+    ]
+    certified_snapshots = sum(len(rows) for rows in series.values())
+    return series, depth, {
+        "source": [book_meta["source"], bbo_meta["source"]],
+        "source_mode": UNION_SOURCE_MODE,
+        "certified_snapshots": certified_snapshots,
+        "coins": len(series),
+        "l2_overlap_snapshots_excluded": overlap_excluded,
+        "mapping_verified": bool(used_meta)
+        and all(meta.get("mapping_verified") is True for meta in used_meta),
+        "skew_verified": bool(used_meta)
+        and all(meta.get("skew_verified") is True for meta in used_meta),
+        "contract_multipliers_normalized": True,
+        "quote_currencies_normalized": True,
+        "sizes_normalized_to_usd_notional": True,
+        "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+        "capacity_definition": "minimum USD capacity on certified four-side union",
+        "overlap_policy": "BBO_OWNS_PER_COIN_INTERVAL_L2_EXTENDS_OUTSIDE",
+        "component_source_meta": {"l2": book_meta, "bbo": bbo_meta},
+        "legacy_rows_never_upgraded": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+
+
 def snapshot_fresh(snapshot_ts_ms: object, now_ms: object, *, max_age_ms: float = MAX_SNAPSHOT_AGE_MS) -> bool:
     snapshot = _number(snapshot_ts_ms)
     now = _number(now_ms)
@@ -591,11 +668,13 @@ __all__ = [
     "MAX_SPREAD_BPS",
     "MAX_VENUE_SKEW_MS",
     "SOURCE_MODE",
+    "UNION_SOURCE_MODE",
     "build_four_fill_cycle",
     "certify_atomic_bbo_row",
     "certify_atomic_row",
     "load_certified_atomic_bbo_series",
     "load_certified_atomic_series",
+    "load_certified_atomic_union_series",
     "load_preferred_certified_atomic_series",
     "observation_gap_ok",
     "snapshot_fresh",

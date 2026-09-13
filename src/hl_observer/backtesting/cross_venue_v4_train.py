@@ -71,6 +71,7 @@ def _build_train_paths(
     *,
     train_end_ms: float,
     economic: FamilyEconomicContract | None = None,
+    candidate_coins: Sequence[str] = v3.PREDECLARED_COINS,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Build causal entry-to-expiry paths once for the finite policy family."""
 
@@ -87,7 +88,7 @@ def _build_train_paths(
     max_book_age_ms = float(contract.registry.get("cross_venue.max_book_age_ms").value)
     paths: list[dict[str, Any]] = []
     diagnostics: dict[str, int] = defaultdict(int)
-    for coin in v3.PREDECLARED_COINS:
+    for coin in candidate_coins:
         rows = sorted(list(series.get(coin, ())), key=lambda row: float(row[0]))
         if len(rows) < 2:
             continue

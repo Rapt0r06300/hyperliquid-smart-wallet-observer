@@ -437,6 +437,7 @@ def _normalization_proof_ok(source_mode: str, source_meta: Mapping[str, Any] | N
     certified_loader_units = source_meta.get("capacity_definition") in {
         "minimum USD capacity on the four raw BBO sides",
         "minimum USD capacity on the four BBO top levels",
+        "minimum USD capacity on certified four-side union",
     }
     return explicit_units or certified_loader_units
 
