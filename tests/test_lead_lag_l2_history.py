@@ -100,6 +100,8 @@ def test_snapshot_recovers_real_prices_sizes_and_depth() -> None:
     assert snapshot["ask_top_usd"] == 404.0
     assert snapshot["bid_depth_usd"] == 497.0
     assert snapshot["ask_depth_usd"] == 914.0
+    assert snapshot["bids5"] == [[100.0, 2.0], [99.0, 3.0]]
+    assert snapshot["asks5"] == [[101.0, 4.0], [102.0, 5.0]]
     assert snapshot["data_origin"] == "RECORDED_REAL"
     assert snapshot["received_ts_ms"] == 1_786_552_000_000
     assert snapshot["written_ts_ms"] == 1_786_552_000_003

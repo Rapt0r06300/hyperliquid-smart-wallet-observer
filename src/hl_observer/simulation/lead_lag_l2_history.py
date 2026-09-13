@@ -268,6 +268,8 @@ def snapshot_from_tick(record: Mapping[str, Any]) -> dict[str, Any] | None:
         "ask_top_usd": best_ask[0] * best_ask[1],
         "bid_depth_usd": sum(price * size for price, size in bid_levels),
         "ask_depth_usd": sum(price * size for price, size in ask_levels),
+        "bids5": [list(level) for level in bid_levels[:5]],
+        "asks5": [list(level) for level in ask_levels[:5]],
         "connection_id": record.get("connection_id"),
         "sequence": record.get("sequence"),
         "reconnect_count": int(record.get("reconnect_count") or 0),
