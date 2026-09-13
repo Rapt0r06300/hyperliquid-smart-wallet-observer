@@ -38,6 +38,7 @@ Spawner = Callable[[list[str], Path, Mapping[str, str]], ProcessHandle]
 _CREATE_NO_WINDOW = 0x08000000
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_IDLE_PRIORITY_CLASS = 0x00000040
 
 
 def _registry(*, campaign_only: bool = False) -> dict[str, dict[str, Any]]:
@@ -81,7 +82,16 @@ def resolve_project_python(root: str | Path) -> Path:
 def _background_creation_flags(platform_name: str = os.name) -> int:
     if platform_name != "nt":
         return 0
-    return _CREATE_NO_WINDOW | _CREATE_NEW_PROCESS_GROUP | _CREATE_BREAKAWAY_FROM_JOB
+    # The campaign may run for days beside user workloads such as Salad. Idle
+    # priority still consumes every otherwise-free CPU cycle, but yields as
+    # soon as normal-priority applications need the processor. Child collector
+    # workers inherit the class from their bounded wrapper.
+    return (
+        _CREATE_NO_WINDOW
+        | _CREATE_NEW_PROCESS_GROUP
+        | _CREATE_BREAKAWAY_FROM_JOB
+        | _IDLE_PRIORITY_CLASS
+    )
 
 
 def _default_spawn(
@@ -312,7 +322,7 @@ def attach_bounded_collectors(
     campaign_registry = _registry(campaign_only=True)
     unknown = [name for name in requested if name not in campaign_registry]
     if unknown:
-        raise ValueError("campaign collector unknown: %s" % ",".join(unknown))
+        raise ValueError(f"campaign collector unknown: {','.join(unknown)}")
 
     inventory = process_inventory or _processus_projet
     inspected = inspect_bounded_collectors(

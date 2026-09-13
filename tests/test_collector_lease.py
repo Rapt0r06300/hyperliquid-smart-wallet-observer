@@ -55,6 +55,7 @@ def test_windows_background_collectors_break_away_from_parent_job() -> None:
     assert flags & 0x08000000  # CREATE_NO_WINDOW
     assert flags & 0x00000200  # CREATE_NEW_PROCESS_GROUP
     assert flags & 0x01000000  # CREATE_BREAKAWAY_FROM_JOB
+    assert flags & 0x00000040  # IDLE_PRIORITY_CLASS: yield to desktop workloads
 
 
 def test_non_windows_background_collectors_use_no_creation_flags() -> None:
