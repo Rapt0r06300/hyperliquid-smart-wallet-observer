@@ -29,13 +29,14 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
         os.fsync(handle.fileno())
     # Windows can deny an otherwise valid atomic replacement while a bounded
     # collector has the lease open for its short validation read. Retry only
-    # this transient sharing error; every other failure still fails closed.
+    # errors carrying a Windows transient lock/access code. Checking winerror
+    # rather than os.name keeps this deterministic and testable on every CI OS.
     for attempt in range(20):
         try:
             os.replace(temporary, path)
             return
         except PermissionError as exc:
-            if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}:
+            if getattr(exc, "winerror", None) not in {5, 32, 33}:
                 raise
             if attempt == 19:
                 raise
