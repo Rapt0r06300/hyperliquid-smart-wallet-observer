@@ -21,7 +21,6 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
 )
 from hl_observer.collection.vault_fills_backfill import canonical_fill_id
 
-
 VAULT = "0x" + "a" * 40
 
 
@@ -162,6 +161,11 @@ def test_forward_fill_captures_reference_entry_and_real_exit_without_lookahead(
     assert all(row["collector_protocol"] == COMPANION_PROTOCOL for row in rows)
     assert all(row["writer_run_id"] == engine.state["writer_run_id"] for row in rows)
     assert all(row["clean_epoch_ms"] == engine.state["clean_epoch_ms"] for row in rows)
+    assert all(row["vault"] == VAULT for row in rows)
+    assert all(row["direction"] == 1 for row in rows)
+    assert all(row["signal_ts_ms"] == 1_000_000 for row in rows)
+    assert all(row["signal_event_id"] == canonical_fill_id(_fill(1_000_000)) for row in rows)
+    assert all(row["signal_action"] == "OPEN" for row in rows)
     assert all(row["paper_read_only"] is True and row["real_execution"] is False for row in rows)
     assert all(
         0 <= row["received_at_ms"] - row["checkpoint_target_ms"] <= MAX_TARGET_LAG_MS
@@ -299,3 +303,43 @@ def test_open_explicite_redemarre_un_metaordre_meme_dans_la_fenetre(tmp_path: Pa
         for line in (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()
     ]
     assert rows[-1]["metaorder_id"] != first_id
+
+
+def test_checkpoints_simultanes_du_meme_coin_partagent_une_observation_l2(
+    tmp_path: Path,
+) -> None:
+    now = [5_000_000]
+    fetches = []
+
+    def fetch(coin: str) -> dict:
+        fetches.append(coin)
+        return _book(now[0])
+
+    engine = CopyVaultCheckpointTail(
+        tmp_path,
+        fetch_book=fetch,
+        clock_ms=lambda: now[0],
+    )
+    engine.state["pending"] = [
+        {
+            "coin": "BTC",
+            "metaorder_id": f"meta-{index}",
+            "stage": "REFERENCE",
+            "checkpoint_id": f"meta-{index}:REFERENCE",
+            "target_wall_ms": now[0],
+            "attempts": 0,
+        }
+        for index in range(2)
+    ]
+
+    result = engine.poll_once()
+
+    assert result["captured"] == 2
+    assert fetches == ["BTC"]
+    rows = [
+        json.loads(line)
+        for line in (tmp_path / OUTPUT_RELPATH).read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(rows) == 2
+    assert len({row["checkpoint_id"] for row in rows}) == 2
+    assert len({row["received_at_ms"] for row in rows}) == 1

@@ -352,7 +352,16 @@ class CopyVaultCheckpointTail:
                 )
                 previous["continuation_metaorder_id"] = continuation_id
                 pending = list(self.state.get("pending") or [])
-                base = {"coin": coin, "metaorder_id": continuation_id, "attempts": 0}
+                base = {
+                    "coin": coin,
+                    "vault": vault,
+                    "direction": direction,
+                    "signal_ts_ms": received_at_ms,
+                    "signal_event_id": event_id,
+                    "signal_action": entry_action,
+                    "metaorder_id": continuation_id,
+                    "attempts": 0,
+                }
                 pending.extend([
                     {
                         **base,
@@ -392,7 +401,16 @@ class CopyVaultCheckpointTail:
         }
         self.state["metaorder_state"] = meta_state
         self.state["counters"]["metaorders_started"] += 1
-        base = {"coin": coin, "metaorder_id": identifier, "attempts": 0}
+        base = {
+            "coin": coin,
+            "vault": vault,
+            "direction": direction,
+            "signal_ts_ms": received_at_ms,
+            "signal_event_id": event_id,
+            "signal_action": entry_action,
+            "metaorder_id": identifier,
+            "attempts": 0,
+        }
         pending = list(self.state.get("pending") or [])
         pending.extend([
             {
@@ -415,6 +433,17 @@ class CopyVaultCheckpointTail:
         return [
             {
                 "coin": str(entry["coin"]),
+                **{
+                    key: entry[key]
+                    for key in (
+                        "vault",
+                        "direction",
+                        "signal_ts_ms",
+                        "signal_event_id",
+                        "signal_action",
+                    )
+                    if key in entry
+                },
                 "metaorder_id": str(entry["metaorder_id"]),
                 "stage": f"EXIT_{horizon_ms}",
                 "checkpoint_id": f"{entry['metaorder_id']}:EXIT:{horizon_ms}",
@@ -429,6 +458,7 @@ class CopyVaultCheckpointTail:
         captured_set = set(captured_ids)
         remaining: list[dict[str, Any]] = []
         additions: list[dict[str, Any]] = []
+        fetch_cache: dict[str, tuple[int, dict[str, Any] | None]] = {}
         captured_now = 0
         expired_now = 0
         for checkpoint in sorted(
@@ -445,12 +475,22 @@ class CopyVaultCheckpointTail:
             if now_ms - target_ms > MAX_TARGET_LAG_MS:
                 expired_now += 1
                 continue
-            try:
-                raw = self.fetch_book(str(checkpoint["coin"]))
-            except Exception:  # noqa: BLE001 - collection must remain alive on network errors
-                raw = None
-            received_at_ms = self.clock_ms()
-            parsed = _parse_book(raw, received_at_ms=received_at_ms) if isinstance(raw, Mapping) else None
+            coin = str(checkpoint["coin"]).upper()
+            cached = fetch_cache.get(coin)
+            if cached is None:
+                try:
+                    raw = self.fetch_book(coin)
+                except Exception:  # noqa: BLE001 - collection must remain alive on network errors
+                    raw = None
+                received_at_ms = self.clock_ms()
+                parsed = (
+                    _parse_book(raw, received_at_ms=received_at_ms)
+                    if isinstance(raw, Mapping)
+                    else None
+                )
+                fetch_cache[coin] = (received_at_ms, parsed)
+            else:
+                received_at_ms, parsed = cached
             if parsed is None or not (0 <= received_at_ms - target_ms <= MAX_TARGET_LAG_MS):
                 checkpoint["attempts"] = int(checkpoint.get("attempts") or 0) + 1
                 self.state["counters"]["fetch_retries"] += 1
@@ -459,6 +499,17 @@ class CopyVaultCheckpointTail:
             row = {
                 "schema_version": "hypersmart.copy_vault_l2.v1",
                 "coin": str(checkpoint["coin"]).upper(),
+                **{
+                    key: checkpoint[key]
+                    for key in (
+                        "vault",
+                        "direction",
+                        "signal_ts_ms",
+                        "signal_event_id",
+                        "signal_action",
+                    )
+                    if key in checkpoint
+                },
                 "received_at_ms": received_at_ms,
                 **parsed,
                 "source": "HYPERLIQUID_INFO_L2BOOK_CAUSAL_CHECKPOINT",
