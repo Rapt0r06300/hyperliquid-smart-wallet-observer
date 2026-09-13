@@ -23,23 +23,31 @@ DEFAULT_RELPATH = Path("runtime") / "data" / "economic_collection_lease.json"
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    with temporary.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
-        handle.flush()
-        os.fsync(handle.fileno())
-    # Windows can deny an otherwise valid atomic replacement while a bounded
-    # collector has the lease open for its short validation read. Retry only
-    # this transient sharing error; every other failure still fails closed.
-    for attempt in range(20):
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        # Windows can deny an otherwise valid atomic replacement while a bounded
+        # collector has the lease open for its short validation read. Retry only
+        # the explicit Windows sharing/access winerrors, even when a test simulates
+        # them on another host OS; every other failure still fails closed.
+        for attempt in range(20):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError as exc:
+                if getattr(exc, "winerror", None) not in {5, 32}:
+                    raise
+                if attempt == 19:
+                    raise
+                time.sleep(0.05)
+    finally:
         try:
-            os.replace(temporary, path)
-            return
-        except PermissionError as exc:
-            if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}:
-                raise
-            if attempt == 19:
-                raise
-            time.sleep(0.05)
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            # Cleanup must never hide the original write/replace failure.
+            pass
 
 
 def create_lease(
