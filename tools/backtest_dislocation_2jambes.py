@@ -196,6 +196,9 @@ def backtester(
     depth_by_coin: dict[str, list[tuple[float, float]]] | None = None,
     depth_freshness_ms=DEPTH_FRESHNESS_MS,
     notional_usd=NOTIONAL_USD,
+    entry_capacity_fraction: float | None = None,
+    max_notional_usd: float | None = None,
+    minimum_notional_usd: float = NOTIONAL_USD,
     direction_multiplier: int = 1,
     min_executable_edge_bps=MIN_EXECUTABLE_EDGE_BPS,
     max_observation_gap_ms=MAX_OBSERVATION_GAP_MS,
@@ -206,6 +209,7 @@ def backtester(
         "candidate_detections": 0,
         "rejected_non_positive_executable_edge": 0,
         "rejected_entry_depth": 0,
+        "rejected_adaptive_notional_below_minimum": 0,
         "exits_deferred_depth": 0,
         "positions_left_open": 0,
         "positions_closed": 0,
@@ -295,11 +299,27 @@ def backtester(
                             ts,
                             freshness_ms=float(depth_freshness_ms),
                         )
-                        if (
-                            entry_depth is None
-                            or float(entry_depth["capacity_usd"]) < float(notional_usd)
-                        ):
+                        required_entry_notional = (
+                            float(minimum_notional_usd)
+                            if entry_capacity_fraction is not None
+                            else float(notional_usd)
+                        )
+                        if entry_depth is None or float(entry_depth["capacity_usd"]) < required_entry_notional:
                             counters["rejected_entry_depth"] += 1
+                            pending = None
+                            continue
+                    sized_notional = float(notional_usd)
+                    if entry_capacity_fraction is not None:
+                        fraction = float(entry_capacity_fraction)
+                        cap = float(max_notional_usd) if max_notional_usd is not None else float("inf")
+                        if not (0.0 < fraction <= 1.0) or cap <= 0.0:
+                            raise ValueError("adaptive capacity sizing requires 0 < fraction <= 1 and cap > 0")
+                        sized_notional = min(
+                            cap,
+                            float(entry_depth["capacity_usd"]) * fraction,
+                        )
+                        if sized_notional < float(minimum_notional_usd):
+                            counters["rejected_adaptive_notional_below_minimum"] += 1
                             pending = None
                             continue
                     position = {
@@ -313,6 +333,7 @@ def backtester(
                         "hl_in": hl,
                         "bn_in": bn,
                         "entry_depth": entry_depth,
+                        "notional_usd": sized_notional,
                         "entry_convergence_edge_bps": convergence_edge,
                         "exit_pending_reason": None,
                     }
@@ -358,7 +379,11 @@ def backtester(
                     ts,
                     freshness_ms=float(depth_freshness_ms),
                 )
-                if exit_depth is None or float(exit_depth["capacity_usd"]) < float(notional_usd):
+                if (
+                    exit_depth is None
+                    or float(exit_depth["capacity_usd"])
+                    < float(position["notional_usd"])
+                ):
                     position["exit_pending_reason"] = exit_reason
                     counters["exits_deferred_depth"] += 1
                     continue
@@ -385,7 +410,7 @@ def backtester(
                 and min(
                     float(position["entry_depth"]["capacity_usd"]),
                     float(exit_depth["capacity_usd"]),
-                ) >= float(notional_usd)
+                ) >= float(position["notional_usd"])
             )
             # BBO already includes the crossed spread.  When the recorded
             # minimum capacity of all four required sides covers the full
@@ -396,10 +421,11 @@ def backtester(
             gross_reconciled = (
                 net + float(fees_ar_bps) + spread_cost + latency_cost + float(slippage_bps or 0.0)
             )
-            fees_usd = float(fees_ar_bps) / 1e4 * float(notional_usd)
-            spread_usd = spread_cost / 1e4 * float(notional_usd)
-            slippage_usd = float(slippage_bps or 0.0) / 1e4 * float(notional_usd)
-            latency_usd = latency_cost / 1e4 * float(notional_usd)
+            trade_notional_usd = float(position["notional_usd"])
+            fees_usd = float(fees_ar_bps) / 1e4 * trade_notional_usd
+            spread_usd = spread_cost / 1e4 * trade_notional_usd
+            slippage_usd = float(slippage_bps or 0.0) / 1e4 * trade_notional_usd
+            latency_usd = latency_cost / 1e4 * trade_notional_usd
             spread_zero_reason = (
                 ZeroCostReason.NOT_APPLICABLE
                 if spread_cost == 0.0 and raw_spread_impact < 0.0
@@ -491,8 +517,8 @@ def backtester(
                 "raw_latency_impact_bps": round(raw_latency_impact, 4),
                 "raw_spread_impact_bps": round(raw_spread_impact, 4),
                 "net_bps": round(net, 4),
-                "net_usd": round(net / 1e4 * float(notional_usd), 6),
-                "notional_usd": float(notional_usd),
+                "net_usd": round(net / 1e4 * trade_notional_usd, 6),
+                "notional_usd": trade_notional_usd,
                 "entry_capacity_usd": (
                     round(float(position["entry_depth"]["capacity_usd"]), 6)
                     if position.get("entry_depth") is not None else None

@@ -132,6 +132,50 @@ def test_profondeur_quatre_cotes_prouve_slippage_zero_et_reconciliation():
     assert summary["LIQUIDATABLE_NET"] is True
 
 
+def test_dimensionnement_adaptatif_utilise_uniquement_capacite_entree_et_reexige_sortie():
+    t = 1_000_000.0
+    events = [
+        (t, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 500, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 1000, "ATOMIC", 99.80, 99.82, 99.80, 99.82),
+    ]
+    depth = {"ZZZ": [(t, 200.0), (t + 500, 200.0), (t + 1000, 80.0)]}
+
+    deferred = BT.backtester(
+        {"ZZZ": events},
+        fees_ar_bps=0.0,
+        depth_by_coin=depth,
+        entry_capacity_fraction=0.5,
+        max_notional_usd=150.0,
+        minimum_notional_usd=15.0,
+    )
+    executable = BT.backtester(
+        {"ZZZ": events},
+        fees_ar_bps=0.0,
+        depth_by_coin={"ZZZ": [(row[0], 200.0) for row in events]},
+        entry_capacity_fraction=0.5,
+        max_notional_usd=150.0,
+        minimum_notional_usd=15.0,
+    )
+
+    assert deferred == []
+    assert len(executable) == 1
+    assert executable[0]["notional_usd"] == 100.0
+    assert executable[0]["LIQUIDATABLE_NET"] is True
+
+    diagnostics = {}
+    assert BT.backtester(
+        {"ZZZ": events},
+        fees_ar_bps=0.0,
+        depth_by_coin={"ZZZ": [(row[0], 40.0) for row in events]},
+        entry_capacity_fraction=0.25,
+        max_notional_usd=150.0,
+        minimum_notional_usd=15.0,
+        diagnostics=diagnostics,
+    ) == []
+    assert diagnostics["rejected_adaptive_notional_below_minimum"] == 1
+
+
 def test_profondeur_perimee_bloque_entree_plutot_que_inventer_fill():
     t = 1_000_000.0
     evs = []
