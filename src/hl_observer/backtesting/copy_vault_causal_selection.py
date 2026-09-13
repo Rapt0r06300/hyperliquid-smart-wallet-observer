@@ -214,6 +214,7 @@ def select_observed_continuations(
             "leader_notional_usd_at_signal": round(
                 float(confirmation.get("cumulative_leader_notional_usd") or 0.0), 8
             ),
+            "confirmation_burst_ms": max(observed_times) - min(observed_times),
             "member_event_ids_at_signal": [str(row["event_id"]) for row in prefix],
             "continuation_policy": f"enter_after_{required}_observed_live_fills",
         }
@@ -234,6 +235,12 @@ def select_observed_continuations(
         "noncausal_prefix_rejected": rejected_noncausal,
         "nonmonotonic_observation_rejected": rejected_nonmonotonic,
         "signal_policy": f"Nth_observed_live_fill_prefix_only;N={required}",
+        "decision_time_feature_fields": [
+            "confirmation_fill_count",
+            "leader_notional_usd_at_signal",
+            "confirmation_burst_ms",
+            "member_event_ids_at_signal",
+        ],
     }
 
 

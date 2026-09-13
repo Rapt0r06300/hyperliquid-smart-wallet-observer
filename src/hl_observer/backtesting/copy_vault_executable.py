@@ -15,12 +15,12 @@ from hl_observer.backtesting.copy_vault_causal_selection import (
     select_causal_protocol_inputs,
     select_observed_continuations,
 )
+from hl_observer.backtesting.copy_vault_evidence import temporal_evidence
 from hl_observer.backtesting.copy_vault_execution_math import (
     _book_side,
     _walk_base_quantity,
     _walk_quote_notional,
 )
-from hl_observer.backtesting.copy_vault_evidence import temporal_evidence
 from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
@@ -382,6 +382,14 @@ def execute_metaorder(
         "signal_ts_ms": signal_ms,
         "first_fill_ts_ms": int(metaorder.get("first_fill_ts_ms") or signal_ms),
         "signal_source": metaorder.get("signal_source") or "REST_BACKFILL",
+        "confirmation_fill_count": metaorder.get("confirmation_fill_count"),
+        "leader_notional_usd_at_signal": metaorder.get(
+            "leader_notional_usd_at_signal"
+        ),
+        "confirmation_burst_ms": metaorder.get("confirmation_burst_ms"),
+        "member_event_ids_at_signal": list(
+            metaorder.get("member_event_ids_at_signal") or ()
+        ),
         "causal_books_eligible": causal_books,
         "causal_forward_eligible": metaorder.get("causal_forward_eligible") is True and causal_books,
         "book_binding_method": book_binding_method,

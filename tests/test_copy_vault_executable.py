@@ -150,8 +150,46 @@ def test_continuation_attend_trois_fills_observes_sans_regarder_le_futur() -> No
     assert selected_initial[0]["confirmation_event_id"] == "third"
     assert selected_initial[0]["member_event_ids_at_signal"] == ["first", "second", "third"]
     assert selected_initial[0]["leader_notional_usd_at_signal"] == 300.0
+    assert selected_initial[0]["confirmation_burst_ms"] == 2_000
     assert selected_enriched[0]["metaorder_id"] == selected_initial[0]["metaorder_id"]
     assert selected_enriched[0]["leader_notional_usd_at_signal"] == 300.0
+    assert selected_enriched[0]["confirmation_burst_ms"] == 2_000
+
+
+def test_execution_propage_uniquement_les_features_connues_au_signal() -> None:
+    def live(event_id: str, ts_ms: int, action: str) -> dict:
+        return {
+            **_entry(event_id, ts_ms, action=action),
+            "source": "LIVE_WS",
+            "is_snapshot": False,
+            "observed_at_ms": ts_ms + 25,
+        }
+
+    metaorders = cluster_metaorders(
+        [
+            live("first", 1_000, "OPEN"),
+            live("second", 2_000, "ADD"),
+            live("future", 9_000, "ADD"),
+        ]
+    )[0]
+    selected, _audit = select_observed_continuations(
+        metaorders, required_observed_fills=2
+    )
+    signal_ms = selected[0]["signal_ts_ms"]
+    books = [
+        _book(signal_ms, 99.0, 101.0, causal=True),
+        _book(signal_ms + COPY_DELAY_MS, 100.0, 102.0, causal=True),
+        _book(signal_ms + COPY_DELAY_MS + 300_000, 109.0, 111.0, causal=True),
+    ]
+
+    trade, reason = execute_metaorder(selected[0], books, horizon_ms=300_000)
+
+    assert reason == "LIQUIDATABLE_NET"
+    assert trade is not None
+    assert trade["confirmation_fill_count"] == 2
+    assert trade["leader_notional_usd_at_signal"] == 200.0
+    assert trade["confirmation_burst_ms"] == 1_000
+    assert trade["member_event_ids_at_signal"] == ["first", "second"]
 
 
 def test_continuation_refuse_un_prefix_historique_ou_non_monotone() -> None:
