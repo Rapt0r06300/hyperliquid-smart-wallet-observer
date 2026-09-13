@@ -50,10 +50,6 @@ LEGACY_GROS_FICHIERS = {             # dette connue et assumée (à découper, c
     "runtime/persistent_poll_runner.py", "ops/archive_portable.py", "ops/pnl_improvement_lab.py",
     "ops/historical_analysis_suite.py", "experimental/metaorder_shadow.py", "experimental/cohortes.py",
     "experimental/signaux.py", "paper_trading/paper_engine.py",
-    # 🔴 13/09 — déjà présent à 950 lignes sur le main intégré dans la PR #34 ; ce chantier
-    # Bybit/OKX ne l'a pas créé ni modifié. On le comptabilise explicitement comme dette legacy
-    # au lieu de faire échouer une PR sans rapport. Le vrai remède reste son découpage dédié.
-    "backtesting/lead_lag_multiasset_train.py",
 }
 
 _spec = importlib.util.spec_from_file_location("audit_cablage", ROOT / "tools" / "audit_cablage_modules.py")
