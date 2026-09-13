@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +16,11 @@ SUPPORTED_NATIVE_VENUES: frozenset[str] = frozenset({"bybit", "okx"})
 
 
 class _InstrumentClient(Protocol):
-    async def discover_instruments(self, *, include_prelaunch: bool = False) -> list[VenueInstrument]: ...
+    async def discover_instruments(
+        self,
+        *,
+        include_prelaunch: bool = False,
+    ) -> list[VenueInstrument]: ...
 
 
 class NativeVenueDiscoveryResult(BaseModel):
@@ -51,10 +55,12 @@ async def discover_native_venue_candidates(
 ) -> NativeVenueDiscoveryResult:
     """Discover public perp candidates without failing the whole scan on one venue.
 
-    `clients` is dependency injection for deterministic tests. Production callers normally
-    leave it unset, in which case only public unauthenticated clients are constructed.
+    ``clients`` is dependency injection for deterministic tests. Production callers
+    normally leave it unset, so only public unauthenticated clients are constructed.
     """
-    requested = list(dict.fromkeys(str(v).strip().lower() for v in venues if str(v).strip()))
+    requested = list(
+        dict.fromkeys(str(venue).strip().lower() for venue in venues if str(venue).strip())
+    )
     unsupported = sorted(set(requested) - SUPPORTED_NATIVE_VENUES)
     if unsupported:
         raise ValueError(f"unsupported native venue(s): {', '.join(unsupported)}")
@@ -62,11 +68,13 @@ async def discover_native_venue_candidates(
     async def run_one(venue: str) -> tuple[str, list[VenueInstrument], str | None]:
         try:
             if clients and venue in clients:
-                rows = await clients[venue].discover_instruments(include_prelaunch=include_prelaunch)
+                rows = await clients[venue].discover_instruments(
+                    include_prelaunch=include_prelaunch
+                )
             else:
                 rows = await _discover_owned(venue, include_prelaunch)
             return venue, rows, None
-        except Exception as exc:  # noqa: BLE001 - one failed venue must not erase other data.
+        except Exception as exc:  # noqa: BLE001 - preserve data from healthy venues.
             return venue, [], str(exc)[:240]
 
     batches = await asyncio.gather(*(run_one(venue) for venue in requested))
@@ -87,14 +95,23 @@ async def discover_native_venue_candidates(
         for symbol, found_venues in sorted(canonical_map.items())
     }
     cross_venue = sorted(
-        symbol for symbol, found_venues in canonical_venues.items() if len(found_venues) >= 2
+        symbol
+        for symbol, found_venues in canonical_venues.items()
+        if len(found_venues) >= 2
     )
-    hl_coins = {str(coin).strip().upper() for coin in (hyperliquid_coins or []) if str(coin).strip()}
+    hl_coins = {
+        str(coin).strip().upper()
+        for coin in (hyperliquid_coins or [])
+        if str(coin).strip()
+    }
     overlap = sorted(
         symbol for symbol in canonical_venues if base_from_canonical(symbol) in hl_coins
     )
     return NativeVenueDiscoveryResult(
-        instruments=sorted(instruments, key=lambda item: (item.canonical_symbol, item.venue, item.symbol)),
+        instruments=sorted(
+            instruments,
+            key=lambda item: (item.canonical_symbol, item.venue, item.symbol),
+        ),
         symbols_by_venue=symbols_by_venue,
         canonical_venues=canonical_venues,
         cross_venue_candidates=cross_venue,
