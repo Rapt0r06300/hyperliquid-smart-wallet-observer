@@ -570,6 +570,63 @@ def test_vaults_et_roles(tmp_path):
     assert d["0xOBS"] == "CANDIDAT_OBSERVE"                         # trop jeune -> observé seulement
 
 
+def test_nombre_de_core_configurable_reste_borne(tmp_path, monkeypatch):
+    """La campagne peut suivre davantage de leaders sûrs sans ouvrir un slot supplémentaire."""
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    classement = [
+        {"vault": f"0xCORE{index}", "retenu": True, "facteurs": {}}
+        for index in range(1, 8)
+    ]
+    classement.extend(
+        {
+            "vault": f"0xCAND{index}",
+            "retenu": False,
+            "facteurs": {
+                "anciennete_j": 60,
+                "drawdown_pct": 10,
+                "copyabilite": 0.9,
+            },
+        }
+        for index in range(1, 8)
+    )
+    (data / "vaults_scores.json").write_text(
+        json.dumps({"classement": classement}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HYPERSMART_VAULT_CORE_SLOTS", "5")
+
+    roles = C.vaults_et_roles(tmp_path)
+
+    assert [vault for vault, role, _why in roles if role == "CORE"] == [
+        "0xCORE1",
+        "0xCORE2",
+        "0xCORE3",
+        "0xCORE4",
+        "0xCORE5",
+    ]
+    assert len(roles) == C.MAX_SLOTS
+
+
+def test_nombre_de_core_invalide_retombe_sur_deux(tmp_path, monkeypatch):
+    data = tmp_path / "runtime" / "data"
+    data.mkdir(parents=True)
+    classement = [
+        {"vault": f"0xCORE{index}", "retenu": True, "facteurs": {}}
+        for index in range(1, 5)
+    ]
+    (data / "vaults_scores.json").write_text(
+        json.dumps({"classement": classement}), encoding="utf-8"
+    )
+    monkeypatch.setenv("HYPERSMART_VAULT_CORE_SLOTS", "invalide")
+
+    roles = C.vaults_et_roles(tmp_path)
+
+    assert [vault for vault, role, _why in roles if role == "CORE"] == [
+        "0xCORE1",
+        "0xCORE2",
+    ]
+
+
 def _public_universe_payload(count: int) -> dict:
     rows = []
     addresses = []

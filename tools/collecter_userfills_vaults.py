@@ -114,6 +114,7 @@ def _shadow_par_vault(root: Path) -> dict:
 
 
 MAX_SLOTS = 10                          # plafond dur des places userFills (inchangé)
+DEFAULT_CORE_SLOTS = 2                  # production : comportement historique ; campagne configurable par env
 SENTINELLES_K = 3                       # ≤3 slots RÉSERVÉS aux LIQUIDATOR_SENTINELS (top liquidateurs)
 ROLE_ROTATION_SECONDS = max(60.0, float(os.getenv("HYPERSMART_VAULT_ROLE_ROTATION_SECONDS", "120")))
 UNIVERSE_REFRESH_SECONDS = max(900.0, float(os.getenv("HYPERSMART_VAULT_UNIVERSE_REFRESH_SECONDS", "1800")))
@@ -184,8 +185,18 @@ def charger_sentinelles(root: Path, *, k: int = SENTINELLES_K) -> list[str]:
     return LS.selectionner_sentinelles(recs, k=k)["sentinelles"]
 
 
+def _core_slots() -> int:
+    """Nombre de leaders strictement retenus suivis en continu, toujours borné par le plafond WS."""
+    raw = os.getenv("HYPERSMART_VAULT_CORE_SLOTS", str(DEFAULT_CORE_SLOTS))
+    try:
+        requested = int(raw)
+    except (TypeError, ValueError):
+        requested = DEFAULT_CORE_SLOTS
+    return max(1, min(requested, MAX_SLOTS))
+
+
 def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index: int = 0) -> list[tuple[str, str, str]]:
-    """(vault, role, raison) sur ≤10 places WS : 2 CORE (retenus stricts, TRADENT ALPHA+PROBE) + ≤3
+    """(vault, role, raison) sur ≤10 places WS : CORE configurables (retenus stricts) + ≤3
     LIQUIDATOR_SENTINELS ÉPINGLÉS (top liquidateurs confirmés — pour capter les liquidations forward) +
     le reste en CANDIDATS OBSERVÉS par ROTATION = activité live + qualité shadow + copyabilité. Total borné
     à MAX_SLOTS : les sentinelles NE dépassent JAMAIS la limite et NE volent PAS les slots CORE. PROBE ne
@@ -196,7 +207,11 @@ def vaults_et_roles(root: Path, *, n_candidats: int = MAX_SLOTS, rotation_index:
     except (OSError, ValueError):
         d = {}
     classement = d.get("classement") or []
-    core = [c["vault"] for c in classement if c.get("retenu") and c.get("vault")][:2]
+    core = [
+        c["vault"]
+        for c in classement
+        if c.get("retenu") and c.get("vault")
+    ][:_core_slots()]
     out = [(v, "CORE", "retenu strict (score) → trade ALPHA+PROBE") for v in core]
     pris = set(core)
     # Sentinelles épinglées (dédupliquées vs CORE), sans jamais dépasser MAX_SLOTS
