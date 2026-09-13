@@ -7,7 +7,13 @@ from pydantic import BaseModel, Field
 
 from hl_observer.config.settings import Settings
 from hl_observer.explorer.explorer_source import scrape_explorer
-from hl_observer.markets.scanner import MarketDiscoveryPlan, MarketScanPlan, run_discover_markets, run_scan_markets
+from hl_observer.markets.scanner import (
+    MarketDiscoveryPlan,
+    MarketScanPlan,
+    run_discover_markets,
+    run_scan_markets,
+)
+from hl_observer.markets.venues.multi_venue import discover_native_venue_candidates
 from hl_observer.security.safety_audit import run_safety_audit
 from hl_observer.storage.database import create_session_factory, create_sqlite_engine, init_db
 from hl_observer.wallets.discovery import build_wallet_discovery_plan, run_wallet_discovery
@@ -32,6 +38,9 @@ class AutoscanResult(BaseModel):
     sources_attempted: int = 0
     source_failures: int = 0
     candidates_created: int = 0
+    market_candidates_discovered: int = 0
+    cross_venue_candidates: list[str] = Field(default_factory=list)
+    hyperliquid_market_overlap: list[str] = Field(default_factory=list)
     wallets_selected: int = 0
     transactions_seen: int = 0
     full_addresses_found: int = 0
@@ -56,9 +65,13 @@ def run_autoscan(
     engine = create_sqlite_engine(settings.database_url)
     session_factory = create_session_factory(engine)
 
-    _step(result, "safety", "OK", "Securite verifiee : mainnet interdit et audit local lance.", {
-        "safety_ok": run_safety_audit(".").ok,
-    })
+    _step(
+        result,
+        "safety",
+        "OK",
+        "Securite verifiee : mainnet interdit et audit local lance.",
+        {"safety_ok": run_safety_audit(".").ok},
+    )
     _step(result, "database", "OK", "Base SQLite prete; creation non destructive effectuee.")
 
     market_discovery = _safe_call(
@@ -91,7 +104,37 @@ def run_autoscan(
             )
         ).model_dump(),
     )
-    _ = (market_discovery, market_scan)
+    _ = market_scan
+
+    if dry_run or not store:
+        _step(
+            result,
+            "native_venue_candidates",
+            "SKIPPED",
+            "Bybit/OKX non contactes en dry-run; aucun appel reseau externe force.",
+        )
+    else:
+        native_markets = _safe_call(
+            result,
+            "native_venue_candidates",
+            "Decouverte read-only des perps publics Bybit et OKX.",
+            lambda: asyncio.run(
+                discover_native_venue_candidates(
+                    ["bybit", "okx"],
+                    include_prelaunch=True,
+                    hyperliquid_coins=list(market_discovery.get("coins", []) or []),
+                )
+            ).model_dump(),
+        )
+        if native_markets:
+            canonical = native_markets.get("canonical_venues", {}) or {}
+            result.market_candidates_discovered = len(canonical)
+            result.cross_venue_candidates = list(
+                native_markets.get("cross_venue_candidates", []) or []
+            )
+            result.hyperliquid_market_overlap = list(
+                native_markets.get("hyperliquid_overlap", []) or []
+            )
 
     with session_factory() as session:
         leaderboard_payload = _safe_call(
@@ -112,9 +155,15 @@ def run_autoscan(
         )
         if leaderboard_payload:
             result.sources_attempted += 1
-            result.full_addresses_found += int(leaderboard_payload.get("full_addresses_found", 0) or 0)
-            result.truncated_addresses_rejected += int(leaderboard_payload.get("truncated_addresses_seen", 0) or 0)
-            result.candidates_created += int(leaderboard_payload.get("candidates_created", 0) or 0)
+            result.full_addresses_found += int(
+                leaderboard_payload.get("full_addresses_found", 0) or 0
+            )
+            result.truncated_addresses_rejected += int(
+                leaderboard_payload.get("truncated_addresses_seen", 0) or 0
+            )
+            result.candidates_created += int(
+                leaderboard_payload.get("candidates_created", 0) or 0
+            )
             if leaderboard_payload.get("status") not in {"OK", "IMPORT_OK"}:
                 result.source_failures += 1
 
@@ -136,9 +185,15 @@ def run_autoscan(
         if explorer_payload:
             result.sources_attempted += 1
             result.transactions_seen += int(explorer_payload.get("events_seen", 0) or 0)
-            result.full_addresses_found += int(explorer_payload.get("full_addresses_found", 0) or 0)
-            result.truncated_addresses_rejected += int(explorer_payload.get("truncated_addresses_rejected", 0) or 0)
-            result.candidates_created += int(explorer_payload.get("candidates_created", 0) or 0)
+            result.full_addresses_found += int(
+                explorer_payload.get("full_addresses_found", 0) or 0
+            )
+            result.truncated_addresses_rejected += int(
+                explorer_payload.get("truncated_addresses_rejected", 0) or 0
+            )
+            result.candidates_created += int(
+                explorer_payload.get("candidates_created", 0) or 0
+            )
             if explorer_payload.get("status") not in {"OK", "PARTIAL"}:
                 result.source_failures += 1
 
@@ -165,7 +220,10 @@ def run_autoscan(
     )
     if discovery:
         result.wallets_selected = len(discovery.get("selected_wallets", []) or [])
-        result.candidates_created = max(result.candidates_created, int(discovery.get("candidates_found", 0) or 0))
+        result.candidates_created = max(
+            result.candidates_created,
+            int(discovery.get("candidates_found", 0) or 0),
+        )
 
     with session_factory() as session:
         top500 = _safe_call(
@@ -182,7 +240,10 @@ def run_autoscan(
             ).model_dump(),
         )
         if top500:
-            result.wallets_selected = max(result.wallets_selected, int(top500.get("wallets_selected", 0) or 0))
+            result.wallets_selected = max(
+                result.wallets_selected,
+                int(top500.get("wallets_selected", 0) or 0),
+            )
 
         queue = _safe_call(
             result,
@@ -201,7 +262,12 @@ def run_autoscan(
         else:
             session.rollback()
 
-    _step(result, "analysis", "OK", "Analyses ouvertures, fermetures, playbooks et paper-follow preparees depuis les donnees stockees.")
+    _step(
+        result,
+        "analysis",
+        "OK",
+        "Analyses ouvertures, fermetures, playbooks et paper-follow preparees depuis les donnees stockees.",
+    )
     if result.candidates_created == 0:
         result.status = "NEEDS_IMPORT"
         result.next_action = "import_leaderboard_or_explorer"
@@ -226,10 +292,13 @@ def format_autoscan_report(result: AutoscanResult) -> str:
         f"sources demandees: {', '.join(result.sources)}",
         f"sources essayees: {result.sources_attempted}",
         f"sources en erreur/import requis: {result.source_failures}",
+        f"candidats marches Bybit/OKX: {result.market_candidates_discovered}",
+        f"candidats cross-venue Bybit+OKX: {len(result.cross_venue_candidates)}",
+        f"overlap Hyperliquid: {len(result.hyperliquid_market_overlap)}",
         f"transactions explorer vues: {result.transactions_seen}",
         f"adresses completes trouvees: {result.full_addresses_found}",
         f"adresses tronquees rejetees: {result.truncated_addresses_rejected}",
-        f"candidats crees: {result.candidates_created}",
+        f"candidats wallets crees: {result.candidates_created}",
         f"wallets selectionnes: {result.wallets_selected}",
         "anti-fake: Aucun wallet n'a ete invente; seules les adresses completes stockees ou extraites sont utilisees.",
         f"statut: {result.status}",
@@ -254,7 +323,13 @@ def _safe_call(
         result.source_failures += 1
         _step(result, name, "FAILED", message, error_message=str(exc))
         return {}
-    _step(result, name, "OK", message, details=details if isinstance(details, dict) else {})
+    _step(
+        result,
+        name,
+        "OK",
+        message,
+        details=details if isinstance(details, dict) else {},
+    )
     return details if isinstance(details, dict) else {}
 
 
