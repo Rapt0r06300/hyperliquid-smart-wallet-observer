@@ -579,7 +579,7 @@ def test_ensure_attaches_campaign_companion_without_replacing_active_lease(
     assert "token" not in json.dumps(result)
 
 
-def test_ensure_never_replaces_active_campaign_for_missing_normal_collector(
+def test_ensure_attaches_missing_normal_collector_without_replacing_lease(
     tmp_path: Path,
 ) -> None:
     start_bounded_collectors(
@@ -613,12 +613,58 @@ def test_ensure_never_replaces_active_campaign_for_missing_normal_collector(
         sleeper=lambda _seconds: None,
     )
 
-    assert result["status"] == "DEGRADED"
-    assert result["actifs"] == {"bbo-collector": 601}
-    assert result["manquants"] == ["allmids-collector"]
-    assert result["lease_preserved"] is True
-    assert result["ensure_reason"] == (
-        "ACTIVE_CAMPAIGN_NOT_REPLACED_FOR_NORMAL_COLLECTORS"
+    assert result["status"] == "ACTIVE"
+    assert result["actifs"] == {
+        "bbo-collector": 601,
+        "allmids-collector": 602,
+    }
+    assert result["manquants"] == []
+    assert result["attached_without_lease_replacement"] is True
+    assert len(spawn_calls) == 1
+    assert "collecter_allmids.py" in " ".join(spawn_calls[0])
+    assert lease_path.read_bytes() == lease_before
+
+
+def test_ensure_restarts_one_dead_requested_collector_without_stopping_survivor(
+    tmp_path: Path,
+) -> None:
+    pids = iter((701, 702))
+    start_bounded_collectors(
+        tmp_path,
+        ["bbo-collector", "allmids-collector"],
+        duration_s=600.0,
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [],
+        spawner=lambda _command, _root, _environment: _FakeProcess(next(pids)),
+        sleeper=lambda _seconds: None,
     )
-    assert spawn_calls == []
+    lease_path = tmp_path / "runtime/data/economic_collection_lease.json"
+    lease_before = lease_path.read_bytes()
+    spawned: list[list[str]] = []
+
+    result = ensure_bounded_collectors(
+        tmp_path,
+        ["bbo-collector", "allmids-collector"],
+        startup_wait_s=0.0,
+        process_inventory=lambda _root: [
+            {
+                "pid": 701,
+                "ppid": 1,
+                "name": "python.exe",
+                "cmd": "python tools/run_bounded_collector.py --name bbo-collector",
+            }
+        ],
+        spawner=lambda command, _root, _environment: (
+            spawned.append(command) or _FakeProcess(703)
+        ),
+        sleeper=lambda _seconds: None,
+    )
+
+    assert result["status"] == "ACTIVE"
+    assert result["actifs"] == {
+        "bbo-collector": 701,
+        "allmids-collector": 703,
+    }
+    assert len(spawned) == 1
+    assert "collecter_allmids.py" in " ".join(spawned[0])
     assert lease_path.read_bytes() == lease_before

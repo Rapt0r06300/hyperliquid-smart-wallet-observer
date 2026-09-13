@@ -309,20 +309,20 @@ def attach_bounded_collectors(
     sleeper: Callable[[float], None] = time.sleep,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Attach campaign-only collectors to the current lease without replacing it.
+    """Attach missing registered collectors to the current lease without replacing it.
 
-    This path exists for evidence companions that must start while a verified
-    bounded campaign is already collecting. It fails closed unless every
-    recorded process is still owned and the persisted bearer lease is valid.
-    The lease ID, expiry and existing PID set are preserved byte-for-byte.
+    This path also repairs one failed normal collector while its siblings keep
+    collecting. It fails closed unless the persisted bearer lease is valid and
+    at least one recorded process is still owned. The lease ID and expiry are
+    preserved byte-for-byte.
     """
 
     project_root = Path(root).resolve()
     requested = list(dict.fromkeys(str(name) for name in names))
-    campaign_registry = _registry(campaign_only=True)
-    unknown = [name for name in requested if name not in campaign_registry]
+    registry = _registry()
+    unknown = [name for name in requested if name not in registry]
     if unknown:
-        raise ValueError(f"campaign collector unknown: {','.join(unknown)}")
+        raise ValueError(f"collector unknown: {','.join(unknown)}")
 
     inventory = process_inventory or _processus_projet
     inspected = inspect_bounded_collectors(
@@ -330,7 +330,12 @@ def attach_bounded_collectors(
         process_inventory=inventory,
         now=now,
     )
-    if not isinstance(inspected, dict) or inspected.get("status") != "ACTIVE":
+    if (
+        not isinstance(inspected, dict)
+        or inspected.get("status") not in {"ACTIVE", "DEGRADED"}
+        or inspected.get("lease_valid") is not True
+        or not inspected.get("actifs")
+    ):
         status = inspected.get("status") if isinstance(inspected, dict) else "MISSING"
         raise RuntimeError(f"COLLECTOR_ATTACH_REQUIRES_ACTIVE_CAMPAIGN:{status}")
 
@@ -360,7 +365,7 @@ def attach_bounded_collectors(
         if isinstance(pid, int)
     }
     already_attached = {name: active[name] for name in requested if name in active}
-    pending = [campaign_registry[name] for name in requested if name not in active]
+    pending = [registry[name] for name in requested if name not in active]
     python_executable = resolve_project_python(project_root)
     runner = project_root / "tools" / "run_bounded_collector.py"
     launch = spawner or _default_spawn
@@ -406,15 +411,10 @@ def attach_bounded_collectors(
         else:
             returncodes[name] = int(returncode)
 
-    old_pids = {
-        str(name): int(pid)
-        for name, pid in dict(persisted.get("pids") or {}).items()
-        if isinstance(pid, int)
-    }
     old_started = set(persisted.get("demarres_et_verifies") or [])
     old_requested = list(persisted.get("requested") or [])
     combined_requested = list(dict.fromkeys([*old_requested, *requested]))
-    combined_pids = {**old_pids, **started}
+    combined_pids = {**active, **started}
     missing = [name for name in combined_requested if name not in combined_pids]
     log_tails = dict(persisted.get("startup_log_tails") or {})
     log_tails.update({
@@ -470,11 +470,11 @@ def ensure_bounded_collectors(
     sleeper: Callable[[float], None] = time.sleep,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Ensure requested collectors while never replacing a healthy campaign.
+    """Ensure requested collectors while never replacing a surviving campaign.
 
-    A missing campaign-only companion is attached under the active lease. If a
-    normal collector is missing from an otherwise healthy campaign, the state
-    is reported degraded instead of invalidating every running wrapper.
+    Any missing registered collector is attached under the active lease. A new
+    lease is issued only when no verified campaign process survives or the old
+    lease is invalid.
     """
 
     project_root = Path(root).resolve()
@@ -484,7 +484,11 @@ def ensure_bounded_collectors(
         process_inventory=process_inventory,
         now=now,
     )
-    if not isinstance(current, dict) or current.get("status") != "ACTIVE":
+    if (
+        not isinstance(current, dict)
+        or current.get("lease_valid") is not True
+        or not current.get("actifs")
+    ):
         return start_bounded_collectors(
             project_root,
             requested,
@@ -497,27 +501,16 @@ def ensure_bounded_collectors(
 
     active = set(_mapping_keys(current.get("actifs")))
     missing = [name for name in requested if name not in active]
-    campaign_names = set(_registry(campaign_only=True))
-    campaign_missing = [name for name in missing if name in campaign_names]
-    normal_missing = [name for name in missing if name not in campaign_names]
-    if campaign_missing:
+    if missing:
         current = attach_bounded_collectors(
             project_root,
-            campaign_missing,
+            missing,
             startup_wait_s=startup_wait_s,
             process_inventory=process_inventory,
             spawner=spawner,
             sleeper=sleeper,
             now=now,
         )
-    if normal_missing:
-        return {
-            **current,
-            "status": "DEGRADED",
-            "manquants": sorted(set(current.get("manquants") or []) | set(normal_missing)),
-            "lease_preserved": True,
-            "ensure_reason": "ACTIVE_CAMPAIGN_NOT_REPLACED_FOR_NORMAL_COLLECTORS",
-        }
     return current
 
 
