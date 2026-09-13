@@ -31,6 +31,17 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
     )
     monkeypatch.setattr(
         module,
+        "explore_lead_lag_bbo_repricing_train",
+        lambda _root, *, sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(
+        module,
         "load_preferred_certified_atomic_series",
         lambda _root: ({}, {}, {"source_mode": "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"}),
     )
@@ -158,6 +169,11 @@ def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
         is False
     )
     assert "cross_venue_persistence_v5" in result["reports"]
+    assert (
+        result["research_variants"]["lead_lag_bbo_repricing"]["heldout_evaluated"]
+        is False
+    )
+    assert "lead_lag_bbo_repricing" in result["reports"]
     assert alignment_calls == [None]
     assert result["lead_source_alignment"]["requested_sources"] == 0
     assert (
@@ -187,6 +203,17 @@ def test_vnext_pack_preserve_une_liste_de_sources_explicite(
             "selection_eligible": False,
             "physical_freeze_allowed": False,
             "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_lead_lag_bbo_repricing_train",
+        lambda _root, *, sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
         },
     )
     monkeypatch.setattr(

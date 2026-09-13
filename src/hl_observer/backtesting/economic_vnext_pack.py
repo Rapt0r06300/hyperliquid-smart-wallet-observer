@@ -32,6 +32,9 @@ from hl_observer.backtesting.cross_venue_v4_train import explore_cross_venue_v4_
 from hl_observer.backtesting.cross_venue_v5_persistence_train import (
     explore_cross_venue_v5_train,
 )
+from hl_observer.backtesting.lead_lag_bbo_repricing_train import (
+    explore_lead_lag_bbo_repricing_train,
+)
 from hl_observer.backtesting.lead_lag_multiasset_train import explore_lead_lag_multiasset_train
 from hl_observer.backtesting.lead_lag_source_alignment import select_aligned_bbo_sources
 
@@ -87,6 +90,10 @@ def run_economic_vnext_pack(
         ),
     }
     lead = explore_lead_lag_multiasset_train(project_root, aligned_lead_sources)
+    lead_bbo_repricing = explore_lead_lag_bbo_repricing_train(
+        project_root,
+        sources=aligned_lead_sources,
+    )
 
     cross_series, cross_depth, cross_meta = load_preferred_certified_atomic_series(project_root)
     cross = explore_cross_venue_v4_train(
@@ -217,6 +224,11 @@ def run_economic_vnext_pack(
 
     paths = {
         "lead_lag": _write_json(project_root, "lead_lag_multiasset_train", lead),
+        "lead_lag_bbo_repricing": _write_json(
+            project_root,
+            "lead_lag_bbo_repricing_train",
+            lead_bbo_repricing,
+        ),
         "cross_venue": _write_json(project_root, "cross_venue_v4_train", cross),
         "cross_venue_persistence_v5": _write_json(
             project_root,
@@ -272,6 +284,20 @@ def run_economic_vnext_pack(
         "copy_vault_universe_integrity": copy_integrity,
         "lead_source_alignment": lead_alignment,
         "research_variants": {
+            "lead_lag_bbo_repricing": {
+                "status": lead_bbo_repricing.get("status"),
+                "selection_eligible": lead_bbo_repricing.get("selection_eligible")
+                is True,
+                "physical_freeze_allowed": lead_bbo_repricing.get(
+                    "physical_freeze_allowed"
+                )
+                is True,
+                "freeze_candidate_sha256": lead_bbo_repricing.get(
+                    "freeze_candidate_sha256"
+                ),
+                "heldout_evaluated": lead_bbo_repricing.get("heldout_evaluated")
+                is True,
+            },
             "cross_venue_persistence_v5": {
                 "status": cross_v5.get("status"),
                 "selection_eligible": cross_v5.get("selection_eligible") is True,
