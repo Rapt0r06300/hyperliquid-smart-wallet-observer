@@ -188,6 +188,7 @@ def backtester(
     seuil_entree=SEUIL_ENTREE_BPS,
     seuil_sortie=SEUIL_SORTIE_BPS,
     stop_bps=STOP_AGGRAVATION_BPS,
+    stop_net_bps: float | None = None,
     horizon_s=HORIZON_MAX_S,
     fraicheur_ms=FRAICHEUR_MAX_MS,
     latence_ms=LATENCE_MS,
@@ -364,10 +365,28 @@ def backtester(
             converged = abs(basis) <= seuil_sortie
             expired = age_s >= horizon_s
             stopped = abs(basis) >= abs(position["basis_in"]) + stop_bps
+            current_net_bps = _net_trade_bps(
+                position["hl_in"],
+                position["bn_in"],
+                hl,
+                bn,
+                sens=position["sens"],
+                fees_ar_bps=float(fees_ar_bps),
+            )
+            net_stopped = bool(
+                stop_net_bps is not None
+                and current_net_bps <= -abs(float(stop_net_bps))
+            )
             exit_reason = position.get("exit_pending_reason")
             if exit_reason is None:
                 exit_reason = (
-                    "CONVERGENCE" if converged else ("STOP" if stopped else ("AGE" if expired else None))
+                    "CONVERGENCE"
+                    if converged
+                    else (
+                        "NET_STOP"
+                        if net_stopped
+                        else ("STOP" if stopped else ("AGE" if expired else None))
+                    )
                 )
             if exit_reason is None:
                 continue

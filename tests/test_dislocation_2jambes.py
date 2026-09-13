@@ -176,6 +176,30 @@ def test_dimensionnement_adaptatif_utilise_uniquement_capacite_entree_et_reexige
     assert diagnostics["rejected_adaptive_notional_below_minimum"] == 1
 
 
+def test_stop_net_executable_borne_la_perte_avant_le_stop_de_basis():
+    t = 1_000_000.0
+    events = [
+        (t, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 500, "ATOMIC", 100.20, 100.22, 99.80, 99.82),
+        (t + 1000, "ATOMIC", 100.45, 100.47, 99.80, 99.82),
+        (t + 1500, "ATOMIC", 100.70, 100.72, 99.80, 99.82),
+    ]
+    depth = {"ZZZ": [(row[0], 250.0) for row in events]}
+
+    trades = BT.backtester(
+        {"ZZZ": events},
+        fees_ar_bps=0.0,
+        depth_by_coin=depth,
+        stop_bps=1000.0,
+        stop_net_bps=20.0,
+    )
+
+    assert len(trades) == 1
+    assert trades[0]["sortie"] == "NET_STOP"
+    assert trades[0]["ts_out"] == t + 1000
+    assert trades[0]["net_bps"] <= -20.0
+
+
 def test_profondeur_perimee_bloque_entree_plutot_que_inventer_fill():
     t = 1_000_000.0
     evs = []
