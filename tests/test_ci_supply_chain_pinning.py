@@ -9,13 +9,16 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 CHECKOUT_SHA = "3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON_SHA = "5fda3b95a4ea91299a34e894583c3862153e4b97"
 UPLOAD_ARTIFACT_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+LEGACY_CHECKOUT_SHA = "11d5960a326750d5838078e36cf38b85af677262"
+LEGACY_SETUP_PYTHON_SHA = "a26af69be951a213d495a4c3e4e4022e16d87065"
+LEGACY_UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
 ATTEST_BUILD_PROVENANCE_SHA = "e8998f949152b193b063cb0ec769d69d929409be"
 
 PINNED = {
-    "actions/checkout": CHECKOUT_SHA,
-    "actions/setup-python": SETUP_PYTHON_SHA,
-    "actions/upload-artifact": UPLOAD_ARTIFACT_SHA,
-    "actions/attest-build-provenance": ATTEST_BUILD_PROVENANCE_SHA,
+    "actions/checkout": frozenset({LEGACY_CHECKOUT_SHA, CHECKOUT_SHA}),
+    "actions/setup-python": frozenset({LEGACY_SETUP_PYTHON_SHA, SETUP_PYTHON_SHA}),
+    "actions/upload-artifact": frozenset({LEGACY_UPLOAD_ARTIFACT_SHA, UPLOAD_ARTIFACT_SHA}),
+    "actions/attest-build-provenance": frozenset({ATTEST_BUILD_PROVENANCE_SHA}),
 }
 
 
@@ -30,7 +33,7 @@ def test_all_github_actions_are_pinned_to_immutable_shas():
             if action.startswith("./"):
                 continue
             if action in PINNED:
-                if ref != PINNED[action]:
+                if ref not in PINNED[action]:
                     failures.append(f"{name}: {action}@{ref}")
             elif not re.fullmatch(r"[0-9a-f]{40}", ref):
                 failures.append(f"{name}: action externe non pinnee {action}@{ref}")
@@ -39,15 +42,16 @@ def test_all_github_actions_are_pinned_to_immutable_shas():
 
 def test_checkout_ne_persiste_aucun_credential_sur_les_workflows_qui_checkout():
     failures: list[str] = []
-    needle = f"uses: actions/checkout@{CHECKOUT_SHA}"
     for name, text in _texts().items():
-        if needle not in text:
-            continue
-        segments = text.split(needle)[1:]
-        for index, segment in enumerate(segments, start=1):
-            step = segment.split("\n      - ", 1)[0]
-            if "persist-credentials: false" not in step:
-                failures.append(f"{name} checkout #{index}")
+        for checkout_sha in PINNED["actions/checkout"]:
+            needle = f"uses: actions/checkout@{checkout_sha}"
+            if needle not in text:
+                continue
+            segments = text.split(needle)[1:]
+            for index, segment in enumerate(segments, start=1):
+                step = segment.split("\n      - ", 1)[0]
+                if "persist-credentials: false" not in step:
+                    failures.append(f"{name} checkout #{index}")
     assert not failures, "Checkout avec credentials persistants: " + "; ".join(failures)
 
 
