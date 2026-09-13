@@ -15,7 +15,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 SCHEMA_VERSION = "hypersmart.collector_lease.v1"
 PURPOSE = "economic_evidence_collection"
 DEFAULT_RELPATH = Path("runtime") / "data" / "economic_collection_lease.json"
@@ -28,7 +27,19 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
         json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(temporary, path)
+    # Windows can deny an otherwise valid atomic replacement while a bounded
+    # collector has the lease open for its short validation read. Retry only
+    # this transient sharing error; every other failure still fails closed.
+    for attempt in range(20):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError as exc:
+            if os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}:
+                raise
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 def create_lease(

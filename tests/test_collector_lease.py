@@ -4,6 +4,9 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
+from hl_observer.ops import collector_lease
 from hl_observer.ops.bounded_collection import (
     _background_creation_flags,
     attach_bounded_collectors,
@@ -102,6 +105,33 @@ def test_lease_is_bounded_replaced_and_never_publicly_exposes_token(tmp_path: Pa
     assert public_lease(second)["paper_read_only"] is True
     assert public_lease(second)["real_execution"] is False
     assert first["lease_id"] != second["lease_id"]
+
+
+def test_lease_replace_retries_transient_windows_file_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_replace = collector_lease.os.replace
+    attempts = 0
+
+    def flaky_replace(source: str | Path, destination: str | Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            error = PermissionError("temporary sharing violation")
+            error.winerror = 5
+            raise error
+        real_replace(source, destination)
+
+    monkeypatch.setattr(collector_lease.os, "replace", flaky_replace)
+    monkeypatch.setattr(collector_lease.time, "sleep", lambda _seconds: None)
+
+    lease_file, payload = create_lease(
+        tmp_path, duration_s=60.0, now=100.0, token="retry-token"
+    )
+
+    assert attempts == 3
+    assert validate_lease(lease_file, "retry-token", tmp_path, now=101.0)[0] is True
+    assert payload["paper_read_only"] is True
 
 
 def test_lease_fails_closed_for_wrong_root_and_safety_tampering(tmp_path: Path) -> None:
