@@ -1,345 +1,105 @@
-"""Causal queue-aware maker replay for the Lead-Lag V3 hypothesis.
+"""Lead-Lag queue replay with an optional causal already-priced entry veto.
 
-The mechanism is deliberately narrow and predeclared: a strong rolling ETH
-shock observed on Binance may post one passive Hyperliquid order.  A touch is
-never a fill.  Recorded public trades must consume both the quantity already
-ahead and the complete paper order before the entry exists.  The position is
-then closed at a recorded marketable top-of-book price.
-
-This module is local PAPER/READ-ONLY research code.  It has no exchange client
-and no order-placement surface.
+The frozen V3 implementation lives in ``_lead_lag_queue_replay_core`` unchanged.
+This facade preserves that implementation byte-for-byte while adding one
+opt-in, pre-FIFO veto for research runs.  ``None`` keeps legacy behaviour.
 """
 from __future__ import annotations
 
 import bisect
-import hashlib
-import json
+import contextvars
 import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from hl_observer.backtesting.lead_lag_queue_analysis import (
-    _number,
-)
-from hl_observer.backtesting.lead_lag_queue_analysis import (
-    assign_shock_segments as _assign_shock_segments,
-)
-from hl_observer.backtesting.lead_lag_queue_analysis import (
-    detect_rolling_shocks as _detect_rolling_shocks,
-)
-from hl_observer.backtesting.lead_lag_queue_analysis import (
-    summarize_rows as _summary,
-)
-from hl_observer.backtesting.lead_lag_queue_analysis import (
-    validate_precomputed_shocks as _validated_precomputed_shocks,
-)
-from hl_observer.backtesting.lead_lag_queue_costs import (
-    maker_cost_receipts as _maker_cost_receipts,
-)
-from hl_observer.economics.assumptions import EconomicRunMode
-from hl_observer.economics.families import build_lead_lag_maker_contract
-from hl_observer.fees.hyperliquid_fees import nos_frais
+from hl_observer.backtesting import _lead_lag_queue_replay_core as _core
 
-SCHEMA_VERSION = "hypersmart.lead_lag_queue_replay.v1"
-REQUIRED_COIN = "ETH"
-SHOCK_WINDOW_MS = 1_000
-SHOCK_THRESHOLD_BPS = 20.0
-SHOCK_COOLDOWN_MS = 5_000
-MAKER_LIFETIME_MS = 2_000
-HOLD_MS = 5_000
-NOTIONAL_USD = 25.0
-MAX_BOOK_DELAY_MS = 750
-DIAGNOSTIC_LATENCY_MS = 750.0
-MIN_COMPLETE_PROOF_DAYS = 2
-POST_FREEZE_PROOF_POLICY = "FIRST_TWO_COMPLETE_UTC_DAYS_AFTER_FREEZE_V1"
-MAKER_PROTOCOL_NAME = "lead_lag_queue_maker_walk_forward_v1"
-MAKER_EXECUTION_MODEL = (
-    "causal_eth_strong_shock_full_fifo_maker_entry_taker_exit_v1"
+# Preserve the complete historical module surface, including constants and
+# private helpers used by existing internal research/tests.
+for _name in dir(_core):
+    if not _name.startswith("__"):
+        globals()[_name] = getattr(_core, _name)
+
+_ORIGINAL_REPLAY_ONE = _core._replay_one
+_ALREADY_PRICED_MAX_FRACTION: contextvars.ContextVar[float | None] = (
+    contextvars.ContextVar("lead_lag_already_priced_max_fraction", default=None)
 )
 
 
-def maker_protocol_signature() -> dict[str, Any]:
-    """Return the immutable maker strategy fields, excluding measured data."""
-
-    return {
-        "calibration_protocol": MAKER_PROTOCOL_NAME,
-        "execution_model": MAKER_EXECUTION_MODEL,
-        "coin": REQUIRED_COIN,
-        "shock_window_ms": SHOCK_WINDOW_MS,
-        "shock_threshold_bps": SHOCK_THRESHOLD_BPS,
-        "shock_cooldown_ms": SHOCK_COOLDOWN_MS,
-        "maker_lifetime_ms": MAKER_LIFETIME_MS,
-        "hold_ms": HOLD_MS,
-        "notional_usd": NOTIONAL_USD,
-        "max_book_age_or_delay_ms": MAX_BOOK_DELAY_MS,
-        "queue_rule": (
-            "FIFO_PUBLIC_TRADES_CONSUME_AHEAD_PLUS_COMPLETE_OWN_QUANTITY"
-        ),
-        "cancellation_rule": "CANCELLATIONS_DO_NOT_ADVANCE_QUEUE",
-        "entry_decision_policy": (
-            "LATEST_KNOWN_FRESH_BOOK_OR_FIRST_CAUSAL_BOOK_AFTER_DECISION"
-        ),
-        "latency_policy": "FROZEN_MEASURED_RUNTIME_P95",
-        "post_freeze_proof_policy": POST_FREEZE_PROOF_POLICY,
-        "minimum_complete_proof_days": MIN_COMPLETE_PROOF_DAYS,
-        "paper_read_only": True,
-        "real_execution": False,
-    }
-
-
-def post_freeze_proof_window(
-    *, frozen_at_ms: int, evaluated_at_ms: int
-) -> dict[str, Any]:
-    """Return immutable OOS/forward bounds over complete post-freeze UTC days."""
-
-    day_ms = 86_400_000
-    proof_start = ((int(frozen_at_ms) // day_ms) + 1) * day_ms
-    completed_cutoff = (int(evaluated_at_ms) // day_ms) * day_ms
-    complete_days = max(0, (completed_cutoff - proof_start) // day_ms)
-    if complete_days <= 0:
-        segments = {"oos": (None, None), "forward": (None, None)}
-    else:
-        oos_end = proof_start + day_ms - 1
-        forward = (
-            (proof_start + day_ms, completed_cutoff - 1)
-            if complete_days >= 2
-            else (None, None)
-        )
-        segments = {"oos": (proof_start, oos_end), "forward": forward}
-    return {
-        "policy": POST_FREEZE_PROOF_POLICY,
-        "frozen_at_ms": int(frozen_at_ms),
-        "evaluated_at_ms": int(evaluated_at_ms),
-        "proof_start_ms": proof_start,
-        "completed_cutoff_exclusive_ms": completed_cutoff,
-        "complete_days_available": complete_days,
-        "segments": segments,
-    }
-
-
-def _stable_id(payload: Mapping[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
-def detect_rolling_shocks(
-    trades: Sequence[Sequence[float]],
-    *,
-    window_ms: int = SHOCK_WINDOW_MS,
-    threshold_bps: float = SHOCK_THRESHOLD_BPS,
-    cooldown_ms: int = SHOCK_COOLDOWN_MS,
-) -> list[dict[str, Any]]:
-    """Detect causal rolling-price shocks without consulting future trades."""
-    return _detect_rolling_shocks(
-        trades,
-        window_ms=window_ms,
-        threshold_bps=threshold_bps,
-        cooldown_ms=cooldown_ms,
-    )
-
-
-def _first_book_at_or_after(
+def _fresh_book_at_or_before(
     books: Sequence[Mapping[str, Any]],
     timestamps: Sequence[int],
-    target_ms: float,
+    target_ms: int,
     *,
-    max_delay_ms: int,
+    max_age_ms: int,
 ) -> Mapping[str, Any] | None:
-    index = bisect.bisect_left(timestamps, int(math.ceil(target_ms)))
-    if index >= len(books):
+    """Return only a fresh observation already known by ``target_ms``."""
+
+    index = bisect.bisect_right(timestamps, int(target_ms)) - 1
+    if index < 0:
         return None
     row = books[index]
-    delay = int(row.get("ts_ms") or 0) - float(target_ms)
-    if delay < 0 or delay > max(0, int(max_delay_ms)):
+    observed_ms = int(row.get("ts_ms") or 0)
+    age_ms = int(target_ms) - observed_ms
+    if age_ms < 0 or age_ms > max(0, int(max_age_ms)):
         return None
     return row
 
 
-def _entry_book_for_decision(
-    books: Sequence[Mapping[str, Any]],
-    timestamps: Sequence[int],
-    target_ms: float,
-    *,
-    max_age_or_delay_ms: int,
-) -> tuple[Mapping[str, Any], int, str] | None:
-    """Return the freshest book causally known when the paper order can be sent."""
-
-    decision_ms = int(math.ceil(target_ms))
-    previous_index = bisect.bisect_right(timestamps, decision_ms) - 1
-    if previous_index >= 0:
-        previous = books[previous_index]
-        age_ms = decision_ms - int(previous.get("ts_ms") or 0)
-        if 0 <= age_ms <= max(0, int(max_age_or_delay_ms)):
-            return previous, decision_ms, "LATEST_KNOWN_FRESH_BOOK_AT_DECISION"
-
-    later = _first_book_at_or_after(
-        books,
-        timestamps,
-        target_ms,
-        max_delay_ms=max_age_or_delay_ms,
-    )
-    if later is None:
+def _book_mid(row: Mapping[str, Any]) -> float | None:
+    bid = _core._number(row.get("bid"))
+    ask = _core._number(row.get("ask"))
+    if bid is None or ask is None or bid <= 0 or ask <= 0 or ask < bid:
         return None
-    observed_ms = int(later.get("ts_ms") or 0)
-    return later, observed_ms, "FIRST_CAUSAL_BOOK_AFTER_DECISION"
+    return 0.5 * (float(bid) + float(ask))
 
 
-def _matching_public_trades(
-    trades: Sequence[Mapping[str, Any]],
-    timestamps: Sequence[int],
-    *,
-    start_ms: int,
-    end_ms: int,
-    price: float,
-    passive_direction: int,
-    earliest_exchange_ms: int | None,
-) -> list[Mapping[str, Any]]:
-    expected_side = "A" if passive_direction > 0 else "B"
-    index = bisect.bisect_right(timestamps, int(start_ms))
-    result: list[Mapping[str, Any]] = []
-    while index < len(trades):
-        row = trades[index]
-        observed_ms = int(row.get("ts_ms") or 0)
-        if observed_ms > int(end_ms):
-            break
-        trade_price = _number(row.get("px"))
-        exchange_ms = _number(row.get("exchange_ts_ms"))
-        if (
-            str(row.get("side") or "").upper() == expected_side
-            and trade_price is not None
-            and math.isclose(trade_price, float(price), rel_tol=1e-10, abs_tol=1e-10)
-            and (
-                earliest_exchange_ms is None
-                or exchange_ms is None
-                or exchange_ms >= earliest_exchange_ms
-            )
-        ):
-            result.append(row)
-        index += 1
-    return result
-
-
-def _economic_row(
-    *,
+def _causal_already_priced_fraction(
     shock: Mapping[str, Any],
-    direction: int,
+    *,
+    books: Sequence[Mapping[str, Any]],
+    book_timestamps: Sequence[int],
     entry_book: Mapping[str, Any],
-    entry_ts_ms: int,
-    entry_decision_policy: str,
-    fill_trade: Mapping[str, Any],
-    exit_book: Mapping[str, Any],
-    queue_events: list[dict[str, float]],
-    initial_qty_ahead: float,
-    paper_order_qty: float,
-    notional_usd: float,
-    latency_ms: float,
-    latency_measured: bool,
-    all_queue_events_quality_ready: bool,
-    placebo: bool,
-) -> dict[str, Any]:
-    entry_price = float(entry_book["bid"] if direction > 0 else entry_book["ask"])
-    exit_price = float(exit_book["bid"] if direction > 0 else exit_book["ask"])
-    entry_mid = 0.5 * (float(entry_book["bid"]) + float(entry_book["ask"]))
-    exit_mid = 0.5 * (float(exit_book["bid"]) + float(exit_book["ask"]))
-    quantity = float(paper_order_qty)
-    entry_notional = quantity * entry_price
-    exit_notional = quantity * exit_price
-    # A passive fill captures the entry-side spread.  Treat that measured
-    # execution benefit as part of gross PnL so every cost receipt remains a
-    # non-negative cost; the taker exit spread is then charged explicitly.
-    gross_pnl = float(direction) * (exit_mid - entry_price) * quantity
-    executable_before_fees = float(direction) * (exit_price - entry_price) * quantity
-    spread_cost = gross_pnl - executable_before_fees
-    fees = nos_frais("perp")
-    entry_fee = entry_notional * float(fees.maker_bps) / 10_000.0
-    exit_fee = exit_notional * float(fees.taker_bps) / 10_000.0
-    fee_cost = entry_fee + exit_fee
-    slippage_cost = 0.0
-    latency_cost = 0.0  # The delayed entry observation already embeds latency.
-    net = executable_before_fees - fee_cost
-    exit_capacity_value = (
-        exit_book.get("bid_top_usd")
-        if direction > 0
-        else exit_book.get("ask_top_usd")
+    max_book_delay_ms: int,
+) -> float | None:
+    """Measure source-shock absorption using no observation after entry.
+
+    Hyperliquid is compared from the freshest book known at/before the source
+    shock window start to the causal book available when the delayed order can
+    actually be sent.  Missing baseline evidence disables the veto for that
+    signal rather than inventing a price.
+    """
+
+    source_shock_bps = _core._number(shock.get("lead_shock_bps"))
+    window_start_ms = _core._number(shock.get("window_start_ts_ms"))
+    if (
+        source_shock_bps is None
+        or window_start_ms is None
+        or abs(source_shock_bps) <= 1e-12
+    ):
+        return None
+
+    baseline_book = _fresh_book_at_or_before(
+        books,
+        book_timestamps,
+        int(window_start_ms),
+        max_age_ms=max_book_delay_ms,
     )
-    exit_capacity = float(exit_capacity_value or 0.0)
-    capacity_ok = exit_capacity + 1e-12 >= exit_notional
-    quality_ready = bool(
-        entry_book.get("data_gate_ready") is True
-        and exit_book.get("data_gate_ready") is True
-        and all_queue_events_quality_ready
+    if baseline_book is None:
+        return None
+    baseline_mid = _book_mid(baseline_book)
+    entry_mid = _book_mid(entry_book)
+    if baseline_mid is None or entry_mid is None or baseline_mid <= 0:
+        return None
+
+    source_direction = 1.0 if source_shock_bps > 0 else -1.0
+    signed_hl_move_bps = (
+        ((entry_mid / baseline_mid) - 1.0) * 10_000.0 * source_direction
     )
-    reconciliation_ok = math.isclose(
-        gross_pnl - fee_cost - spread_cost - slippage_cost - latency_cost,
-        net,
-        abs_tol=1e-9,
-    )
-    liquidatable = bool(
-        latency_measured and quality_ready and capacity_ok and reconciliation_ok
-    )
-    identity_payload = {
-        "coin": REQUIRED_COIN,
-        "trigger_ts_ms": int(shock["trigger_ts_ms"]),
-        "direction": int(direction),
-        "entry_ts_ms": int(entry_ts_ms),
-        "fill_ts_ms": int(fill_trade["ts_ms"]),
-        "exit_ts_ms": int(exit_book["ts_ms"]),
-        "placebo": bool(placebo),
-    }
-    return {
-        "trade_id": _stable_id(identity_payload),
-        "coin": REQUIRED_COIN,
-        "direction": int(direction),
-        "side": "LONG" if direction > 0 else "SHORT",
-        "lead_shock_bps": float(shock["lead_shock_bps"]),
-        "trigger_ts_ms": int(shock["trigger_ts_ms"]),
-        "entry_ts_ms": int(entry_ts_ms),
-        "entry_book_ts_ms": int(entry_book["ts_ms"]),
-        "entry_decision_policy": str(entry_decision_policy),
-        "fill_ts_ms": int(fill_trade["ts_ms"]),
-        "exit_ts_ms": int(exit_book["ts_ms"]),
-        "entry_price": entry_price,
-        "exit_price": exit_price,
-        "entry_mid": entry_mid,
-        "exit_mid": exit_mid,
-        "initial_qty_ahead": float(initial_qty_ahead),
-        "paper_order_qty": quantity,
-        "required_qty_for_full_fill": float(initial_qty_ahead + quantity),
-        "queue_events": queue_events,
-        "queue_traded_qty": sum(event["traded_qty_at_level"] for event in queue_events),
-        "notional_usd": float(notional_usd),
-        "entry_notional_usd": entry_notional,
-        "exit_notional_usd": exit_notional,
-        "exit_top_capacity_usd": exit_capacity,
-        "capacity_ok": capacity_ok,
-        "maker_entry_fee_bps": float(fees.maker_bps),
-        "taker_exit_fee_bps": float(fees.taker_bps),
-        "gross_pnl_usd": gross_pnl,
-        "fees_usd": fee_cost,
-        "spread_cost_usd": spread_cost,
-        "slippage_cost_usd": slippage_cost,
-        "latency_cost_usd": latency_cost,
-        "rebate_usd": 0.0,
-        "net_pnl_usd": net,
-        "economic_reconciliation_ok": reconciliation_ok,
-        "latency_ms": float(latency_ms),
-        "latency_measured": bool(latency_measured),
-        "latency_embedded_in_delayed_entry": True,
-        "data_gate_ready": quality_ready,
-        "full_fill": True,
-        "closed_position": True,
-        "liquidatable_net": liquidatable,
-        "LIQUIDATABLE_NET": liquidatable,
-        "placebo": bool(placebo),
-        "paper_read_only": True,
-        "real_execution": False,
-        "walk_forward_segment": str(shock.get("walk_forward_segment") or ""),
-        "segment": str(shock.get("walk_forward_segment") or ""),
-    }
+    return max(0.0, signed_hl_move_bps / abs(float(source_shock_bps)))
 
 
-def _replay_one(
+def _replay_one_with_already_priced(
     shock: Mapping[str, Any],
     *,
     direction: int,
@@ -355,80 +115,48 @@ def _replay_one(
     max_book_delay_ms: int,
     placebo: bool,
 ) -> tuple[dict[str, Any] | None, str]:
-    target_ms = int(shock["trigger_ts_ms"]) + float(latency_ms)
-    entry_decision = _entry_book_for_decision(
-        books,
-        book_timestamps,
-        target_ms,
-        max_age_or_delay_ms=max_book_delay_ms,
-    )
-    if entry_decision is None:
-        return None, "MISSING_CAUSAL_ENTRY_BOOK"
-    entry_book, entry_ts_ms, entry_decision_policy = entry_decision
-    entry_price = float(entry_book["bid"] if direction > 0 else entry_book["ask"])
-    initial_ahead = float(entry_book["bid_size"] if direction > 0 else entry_book["ask_size"])
-    if entry_price <= 0 or initial_ahead <= 0:
-        return None, "INVALID_ENTRY_LEVEL"
-    own_quantity = float(notional_usd) / entry_price
-    required_quantity = initial_ahead + own_quantity
-    earliest_exchange = _number(entry_book.get("exchange_ts_ms"))
-    matching = _matching_public_trades(
-        public_trades,
-        trade_timestamps,
-        start_ms=entry_ts_ms,
-        end_ms=entry_ts_ms + int(maker_lifetime_ms),
-        price=entry_price,
-        passive_direction=direction,
-        earliest_exchange_ms=int(earliest_exchange) if earliest_exchange is not None else None,
-    )
-    queue_events: list[dict[str, float]] = []
-    cumulative = 0.0
-    fill_trade: Mapping[str, Any] | None = None
-    quality_ready = True
-    for trade in matching:
-        traded_quantity = max(0.0, float(trade.get("sz") or 0.0))
-        if traded_quantity <= 0:
-            continue
-        queue_events.append(
-            {"book_size_change": 0.0, "traded_qty_at_level": traded_quantity}
+    threshold = _ALREADY_PRICED_MAX_FRACTION.get()
+    if threshold is not None:
+        target_ms = int(shock["trigger_ts_ms"]) + float(latency_ms)
+        entry_decision = _core._entry_book_for_decision(
+            books,
+            book_timestamps,
+            target_ms,
+            max_age_or_delay_ms=max_book_delay_ms,
         )
-        cumulative += traded_quantity
-        quality_ready = quality_ready and trade.get("data_gate_ready") is True
-        if cumulative + 1e-12 >= required_quantity:
-            fill_trade = trade
-            break
-    if fill_trade is None:
-        return None, "QUEUE_NOT_FULLY_CONSUMED"
-
-    exit_target_ms = int(fill_trade["ts_ms"]) + int(hold_ms)
-    exit_book = _first_book_at_or_after(
-        books,
-        book_timestamps,
-        exit_target_ms,
-        max_delay_ms=max_book_delay_ms,
-    )
-    if exit_book is None:
-        return None, "MISSING_CAUSAL_EXIT_BOOK"
-    return (
-        _economic_row(
-            shock=shock,
-            direction=direction,
+        if entry_decision is None:
+            return None, "MISSING_CAUSAL_ENTRY_BOOK"
+        entry_book, _, _ = entry_decision
+        absorbed_fraction = _causal_already_priced_fraction(
+            shock,
+            books=books,
+            book_timestamps=book_timestamps,
             entry_book=entry_book,
-            entry_ts_ms=entry_ts_ms,
-            entry_decision_policy=entry_decision_policy,
-            fill_trade=fill_trade,
-            exit_book=exit_book,
-            queue_events=queue_events,
-            initial_qty_ahead=initial_ahead,
-            paper_order_qty=own_quantity,
-            notional_usd=notional_usd,
-            latency_ms=latency_ms,
-            latency_measured=latency_measured,
-            all_queue_events_quality_ready=quality_ready,
-            placebo=placebo,
-        ),
-        "FILLED_AND_CLOSED",
+            max_book_delay_ms=max_book_delay_ms,
+        )
+        if absorbed_fraction is not None and absorbed_fraction >= threshold:
+            return None, "ALREADY_PRICED"
+
+    return _ORIGINAL_REPLAY_ONE(
+        shock,
+        direction=direction,
+        books=books,
+        book_timestamps=book_timestamps,
+        public_trades=public_trades,
+        trade_timestamps=trade_timestamps,
+        latency_ms=latency_ms,
+        latency_measured=latency_measured,
+        maker_lifetime_ms=maker_lifetime_ms,
+        hold_ms=hold_ms,
+        notional_usd=notional_usd,
+        max_book_delay_ms=max_book_delay_ms,
+        placebo=placebo,
     )
+
+
+# The frozen core assigns and evaluates walk-forward segments before invoking
+# this function, so vetoed candidates cannot reshuffle train/validation/OOS.
+_core._replay_one = _replay_one_with_already_priced
 
 
 def replay_lead_lag_queue_maker(
@@ -437,336 +165,56 @@ def replay_lead_lag_queue_maker(
     public_trade_history: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
     latency_evidence: Mapping[str, Any],
-    coin: str = REQUIRED_COIN,
-    shock_window_ms: int = SHOCK_WINDOW_MS,
-    shock_threshold_bps: float = SHOCK_THRESHOLD_BPS,
-    shock_cooldown_ms: int = SHOCK_COOLDOWN_MS,
-    maker_lifetime_ms: int = MAKER_LIFETIME_MS,
-    hold_ms: int = HOLD_MS,
-    notional_usd: float = NOTIONAL_USD,
-    max_book_delay_ms: int = MAX_BOOK_DELAY_MS,
+    coin: str = _core.REQUIRED_COIN,
+    shock_window_ms: int = _core.SHOCK_WINDOW_MS,
+    shock_threshold_bps: float = _core.SHOCK_THRESHOLD_BPS,
+    shock_cooldown_ms: int = _core.SHOCK_COOLDOWN_MS,
+    maker_lifetime_ms: int = _core.MAKER_LIFETIME_MS,
+    hold_ms: int = _core.HOLD_MS,
+    notional_usd: float = _core.NOTIONAL_USD,
+    max_book_delay_ms: int = _core.MAX_BOOK_DELAY_MS,
     segment_bounds: Mapping[str, tuple[int | None, int | None]] | None = None,
     precomputed_shocks: Sequence[Mapping[str, Any]] | None = None,
+    already_priced_max_fraction: float | None = None,
 ) -> dict[str, Any]:
-    """Replay the immutable maker hypothesis and its same-time placebo."""
+    """Replay V3 with an optional causal pre-FIFO ``ALREADY_PRICED`` veto."""
 
-    selected_coin = str(coin).upper()
-    if selected_coin != REQUIRED_COIN:
-        raise ValueError(f"predeclared Lead-Lag V3 coin is {REQUIRED_COIN}, got {selected_coin}")
-    streams = tape.get(selected_coin) or {}
-    lead_trades = list(streams.get("TRADE") or [])
-    shocks = (
-        detect_rolling_shocks(
-            lead_trades,
-            window_ms=shock_window_ms,
-            threshold_bps=shock_threshold_bps,
-            cooldown_ms=shock_cooldown_ms,
-        )
-        if precomputed_shocks is None
-        else _validated_precomputed_shocks(
-            precomputed_shocks,
-            window_ms=shock_window_ms,
-            threshold_bps=shock_threshold_bps,
-            cooldown_ms=shock_cooldown_ms,
-        )
-    )
-    shock_source = (
-        "DETECTED_FROM_RECORDED_TAPE"
-        if precomputed_shocks is None
-        else "PRECOMPUTED_CAUSAL_STREAMING_INDEX"
-    )
-    _assign_shock_segments(shocks, segment_bounds)
-    if segment_bounds is not None:
-        shocks = [
-            shock
-            for shock in shocks
-            if shock.get("walk_forward_segment") != "excluded"
-        ]
-    books = sorted(
-        [dict(row) for row in l2_history.get(selected_coin, ())],
-        key=lambda row: int(row.get("ts_ms") or 0),
-    )
-    public_trades = sorted(
-        [dict(row) for row in public_trade_history.get(selected_coin, ())],
-        key=lambda row: int(row.get("ts_ms") or 0),
-    )
-    book_timestamps = [int(row.get("ts_ms") or 0) for row in books]
-    trade_timestamps = [int(row.get("ts_ms") or 0) for row in public_trades]
-    measured = latency_evidence.get("measured") is True
-    measured_p95 = _number(latency_evidence.get("p95_ms"))
-    applied_latency = float(measured_p95 if measured_p95 is not None else DIAGNOSTIC_LATENCY_MS)
+    threshold: float | None = None
+    if already_priced_max_fraction is not None:
+        parsed = _core._number(already_priced_max_fraction)
+        if parsed is None or parsed <= 0:
+            raise ValueError("INVALID_ALREADY_PRICED_MAX_FRACTION")
+        threshold = float(parsed)
 
-    rows: list[dict[str, Any]] = []
-    placebo_rows: list[dict[str, Any]] = []
-    diagnostics: dict[str, int] = {}
-    for shock in shocks:
-        direction = int(shock["direction"])
-        row, reason = _replay_one(
-            shock,
-            direction=direction,
-            books=books,
-            book_timestamps=book_timestamps,
-            public_trades=public_trades,
-            trade_timestamps=trade_timestamps,
-            latency_ms=applied_latency,
-            latency_measured=measured,
+    token = _ALREADY_PRICED_MAX_FRACTION.set(threshold)
+    try:
+        report = _core.replay_lead_lag_queue_maker(
+            tape,
+            l2_history,
+            public_trade_history,
+            latency_evidence=latency_evidence,
+            coin=coin,
+            shock_window_ms=shock_window_ms,
+            shock_threshold_bps=shock_threshold_bps,
+            shock_cooldown_ms=shock_cooldown_ms,
             maker_lifetime_ms=maker_lifetime_ms,
             hold_ms=hold_ms,
             notional_usd=notional_usd,
             max_book_delay_ms=max_book_delay_ms,
-            placebo=False,
+            segment_bounds=segment_bounds,
+            precomputed_shocks=precomputed_shocks,
         )
-        diagnostics[reason] = diagnostics.get(reason, 0) + 1
-        if row is not None:
-            rows.append(row)
-        placebo, placebo_reason = _replay_one(
-            shock,
-            direction=-direction,
-            books=books,
-            book_timestamps=book_timestamps,
-            public_trades=public_trades,
-            trade_timestamps=trade_timestamps,
-            latency_ms=applied_latency,
-            latency_measured=measured,
-            maker_lifetime_ms=maker_lifetime_ms,
-            hold_ms=hold_ms,
-            notional_usd=notional_usd,
-            max_book_delay_ms=max_book_delay_ms,
-            placebo=True,
-        )
-        diagnostics[f"PLACEBO_{placebo_reason}"] = diagnostics.get(
-            f"PLACEBO_{placebo_reason}", 0
-        ) + 1
-        if placebo is not None:
-            placebo_rows.append(placebo)
+    finally:
+        _ALREADY_PRICED_MAX_FRACTION.reset(token)
 
-    rows.sort(key=lambda row: (int(row["trigger_ts_ms"]), str(row["trade_id"])))
-    placebo_rows.sort(
-        key=lambda row: (int(row["trigger_ts_ms"]), str(row["trade_id"]))
-    )
-    segment_summaries = {
-        segment: _summary(
-            [row for row in rows if row.get("walk_forward_segment") == segment]
-        )
-        for segment in ("train", "validation", "oos", "forward")
-    }
-    placebo_summaries = {
-        segment: _summary(
-            [row for row in placebo_rows if row.get("walk_forward_segment") == segment]
-        )
-        for segment in ("train", "validation", "oos", "forward")
-    }
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "mechanism": "lead_lag_v3_eth_strong_shock_queue_maker",
-        "parameters": {
-            "coin": selected_coin,
-            "shock_window_ms": int(shock_window_ms),
-            "shock_threshold_bps": float(shock_threshold_bps),
-            "shock_cooldown_ms": int(shock_cooldown_ms),
-            "maker_lifetime_ms": int(maker_lifetime_ms),
-            "hold_ms": int(hold_ms),
-            "notional_usd": float(notional_usd),
-            "max_book_delay_ms": int(max_book_delay_ms),
-        },
-        "strong_shocks_seen": len(shocks),
-        "shock_source": shock_source,
-        "maker_queue_candidates": rows,
-        "placebo_candidates": placebo_rows,
-        "segment_summaries": segment_summaries,
-        "placebo_segment_summaries": placebo_summaries,
-        "train_placebo_net_pnl_usd": placebo_summaries["train"]["net_pnl_usd"],
-        "latency_evidence": dict(latency_evidence),
-        "latency_measured": measured,
-        "applied_latency_ms": applied_latency,
-        "segment_bounds": (
-            {
-                str(name): list(bounds)
-                for name, bounds in segment_bounds.items()
-            }
-            if segment_bounds is not None
-            else None
-        ),
-        "diagnostics": diagnostics,
-        "data_sources": {
-            "lead": "recorded Binance public trades",
-            "execution": "recorded Hyperliquid l2Book plus public trades",
-        },
-        "queue_rule": "FIFO_PUBLIC_TRADES_CONSUME_AHEAD_PLUS_COMPLETE_OWN_QUANTITY",
-        "cancellation_rule": "CANCELLATIONS_DO_NOT_ADVANCE_QUEUE",
-        "latency_rule": "MEASURED_P95_EMBEDDED_IN_ENTRY_OR_DIAGNOSTIC_NON_LIQUIDATABLE",
-        "forward_status": "NOT_STARTED_POST_FREEZE",
-        "paper_read_only": True,
-        "real_execution": False,
-    }
+    result = dict(report)
+    parameters = dict(result.get("parameters") or {})
+    parameters["already_priced_max_fraction"] = threshold
+    result["parameters"] = parameters
+    return result
 
 
-def _valid_sha256(value: object) -> bool:
-    text = str(value or "")
-    return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
-
-
-def _validate_frozen_maker(
-    frozen_parameters: Mapping[str, Any], *, frozen_at_ms: int
-) -> float:
-    signature = maker_protocol_signature()
-    if any(frozen_parameters.get(key) != value for key, value in signature.items()):
-        raise ValueError("FROZEN_MAKER_PROTOCOL_MISMATCH")
-    if frozen_parameters.get("training_selection_eligible") is not True:
-        raise ValueError("TRAINING_SELECTION_NOT_ELIGIBLE")
-    selection_cutoff = _number(frozen_parameters.get("selection_cutoff_ms"))
-    if (
-        selection_cutoff is None
-        or selection_cutoff <= 0
-        or selection_cutoff >= int(frozen_at_ms)
-    ):
-        raise ValueError("INVALID_SELECTION_CUTOFF")
-    train_ranges = frozen_parameters.get("train_ranges")
-    if not isinstance(train_ranges, Sequence) or not train_ranges:
-        raise ValueError("INVALID_TRAIN_RANGES")
-    for bounds in train_ranges:
-        if (
-            not isinstance(bounds, Sequence)
-            or len(bounds) != 2
-            or _number(bounds[0]) is None
-            or _number(bounds[1]) is None
-            or float(bounds[0]) > float(bounds[1])
-            or float(bounds[1]) > selection_cutoff
-        ):
-            raise ValueError("INVALID_TRAIN_RANGES")
-    for key in (
-        "latency_evidence_sha256",
-        "training_selection_evidence_sha256",
-    ):
-        if not _valid_sha256(frozen_parameters.get(key)):
-            raise ValueError("INVALID_FROZEN_EVIDENCE_HASH")
-    latency = _number(frozen_parameters.get("applied_latency_ms"))
-    if latency is None or latency < 0:
-        raise ValueError("INVALID_FROZEN_LATENCY")
-    return float(latency)
-
-
-def evaluate_frozen_maker(
-    tape: Mapping[str, Mapping[str, list]],
-    l2_history: Mapping[str, Sequence[Mapping[str, Any]]],
-    public_trade_history: Mapping[str, Sequence[Mapping[str, Any]]],
-    *,
-    frozen_parameters: Mapping[str, Any],
-    frozen_at_ms: int,
-    evaluated_at_ms: int,
-    economic_mode: EconomicRunMode | str = EconomicRunMode.CERTIFIABLE,
-) -> dict[str, Any]:
-    """Evaluate only complete UTC days strictly after a valid maker freeze."""
-
-    applied_latency = _validate_frozen_maker(
-        frozen_parameters, frozen_at_ms=int(frozen_at_ms)
-    )
-    proof_window = post_freeze_proof_window(
-        frozen_at_ms=int(frozen_at_ms), evaluated_at_ms=int(evaluated_at_ms)
-    )
-    segment_bounds = {
-        "train": (None, None),
-        "validation": (None, None),
-        **dict(proof_window["segments"]),
-    }
-    replay = replay_lead_lag_queue_maker(
-        tape,
-        l2_history,
-        public_trade_history,
-        latency_evidence={
-            "measured": True,
-            "p95_ms": applied_latency,
-            "sha256": frozen_parameters["latency_evidence_sha256"],
-            "frozen": True,
-        },
-        coin=str(frozen_parameters["coin"]),
-        shock_window_ms=int(frozen_parameters["shock_window_ms"]),
-        shock_threshold_bps=float(frozen_parameters["shock_threshold_bps"]),
-        shock_cooldown_ms=int(frozen_parameters["shock_cooldown_ms"]),
-        maker_lifetime_ms=int(frozen_parameters["maker_lifetime_ms"]),
-        hold_ms=int(frozen_parameters["hold_ms"]),
-        notional_usd=float(frozen_parameters["notional_usd"]),
-        max_book_delay_ms=int(frozen_parameters["max_book_age_or_delay_ms"]),
-        segment_bounds=segment_bounds,
-    )
-    contract = build_lead_lag_maker_contract(
-        mode=economic_mode,
-        notional_usd=float(frozen_parameters["notional_usd"]),
-        max_book_age_ms=float(frozen_parameters["max_book_age_or_delay_ms"]),
-    )
-    economic_receipt = contract.receipt()
-    rows: list[dict[str, Any]] = []
-    for raw in replay["maker_queue_candidates"]:
-        row = dict(raw)
-        row["assumption_snapshot_hash"] = contract.registry.snapshot_hash()
-        row["economic_contract"] = economic_receipt
-        row["cost_component_receipts"] = _maker_cost_receipts(
-            row, reality_model_version=contract.reality_model_version
-        )
-        rows.append(row)
-
-    summaries = {
-        segment: _summary(
-            [row for row in rows if row.get("walk_forward_segment") == segment]
-        )
-        for segment in ("oos", "forward")
-    }
-    placebo_rows = list(replay["placebo_candidates"])
-    placebo_oos = _summary(
-        [row for row in placebo_rows if row.get("walk_forward_segment") == "oos"]
-    )
-    oos_net = summaries["oos"]["net_pnl_usd"]
-    forward_net = summaries["forward"]["net_pnl_usd"]
-    temporal_evidence = {
-        "oos": {
-            **summaries["oos"],
-            "no_lookahead": True,
-            "purged": True,
-        },
-        "forward": {
-            **summaries["forward"],
-            "post_freeze": all(
-                int(row["trigger_ts_ms"]) > int(frozen_at_ms)
-                for row in rows
-                if row.get("walk_forward_segment") == "forward"
-            ),
-            "causal_live_only": True,
-        },
-        "placebos": {
-            "candidate_net_usd": oos_net,
-            "placebo_net_usd": placebo_oos["net_pnl_usd"],
-            "beaten": (
-                summaries["oos"]["sample_count"] > 0
-                and placebo_oos["sample_count"] > 0
-                and float(oos_net) > float(placebo_oos["net_pnl_usd"])
-            ),
-            "method": "same_shocks_inverted_direction_full_fifo",
-        },
-    }
-    return {
-        "schema_version": SCHEMA_VERSION,
-        "mechanism": replay["mechanism"],
-        "frozen_at_ms": int(frozen_at_ms),
-        "evaluated_at_ms": int(evaluated_at_ms),
-        "frozen_parameters": dict(frozen_parameters),
-        "proof_window": proof_window,
-        "trades": rows,
-        "summary": _summary(rows),
-        "segment_summaries": summaries,
-        "temporal_evidence": temporal_evidence,
-        "economic_contract": economic_receipt,
-        "assumption_snapshot_hash": contract.registry.snapshot_hash(),
-        "diagnostics": dict(replay["diagnostics"]),
-        "proof_net_pnl_usd": round(float(oos_net) + float(forward_net), 8),
-        "paper_read_only": True,
-        "real_execution": False,
-    }
-
-
-__all__ = [
-    "detect_rolling_shocks",
-    "evaluate_frozen_maker",
-    "maker_protocol_signature",
-    "post_freeze_proof_window",
-    "replay_lead_lag_queue_maker",
-]
+# Keep the original explicit public surface while replacing only the replay
+# entry point above.  Frozen evaluation remains byte-for-byte legacy unless a
+# caller explicitly opts into this facade parameter.
+__all__ = list(_core.__all__)
