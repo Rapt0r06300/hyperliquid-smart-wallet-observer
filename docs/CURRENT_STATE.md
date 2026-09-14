@@ -34,6 +34,19 @@ Le projet reste **paper/read-only** :
 
 La politique de signalement est dans `SECURITY.md`.
 
+### 2.1 Contrat obligatoire avant tout futur trading réel
+
+Le processus doit rester actif en continu pour observer et recalculer les opportunités, mais l'ouverture d'une position reste fail-closed lorsqu'aucun avantage net prouvé ne couvre les coûts et le risque. Le moteur d'exécution réel devra, avant son activation :
+
+- lire le solde et la marge réellement disponibles, sans capital codé en dur, y compris pour un compte initial de 50 USD ;
+- dimensionner chaque ordre en fraction du capital et de la liquidité exécutable observée ;
+- conserver une réserve de marge et plafonner l'exposition, la perte par trade, la perte journalière et le drawdown cumulé ;
+- bloquer uniquement les nouvelles prises de position lorsque ces limites sont atteintes, tout en continuant le scan et la réévaluation des signaux ;
+- refuser un ordre si la taille minimale, les frais, le spread, le slippage ou le risque de liquidation empêchent une espérance nette positive dans les limites fixées ;
+- ne jamais présenter la conservation du capital ou un rendement quotidien comme garanti.
+
+Ces exigences ne lèvent pas le verrou paper/read-only actuel et ne constituent pas une autorisation de trading réel.
+
 ## 3. Chantier des 775 optimisations pré-run
 
 Le registre canonique des **775 optimisations pré-run est scellé 775/775**. Il n'est pas permis de renuméroter, supprimer ou recycler les identifiants 1–775. Toute découverte réellement nouvelle commence à 776+.

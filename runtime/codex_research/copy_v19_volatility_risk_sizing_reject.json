@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "record_id": "R-CV-COPY-V19-VOL-RISK-REJECT-9AAA88B",
+  "hypothesis_id": "H-CV-COPY-V19-CAUSAL-VOLATILITY-RISK-SIZING",
+  "parent_hypothesis_id": "H-CV-COPY-V18-DEPTH-SIZED-ALIGNMENT",
+  "family": "copy_vault",
+  "stage": "REJECTED",
+  "verdict": "NO_ROBUST_TRAIN_CANDIDATE",
+  "baseline": false,
+  "change_class": "MODEL",
+  "controller_action": "PIVOT",
+  "base_sha": "9aaa88b81d55dda478e2394553451d71e584b42d",
+  "created_at_utc": "2026-09-14T06:42:00Z",
+  "mechanism": "Copy a causal vault ADD only when aligned with the observed Hyperliquid book, and size the paper position so the trailing 30-minute high-low move implies a fixed 1, 2, or 3 USD risk budget, bounded by visible depth and 600 USD.",
+  "temporal_operator": "At signal time, compute the high-low range from causal five-level midpoint observations in the preceding 30 minutes only, floor measured volatility at 25 bps, divide the fixed dollar-risk budget by that rate, and cap the result by the smaller visible bid/ask capacity and 600 USD. Reject sizes below 75 USD, then enter after the canonical delay and exit after one hour.",
+  "conditioning": [
+    "ADD action only",
+    "signed depth imbalance minimum 0 or 0.20",
+    "at least ten causal midpoint observations in the trailing 30 minutes",
+    "maximum trailing observation gap five minutes",
+    "volatility floor 25 bps",
+    "fixed dollar-risk target 1, 2, or 3 USD",
+    "notional capped by exact signal-time two-sided five-level depth and 600 USD",
+    "computed notional below 75 USD rejected",
+    "maximum one admitted entry per vault and coin per UTC day",
+    "maximum ten simultaneous positions",
+    "canonical taker costs and exact five-level VWAP",
+    "same-size direction-flip placebo",
+    "only complete causal actual and placebo episodes enter aggregation"
+  ],
+  "data_surfaces": [
+    "causal live non-snapshot vault fills",
+    "continuous causal Hyperliquid five-level L2"
+  ],
+  "execution_translation": "Paper-only volatility-targeted taker entry and exit. Position risk is fixed from pre-entry observations and cannot increase from future outcomes. Spread, slippage, adverse latency, and canonical fees are reconciled; no order or collector is used.",
+  "prediction_target": "At least 4 USD net per TRAIN day with eight trades across three days, profit factor above one, placebo beaten, positive 430-trial-adjusted total lower bound, top positive trade share and largest vault and coin shares at most 60 percent, complete episodes, and bounded per-position pre-entry risk.",
+  "falsification_test": "Reject if none of the six fixed alignment and dollar-risk variants passes every TRAIN gate. Heldout and forward remain unopened before freeze.",
+  "experiment_ids": [
+    "copy-v19-causal-volatility-risk-sizing-train"
+  ],
+  "trial_count": 6,
+  "economic_progress": {
+    "prior_family_trial_count": 424,
+    "new_trial_count": 6,
+    "bonferroni_trial_count": 430,
+    "best_net_pnl_usd": 11.3131224436,
+    "best_daily_mean_net_pnl_usd": 3.771040814533333,
+    "best_sample_count": 7,
+    "best_distinct_days": 3,
+    "best_profit_factor": 5.308600664851777,
+    "best_placebo_net_pnl_usd": -15.43348112,
+    "best_total_lcb_usd": -40.51896505696858
+  },
+  "source_refs": [
+    "runtime/reports/economic_campaigns/research_vnext/copy_vault_v19_volatility_risk_sizing_train.json"
+  ],
+  "scientific_signatures": [],
+  "notes": "TRAIN-only replay rejected without opening heldout. Volatility targeting bounded pre-entry dollar risk and remained positive with strong placebo separation, but reduced the sample to seven trades, 3.77 USD/day, and a negative adjusted lower bound.",
+  "rationale": "V18 passed every TRAIN gate except the multiplicity-adjusted lower bound because its depth-based size concentrated dollar gains in one day. Pre-entry volatility targeting is a causal risk normalization intended to equalize dollar exposure across regimes while retaining the eight-trade diversified sample."
+}

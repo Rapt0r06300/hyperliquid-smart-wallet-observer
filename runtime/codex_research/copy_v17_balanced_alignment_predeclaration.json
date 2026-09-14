@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "record_id": "R-CV-COPY-V17-BALANCED-ALIGNMENT-DISC-9AAA88B",
+  "hypothesis_id": "H-CV-COPY-V17-BALANCED-ALIGNMENT",
+  "parent_hypothesis_id": "H-CV-COPY-V15-L2-ALIGNED-LARGE-ADD",
+  "family": "copy_vault",
+  "stage": "DISCOVERY",
+  "verdict": "PREDECLARED",
+  "baseline": false,
+  "change_class": "PARAMETER_ONLY",
+  "controller_action": "IMPROVE",
+  "base_sha": "9aaa88b81d55dda478e2394553451d71e584b42d",
+  "created_at_utc": "2026-09-14T05:55:00Z",
+  "mechanism": "Retain the causal v15 ADD signal and same-direction five-level depth filter, but admit at most one completed paper entry per vault and UTC day so no single leader can dominate the evidence.",
+  "temporal_operator": "Process TRAIN signals in observable-time order. Apply a fixed signed-depth threshold of 0, 0.20, or 0.50, then enter after the canonical delay and exit after 30 or 60 minutes. Vault and coin daily counters use only earlier admitted entries.",
+  "conditioning": [
+    "ADD action only",
+    "signed five-level depth imbalance minimum 0, 0.20, or 0.50",
+    "fixed 600 USD paper notional",
+    "fixed 30 or 60 minute horizon",
+    "maximum one admitted entry per vault per UTC day",
+    "maximum one admitted entry per coin per UTC day",
+    "maximum ten simultaneous paper positions",
+    "canonical full taker costs and observed five-level VWAP",
+    "direction-flip placebo on the same admitted identities",
+    "only complete causal entry and exit episodes enter aggregation"
+  ],
+  "data_surfaces": [
+    "causal live non-snapshot vault fills",
+    "continuous causal Hyperliquid five-level L2"
+  ],
+  "execution_translation": "Paper-only Hyperliquid taker entry and exit at observed five-level VWAP with spread, slippage, adverse latency, and canonical fees reconciled. No order, network collection, carry PnL, future feature, or invented exit is allowed.",
+  "prediction_target": "At least 4 USD net per TRAIN day with eight trades across three days, profit factor above one, direction placebo beaten, positive 418-trial-adjusted total lower bound, top positive trade share and largest vault and coin shares at most 60 percent, and complete counted episodes.",
+  "falsification_test": "Reject if none of the six fixed depth-threshold and horizon variants passes every TRAIN gate. Heldout and forward outcomes remain unopened before freeze.",
+  "experiment_ids": [
+    "copy-v17-balanced-alignment-train-predeclaration"
+  ],
+  "trial_count": 0,
+  "economic_progress": {
+    "prior_family_trial_count": 412,
+    "new_trial_count": 6,
+    "bonferroni_trial_count": 418,
+    "target_net_usd_per_day": 4.0
+  },
+  "source_refs": [
+    "runtime/reports/economic_campaigns/research_vnext/copy_vault_v15_l2_aligned_add_train.json",
+    "runtime/codex_research/copy_v15_trade_concentration_audit.json",
+    "src/hl_observer/backtesting/copy_vault_executable.py"
+  ],
+  "scientific_signatures": [],
+  "notes": "The six-variant TRAIN grid is fixed before reading v17 outcomes. Collection is disabled and the process runs at below-normal Windows priority.",
+  "rationale": "V15 produced 71.51 USD net over four observed TRAIN days but one vault supplied 73.33 percent of trades. A one-entry-per-vault-day budget is causal and directly targets that sole deterministic gate failure while keeping the profitable execution mechanism unchanged."
+}

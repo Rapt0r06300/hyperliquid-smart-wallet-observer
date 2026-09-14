@@ -1,0 +1,126 @@
+{
+  "freeze": {
+    "schema_version": "hypersmart.economic_parameter_freeze.v1",
+    "campaign_id": "1789392614450-0eba248fbe83",
+    "family": "copy_vault",
+    "frozen_at_ms": 1789392614450,
+    "selected_before_final_evaluation": true,
+    "parameters": {
+      "protocol": "copy_v21_entry_capacity_daily_lock_v1",
+      "training_selection_eligible": true,
+      "paper_read_only": true,
+      "real_execution": false,
+      "minimum_leader_fill_notional_usd": 100.0,
+      "signed_depth_imbalance_minimum": 0.0,
+      "core_notional_usd": 600.0,
+      "probe_notional_usd": 75.0,
+      "daily_profit_lock_usd": 4.0,
+      "stop_loss_bps": 50.0,
+      "take_profit_bps": 100.0,
+      "horizon_ms": 3600000,
+      "vault_daily_limit": 1,
+      "coin_daily_limit": 1,
+      "max_open_positions": 10,
+      "bonferroni_trial_count": 432,
+      "bounds": {
+        "train_start_ms": 1786637370177,
+        "train_end_ms": 1788099281901,
+        "validation_start_ms": 1788102971901,
+        "validation_end_ms": 1789158938999,
+        "oos_start_ms": 1789162628999,
+        "oos_end_ms": 1789319825220,
+        "purge_ms": 3690000,
+        "validation_empty_after_purge": false
+      },
+      "train_trade_ids_sha256": "75c26bac1c138af3f2489cdf53489e7abad49ffa1ab9f2e96e8345e77e7d1609"
+    },
+    "parameters_sha256": "0eba248fbe8385408251124fc183ddc581a37af80e2fa1b7aad5f90e9e8930a8",
+    "dataset_provenance": {
+      "files": [
+        {
+          "path": "runtime/data/vault_fills.jsonl",
+          "exists": true,
+          "size_bytes": 20610867,
+          "mtime_ns": 1789315715111660400,
+          "fingerprint": "c68a5cf34411b65cf0fc4d7c58d287c8592b2edf5541d2ef3840194b0c9b6f6e",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/data/vault_fills_live.jsonl",
+          "exists": true,
+          "size_bytes": 23294479,
+          "mtime_ns": 1789319838158041100,
+          "fingerprint": "9bdae6788936791e868fb97e48461c596604e6bd25fd0a44e1486acc335a06be",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/data/leader_fills_forward.jsonl",
+          "exists": true,
+          "size_bytes": 11731435,
+          "mtime_ns": 1787428411259437400,
+          "fingerprint": "a358b389e1f885c88f015e2733ca9a2e3dff20d7c5cd6a2c4dbbbf902f235254",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/data/leader_fills_bruts.jsonl",
+          "exists": true,
+          "size_bytes": 8559677,
+          "mtime_ns": 1789073152344264500,
+          "fingerprint": "1f18ab09c23c9db8056bbf7cf174b438ca42a9c6c517cd29a72b85448340f7db",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/data/vault_episodes.jsonl",
+          "exists": true,
+          "size_bytes": 49322294,
+          "mtime_ns": 1789315715684908900,
+          "fingerprint": "b2218733cafde4cd61a55d1f3464618f0441e3261fde7840c6c921e3d8ebb44b",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/data/carnet_venues.jsonl",
+          "exists": true,
+          "size_bytes": 187282036,
+          "mtime_ns": 1789319828450301500,
+          "fingerprint": "8ec7b163d38612e5eef879f9c2b12aa022f4d74f9dd04caec761092a53661407",
+          "fingerprint_method": "EDGE_SHA256_WITH_SIZE"
+        },
+        {
+          "path": "runtime/data/copy_vault_l2_tape.jsonl",
+          "exists": true,
+          "size_bytes": 468172694,
+          "mtime_ns": 1789319843584412500,
+          "fingerprint": "63a4530d301a25245a7f1ea0af86cb9db45313236bde59e1a0682fb0826ea0c9",
+          "fingerprint_method": "EDGE_SHA256_WITH_SIZE"
+        },
+        {
+          "path": "runtime/reports/economic_campaigns/research_vnext/copy_vault_v21_entry_capacity_daily_lock_train.json",
+          "exists": true,
+          "size_bytes": 722817,
+          "mtime_ns": 1789392528114186100,
+          "fingerprint": "efe6280e87826dc6d8a86de1c88dfff92f18d3c29c0433484804a8cfc311d1dc",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/codex_research/run_copy_v21_entry_capacity_daily_lock_train.py",
+          "exists": true,
+          "size_bytes": 12818,
+          "mtime_ns": 1789392490385914000,
+          "fingerprint": "7f5f7e915a843db5ae1bbb7b693ceb6c4ac9237a4c3b9480ede298c9fe75f85a",
+          "fingerprint_method": "FULL_SHA256"
+        },
+        {
+          "path": "runtime/codex_research/run_copy_v10_causal_risk_exits_train.py",
+          "exists": true,
+          "size_bytes": 13723,
+          "mtime_ns": 1789392258405019300,
+          "fingerprint": "6eb4cfe93265f1eee0d5f8f145228b32b3e222f34c5aef4d5bb3c2a43d2f16a6",
+          "fingerprint_method": "FULL_SHA256"
+        }
+      ],
+      "dataset_fingerprint": "c6c65aa2486559899ff4443b45f1291faf16089001641e9f0c9511a945383aae"
+    },
+    "path": "runtime/reports/economic_campaigns/freezes/copy_vault/1789392614450-0eba248fbe83.json"
+  },
+  "train_report": "runtime/reports/economic_campaigns/research_vnext/copy_vault_v21_entry_capacity_daily_lock_train.json"
+}
