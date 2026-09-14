@@ -39,6 +39,7 @@ class SourceEntry:
     size: int = 0
     sha256: str = ""
     target: str = ""
+    reason: str = ""
 
     def as_dict(self) -> dict[str, object]:
         result: dict[str, object] = {"path": self.path, "kind": self.kind}
@@ -46,6 +47,8 @@ class SourceEntry:
             result.update(size=self.size, sha256=self.sha256)
         elif self.kind == "junction":
             result["target"] = self.target
+        elif self.kind == "excluded":
+            result["reason"] = self.reason
         return result
 
 
@@ -143,7 +146,14 @@ def inventory_source(root: str | Path, *, exclude: str | Path | None = None, has
             size = path.stat().st_size
             normalized = relative.casefold()
             known_public_hash = PUBLIC_NONSECRET_ENV_HASHES.get(normalized)
-            digest = sha256_file(path) if hash_files or known_public_hash else ""
+            try:
+                digest = sha256_file(path) if hash_files or known_public_hash else ""
+            except PermissionError:
+                parts = {part.casefold() for part in Path(relative).parts}
+                if "__pycache__" not in parts or path.suffix.casefold() != ".pyc":
+                    raise
+                entries.append(SourceEntry(relative, "excluded", size=size, reason="unreadable_generated_python_cache"))
+                continue
             if known_public_hash and digest != known_public_hash:
                 raise FullFolderReleaseError(f"reviewed public environment file changed: {relative}")
             entries.append(SourceEntry(relative, "file", size=size, sha256=digest))

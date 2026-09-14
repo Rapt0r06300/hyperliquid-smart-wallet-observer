@@ -19,6 +19,10 @@ d'un fichier source pendant la création. Les jonctions internes ne sont pas
 suivies : leur cible relative est inscrite dans l'inventaire et l'installateur
 les recrée après vérification.
 
+Un cache Python compilé sous __pycache__ peut être inscrit comme exclu s'il est
+réellement illisible à cause de son ACL Windows. Aucun autre fichier illisible
+n'est toléré.
+
 Après avoir poussé le commit et installé GitHub CLI, la publication s'effectue
 avec tools/publish_full_folder_release.ps1 en lui passant BuildDirectory, qui
 doit désigner le sous-dossier produit sous runtime/portable-build.

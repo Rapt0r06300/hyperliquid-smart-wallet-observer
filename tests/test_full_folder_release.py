@@ -81,3 +81,26 @@ def test_internal_directory_link_is_recorded_and_never_traversed(tmp_path: Path)
     assert linked.kind == "junction"
     assert linked.target == "runtime/data"
     assert not any(entry.path.startswith("linked-data/") for entry in entries)
+
+
+def test_only_an_unreadable_generated_python_cache_may_be_excluded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "repo"
+    cache = root / "package" / "__pycache__"
+    cache.mkdir(parents=True)
+    inaccessible = cache / "module.pyc"
+    inaccessible.write_bytes(b"cache")
+    source = root / "source.py"
+    source.write_text("pass", encoding="utf-8")
+    real_hash = FFR.sha256_file
+
+    def denied(path: str | Path, chunk_size: int = 8 * 1024 * 1024) -> str:
+        if Path(path) == inaccessible:
+            raise PermissionError("injected")
+        return real_hash(path, chunk_size)
+
+    monkeypatch.setattr(FFR, "sha256_file", denied)
+    entries = FFR.inventory_source(root)
+    excluded = next(entry for entry in entries if entry.path.endswith("module.pyc"))
+    assert excluded.kind == "excluded"
+    assert excluded.reason == "unreadable_generated_python_cache"
+    assert next(entry for entry in entries if entry.path == "source.py").kind == "file"
