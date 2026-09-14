@@ -53,6 +53,20 @@ def test_plan_and_finalize_hash_every_release_asset(tmp_path: Path):
     assert on_disk == manifest
 
 
+def test_plan_excludes_every_previous_portable_build(tmp_path: Path):
+    root = tmp_path / "repo"
+    old = root / "runtime" / "portable-build" / "old"
+    output = root / "runtime" / "portable-build" / "new"
+    old.mkdir(parents=True)
+    (old / "old-volume.001").write_bytes(b"must not be nested")
+    (root / "kept.txt").write_text("kept", encoding="utf-8")
+    FFR.write_plan(root, output, "d" * 40)
+    inventory = json.loads((output / FFR.INVENTORY_NAME).read_text(encoding="utf-8"))
+    paths = {entry["path"] for entry in inventory["entries"]}
+    assert "kept.txt" in paths
+    assert not any(path.startswith("runtime/portable-build/") for path in paths)
+
+
 def test_finalize_refuses_a_source_modified_during_build(tmp_path: Path):
     root = tmp_path / "repo"
     output = root / "build"

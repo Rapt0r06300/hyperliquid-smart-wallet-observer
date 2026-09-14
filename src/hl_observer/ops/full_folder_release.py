@@ -204,7 +204,9 @@ def inventory_payload(root: Path, entries: Iterable[SourceEntry], *, head: str) 
 
 def write_plan(root: Path, output: Path, head: str) -> dict[str, object]:
     output.mkdir(parents=True, exist_ok=True)
-    entries = inventory_source(root, exclude=output, hash_files=True)
+    build_root = (root / "runtime" / "portable-build").resolve()
+    exclusion = build_root if _lexically_within(output, build_root) else output
+    entries = inventory_source(root, exclude=exclusion, hash_files=True)
     inventory = inventory_payload(root, entries, head=head)
     inventory_bytes = canonical_json(inventory)
     (output / INVENTORY_NAME).write_bytes(inventory_bytes)
