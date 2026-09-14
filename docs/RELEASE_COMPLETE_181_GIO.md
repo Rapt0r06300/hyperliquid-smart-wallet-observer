@@ -19,9 +19,11 @@ d'un fichier source pendant la création. Les jonctions internes ne sont pas
 suivies : leur cible relative est inscrite dans l'inventaire et l'installateur
 les recrée après vérification.
 
-Un cache Python compilé sous __pycache__ peut être inscrit comme exclu s'il est
-réellement illisible à cause de son ACL Windows. Aucun autre fichier illisible
-n'est toléré.
+Les éléments régénérables ou transitoires réellement illisibles à cause de
+leurs ACL Windows sont inscrits comme exclus avec leur taille : caches Python,
+sidecars SQLite de pytest et membres cassés des environnements Python
+portables. Un fichier métier, une base durable ou une donnée de marché
+illisible fait échouer la construction.
 
 Après avoir poussé le commit et installé GitHub CLI, la publication s'effectue
 avec tools/publish_full_folder_release.ps1 en lui passant BuildDirectory, qui

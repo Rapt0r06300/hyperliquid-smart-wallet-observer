@@ -49,6 +49,7 @@ class SourceEntry:
             result["target"] = self.target
         elif self.kind == "excluded":
             result["reason"] = self.reason
+            result["size"] = self.size
         return result
 
 
@@ -89,6 +90,20 @@ def _assert_public_path(relative: str) -> None:
     name = Path(relative).name.casefold()
     if ((name in SECRET_NAMES or name.startswith(".env.")) and not _is_public_template(name)) or name.endswith(SECRET_SUFFIXES):
         raise FullFolderReleaseError(f"secret filename refused: {relative}")
+
+
+def _unreadable_reason(relative: str) -> str | None:
+    normalized = relative.replace("\\", "/").casefold()
+    parts = set(Path(normalized).parts)
+    if "__pycache__" in parts and normalized.endswith(".pyc"):
+        return "unreadable_generated_python_cache"
+    if normalized.startswith("runtime/pytest_tmp") and normalized.endswith(
+        (".sqlite-wal", ".sqlite-shm", ".sqlite3-wal", ".sqlite3-shm", ".db-wal", ".db-shm")
+    ):
+        return "unreadable_transient_test_sqlite_sidecar"
+    if normalized.startswith(("tools/python/", "portable_runtime/")):
+        return "unreadable_portable_environment_member"
+    return None
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -149,10 +164,10 @@ def inventory_source(root: str | Path, *, exclude: str | Path | None = None, has
             try:
                 digest = sha256_file(path) if hash_files or known_public_hash else ""
             except PermissionError:
-                parts = {part.casefold() for part in Path(relative).parts}
-                if "__pycache__" not in parts or path.suffix.casefold() != ".pyc":
+                reason = _unreadable_reason(relative)
+                if reason is None:
                     raise
-                entries.append(SourceEntry(relative, "excluded", size=size, reason="unreadable_generated_python_cache"))
+                entries.append(SourceEntry(relative, "excluded", size=size, reason=reason))
                 continue
             if known_public_hash and digest != known_public_hash:
                 raise FullFolderReleaseError(f"reviewed public environment file changed: {relative}")
@@ -175,11 +190,14 @@ def inventory_source(root: str | Path, *, exclude: str | Path | None = None, has
 def inventory_payload(root: Path, entries: Iterable[SourceEntry], *, head: str) -> dict[str, object]:
     material = [entry.as_dict() for entry in entries]
     files = [entry for entry in material if entry["kind"] == "file"]
+    excluded = [entry for entry in material if entry["kind"] == "excluded"]
     return {
         "schema_version": SCHEMA_VERSION,
         "git_head": head,
         "file_count": len(files),
         "total_bytes": sum(int(entry["size"]) for entry in files),
+        "excluded_unreadable_count": len(excluded),
+        "excluded_unreadable_bytes": sum(int(entry.get("size", 0)) for entry in excluded),
         "entries": material,
     }
 
@@ -225,6 +243,8 @@ def finalize(root: Path, output: Path, tag: str, head: str, repository: str) -> 
         "archive_assets": assets,
         "file_count": inventory["file_count"],
         "total_bytes": inventory["total_bytes"],
+        "excluded_unreadable_count": inventory["excluded_unreadable_count"],
+        "excluded_unreadable_bytes": inventory["excluded_unreadable_bytes"],
     }
     (output / MANIFEST_NAME).write_bytes(canonical_json(manifest))
     return manifest

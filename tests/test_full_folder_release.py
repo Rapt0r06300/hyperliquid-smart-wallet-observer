@@ -104,3 +104,14 @@ def test_only_an_unreadable_generated_python_cache_may_be_excluded(tmp_path: Pat
     assert excluded.kind == "excluded"
     assert excluded.reason == "unreadable_generated_python_cache"
     assert next(entry for entry in entries if entry.path == "source.py").kind == "file"
+
+
+def test_unreadable_business_data_still_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    business = root / "runtime" / "data" / "ledger.sqlite3"
+    business.parent.mkdir(parents=True)
+    business.write_bytes(b"durable")
+    monkeypatch.setattr(FFR, "sha256_file", lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("injected")))
+    with pytest.raises(PermissionError):
+        FFR.inventory_source(root)
