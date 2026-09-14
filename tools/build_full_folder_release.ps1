@@ -49,7 +49,7 @@ $archive = Join-Path $output "Alina-SmartFlow-Full.7z"
 $members = Join-Path $output "archive-members.txt"
 $volumeArgument = "-v" + $VolumeMiB + "m"
 $arguments = @(
-    "a", ('"' + $archive + '"'), "-t7z", "-mx=1", "-mmt=$CompressionThreads",
+    "a", ('"' + $archive + '"'), "-t7z", "-mx=0", "-mmt=$CompressionThreads",
     $volumeArgument, "-scsUTF-8", "-bsp1", ('@"' + $members + '"')
 )
 $process = Start-Process -FilePath $sevenZip -ArgumentList $arguments -WorkingDirectory $rootPath -Wait -PassThru -NoNewWindow

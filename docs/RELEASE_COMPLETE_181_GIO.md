@@ -13,6 +13,10 @@ La construction produit :
 - des volumes Alina-SmartFlow-Full.7z.001, .002, etc. de 1 900 Mio au plus ;
 - ASSETS_A_TELECHARGER.txt, la liste exacte des assets à publier.
 
+Les données sont stockées sans recompression, car les gros shards sont déjà
+compressés. Cela réduit le temps et le CPU de construction tout en conservant
+le découpage, les SHA-256 et l'intégralité des octets lisibles.
+
 Le constructeur refuse les noms de fichiers correspondant à des secrets,
 refuse une source Git divergente de origin/main, et refuse toute modification
 d'un fichier source pendant la création. Les jonctions internes ne sont pas
