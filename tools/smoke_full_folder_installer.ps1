@@ -3,7 +3,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $case = Join-Path $root ("runtime\portable-build\e2e-" + [Guid]::NewGuid().ToString("N"))
 $source = Join-Path $case "source"
 $release = Join-Path $source "release"
-$target = Join-Path $case "installed\Projet invest"
+$target = Join-Path $case "installed\Projet AlinaSmartFlow"
 $cache = Join-Path $case "cache"
 New-Item -ItemType Directory -Path (Join-Path $source "data"), (Join-Path $source "empty"), $release | Out-Null
 [IO.File]::WriteAllBytes((Join-Path $source "data\payload.bin"), [Text.Encoding]::UTF8.GetBytes(("alina-" * 10000)))

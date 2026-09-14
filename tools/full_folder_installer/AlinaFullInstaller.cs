@@ -247,7 +247,7 @@ internal static class AlinaFullInstaller
 
     private sealed class Options
     {
-        public string Destination = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Projet invest");
+        public string Destination = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Projet AlinaSmartFlow");
         public string Cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AlinaSmartFlow", "downloads", ReleaseInfo.Tag);
         public bool Yes;
         public bool KeepCache;

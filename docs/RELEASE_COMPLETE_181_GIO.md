@@ -36,7 +36,7 @@ doit désigner le sous-dossier produit sous runtime/portable-build.
 Sur le PC cible, l'installateur télécharge les volumes avec reprise HTTP,
 contrôle leur taille et leur SHA-256, extrait dans un dossier temporaire,
 contrôle ensuite chaque fichier et publie le dossier final seulement après
-validation complète. La destination par défaut est le dossier Projet invest
+validation complète. La destination par défaut est le dossier Projet AlinaSmartFlow
 sur le Bureau. Elle doit être absente ou vide.
 
 Options disponibles : --yes, --destination, --cache et --keep-cache.
