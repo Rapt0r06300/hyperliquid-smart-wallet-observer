@@ -29,7 +29,7 @@ def _copy_integrity():
 
 
 def _proof(family: str, *, oos_net: float = 2.2, forward_net: float = 2.2):
-    row = {"family": family, "paper_read_only": True, "real_execution": False, "starting_capital_usd": 1000.0, "parameters_frozen": True, "opened_positions": 4, "closed_positions": 4, "gross_pnl_usd": 5.8, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 4.4, "liquidatable_net": True, "duplicate_trade_ids": 0, "trade_ids_count": 4, "trade_ids_sha256": "a" * 64, "oos": _segment(oos_net, 2, "b", no_lookahead=True), "forward": _segment(forward_net, 2, "c", post_freeze=True), "placebos": {"beaten": True}}
+    row = {"family": family, "paper_read_only": True, "real_execution": False, "starting_capital_usd": 100.0, "parameters_frozen": True, "opened_positions": 4, "closed_positions": 4, "gross_pnl_usd": 5.8, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 4.4, "liquidatable_net": True, "duplicate_trade_ids": 0, "trade_ids_count": 4, "trade_ids_sha256": "a" * 64, "oos": _segment(oos_net, 2, "b", no_lookahead=True), "forward": _segment(forward_net, 2, "c", post_freeze=True), "placebos": {"beaten": True}}
     if family == "copy_vault":
         row["vault_generalization"] = {"sample_count": 20, "net_bps": 3.0}
         row["copy_checkpoint_integrity"] = _copy_integrity()
