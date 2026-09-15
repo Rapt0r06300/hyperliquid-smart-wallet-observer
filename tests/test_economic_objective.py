@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from hl_observer.simulation.economic_objective import (
     MIN_PROOF_DAYS,
+    STARTING_CAPITAL_USD,
+    TARGET_NET_USD,
+    TARGET_NET_USD_PER_DAY,
     canonical_family,
     evaluate_daily_net,
     evaluate_objective,
 )
+from hl_observer.simulation.paper_ledger import PaperLedger
 
 
 def _segment(
@@ -41,7 +45,7 @@ def _proof(**overrides):
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": 100.0,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
@@ -117,6 +121,22 @@ def _proof(**overrides):
     }
     row.update(overrides)
     return row
+
+
+def test_canonical_capital_contract_is_100_usd_for_every_family_and_keeps_four_usd_target():
+    assert STARTING_CAPITAL_USD == 100.0
+    assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 4.0
+    assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
+
+    for family in ("copy_vault", "lead_lag", "cross_venue_dislocation_v2"):
+        accepted = evaluate_objective(
+            _proof(family=family, starting_capital_usd=STARTING_CAPITAL_USD)
+        )
+        rejected = evaluate_objective(
+            _proof(family=family, starting_capital_usd=1000.0)
+        )
+        assert "INVALID_STARTING_CAPITAL" not in accepted["objective_reasons"]
+        assert "INVALID_STARTING_CAPITAL" in rejected["objective_reasons"]
 
 
 def test_arbitrage_alias_ne_cree_pas_une_quatrieme_famille():
