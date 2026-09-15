@@ -329,12 +329,24 @@ ANALYSER_BACKTESTS_REPLAYS.cmd quick
 # CLI help
 python -m hl_observer --help
 
+# Broad public market discovery (CCXT metadata only)
+python -m hl_observer discover-ccxt-universe
+
 # Start UI only
 python -m hl_observer ui
 
 # Verify safety
 python -m pytest -q tests/test_hypersmart_*.py
 ```
+
+### CCXT Universe Scout
+
+CCXT sert uniquement à découvrir les marchés publics des venues configurées dans
+`ccxt_universe`. Il produit `data/ccxt_universe.json`, le coverage, les différences
+depuis le snapshot précédent et les candidats multi-venues. `NATIVE_ELIGIBLE` indique
+qu’un collecteur natif Alina existe pour la venue (Hyperliquid, Binance, Bybit ou OKX) ;
+les autres marchés restent `DISCOVERY_ONLY` et ne vont jamais dans le hot path
+Cross-Venue/Lead-Lag. Aucune clé API n’est nécessaire.
 
 ---
 

@@ -18,6 +18,7 @@ from hl_observer.collection.collector import (
     run_collection_once,
     validate_wallet_address,
 )
+from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.weight_budgeter import (
     ReadOnlyBudgetRequest,
     format_budget_plan,
@@ -91,6 +92,7 @@ from hl_observer.markets.scanner import (
     run_discover_markets,
     run_scan_markets,
 )
+from hl_observer.markets.ccxt_universe import CCXTUniverseScout
 from hl_observer.opportunities.fresh_opportunity import (
     find_fresh_opportunities,
     format_fresh_opportunity_report,
@@ -2275,6 +2277,34 @@ def discover_markets(
     )
     result = asyncio.run(run_discover_markets(plan, settings))
     typer.echo(format_market_discovery_report(result))
+
+
+@app.command("discover-ccxt-universe")
+def discover_ccxt_universe(
+    exchange: list[str] | None = typer.Option(
+        None, "--exchange", help="CCXT exchange id; repeat to override configured venues."
+    ),
+    snapshot: Path | None = typer.Option(None, "--snapshot", help="Local JSON snapshot path."),
+    include_spot: bool = typer.Option(
+        False, "--include-spot", help="Include spot markets as discovery metadata."
+    ),
+) -> None:
+    """Discover public markets through CCXT; never feed CCXT into native hot paths."""
+    settings = _settings()
+    config = settings.ccxt_universe
+    if not config.enabled:
+        typer.echo(json.dumps({"source": "CCXT", "error": "CCXT_UNIVERSE_DISABLED"}))
+        raise typer.Exit(1)
+    scout = CCXTUniverseScout(
+        exchanges=exchange or config.exchanges,
+        snapshot_path=snapshot or config.snapshot_path,
+        timeout_seconds=config.timeout_seconds,
+        max_attempts=config.max_attempts,
+        include_spot=config.include_spot or include_spot,
+    )
+    result = asyncio.run(scout.scan())
+    note_coins(result.native_collection_candidates)
+    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
 
 
 @app.command("scan-markets")

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from hl_observer.arbitrage.cross_source_comparator import (
@@ -22,6 +23,7 @@ from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPubl
 from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.native_venue_market import MultiVenueMarketStore, NativeMarketSnapshot
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
+from hl_observer.markets.ccxt_universe import load_native_collection_candidates
 
 SCHEMA_VERSION = "alina.native_venue_coordinator.v1"
 
@@ -41,6 +43,7 @@ class NativeVenueCoordinator:
         okx_client: Any | None = None,
         stale_after_ms: int = 1_000,
         max_symbols_per_venue: int = 100,
+        ccxt_snapshot_path: str | Path | None = "data/ccxt_universe.json",
     ) -> None:
         self.stale_after_ms = int(stale_after_ms)
         self.max_symbols_per_venue = max(1, int(max_symbols_per_venue))
@@ -50,6 +53,12 @@ class NativeVenueCoordinator:
         self.registry: dict[str, dict[str, str]] = {}
         self._bybit_states: dict[str, BybitMarketState] = {}
         self._okx_states: dict[str, OkxMarketState] = {}
+        self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
+        self._ccxt_priority = set(
+            load_native_collection_candidates(self.ccxt_snapshot_path)
+            if self.ccxt_snapshot_path
+            else []
+        )
 
     def discover(self, *, now_s: float | None = None) -> dict[str, dict[str, str]]:
         """Discover live USDT perpetuals from both public REST APIs.
@@ -57,6 +66,10 @@ class NativeVenueCoordinator:
         Failure of one venue does not fabricate markets from that venue. If a venue
         fails, discoveries from the other venue remain available.
         """
+        if self.ccxt_snapshot_path:
+            self._ccxt_priority = set(
+                load_native_collection_candidates(self.ccxt_snapshot_path)
+            )
         discovered: dict[str, dict[str, str]] = {}
         for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client)):
             try:
@@ -77,7 +90,7 @@ class NativeVenueCoordinator:
         # Prefer assets visible on multiple venues; then fill remaining capacity.
         ranked = sorted(
             self.registry.items(),
-            key=lambda item: (-len(item[1]), item[0]),
+            key=lambda item: (item[0] not in self._ccxt_priority, -len(item[1]), item[0]),
         )
         symbols = [venues[venue_key] for _coin, venues in ranked if venue_key in venues]
         return symbols[: self.max_symbols_per_venue]
@@ -173,6 +186,7 @@ class NativeVenueCoordinator:
             "bybit_symbols": len(self.symbols_for("bybit")),
             "okx_symbols": len(self.symbols_for("okx")),
             "candidate_coins_2plus_venues": candidates,
+            "ccxt_native_candidates_prioritized": len(self._ccxt_priority),
             "real_execution": False,
         }
 

@@ -7,17 +7,18 @@ from typing import Any
 import yaml
 
 from hl_observer.config.settings import (
+    AdaptiveRiskFilterSettings,
+    CCXTUniverseSettings,
     CollectionSettings,
     CopyTradingSettings,
-    AdaptiveRiskFilterSettings,
     ExecutionEnvironment,
     ExecutionSettings,
     HyperliquidSettings,
     MarketUniverseSettings,
     RiskSettings,
     Settings,
-    WalletBootstrapSettings,
     WalletAnalysisSettings,
+    WalletBootstrapSettings,
     WalletDiscoverySettings,
     WalletScannerSettings,
 )
@@ -73,6 +74,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
     bootstrap_raw = raw.get("wallet_bootstrap", {}) if isinstance(raw.get("wallet_bootstrap", {}), dict) else {}
     scanner_raw = raw.get("wallet_scanner", {}) if isinstance(raw.get("wallet_scanner", {}), dict) else {}
     market_universe_raw = raw.get("market_universe", {}) if isinstance(raw.get("market_universe", {}), dict) else {}
+    ccxt_universe_raw = raw.get("ccxt_universe", {}) if isinstance(raw.get("ccxt_universe", {}), dict) else {}
     wallet_analysis_raw = raw.get("wallet_analysis", {}) if isinstance(raw.get("wallet_analysis", {}), dict) else {}
     adaptive_risk_raw = raw.get("adaptive_risk_filter", {}) if isinstance(raw.get("adaptive_risk_filter", {}), dict) else {}
     copy_raw = raw.get("copy_trading", {}) if isinstance(raw.get("copy_trading", {}), dict) else {}
@@ -157,6 +159,7 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         wallet_bootstrap=WalletBootstrapSettings(**bootstrap_raw),
         wallet_scanner=WalletScannerSettings(**scanner_raw),
         market_universe=MarketUniverseSettings(**market_universe_raw),
+        ccxt_universe=CCXTUniverseSettings(**ccxt_universe_raw),
         wallet_analysis=WalletAnalysisSettings(**wallet_analysis_raw),
         adaptive_risk_filter=AdaptiveRiskFilterSettings(**adaptive_risk_raw),
         execution=execution,

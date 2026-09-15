@@ -141,6 +141,28 @@ class MarketUniverseSettings(BaseModel):
     altcoins_enabled: bool = True
 
 
+class CCXTUniverseSettings(BaseModel):
+    enabled: bool = True
+    exchanges: list[str] = Field(
+        default_factory=lambda: [
+            "hyperliquid",
+            "binanceusdm",
+            "bybit",
+            "okx",
+            "gateio",
+            "bitget",
+            "kucoinfutures",
+            "krakenfutures",
+            "coinbase",
+            "mexc",
+        ]
+    )
+    include_spot: bool = False
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    max_attempts: int = Field(default=2, ge=1, le=3)
+    snapshot_path: Path = Path("data/ccxt_universe.json")
+
+
 class WalletAnalysisSettings(BaseModel):
     analyze_all_coins: bool = True
     per_coin_metrics: bool = True
@@ -246,6 +268,7 @@ class Settings(BaseModel):
     wallet_bootstrap: WalletBootstrapSettings = Field(default_factory=WalletBootstrapSettings)
     wallet_scanner: WalletScannerSettings = Field(default_factory=WalletScannerSettings)
     market_universe: MarketUniverseSettings = Field(default_factory=MarketUniverseSettings)
+    ccxt_universe: CCXTUniverseSettings = Field(default_factory=CCXTUniverseSettings)
     wallet_analysis: WalletAnalysisSettings = Field(default_factory=WalletAnalysisSettings)
     adaptive_risk_filter: AdaptiveRiskFilterSettings = Field(default_factory=AdaptiveRiskFilterSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)

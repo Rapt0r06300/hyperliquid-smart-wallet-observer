@@ -135,6 +135,24 @@ market_universe:
   prefer_major_coins: true
   altcoins_enabled: true
 
+ccxt_universe:
+  enabled: true
+  exchanges:
+    - hyperliquid
+    - binanceusdm
+    - bybit
+    - okx
+    - gateio
+    - bitget
+    - kucoinfutures
+    - krakenfutures
+    - coinbase
+    - mexc
+  include_spot: false
+  timeout_seconds: 10
+  max_attempts: 2
+  snapshot_path: data/ccxt_universe.json
+
 adaptive_risk_filter:
   enabled: true
   default_decision: observe_only
