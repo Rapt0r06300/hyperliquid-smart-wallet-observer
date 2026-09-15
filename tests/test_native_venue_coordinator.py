@@ -14,11 +14,18 @@ class _OkxDiscovery:
         return [("BTC", "BTC-USDT-SWAP"), ("ETH", "ETH-USDT-SWAP"), ("XRP", "XRP-USDT-SWAP")]
 
 
+class _EmptyDiscovery:
+    def discover_usdt_perpetuals(self):
+        return []
+
+
 def test_discovery_builds_registry_and_feeds_coin_universe() -> None:
     clear()
     coordinator = NativeVenueCoordinator(
         bybit_client=_BybitDiscovery(),
         okx_client=_OkxDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
         stale_after_ms=2_000,
     )
     registry = coordinator.discover(now_s=100.0)

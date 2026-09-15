@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import time
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -92,9 +93,14 @@ from hl_observer.markets.scanner import (
     run_discover_markets,
     run_scan_markets,
 )
-from hl_observer.markets.ccxt_universe import CCXTUniverseScout
-from dataclasses import asdict
-from hl_observer.data_sources.market_backfill import HistoricalBackfillHub, BackfillRequest, HistoricalDataType, HistoricalRecord, LocalFileAdapter
+from hl_observer.markets.ccxt_universe import CCXTUniverseScout, NATIVE_VENUES
+from hl_observer.data_sources.market_backfill import (
+    BackfillRequest,
+    HistoricalBackfillHub,
+    HistoricalDataType,
+    HistoricalRecord,
+    build_official_adapters,
+)
 from hl_observer.markets.universal_registry import UniversalMarketRegistry
 from hl_observer.replay.data_quality import determine_replay_quality
 from hl_observer.opportunities.fresh_opportunity import (
@@ -2292,6 +2298,11 @@ def discover_ccxt_universe(
     include_spot: bool = typer.Option(
         False, "--include-spot", help="Include spot markets as discovery metadata."
     ),
+    registry_path: Path = typer.Option(
+        Path("data/universal_market_registry.json"),
+        "--registry",
+        help="Atomic universal registry JSON output path.",
+    ),
 ) -> None:
     """Discover public markets through CCXT; never feed CCXT into native hot paths."""
     settings = _settings()
@@ -2308,16 +2319,47 @@ def discover_ccxt_universe(
     )
     result = asyncio.run(scout.scan())
     note_coins(result.native_collection_candidates)
-    typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+    registry = (
+        UniversalMarketRegistry.load(registry_path)
+        if registry_path.exists()
+        else UniversalMarketRegistry(native_venues=NATIVE_VENUES)
+    )
+    registry.native_venues.update(UniversalMarketRegistry(native_venues=NATIVE_VENUES).native_venues)
+    registry.ingest_ccxt(result)
+    historical_hub = HistoricalBackfillHub(
+        build_official_adapters(fetch_json=lambda *_args, **_kwargs: ()).values()
+    )
+    registry.ingest_historical_capabilities(
+        historical_hub,
+        (
+            BackfillRequest(
+                venue=market.venue,
+                canonical_coin=market.canonical_base,
+                exchange_symbol=market.exchange_symbol,
+                data_type=HistoricalDataType.OHLCV,
+                start_timestamp=0,
+                end_timestamp=0,
+            )
+            for market in result.markets
+        ),
+    )
+    registry.register_specialized_sources()
+    registry.dump(registry_path)
+    summary: dict[str, object] = registry.summary()
+    summary["registry"] = str(registry_path)
+    summary["errors_by_venue"] = result.errors_by_venue
+    typer.echo(json.dumps(summary, indent=2, sort_keys=True))
 
 
 @app.command("data-coverage")
 def data_coverage(snapshot: Path = typer.Option(Path("data/ccxt_universe.json"), "--snapshot")) -> None:
     """Print compact native/discovery market coverage; never connects to trading APIs."""
-    try: payload = json.loads(snapshot.read_text(encoding="utf-8"))
-    except (OSError, ValueError): payload = {}
+    try:
+        payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        payload = {}
     markets = payload.get("markets", []) if isinstance(payload, dict) else []
-    registry = UniversalMarketRegistry(native_venues={"hyperliquid", "binance", "bybit", "okx", "gate", "bitget"})
+    registry = UniversalMarketRegistry(native_venues=NATIVE_VENUES)
     for row in markets:
         registry.register(row.get("canonical_base", ""), row.get("venue", ""), row.get("exchange_symbol", ""), native=row.get("discovery_status") == "NATIVE_ELIGIBLE", discovery=True, market_type=row.get("market_type", "perp"), active=row.get("active", True))
     typer.echo(json.dumps({"coins": len(registry._markets), "candidates": [asdict(row) for row in registry.candidates()]}, default=str, indent=2))
@@ -2330,8 +2372,11 @@ def replay_quality(path: Path = typer.Argument(..., exists=True, readable=True))
     records = []
     for row in rows if isinstance(rows, list) else rows.get("records", []):
         try:
-            item = dict(row); item["data_type"] = HistoricalDataType(item["data_type"]); records.append(HistoricalRecord(**item))
-        except Exception: continue
+            item = dict(row)
+            item["data_type"] = HistoricalDataType(item["data_type"])
+            records.append(HistoricalRecord(**item))
+        except Exception:
+            continue
     typer.echo(determine_replay_quality(records).value)
 
 

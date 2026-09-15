@@ -86,7 +86,14 @@ class CanonicalCCXTMarket(BaseModel):
 
     @property
     def identity(self) -> str:
-        return f"{self.venue}|{self.exchange_symbol}"
+        return "|".join(
+            (
+                self.venue,
+                self.exchange_symbol,
+                self.market_type,
+                self.settle_currency or "",
+            )
+        )
 
 
 class AggregatedCoin(BaseModel):

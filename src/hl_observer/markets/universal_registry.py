@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from enum import StrEnum
 import json
 import os
+from collections.abc import Iterable, Mapping
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from hl_observer.collection.native_venue_market import canonical_coin
 
@@ -35,10 +37,24 @@ class MarketInstrument:
     exchange_symbol: str
     status: AvailabilityStatus
     market_type: str = "perp"
+    quote: str | None = None
+    settle: str | None = None
+    linear: bool | None = None
+    inverse: bool | None = None
+    contract_size: float | None = None
     active: bool = True
+    native: bool = False
     historical: bool = False
     discovery: bool = False
     specialized: bool = False
+    requires_key: bool = False
+    replay_quality: str = "UNMEASURABLE"
+    first_observed_at_ms: int | None = None
+    last_observed_at_ms: int | None = None
+
+    @property
+    def identity(self) -> str:
+        return _instrument_key(self.venue, self.exchange_symbol, self.market_type, self.settle)
 
 
 @dataclass(slots=True)
@@ -52,7 +68,7 @@ class RegisteredMarket:
 
     @property
     def venue_count(self) -> int:
-        return sum(item.active for item in self.instruments.values())
+        return len({item.venue for item in self.instruments.values() if item.active})
 
     @property
     def native_venue_count(self) -> int:
@@ -60,11 +76,41 @@ class RegisteredMarket:
 
     @property
     def hot_path_venues(self) -> tuple[str, ...]:
-        return tuple(sorted(item.venue for item in self.instruments.values() if item.active and item.status is AvailabilityStatus.NATIVE_LIVE))
+        return tuple(
+            sorted(
+                {
+                    item.venue
+                    for item in self.instruments.values()
+                    if item.active and item.status is AvailabilityStatus.NATIVE_LIVE
+                }
+            )
+        )
 
     @property
     def historical_venue_count(self) -> int:
-        return sum(item.active and item.historical for item in self.instruments.values())
+        return len({item.venue for item in self.instruments.values() if item.active and item.historical})
+
+    @property
+    def status(self) -> AvailabilityStatus:
+        priority = {
+            AvailabilityStatus.NATIVE_LIVE: 0,
+            AvailabilityStatus.HISTORICAL_ONLY: 1,
+            AvailabilityStatus.DISCOVERY_ONLY: 2,
+            AvailabilityStatus.SPECIALIZED: 3,
+            AvailabilityStatus.REQUIRES_KEY: 4,
+            AvailabilityStatus.UNAVAILABLE: 5,
+        }
+        active = [item.status for item in self.instruments.values() if item.active]
+        return min(active, key=priority.__getitem__) if active else AvailabilityStatus.UNAVAILABLE
+
+    def instruments_for_venue(self, venue: str) -> tuple[MarketInstrument, ...]:
+        venue_key = _canonical_venue(venue)
+        return tuple(
+            sorted(
+                (item for item in self.instruments.values() if item.venue == venue_key),
+                key=lambda item: item.identity,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,11 +145,12 @@ class UniversalMarketRegistry:
     """Single aggregation layer; discovery metadata never becomes market data."""
 
     def __init__(self, *, native_venues: Iterable[str] = (), hot_candidate_hours: int = 72) -> None:
-        self.native_venues = {str(venue).strip().lower() for venue in native_venues}
+        self.native_venues = {_canonical_venue(venue) for venue in native_venues}
         self.hot_candidate_ms = max(1, int(hot_candidate_hours)) * 3_600_000
         self._markets: dict[str, RegisteredMarket] = {}
-        self._snapshot_active: dict[tuple[str, str], dict[str, Any]] = {}
+        self._snapshot_active: dict[tuple[str, str, str, str], dict[str, Any]] = {}
         self._hot: dict[str, HotCandidate] = {}
+        self._specialized_sources: dict[str, AvailabilityStatus] = {}
 
     def register(
         self,
@@ -119,36 +166,171 @@ class UniversalMarketRegistry:
         available: bool = True,
         active: bool = True,
         market_type: str = "perp",
+        quote: str | None = None,
+        settle: str | None = None,
+        linear: bool | None = None,
+        inverse: bool | None = None,
+        contract_size: float | None = None,
+        replay_quality: str = "UNMEASURABLE",
+        first_observed_at_ms: int | None = None,
+        last_observed_at_ms: int | None = None,
     ) -> MarketInstrument:
         base = canonical_coin(coin)
-        venue_key = str(venue).strip().lower()
+        venue_key = _canonical_venue(venue)
+        symbol = str(exchange_symbol).strip().upper()
+        market_kind = str(market_type).strip().lower()
+        settle_key = _currency(settle)
+        key = _instrument_key(venue_key, symbol, market_kind, settle_key)
+        prior = self._markets.get(base, RegisteredMarket(base)).instruments.get(key)
+        native = bool(native or (prior and prior.native))
+        historical = bool(historical or (prior and prior.historical))
+        discovery = bool(discovery or (prior and prior.discovery))
+        specialized = bool(specialized or (prior and prior.specialized))
+        requires_key = bool(requires_key or (prior and prior.requires_key))
         if native and venue_key in self.native_venues:
             status = AvailabilityStatus.NATIVE_LIVE
-        elif specialized:
-            status = AvailabilityStatus.REQUIRES_KEY if requires_key else AvailabilityStatus.SPECIALIZED
         elif historical:
             status = AvailabilityStatus.HISTORICAL_ONLY
         elif discovery and available:
             status = AvailabilityStatus.DISCOVERY_ONLY
+        elif requires_key:
+            status = AvailabilityStatus.REQUIRES_KEY
+        elif specialized:
+            status = AvailabilityStatus.SPECIALIZED
         else:
             status = AvailabilityStatus.UNAVAILABLE
         instrument = MarketInstrument(
             venue=venue_key,
-            exchange_symbol=str(exchange_symbol).strip().upper(),
+            exchange_symbol=symbol,
             status=status,
-            market_type=str(market_type).lower(),
+            market_type=market_kind,
+            quote=_currency(quote) or (prior.quote if prior else None),
+            settle=settle_key or (prior.settle if prior else None),
+            linear=linear if linear is not None else (prior.linear if prior else None),
+            inverse=inverse if inverse is not None else (prior.inverse if prior else None),
+            contract_size=_positive(contract_size)
+            if contract_size is not None
+            else (prior.contract_size if prior else None),
             active=bool(active),
+            native=native,
             historical=bool(historical),
             discovery=bool(discovery),
             specialized=bool(specialized),
+            requires_key=requires_key,
+            replay_quality=str(replay_quality or (prior.replay_quality if prior else "UNMEASURABLE")).upper(),
+            first_observed_at_ms=_earliest(
+                first_observed_at_ms, prior.first_observed_at_ms if prior else None
+            ),
+            last_observed_at_ms=_latest(last_observed_at_ms, prior.last_observed_at_ms if prior else None),
         )
-        self._markets.setdefault(base, RegisteredMarket(base)).instruments[venue_key] = instrument
+        self._markets.setdefault(base, RegisteredMarket(base)).instruments[key] = instrument
         return instrument
 
     def market(self, coin: str) -> RegisteredMarket:
         return self._markets[canonical_coin(coin)]
 
-    def update_metrics(self, coin: str, *, volume_24h: float | None = None, open_interest: float | None = None, liquidity: float | None = None, replay_quality: str | None = None) -> None:
+    @property
+    def coins(self) -> tuple[str, ...]:
+        return tuple(sorted(self._markets))
+
+    @property
+    def specialized_sources(self) -> dict[str, AvailabilityStatus]:
+        return dict(self._specialized_sources)
+
+    def coins_at_least_venues(self, minimum: int) -> list[str]:
+        return sorted(row.coin for row in self._markets.values() if row.venue_count >= max(1, int(minimum)))
+
+    def coins_at_least_native_venues(self, minimum: int) -> list[str]:
+        return sorted(
+            row.coin for row in self._markets.values() if row.native_venue_count >= max(1, int(minimum))
+        )
+
+    def summary(self, *, min_native_venues: int = 2) -> dict[str, int]:
+        instruments = [item for market in self._markets.values() for item in market.instruments.values()]
+        return {
+            "coins": len(self._markets),
+            "instruments": len(instruments),
+            "native_live": sum(
+                item.active and item.status is AvailabilityStatus.NATIVE_LIVE for item in instruments
+            ),
+            "discovery_only": sum(
+                item.active and item.status is AvailabilityStatus.DISCOVERY_ONLY for item in instruments
+            ),
+            "historical_only": sum(
+                item.active and item.status is AvailabilityStatus.HISTORICAL_ONLY for item in instruments
+            ),
+            "multi_venue_2+": len(self.coins_at_least_venues(2)),
+            "hot_path_eligible": len(self.coins_at_least_native_venues(min_native_venues)),
+        }
+
+    def ingest_ccxt(self, result: Any) -> None:
+        """Register CCXT discovery metadata without routing CCXT data to hot paths."""
+        for row in getattr(result, "markets", result):
+            observed_at_ms = _iso_ms(getattr(row, "discovered_at", None))
+            self.register(
+                row.canonical_base,
+                row.venue,
+                row.exchange_symbol,
+                native=_canonical_venue(row.venue) in self.native_venues,
+                discovery=True,
+                active=bool(getattr(row, "active", True)),
+                market_type=getattr(row, "market_type", "perp"),
+                quote=getattr(row, "quote", None),
+                settle=getattr(row, "settle_currency", None),
+                linear=getattr(row, "linear", None),
+                inverse=getattr(row, "inverse", None),
+                contract_size=getattr(row, "contract_size", None),
+                first_observed_at_ms=observed_at_ms,
+                last_observed_at_ms=observed_at_ms,
+            )
+
+    def ingest_historical_capabilities(self, hub: Any, requests: Iterable[Any]) -> None:
+        """Expose already configured historical capabilities without fetching data."""
+        for request in requests:
+            if not hub.supports(request):
+                continue
+            coin = canonical_coin(request.canonical_coin)
+            venue = _canonical_venue(request.venue)
+            symbol = str(request.exchange_symbol).strip().upper()
+            existing = (
+                item
+                for item in self._markets.get(coin, RegisteredMarket(coin)).instruments.values()
+                if item.venue == venue and item.exchange_symbol == symbol
+            )
+            prior = next(existing, None)
+            if prior is None:
+                self.register(coin, venue, symbol, historical=True)
+                continue
+            self.register(
+                coin,
+                venue,
+                symbol,
+                native=prior.native,
+                historical=True,
+                discovery=prior.discovery,
+                specialized=prior.specialized,
+                requires_key=prior.requires_key,
+                active=prior.active,
+                market_type=prior.market_type,
+                quote=prior.quote,
+                settle=prior.settle,
+                linear=prior.linear,
+                inverse=prior.inverse,
+                contract_size=prior.contract_size,
+                replay_quality=prior.replay_quality,
+                first_observed_at_ms=prior.first_observed_at_ms,
+                last_observed_at_ms=prior.last_observed_at_ms,
+            )
+
+    def update_metrics(
+        self,
+        coin: str,
+        *,
+        volume_24h: float | None = None,
+        open_interest: float | None = None,
+        liquidity: float | None = None,
+        replay_quality: str | None = None,
+    ) -> None:
         market = self._markets.setdefault(canonical_coin(coin), RegisteredMarket(canonical_coin(coin)))
         market.volume_24h = _positive(volume_24h)
         market.open_interest = _positive(open_interest)
@@ -169,43 +351,91 @@ class UniversalMarketRegistry:
                 + _scale(market.open_interest, 250_000)
                 + _scale(market.liquidity, 50_000)
             )
-            rows.append(CandidateScore(market.coin, round(score, 3), market.venue_count, market.native_venue_count, market.historical_venue_count, market.replay_quality, market.native_venue_count >= max(1, min_native_venues)))
+            rows.append(
+                CandidateScore(
+                    market.coin,
+                    round(score, 3),
+                    market.venue_count,
+                    market.native_venue_count,
+                    market.historical_venue_count,
+                    market.replay_quality,
+                    market.native_venue_count >= max(1, min_native_venues),
+                )
+            )
         return sorted(rows, key=lambda row: (-row.score, row.coin))
 
-    def apply_snapshot(self, rows: Iterable[Mapping[str, Any]], *, observed_at_ms: int) -> list[DiscoveryEvent]:
-        current: dict[tuple[str, str], dict[str, Any]] = {}
+    def apply_snapshot(
+        self, rows: Iterable[Mapping[str, Any]], *, observed_at_ms: int
+    ) -> list[DiscoveryEvent]:
+        current: dict[tuple[str, str, str, str], dict[str, Any]] = {}
         events: list[DiscoveryEvent] = []
-        previous_coins = {coin for coin, _venue in self._snapshot_active}
+        previous_coins = {key[0] for key in self._snapshot_active}
         for raw in rows:
             coin = canonical_coin(str(raw.get("coin") or raw.get("canonical_coin") or ""))
-            venue = str(raw.get("venue") or "").strip().lower()
+            venue = _canonical_venue(raw.get("venue") or "")
             symbol = str(raw.get("symbol") or raw.get("exchange_symbol") or "").strip().upper()
             if not coin or not venue or not symbol or raw.get("active") is False:
                 continue
-            key = (coin, venue)
+            market_type = "perp" if raw.get("perpetual") else str(raw.get("market_type") or "spot")
+            settle = _currency(raw.get("settle") or raw.get("settle_currency"))
+            key = (coin, venue, symbol, f"{market_type}|{settle or ''}")
             item = dict(raw)
             item.update({"coin": coin, "venue": venue, "symbol": symbol})
             current[key] = item
             old = self._snapshot_active.get(key)
             if old is None:
-                was_known = coin in previous_coins
-                event_type = DiscoveryEventType.NEW_VENUE if was_known else DiscoveryEventType.NEW_MARKET
+                was_known = coin in previous_coins or any(item[0] == coin for item in current if item != key)
+                venue_was_known = any(item[:2] == (coin, venue) for item in self._snapshot_active) or any(
+                    item[:2] == (coin, venue) for item in current if item != key
+                )
+                event_type = (
+                    DiscoveryEventType.NEW_VENUE
+                    if was_known and not venue_was_known
+                    else DiscoveryEventType.NEW_MARKET
+                )
                 events.append(DiscoveryEvent(event_type, coin, venue, symbol, int(observed_at_ms)))
                 if bool(raw.get("perpetual")):
-                    events.append(DiscoveryEvent(DiscoveryEventType.NEW_PERP, coin, venue, symbol, int(observed_at_ms)))
+                    events.append(
+                        DiscoveryEvent(DiscoveryEventType.NEW_PERP, coin, venue, symbol, int(observed_at_ms))
+                    )
                 self._enqueue(coin, event_type.value, int(observed_at_ms))
             elif old.get("active") is False:
-                events.append(DiscoveryEvent(DiscoveryEventType.REACTIVATED, coin, venue, symbol, int(observed_at_ms)))
+                events.append(
+                    DiscoveryEvent(DiscoveryEventType.REACTIVATED, coin, venue, symbol, int(observed_at_ms))
+                )
                 self._enqueue(coin, DiscoveryEventType.REACTIVATED.value, int(observed_at_ms))
-            self.register(coin, venue, symbol, native=venue in self.native_venues, discovery=True, active=True, market_type="perp" if raw.get("perpetual") else str(raw.get("market_type") or "spot"))
+            self.register(
+                coin,
+                venue,
+                symbol,
+                native=venue in self.native_venues,
+                discovery=True,
+                active=True,
+                market_type=market_type,
+                quote=raw.get("quote"),
+                settle=settle,
+                linear=raw.get("linear"),
+                inverse=raw.get("inverse"),
+                contract_size=raw.get("contract_size"),
+                first_observed_at_ms=observed_at_ms,
+                last_observed_at_ms=observed_at_ms,
+            )
         for key, old in self._snapshot_active.items():
             if key not in current and old.get("active") is not False:
-                coin, venue = key
-                events.append(DiscoveryEvent(DiscoveryEventType.DELISTED, coin, venue, str(old["symbol"]), int(observed_at_ms)))
+                coin, venue, symbol, type_and_settle = key
+                events.append(
+                    DiscoveryEvent(
+                        DiscoveryEventType.DELISTED, coin, venue, str(old["symbol"]), int(observed_at_ms)
+                    )
+                )
                 current[key] = {**old, "active": False}
-                if coin in self._markets and venue in self._markets[coin].instruments:
-                    prior = self._markets[coin].instruments[venue]
-                    self._markets[coin].instruments[venue] = MarketInstrument(**{**asdict(prior), "active": False})
+                market_type, _, settle = type_and_settle.partition("|")
+                instrument_key = _instrument_key(venue, symbol, market_type, settle or None)
+                if coin in self._markets and instrument_key in self._markets[coin].instruments:
+                    prior = self._markets[coin].instruments[instrument_key]
+                    self._markets[coin].instruments[instrument_key] = MarketInstrument(
+                        **{**asdict(prior), "active": False, "last_observed_at_ms": int(observed_at_ms)}
+                    )
         self._snapshot_active = current
         return events
 
@@ -220,20 +450,123 @@ class UniversalMarketRegistry:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "markets": {coin: {"coin": row.coin, "instruments": {venue: {**asdict(item), "status": item.status.value} for venue, item in row.instruments.items()}, "volume_24h": row.volume_24h, "open_interest": row.open_interest, "liquidity": row.liquidity, "replay_quality": row.replay_quality} for coin, row in sorted(self._markets.items())},
+            "schema_version": 2,
+            "native_venues": sorted(self.native_venues),
+            "hot_candidate_ms": self.hot_candidate_ms,
+            "markets": {
+                coin: {
+                    "coin": row.coin,
+                    "instruments": {
+                        key: {**asdict(item), "status": item.status.value}
+                        for key, item in row.instruments.items()
+                    },
+                    "volume_24h": row.volume_24h,
+                    "open_interest": row.open_interest,
+                    "liquidity": row.liquidity,
+                    "replay_quality": row.replay_quality,
+                }
+                for coin, row in sorted(self._markets.items())
+            },
             "hot_candidates": [asdict(row) for row in self._hot.values()],
+            "snapshot_active": list(self._snapshot_active.values()),
+            "specialized_sources": {
+                key: value.value for key, value in sorted(self._specialized_sources.items())
+            },
         }
         temporary = target.with_suffix(target.suffix + ".tmp")
         temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         os.replace(temporary, target)
 
+    @classmethod
+    def load(cls, path: str | Path) -> UniversalMarketRegistry:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        registry = cls(native_venues=payload.get("native_venues", ()))
+        registry.hot_candidate_ms = int(payload.get("hot_candidate_ms", registry.hot_candidate_ms))
+        for coin, row in payload.get("markets", {}).items():
+            market = RegisteredMarket(
+                coin=canonical_coin(coin),
+                volume_24h=row.get("volume_24h"),
+                open_interest=row.get("open_interest"),
+                liquidity=row.get("liquidity"),
+                replay_quality=str(row.get("replay_quality") or "UNMEASURABLE"),
+            )
+            for raw in row.get("instruments", {}).values():
+                item = dict(raw)
+                item["status"] = AvailabilityStatus(item["status"])
+                instrument = MarketInstrument(**item)
+                market.instruments[instrument.identity] = instrument
+            registry._markets[market.coin] = market
+        registry._hot = {row["coin"]: HotCandidate(**row) for row in payload.get("hot_candidates", [])}
+        registry._specialized_sources = {
+            key: AvailabilityStatus(value) for key, value in payload.get("specialized_sources", {}).items()
+        }
+        for raw in payload.get("snapshot_active", []):
+            item = dict(raw)
+            coin = canonical_coin(item.get("coin", ""))
+            venue = _canonical_venue(item.get("venue", ""))
+            symbol = str(item.get("symbol") or item.get("exchange_symbol") or "").upper()
+            market_type = "perp" if item.get("perpetual") else str(item.get("market_type") or "spot")
+            settle = _currency(item.get("settle") or item.get("settle_currency"))
+            registry._snapshot_active[(coin, venue, symbol, f"{market_type}|{settle or ''}")] = item
+        return registry
+
     def register_specialized_sources(self) -> None:
         """Expose existing context adapters in this registry without hot-path promotion."""
         from hl_observer.venues.registre_venues import registre
+
         for venue, capabilities in registre().items():
             if venue in self.native_venues or venue in {"binance", "hyperliquid"}:
                 continue
-            self.register(venue, venue, venue, specialized=True, requires_key=capabilities.get("pull_live") == "REQUIRES_KEY", active=False)
+            self._specialized_sources[_canonical_venue(venue)] = (
+                AvailabilityStatus.REQUIRES_KEY
+                if capabilities.get("pull_live") == "REQUIRES_KEY"
+                else AvailabilityStatus.SPECIALIZED
+            )
+
+
+def _canonical_venue(value: object) -> str:
+    venue = str(value or "").strip().lower()
+    return {
+        "binanceusdm": "binance",
+        "binancecoinm": "binance",
+        "gateio": "gate",
+        "krakenfutures": "kraken",
+    }.get(venue, venue)
+
+
+def _currency(value: object) -> str | None:
+    cleaned = str(value or "").strip().upper()
+    return cleaned or None
+
+
+def _instrument_key(venue: str, symbol: str, market_type: str, settle: str | None) -> str:
+    return "|".join(
+        (
+            _canonical_venue(venue),
+            str(symbol).strip().upper(),
+            str(market_type).strip().lower(),
+            _currency(settle) or "",
+        )
+    )
+
+
+def _earliest(current: int | None, prior: int | None) -> int | None:
+    values = [int(value) for value in (current, prior) if value is not None]
+    return min(values) if values else None
+
+
+def _latest(current: int | None, prior: int | None) -> int | None:
+    values = [int(value) for value in (current, prior) if value is not None]
+    return max(values) if values else None
+
+
+def _iso_ms(value: object) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return None
 
 
 def _positive(value: float | None) -> float | None:
@@ -248,4 +581,13 @@ def _scale(value: float | None, unit: float) -> float:
     return min(10.0, (value or 0.0) / unit) if value is not None else 0.0
 
 
-__all__ = ["AvailabilityStatus", "CandidateScore", "DiscoveryEvent", "DiscoveryEventType", "HotCandidate", "MarketInstrument", "RegisteredMarket", "UniversalMarketRegistry"]
+__all__ = [
+    "AvailabilityStatus",
+    "CandidateScore",
+    "DiscoveryEvent",
+    "DiscoveryEventType",
+    "HotCandidate",
+    "MarketInstrument",
+    "RegisteredMarket",
+    "UniversalMarketRegistry",
+]
