@@ -5,9 +5,9 @@ le pull live reste gate. Complementaire de research.venue_capabilities (etat pru
 stdlib pure, 0 reseau."""
 from __future__ import annotations
 
-from . import (bybit, coinbase, defillama, deribit, drift, dune, glassnode, gmx, kraken, nansen, okx)
+from . import (bitget, bybit, coinbase, defillama, deribit, drift, dune, gate, glassnode, gmx, kraken, nansen, okx)
 
-_MODULES = (bybit, okx, coinbase, deribit, kraken, drift, gmx, nansen, dune, glassnode, defillama)
+_MODULES = (bybit, okx, gate, bitget, coinbase, deribit, kraken, drift, gmx, nansen, dune, glassnode, defillama)
 
 
 def registre() -> dict:

@@ -33,7 +33,7 @@ def canonical_coin(symbol: str) -> str:
         parts = [part for part in value.split("-") if part]
         if parts:
             return parts[0]
-    for suffix in ("USDT-PERP", "USDC-PERP", "USD-PERP", "USDT", "USDC", "USD"):
+    for suffix in ("USDT-PERP", "USDC-PERP", "USD-PERP", "_USDT", "_USDC", "_USD", "USDT", "USDC", "USD"):
         if value.endswith(suffix) and len(value) > len(suffix):
             return value[: -len(suffix)]
     return value

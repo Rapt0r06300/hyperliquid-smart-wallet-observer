@@ -18,6 +18,10 @@ from hl_observer.data_sources.historical_backfill_engine import (
     HistoricalBackfillResult,
     TtlPageCache,
 )
+from hl_observer.data_sources.market_backfill import (
+    BackfillRequest, BackfillResult, HistoricalBackfillHub, HistoricalDataType,
+    HistoricalRecord, LocalFileAdapter, TardisFileAdapter, build_official_adapters,
+)
 from hl_observer.data_sources.fresh_data_plan import (
     FreshDataPlan,
     FreshDataPlanRequest,
@@ -35,6 +39,8 @@ __all__ = [
     "DataQualityAssessment",
     "DataQualityConfig",
     "DataQualityGate",
+    "BackfillRequest", "BackfillResult", "HistoricalBackfillHub", "HistoricalDataType",
+    "HistoricalRecord", "LocalFileAdapter", "TardisFileAdapter", "build_official_adapters",
     "DataQualityStatus",
     "FetchRequest",
     "FetchResult",

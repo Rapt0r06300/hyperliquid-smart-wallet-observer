@@ -27,6 +27,12 @@ DEFAULT_EXCHANGES = (
     "krakenfutures",
     "coinbase",
     "mexc",
+    "htx",
+    "cryptocom",
+    "phemex",
+    "bitmex",
+    "deribit",
+    "coinex",
 )
 VENUE_ALIASES = {
     "binanceusdm": "binance",
@@ -36,7 +42,7 @@ VENUE_ALIASES = {
     "krakenfutures": "kraken",
 }
 CCXT_EXCHANGE_CLASS_ALIASES = {"gateio": "gate"}
-NATIVE_VENUES = frozenset({"hyperliquid", "binance", "bybit", "okx"})
+NATIVE_VENUES = frozenset({"hyperliquid", "binance", "bybit", "okx", "gate", "gateio", "bitget"})
 
 
 class CanonicalCCXTMarket(BaseModel):
@@ -53,6 +59,30 @@ class CanonicalCCXTMarket(BaseModel):
     discovered_at: str
     source: Literal["CCXT"] = SOURCE
     discovery_status: Literal["NATIVE_ELIGIBLE", "DISCOVERY_ONLY"]
+
+    @property
+    def canonical_coin(self) -> str:
+        return self.canonical_base
+
+    @property
+    def base(self) -> str:
+        return self.canonical_base
+
+    @property
+    def settle(self) -> str | None:
+        return self.settle_currency
+
+    @property
+    def spot(self) -> bool:
+        return self.market_type == "spot"
+
+    @property
+    def perpetual(self) -> bool:
+        return self.market_type == "perp"
+
+    @property
+    def future(self) -> bool:
+        return self.market_type == "future"
 
     @property
     def identity(self) -> str:

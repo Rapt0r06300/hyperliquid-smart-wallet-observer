@@ -139,7 +139,7 @@ def test_venue_failure_does_not_fail_global_scan(tmp_path):
 
 
 def test_marks_market_discovery_only_without_native_collector(tmp_path):
-    payloads = {"gateio": {"XYZ/USDT:USDT": _perp("XYZ/USDT:USDT", "XYZ")}}
+    payloads = {"kucoinfutures": {"XYZ/USDT:USDT": _perp("XYZ/USDT:USDT", "XYZ")}}
 
     result = asyncio.run(_scout(tmp_path, payloads).scan())
 

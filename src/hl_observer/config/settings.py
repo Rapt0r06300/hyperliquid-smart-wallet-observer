@@ -163,6 +163,13 @@ class CCXTUniverseSettings(BaseModel):
     snapshot_path: Path = Path("data/ccxt_universe.json")
 
 
+class DataExpansionSettings(BaseModel):
+    native_venues: list[str] = Field(default_factory=lambda: ["hyperliquid", "binance", "bybit", "okx", "gate", "bitget"])
+    historical_enabled: bool = True
+    historical_snapshot_path: Path = Path("data/market_registry.json")
+    tardis_enabled: bool = False
+
+
 class WalletAnalysisSettings(BaseModel):
     analyze_all_coins: bool = True
     per_coin_metrics: bool = True
@@ -269,6 +276,7 @@ class Settings(BaseModel):
     wallet_scanner: WalletScannerSettings = Field(default_factory=WalletScannerSettings)
     market_universe: MarketUniverseSettings = Field(default_factory=MarketUniverseSettings)
     ccxt_universe: CCXTUniverseSettings = Field(default_factory=CCXTUniverseSettings)
+    data_expansion: DataExpansionSettings = Field(default_factory=DataExpansionSettings)
     wallet_analysis: WalletAnalysisSettings = Field(default_factory=WalletAnalysisSettings)
     adaptive_risk_filter: AdaptiveRiskFilterSettings = Field(default_factory=AdaptiveRiskFilterSettings)
     execution: ExecutionSettings = Field(default_factory=ExecutionSettings)

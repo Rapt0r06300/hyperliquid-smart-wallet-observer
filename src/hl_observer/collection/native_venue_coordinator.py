@@ -20,7 +20,9 @@ from hl_observer.arbitrage.cross_source_comparator import (
     compare_cross_source_prices,
 )
 from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
+from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
 from hl_observer.collection.coin_universe import note_coins
+from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
 from hl_observer.collection.native_venue_market import MultiVenueMarketStore, NativeMarketSnapshot
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
 from hl_observer.markets.ccxt_universe import load_native_collection_candidates
@@ -41,6 +43,8 @@ class NativeVenueCoordinator:
         *,
         bybit_client: Any | None = None,
         okx_client: Any | None = None,
+        gate_client: Any | None = None,
+        bitget_client: Any | None = None,
         stale_after_ms: int = 1_000,
         max_symbols_per_venue: int = 100,
         ccxt_snapshot_path: str | Path | None = "data/ccxt_universe.json",
@@ -49,10 +53,14 @@ class NativeVenueCoordinator:
         self.max_symbols_per_venue = max(1, int(max_symbols_per_venue))
         self.bybit_client = bybit_client or BybitPublicClient()
         self.okx_client = okx_client or OkxPublicClient()
+        self.gate_client = gate_client or GatePublicClient()
+        self.bitget_client = bitget_client or BitgetPublicClient()
         self.store = MultiVenueMarketStore(stale_after_ms=self.stale_after_ms)
         self.registry: dict[str, dict[str, str]] = {}
         self._bybit_states: dict[str, BybitMarketState] = {}
         self._okx_states: dict[str, OkxMarketState] = {}
+        self._gate_states: dict[str, GateMarketState] = {}
+        self._bitget_states: dict[str, BitgetMarketState] = {}
         self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
         self._ccxt_priority = set(
             load_native_collection_candidates(self.ccxt_snapshot_path)
@@ -71,7 +79,7 @@ class NativeVenueCoordinator:
                 load_native_collection_candidates(self.ccxt_snapshot_path)
             )
         discovered: dict[str, dict[str, str]] = {}
-        for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client)):
+        for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client), ("gate", self.gate_client), ("bitget", self.bitget_client)):
             try:
                 rows = client.discover_usdt_perpetuals()
             except Exception:
@@ -168,6 +176,21 @@ class NativeVenueCoordinator:
         self.store.put(snapshot)
         return snapshot
 
+    def ingest_gate(self, payload: Mapping[str, object], *, receive_ts_ms: int | None = None, now_ms: int | None = None) -> NativeMarketSnapshot | None:
+        data = payload.get("result") if isinstance(payload.get("result"), Mapping) else payload
+        contract = str((data if isinstance(data, Mapping) else {}).get("contract") or (data if isinstance(data, Mapping) else {}).get("s") or "").upper()
+        if not contract: return None
+        state = self._gate_states.setdefault(contract, GateMarketState(contract=contract, stale_after_ms=self.stale_after_ms))
+        channel = str(payload.get("channel") or payload.get("event") or "").lower()
+        (state.apply_ticker(dict(data)) if "ticker" in channel else state.apply_book(dict(data), receive_ts_ms=receive_ts_ms))
+        snapshot = state.snapshot(now_ms=now_ms); self.store.put(snapshot); return snapshot
+
+    def ingest_bitget(self, payload: Mapping[str, object], *, receive_ts_ms: int | None = None, now_ms: int | None = None) -> NativeMarketSnapshot | None:
+        arg = payload.get("arg") or {}; symbol = str(arg.get("instId") if isinstance(arg, Mapping) else "").upper()
+        if not symbol: return None
+        state = self._bitget_states.setdefault(symbol, BitgetMarketState(symbol=symbol, stale_after_ms=self.stale_after_ms))
+        state.apply(dict(payload), receive_ts_ms=receive_ts_ms); snapshot = state.snapshot(now_ms=now_ms); self.store.put(snapshot); return snapshot
+
     def candidate_coins(self, *, now_ms: int, min_venues: int = 2) -> list[str]:
         return self.store.candidate_coins(now_ms=now_ms, min_venues=min_venues)
 
@@ -185,6 +208,8 @@ class NativeVenueCoordinator:
             "registry_coins": len(self.registry),
             "bybit_symbols": len(self.symbols_for("bybit")),
             "okx_symbols": len(self.symbols_for("okx")),
+            "gate_symbols": len(self.symbols_for("gate")),
+            "bitget_symbols": len(self.symbols_for("bitget")),
             "candidate_coins_2plus_venues": candidates,
             "ccxt_native_candidates_prioritized": len(self._ccxt_priority),
             "real_execution": False,
@@ -206,11 +231,23 @@ class NativeVenueCoordinator:
             now = int(time.time() * 1000)
             self.ingest_okx(payload, receive_ts_ms=now, now_ms=now)
 
+    async def run_gate(self) -> None:
+        symbols = self.symbols_for("gate")
+        if not symbols: return
+        async for payload in self.gate_client.messages(symbols):
+            now = int(time.time() * 1000); self.ingest_gate(payload, receive_ts_ms=now, now_ms=now)
+
+    async def run_bitget(self) -> None:
+        symbols = self.symbols_for("bitget")
+        if not symbols: return
+        async for payload in self.bitget_client.messages(symbols):
+            now = int(time.time() * 1000); self.ingest_bitget(payload, receive_ts_ms=now, now_ms=now)
+
     async def run(self, *, discover_first: bool = True) -> None:
         """Run both native public collectors until cancelled."""
         if discover_first or not self.registry:
             await asyncio.to_thread(self.discover)
-        await asyncio.gather(self.run_bybit(), self.run_okx())
+        await asyncio.gather(self.run_bybit(), self.run_okx(), self.run_gate(), self.run_bitget())
 
 
 def _bybit_symbol(payload: Mapping[str, object]) -> str:

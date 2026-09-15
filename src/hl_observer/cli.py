@@ -93,6 +93,10 @@ from hl_observer.markets.scanner import (
     run_scan_markets,
 )
 from hl_observer.markets.ccxt_universe import CCXTUniverseScout
+from dataclasses import asdict
+from hl_observer.data_sources.market_backfill import HistoricalBackfillHub, BackfillRequest, HistoricalDataType, HistoricalRecord, LocalFileAdapter
+from hl_observer.markets.universal_registry import UniversalMarketRegistry
+from hl_observer.replay.data_quality import determine_replay_quality
 from hl_observer.opportunities.fresh_opportunity import (
     find_fresh_opportunities,
     format_fresh_opportunity_report,
@@ -2305,6 +2309,30 @@ def discover_ccxt_universe(
     result = asyncio.run(scout.scan())
     note_coins(result.native_collection_candidates)
     typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True))
+
+
+@app.command("data-coverage")
+def data_coverage(snapshot: Path = typer.Option(Path("data/ccxt_universe.json"), "--snapshot")) -> None:
+    """Print compact native/discovery market coverage; never connects to trading APIs."""
+    try: payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    except (OSError, ValueError): payload = {}
+    markets = payload.get("markets", []) if isinstance(payload, dict) else []
+    registry = UniversalMarketRegistry(native_venues={"hyperliquid", "binance", "bybit", "okx", "gate", "bitget"})
+    for row in markets:
+        registry.register(row.get("canonical_base", ""), row.get("venue", ""), row.get("exchange_symbol", ""), native=row.get("discovery_status") == "NATIVE_ELIGIBLE", discovery=True, market_type=row.get("market_type", "perp"), active=row.get("active", True))
+    typer.echo(json.dumps({"coins": len(registry._markets), "candidates": [asdict(row) for row in registry.candidates()]}, default=str, indent=2))
+
+
+@app.command("replay-quality")
+def replay_quality(path: Path = typer.Argument(..., exists=True, readable=True)) -> None:
+    """Classify a JSON/JSONL historical record file as Bronze/Silver/Gold."""
+    rows = json.loads(path.read_text(encoding="utf-8")) if path.suffix.lower() == ".json" else [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    records = []
+    for row in rows if isinstance(rows, list) else rows.get("records", []):
+        try:
+            item = dict(row); item["data_type"] = HistoricalDataType(item["data_type"]); records.append(HistoricalRecord(**item))
+        except Exception: continue
+    typer.echo(determine_replay_quality(records).value)
 
 
 @app.command("scan-markets")
