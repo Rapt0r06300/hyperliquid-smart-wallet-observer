@@ -15,9 +15,13 @@ Ces tests verrouillent les quatre points qui comptent :
 from __future__ import annotations
 
 import ast
+import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 from hl_observer.ops import superviseur_collecteurs as SC
 
@@ -228,3 +232,116 @@ def test_les_limites_sont_plus_larges_que_les_cadences():
     et le superviseur relancerait en boucle un processus vivant (double collecte)."""
     for c in SC.REGISTRE:
         assert c["limite_minutes"] * 60.0 > c["intervalle_s"] * 1.5, c["nom"]
+
+
+def test_un_wrapper_vivant_dont_la_derniere_passe_echoue_est_EN_ERREUR(
+    tmp_path,
+):
+    """Casse si le statut confond de nouveau processus présent et collecte réussie."""
+    _tous_vivants(tmp_path)
+    etat = tmp_path / "runtime" / "data" / "collecteurs" / "marks-collector.json"
+    etat.parent.mkdir(parents=True)
+    etat.write_text(
+        json.dumps({"state": "ERROR", "exit_code": 1, "updated_at": time.time()}),
+        encoding="utf-8",
+    )
+    procs = [{
+        "pid": 4242,
+        "ppid": 1,
+        "name": "cmd.exe",
+        "cmd": "cmd /c tools\\boucle_collecteur.cmd marks-collector "
+               "tools\\ecrire_marks_tous_coins.py 60 --une-fois",
+    }]
+
+    resultat = SC.status_detaille(tmp_path, profil="all", procs=procs)
+    marks = next(item for item in resultat if item["nom"] == "marks-collector")
+
+    assert marks["etat"] == "ERREUR"
+    assert marks["dernier_code_sortie"] == 1
+
+
+def test_le_cli_refuse_de_demarrer_si_le_runtime_est_invalide(tmp_path, monkeypatch):
+    """Casse si un python incomplet peut de nouveau lancer des wrappers condamnés."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        SC,
+        "verifier_runtime_collecteurs",
+        lambda root: {"ok": False, "erreur": "imports manquants: httpx,yaml"},
+        raising=False,
+    )
+
+    assert SC._cli(["demarrer-tous", "all"]) == 4
+    assert not (tmp_path / SC.PIDS_RELPATH).exists()
+
+
+def test_un_runtime_valide_ne_transporte_aucun_faux_message_erreur():
+    """Casse si un contrôle réussi reste affiché comme « runtime invalide »."""
+    status = SimpleNamespace(
+        probe_ok=True,
+        error=None,
+        missing_imports=(),
+        external_path_leaks=(),
+        selected_python="C:/projet/tools/python/python.exe",
+    )
+
+    assert SC._rapport_runtime(status) == {
+        "ok": True,
+        "erreur": None,
+        "python": "C:/projet/tools/python/python.exe",
+    }
+
+
+def test_inventaire_psutil_retrouve_un_vrai_processus_collecteur(tmp_path):
+    """Casse si le statut revient au CIM Windows bloquant ou perd les lignes de commande."""
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+            "marks-collector",
+            "tools/ecrire_marks_tous_coins.py",
+        ],
+        cwd=tmp_path,
+    )
+    try:
+        trouves = SC._processus_projet_psutil(tmp_path)
+        assert any(item["pid"] == process.pid for item in trouves)
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+def test_sous_windows_un_log_frais_ne_ressuscite_pas_un_processus_absent(
+    tmp_path, monkeypatch
+):
+    """Casse si des logs historiques font encore afficher 20/20 après l'arrêt réel."""
+    _tous_vivants(tmp_path)
+    monkeypatch.setattr(SC, "_processus_projet", lambda root: [])
+    monkeypatch.setattr(SC.os, "name", "nt")
+
+    resultat = SC.status_detaille(tmp_path, profil="all")
+
+    assert {item["etat"] for item in resultat} == {"MORT"}
+
+
+def test_une_premiere_passe_longue_est_vivante_si_runner_RUNNING(tmp_path):
+    """Casse si un ancien log fait afficher MORT pendant que la nouvelle passe travaille."""
+    _tous_vivants(tmp_path)
+    _log(tmp_path, "marks-collector", age_s=60 * 60)
+    etat = tmp_path / "runtime" / "data" / "collecteurs" / "marks-collector.json"
+    etat.parent.mkdir(parents=True)
+    etat.write_text(json.dumps({"state": "RUNNING", "exit_code": None}), encoding="utf-8")
+    procs = [{
+        "pid": 4242,
+        "ppid": 1,
+        "name": "cmd.exe",
+        "cmd": "cmd /c tools\\boucle_collecteur.cmd marks-collector "
+               "tools\\ecrire_marks_tous_coins.py 60 --une-fois",
+    }]
+
+    marks = next(
+        item for item in SC.status_detaille(tmp_path, profil="all", procs=procs)
+        if item["nom"] == "marks-collector"
+    )
+
+    assert marks["etat"] == "VIVANT"

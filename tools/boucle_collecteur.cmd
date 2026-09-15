@@ -21,54 +21,12 @@ REM  Securite : lecture seule cote marche. 0 ordre, 0 cle, 0 signature.
 REM ============================================================================
 setlocal
 cd /d "%~dp0.."
-set "NOM=%~1"
-set "SCRIPT=%~2"
-set "INTERVALLE=%~3"
-if "%NOM%"=="" exit /b 2
-if "%SCRIPT%"=="" exit /b 2
-if "%INTERVALLE%"=="" set "INTERVALLE=300"
+REM Runtime unique et valide : aucun repli silencieux vers un Python systeme/incomplet.
+call "%CD%\tools\portable_env.cmd"
+if errorlevel 1 exit /b 30
 
-set "PYTHONIOENCODING=utf-8"
-set "PYTHONPATH=%CD%\src"
-set "PYTHON_EXE=%CD%\portable_runtime\python\python.exe"
-if not exist "%PYTHON_EXE%" set "PYTHON_EXE=%CD%\tools\python\python.exe"
-if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
-if not exist "runtime\logs" mkdir "runtime\logs" >nul 2>&1
-set "LOG=runtime\logs\%NOM%.log"
-
-REM 🔴 20/07 : le superviseur relance un collecteur mort... et cette troncature DETRUISAIT la
-REM preuve de sa mort (venues-collector : mort dans la nuit, log ecrase a 4:12, autopsie
-REM impossible). On garde UNE generation : l'ancien log devient <nom>.prev.log avant d'etre
-REM tronque. La tache R5 (pourquoi meurent-ils ?) a besoin de ce cadavre pour parler.
-if exist "%LOG%" copy /y "%LOG%" "%LOG%.prev" >nul 2>&1
-
-echo ============================================================ > "%LOG%"
-echo  %NOM% — demarre le %date% a %time% (toutes les %INTERVALLE% s) >> "%LOG%"
-echo  script : %SCRIPT% >> "%LOG%"
-echo ============================================================ >> "%LOG%"
-
-REM 21/07 ANTI-ORPHELIN (Flo : « Q — et meme la croix — doivent terminer la session ») :
-REM on capture le marqueur de session du lanceur AU DEMARRAGE. A chaque passe, le garde
-REM verifie (1) que le marqueur n'a pas change (sinon = vieille session -> stop, plus
-REM jamais de boucles DOUBLEES) et (2) que le moteur donne signe de vie (sinon -> stop).
-set "MARQUEUR="
-if exist "runtime\data\lanceur_session_marqueur.txt" set /p MARQUEUR=<"runtime\data\lanceur_session_marqueur.txt"
-
-:boucle
-"%PYTHON_EXE%" tools\collecteur_doit_vivre.py "%MARQUEUR%" >> "%LOG%" 2>&1
-if errorlevel 1 (
-  echo   [arret propre anti-orphelin — la session est terminee] >> "%LOG%"
-  exit /b 0
-)
-echo. >> "%LOG%"
-echo --- passe du %date% %time% --- >> "%LOG%"
-"%PYTHON_EXE%" "%SCRIPT%" %4 %5 %6 %7 %8 %9 >> "%LOG%" 2>&1
-echo   [fin de passe, code de sortie = %errorlevel%] >> "%LOG%"
-REM PAUSE PAR `ping` ET PAS `timeout` : `timeout` exige une console interactive et echoue avec
-REM « Input redirection is not supported » des qu'on tourne en arriere-plan (start /b) ou avec
-REM stdin redirige. La boucle partirait alors en roue libre, a fond, sans pause -- un collecteur
-REM poli qui devient un marteau-pilon sur l'API publique. `ping -n N` attend N-1 secondes et
-REM ne depend d'aucune console.
-set /a "ATTENTE=%INTERVALLE%+1"
-ping -n %ATTENTE% 127.0.0.1 >nul 2>&1
-goto boucle
+REM La boucle Python conserve TOUS les arguments (%*), publie un etat JSON atomique apres
+REM chaque passe, relance rapidement avec backoff en cas de crash et archive les logs en gzip
+REM sans troncature. Le garde anti-orphelin reste applique avant chaque passe.
+"%HYPERSMART_PYTHON%" -m hl_observer.ops.collector_runner %*
+exit /b %ERRORLEVEL%

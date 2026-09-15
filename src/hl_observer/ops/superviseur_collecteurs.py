@@ -287,6 +287,7 @@ def verifier_et_relancer(
 #  Le lanceur (cmd) appelle ces fonctions : plus aucune liste de collecteurs dupliquée en .cmd.
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 PIDS_RELPATH = Path("runtime") / "data" / "collecteurs_pids.json"
+ETATS_RELPATH = Path("runtime") / "data" / "collecteurs"
 PORT_UI = 8794
 LOCK_USERFILLS = Path("runtime") / "data" / "userfills_live.lock"
 
@@ -342,6 +343,39 @@ def _lire_pids(root: str | Path) -> dict[str, Any]:
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _lire_etat_collecteur(root: str | Path, nom: str) -> dict[str, Any]:
+    try:
+        payload = json.loads((Path(root) / ETATS_RELPATH / f"{nom}.json").read_text(
+            encoding="utf-8"
+        ))
+        return payload if isinstance(payload, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _rapport_runtime(status: Any) -> dict[str, Any]:
+    details = list(status.missing_imports) + list(status.external_path_leaks)
+    erreur = None
+    if not status.probe_ok:
+        erreur = status.error or (", ".join(details) if details else "runtime invalide")
+    return {
+        "ok": bool(status.probe_ok),
+        "erreur": erreur,
+        "python": status.selected_python,
+    }
+
+
+def verifier_runtime_collecteurs(root: str | Path) -> dict[str, Any]:
+    """Bloque le démarrage si le runtime officiel existe mais est incomplet."""
+    try:
+        from tools.portable_runtime import runtime_status
+
+        status = runtime_status(Path(root), require_embedded=True)
+        return _rapport_runtime(status)
+    except Exception as exc:  # noqa: BLE001 — le refus doit rester explicite
+        return {"ok": False, "erreur": f"{type(exc).__name__}: {exc}", "python": None}
 
 
 def _pid_collecteur_existant(c: dict[str, Any], procs: list[dict[str, Any]]) -> int | None:
@@ -537,22 +571,7 @@ def _parse_ps_process(out: str) -> list[dict[str, Any]]:
     return res
 
 
-def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
-    """Process cmd/python signés NOS collecteurs (signature boucle_collecteur.cmd / script du registre).
-    Registry-driven, JAMAIS un motif large type *hl_observer*. [] hors Windows."""
-    # Ne filtre pas avec les signatures dans PowerShell : la commande d'inventaire contient alors
-    # elle-meme ``collecter_userfills_vaults.py`` et se detecte comme un faux collecteur. On ne demande
-    # que cmd/python, puis on applique ici la liste blanche issue du REGISTRE.
-    out = _ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
-              "($_.Name -eq 'cmd.exe' -or $_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') } "
-              "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
-    tous = [
-        p for p in _parse_ps_process(out)
-        if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
-    ]
-    # Les wrappers de campagne sont eux aussi des processus HyperSmart signes.
-    # Sans cette union, ``inspect_bounded_collectors`` perdait le compagnon
-    # Copy-Vault pourtant vivant et marquait la collecte DEGRADED.
+def _filtrer_processus_collecteurs(tous: list[dict[str, Any]]) -> list[dict[str, Any]]:
     inventaire = REGISTRE + COLLECTEURS_CAMPAGNE
     scripts = {
         str(c["script"]).replace("/", "\\").split("\\")[-1].lower()
@@ -570,16 +589,61 @@ def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
 
     retenus = [p for p in tous if signe(p)]
     pids = {p.get("pid") for p in retenus if isinstance(p.get("pid"), int)}
-    # Inclure recursivement les enfants des wrappers signes. Le Python BBO n'a pas toujours le chemin
-    # du projet dans sa ligne de commande, mais son parent est exactement notre boucle_collecteur.cmd.
     while True:
-        enfants = [p for p in tous if isinstance(p.get("pid"), int) and p.get("ppid") in pids]
-        nouveaux = [p for p in enfants if p.get("pid") not in pids]
+        nouveaux = [
+            p
+            for p in tous
+            if isinstance(p.get("pid"), int)
+            and p.get("ppid") in pids
+            and p.get("pid") not in pids
+        ]
         if not nouveaux:
             break
         retenus.extend(nouveaux)
         pids.update(p["pid"] for p in nouveaux)
     return retenus
+
+
+def _processus_projet_psutil(root: str | Path) -> list[dict[str, Any]]:
+    """Inventaire local rapide; ne dépend pas de WMI/CIM et ne lance aucun shell."""
+    del root
+    import psutil
+
+    tous: list[dict[str, Any]] = []
+    for process in psutil.process_iter(["pid", "ppid", "name", "cmdline"]):
+        try:
+            info = process.info
+            cmdline = info.get("cmdline") or ()
+            tous.append({
+                "pid": info.get("pid"),
+                "ppid": info.get("ppid"),
+                "name": info.get("name"),
+                "cmd": subprocess.list2cmdline(list(cmdline)),
+            })
+        except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess, OSError):
+            continue
+    return _filtrer_processus_collecteurs(tous)
+
+
+def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
+    """Process cmd/python signés NOS collecteurs (signature boucle_collecteur.cmd / script du registre).
+    Registry-driven, JAMAIS un motif large type *hl_observer*. [] hors Windows."""
+    try:
+        return _processus_projet_psutil(root)
+    except (ImportError, OSError):
+        pass
+    # Repli ancien si psutil est réellement indisponible. Ne filtre pas avec les signatures dans
+    # PowerShell : la commande d'inventaire contient alors
+    # elle-meme ``collecter_userfills_vaults.py`` et se detecte comme un faux collecteur. On ne demande
+    # que cmd/python, puis on applique ici la liste blanche issue du REGISTRE.
+    out = _ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
+              "($_.Name -eq 'cmd.exe' -or $_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') } "
+              "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+    tous = [
+        p for p in _parse_ps_process(out)
+        if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
+    ]
+    return _filtrer_processus_collecteurs(tous)
 
 
 def pid_du_port(port: int = PORT_UI) -> int | None:
@@ -604,6 +668,7 @@ def status_detaille(
     *,
     maintenant: float | None = None,
     profil: str = "all",
+    procs: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Les 17 composants : pid enregistré, nb d'instances vivantes, heartbeat, âge du dernier log, état réel.
     Registry-driven. Sur Windows : instances/pid réels ; en sandbox : fraîcheur des logs seule."""
@@ -611,20 +676,31 @@ def status_detaille(
     collecteurs = collecteurs_pour_profil(profil_normalise)
     reg_pids = _lire_pids(root).get("pids", {})
     reg_pids = reg_pids if isinstance(reg_pids, dict) else {}
-    procs = _processus_projet(root)
+    processus_projet = _processus_projet(root) if procs is None else list(procs)
     hb_uf = _heartbeat_userfills(root)
     etats = etat_collecteurs(root, maintenant=maintenant, profil=profil_normalise)
     out = []
     for c, e in zip(collecteurs, etats):
         nom = c["nom"]
-        instances, processus = _nombre_instances_logiques(c, procs)
-        vivant = (instances > 0) if procs else (not e["mort"])
+        instances, processus = _nombre_instances_logiques(c, processus_projet)
+        preuve_processus_disponible = procs is not None or os.name == "nt" or bool(processus_projet)
+        vivant = (instances > 0) if preuve_processus_disponible else (not e["mort"])
+        etat_runner = _lire_etat_collecteur(root, nom)
+        dernier_code = etat_runner.get("exit_code")
+        if vivant and etat_runner.get("state") == "ERROR":
+            etat_reel = "ERREUR"
+        elif vivant and (etat_runner.get("state") == "RUNNING" or not e["mort"]):
+            etat_reel = "VIVANT"
+        else:
+            etat_reel = "MORT"
         out.append({"nom": nom, "profil": profil_collecteur(nom),
                     "pid_enregistre": reg_pids.get(nom), "instances": instances,
                     "processus": processus,
                     "heartbeat_ms": hb_uf if nom == "userfills-live" else None,
                     "age_log_min": e["age_minutes"], "limite_min": e["limite_minutes"],
-                    "log_mort": e["mort"], "etat": "VIVANT" if vivant else "MORT"})
+                    "log_mort": e["mort"], "etat": etat_reel,
+                    "etat_runner": etat_runner.get("state"),
+                    "dernier_code_sortie": dernier_code})
     return out
 
 
@@ -682,6 +758,10 @@ def _cli(argv: list[str]) -> int:
     cmd = argv[0] if argv else "status"
     if cmd == "demarrer-tous":
         profil = argv[1] if len(argv) > 1 else "core"
+        runtime = verifier_runtime_collecteurs(root)
+        if not runtime["ok"]:
+            print("[collecteurs] REFUS RUNTIME: %s" % runtime["erreur"], flush=True)
+            return 4
         try:
             r = demarrer_tous(root, profil=profil)
         except ValueError as exc:

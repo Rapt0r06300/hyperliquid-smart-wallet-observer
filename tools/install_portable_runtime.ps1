@@ -22,6 +22,19 @@ function Invoke-Checked {
     if ($LASTEXITCODE -ne 0) { throw "$Description failed with exit code $LASTEXITCODE" }
 }
 
+function Get-Sha256Hex([string]$Path) {
+    # Windows PowerShell minimal installations may not expose Get-FileHash.
+    # Use the .NET primitive available on every supported Windows runtime.
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace("-", "")
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $ProjectRoot = Split-Path -Parent $PSScriptRoot }
 $root = Resolve-FullPath $ProjectRoot
 $requirements = Join-Path $root "requirements-portable.txt"
@@ -49,8 +62,8 @@ if (-not (Test-Path -LiteralPath $pythonPath) -and (Test-Path -LiteralPath $lega
         -Description "Migrating portable_runtime/python to tools/python"
 }
 
-$requirementsHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $requirements).Hash.ToLowerInvariant()
-$wheelLockHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $wheelLock).Hash.ToLowerInvariant()
+$requirementsHash = (Get-Sha256Hex $requirements).ToLowerInvariant()
+$wheelLockHash = (Get-Sha256Hex $wheelLock).ToLowerInvariant()
 if ((Test-Path -LiteralPath $pythonPath) -and -not $Force) {
     $manifestMatches = $false
     if (Test-Path -LiteralPath $manifestPath) {
@@ -87,7 +100,7 @@ try {
     New-Item -ItemType Directory -Force -Path $buildPython | Out-Null
     Write-Host "[portable] Downloading audited CPython: $downloadUrl"
     Invoke-WebRequest -Uri $downloadUrl -OutFile $downloadPath -UseBasicParsing
-    $actualSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $downloadPath).Hash.ToUpperInvariant()
+    $actualSha256 = (Get-Sha256Hex $downloadPath).ToUpperInvariant()
     if ($actualSha256 -ne $expectedSha256) {
         throw "CPython SHA256 mismatch. Expected $expectedSha256, got $actualSha256."
     }
