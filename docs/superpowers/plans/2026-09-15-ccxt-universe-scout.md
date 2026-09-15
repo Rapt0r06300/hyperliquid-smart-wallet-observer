@@ -29,10 +29,10 @@
 - Consumes: dictionnaires de marché retournés par `exchange.load_markets()`.
 - Produces: `CanonicalCCXTMarket`, `CCXTUniverseResult`, `CCXTUniverseScout.scan()` et sérialisation JSON.
 
-- [ ] Écrire les tests de normalisation, agrégation, diff, panne isolée et frontière native.
-- [ ] Exécuter le fichier de test et confirmer l’échec attendu car le module manque.
-- [ ] Implémenter modèles, normalisation, déduplication, agrégation, timeout/retry, statuts et snapshot atomique.
-- [ ] Exécuter le fichier de test jusqu’à réussite.
+- [x] Écrire les tests de normalisation, agrégation, diff, panne isolée et frontière native.
+- [x] Exécuter le fichier de test et confirmer l’échec attendu car le module manque.
+- [x] Implémenter modèles, normalisation, déduplication, agrégation, timeout/retry, statuts et snapshot atomique.
+- [x] Exécuter le fichier de test jusqu’à réussite.
 
 ### Task 2: Configuration, CLI et dépendance
 
@@ -49,10 +49,10 @@
 - Consumes: `Settings.ccxt_universe`.
 - Produces: `hl-observer discover-ccxt-universe` et une courte documentation d’usage.
 
-- [ ] Ajouter un test CLI/config ciblé au même fichier et confirmer son échec.
-- [ ] Ajouter les paramètres bornés, la commande asynchrone et `ccxt` aux dépendances.
-- [ ] Documenter brièvement l’usage et la séparation `DISCOVERY_ONLY`/native.
-- [ ] Exécuter uniquement `tests/test_ccxt_universe_scout.py`.
+- [x] Ajouter les assertions d’intégration ciblées au même fichier et confirmer leur échec.
+- [x] Ajouter les paramètres bornés, la commande asynchrone et `ccxt` aux dépendances.
+- [x] Documenter brièvement l’usage et la séparation `DISCOVERY_ONLY`/native.
+- [x] Exécuter uniquement `tests/test_ccxt_universe_scout.py`.
 
 ### Task 3: Vérification et livraison
 
@@ -63,6 +63,6 @@
 - Consumes: diff Git et sortie pytest fraîche.
 - Produces: commit poussé sur `main`.
 
-- [ ] Relire le diff ciblé et vérifier l’absence d’accès privé/trading.
-- [ ] Réexécuter `pytest -q tests/test_ccxt_universe_scout.py`.
-- [ ] Committer avec `feat: add CCXT universe scout` puis pousser `main`.
+- [x] Relire le diff ciblé et vérifier l’absence d’accès privé/trading.
+- [x] Réexécuter `pytest -q tests/test_ccxt_universe_scout.py`.
+- [x] Committer avec `feat: add CCXT universe scout` puis pousser `main`.
