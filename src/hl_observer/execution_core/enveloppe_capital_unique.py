@@ -1,4 +1,4 @@
-"""AUD-122 — enveloppe de capital UNIQUE 1000 USD : l'exploratoire est DEDANS, jamais EN PLUS.
+"""AUD-122 — enveloppe de capital UNIQUE 100 USD : l'exploratoire est DEDANS, jamais EN PLUS.
 
 Les cohortes/moteurs paper (strict, experimental, ALPHA, probes...) ne doivent JAMAIS voir leurs
 budgets SOMMES au-dela d'un master unique de 1000 USD. Ce checker somme les budgets engages et
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-ENVELOPPE_MASTER_USD = 1000.0
+ENVELOPPE_MASTER_USD = 100.0
 
 
 def verifier_enveloppe(budgets: Mapping[str, float], *, master_usd: float = ENVELOPPE_MASTER_USD) -> dict:

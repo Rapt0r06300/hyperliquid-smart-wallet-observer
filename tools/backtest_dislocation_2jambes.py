@@ -616,7 +616,7 @@ def _summary(trades: list[dict]) -> dict:
         ),
         "latency_cost_usd": round(sum(component_usd(t, "latency_cost_bps") for t in trades), 6),
         "net_total_usd": round(net, 6),
-        "roi_pct": round(net / 1000.0 * 100.0, 6),
+        "roi_pct": round(net / 100.0 * 100.0, 6),
         "hit_rate": round(sum(1 for t in trades if float(t.get("net_usd") or 0.0) > 0) / count, 6) if count else 0.0,
         "profit_factor": _pf([float(t.get("net_bps") or 0.0) for t in trades]),
         "max_drawdown_usd": abs(_dd_usd(trades)),

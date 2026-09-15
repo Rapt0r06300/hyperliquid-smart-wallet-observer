@@ -29,7 +29,7 @@ POSITIONS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_positions
 STATUS_RELPATH = Path("runtime") / "data" / ("experimental_paper_%s_status.json" % VERSION)
 SESSION_POINTER_RELPATH = Path("runtime") / "data" / "sessions" / "COURANTE.json"
 
-BUDGET_TOTAL_USD = 1000.0
+BUDGET_TOTAL_USD = 100.0
 AGE_MAX_SIGNAL_MS = 30_000.0
 MIN_EDGE_NET_BPS = 12.0
 MIN_ROI_ANNUEL_NET_PCT = 15.0

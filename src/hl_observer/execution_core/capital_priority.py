@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-ENVELOPPE = 1000.0
+ENVELOPPE = 100.0
 
 
 def allouer_avec_priorite_strict(demandes: Mapping[str, float], *, strict_key: str = "strict",
