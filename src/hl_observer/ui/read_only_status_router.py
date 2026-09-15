@@ -34,7 +34,7 @@ def create_read_only_status_router(
     def simulation_status_read_only() -> dict[str, Any]:
         current_ms = now_ms()
         with lock:
-            starting = float(getattr(state, "simulation_starting_equity_usdt", 1000.0) or 1000.0)
+            starting = float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0)
             realized = float(getattr(state, "simulation_realized_pnl_usdc", 0.0) or 0.0)
             raw_positions = list((getattr(state, "simulation_virtual_positions", {}) or {}).values())
             engine_status = status_helpers._read_engine_status(settings)

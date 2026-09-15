@@ -29,11 +29,11 @@ class KellySizingConfig:
     min_win_probability: float = 0.52
 
     # Starting equity for paper simulation
-    starting_equity_usdt: float = 1000.0
+    starting_equity_usdt: float = 100.0
 
     # Absolute min/max per position
     min_position_usdt: float = 5.0
-    max_position_usdt: float = 50.0
+    max_position_usdt: float = 5.0
 
     # Max total exposure (all open positions)
     max_total_exposure_usdt: float = 200.0

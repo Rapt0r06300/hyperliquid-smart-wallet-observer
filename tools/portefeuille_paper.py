@@ -27,7 +27,7 @@ class PortefeuillePaper:
     """Capital partagé. Levier borne la marge par position. Aucune position n'ouvre si la marge dépasse le
     cash disponible (capital réellement partagé). Tout événement est journalisé dans un ledger append-only."""
 
-    def __init__(self, capital_initial: float = 1000.0, *, levier: float = 3.0):
+    def __init__(self, capital_initial: float = 100.0, *, levier: float = 3.0):
         self.capital_initial = float(capital_initial)
         self.cash = float(capital_initial)
         self.levier = float(levier)

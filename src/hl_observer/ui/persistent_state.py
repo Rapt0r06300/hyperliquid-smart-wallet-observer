@@ -149,7 +149,7 @@ def load_or_create_ui_state(settings: Settings) -> UiState:
     return state
 
 
-def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = 1000.0) -> UiState:
+def reset_simulation_state(settings: Settings, *, starting_equity_usdt: float = 100.0) -> UiState:
     """Start a fresh launcher session while keeping the reset local and explicit."""
 
     state = UiState()

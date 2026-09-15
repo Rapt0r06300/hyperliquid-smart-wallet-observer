@@ -15,7 +15,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ledger = PaperLedger(
-        starting_balance_usdc=1_000.0,
+        starting_balance_usdc=100.0,
         session_id="audit:capital-accounting:v2",
     )
     ledger.open_position(
@@ -64,7 +64,7 @@ def main() -> int:
         "hedged_net_is_zero": before_capital["net_directional_exposure_usd"] == 0.0,
         "liquidatable_pnl_authoritative": (
             before_capital["liquidatable_pnl_usd"] == 0.5
-            and before_reduce["authoritative_equity_usdc"] == 1_000.5
+            and before_reduce["authoritative_equity_usdc"] == 100.5
         ),
         "partial_close_scales_exposure": (
             after_capital["gross_exposure_usd"] == 100.0

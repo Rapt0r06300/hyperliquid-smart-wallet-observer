@@ -447,7 +447,7 @@ function upsertStatusGraphPoint(d){
   var g=d&&d.latest_graph_point;if(!g)return;
   var t=Number(g.timestamp_ms),eq=Number(g.current_equity_usdt),pnl=Number(g.current_pnl_usdc);
   if(!isFinite(t)||!isFinite(eq)||eq<=0)return;
-  var pts=(window._metaPts||[]).slice(),point={t:t,equity:eq,pnl:isFinite(pnl)?pnl:(eq-1000),status:true};
+  var pts=(window._metaPts||[]).slice(),point={t:t,equity:eq,pnl:isFinite(pnl)?pnl:(eq-100),status:true};
   if(pts.length&&Number(pts[pts.length-1].t)===t)pts[pts.length-1]=point;else pts.push(point);
   pts.sort(function(a,b){return a.t-b.t;});
   if(pts.length>600)pts=pts.slice(pts.length-600);

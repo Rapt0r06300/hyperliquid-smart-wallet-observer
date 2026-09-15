@@ -219,7 +219,7 @@ def mesurer_oos(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
 
 def simuler_paper(events: list[dict], tape: dict[str, list[tuple[int, float]]], *, horizon_ms: float,
                   seuil: float, notional_usd: float, cout_ar_bps: float,
-                  capital_usd: float = 1000.0, graine: int = 7, forward_fn=FORWARD_DEFAUT,
+                  capital_usd: float = 100.0, graine: int = 7, forward_fn=FORWARD_DEFAUT,
                   cost_components_bps: Mapping[str, float] | None = None) -> dict[str, Any]:
     """Backtest paper des trades de copie. ROI CUMULATIF (PnL/capital) **et** ROI PAR TRADE (bps moyen)
     clairement distingués (rectif Flo). IC bootstrap sur le PnL/trade. Aucune exécution."""
@@ -299,7 +299,7 @@ def _profit_factor(trades: list[dict]) -> float:
 
 def ranger_variantes(events: list[dict], tape: dict[str, list[tuple[int, float]]], *,
                      variantes: Iterable[dict], notional_usd: float = 150.0, cout_ar_bps: float = 12.0,
-                     capital_usd: float = 1000.0, forward_fn=FORWARD_DEFAUT) -> list[dict]:
+                     capital_usd: float = 100.0, forward_fn=FORWARD_DEFAUT) -> list[dict]:
     """Classe des variantes {seuil,horizon_ms} par SCORE = PnL_net × ROI_cumulatif × capacité ÷
     (drawdown+ε), avec la sim paper de chacune. Le drawdown pénalise, la capacité récompense."""
     eps = 1e-6

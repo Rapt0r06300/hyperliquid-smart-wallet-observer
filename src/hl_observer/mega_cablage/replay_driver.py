@@ -96,7 +96,7 @@ def separer_par_episodes(evenements: list[dict[str, Any]], *, fractions: tuple[f
     return segments
 
 
-def rejouer_segment(evenements: list[dict[str, Any]], *, notre_equity: float = 1000.0,
+def rejouer_segment(evenements: list[dict[str, Any]], *, notre_equity: float = 100.0,
                     notional_max: float = 500.0, fee_bps: float = 4.5,
                     leader_equity_defaut: float | None = None) -> dict[str, Any]:
     """Rejoue un segment sur un pipeline NEUF. Rend {ticks, events, equity, roi, realized, fees, reconcilie,
@@ -116,7 +116,7 @@ def rejouer_segment(evenements: list[dict[str, Any]], *, notre_equity: float = 1
 
 
 def rejouer_is_oos_forward(evenements: list[dict[str, Any]], *, fractions: tuple[float, ...] = (0.6, 0.2, 0.2),
-                           source: str = "INCONNU", notre_equity: float = 1000.0,
+                           source: str = "INCONNU", notre_equity: float = 100.0,
                            notional_max: float = 500.0, fee_bps: float = 4.5,
                            leader_equity_defaut: float | None = None) -> dict[str, Any]:
     """Découpe IS/OOS/FORWARD et rejoue chaque segment isolément. Verdict : OOS et FORWARD tiennent-ils (ROI ≥ 0

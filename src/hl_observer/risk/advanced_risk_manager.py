@@ -62,13 +62,13 @@ class AdvancedRiskConfig:
     vol_extreme_sizing_mult: float = 0.30
     alpha_decay_max_hours: float = 4.0
     max_correlation: float = 0.85
-    starting_equity_usdt: float = 1000.0
+    starting_equity_usdt: float = 100.0
 
 
 @dataclass
 class DailyPnLState:
     """Tracks daily PnL for stop-loss halt."""
-    day_start_equity_usdt: float = 1000.0
+    day_start_equity_usdt: float = 100.0
     day_realized_pnl_usdt: float = 0.0
     day_start_timestamp: float = 0.0
     trades_today: int = 0

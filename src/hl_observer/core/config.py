@@ -12,7 +12,7 @@ class CoreConfig:
     runtime_dir: Path = Path("runtime")
     data_dir: Path = Path("runtime/data")
     logs_dir: Path = Path("logs")
-    default_starting_balance_usdc: float = 1_000.0
+    default_starting_balance_usdc: float = 100.0
     runtime_mode: RuntimeModeDecision = field(default_factory=decide_runtime_mode)
     max_retry_attempts: int = 3
     retry_base_delay_seconds: float = 0.25

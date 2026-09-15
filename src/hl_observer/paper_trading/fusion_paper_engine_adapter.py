@@ -58,11 +58,11 @@ def run_copy_votes_through_paper_engine(
     *,
     market_price: float,
     observed_at_ms: int,
-    starting_cash_usdt: float = 1000.0,
+    starting_cash_usdt: float = 100.0,
     admission_floor_power: float | None = None,
 ) -> FusionPaperEngineSummary:
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
-    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0)
+    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0)
     max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     # BUG CORRIGE (audit 2026-07-11) -- FAIL-OPEN : `if leverage <= 1.0: leverage = 10.0`
     # ECRASAIT SILENCIEUSEMENT toute config a 1. On ne pouvait donc PAS simuler sans levier,
@@ -313,7 +313,7 @@ def run_distilled_opportunities_through_paper_engine(
     *,
     market_prices: dict[str, float],
     observed_at_ms: int,
-    starting_cash_usdt: float = 1000.0,
+    starting_cash_usdt: float = 100.0,
 ) -> FusionPaperEngineSummary:
     """Evaluate distilled GitHub-inspired opportunities through PaperEngine.
 
@@ -325,7 +325,7 @@ def run_distilled_opportunities_through_paper_engine(
     """
 
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
-    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 400.0)
+    max_total_exposure_usdt = _env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0)
     max_open_positions = _env_int("HYPERSMART_MAX_OPEN_POSITIONS", 12)
     # BUG CORRIGE (audit 2026-07-11) -- FAIL-OPEN : `if leverage <= 1.0: leverage = 10.0`
     # ECRASAIT SILENCIEUSEMENT toute config a 1. On ne pouvait donc PAS simuler sans levier,

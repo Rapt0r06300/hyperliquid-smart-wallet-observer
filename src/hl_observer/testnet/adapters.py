@@ -43,7 +43,7 @@ class FakeTestnetExchangeAdapter:
     """Deterministic fake testnet adapter for tests, CLI dry-confirmed runs and dashboards."""
 
     prices: dict[str, float] = field(default_factory=lambda: {"BTC": 60_000.0, "ETH": 3_000.0, "SOL": 150.0, "HYPE": 40.0})
-    starting_equity_usdc: float = 1_000.0
+    starting_equity_usdc: float = 100.0
     name: str = "fake_hyperliquid_testnet"
     environment: str = "testnet"
     base_url: str = "https://api.hyperliquid-testnet.xyz/fake-adapter"

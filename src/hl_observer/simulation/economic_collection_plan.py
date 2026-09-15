@@ -21,7 +21,11 @@ from hl_observer.collection.copy_vault_checkpoint_tail import (
 )
 
 from .economic_campaigns import REPORT_DIR
-from .economic_objective import CANONICAL_FAMILIES, canonical_family
+from .economic_objective import (
+    CANONICAL_FAMILIES,
+    STARTING_CAPITAL_USD,
+    canonical_family,
+)
 
 SCHEMA_VERSION = "hypersmart.economic_collection_resume.v2"
 STATE_FILENAME = "collection_resume_state.json"
@@ -674,7 +678,7 @@ def build_collection_plan(
         "generated_at_ms": int(now_ms if now_ms is not None else time.time() * 1000),
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd_per_family": 1000.0,
+        "starting_capital_usd_per_family": STARTING_CAPITAL_USD,
         "target_net_usd_per_family": 4.0,
         "goal_complete": goal_complete,
         "all_software_pipelines_ready": all(

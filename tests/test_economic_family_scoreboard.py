@@ -68,7 +68,7 @@ def test_scoreboards_keep_families_separate_and_deny_incomplete_evidence(tmp_pat
     assert cross["net_pnl_usd"] == -0.1366
     assert cross["liquidatable_net"] is False
     assert result["disabled_families"] == ["cross_venue_dislocation_v1", "carry"]
-    assert result["starting_capital_usd"] == 1000.0
+    assert result["starting_capital_usd"] == 100.0
     assert result["real_execution"] is False
 
 
@@ -104,7 +104,7 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
     ).receipt()
     campaign = {
         "family": "cross_venue_dislocation_v2",
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": 100.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,
@@ -188,10 +188,10 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
     assert list(result["families"]).count("cross_venue_dislocation_v2") == 1
 
 
-def test_public_paper_default_uses_the_unique_1000_usd_capital() -> None:
+def test_public_paper_default_uses_the_unique_100_usd_capital() -> None:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "HYPERSMART_PAPER_STARTING_EQUITY=1000.0" in env_example
-    assert "HYPERSMART_PAPER_STARTING_EQUITY=10000.0" not in env_example
+    assert "HYPERSMART_PAPER_STARTING_EQUITY=100.0" in env_example
+    assert "HYPERSMART_PAPER_STARTING_EQUITY=1000.0" not in env_example
 
 
 def test_scoreboards_are_reachable_from_the_read_only_runtime() -> None:

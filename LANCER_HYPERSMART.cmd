@@ -127,7 +127,7 @@ set "HYPERSMART_SIMULATION_MAX_SIGNAL_AGE_MS=10000"
 REM 20/07 — CAPITAL DECLARE (repli de la marge dynamique si l'etat UI est illisible).
 REM Sans lui : capital=None -> marge 50 $/position -> 40 %% du capital dort. La distance a la
 REM liquidation depend du LEVIER, pas de la taille : deployer plus a levier constant est sur.
-set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000"
+set "HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=100"
 REM Legacy ARBITRAGE DE DISLOCATION paper v1 : QUARANTAINE DEFINITIVE.
 REM Le cross-venue actif est EXPERIMENTAL_PAPER v2 (deux jambes, couts complets, ledger isole).
 REM Re-activer ce flag recreerait un second chemin economique ambigu : contrat runtime = 0.
@@ -328,8 +328,8 @@ REM TAILLE & LEVIER (2026-06-25, remarque utilisateur: "des centimes c'est incoh
 REM   sur Hyperliquid on trade des PERPETUELS avec LEVIER. La "mise" = MARGE bloquee ; la position
 REM   controle marge*levier de notionnel ; le PnL = variation_prix * notionnel_leverage (donc un
 REM   mouvement de 1% sur 100$ de marge a 5x = ~5$, plus des centimes). On passe la marge par
-REM   position a 100$ (10 positions = 1000$ de marge deployable) et un levier de 5x (realiste/modere).
-REM   L'exposition/cash restent comptes en MARGE -> les 1000$ sont toujours proteges. Aucun faux PnL:
+REM   position a 50$ (2 positions = 100$ de marge deployable) et un levier de 5x (realiste/modere).
+REM   L'exposition/cash restent comptes en MARGE -> les 100$ sont toujours proteges. Aucun faux PnL:
 REM   tout est calcule au VRAI prix marche, juste dimensionne comme un vrai compte perp.
 set "HYPERSMART_MAX_POSITION_USDT=50"
 REM ===== MODE GRINDER (session P1 2026-07-07, flags ON pour collecte de donnees A/B) =====
@@ -349,7 +349,7 @@ REM PLANCHER NOTIONAL (replay A/B 2026-07-07 sur logs frais): les micro-trades o
 REM negatif (frais ~59%% du brut). Filtre causal notional>=40: train ET validation positifs
 REM (+0.11 vs -1.77 tous trades). Echantillon encore petit (13 trades) - a re-verifier.
 set "HYPERSMART_MIN_PAPER_NOTIONAL_USDT=40"
-set "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT=1000"
+set "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT=100"
 set "HYPERSMART_MAX_OPEN_POSITIONS=20"
 REM LEVIER de simulation: 5x = realisme perp Hyperliquid (demande Flo 2026-07-08: "pas que des
 REM centimes, comme le marche reel"). notional = marge x levier -> $40 de marge = $200 d'expo.
@@ -360,7 +360,7 @@ REM LAISSER COURIR (demande Flo): on coupe le quality-guard qui fermait les posi
 REM (elles n'atteignaient jamais leur SL/TP 1.2-1.6%%). Desormais SL/TP + sortie du leader gouvernent
 REM -> on capture le VRAI mouvement du marche, pas du bruit. Reversible (=1 pour re-activer).
 set "HYPERSMART_LEGACY_POSITION_QUALITY_GUARD_ENABLED=0"
-REM RESET PROPRE A CHAQUE LANCEMENT (demande utilisateur): equity remise a 1000, compteurs
+REM RESET PROPRE A CHAQUE LANCEMENT (demande utilisateur): equity remise a 100, compteurs
 REM trades gagnants/perdants et taux de reussite remis a 0, logs de session repartis a neuf
 REM (les anciens sont archives dans _archives). Mettre 0 pour au contraire CONSERVER l'equity.
 REM RESET DES LOGS 2026-06-25: en plus, le dossier logs\ encombre est REMIS A ZERO a chaque

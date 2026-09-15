@@ -14,7 +14,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from hl_observer.backtesting import lead_lag_shadow
-from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.economic_objective import (
+    STARTING_CAPITAL_USD,
+    evaluate_objective,
+)
 from hl_observer.strategies.lead_lag_paper import SignalLeadLag, rejouer_lead_lag
 
 
@@ -199,7 +202,7 @@ def campaign_from_replay(
         "schema_version": "hypersmart.economic_campaign_evidence.v1",
         "family": "lead_lag",
         "campaign_id": freeze.get("campaign_id") if freeze else None,
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
         "parameters_frozen": bool(freeze and freeze.get("selected_before_final_evaluation") is True),
@@ -214,7 +217,7 @@ def campaign_from_replay(
         "slippage_cost_usd": slippage,
         "latency_cost_usd": latency,
         "net_pnl_usd": total_net,
-        "roi_pct": round(total_net / 1000.0 * 100.0, 8),
+        "roi_pct": round(total_net / STARTING_CAPITAL_USD * 100.0, 8),
         "max_drawdown_usd": max(
             (float(segment.get("max_drawdown_usd") or 0.0) for segment in ordered),
             default=0.0,

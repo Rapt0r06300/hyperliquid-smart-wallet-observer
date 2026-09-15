@@ -153,7 +153,7 @@ def _resultat(pipe: MegaCablage, n_events: int, dry_run: bool,
 
 def run_mega_cablage(*, bundles: list[dict[str, Any]] | None = None,
                      evenements: list[dict[str, Any]] | None = None, from_logs: str | Path | None = None,
-                     notre_equity: float = 1000.0, notional_max: float = 500.0, fee_bps: float = 4.5,
+                     notre_equity: float = 100.0, notional_max: float = 50.0, fee_bps: float = 4.5,
                      leader_equity_par_vault: dict[str, Any] | None = None,
                      leader_equity_defaut: float | None = None, verifier_unite: bool = True,
                      cross_venue_paper: bool = True, dry_run: bool = True) -> MegaCablageRunResult:
@@ -169,7 +169,7 @@ def run_mega_cablage(*, bundles: list[dict[str, Any]] | None = None,
     return _resultat(pipe, len(flux), dry_run, tuple(notes))
 
 
-def boucle_continue(*, source: Callable[[], Any], notre_equity: float = 1000.0, notional_max: float = 500.0,
+def boucle_continue(*, source: Callable[[], Any], notre_equity: float = 100.0, notional_max: float = 50.0,
                     fee_bps: float = 4.5, leader_equity_par_vault: dict[str, Any] | None = None,
                     leader_equity_defaut: float | None = None, max_iterations: int | None = None,
                     cross_venue_paper: bool = True, dry_run: bool = True) -> MegaCablageRunResult:

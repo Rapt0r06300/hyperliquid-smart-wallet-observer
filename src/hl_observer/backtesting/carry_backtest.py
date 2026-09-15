@@ -53,7 +53,7 @@ class Config:
     securite_liquidation: float = 1.5
     max_slots: int = 12
     part_max_par_coin: float = PART_MAX_PAR_COIN
-    capital_usd: float = 1000.0
+    capital_usd: float = 100.0
     #: 🧪 EXP#1 (23/07) — seuil d'OUVERTURE sur le funding. 0.0 = BASELINE (production, aucun
     #: changement). > 0 = n'ouvre que si funding ≥ seuil : teste si concentrer le capital sur le
     #: funding au-dessus du plancher améliore le net. Porte par LIGNE (aucun lookahead : ne lit que

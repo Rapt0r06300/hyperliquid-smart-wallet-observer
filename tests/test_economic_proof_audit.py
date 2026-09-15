@@ -171,7 +171,7 @@ def _positive_copy_evidence() -> tuple[dict, dict]:
     snapshot_hash = economic_contract["assumption_snapshot_hash"]
     campaign = {
         "family": "copy_vault",
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": 100.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

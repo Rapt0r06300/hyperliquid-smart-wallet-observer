@@ -167,7 +167,7 @@ class EconomicWriter:
                 raw_positions = list((getattr(state, "simulation_virtual_positions", {}) or {}).values())
                 market_marks = latest_local_market_marks(self.settings, raw_positions, current_ms=ts)
 
-            starting = float(getattr(state, "simulation_starting_equity_usdt", 1000.0) or 1000.0)
+            starting = float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0)
             realized = float(getattr(state, "simulation_realized_pnl_usdc", 0.0) or 0.0)
             marked = status_helpers._mark_to_market_positions(
                 raw_positions,

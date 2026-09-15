@@ -87,7 +87,7 @@ def _valid_copy_campaign() -> dict:
     assert economic_contract["certification"]["ready"] is True
     campaign = {
         "family": "copy_vault",
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": 100.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

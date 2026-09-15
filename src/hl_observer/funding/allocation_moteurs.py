@@ -110,7 +110,7 @@ def etats_courants() -> list[MoteurEtat]:
     ]
 
 
-def rapport(capital_usd: float = 1000.0) -> dict[str, Any]:
+def rapport(capital_usd: float = 100.0) -> dict[str, Any]:
     """L'allocation courante, lisible — pour le dashboard/audit. Aujourd'hui : tout en réserve."""
     r = allouer_capital(etats_courants(), capital_usd=capital_usd)
     r["capital_usd"] = capital_usd

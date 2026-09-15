@@ -22,7 +22,7 @@ def _cost_usd(notional: float, couts: dict | None) -> float:
 class PortefeuilleGlobal:
     """État sur disque : state.json (snapshot) + ledger.jsonl (append-only). Reprenable après crash."""
 
-    def __init__(self, dossier: Path, *, capital_initial: float = 1000.0, levier: float = 3.0,
+    def __init__(self, dossier: Path, *, capital_initial: float = 100.0, levier: float = 3.0,
                  max_expo_coin_frac: float = 0.5):
         self.dir = Path(dossier)
         self.dir.mkdir(parents=True, exist_ok=True)

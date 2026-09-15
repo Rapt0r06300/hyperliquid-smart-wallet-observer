@@ -30,6 +30,7 @@ from hl_observer.economics.assumptions import (
     ZeroCostReason,
 )
 from hl_observer.economics.families import build_lead_lag_contract
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 CAMPAIGN_HORIZON_MS = _base.CAMPAIGN_HORIZON_MS
 CAMPAIGN_NOTIONAL_USD = _base.CAMPAIGN_NOTIONAL_USD
@@ -330,7 +331,7 @@ def summarize_executable_episodes(
         "slippage_cost_usd": round(slippage, 8),
         "latency_cost_usd": round(latency, 8),
         "net_pnl_usd": round(net, 8),
-        "roi_pct": round(net / 1000.0 * 100.0, 8),
+        "roi_pct": round(net / STARTING_CAPITAL_USD * 100.0, 8),
         "max_drawdown_usd": round(max_drawdown, 8),
         "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
         "profit_factor": round(gains / losses, 8) if losses > 0 else None,

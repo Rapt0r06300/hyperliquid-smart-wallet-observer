@@ -78,7 +78,7 @@ class SortiesEnAttente:
         self._sauver()
 
 
-def simuler(geles, corpus_fwd, *, filtrer, evaluer, capital: float = 1000.0, notional_par_trade: float = 100.0,
+def simuler(geles, corpus_fwd, *, filtrer, evaluer, capital: float = 100.0, notional_par_trade: float = 100.0,
             levier: float = 3.0, stop_event=None, portefeuille=None, max_par_candidat=None, pending_path=None,
             maintenant_ms=None, fermer_tout_a_la_fin: bool = False) -> dict:
     """Rejoue le forward à capital PARTAGÉ. `portefeuille` = le portefeuille GLOBAL persistant du run (AF-P3) s'il

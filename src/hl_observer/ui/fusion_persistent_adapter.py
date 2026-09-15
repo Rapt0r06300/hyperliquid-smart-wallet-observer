@@ -994,14 +994,14 @@ def _portfolio_open_refusal(
     # Un garde-fou de risque ne doit JAMAIS se desserrer tout seul (deny-by-default).
     # On respecte desormais la config ; on ne remplace que les valeurs INVALIDES (<= 0) par le defaut.
     # Semantique (fix "centimes") : MAX_TOTAL_EXPOSURE_USDT = budget de MARGE ; le plafond compare
-    # est en NOTIONAL, donc budget_marge x levier. Config actuelle du launcher (1000 x 10 = 10 000)
+    # est en NOTIONAL, donc budget_marge x levier. Config actuelle du launcher (100 x 10 = 1 000)
     # -> comportement live INCHANGE.
     _lev_ex = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
     if _lev_ex <= 0.0:
         _lev_ex = 10.0
-    _base_ex = abs(_env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 1000.0))
+    _base_ex = abs(_env_float("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", 100.0))
     if _base_ex <= 0.0:
-        _base_ex = 1000.0
+        _base_ex = 100.0
     max_exposure = _base_ex * _lev_ex
     current_exposure = _current_open_exposure_usdt(positions)
     if max_exposure > 0 and current_exposure + abs(float(new_notional_usdt or 0.0)) > max_exposure:
@@ -1016,7 +1016,7 @@ def _portfolio_open_refusal(
     try:
         from hl_observer.risk.directional_exposure import directional_refusal
 
-        _equity = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+        _equity = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
         _dir = directional_refusal(
             positions,
             coin=str(coin or ""),
@@ -1038,7 +1038,7 @@ def _portfolio_open_refusal(
 
         _mode = str(strategy_mode or "").upper()
         if _mode:
-            _equity_b = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+            _equity_b = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
             _budget = engine_budget_refusal(
                 getattr(state, "simulation_ledger_events", None) or [],
                 moteur=_mode,
@@ -1076,7 +1076,7 @@ def _portfolio_open_refusal(
 
         _cote = _normaliser_sens(side)
         if _cote:
-            _equity_c = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+            _equity_c = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
             _pct_grp = _env_float("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", 80.0)
             _cap_grp = _equity_c * max(0.0, _pct_grp) / 100.0
             if _cap_grp > 0.0:
@@ -1226,7 +1226,7 @@ def _opens_today(ledger_events: list) -> int:
 def _day_pnl_pct(state: UiState) -> float:
     """PnL du jour en % de l'equity de depart. 0.0 si inconnu -> le verrou de gain ne mord pas
     (il est de toute facon DESACTIVE par defaut : HYPERSMART_DAILY_PROFIT_TARGET_PCT=0)."""
-    equity0 = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0)) or 1000.0)
+    equity0 = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
     if equity0 <= 0:
         return 0.0
     realized = _safe_float(getattr(state, "simulation_realized_pnl_usdt", 0.0)) or 0.0
@@ -1326,7 +1326,7 @@ def _copy_like_direct_order_refusal(value: dict[str, Any], *, state: UiState | N
             min_edge_required_bps=float(min_edge),
             consensus_wallets=int(consensus),
             liquidity_score=float(liquidity),
-            starting_equity_usdt=float(getattr(state, "simulation_starting_equity_usdt", 1000.0) or 1000.0),
+            starting_equity_usdt=float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0),
             extra_edge_after_loss_bps=abs(_env_float("HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS", 24.0)),
             min_consensus_after_loss=max(min_consensus, _env_int("HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS", 4)),
             min_liquidity_after_loss=max(min_liquidity, _env_float("HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY", 0.60)),
@@ -1371,7 +1371,7 @@ def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_pri
     # SIZING REEL (demande Flo "comme si on tradait en vrai"): on ne matche PAS la taille $
     # derisoire du leader (~40); on alloue NOTRE marge par trade x levier, comme un compte perp
     # reel. Autoritaire (dernier gate). Robuste aux valeurs "collees" dans l'env Windows: on
-    # PLANCHE la marge a 100 et le levier a 10 -> notional position >= 100 x 10 = 1000.
+    # PLANCHE la marge a 50 et le levier a 10 -> notional position >= 50 x 10 = 500.
     # GRINDER (correction Flo: $1000/position empechait le grinder). Beaucoup de PETITES
     # positions gagnantes: marge PETITE (<=40) x levier -> ex 40 x 10 = 400. Le PnL vient du
     # VOLUME (plein de positions) + funding, PAS de positions geantes. Le levier evite les centimes.
@@ -1382,7 +1382,7 @@ def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_pri
         lev = 10.0
     # MODELE REEL (Flo prouve a l'ecran: notional $50 -> PnL -0.12 = centimes). Le $50 est la
     # MARGE (capital a risque par position), PAS le notional. A 10x: notional = 50 x 10 = 500
-    # -> PnL = 500 x Dprix -> DES DOLLARS, comme un perp reel. Solde 1000 / marge 50 = 20 positions.
+    # -> PnL = 500 x Dprix -> DES DOLLARS, comme un perp reel. Solde 100 / marge 50 = 2 positions.
     # (Avant: margin clampe a 12 PUIS notional clampe a 50 -> double bride = centimes garantis.)
     margin_cap = abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 50.0))
     if margin_cap <= 0.0:      # idem : seule une valeur INVALIDE retombe sur le defaut

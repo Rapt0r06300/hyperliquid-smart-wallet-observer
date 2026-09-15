@@ -87,7 +87,7 @@ def create_dydx_router() -> APIRouter:
             return {
                 "session_id": s.get("session_id", ""),
                 "net_pnl_usdt": s.get("net_pnl_usdt", 0.0),
-                "equity_usdt": s.get("equity_usdt", 1000.0),
+                "equity_usdt": s.get("equity_usdt", 100.0),
                 "total_trades": s.get("total_trades", 0),
                 "winrate": s.get("winrate", "0%"),
                 "fees_paid": s.get("fees_paid", 0.0),
@@ -127,7 +127,7 @@ def create_dydx_router() -> APIRouter:
                 "paper_only": True,
                 "read_only": True,
                 "net_pnl_usdt": 0.0,
-                "equity_usdt": 1000.0,
+                "equity_usdt": 100.0,
                 "positions": [],
                 "error": str(e),
                 "disclaimer": DISCLAIMER,

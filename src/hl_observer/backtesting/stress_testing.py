@@ -15,7 +15,7 @@ def portfolio_stress(positions: dict, shocks: dict) -> float:
 
 
 def monte_carlo_paths(*, mu: float, sigma: float, steps: int, n: int = 1000,
-                      start: float = 1000.0, seed: int = 7) -> dict:
+start: float = 100.0, seed: int = 7) -> dict:
     """Simule n trajectoires d'équity (rendements normaux i.i.d.). Retourne médiane, p5, p95 et la
     probabilité de finir en perte — pour VOIR la distribution des issues, pas juste la moyenne."""
     rng = random.Random(seed)

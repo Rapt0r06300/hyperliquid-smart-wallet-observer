@@ -22,7 +22,7 @@ from hl_observer.backtesting.cross_venue_certified import (
 TARGET_NET_USD = 4.0
 TARGET_NET_USD_PER_DAY = 4.0
 MIN_PROOF_DAYS = 2
-STARTING_CAPITAL_USD = 1000.0
+STARTING_CAPITAL_USD = 100.0
 COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _ALIASES = {

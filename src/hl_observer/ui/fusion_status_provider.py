@@ -313,7 +313,7 @@ def _state_summary(state: UiState) -> dict[str, Any]:
     return {
         "open_positions": len(positions) if isinstance(positions, dict) else 0,
         "ledger_events": len(ledger) if isinstance(ledger, list) else 0,
-        "starting_equity_usdt": float(getattr(state, "simulation_starting_equity_usdt", 1000.0) or 1000.0),
+        "starting_equity_usdt": float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0),
         "realized_pnl_usdc": float(getattr(state, "simulation_realized_pnl_usdc", 0.0) or 0.0),
         "entries_total": int(getattr(state, "simulation_reproduced_entries_total", 0) or 0),
         "exits_total": int(getattr(state, "simulation_reproduced_exits_total", 0) or 0),
@@ -405,7 +405,7 @@ def _state_current_equity(state: UiState) -> float:
         value = _safe_float(history[-1].get("current_equity_usdt"))
         if value is not None and value > 0:
             return value
-    return float(getattr(state, "simulation_starting_equity_usdt", 1000.0) or 1000.0) + float(
+    return float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0) + float(
         getattr(state, "simulation_realized_pnl_usdc", 0.0) or 0.0
     )
 

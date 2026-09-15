@@ -280,7 +280,7 @@ def _net_segment(signaux: Sequence[Any], *, config: dict[str, Any]) -> dict[str,
         else round(gains / losses, 8) if losses > 0
         else None
     )
-    curve = [float(config.get("equity", 1000.0))]
+    curve = [float(config.get("equity", 100.0))]
     for value in nets:
         curve.append(curve[-1] + value)
     return {
@@ -355,7 +355,7 @@ def rejouer_lead_lag(
         )
     placebo = _net_segment(placebo_signals, config=config)
 
-    equity = [float(config.get("equity", 1000.0))]
+    equity = [float(config.get("equity", 100.0))]
     for value in in_sample["nets_episodes"]:
         equity.append(equity[-1] + value)
     capacity = round(in_sample["notional"], 4) if in_sample["fills"] else M.UNMEASURABLE

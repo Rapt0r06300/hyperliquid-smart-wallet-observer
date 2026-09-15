@@ -369,7 +369,7 @@ def _capacite_du_lot(racine: Path, episodes: Sequence[Episode], carnet_relpath: 
     return resume
 
 
-def revalider(root: Path | str, *, starting_equity_usd: float = 1000.0,
+def revalider(root: Path | str, *, starting_equity_usd: float = 100.0,
               ledgers: Mapping[str, str] | None = None,
               carnet_relpath: str | None = "runtime/data/carnet_venues.jsonl") -> dict[str, Any]:
     """Revalide chaque ledger connu. Ledger absent ou non appariable ⇒ statut explicite, jamais un zéro."""
@@ -420,7 +420,7 @@ def ecrire_rapport(rapport: Mapping[str, Any], root: Path | str) -> Path:
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Revalidation economique (lecture seule, paper-only).")
     parser.add_argument("--root", default=".")
-    parser.add_argument("--starting-equity", type=float, default=1000.0)
+    parser.add_argument("--starting-equity", type=float, default=100.0)
     args = parser.parse_args(list(argv) if argv is not None else None)
     rapport = revalider(Path(args.root).resolve(), starting_equity_usd=float(args.starting_equity))
     chemin = ecrire_rapport(rapport, Path(args.root).resolve())

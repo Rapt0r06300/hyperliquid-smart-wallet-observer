@@ -123,7 +123,7 @@ def executer_smoke_portable(
     opened = normalized[0].fill
     closed = normalized[1].fill
     assert opened is not None and closed is not None
-    ledger = PaperLedger(starting_balance_usdc=1_000.0, session_id=run_id)
+    ledger = PaperLedger(starting_balance_usdc=100.0, session_id=run_id)
     ledger.open_position(
         coin=opened.coin,
         side="LONG",

@@ -1337,7 +1337,7 @@ def opportunity_report(
         risk_config=RealtimeCopyRiskConfig(
             min_edge_required_bps=max(1.0, simulation_min_edge_bps),
             max_signal_age_ms=max_signal_age_ms,
-            starting_equity_usdt=1000.0,
+            starting_equity_usdt=100.0,
         ),
     )
     typer.echo(format_fresh_opportunity_report(report))
@@ -1374,12 +1374,12 @@ def consensus_report(
 
 @app.command("simulate-magic-bot")
 def simulate_magic_bot(
-    capital: float = typer.Option(1000.0, "--capital", min=1.0, help="Virtual local starting capital."),
+    capital: float = typer.Option(100.0, "--capital", min=1.0, help="Virtual local starting capital."),
     scenario: str = typer.Option("conservative", "--scenario", help="Simulation scenario label."),
 ) -> None:
     """Start/report a local simulation plan; no order, no network."""
-    if abs(capital - 1000.0) > 0.001:
-        typer.echo("Safety warning: product default is 1000 USDT fictive; custom capital is report-only.")
+    if abs(capital - 100.0) > 0.001:
+        typer.echo("Safety warning: product default is 100 USDT fictive; custom capital is report-only.")
     typer.echo("simulate_magic_bot=local_simulation_without_money")
     typer.echo(f"capital={capital:.2f}")
     typer.echo(f"scenario={scenario}")
@@ -1397,7 +1397,7 @@ def simulation_report(
     typer.echo("simulation_report=local_without_money")
     typer.echo(f"period={period}")
     typer.echo(f"state_path={simulation_state_path(settings)}")
-    typer.echo("starting_equity_usdt=1000.00")
+    typer.echo("starting_equity_usdt=100.00")
 
 
 @app.command("simulation-loss-report")
@@ -3791,7 +3791,7 @@ def testnet_loop_observe(
 
 @app.command("reset-simulation-state")
 def reset_simulation_state_command(
-    starting_equity: float = typer.Option(1000.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
+    starting_equity: float = typer.Option(100.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
 ) -> None:
     """Reset the local UI simulation session; no orders, no network, no testnet."""
     settings = _settings()

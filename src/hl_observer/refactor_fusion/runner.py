@@ -152,7 +152,7 @@ def run_refactor_fusion(
                 TriangularEdge("BTC", "USDC", 101_500.0),
             ),
             latencies_ms=(250, 900, 4_000, 6_200),
-            peak_equity=1_000.0,
+            peak_equity=100.0,
             current_equity=998.5,
         )
     )

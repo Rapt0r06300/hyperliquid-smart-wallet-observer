@@ -9,7 +9,7 @@ from __future__ import annotations
 from math import sqrt
 
 
-def equity_curve(realized_pnls: list[float], *, start_equity: float = 1000.0) -> list[float]:
+def equity_curve(realized_pnls: list[float], *, start_equity: float = 100.0) -> list[float]:
     eq = float(start_equity)
     out = [eq]
     for p in realized_pnls:
@@ -54,7 +54,7 @@ def brier_advantage(probs: list[float], outcomes: list[int], *, baseline: float 
     return round(base - model, 6)
 
 
-def build_report(realized_pnls: list[float], *, start_equity: float = 1000.0) -> dict:
+def build_report(realized_pnls: list[float], *, start_equity: float = 100.0) -> dict:
     eq = equity_curve(realized_pnls, start_equity=start_equity)
     rets = [float(p) for p in realized_pnls]
     return {

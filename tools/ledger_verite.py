@@ -73,7 +73,7 @@ def lire_ledger(chemin: Path, *, strict: bool = True) -> dict:
             "promotion_autorisee": not erreurs}
 
 
-def rejouer(evenements, *, capital_initial: float = 1000.0, levier: float = 3.0,
+def rejouer(evenements, *, capital_initial: float = 100.0, levier: float = 3.0,
             depuis_seq: int = 0) -> dict:
     """IDEA-34 — rejeu IDEMPOTENT : seuls les événements dont `event_seq > depuis_seq` sont appliqués.
     Rejouer deux fois le même ledger donne EXACTEMENT le même état (aucun double comptage)."""
@@ -104,7 +104,7 @@ def rejouer(evenements, *, capital_initial: float = 1000.0, levier: float = 3.0,
             "n_appliques": n_appliques, "state_version": STATE_VERSION}
 
 
-def reprise_apres_crash(chemin_ledger: Path, snapshot: dict | None, *, capital_initial: float = 1000.0,
+def reprise_apres_crash(chemin_ledger: Path, snapshot: dict | None, *, capital_initial: float = 100.0,
                         levier: float = 3.0) -> dict:
     """IDEA-34/35 — reprise EXACTE.
 

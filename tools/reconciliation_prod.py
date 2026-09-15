@@ -28,7 +28,7 @@ def lire_jsonl_stream(chemin: Path):
                 continue
 
 
-def reconstruire_depuis_ledger(chemin_ledger: Path, *, capital_initial: float = 1000.0) -> dict:
+def reconstruire_depuis_ledger(chemin_ledger: Path, *, capital_initial: float = 100.0) -> dict:
     """Reconstruit l'état d'un portefeuille depuis SON ledger (OPEN/ADD/REDUCE/CLOSE), en streaming. Rend
     realized, cash, equity (à la clôture des positions restantes marquées à leur dernier prix vu), drawdown,
     ROI total/déployé. Indépendant de tout compteur courant : c'est la SOURCE DE VÉRITÉ."""
@@ -67,7 +67,7 @@ def reconstruire_depuis_ledger(chemin_ledger: Path, *, capital_initial: float = 
             "source": "LEDGER_EVENTS (reconstruit en streaming)"}
 
 
-def reconstruire_global(ledgers, *, capital_initial: float = 1000.0, levier: float = 3.0,
+def reconstruire_global(ledgers, *, capital_initial: float = 100.0, levier: float = 3.0,
                         equity_curve_out=None) -> dict:
     """PORTEFEUILLE GLOBAL DU RUN : fusionne TOUS les ledgers de campagne en UNE seule séquence chronologique
     et fait passer UN SEUL capital à travers (jamais additionner plusieurs capitaux ni plusieurs drawdowns).

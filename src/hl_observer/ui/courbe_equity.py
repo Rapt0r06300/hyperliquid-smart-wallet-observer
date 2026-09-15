@@ -40,7 +40,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-CAPITAL_INITIAL_DEFAUT = 1000.0
+CAPITAL_INITIAL_DEFAUT = 100.0
 #: en dessous, une courbe n'a pas de forme : on le DIT au lieu de dessiner du bruit.
 POINTS_MIN_POUR_UNE_FORME = 2
 

@@ -15,7 +15,7 @@ from typing import Any
 
 from hl_observer.economics.proof_binding import audit_economic_contract_receipt
 
-from .economic_objective import evaluate_objective
+from .economic_objective import STARTING_CAPITAL_USD, evaluate_objective
 
 SCHEMA_VERSION = "hypersmart.economic_family_scoreboards.v2"
 ACTIVE_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
@@ -65,7 +65,7 @@ def _empty_row(family: str) -> dict[str, Any]:
         "forward": None,
         "placebos": None,
         "liquidatable_net": None,
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "verdict": "MORE_DATA",
         "verdict_reasons": [],
@@ -269,7 +269,7 @@ def build_scoreboards(root: str | Path = ".") -> dict[str, Any]:
         "families": {row["family"]: row for row in rows},
         "active_families": list(ACTIVE_FAMILIES),
         "disabled_families": ["cross_venue_dislocation_v1", "carry"],
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": STARTING_CAPITAL_USD,
         "paper_read_only": True,
         "real_execution": False,
     }

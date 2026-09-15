@@ -43,7 +43,7 @@ def sauvegarder(root: Path = RACINE, *, ts: str | None = None) -> Path:
     return dst
 
 
-def reset(root: Path = RACINE, *, starting_equity: float = 1000.0, runner=None) -> int:
+def reset(root: Path = RACINE, *, starting_equity: float = 100.0, runner=None) -> int:
     """Remise à zéro via la commande CLI existante `reset-simulation-state`. `runner` injectable (test)."""
     if runner is not None:
         return int(runner())
@@ -56,7 +56,7 @@ def reset(root: Path = RACINE, *, starting_equity: float = 1000.0, runner=None) 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Reset paper VOLONTAIRE (sauvegarde horodatee + remise a zero).")
     ap.add_argument("--confirm", action="store_true", help="obligatoire : confirme la remise a zero")
-    ap.add_argument("--starting-equity", type=float, default=1000.0)
+    ap.add_argument("--starting-equity", type=float, default=100.0)
     a = ap.parse_args(argv)
     if not a.confirm:
         print("REFUS : reset-paper efface equity/PnL/positions. Relance avec --confirm pour confirmer.", flush=True)

@@ -32,7 +32,7 @@ class MegaCablage:
     sizing de copie utilise l'equity VIVANTE du ledger (pas une valeur figée). cross_venue_paper active
     l'exécution paper des deux jambes cross-venue (par défaut True)."""
 
-    def __init__(self, *, notre_equity: float = 1000.0, notional_max: float = 500.0, fee_bps: float = 4.5,
+    def __init__(self, *, notre_equity: float = 100.0, notional_max: float = 50.0, fee_bps: float = 4.5,
                  venue: str = "HYPERLIQUID", min_fill_ratio: float = 0.85, verifier_unite: bool = True,
                  drawdown_gate: Any = None, verrou: Any = None, cross_venue_paper: bool = True,
                  seuil_edge_cross_venue_bps: float = 1.0) -> None:

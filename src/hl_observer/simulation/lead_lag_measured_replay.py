@@ -249,7 +249,7 @@ def replay_measured_lead_lag(
     max_book_age_ms: float = DEFAULT_MAX_BOOK_AGE_MS,
     max_execution_observation_delay_ms: float = DEFAULT_MAX_EXECUTION_OBSERVATION_DELAY_MS,
     min_episodes: int = 5,
-    equity: float = 1000.0,
+    equity: float = 100.0,
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> dict[str, Any]:
     """Replay strictly executable episodes with prior-only admission edge."""

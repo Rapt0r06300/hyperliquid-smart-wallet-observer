@@ -66,8 +66,8 @@ class CircuitBreakerState:
     """Current state of the circuit breaker."""
 
     state: CircuitState = CircuitState.NORMAL
-    peak_equity_usdt: float = 1000.0
-    current_equity_usdt: float = 1000.0
+    peak_equity_usdt: float = 100.0
+    current_equity_usdt: float = 100.0
     session_pnl_usdt: float = 0.0
     consecutive_losses: int = 0
     consecutive_wins_in_recovery: int = 0

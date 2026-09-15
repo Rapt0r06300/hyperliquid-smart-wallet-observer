@@ -17,7 +17,7 @@ def build_risk_panel(
     recent_trade_pnls: list[float] | None = None,
     open_positions: list[dict] | None = None,
     equity: float | None = None,
-    start_equity: float = 1000.0,
+    start_equity: float = 100.0,
     daily_loss_pct: float = 0.0,
     kill_switch_tripped: bool = False,
     confidence: float = 0.95,

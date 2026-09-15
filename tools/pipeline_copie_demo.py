@@ -78,8 +78,8 @@ def main() -> int:
     print("    edge_validé_OOS=%s -> DÉCISION=%s" % (m["edge_valide_oos"], m["decision"]))
     print("\n[3] SIMULATION PAPER (OOS, coûts inclus) — ROI cumulé ≠ ROI par trade")
     sim = simuler_paper(alpha, tape, horizon_ms=o["horizon_ms"], seuil=o["seuil"],
-                        notional_usd=150.0, cout_ar_bps=12.0, capital_usd=1000.0)
-    print("    trades=%d | PnL net=%.2f$ | ROI cumulé=%.2f%% (sur 1000$) | ROI/trade=%.1f bps [IC95 %s]"
+                        notional_usd=15.0, cout_ar_bps=12.0, capital_usd=100.0)
+    print("    trades=%d | PnL net=%.2f$ | ROI cumulé=%.2f%% (sur 100$) | ROI/trade=%.1f bps [IC95 %s]"
           % (sim["n_trades"], sim["pnl_net_usd"], sim["roi_cumulatif_pct"], sim["roi_par_trade_bps"],
              sim["roi_par_trade_ic95_bps"]))
     print("    drawdown=%.2f%% | winrate=%.0f%% | profit_factor=%s | capacité/trade=%.0f$"

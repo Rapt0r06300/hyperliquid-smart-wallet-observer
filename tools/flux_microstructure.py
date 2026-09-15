@@ -136,7 +136,7 @@ def ladder_passive(*, mid: float, spread_bps: float, n_niveaux: int = 3, pas_bps
 
 
 def risque_inventaire(*, inventaire_usd: float, prix_entree_moyen: float, prix_courant: float,
-                      levier: float = 3.0, capital_usd: float = 1000.0,
+                      levier: float = 3.0, capital_usd: float = 100.0,
                       inventaire_max_usd: float = 500.0) -> dict:
     """IDEA-57 — inventaire ouvert, perte latente, concentration et distance de liquidation THÉORIQUE.
     En paper aucune liquidation ne se produit : le chiffre sert d'alerte de risque, pas de prédiction."""

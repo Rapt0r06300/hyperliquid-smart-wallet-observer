@@ -24,7 +24,7 @@ class PaperIntent:
 
 
 class MoteurPaper:
-    def __init__(self, capital_usd: float = 1000.0) -> None:
+    def __init__(self, capital_usd: float = 100.0) -> None:
         self.capital_usd = float(capital_usd)
         self.enveloppe_usd = float(capital_usd)
         self.fills = []

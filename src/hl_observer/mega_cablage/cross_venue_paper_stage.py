@@ -44,7 +44,7 @@ def executer_paire_cross_venue(*, coin: str, venue1: str, venue2: str, action1: 
     """Assemble et exécute la paire non-atomique. Les deux jambes sont BOOKÉES au ledger fourni (ou un neuf).
     Le stress adverse s'applique à la 2e jambe + l'unwind selon le sens de la 1re (BUY → prix baissés, SELL →
     montés). Retourne {report, ledger, matched_notional, paired_edge, positions, chaine_ok}."""
-    ledger = ledger if ledger is not None else PaperLedger(starting_balance_usdc=1000.0)
+    ledger = ledger if ledger is not None else PaperLedger(starting_balance_usdc=100.0)
     dist = MeasuredLatencyDistribution(samples_ms=tuple(float(x) for x in latences_ms),
                                        source="recorded_cross_venue_round_trip")
     lat_max = max(latences_ms)

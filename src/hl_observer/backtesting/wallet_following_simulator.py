@@ -28,7 +28,7 @@ class WalletFollowingResult:
     equity_curve: tuple[float, ...]
 
 
-def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 1000.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
+def simulate_wallet_following(events: Iterable[dict[str, object]], *, starting_equity: float = 100.0, fee_bps: float = 4.0, slippage_bps: float = 2.0) -> WalletFollowingResult:
     equity = float(starting_equity)
     curve = [equity]
     trades: list[BacktestTrade] = []

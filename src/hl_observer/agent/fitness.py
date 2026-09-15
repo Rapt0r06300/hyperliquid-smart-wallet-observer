@@ -82,7 +82,7 @@ def profit_factor(pnls: Sequence[float]) -> float:
     return gains / pertes
 
 
-def drawdown_pct(pnls: Sequence[float], capital: float = 1000.0) -> float:
+def drawdown_pct(pnls: Sequence[float], capital: float = 100.0) -> float:
     """Le pire creux depuis un sommet, en %. Ce que ca fait VRAIMENT de le vivre."""
     if not pnls or capital <= 0:
         return 0.0
@@ -110,7 +110,7 @@ def evaluer(
     pnls: Sequence[float],
     *,
     fenetres: Sequence[Sequence[float]] | None = None,
-    capital: float = 1000.0,
+    capital: float = 100.0,
 ) -> Fitness:
     """LE score. DENY-BY-DEFAULT : sans donnee, zero. Jamais de benefice du doute."""
     if not pnls:

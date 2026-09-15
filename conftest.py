@@ -30,7 +30,7 @@ def seed_copy_vault_vnext_certification_for_explicit_fusion_contract(
         family="copy_vault",
         freeze_candidate={"variant": "ui-explicit-fusion-contract"},
         dataset_fingerprint="d" * 64,
-        config={"capital_usd": 1000.0, "paper_read_only": True},
+config={"capital_usd": 100.0, "paper_read_only": True},
         frozen_at_ms=1_000,
     )
     freeze_hash = str(manifest["freeze_hash"])

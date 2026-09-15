@@ -49,6 +49,7 @@ from hl_observer.economics.assumptions import (
     is_certifiable_mode,
 )
 from hl_observer.economics.families import build_copy_vault_contract
+from hl_observer.simulation.economic_objective import STARTING_CAPITAL_USD
 
 SCHEMA_VERSION = "hypersmart.copy_vault_executable.v1"
 
@@ -521,7 +522,7 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         "gross_pnl_usd": round(gross, 8), "fees_usd": round(fees, 8),
         "spread_cost_usd": round(spread, 8), "slippage_cost_usd": round(slippage, 8),
         "latency_cost_usd": round(latency, 8), "net_pnl_usd": round(net, 8),
-        "roi_pct": round(net / 1000.0 * 100.0, 8),
+        "roi_pct": round(net / STARTING_CAPITAL_USD * 100.0, 8),
         "max_drawdown_usd": round(max_drawdown, 8),
         "hit_rate": round(wins / len(rows), 8) if rows else 0.0,
         "profit_factor": round(gains / losses, 8) if losses > 0 else None,

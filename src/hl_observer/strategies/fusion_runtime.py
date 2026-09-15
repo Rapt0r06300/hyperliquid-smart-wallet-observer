@@ -82,8 +82,8 @@ class FusionRuntimeInput:
     funding_rows: tuple[dict[str, object], ...]
     triangular_edges: tuple[TriangularEdge, ...]
     latencies_ms: tuple[int, ...] = ()
-    peak_equity: float = 1000.0
-    current_equity: float = 1000.0
+    peak_equity: float = 100.0
+    current_equity: float = 100.0
     copy_ratio: float = 0.05
     open_positions: tuple[dict[str, object], ...] = ()
     distilled_signal_candidates: tuple[DistilledSignalCandidate, ...] = ()

@@ -166,7 +166,7 @@ def _run_order(
         second_fetch=second_fetch,
     )
     ledger = PaperLedger(
-        starting_balance_usdc=1_000.0,
+        starting_balance_usdc=100.0,
         session_id=f"runtime-cross-venue:{request_id}",
     )
     report = execute_non_atomic_cross_venue(

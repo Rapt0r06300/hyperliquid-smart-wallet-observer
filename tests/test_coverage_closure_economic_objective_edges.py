@@ -28,7 +28,7 @@ def _proof(**overrides):
         "family": "lead_lag",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 1000.0,
+        "starting_capital_usd": 100.0,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,

@@ -1,7 +1,7 @@
 """[Bloc 5-7/37/56 / AUD-071,221,222] Orchestrateur UNIQUE hyperlab_master.
 
 run(mode) : quick / full / deep / maximum / resume. UN SEUL chemin economique (AUD-071) : toutes les
-familles passent par le moteur paper unique et l'enveloppe 1000 USD. Pipeline REEL :
+familles passent par le moteur paper unique et l'enveloppe 100 USD. Pipeline REEL :
 ingest (data_plane -> Bronze/Silver/Gold/catalogue) -> familles -> moteur paper -> ledger/equity ->
 rapport. `deep`/`maximum` ajoutent la validation statistique. `resume` reprend depuis un etat.
 Carry reste DISABLED_BY_SCOPE (hors familles). 0 reseau, 0 ordre reel.
@@ -39,7 +39,7 @@ def run(mode: str, *, root: str, conn, fixtures: Mapping, etat: Optional[Mapping
     ts = fixtures.get("ts", 1000.0)
     venue = fixtures.get("venue", "bybit")
     symbole = fixtures.get("symbole", "BTCUSDT")
-    moteur = MoteurPaper(1000.0)
+    moteur = MoteurPaper(100.0)
 
     if "ingest" not in faites:
         data_plane.ingerer(root, conn, venue, fixtures["records"], ts=ts)

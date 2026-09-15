@@ -31,7 +31,7 @@ AMBER_SIZE_MULT_ENV = "HYPERSMART_V26_HALT_AMBER_SIZE_MULT"
 
 _DEF = {
     AMBER_LOSS_ENV: 12.0,        # perte réalisée fenêtre -> AMBER
-    RED_LOSS_ENV: 25.0,          # -> RED (aligné hard halt 2.5% d'une equity 1000)
+    RED_LOSS_ENV: 2.5,           # -> RED (aligné hard halt 2.5% d'une equity 100)
     WINDOW_ENV: 240.0,           # 4 h
     COOLDOWN_ENV: 45.0,          # 45 min par palier de descente
     AMBER_SIZE_MULT_ENV: 0.5,

@@ -50,7 +50,7 @@ FUNDING = RACINE / "runtime" / "history" / "funding.jsonl"
 BOUGIES = RACINE / "runtime" / "history" / "candles_1h.jsonl"
 SORTIE = RACINE / "data" / "reports" / "carry_vs_hlp.json"
 
-CAPITAL = 1000.0          # capital paper, réparti sur les DEUX jambes
+CAPITAL = 100.0           # capital paper, réparti sur les DEUX jambes
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 # 🔴🔴 LA CONTRAINTE QUI DÉCIDE DE TOUT — et qu'on peut oublier en regardant le funding.

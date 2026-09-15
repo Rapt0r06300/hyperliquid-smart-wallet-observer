@@ -23,7 +23,7 @@ class UiState:
     max_events: int = 250
     max_logs: int = 500
     simulation_started_at_ms: int = field(default_factory=now_ms)
-    simulation_starting_equity_usdt: float = 1000.0
+    simulation_starting_equity_usdt: float = 100.0
     simulation_processed_delta_keys: set[str] = field(default_factory=set)
     simulation_virtual_positions: dict[str, dict[str, Any]] = field(default_factory=dict)
     simulation_ledger_events: list[dict[str, Any]] = field(default_factory=list)

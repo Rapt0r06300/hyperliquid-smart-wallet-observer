@@ -82,7 +82,7 @@ def evaluer_budgets(
     """Rend un budget par moteur. Le PnL vient du LEDGER, source unique de vérité."""
     capital = abs(float(equity_usdt or 0.0))
     if capital <= 0.0:
-        capital = 1000.0             # capital illisible : on ne desactive pas le garde-fou
+        capital = 100.0          # capital illisible : on ne desactive pas le garde-fou
 
     soft = capital * _pct(ENV_SOFT_PCT, DEFAUT_SOFT_PCT) / 100.0
     hard = capital * _pct(ENV_HARD_PCT, DEFAUT_HARD_PCT) / 100.0

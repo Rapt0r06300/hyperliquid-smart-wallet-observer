@@ -20,7 +20,7 @@ class ExecuteurPaper:
     """Détient un PaperLedger et applique un candidat netté au chemin réel fill→ledger. Suit le côté ouvert par
     coin pour router chaque net vers open/increase/reduce/close. mark-to-market et PnL réconcilié exposés."""
 
-    def __init__(self, *, starting_balance_usdc: float = 1000.0, fee_bps: float = 4.5,
+    def __init__(self, *, starting_balance_usdc: float = 100.0, fee_bps: float = 4.5,
                  min_fill_ratio: float = 0.85) -> None:
         self.ledger = PaperLedger(starting_balance_usdc=starting_balance_usdc)
         self.fee_bps = float(fee_bps)

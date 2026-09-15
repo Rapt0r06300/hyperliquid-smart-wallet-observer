@@ -145,4 +145,4 @@ def test_capital_absent_reste_None_jamais_invente(tmp_path, monkeypatch):
 
 def test_le_lanceur_declare_le_capital_en_repli():
     src = open("LANCER_HYPERSMART.cmd", encoding="utf-8", errors="replace").read()
-    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=1000' in src
+    assert 'HYPERSMART_SIMULATION_INITIAL_EQUITY_USDT=100' in src

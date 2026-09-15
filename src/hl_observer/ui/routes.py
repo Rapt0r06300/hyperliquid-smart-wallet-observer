@@ -349,7 +349,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         state; it performs no DB scan and invents no positions or PnL.
         """
 
-        starting = safe_float(getattr(state, "simulation_starting_equity_usdt", 1000.0), 1000.0)
+        starting = safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0), 100.0)
         realized = safe_float(getattr(state, "simulation_realized_pnl_usdc", 0.0), 0.0)
         history = getattr(state, "simulation_equity_history", None)
         if not isinstance(history, list):
@@ -726,7 +726,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         *,
         mid_prices: dict[str, float] | None = None,
         orderbooks_by_coin: dict[str, dict[str, Any]] | None = None,
-        starting_equity_usdt: float = 1000.0,
+        starting_equity_usdt: float = 100.0,
         max_position_notional_usdt: float = 50.0,
         max_open_positions: int = 6,
         max_events: int = 2_000,
@@ -1030,7 +1030,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
 
         def recent_paper_return_fractions(*, limit: int = 80) -> list[float]:
             returns: list[float] = []
-            denominator = max(1.0, float(starting_equity_usdt or 1000.0))
+            denominator = max(1.0, float(starting_equity_usdt or 100.0))
             for item in ledger_events[-limit:]:
                 if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
                     continue
@@ -1950,7 +1950,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 # PERP LEVERAGE: desired_notional is the MARGIN (stake); the position controls
                 # margin*leverage of notional. size is the leveraged coin qty so PnL = size*Δprice
                 # scales with leverage (real Hyperliquid behaviour). Fees are charged on the FULL
-                # leveraged notional. Exposure/cash stay in margin terms (caps still protect 1000$).
+                # leveraged notional. Exposure/cash stay in margin terms (caps still protect 100$).
                 margin_usdt = desired_notional
                 notional = desired_notional * simulation_leverage
                 if calibrated_bool_env("HYPERSMART_RUNTIME_DEPTH_FILL_GUARD", True):
@@ -2048,7 +2048,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 # simulation entries are rejected even after the edge gate has
                 # accepted them.
                 # V9: edge_remaining_bps is the primary gate. Keep a dust guard,
-                # but make it small enough for a 1000 USDT paper account to
+                # but make it small enough for a 100 USDT paper account to
                 # take bounded consensus opportunities instead of starving.
                 minimum_edge_usdt = calibrated_float_env(
                     "HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT",
@@ -2767,7 +2767,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         return {
             "timestamp_ms": int(timestamp_ms or state.simulation_started_at_ms or now_ms()),
             "current_pnl_usdc": 0.0,
-            "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 1000.0), 6),
+            "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 100.0), 6),
             "realized_pnl_usdc": 0.0,
             "unrealized_pnl_usdc": 0.0,
             "open_exposure_usdt": 0.0,
@@ -2837,7 +2837,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 {
                     "timestamp_ms": int(event.get("observed_at_ms") or timestamp_ms),
                     "current_pnl_usdc": round(next_pnl, 6),
-                    "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 1000.0) + next_pnl, 6),
+                    "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 100.0) + next_pnl, 6),
                     "realized_pnl_usdc": round(next_pnl, 6),
                     "unrealized_pnl_usdc": 0.0,
                     "open_exposure_usdt": previous.get("open_exposure_usdt") or 0.0,
@@ -2901,7 +2901,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         return candles
 
     def build_pnl_consistency(equity: dict[str, Any]) -> dict[str, Any]:
-        starting = safe_float(equity.get("starting_equity_usdt"), 1000.0)
+        starting = safe_float(equity.get("starting_equity_usdt"), 100.0)
         realized = safe_float(equity.get("realized_pnl_usdc"), 0.0)
         unrealized = safe_float(equity.get("unrealized_pnl_usdc"), 0.0)
         reported_total = safe_float(equity.get("current_pnl_usdc"), 0.0)
@@ -3189,7 +3189,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 f"Exiger un signal plus fort sur {worst_coin_side[0][0]} {worst_coin_side[0][1]} "
                 f"apres perte session ({worst_coin_side[1]:.4f} USDC)."
             )
-        if open_exposure > safe_float(equity.get("current_equity_usdt"), 1000.0) * 0.5:
+        if open_exposure > safe_float(equity.get("current_equity_usdt"), 100.0) * 0.5:
             recommendations.append("Exposition elevee: reduire le nombre de positions simultanees ou le notional par entree.")
         if not recommendations:
             recommendations.append("Aucune cause dominante: continuer a collecter des deltas frais et verifier le consensus multi-wallet.")
@@ -5376,7 +5376,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     async def actions(request: UiActionRequest) -> dict[str, Any]:
         if request.action == "reset_simulation_session":
             state.simulation_started_at_ms = now_ms()
-            state.simulation_starting_equity_usdt = 1000.0
+            state.simulation_starting_equity_usdt = 100.0
             state.simulation_processed_delta_keys.clear()
             state.simulation_virtual_positions.clear()
             state.simulation_ledger_events.clear()

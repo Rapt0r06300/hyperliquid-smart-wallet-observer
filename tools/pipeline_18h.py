@@ -614,7 +614,7 @@ def phase_holdout_forward(rundir: Path, corpus_hold: list[dict], corpus_fwd: lis
         import forward_portefeuille as FPF
         import moteur_execution_prod as MEP
         from portefeuille_paper import PortefeuillePaper
-        pf_local = PortefeuillePaper(1000.0, levier=3.0)      # LOCAL : diagnostic pré-forward, jamais le global
+        pf_local = PortefeuillePaper(100.0, levier=3.0)       # LOCAL : diagnostic pré-forward, jamais le global
         pending_path = rundir / "ledger" / "pending_exits.json"
         sim = FPF.simuler(geles, corpus_fwd, filtrer=_filtrer_corpus,
                           evaluer=lambda ep, sens, horizon_ms: MEP.evaluer_episode(ep, sens=sens, horizon_ms=horizon_ms),

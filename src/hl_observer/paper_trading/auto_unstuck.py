@@ -36,7 +36,7 @@ _DEF = {
     UNDERWATER_ENV: 120.0,      # -1.2% latent
     MIN_AGE_ENV: 45.0,          # 45 min
     FRACTION_ENV: 0.10,         # 10% par unstuck (passivbot: chip away)
-    BUDGET_ENV: 10.0,           # ~1% d'une equity 1000 (aligné allowance passivbot)
+    BUDGET_ENV: 1.0,            # ~1% d'une equity 100 (aligné allowance passivbot)
     BUDGET_WINDOW_ENV: 1440.0,  # 24 h
     MAX_PER_PASS_ENV: 1.0,      # 1 unstuck max par passe (prudence)
 }

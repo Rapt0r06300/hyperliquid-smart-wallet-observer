@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Runner paper du meta-cablage des pepites 201-300 (dry-run only, 0 ordre reel).")
     ap.add_argument("--from-logs", type=str, default=None,
                     help="Dossier ou fichier .jsonl d'evenements replay a rejouer.")
-    ap.add_argument("--equity", type=float, default=1000.0, help="Notre equity de depart (USDC).")
+    ap.add_argument("--equity", type=float, default=100.0, help="Notre equity de depart (USDC).")
     ap.add_argument("--notional-max", type=float, default=500.0, help="Plafond notional par ordre (USDC).")
     ap.add_argument("--fee-bps", type=float, default=4.5, help="Frais taker en bps.")
     ap.add_argument("--leader-equity", type=float, default=None,
