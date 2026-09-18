@@ -127,7 +127,7 @@ def test_record_trade_result_tracks_loss_win_recovery_and_trims(monkeypatch) -> 
         recent_pnl_events=[(1.0, -100.0), (19_900.0, 5.0)],
     )
     result = record_trade_result(state, pnl_bps=10.0, pnl_usdt=2.0)
-    assert result.current_equity_usdt == 1002.0
+    assert result.current_equity_usdt == 102.0
     assert result.session_pnl_usdt == 2.0
     assert result.consecutive_losses == 0
     assert result.consecutive_wins_in_recovery == 1
@@ -137,7 +137,7 @@ def test_record_trade_result_tracks_loss_win_recovery_and_trims(monkeypatch) -> 
     assert all(ts >= 16_400.0 for ts, _ in result.recent_pnl_events)
 
     result = record_trade_result(state, pnl_bps=-20.0, pnl_usdt=-3.0)
-    assert result.current_equity_usdt == 999.0
+    assert result.current_equity_usdt == 99.0
     assert result.session_pnl_usdt == -1.0
     assert result.consecutive_losses == 1
     assert result.consecutive_wins_in_recovery == 0

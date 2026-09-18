@@ -409,7 +409,7 @@ def _preuve_live_complete(rundir, cid, *, nets, freeze=1000.0, maintenant=4000.0
     reg.suivre(cid, paires=[("e%d" % i, n) for i, n in enumerate(nets)], maintenant_ms=maintenant)
     pf = PG.PortefeuilleGlobal(rundir / "global_portfolio")
     for j in range(ops_cid if ops_cid is not None else 1):
-        pf.ouvrir("%s:%d" % (cid, j), coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=float(j))
+        pf.ouvrir("%s:%d" % (cid, j), coin="BTC", sens=1, notional=50.0, prix=100.0, ts_ms=float(j))
         pf.fermer("%s:%d" % (cid, j), prix=101.0, ts_ms=float(j) + 1)
     return reg
 
@@ -453,7 +453,7 @@ def test_ledger_autre_candidat_refuse(tmp_path):
     reg.figer("c1", freeze_exchange_ts=1000.0)
     reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(40)], maintenant_ms=4000.0)
     pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio")
-    pf.ouvrir("c2:0", coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=0.0)   # trade d'un AUTRE candidat
+    pf.ouvrir("c2:0", coin="BTC", sens=1, notional=50.0, prix=100.0, ts_ms=0.0)   # trade d'un AUTRE candidat
     pf.fermer("c2:0", prix=101.0, ts_ms=1.0)
     assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0             # un trade d'un autre candidat ne valide jamais
 
@@ -589,7 +589,7 @@ def test_open_sans_close_jamais_promu(tmp_path):
     reg = RCL.RegistreCandidatsLive(tmp_path); reg.figer("c1", freeze_exchange_ts=1000.0)
     reg.suivre("c1", paires=[("e%d" % i, 1.0) for i in range(40)], maintenant_ms=4000.0)
     PG.PortefeuilleGlobal(tmp_path / "global_portfolio").ouvrir(
-        "c1:0", coin="BTC", sens=1, notional=100.0, prix=100.0, ts_ms=0.0)   # OPEN seul, PAS de CLOSE
+        "c1:0", coin="BTC", sens=1, notional=50.0, prix=100.0, ts_ms=0.0)   # OPEN seul, PAS de CLOSE
     assert RC._promouvoir_pass_live(tmp_path)["n_promus"] == 0   # exige ≥1 OPEN ET ≥1 CLOSE
 
 
