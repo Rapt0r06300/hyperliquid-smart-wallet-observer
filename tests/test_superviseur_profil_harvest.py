@@ -46,6 +46,10 @@ def test_cli_demarrer_tous_bloque_si_source_obligatoire_absente(monkeypatch):
                 "pids": {"allmids-collector": 1}, "reutilises": [],
                 "manquants": ["bbo-collector", "vault-collector"]}
 
+    monkeypatch.setattr(
+        SC, "verifier_runtime_collecteurs",
+        lambda root: {"ok": True, "erreur": None, "python": "test-python"},
+    )
     monkeypatch.setattr(SC, "demarrer_tous", _ko)
     assert SC._cli(["demarrer-tous", "harvest"]) == 3
 

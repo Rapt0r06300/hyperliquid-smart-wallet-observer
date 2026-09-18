@@ -127,7 +127,8 @@ def test_runtime_installer_pins_official_cpython_and_validates_hash():
     assert "https://www.python.org/ftp/python/" in text
     assert "python-$PythonVersion-embed-amd64.zip" in text
     assert "F05E28D161C6B15AF64A7CB7F08B4A22B3A6B03EEE71BAEE24EA557B3BDD5798" in text
-    assert "Get-FileHash -Algorithm SHA256" in text
+    assert "Get-Sha256Hex" in text
+    assert "[System.Security.Cryptography.SHA256]::Create()" in text
     assert "requirements-portable.txt" in text
     assert "portable_runtime_manifest.json" in text
     assert "tools\\wheelhouse" in text

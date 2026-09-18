@@ -171,6 +171,7 @@ def test_la_racine_contient_les_deux_lanceurs_officiels():
         "RECETTE-WINDOWS.cmd",
         "RECETTE-LANCEUR.cmd",
         "CREER_ARCHIVE_PORTABLE.cmd",
+        "CREER_RELEASE_COMPLETE.cmd",
         "COMMITTER_B1_B2.cmd",
         "ANALYSE_HISTORIQUE_COMPLETE.cmd",
         "DIAGNOSTIC_LANCEUR.cmd",
