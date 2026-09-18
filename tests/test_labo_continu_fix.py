@@ -208,8 +208,8 @@ def test_portefeuille_global_reconcilie_en_streaming(tmp_path):
 
 def test_reconciliation_coherent_calcule_pas_code(tmp_path):
     # portefeuille global cohérent -> _coherence_reconciliation renvoie True calculé
-    pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio", capital_initial=1000.0, levier=3.0)
-    pf.ouvrir("p1", coin="BTC", sens=1, notional=300.0, prix=100.0, ts_ms=1.0)
+    pf = PG.PortefeuilleGlobal(tmp_path / "global_portfolio", capital_initial=100.0, levier=3.0)
+    pf.ouvrir("p1", coin="BTC", sens=1, notional=30.0, prix=100.0, ts_ms=1.0)
     pf.fermer("p1", prix=101.0, ts_ms=2.0)
     import reconciliation_prod as RECO
     glob = RECO.reconstruire_global([tmp_path / "global_portfolio" / "ledger.jsonl"])
