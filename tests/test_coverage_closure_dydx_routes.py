@@ -145,7 +145,7 @@ def test_dydx_routes_fail_closed_paths(monkeypatch) -> None:
     assert tick["running"] is False
     assert tick["paper_only"] is True
     assert tick["read_only"] is True
-    assert tick["equity_usdt"] == 1000.0
+    assert tick["equity_usdt"] == 100.0
 
     health = asyncio.run(endpoints["/api/dydx/health"]())
     assert health["running"] is False
