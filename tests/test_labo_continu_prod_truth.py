@@ -143,15 +143,15 @@ def test_forward_portfolio_shared_capital():
 
 # ─────────── 7) réconciliation depuis le ledger d'événements ───────────
 def test_real_ledger_reconciliation(tmp_path):
-    pf = PP.PortefeuillePaper(1000.0, levier=3.0)
-    pf.ouvrir("p1", coin="BTC", sens=1, notional=300.0, prix=100.0, couts={"fees_bps": 2.0})
-    pf.fermer("p1", prix=102.0, couts={"fees_bps": 2.0})         # +2% sur 300 = +6, − frais
+    pf = PP.PortefeuillePaper(100.0, levier=3.0)
+    pf.ouvrir("p1", coin="BTC", sens=1, notional=30.0, prix=100.0, couts={"fees_bps": 2.0})
+    pf.fermer("p1", prix=102.0, couts={"fees_bps": 2.0})          # +2% sur 30 = +0.6, − frais
     led = tmp_path / "forward_portfolio.jsonl"
     pf.ecrire_ledger(led)
     rec = RECO.reconstruire_depuis_ledger(led)
     # PnL reconstruit ≈ PnL du portefeuille (source indépendante = ledger d'événements)
     assert abs(rec["pnl_realise"] - pf.realized) < 1e-3 and rec["evenements"]["open"] == 1 and rec["evenements"]["close"] == 1
-    assert rec["equity"] > 1000.0                                 # gain réel réconcilié
+    assert rec["equity"] > 100.0                                  # gain réel réconcilié
 
 
 # ─────────── 8) variante interrompue reste RETRYABLE ───────────

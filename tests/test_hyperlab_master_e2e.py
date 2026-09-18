@@ -35,7 +35,7 @@ def test_run_full_pipeline(tmp_path):
                      blocages=["collecte live: REQUIRES_NETWORK"])
     # copy(1) + leadlag(1) + cross(2) = 4 intents, tous sous l'enveloppe
     assert out["intents"] == 4 and out["fills"] == 4 and out["refus"] == 0
-    assert out["rapport"]["expo_brute_usd"] <= 1000.0
+    assert out["rapport"]["expo_brute_usd"] <= 100.0
     assert out["rapport"]["blocages"] == ["collecte live: REQUIRES_NETWORK"]
     assert out["validation"] is None  # full n'inclut pas la validation
 

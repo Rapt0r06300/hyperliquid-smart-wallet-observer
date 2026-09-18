@@ -9,7 +9,6 @@ description = "Alina SmartFlow — read-only Hyperliquid smart-wallet research e
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "ccxt>=4,<5",
     "fastapi>=0.115,<1",
     "httpx>=0.27,<1",
     "numpy>=1.24,<3",
@@ -28,6 +27,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Discovery-only helper. Kept out of the default/runtime install because CCXT
+# exposes real order APIs; the stable paper/read-only runtime must not ship that capability.
+discovery = [
+    "ccxt>=4,<5",
+]
 dev = [
     "pytest>=9.0.3,<10",
     "ruff>=0.5,<1",

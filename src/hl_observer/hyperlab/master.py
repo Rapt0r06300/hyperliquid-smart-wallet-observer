@@ -18,9 +18,9 @@ from .strategies import CopyVault, CrossVenue, LeadLag
 
 MODES = {
     "quick":   {"familles": ("copy_vault",), "validation": False, "notionnel": 100.0},
-    "full":    {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": False, "notionnel": 100.0},
-    "deep":    {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": True, "notionnel": 100.0},
-    "maximum": {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": True, "notionnel": 150.0},
+    "full":    {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": False, "notionnel": 25.0},
+    "deep":    {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": True, "notionnel": 25.0},
+    "maximum": {"familles": ("copy_vault", "lead_lag", "cross_venue"), "validation": True, "notionnel": 25.0},
 }
 ETAPES = ("ingest", "strategies", "execution", "validation", "report")
 
