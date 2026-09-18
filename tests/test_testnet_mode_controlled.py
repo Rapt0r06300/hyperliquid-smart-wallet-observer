@@ -52,7 +52,7 @@ def test_fake_adapter_opens_closes_and_reports_testnet_pnl(tmp_path):
 
     portfolio = executor.get_portfolio()
     assert portfolio.realized_pnl_usdc == 1.0
-    assert portfolio.equity_usdc == 1001.0
+    assert portfolio.equity_usdc == 101.0
     assert journal.path.read_text(encoding="utf-8").count("testnet_order_result") == 2
 
 

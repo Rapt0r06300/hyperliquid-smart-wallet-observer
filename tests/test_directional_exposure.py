@@ -235,6 +235,8 @@ def test_the_directional_guard_is_wired_into_the_portfolio_gate(monkeypatch):
     # le garde-fou d'exposition NETTE. C'est la seule facon de savoir s'il est vraiment cable.
     # ---------------------------------------------------------------------------------
     monkeypatch.setenv("HYPERSMART_MAX_OPEN_POSITIONS", "50")
+    # Isolate the directional guard: the gross-exposure guard must not fire first.
+    monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000")
     state = UiState()
     state.simulation_starting_equity_usdt = 1000.0
     # le book est deja short a 250 % du capital

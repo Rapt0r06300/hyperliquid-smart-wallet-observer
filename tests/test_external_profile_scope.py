@@ -183,6 +183,10 @@ def test_both_flags_allow_ab_research_materialization(monkeypatch):
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
     monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
+    # This test isolates the explicit A/B unlock, not portfolio concentration caps.
+    monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000")
     state = UiState()
     report = apply_fusion_paper_orders_to_state(state, _fusion_status_with_direct_order(), current_ms=1_000)
     assert report["applied_count"] == 1

@@ -69,7 +69,7 @@ def test_v12_paper_engine_opens_marks_and_closes_local_position():
     assert len(engine.positions) == 1
 
     equity, unrealized, drawdown = engine.mark_to_market({"HYPE": 103.0})
-    assert equity > 1000.0
+    assert equity > 100.0
     assert unrealized > 0
     assert drawdown == 0
 

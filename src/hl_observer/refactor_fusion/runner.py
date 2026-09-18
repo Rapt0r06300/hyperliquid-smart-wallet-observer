@@ -29,6 +29,7 @@ from hl_observer.backtesting.wallet_following_simulator import simulate_wallet_f
 from hl_observer.copy_wallet.copy_conflict_resolver import LeaderVote, resolve_copy_conflict
 from hl_observer.copy_wallet.copy_latency_profiler import profile_copy_latency
 from hl_observer.copy_wallet.copy_session_controller import start_copy_session
+from hl_observer.copy_wallet.proportional_sizer import ProportionalSizingConfig
 from hl_observer.copy_wallet.wallet_mirror_runtime import MirrorPipelineResult, run_wallet_mirror_pipeline
 from hl_observer.connectors.paper_execution_connector import LocalPaperExecutionConnector
 from hl_observer.connectors.standard import PaperOrderRequest
@@ -153,7 +154,7 @@ def run_refactor_fusion(
             ),
             latencies_ms=(250, 900, 4_000, 6_200),
             peak_equity=100.0,
-            current_equity=998.5,
+            current_equity=99.85,
         )
     )
     loss_panel = build_loss_attribution_panel(audit)
@@ -375,6 +376,13 @@ def _fixture_wallet_mirror(log_dir: Path, *, session_context: SessionEntryRiskCo
         logs_dir=log_dir,
         leader_expected_edge_bps=72.0,
         session_risk_context=session_context,
+        # Labelled dry-run fixture: exercise the accepted paper-intent path while
+        # keeping deployed margin below the $100 paper equity.
+        sizing_config=ProportionalSizingConfig(
+            base_copy_ratio=0.20,
+            max_margin_usdt=30.0,
+            max_equity_fraction=0.30,
+        ),
     )
 
 

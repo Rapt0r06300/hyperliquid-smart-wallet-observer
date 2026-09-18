@@ -631,19 +631,17 @@ def _processus_projet(root: str | Path) -> list[dict[str, Any]]:
     try:
         return _processus_projet_psutil(root)
     except (ImportError, OSError):
-        pass
-    # Repli ancien si psutil est réellement indisponible. Ne filtre pas avec les signatures dans
-    # PowerShell : la commande d'inventaire contient alors
-    # elle-meme ``collecter_userfills_vaults.py`` et se detecte comme un faux collecteur. On ne demande
-    # que cmd/python, puis on applique ici la liste blanche issue du REGISTRE.
-    out = _ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
-              "($_.Name -eq 'cmd.exe' -or $_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') } "
-              "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
-    tous = [
-        p for p in _parse_ps_process(out)
-        if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
-    ]
-    return _filtrer_processus_collecteurs(tous)
+        # Repli ancien si psutil est réellement indisponible. Ne filtre pas avec les signatures dans
+        # PowerShell : la commande d'inventaire contient alors
+        # elle-meme ``collecter_userfills_vaults.py`` et se detecte comme un faux collecteur.
+        out = _ps("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and "
+                  "($_.Name -eq 'cmd.exe' -or $_.Name -eq 'python.exe' -or $_.Name -eq 'pythonw.exe') } "
+                  "| Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress")
+        tous = [
+            p for p in _parse_ps_process(out)
+            if str(p.get("name") or "").lower() in {"cmd.exe", "python.exe", "pythonw.exe"}
+        ]
+        return _filtrer_processus_collecteurs(tous)
 
 
 def pid_du_port(port: int = PORT_UI) -> int | None:

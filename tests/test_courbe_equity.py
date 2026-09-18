@@ -50,7 +50,7 @@ def test_la_courbe_bouge_quand_le_ledger_bouge(tmp_path):
     assert c["amplitude_usd"] > 0, "une equity qui bouge doit avoir une amplitude non nulle"
     assert c["realise_cumule"] == pytest.approx(-1.5)
     # départ + 2 événements + maintenant
-    assert [p["equity"] for p in c["points"]] == pytest.approx([1000.0, 998.0, 998.5, 998.5])
+    assert [p["equity"] for p in c["points"]] == pytest.approx([100.0, 98.0, 98.5, 98.5])
 
 
 def test_le_dernier_point_vaut_le_pnl_stable_du_bandeau(tmp_path):
@@ -63,7 +63,7 @@ def test_le_dernier_point_vaut_le_pnl_stable_du_bandeau(tmp_path):
     c = ce.construire(root, funding_regle_usd=0.35, now_ms=2000)
     stable = -6.0 + 0.35
     assert c["points"][-1]["pnl"] == pytest.approx(stable)
-    assert c["points"][-1]["equity"] == pytest.approx(1000.0 + stable)
+    assert c["points"][-1]["equity"] == pytest.approx(100.0 + stable)
 
 
 def test_le_funding_ne_retro_projette_jamais_sur_le_passe(tmp_path):
@@ -71,10 +71,10 @@ def test_le_funding_ne_retro_projette_jamais_sur_le_passe(tmp_path):
     point courant. L'appliquer au passé serait réécrire l'histoire."""
     root = _ledger(tmp_path, [_close(1000, -1.0), _close(2000, -1.0)])
     c = ce.construire(root, funding_regle_usd=5.0, now_ms=3000)
-    assert c["points"][1]["equity"] == pytest.approx(999.0)
-    assert c["points"][2]["equity"] == pytest.approx(998.0)
+    assert c["points"][1]["equity"] == pytest.approx(99.0)
+    assert c["points"][2]["equity"] == pytest.approx(98.0)
     assert c["points"][-1].get("inclut_funding_courant") is True
-    assert c["points"][-1]["equity"] == pytest.approx(1003.0)
+    assert c["points"][-1]["equity"] == pytest.approx(103.0)
 
 
 def test_seul_le_mode_demande_entre_dans_la_courbe(tmp_path):
@@ -118,7 +118,7 @@ def test_le_plafond_de_points_garde_le_depart_et_le_present(tmp_path):
     c = ce.construire(root, now_ms=999_999, max_points=50)
     assert len(c["points"]) <= 50
     assert c["points"][0]["evenement"] == "DEPART"
-    assert c["points"][0]["equity"] == pytest.approx(1000.0)
+    assert c["points"][0]["equity"] == pytest.approx(100.0)
     assert c["points"][-1]["evenement"] == "MAINTENANT"
 
 

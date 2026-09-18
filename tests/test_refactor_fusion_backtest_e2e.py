@@ -23,7 +23,7 @@ def test_backtest_e2e_uses_delay_costs_fees_slippage_and_equity_curve() -> None:
     assert len(result.trades) == 1
     assert result.trades[0].fee_usdt > 0
     assert len(result.equity_curve) == 2
-    assert result.equity_curve[0] == 1000.0
+    assert result.equity_curve[0] == 100.0
     assert abs(result.net_pnl_usdt - (result.equity_curve[-1] - result.equity_curve[0])) < 1e-9
 
 
@@ -44,4 +44,4 @@ def test_backtest_e2e_can_report_negative_result_without_hiding_it() -> None:
     )
 
     assert result.net_pnl_usdt < 0
-    assert result.equity_curve[-1] < 1000.0
+    assert result.equity_curve[-1] < 100.0

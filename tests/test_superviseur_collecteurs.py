@@ -316,10 +316,8 @@ def test_sous_windows_un_log_frais_ne_ressuscite_pas_un_processus_absent(
 ):
     """Casse si des logs historiques font encore afficher 20/20 après l'arrêt réel."""
     _tous_vivants(tmp_path)
-    monkeypatch.setattr(SC, "_processus_projet", lambda root: [])
-    monkeypatch.setattr(SC.os, "name", "nt")
-
-    resultat = SC.status_detaille(tmp_path, profil="all")
+    # Explicit empty process proof; do not mutate global os.name on a Linux pytest runner.
+    resultat = SC.status_detaille(tmp_path, profil="all", procs=[])
 
     assert {item["etat"] for item in resultat} == {"MORT"}
 

@@ -75,7 +75,7 @@ def test_main_borne_execute_la_vraie_boucle_et_publie_son_succes(
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HYPERSMART_COLLECTOR_MAX_PASSES", "1")
+    monkeypatch.setenv("COLLECTOR_RUNNER_MAX_PASSES", "1")
 
     assert CR.main(["demo", str(script), "60", "--coin", "BTC"]) == 0
     assert json.loads(sortie.read_text(encoding="utf-8")) == ["--coin", "BTC"]

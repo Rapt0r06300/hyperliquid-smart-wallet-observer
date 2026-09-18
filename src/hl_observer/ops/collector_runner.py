@@ -166,7 +166,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError:
         marker = ""
     try:
-        max_passes = max(0, int(os.environ.get("HYPERSMART_COLLECTOR_MAX_PASSES", "0")))
+        max_passes = max(0, int(os.environ.get("COLLECTOR_RUNNER_MAX_PASSES", "0")))
     except ValueError:
         max_passes = 0
     passes_session = 0

@@ -391,7 +391,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_OPEN_POSITIONS" "12"
 # Historical conservative marker retained for launcher regression tests:
 # Set-HyperSmartDefaultEnv "HYPERSMART_MAX_POSITION_USDT" "25"
 Set-HyperSmartDefaultEnv "HYPERSMART_MAX_POSITION_USDT" "40"
-Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
+Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "100"
 # 2026-07-08 (demande Flo "pas que des centimes"): levier perp realiste 5x. C'etait la
 # CAUSE du PnL en centimes -> ce defaut ps1 (1) ecrasait le 5 du .cmd (Set...DefaultEnv
 # ne pose que si non-defini, et le python etait lance par la ps1). notional = marge x 5.
@@ -413,7 +413,7 @@ Set-HyperSmartDefaultEnv "HYPERSMART_MAX_TOTAL_EXPOSURE_USDT" "400"
 # marge 50 = 20 positions. FORCE (ecrase le 12/40/400 set-if-unset + l'env colle Windows).
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_POSITION_USDT", "50", "Process")
 [Environment]::SetEnvironmentVariable("HYPERSMART_MAX_OPEN_POSITIONS", "20", "Process")
-[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000", "Process")
+[Environment]::SetEnvironmentVariable("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "100", "Process")
 # 2026-07-18 - mode sniper mono-wallet DECLARE FERME (sentinelle >= 1000). Voir le meme
 # commentaire dans LANCER_HYPERSMART.cmd : edge de copie mesure a -7,97 bps hors echantillon,
 # leader CONTRARIEN. Le plancher de 30 laissait croire que le mode vivait alors que rien ne
