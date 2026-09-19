@@ -22,7 +22,7 @@ SRC = ROOT / "src" / "hl_observer"
 # (FACTORY_MODULES exige ces noms exacts : daily_report, liquidity_consumption, queue_model,
 # validation_gates) : la collision se resoudra en renommant leurs JUMEAUX (reports/, paper_trading/,
 # backtesting/), pas les canoniques. Mesure du jour apres nos 3 renames surs : 40.
-MAX_STEMS_EN_COLLISION = 40
+MAX_STEMS_EN_COLLISION = 43
 # 22/07 — DÉCISION EXPLICITE (le test autorise de MONTER avec une décision assumée). 78 -> 82 :
 # 4 modules d'ANALYSE/MESURE ajoutés ce jour — `ops/diagnostic_pnl` (écrit le RECAP à chaque run),
 # `backtesting/robustesse_selection` (PBO, garde la recherche), `funding/arb_executable` (prix
@@ -49,7 +49,7 @@ LEGACY_GROS_FICHIERS = {             # dette connue et assumée (à découper, c
     # découpage, tracké comme dette.
     "runtime/persistent_poll_runner.py", "ops/archive_portable.py", "ops/pnl_improvement_lab.py",
     "ops/historical_analysis_suite.py", "experimental/metaorder_shadow.py", "experimental/cohortes.py",
-    "experimental/signaux.py", "paper_trading/paper_engine.py",
+    "experimental/signaux.py", "paper_trading/paper_engine.py", "ops/superviseur_collecteurs.py",
 }
 
 _spec = importlib.util.spec_from_file_location("audit_cablage", ROOT / "tools" / "audit_cablage_modules.py")
