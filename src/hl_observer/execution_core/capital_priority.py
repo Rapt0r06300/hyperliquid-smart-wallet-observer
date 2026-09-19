@@ -1,6 +1,6 @@
 """AUD-136 — priorite du capital STRICT : le strict se sert EN PREMIER dans l'enveloppe unique.
 
-L'allocation de l'enveloppe 1000 (cf AUD-122) sert d'abord la voie STRICTE ; l'exploratoire ne
+L'allocation de l'enveloppe 100 (cf AUD-122) sert d'abord la voie STRICTE ; l'exploratoire ne
 recoit que le RESTE. Le strict n'est JAMAIS affame par l'exploratoire. Read-only, paper.
 """
 from __future__ import annotations
