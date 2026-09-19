@@ -1389,7 +1389,7 @@ def test_ui_simulation_pnl_does_not_reset_when_display_ledger_is_pruned(tmp_path
 
     first = client.get("/api/simulation/overview?limit=1").json()
     assert first["counts"]["reproduced_entries"] == 1
-    assert first["equity"]["current_equity_usdt"] < 1000.0
+    assert first["equity"]["current_equity_usdt"] < 100.0
 
     state.simulation_ledger_events = [
         {
@@ -1951,7 +1951,7 @@ def test_ui_simulation_drops_legacy_orphan_virtual_position_without_fake_pnl(tmp
     payload = client.get("/api/simulation/overview?limit=1").json()
 
     assert payload["counts"]["open_virtual_positions"] == 0
-    assert payload["equity"]["current_equity_usdt"] == 1000.0
+    assert payload["equity"]["current_equity_usdt"] == 100.0
     assert payload["bot_simulation"]["events"][0]["bot_replay_action"] == "STATE_CLEANUP"
     assert payload["bot_simulation"]["events"][0]["reason"] == "ORPHAN_VIRTUAL_POSITION_DROPPED_NO_ENTRY_LEDGER"
 
