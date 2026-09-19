@@ -51,6 +51,7 @@ def test_processus_projet_exclut_le_diagnostic_et_inclut_les_enfants(monkeypatch
         {"ProcessId": 99, "ParentProcessId": 1, "Name": "python.exe",
          "CommandLine": "python C:\\autre\\application.py"},
     ]
+    monkeypatch.setattr(SC, "_processus_projet_psutil", lambda _root: (_ for _ in ()).throw(ImportError("test fallback")))
     monkeypatch.setattr(SC, "_ps", lambda _commande: json.dumps(processus))
 
     trouves = SC._processus_projet(Path.cwd())
