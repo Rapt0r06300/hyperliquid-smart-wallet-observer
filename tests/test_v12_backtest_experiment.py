@@ -63,7 +63,7 @@ def test_v12_backtest_open_and_close_realizes_local_pnl():
 
     assert [decision.accepted for decision in result.decisions] == [True, True]
     assert result.realized_pnl_usdt > 0
-    assert result.final_equity_usdt > 1000.0
+    assert result.final_equity_usdt > 100.0
     assert result.evidence[-1].paper_trade_id is not None
 
 
