@@ -20,6 +20,10 @@ def test_simulation_overview_writes_logs_to_send_folder(tmp_path: Path, monkeypa
     monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_EDGE_BPS", "5")
     monkeypatch.setenv("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "5")
     monkeypatch.setenv("HYPERSMART_SIMULATION_MIN_LIQUIDITY_SCORE", "0.1")
+    monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui.sqlite3'}"
     settings.logs_dir = tmp_path / "logs"
