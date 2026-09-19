@@ -149,11 +149,11 @@ def test_default_schedule_matches_safe_scan_architecture() -> None:
     assert all("execution" not in item.description.lower() for item in schedule)
 
 
-def test_paper_config_is_locked_to_1000_and_prudent_caps() -> None:
+def test_paper_config_is_locked_to_100_and_prudent_caps() -> None:
     cfg = RealtimeCopyRiskConfig()
-    assert cfg.starting_equity_usdt == 1000.0
+    assert cfg.starting_equity_usdt == 100.0
     assert cfg.max_position_notional_usdt == 50.0
-    assert cfg.max_total_exposure_usdt == 200.0
+    assert cfg.max_total_exposure_usdt == 100.0
 
 
 def test_throughput_plan_refuses_bypass_and_aggressive_scraping() -> None:
