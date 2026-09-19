@@ -161,6 +161,6 @@ def test_v12_decision_pipeline_refuses_missing_market_mid_without_fake_pnl(tmp_p
     assert result.paper_results[0].accepted is False
     assert result.paper_results[0].trade is not None
     assert result.paper_results[0].trade.action == "NO_TRADE"
-    assert result.paper_results[0].equity_usdt == 1000.0
+    assert result.paper_results[0].equity_usdt == 100.0
     assert len(engine.positions) == 0
     assert store.count("v12_decision_evidence") == 1
