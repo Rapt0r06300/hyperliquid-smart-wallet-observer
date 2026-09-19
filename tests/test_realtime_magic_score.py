@@ -30,6 +30,7 @@ def test_realtime_magic_score_accepts_fresh_measurable_edge_for_local_simulation
     # EDGE FABRIQUE (2026-07-11) : par DEFAUT le bot refuse un edge non empirique.
     # Ce test exerce l'ANCIEN chemin (edge invente) -> mode A/B EXPLICITE.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "10")
     score = score_realtime_copy_candidate(_input())
 
     assert score.accepted
@@ -153,6 +154,7 @@ def test_realtime_magic_score_caps_position_size_against_small_leader_trade(monk
     # EDGE FABRIQUE (2026-07-11) : par DEFAUT le bot refuse un edge non empirique.
     # Ce test exerce l'ANCIEN chemin (edge invente) -> mode A/B EXPLICITE.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    monkeypatch.setenv("HYPERSMART_SIMULATION_LEVERAGE", "10")
     score = score_realtime_copy_candidate(_input(leader_notional_usdt=12.0))
 
     assert score.accepted
