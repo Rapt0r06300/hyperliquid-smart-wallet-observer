@@ -111,17 +111,17 @@ def test_low_edge_is_refused():
 
 
 def test_exposure_cap_blocks_after_max():
-    # 6 entrées propres sur coins distincts, cap total 200 / 50 par position -> max 4 ouvertes
+    # 6 entrées propres sur coins distincts, cap total 100 / 50 par position -> max 2 ouvertes
     fills = [
         _fill(coin=c, action_type="OPEN_LONG", fill_ts_ms=NOW - 3_000)
         for c in ["BTC", "ETH", "SOL", "HYPE", "AVAX", "ARB"]
     ]
     r = run_v9_paper_session(fills, now_ms=NOW)
-    assert r.entries_opened == 4
+    assert r.entries_opened == 2
     assert any(d.get("reason") == "MAX_EXPOSURE_REACHED" for d in r.decisions)
 
 
 def test_empty_session_is_no_data():
     r = run_v9_paper_session([], now_ms=NOW)
-    assert r.entries_opened == 0 and r.equity_usdt == 1000.0
+    assert r.entries_opened == 0 and r.equity_usdt == 100.0
     assert r.supply_report.bottleneck == "NO_DATA"
