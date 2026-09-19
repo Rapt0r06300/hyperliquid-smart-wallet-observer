@@ -47,6 +47,13 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         ("HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY", "0.0"),
         # sans allMids en test, le prix du leader sert de mid (sinon veto CURRENT_MID_REQUIRED)
         ("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "600000"),
+        # Isolate persistence from portfolio sizing/risk caps. Those guards have
+        # dedicated tests; persistence fixtures intentionally exercise adds and
+        # multiple same-direction positions.
+        ("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000"),
+        ("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000"),
+        ("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000"),
+        ("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000"),
     ):
         monkeypatch.setenv(var, val)
 
