@@ -160,9 +160,9 @@ def test_une_mesure_fraiche_RAFRAICHIT_le_cache(tmp_path):
 def test_la_boucle_collecteur_PRESERVE_le_log_precedent():
     """La relance du superviseur tronquait le log et DETRUISAIT la preuve de la mort
     (venues-collector, nuit du 19-20/07). Une generation .prev.log doit etre gardee."""
-    texte = (ROOT / "tools" / "boucle_collecteur.cmd").read_text(encoding="utf-8", errors="ignore")
-    assert '.prev"' in texte and "copy /y" in texte.lower(), (
-        "boucle_collecteur.cmd doit copier le log en .prev avant de le tronquer (autopsie R5)")
+    texte = (ROOT / "src" / "hl_observer" / "ops" / "collector_runner.py").read_text(encoding="utf-8", errors="ignore")
+    assert "archiver_log_si_necessaire" in texte and "gzip.open" in texte and "log.unlink()" in texte, (
+        "collector_runner doit archiver le log en gzip avant rotation (autopsie R5)")
 
 
 # ---------------- 20/07 : appariement ETENDU aux tokens Unit (« le maximum de coins ») ----------------
