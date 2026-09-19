@@ -1364,38 +1364,39 @@ def _ledger_reason_for_direct_order(value: dict[str, Any]) -> str:
 
 
 def _cap_paper_notional_and_quantity(notional: float, quantity: float, entry_price: float) -> dict[str, Any]:
-    # C'ETAIT LE VRAI PLAFOND (cause finale prouvee live): tout notional etait clampe a
-    # MAX_POSITION_USDT=40 ICI, au point de materialisation -> quel que soit le levier calcule
-    # en amont, la position affichee restait a 40 = centimes. On traite desormais l'entrant
-    # comme la MARGE (plafonnee a 40) et on applique le LEVIER: notional position = marge x levier.
-    # SIZING REEL (demande Flo "comme si on tradait en vrai"): on ne matche PAS la taille $
-    # derisoire du leader (~40); on alloue NOTRE marge par trade x levier, comme un compte perp
-    # reel. Autoritaire (dernier gate). Robuste aux valeurs "collees" dans l'env Windows: on
-    # PLANCHE la marge a 50 et le levier a 10 -> notional position >= 50 x 10 = 500.
-    # GRINDER (correction Flo: $1000/position empechait le grinder). Beaucoup de PETITES
-    # positions gagnantes: marge PETITE (<=40) x levier -> ex 40 x 10 = 400. Le PnL vient du
-    # VOLUME (plein de positions) + funding, PAS de positions geantes. Le levier evite les centimes.
-    # BUG CORRIGE (audit 2026-07-11) : `if lev < 5: lev = 10` FORCAIT le levier -> impossible de
-    # simuler a levier 1 ou 2 (la config etait ignoree). On ne corrige plus que l'INVALIDE (<= 0).
+    """Cap an already-sized paper notional without inflating it.
+
+    The incoming value is the gross paper notional selected upstream.
+    HYPERSMART_MAX_POSITION_USDT is a margin cap; leverage defines the
+    maximum gross notional, but a smaller requested position must remain
+    smaller. A cap may shrink risk; it must never manufacture extra risk.
+    """
     lev = _env_float("HYPERSMART_SIMULATION_LEVERAGE", 10.0)
     if lev <= 0.0:
         lev = 10.0
-    # MODELE REEL (Flo prouve a l'ecran: notional $50 -> PnL -0.12 = centimes). Le $50 est la
-    # MARGE (capital a risque par position), PAS le notional. A 10x: notional = 50 x 10 = 500
-    # -> PnL = 500 x Dprix -> DES DOLLARS, comme un perp reel. Solde 100 / marge 50 = 2 positions.
-    # (Avant: margin clampe a 12 PUIS notional clampe a 50 -> double bride = centimes garantis.)
     margin_cap = abs(_env_float("HYPERSMART_MAX_POSITION_USDT", 50.0))
-    if margin_cap <= 0.0:      # idem : seule une valeur INVALIDE retombe sur le defaut
+    if margin_cap <= 0.0:
         margin_cap = 50.0
+
     clean_notional = max(0.0, float(notional or 0.0))
     clean_quantity = abs(float(quantity or 0.0))
-    if margin_cap <= 0 or entry_price <= 0 or clean_notional <= 0:
-        return {"notional": clean_notional, "quantity": clean_quantity, "cap_applied": False}
-    margin = margin_cap                            # marge FIXE = notre capital par position ($50), pas la taille derisoire du leader
-    lev_notional = margin * lev                    # notional position = marge x levier (= $500 a 10x) -> PnL en DOLLARS
-    lev_quantity = lev_notional / float(entry_price)
-    return {"notional": round(lev_notional, 8), "quantity": round(lev_quantity, 12), "margin": round(margin, 8), "cap_applied": True}
+    if entry_price <= 0 or clean_notional <= 0:
+        return {
+            "notional": clean_notional,
+            "quantity": clean_quantity,
+            "margin": 0.0,
+            "cap_applied": False,
+        }
 
+    gross_cap = margin_cap * lev
+    capped_notional = min(clean_notional, gross_cap)
+    capped_quantity = capped_notional / float(entry_price)
+    return {
+        "notional": round(capped_notional, 8),
+        "quantity": round(capped_quantity, 12),
+        "margin": round(capped_notional / lev, 8),
+        "cap_applied": capped_notional < clean_notional - 1e-12,
+    }
 
 def _paper_order_action(value: object) -> str:
     if not isinstance(value, dict):
