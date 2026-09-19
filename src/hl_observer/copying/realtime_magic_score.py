@@ -403,7 +403,7 @@ def capped_simulated_notional(
     lev = max(1.0, float(_os.environ.get("HYPERSMART_SIMULATION_LEVERAGE", "1") or 1.0))
     target = cfg.starting_equity_usdt * risk_fraction * lev
     max_pos = cfg.max_position_notional_usdt * lev
-    leader_cap = (inputs.leader_notional_usdt * lev) if inputs.leader_notional_usdt > 0 else max_pos
+    leader_cap = inputs.leader_notional_usdt if inputs.leader_notional_usdt > 0 else max_pos
     notional = min(max_pos, max(cfg.min_position_notional_usdt, target), leader_cap)
     remaining_exposure = max(0.0, cfg.max_total_exposure_usdt * lev - max(0.0, inputs.current_open_exposure_usdt))
     if remaining_exposure <= 0:
@@ -413,7 +413,7 @@ def capped_simulated_notional(
         warnings.append("POSITION_SIZE_CAPPED_BY_TOTAL_EXPOSURE")
     if notional < cfg.min_position_notional_usdt:
         return 0.0, [*warnings, "POSITION_SIZE_BELOW_MINIMUM"]
-    if inputs.leader_notional_usdt * lev > max_pos:
+    if inputs.leader_notional_usdt > max_pos:
         warnings.append("POSITION_SIZE_CAPPED_VS_LEADER")
     return notional, warnings
 
