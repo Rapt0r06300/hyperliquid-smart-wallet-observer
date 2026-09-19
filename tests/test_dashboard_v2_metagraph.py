@@ -81,7 +81,7 @@ def test_equity_history_sert_la_courbe_du_ledger(tmp_path, monkeypatch):
     assert payload["evenements"] == 2
     assert payload["read_only"] is True and payload["real_execution"] is False
     eq = [pt["equity"] for pt in payload["points"]]
-    assert eq[:3] == [1000.0, 998.0, 998.5]
+    assert eq[:3] == [100.0, 98.0, 98.5]
     assert payload["amplitude_usd"] > 0, "la courbe doit BOUGER quand des trades se ferment"
     assert payload["sources"], "la courbe doit pouvoir énumérer ce qu'elle contient"
 
@@ -141,4 +141,4 @@ def test_le_dernier_point_de_l_endpoint_vaut_le_pnl_stable(tmp_path, monkeypatch
                         lambda root=None: {"net_funding_settled": 0.35})
     payload = _appel(tmp_path, monkeypatch)
     assert payload["points"][-1]["pnl"] == -5.65
-    assert payload["points"][-1]["equity"] == 994.35
+    assert payload["points"][-1]["equity"] == 94.35
