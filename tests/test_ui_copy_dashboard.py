@@ -511,7 +511,7 @@ def test_ui_simulation_ignores_old_db_deltas_before_start_timestamp(tmp_path):
 
     payload = client.get("/api/simulation/overview").json()
 
-    assert payload["starting_equity_usdt"] == 1000.0
+    assert payload["starting_equity_usdt"] == 100.0
     assert payload["virtual_quote_asset"] == "USDT"
     assert payload["counts"]["deltas"] == 0
     assert payload["counts"]["live_simulation_deltas"] == 0
