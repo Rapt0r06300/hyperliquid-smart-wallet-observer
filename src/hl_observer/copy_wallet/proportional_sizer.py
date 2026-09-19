@@ -11,10 +11,10 @@ from hl_observer.copy_wallet.wallet_tier import WalletTier
 class ProportionalSizingConfig:
     follower_equity_usdt: float = 100.0
     leader_equity_usdt: float = 100_000.0
-    base_copy_ratio: float = 0.05
+    base_copy_ratio: float = 0.20
     min_margin_usdt: float = 5.0
-    max_margin_usdt: float = 7.5
-    max_equity_fraction: float = 0.075
+    max_margin_usdt: float = 30.0
+    max_equity_fraction: float = 0.30
 
 
 @dataclass(frozen=True, slots=True)
