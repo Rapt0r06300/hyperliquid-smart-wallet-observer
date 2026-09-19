@@ -96,7 +96,7 @@ def test_ouvre_quand_L2_frais_ET_edge_mesure(tmp_path):
     s = sigs[0]
     assert s.coin == "HYPE" and s.sens == 1 and s.meta["src_prix"] == "carnet"
     assert s.prix_entree == 20.01                                        # ask L2 réel (taker long)
-    assert s.notional_usd == 150.0                                       # min(cible 150, profondeur 5000)
+    assert s.notional_usd == 50.0                                        # $100 paper budget: cible 50, profondeur 5000
     assert s.meta["fill_partiel"] is False and s.meta["l2_age_ms"] <= 1000   # L2 < 1 s
     # edge net = edge_brut mesuré (45) − coût A/R L2 réel (spread+2×slippage+frais) ; mesuré, pas inventé
     assert s.meta["edge_brut_mesure_bps"] == 45.0 and s.edge_estime_bps < 45.0
