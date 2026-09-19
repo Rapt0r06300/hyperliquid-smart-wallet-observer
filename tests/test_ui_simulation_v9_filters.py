@@ -216,6 +216,7 @@ def test_simulation_dedupes_same_fill_between_poll_rows(tmp_path: Path, monkeypa
     # EDGE FABRIQUE (2026-07-11) : par DEFAUT le bot refuse un edge non empirique.
     # Ce test exerce l'ANCIEN chemin (edge invente) -> mode A/B EXPLICITE.
     monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
+    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
     monkeypatch.setenv("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "1")
     monkeypatch.setenv("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "5")
     client, factory, _state = _client(tmp_path)
