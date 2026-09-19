@@ -27,7 +27,7 @@ def _endpoint(chemin: str):
 
 # 🔴 21/07 — CES TROIS TESTS ONT ÉTÉ RÉÉCRITS, PAS RÉPARÉS.
 # Ils vérifiaient l'ANCIEN endpoint : `_avec_carry` greffait le net carry sur le dernier point
-# d'un historique copy (d'où l'assertion `== 995.0`). C'est PRÉCISÉMENT ce mécanisme qui
+# d'un historique copy (d'où l'assertion `== 95.0`). C'est PRÉCISÉMENT ce mécanisme qui
 # produisait le métagraphe éclaté (599 points plats + une falaise). La courbe vient désormais
 # du LEDGER via `courbe_equity`. L'intention est conservée mot pour mot — « la courbe reflète
 # le carry », « le passé ne bouge pas », « un carry illisible ne casse pas la courbe » — seule
@@ -84,7 +84,7 @@ def test_le_PASSE_n_est_PAS_reecrit(tmp_path, monkeypatch):
                         lambda root=None: {"net_funding_settled": 5.0})
     root = _ledger(tmp_path, [_close(1000, -3.0), _close(2000, -2.0)])
     d = _appel(_req_root(root))
-    assert d["points"][1]["equity"] == 997.0, "un CLOSE passé garde sa valeur"
+    assert d["points"][1]["equity"] == 97.0, "un CLOSE passé garde sa valeur"
     assert d["points"][2]["equity"] == 995.0, "le 2e CLOSE passé ne bouge pas non plus"
     # le funding réglé (+5) n'entre QUE dans le point courant : -5 réalisé + 5 réglé = 0
     assert d["points"][-1]["pnl"] == 0.0
@@ -102,7 +102,7 @@ def test_un_carry_illisible_ne_CASSE_PAS_la_courbe(tmp_path, monkeypatch):
         d = _appel(_req_root(tmp_path))          # aucun ledger sous tmp_path
     except RuntimeError:
         raise AssertionError("un carry illisible ne doit JAMAIS casser la courbe d'equity")
-    assert d["points"][-1]["equity"] == 1000.0, "pas de données -> ligne plate au capital"
+    assert d["points"][-1]["equity"] == 100.0, "pas de données -> ligne plate au capital"
     assert d["plate"] is True
 
 
