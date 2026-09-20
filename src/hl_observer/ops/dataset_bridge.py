@@ -37,6 +37,8 @@ from hl_observer.datasets.release_gateway import (
     build_release_status,
     ensure_release_metadata,
 )
+from hl_observer.datasets.storage_layout import dataset_asset_cache_dir
+from hl_observer.datasets.streaming_materializer import materialize_records_streaming
 
 # Compatibilité avec les commandes/tests historiques.
 FAMILY_PATTERNS = {
@@ -94,6 +96,14 @@ def _parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Fréquence d'affichage pendant un téléchargement. Défaut: 1 seconde.",
+    )
+    parser.add_argument(
+        "--stream-assets",
+        action="store_true",
+        help=(
+            "Matérialise un asset à la fois puis le purge du cache. "
+            "Réduit fortement le pic disque sur les runners GitHub éphémères."
+        ),
     )
     return parser
 
@@ -436,12 +446,28 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         raw_materialized_bytes = sum(int(item.size) for item in selected)
-        disk = _disk_guard(
-            root,
-            network_remaining_bytes=remaining_network_bytes,
-            raw_materialized_bytes=raw_materialized_bytes,
-            reserve_gib=args.disk_reserve_gib,
-        )
+        if args.stream_assets:
+            largest_asset_bytes = max(
+                (int(assets[name].size) for name in asset_names if name in assets),
+                default=0,
+            )
+            disk = _disk_guard(
+                root,
+                network_remaining_bytes=largest_asset_bytes,
+                raw_materialized_bytes=raw_materialized_bytes,
+                reserve_gib=args.disk_reserve_gib,
+            )
+            disk["stream_assets"] = True
+            disk["total_network_bytes"] = remaining_network_bytes
+            disk["largest_asset_bytes"] = largest_asset_bytes
+        else:
+            disk = _disk_guard(
+                root,
+                network_remaining_bytes=remaining_network_bytes,
+                raw_materialized_bytes=raw_materialized_bytes,
+                reserve_gib=args.disk_reserve_gib,
+            )
+            disk["stream_assets"] = False
         preview["disk_guard"] = disk
         if disk["ok"] is not True:
             raise DatasetBridgeError(
@@ -450,22 +476,39 @@ def main(argv: list[str] | None = None) -> int:
                 f"requis={int(disk['worst_case_required_bytes']) / (1024**3):.2f} Gio."
             )
 
-        downloaded = download_needed_assets_with_progress(
-            root,
-            assets,
-            asset_names,
-            repository=args.repo,
-            force=args.force,
-            heartbeat_seconds=max(0.2, float(args.heartbeat_seconds)),
-        )
         print(
             f"[RECONSTRUCTION] {len(selected)} fichier(s) sélectionné(s) vers {output_root}",
             flush=True,
         )
-        created = materialize_records(selected, downloaded, output_root)
+        streaming_result = None
+        if args.stream_assets:
+            streaming_result = materialize_records_streaming(
+                selected,
+                assets,
+                output_root,
+                dataset_asset_cache_dir(root),
+                repository=args.repo,
+                force=args.force,
+                purge_assets_after_use=True,
+            )
+            created_count = int(streaming_result["created_files"])
+        else:
+            downloaded = download_needed_assets_with_progress(
+                root,
+                assets,
+                asset_names,
+                repository=args.repo,
+                force=args.force,
+                heartbeat_seconds=max(0.2, float(args.heartbeat_seconds)),
+            )
+            created = materialize_records(selected, downloaded, output_root)
+            created_count = len(created)
+
         report = {
             **preview,
-            "fichiers_reconstruits": len(created),
+            "fichiers_reconstruits": created_count,
+            "stream_assets": bool(args.stream_assets),
+            "streaming_result": streaming_result,
             "dossier_reconstruit": str(output_root),
             "source_repository": args.repo,
             "source_release_id": args.release_id,
