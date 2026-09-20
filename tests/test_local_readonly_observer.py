@@ -169,3 +169,32 @@ def test_redact_text_keeps_non_secret_code() -> None:
     text, count = redact_text("value = 123\n")
     assert text == "value = 123\n"
     assert count == 0
+
+
+def test_local_observer_workflow_is_manual_main_only_and_non_destructive() -> None:
+    workflow = (ROOT / ".github/workflows/local-readonly-observer.yml").read_text(
+        encoding="utf-8"
+    )
+    preamble = workflow.split("jobs:", 1)[0]
+    assert "workflow_dispatch:" in preamble
+    assert "push:" not in preamble
+    assert "schedule:" not in preamble
+    assert "github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer'" in workflow
+    assert "github.actor == 'Rapt0r06300'" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "I_AUTHORIZE_READ_ONLY_OBSERVER" in workflow
+    assert r"C:\Users\rberm\Desktop\Projet AlinaSmartFlow" in workflow
+
+    lowered = workflow.lower()
+    forbidden = (
+        "set-location $env:alina_local_target; git fetch",
+        "set-location $env:alina_local_target; git pull",
+        "set-location $env:alina_local_target; git checkout",
+        "set-location $env:alina_local_target; git reset",
+        "set-location $env:alina_local_target; git clean",
+        "set-location $env:alina_local_target; git add",
+        "set-location $env:alina_local_target; git commit",
+        "set-location $env:alina_local_target; git push",
+    )
+    for needle in forbidden:
+        assert needle not in lowered
