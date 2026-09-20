@@ -1,0 +1,347 @@
+name: alina-github-dataset-job
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'control/github_dataset_jobs/*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alina-github-dataset-job
+  cancel-in-progress: false
+
+jobs:
+  dataset-job:
+    if: >-
+      github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
+      github.actor == 'Rapt0r06300' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      HYPERSMART_DATASET_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+      GH_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_EXECUTION_ENABLED: 'false'
+      HYPERSMART_ENABLE_REAL_ORDERS: '0'
+      ENABLE_REAL_ORDERS: '0'
+      TESTNET_ONLY: 'true'
+      HYPERSMART_ANALYSIS_LOCAL_ONLY: '1'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+      - name: Gate exact control-only commit before checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" != "Rapt0r06300/hyperliquid-smart-wallet-observer" ]; then exit 2; fi
+          if [ "$GITHUB_ACTOR" != "Rapt0r06300" ]; then exit 2; fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then exit 2; fi
+
+      - name: Checkout exact SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Resolve exactly one immutable control file
+        id: control
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ROWS < <(git diff-tree --no-commit-id --name-status -r "$GITHUB_SHA")
+          if [ "${#ROWS[@]}" -ne 1 ]; then
+            echo "Exactly one changed file is required."
+            exit 2
+          fi
+          STATUS="$(printf '%s' "${ROWS[0]}" | awk '{print $1}')"
+          PATH_VALUE="$(printf '%s' "${ROWS[0]}" | cut -f2-)"
+          if [ "$STATUS" != "A" ]; then
+            echo "Control file must be newly added."
+            exit 2
+          fi
+          if [[ ! "$PATH_VALUE" =~ ^control/github_dataset_jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json$ ]]; then
+            echo "Refused control path: $PATH_VALUE"
+            exit 2
+          fi
+          echo "path=$PATH_VALUE" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Bind dataset storage to ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ALINA_DATASET_HOME=$RUNNER_TEMP/alina-datasets" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/alina-datasets"
+
+      - name: Reclaim ephemeral disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Require private dataset token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${HYPERSMART_DATASET_TOKEN:-}" ]; then
+            echo "ALINA_DATASET_READ_TOKEN is missing."
+            exit 2
+          fi
+
+      - name: Install exact Alina analysis package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e .
+
+      - name: Validate and normalize control
+        id: job
+        shell: bash
+        env:
+          CONTROL_PATH: ${{ steps.control.outputs.path }}
+        run: |
+          set -euo pipefail
+          python - "$CONTROL_PATH" "$RUNNER_TEMP" <<'PY'
+          import json, pathlib, re, sys
+          src=pathlib.Path(sys.argv[1])
+          out=pathlib.Path(sys.argv[2])/"GITHUB_DATASET_JOB.json"
+          raw=json.loads(src.read_text(encoding="utf-8"))
+          if raw.get("schema") != "alina.github_dataset_job.v1":
+              raise SystemExit("invalid schema")
+          job_id=str(raw.get("job_id") or "")
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", job_id):
+              raise SystemExit("invalid job_id")
+          source=str(raw.get("source") or "full-cold")
+          if source not in {"full-cold","continuous"}:
+              raise SystemExit("invalid source")
+          suite=str(raw.get("suite") or "economic-core")
+          suites={
+              "economic-core","economic-full","copy-vault-full","lead-lag-full",
+              "cross-venue-full","microstructure-full","research-lab-full",
+              "sqlite-core","sqlite-all-safe"
+          }
+          if suite not in suites:
+              raise SystemExit("invalid suite")
+          mode=str(raw.get("mode") or "prepare-only")
+          if mode not in {"prepare-only","economic","historical","historical-full"}:
+              raise SystemExit("invalid mode")
+          if mode == "economic" and suite not in {"economic-core","economic-full"}:
+              raise SystemExit("economic mode requires economic-core/economic-full")
+          cap=float(raw.get("max_download_gib", 6))
+          if not (0 < cap <= 20):
+              raise SystemExit("max_download_gib must be >0 and <=20")
+          normalized={
+              "schema":"alina.github_dataset_job.v1",
+              "job_id":job_id,
+              "source":source,
+              "suite":suite,
+              "mode":mode,
+              "max_download_gib":cap,
+              "paper_only":True,
+              "real_execution":False,
+              "live_collection":False,
+          }
+          out.write_text(json.dumps(normalized,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          for key,value in normalized.items():
+              if key in {"job_id","source","suite","mode","max_download_gib"}:
+                  print(f"{key}={value}")
+          PY
+          while IFS='=' read -r key value; do
+            echo "$key=$value" >> "$GITHUB_OUTPUT"
+          done < <(python - "$RUNNER_TEMP/GITHUB_DATASET_JOB.json" <<'PY'
+          import json, pathlib, sys
+          o=json.loads(pathlib.Path(sys.argv[1]).read_text())
+          for k in ("job_id","source","suite","mode","max_download_gib"):
+              print(f"{k}={o[k]}")
+          PY
+          )
+
+      - name: Enforce paper/read-only guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          expected={
+              "HL_ENABLE_MAINNET_EXECUTION":"0",
+              "HL_ENABLE_TESTNET_EXECUTION":"0",
+              "REAL_MAINNET_TRADING":"false",
+              "TESTNET_EXECUTION_ENABLED":"false",
+              "HYPERSMART_ENABLE_REAL_ORDERS":"0",
+              "ENABLE_REAL_ORDERS":"0",
+              "HYPERSMART_ANALYSIS_LOCAL_ONLY":"1",
+          }
+          bad={k:(os.getenv(k),v) for k,v in expected.items() if os.getenv(k)!=v}
+          if bad: raise SystemExit(f"guard mismatch: {bad}")
+          print("PAPER_READ_ONLY_OK")
+          PY
+
+      - name: Plan verified dataset
+        shell: bash
+        env:
+          SOURCE_KIND: ${{ steps.job.outputs.source }}
+          SUITE: ${{ steps.job.outputs.suite }}
+          MAX_DOWNLOAD_GIB: ${{ steps.job.outputs.max_download_gib }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/alina-job-evidence"
+          if [ "$SOURCE_KIND" = "full-cold" ]; then
+            python -m hl_observer.ops.dataset_bridge prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --release-id 371149058 \
+              --suite "$SUITE" \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1 \
+              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PLAN.json"
+          else
+            python -m hl_observer.ops.continuous_vault prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --ref main \
+              --suite "$SUITE" \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1 \
+              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PLAN.json"
+          fi
+
+      - name: Materialize verified dataset
+        id: prepare
+        shell: bash
+        env:
+          SOURCE_KIND: ${{ steps.job.outputs.source }}
+          SUITE: ${{ steps.job.outputs.suite }}
+          MAX_DOWNLOAD_GIB: ${{ steps.job.outputs.max_download_gib }}
+        run: |
+          set -euo pipefail
+          if [ "$SOURCE_KIND" = "full-cold" ]; then
+            python -m hl_observer.ops.dataset_bridge prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --release-id 371149058 \
+              --suite "$SUITE" \
+              --download \
+              --stream-assets \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1 \
+              --heartbeat-seconds 5 \
+              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PREPARE.json"
+            DATA_ROOT="$(python -m hl_observer.ops.dataset_bridge locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
+          else
+            python -m hl_observer.ops.continuous_vault prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --ref main \
+              --suite "$SUITE" \
+              --download \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1 \
+              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PREPARE.json"
+            DATA_ROOT="$(python -m hl_observer.ops.continuous_vault locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
+          fi
+          test -d "$DATA_ROOT"
+          echo "data_root=$DATA_ROOT" >> "$GITHUB_OUTPUT"
+          du -sh "$DATA_ROOT" || true
+          df -h /
+
+      - name: Run requested analysis
+        if: steps.job.outputs.mode != 'prepare-only'
+        id: analysis
+        continue-on-error: true
+        shell: bash
+        env:
+          MODE: ${{ steps.job.outputs.mode }}
+          SUITE: ${{ steps.job.outputs.suite }}
+          DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "economic" ]; then
+            python tools/run_dataset_economic_campaigns.py \
+              --root "$DATA_ROOT" \
+              --no-start-collection \
+              --lead-history-sources 8
+          else
+            EXTRA=()
+            if [ "$MODE" = "historical-full" ]; then EXTRA+=(--full); fi
+            python -m hl_observer.ops.dataset_research_runner \
+              --root "$GITHUB_WORKSPACE" \
+              --data-root "$DATA_ROOT" \
+              --suite "$SUITE" \
+              "${EXTRA[@]}"
+          fi
+
+      - name: Build public-safe evidence
+        if: always()
+        id: evidence
+        shell: bash
+        env:
+          DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
+          ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
+        run: |
+          set -u
+          OUT="$RUNNER_TEMP/alina-job-evidence"
+          mkdir -p "$OUT/reports"
+          if [ -d "$GITHUB_WORKSPACE/runtime/reports" ]; then
+            cp -a "$GITHUB_WORKSPACE/runtime/reports/." "$OUT/reports/project/" || true
+          fi
+          if [ -n "${DATA_ROOT:-}" ] && [ -d "$DATA_ROOT/runtime/reports" ]; then
+            cp -a "$DATA_ROOT/runtime/reports/." "$OUT/reports/dataset/" || true
+          fi
+          python - "$OUT" <<'PY'
+          import json, os, pathlib, sys
+          out=pathlib.Path(sys.argv[1])
+          job=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"GITHUB_DATASET_JOB.json").read_text())
+          proof={
+              "schema":"alina.github_dataset_job_result.v1",
+              "github_run_id":os.getenv("GITHUB_RUN_ID"),
+              "github_sha":os.getenv("GITHUB_SHA"),
+              "job":job,
+              "analysis_outcome":os.getenv("ANALYSIS_OUTCOME"),
+              "raw_dataset_uploaded":False,
+              "private_token_exposed":False,
+              "paper_only":True,
+              "real_execution":False,
+          }
+          (out/"GITHUB_DATASET_JOB_RESULT.json").write_text(
+              json.dumps(proof,indent=2,sort_keys=True)+"\n",encoding="utf-8"
+          )
+          PY
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload reports only
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alina-github-dataset-job-${{ steps.job.outputs.job_id }}-${{ github.run_id }}
+          path: ${{ steps.evidence.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
+      - name: Fail closed if requested analysis failed
+        if: always() && steps.job.outputs.mode != 'prepare-only'
+        shell: bash
+        env:
+          ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
+        run: |
+          if [ "$ANALYSIS_OUTCOME" != "success" ]; then
+            echo "Requested analysis did not complete successfully."
+            exit 1
+          fi
+          echo "GITHUB_DATASET_JOB_OK"
