@@ -1,35 +1,44 @@
 # GitHub-hosted dataset backtests
 
-## But
+## Architecture canonique
 
-Permettre à Alina SmartFlow de lancer des replays/backtests directement sur les runners GitHub hébergés, sans utiliser le portable.
+Le dépôt public Alina SmartFlow fournit les moteurs de replay/backtest et les ponts de données.
 
-Le workflow est :
-
-`.github/workflows/alina-dataset-backtest-github.yml`
-
-Il est **manuel uniquement** et réservé à l'acteur GitHub `Rapt0r06300`.
-
-## Source des données
-
-Les données lourdes restent dans le dépôt privé :
+Le dépôt privé :
 
 `Rapt0r06300/hypersmart-datasets`
 
-Le workflow utilise le pont datasets existant d'Alina et le secret de lecture :
+reste le **control plane** des données lourdes et des exécutions GitHub-hosted. Le workflow canonique de lancement est :
 
-`ALINA_DATASET_READ_TOKEN`
+`.github/workflows/github-hosted-backtest.yml`
 
-Deux sources sont proposées :
+dans le dépôt privé datasets.
 
-- `full-cold` : la Release historique canonique ID `371149058` ;
-- `continuous` : le dernier index cumulatif du Continuous Data Vault privé.
+Cela évite de faire transiter les données privées par un workflow du dépôt public et permet au workflow privé d'utiliser son propre `GITHUB_TOKEN` pour lire ses Releases.
 
-La source `continuous` devient utilisable dès qu'un premier snapshot autorisé a publié `catalog/CONTINUOUS_VAULT_POINTER.json`.
+## Ce que cette branche ajoute au moteur Alina
 
-Chaque asset téléchargé est vérifié par le mécanisme datasets avec taille + SHA-256.
+- matérialisation FULL/COLD en streaming avec `--stream-assets` ;
+- téléchargement/vérification d'un asset à la fois ;
+- purge de l'asset temporaire après reconstruction ;
+- vérification SHA-256 des fichiers reconstruits ;
+- pont `continuous_vault` vers les snapshots incrémentaux GitHub ;
+- CLI `python -m hl_observer.ops.continuous_vault` ;
+- compatibilité du workspace Continuous Vault avec les runners économiques existants ;
+- mémoire cumulative permettant de conserver des données déjà archivées même lorsqu'elles ne sont plus présentes localement.
 
-## Suites disponibles
+## Sources de données
+
+Deux couches GitHub sont complémentaires :
+
+- **FULL/COLD** : snapshot historique massif, Release privée ID `371149058` ;
+- **Continuous Vault** : nouveaux snapshots incrémentaux immuables, référencés par `catalog/CONTINUOUS_VAULT_POINTER.json` après le premier backup autorisé.
+
+Le bridge Continuous Vault sait lire plusieurs Releases historiques parce que chaque fichier de l'index porte son `release_tag`.
+
+## Suites
+
+Les suites restent celles du `dataset_bridge` existant :
 
 - `economic-core`
 - `economic-full`
@@ -41,49 +50,39 @@ Chaque asset téléchargé est vérifié par le mécanisme datasets avec taille 
 - `sqlite-core`
 - `sqlite-all-safe`
 
-Le workflow calcule le plan exact avant téléchargement et refuse de dépasser `max_download_gib`.
+Aucune stratégie parallèle n'est créée.
 
-## Exécution
+## Disque des runners GitHub
 
-Pour `economic-core` et `economic-full`, le workflow appelle le runner économique canonique :
+Le mode `--stream-assets` réduit le pic de stockage :
 
-`tools/run_dataset_economic_campaigns.py`
+1. télécharger un asset ;
+2. vérifier son SHA-256 ;
+3. reconstruire les fichiers utiles ;
+4. vérifier les fichiers reconstruits ;
+5. supprimer l'asset temporaire ;
+6. passer au suivant.
 
-Pour les autres suites, il utilise :
+Le pic disque est donc proche de :
 
-`python -m hl_observer.ops.dataset_research_runner`
+`volume brut sélectionné + plus gros asset + réserve`
 
-Aucune nouvelle stratégie parallèle n'est créée.
+au lieu de :
+
+`volume brut sélectionné + tous les assets téléchargés`.
+
+Une suite qui dépasse malgré tout l'espace d'un runner GitHub-hosted échoue proprement ; aucune donnée n'est tronquée silencieusement.
 
 ## Sécurité
 
-Le workflow impose :
+Les runners économiques restent paper/read-only. Les workflows privés doivent continuer à imposer :
 
 - mainnet execution = 0 ;
 - testnet execution = 0 ;
 - real trading = false ;
-- mode paper/read-only ;
-- `HYPERSMART_ANALYSIS_LOCAL_ONLY=1` ;
-- `--no-start-collection` pour le runner économique ;
-- aucun self-hosted ;
-- aucune utilisation du portable.
+- aucune collecte live pendant les replays ;
+- vérification des SHA-256 ;
+- plafond de téléchargement ;
+- artefacts de sortie limités aux rapports/verdicts.
 
-## Espace disque GitHub
-
-Les runners GitHub-hosted ont un espace disque limité. Le workflow supprime uniquement des toolchains préinstallées inutiles du runner éphémère afin de récupérer de l'espace.
-
-Le bridge FULL/COLD utilise maintenant `--stream-assets` sur GitHub-hosted : un asset est téléchargé, vérifié, matérialisé puis purgé avant le suivant. Le Vault continu utilise la même logique de streaming.
-
-Les suites très lourdes peuvent encore dépasser la capacité d'un runner standard si leur volume brut reconstruit est lui-même trop grand. Le workflow échoue alors proprement au niveau du disk guard / plafond de téléchargement ; il ne tronque jamais silencieusement les données.
-
-## Résultats
-
-Les données privées reconstruites restent uniquement dans l'espace éphémère du runner.
-
-L'artefact GitHub public du run contient seulement :
-
-- rapports ;
-- verdicts compacts ;
-- métadonnées de run.
-
-Il n'upload jamais les données brutes privées dans le dépôt public Alina.
+Les données brutes restent dans le dépôt privé datasets / ses Releases.
