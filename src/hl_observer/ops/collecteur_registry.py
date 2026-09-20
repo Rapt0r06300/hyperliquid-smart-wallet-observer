@@ -54,6 +54,9 @@ REGISTRE: tuple[dict[str, Any], ...] = (
     {"nom": "bbo-collector", "script": "tools/collecter_bbo.py",
      "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
      "heartbeat": "runtime/data/bbo_heartbeat.json"},
+    {"nom": "native-venues", "script": "tools/collecter_native_venues.py",
+     "intervalle_s": 5, "args": (), "limite_minutes": 5.0,
+     "heartbeat": "runtime/data/native_venues_heartbeat.json"},
     {"nom": "experimental-paper", "script": "tools/experimental_paper_tick.py",
      "intervalle_s": 2, "args": ("--une-fois",), "limite_minutes": 2.0,
      "heartbeat": "runtime/research_lab/heartbeats/experimental-paper.json"},
@@ -114,13 +117,13 @@ COLLECTEURS_RESEARCH = frozenset(
 # Il démarre le socle prix/microstructure/userFills (CORE, REQUIS) PLUS les collecteurs de récolte qui
 # tournent réellement aujourd'hui (carnet L2 batch + Binance depth REST, marks, liquidations, dispersion
 # venues, découverte + scoring de vaults, backfills fills/candles). On n'inclut ici QUE des collecteurs
-# possédant un runner réel : les briques encore BLOCKED_EXTERNAL (node fills global, HF recorder standalone,
-# TWAP standalone, Bybit) restent honnêtement hors profil tant qu'un vrai collecteur n'est pas branché.
-# dYdX reste un connecteur legacy read-only disponible dans REGISTRE/research/all,
-# mais il est dormant par défaut. Le runtime officiel HARVEST est Hyperliquid uniquement.
+# possédant un runner réel. Bybit/OKX/Gate/Bitget sont maintenant branchés via le coordinateur
+# natif read-only et son runner persistant; node fills global/HF recorder/TWAP standalone restent hors
+# profil tant qu'un vrai collecteur n'est pas branché. dYdX reste legacy read-only et dormant par défaut.
 _NOMS_REGISTRE = frozenset(c["nom"] for c in REGISTRE)
 _HARVEST_SOUHAITE = frozenset({
     "allmids-collector", "bbo-collector", "userfills-live",           # CORE (requis)
+    "native-venues",                                                   # Bybit/OKX/Gate/Bitget natifs
     "carnet-collector", "marks-collector", "liq-collector", "venues-collector",
     "overshoot-collector", "vault-collector", "scorer-vaults",
     "backfill-fills", "backfill-candles-vaults",
