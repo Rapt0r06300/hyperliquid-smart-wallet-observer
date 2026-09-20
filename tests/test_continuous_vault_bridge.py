@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from hl_observer.datasets.github_release_bridge import DatasetBridgeError
-from hl_observer.datasets import continuous_vault
+from hl_observer.datasets import continuous_vault_bridge
 
 
 def _contents_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -20,7 +20,7 @@ def _contents_payload(payload: dict[str, object]) -> dict[str, object]:
 
 def test_load_continuous_pointer_decodes_private_contents(monkeypatch) -> None:
     pointer = {
-        "schema": continuous_vault.POINTER_SCHEMA,
+        "schema": continuous_vault_bridge.POINTER_SCHEMA,
         "repository": "Rapt0r06300/hypersmart-datasets",
         "latest_snapshot_id": "snap-1",
         "latest_release_id": 123,
@@ -38,7 +38,7 @@ def test_load_continuous_pointer_decodes_private_contents(monkeypatch) -> None:
         "get_json",
         lambda path: _contents_payload(pointer),
     )
-    result = continuous_vault.load_continuous_pointer()
+    result = continuous_vault_bridge.load_continuous_pointer()
 
     assert result["latest_snapshot_id"] == "snap-1"
     assert result["latest_release_id"] == 123
@@ -47,7 +47,7 @@ def test_load_continuous_pointer_decodes_private_contents(monkeypatch) -> None:
 
 def test_load_continuous_pointer_rejects_wrong_repository(monkeypatch) -> None:
     pointer = {
-        "schema": continuous_vault.POINTER_SCHEMA,
+        "schema": continuous_vault_bridge.POINTER_SCHEMA,
         "repository": "someone/else",
         "index_asset": {
             "asset_id": 456,
@@ -62,12 +62,12 @@ def test_load_continuous_pointer_rejects_wrong_repository(monkeypatch) -> None:
     )
 
     with pytest.raises(DatasetBridgeError):
-        continuous_vault.load_continuous_pointer()
+        continuous_vault_bridge.load_continuous_pointer()
 
 
 def test_iter_continuous_records_keeps_archived_deleted_by_default() -> None:
     payload = {
-        "schema": continuous_vault.INDEX_SCHEMA,
+        "schema": continuous_vault_bridge.INDEX_SCHEMA,
         "files": {
             "runtime/data/current.jsonl": {
                 "present_local": True,
@@ -89,9 +89,9 @@ def test_iter_continuous_records_keeps_archived_deleted_by_default() -> None:
         },
     }
 
-    all_rows = list(continuous_vault.iter_continuous_records(payload))
+    all_rows = list(continuous_vault_bridge.iter_continuous_records(payload))
     current_rows = list(
-        continuous_vault.iter_continuous_records(payload, present_only=True)
+        continuous_vault_bridge.iter_continuous_records(payload, present_only=True)
     )
 
     assert {row.relative_path for row in all_rows} == {
@@ -111,14 +111,14 @@ def test_continuous_workspace_pointer_roundtrip(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setenv("ALINA_DATASET_HOME", str(tmp_path / "datasets"))
     root = tmp_path / "project"
     root.mkdir()
-    workspace = continuous_vault.continuous_workspace_for_digest(
+    workspace = continuous_vault_bridge.continuous_workspace_for_digest(
         root,
         "economic-core",
         "a" * 64,
     )
     workspace.mkdir(parents=True)
 
-    pointer = continuous_vault.write_continuous_workspace_pointer(
+    pointer = continuous_vault_bridge.write_continuous_workspace_pointer(
         root,
         "economic-core",
         digest="a" * 64,
@@ -129,7 +129,7 @@ def test_continuous_workspace_pointer_roundtrip(tmp_path: Path, monkeypatch) -> 
 
     assert pointer.is_file()
     assert (
-        continuous_vault.resolve_continuous_workspace(root, "economic-core")
+        continuous_vault_bridge.resolve_continuous_workspace(root, "economic-core")
         == workspace.resolve()
     )
 
@@ -142,7 +142,7 @@ def test_continuous_workspace_rejects_escape(tmp_path: Path, monkeypatch) -> Non
     outside.mkdir()
 
     with pytest.raises(DatasetBridgeError):
-        continuous_vault.write_continuous_workspace_pointer(
+        continuous_vault_bridge.write_continuous_workspace_pointer(
             root,
             "economic-core",
             digest="b" * 64,
