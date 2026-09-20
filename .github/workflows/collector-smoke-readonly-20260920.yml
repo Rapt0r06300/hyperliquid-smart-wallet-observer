@@ -79,7 +79,7 @@ jobs:
           $venv = Join-Path $env:RUNNER_TEMP "alina-collector-smoke-$env:GITHUB_RUN_ID"
           & $python -m venv $venv
           $venvPython = Join-Path $venv 'Scripts\python.exe'
-          & $venvPython -m pip install --disable-pip-version-check --quiet "httpx>=0.27,<1" "websockets>=12,<16"
+          & $venvPython -m pip install --disable-pip-version-check --quiet "httpx>=0.27,<1" "websockets>=12,<16" "pydantic>=2,<3"
           if ($LASTEXITCODE -ne 0) { throw 'SMOKE_DEPENDENCY_INSTALL_FAILED' }
           "python=$venvPython" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
