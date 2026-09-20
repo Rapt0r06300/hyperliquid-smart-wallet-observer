@@ -111,6 +111,7 @@ class DataVaultTests(unittest.TestCase):
 
             self.assertEqual(summary["changed_files"], 1)
             self.assertEqual(summary["deleted_count"], 1)
+            self.assertTrue(summary["has_delta"])
             self.assertIn("runtime/data/a.jsonl", index["files"])
             self.assertIn("runtime/data/b.jsonl", index["files"])
             self.assertTrue(index["files"]["runtime/data/a.jsonl"]["present_local"])
@@ -146,6 +147,7 @@ class DataVaultTests(unittest.TestCase):
             index = load_gzip_json(Path(second_result["file_index"]))
 
             self.assertEqual(second_result["summary"]["changed_files"], 0)
+            self.assertFalse(second_result["summary"]["has_delta"])
             self.assertTrue(index["files"]["data/stable.json"]["present_local"])
             self.assertEqual(
                 index["files"]["data/stable.json"]["release_tag"],
@@ -310,6 +312,7 @@ class DataVaultTests(unittest.TestCase):
             self.assertEqual(record["backup_deferred_reason"], "unstable_during_copy")
             self.assertEqual(record["release_tag"], "alina-vault-snap-001")
             self.assertEqual(second_result["summary"]["stale_prior_files"], 1)
+            self.assertTrue(second_result["summary"]["has_delta"])
 
     def test_publish_list_contains_metadata_assets(self):
         with tempfile.TemporaryDirectory() as temp:
