@@ -54,7 +54,9 @@ Exemple :
 - FULL/COLD matérialisé avec `--stream-assets` ;
 - les données privées restent sous `RUNNER_TEMP` / `ALINA_DATASET_HOME` ;
 - aucun dataset brut n'est inclus dans l'artifact ;
-- l'artifact contient uniquement plan, provenance et rapports.
+- aucun chemin ni rapport issu du dataset privé n'est copié dans l'artifact public ;
+- les sorties détaillées de préparation restent uniquement dans l'espace éphémère du runner ;
+- l'artifact public contient seulement une preuve synthétique (source, suite, compteurs, verdicts).
 
 Ce workflow utilise un chemin de contrôle différent des workflows self-hosted :
 
