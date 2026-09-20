@@ -472,6 +472,33 @@ def prepare_continuous_suite(
         json.dumps(provenance, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+    canonical_provenance = provenance_dir / "SELECTION_PROVENANCE.json"
+    canonical_provenance.write_text(
+        json.dumps(
+            {
+                "schema": "hypersmart.dataset_selection_provenance.v3",
+                "source_kind": "continuous-vault",
+                "source_repository": repository,
+                "source_release_id": int(pointer.get("latest_release_id") or 0),
+                "source_release_name": pointer.get("latest_release_tag"),
+                "source_snapshot_id": pointer.get("latest_snapshot_id"),
+                "snapshot_fingerprint_sha256": fingerprint,
+                "suite": suite,
+                "selection_digest": digest,
+                "selected_files": len(selected),
+                "selected_raw_bytes": raw_bytes,
+                "paper_read_only": True,
+                "real_execution": False,
+            },
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     current = write_continuous_workspace_pointer(
         root,
         suite,
@@ -485,6 +512,7 @@ def prepare_continuous_suite(
         "downloaded": True,
         "fichiers_reconstruits": int(streaming["created_files"]),
         "provenance": str(provenance_path),
+        "canonical_provenance": str(canonical_provenance),
         "pointeur_courant": str(current),
         "streaming_result": streaming,
     }
