@@ -20,9 +20,14 @@ Le workflow utilise le pont datasets existant d'Alina et le secret de lecture :
 
 `ALINA_DATASET_READ_TOKEN`
 
-La Release FULL/COLD canonique actuelle reste la Release ID `371149058`.
+Deux sources sont proposées :
 
-Chaque asset téléchargé est vérifié par le mécanisme datasets existant avec taille + SHA-256.
+- `full-cold` : la Release historique canonique ID `371149058` ;
+- `continuous` : le dernier index cumulatif du Continuous Data Vault privé.
+
+La source `continuous` devient utilisable dès qu'un premier snapshot autorisé a publié `catalog/CONTINUOUS_VAULT_POINTER.json`.
+
+Chaque asset téléchargé est vérifié par le mécanisme datasets avec taille + SHA-256.
 
 ## Suites disponibles
 
@@ -67,9 +72,9 @@ Le workflow impose :
 
 Les runners GitHub-hosted ont un espace disque limité. Le workflow supprime uniquement des toolchains préinstallées inutiles du runner éphémère afin de récupérer de l'espace.
 
-Les suites très lourdes peuvent encore dépasser la capacité d'un runner standard. Le workflow échoue alors proprement au niveau du disk guard / plafond de téléchargement ; il ne tronque jamais silencieusement les données.
+Le bridge FULL/COLD utilise maintenant `--stream-assets` sur GitHub-hosted : un asset est téléchargé, vérifié, matérialisé puis purgé avant le suivant. Le Vault continu utilise la même logique de streaming.
 
-Le prochain chantier consiste à ajouter un mode de matérialisation streaming afin de réduire le pic disque pour les suites `economic-full` et `lead-lag-full`.
+Les suites très lourdes peuvent encore dépasser la capacité d'un runner standard si leur volume brut reconstruit est lui-même trop grand. Le workflow échoue alors proprement au niveau du disk guard / plafond de téléchargement ; il ne tronque jamais silencieusement les données.
 
 ## Résultats
 
