@@ -4,6 +4,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +12,7 @@ TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
 
+import build_data_vault_snapshot as vault_build
 from build_data_vault_snapshot import build_snapshot
 from data_vault_core import (
     is_secret_path,
@@ -235,6 +237,15 @@ class DataVaultTests(unittest.TestCase):
                     "size": 10,
                     "sha256": "b",
                 },
+                "runtime/data/stale.jsonl": {
+                    "present_local": True,
+                    "backup_stale": True,
+                    "release_tag": "tag-stale",
+                    "storage": "zip_entry",
+                    "asset": "stale.zip",
+                    "size": 10,
+                    "sha256": "c",
+                },
             }
         }
 
@@ -246,6 +257,7 @@ class DataVaultTests(unittest.TestCase):
         )
         self.assertIn("runtime/data/current.jsonl", current)
         self.assertNotIn("runtime/data/old.jsonl", current)
+        self.assertNotIn("runtime/data/stale.jsonl", current)
 
         historical = select_records(
             payload,
@@ -256,6 +268,48 @@ class DataVaultTests(unittest.TestCase):
         )
         self.assertIn("runtime/data/current.jsonl", historical)
         self.assertIn("runtime/data/old.jsonl", historical)
+        self.assertNotIn("runtime/data/stale.jsonl", historical)
+
+        with_stale = select_records(
+            payload,
+            preset="economic-core",
+            contains=(),
+            prefixes=(),
+            include_archived_deleted=True,
+            include_stale_prior=True,
+        )
+        self.assertIn("runtime/data/stale.jsonl", with_stale)
+
+    def test_unstable_live_file_keeps_prior_backup_but_marks_it_stale(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            source = base / "source"
+            first = base / "first"
+            second = base / "second"
+            (source / "runtime" / "data").mkdir(parents=True)
+            path = source / "runtime" / "data" / "live.jsonl"
+            path.write_text('{"v":1}\n', encoding="utf-8")
+
+            first_result = self._build(source, first)
+            previous = Path(first_result["file_index"])
+            path.write_text('{"v":2}\n', encoding="utf-8")
+
+            with patch.object(vault_build, "stable_copy", return_value=None):
+                second_result = self._build(
+                    source,
+                    second,
+                    previous=previous,
+                    snapshot="snap-002",
+                    tag="alina-vault-snap-002",
+                )
+
+            index = load_gzip_json(Path(second_result["file_index"]))
+            record = index["files"]["runtime/data/live.jsonl"]
+            self.assertTrue(record["present_local"])
+            self.assertTrue(record["backup_stale"])
+            self.assertEqual(record["backup_deferred_reason"], "unstable_during_copy")
+            self.assertEqual(record["release_tag"], "alina-vault-snap-001")
+            self.assertEqual(second_result["summary"]["stale_prior_files"], 1)
 
     def test_publish_list_contains_metadata_assets(self):
         with tempfile.TemporaryDirectory() as temp:
