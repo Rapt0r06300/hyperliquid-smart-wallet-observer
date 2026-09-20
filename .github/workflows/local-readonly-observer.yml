@@ -1,0 +1,206 @@
+name: alina-local-readonly-observer-manual
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization_phrase:
+        description: "Type exactly: I_AUTHORIZE_READ_ONLY_OBSERVER"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alina-local-readonly-observer
+  cancel-in-progress: false
+
+jobs:
+  observe-local-project:
+    name: Local READ-ONLY observer
+    if: >-
+      github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
+      github.actor == 'Rapt0r06300' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    timeout-minutes: 30
+
+    env:
+      ALINA_LOCAL_TARGET: 'C:\Users\rberm\Desktop\Projet AlinaSmartFlow'
+      GIT_OPTIONAL_LOCKS: '0'
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONNOUSERSITE: '1'
+
+    steps:
+      - name: Explicit authorization gate
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          AUTHORIZATION_PHRASE: ${{ inputs.authorization_phrase }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:AUTHORIZATION_PHRASE -cne 'I_AUTHORIZE_READ_ONLY_OBSERVER') {
+            throw 'READ_ONLY_OBSERVER_NOT_AUTHORIZED'
+          }
+          Write-Host 'Manual READ-ONLY authorization accepted.'
+
+      - name: Checkout GitHub reference outside local project
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          clean: true
+          persist-credentials: false
+
+      - name: Refresh GitHub branch refs in runner workspace only
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          if ($LASTEXITCODE -ne 0) { throw 'GITHUB_WORKSPACE_FETCH_FAILED' }
+
+      - name: Select existing Python without installing anything
+        id: python
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @()
+          $machinePython = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if ($machinePython) { $candidates += $machinePython }
+          $cmd = Get-Command python -ErrorAction SilentlyContinue
+          if ($cmd) { $candidates += $cmd.Source }
+          $selected = $null
+          foreach ($candidate in ($candidates | Select-Object -Unique)) {
+            if (-not $candidate) { continue }
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            & $candidate -B -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)"
+            if ($LASTEXITCODE -eq 0) {
+              $selected = $candidate
+              break
+            }
+          }
+          if (-not $selected) { throw 'PYTHON_311_NOT_FOUND' }
+          "python=$selected" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Read-only preflight and external evidence directory
+        id: preflight
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = 'C:\Users\rberm\Desktop\Projet AlinaSmartFlow'
+          if ($env:ALINA_LOCAL_TARGET -cne $expected) { throw 'TARGET_PATH_CHANGED' }
+          if (-not (Test-Path -LiteralPath $expected -PathType Container)) {
+            throw 'TARGET_FOLDER_NOT_FOUND'
+          }
+          $out = Join-Path $env:RUNNER_TEMP ("alina-readonly-observer-" + $env:GITHUB_RUN_ID)
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $targetFull = [IO.Path]::GetFullPath($expected).TrimEnd('\')
+          $outFull = [IO.Path]::GetFullPath($out).TrimEnd('\')
+          if ($outFull.StartsWith($targetFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'EVIDENCE_OUTPUT_INSIDE_TARGET'
+          }
+          $index = Join-Path $targetFull '.git\index'
+          $indexBefore = $null
+          if (Test-Path -LiteralPath $index -PathType Leaf) {
+            $indexBefore = (Get-FileHash -LiteralPath $index -Algorithm SHA256).Hash
+          }
+          $acl = Get-Acl -LiteralPath $targetFull
+          [ordered]@{
+            target = $targetFull
+            owner = $acl.Owner
+            access = @($acl.Access | ForEach-Object {
+              [ordered]@{
+                identity = $_.IdentityReference.Value
+                rights = [string]$_.FileSystemRights
+                type = [string]$_.AccessControlType
+                inherited = [bool]$_.IsInherited
+              }
+            })
+            git_index_sha256_before = $indexBefore
+          } | ConvertTo-Json -Depth 6 |
+            Set-Content -LiteralPath (Join-Path $out 'windows_preflight.json') -Encoding UTF8
+          "output=$out" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Observe local project
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          OBSERVER_PYTHON: ${{ steps.python.outputs.python }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE;$env:GITHUB_WORKSPACE\tools"
+          & $env:OBSERVER_PYTHON -B "$env:GITHUB_WORKSPACE\tools\local_readonly_observer.py" --target "$env:ALINA_LOCAL_TARGET" --github-root "$env:GITHUB_WORKSPACE" --output "$env:OBSERVER_OUTPUT" --max-files 500000 --max-seconds 120 --hash-max-mb 256
+          if ($LASTEXITCODE -ne 0) { throw "READ_ONLY_OBSERVER_EXIT_$LASTEXITCODE" }
+
+      - name: Read existing Python runtime and package versions
+        if: always()
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          OBSERVER_PYTHON: ${{ steps.python.outputs.python }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          if (-not $env:OBSERVER_OUTPUT -or -not $env:OBSERVER_PYTHON) { exit 0 }
+          $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
+          $env:PIP_NO_CACHE_DIR = '1'
+          & $env:OBSERVER_PYTHON -B -c "import json,platform,sys; print(json.dumps({'executable':sys.executable,'version':sys.version,'platform':platform.platform(),'machine':platform.machine()}))" | Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'python_runtime.json') -Encoding UTF8
+          & $env:OBSERVER_PYTHON -B -m pip list --format=json --disable-pip-version-check | Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'python_packages.json') -Encoding UTF8
+      - name: Read process and disk metadata only
+        if: always()
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          if (-not $env:OBSERVER_OUTPUT) { exit 0 }
+          $target = $env:ALINA_LOCAL_TARGET
+          $processes = @(
+            Get-CimInstance Win32_Process |
+              Where-Object {
+                $_.CommandLine -and (
+                  $_.CommandLine -like ('*' + $target + '*') -or
+                  $_.CommandLine -match '(?i)Alina|HyperSmart|collecter_|hyperliquid-smart-wallet-observer'
+                )
+              } |
+              Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CommandLine
+          )
+          $processes | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'processes.json') -Encoding UTF8
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, Root, Used, Free |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'disk.json') -Encoding UTF8
+
+      - name: Verify Git index remained unchanged
+        if: always()
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:OBSERVER_OUTPUT) { exit 0 }
+          $index = Join-Path $env:ALINA_LOCAL_TARGET '.git\index'
+          $beforeFile = Join-Path $env:OBSERVER_OUTPUT 'windows_preflight.json'
+          $before = Get-Content -LiteralPath $beforeFile -Raw -Encoding UTF8 | ConvertFrom-Json
+          $afterHash = $null
+          if (Test-Path -LiteralPath $index -PathType Leaf) {
+            $afterHash = (Get-FileHash -LiteralPath $index -Algorithm SHA256).Hash
+          }
+          [ordered]@{
+            git_index_sha256_before = $before.git_index_sha256_before
+            git_index_sha256_after = $afterHash
+            unchanged = ($before.git_index_sha256_before -eq $afterHash)
+          } | ConvertTo-Json -Depth 3 |
+            Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'git_index_postcondition.json') -Encoding UTF8
+          if ($before.git_index_sha256_before -ne $afterHash) {
+            throw 'READ_ONLY_POSTCONDITION_GIT_INDEX_CHANGED'
+          }
+
+      - name: Upload compact read-only evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: alina-local-readonly-observer-${{ github.run_id }}
+          path: ${{ steps.preflight.outputs.output }}
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
