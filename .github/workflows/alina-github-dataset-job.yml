@@ -200,7 +200,7 @@ jobs:
           MAX_DOWNLOAD_GIB: ${{ steps.job.outputs.max_download_gib }}
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/alina-job-evidence"
+          mkdir -p "$RUNNER_TEMP/alina-job-evidence" "$RUNNER_TEMP/alina-private-debug"
           if [ "$SOURCE_KIND" = "full-cold" ]; then
             python -m hl_observer.ops.dataset_bridge prepare \
               --root "$GITHUB_WORKSPACE" \
@@ -209,7 +209,7 @@ jobs:
               --suite "$SUITE" \
               --max-download-gib "$MAX_DOWNLOAD_GIB" \
               --disk-reserve-gib 1 \
-              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PLAN.json"
+              > "$RUNNER_TEMP/alina-private-debug/DATASET_PLAN.json"
           else
             python -m hl_observer.ops.continuous_vault prepare \
               --root "$GITHUB_WORKSPACE" \
@@ -218,7 +218,7 @@ jobs:
               --suite "$SUITE" \
               --max-download-gib "$MAX_DOWNLOAD_GIB" \
               --disk-reserve-gib 1 \
-              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PLAN.json"
+              > "$RUNNER_TEMP/alina-private-debug/DATASET_PLAN.json"
           fi
 
       - name: Materialize verified dataset
@@ -241,7 +241,7 @@ jobs:
               --max-download-gib "$MAX_DOWNLOAD_GIB" \
               --disk-reserve-gib 1 \
               --heartbeat-seconds 5 \
-              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PREPARE.json"
+              > "$RUNNER_TEMP/alina-private-debug/DATASET_PREPARE.json"
             DATA_ROOT="$(python -m hl_observer.ops.dataset_bridge locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
           else
             python -m hl_observer.ops.continuous_vault prepare \
@@ -252,7 +252,7 @@ jobs:
               --download \
               --max-download-gib "$MAX_DOWNLOAD_GIB" \
               --disk-reserve-gib 1 \
-              | tee "$RUNNER_TEMP/alina-job-evidence/DATASET_PREPARE.json"
+              > "$RUNNER_TEMP/alina-private-debug/DATASET_PREPARE.json"
             DATA_ROOT="$(python -m hl_observer.ops.continuous_vault locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
           fi
           test -d "$DATA_ROOT"
@@ -294,26 +294,43 @@ jobs:
           DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
           ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
         run: |
-          set -u
+          set -euo pipefail
           OUT="$RUNNER_TEMP/alina-job-evidence"
-          mkdir -p "$OUT/reports"
-          if [ -d "$GITHUB_WORKSPACE/runtime/reports" ]; then
-            cp -a "$GITHUB_WORKSPACE/runtime/reports/." "$OUT/reports/project/" || true
-          fi
-          if [ -n "${DATA_ROOT:-}" ] && [ -d "$DATA_ROOT/runtime/reports" ]; then
-            cp -a "$DATA_ROOT/runtime/reports/." "$OUT/reports/dataset/" || true
-          fi
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
           python - "$OUT" <<'PY'
           import json, os, pathlib, sys
           out=pathlib.Path(sys.argv[1])
-          job=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"GITHUB_DATASET_JOB.json").read_text())
+          job_path=pathlib.Path(os.environ["RUNNER_TEMP"])/"GITHUB_DATASET_JOB.json"
+          job=json.loads(job_path.read_text()) if job_path.is_file() else {}
+          root_text=os.getenv("DATA_ROOT") or ""
+          file_count=0
+          byte_count=0
+          if root_text:
+              root=pathlib.Path(root_text)
+              if root.is_dir():
+                  for path in root.rglob("*"):
+                      if path.is_file():
+                          file_count += 1
+                          try:
+                              byte_count += path.stat().st_size
+                          except OSError:
+                              pass
           proof={
-              "schema":"alina.github_dataset_job_result.v1",
+              "schema":"alina.github_dataset_job_result.v2",
               "github_run_id":os.getenv("GITHUB_RUN_ID"),
               "github_sha":os.getenv("GITHUB_SHA"),
-              "job":job,
+              "job_id":job.get("job_id"),
+              "source":job.get("source"),
+              "suite":job.get("suite"),
+              "mode":job.get("mode"),
               "analysis_outcome":os.getenv("ANALYSIS_OUTCOME"),
+              "materialization_completed":bool(root_text),
+              "materialized_file_count":file_count,
+              "materialized_bytes":byte_count,
               "raw_dataset_uploaded":False,
+              "dataset_paths_uploaded":False,
+              "dataset_reports_uploaded":False,
               "private_token_exposed":False,
               "paper_only":True,
               "real_execution":False,
@@ -324,7 +341,7 @@ jobs:
           PY
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
 
-      - name: Upload reports only
+      - name: Upload sanitized proof only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
