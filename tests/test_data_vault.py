@@ -40,6 +40,7 @@ class DataVaultTests(unittest.TestCase):
             previous_index_path=previous,
             snapshot_id=snapshot,
             release_tag=tag,
+            source_label="test-project",
             include_roots=("runtime", "data"),
             extra_exclude_prefixes=(),
             small_pack_raw_limit=small_limit,
@@ -72,6 +73,7 @@ class DataVaultTests(unittest.TestCase):
             index = load_gzip_json(Path(result["file_index"]))
 
             self.assertEqual(summary["changed_files"], 1)
+            self.assertEqual(index["source_label"], "test-project")
             self.assertEqual(summary["secret_skip_count"], 1)
             self.assertIn("runtime/data/bbo.jsonl", index["files"])
             self.assertNotIn("runtime/data/danger.txt", index["files"])
