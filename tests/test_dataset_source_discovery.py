@@ -30,6 +30,7 @@ def test_decouvre_les_copies_archivees_sqlite_et_research_lab(tmp_path: Path) ->
         tmp_path / "runtime" / "data" / "hypersmart_simulation_session.sqlite3-wal",
         tmp_path / "runtime" / "research_lab" / "continuous" / "run-a" / "historique" / "episodes.jsonl",
         tmp_path / "archive" / "old" / "runtime" / "research_lab" / "continuous" / "run-b" / "working_set.jsonl",
+        tmp_path / "runtime" / "data" / "event_intelligence" / "events_r2.jsonl",
     ]
     for path in files:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -42,6 +43,7 @@ def test_decouvre_les_copies_archivees_sqlite_et_research_lab(tmp_path: Path) ->
     assert len(groups["replay"]) == 1
     assert len(groups["sqlite"]) == 2
     assert len(groups["research_lab"]) == 2
+    assert len(groups["event_intelligence"]) == 1
     assert is_dataset_workspace(tmp_path) is True
 
     manifest = write_family_source_manifest(tmp_path)
@@ -51,8 +53,10 @@ def test_decouvre_les_copies_archivees_sqlite_et_research_lab(tmp_path: Path) ->
     assert payload["groups"]["lead_lag"]["file_count"] == 2
     assert payload["groups"]["sqlite"]["file_count"] == 2
     assert payload["groups"]["research_lab"]["file_count"] == 2
+    assert payload["groups"]["event_intelligence"]["file_count"] == 1
     assert len(load_family_source_paths(tmp_path, "copy_vault")) == 2
     assert len(load_family_source_paths(tmp_path, "sqlite")) == 2
+    assert len(load_family_source_paths(tmp_path, "event_intelligence")) == 1
 
 
 def test_un_dossier_normal_n_est_pas_un_workspace_dataset(tmp_path: Path) -> None:
