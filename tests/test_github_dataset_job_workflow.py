@@ -37,7 +37,10 @@ def test_dataset_job_uses_private_token_without_uploading_raw_data() -> None:
     assert "HYPERSMART_DATASET_TOKEN" in text
     assert "raw_dataset_uploaded" in text
     assert '"raw_dataset_uploaded":False' in text
-    assert "data_root" not in text.split("Upload reports only", 1)[1]
+    assert '"dataset_paths_uploaded":False' in text
+    assert '"dataset_reports_uploaded":False' in text
+    assert "cp -a" not in text
+    assert "Upload sanitized proof only" in text
     assert 'echo "ALINA_DATASET_HOME=$RUNNER_TEMP/alina-datasets" >> "$GITHUB_ENV"' in text
 
 
