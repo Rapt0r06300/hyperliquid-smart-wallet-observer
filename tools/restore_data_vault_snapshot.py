@@ -165,6 +165,7 @@ def select_records(
     preset: str,
     contains: tuple[str, ...],
     prefixes: tuple[str, ...],
+    include_archived_deleted: bool = False,
 ) -> dict[str, dict[str, Any]]:
     files = index_payload.get("files")
     if not isinstance(files, dict):
@@ -181,6 +182,8 @@ def select_records(
 
     for path, raw in files.items():
         if not isinstance(raw, dict):
+            continue
+        if raw.get("present_local", True) is False and not include_archived_deleted:
             continue
         relative = str(path).replace("\\", "/")
         lowered = relative.casefold()
@@ -334,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prefix", action="append", default=[])
     parser.add_argument("--max-download-gib", type=float, default=12.0)
     parser.add_argument("--plan-only", action="store_true")
+    parser.add_argument("--include-archived-deleted", action="store_true")
     parser.add_argument("--token-env", default="GITHUB_TOKEN")
     args = parser.parse_args(argv)
 
@@ -352,6 +356,7 @@ def main(argv: list[str] | None = None) -> int:
             preset=args.preset,
             contains=tuple(args.contains),
             prefixes=tuple(args.prefix),
+            include_archived_deleted=bool(args.include_archived_deleted),
         )
         if not records:
             raise RestoreError("selection is empty")
