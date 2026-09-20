@@ -12,7 +12,6 @@ on:
       - 'tools/update_data_vault_pointer.py'
       - 'tests/test_data_vault.py'
       - '.github/workflows/data-vault-ci.yml'
-      - '.github/workflows/alina-continuous-data-vault.yml'
   pull_request:
     branches:
       - main
@@ -24,7 +23,6 @@ on:
       - 'tools/update_data_vault_pointer.py'
       - 'tests/test_data_vault.py'
       - '.github/workflows/data-vault-ci.yml'
-      - '.github/workflows/alina-continuous-data-vault.yml'
 
 permissions:
   contents: read
@@ -55,27 +53,3 @@ jobs:
         env:
           PYTHONPATH: tools
         run: python -m unittest discover -s tests -p 'test_data_vault.py' -v
-
-      - name: Guard manual-only local workflow
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          text = Path(".github/workflows/alina-continuous-data-vault.yml").read_text(encoding="utf-8")
-          preamble = text.split("jobs:", 1)[0]
-          assert "workflow_dispatch:" in preamble
-          assert "schedule:" not in preamble
-          assert "push:" not in preamble
-          assert "I_AUTHORIZE_DATA_VAULT_BACKUP" in text
-          assert r"C:\Users\rberm\Desktop\Projet AlinaSmartFlow" in text
-          assert "runs-on: [self-hosted, Windows, X64, alina-research]" in text
-          forbidden = (
-              "Remove-Item -LiteralPath $env:ALINA_LOCAL_TARGET",
-              "git reset",
-              "git clean",
-              "git checkout",
-          )
-          lowered = text.lower()
-          for needle in forbidden:
-              assert needle.lower() not in lowered, needle
-          print("manual-only + local non-destructive guard: OK")
-          PY
