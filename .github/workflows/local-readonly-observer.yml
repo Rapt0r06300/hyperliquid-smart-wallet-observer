@@ -127,6 +127,19 @@ jobs:
           & $env:OBSERVER_PYTHON -B "$env:GITHUB_WORKSPACE\tools\local_readonly_observer.py" --target "$env:ALINA_LOCAL_TARGET" --github-root "$env:GITHUB_WORKSPACE" --output "$env:OBSERVER_OUTPUT" --max-files 500000 --max-seconds 120 --hash-max-mb 256
           if ($LASTEXITCODE -ne 0) { throw "READ_ONLY_OBSERVER_EXIT_$LASTEXITCODE" }
 
+      - name: Read existing Python runtime and package versions
+        if: always()
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          OBSERVER_PYTHON: ${{ steps.python.outputs.python }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          if (-not $env:OBSERVER_OUTPUT -or -not $env:OBSERVER_PYTHON) { exit 0 }
+          $env:PIP_DISABLE_PIP_VERSION_CHECK = '1'
+          $env:PIP_NO_CACHE_DIR = '1'
+          & $env:OBSERVER_PYTHON -B -c "import json,platform,sys; print(json.dumps({'executable':sys.executable,'version':sys.version,'platform':platform.platform(),'machine':platform.machine()}))" | Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'python_runtime.json') -Encoding UTF8
+          & $env:OBSERVER_PYTHON -B -m pip list --format=json --disable-pip-version-check | Set-Content -LiteralPath (Join-Path $env:OBSERVER_OUTPUT 'python_packages.json') -Encoding UTF8
       - name: Read process and disk metadata only
         if: always()
         shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
