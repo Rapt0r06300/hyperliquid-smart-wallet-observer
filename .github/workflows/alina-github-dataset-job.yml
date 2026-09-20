@@ -292,6 +292,7 @@ jobs:
         shell: bash
         env:
           DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
           ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
         run: |
           set -euo pipefail
@@ -316,24 +317,25 @@ jobs:
                               byte_count += path.stat().st_size
                           except OSError:
                               pass
+          mode=job.get("mode")
+          prepare_outcome=os.getenv("PREPARE_OUTCOME") or ""
+          analysis_outcome=os.getenv("ANALYSIS_OUTCOME") or ""
+          success=prepare_outcome=="success" and (
+              mode=="prepare-only" or analysis_outcome=="success"
+          )
           proof={
-              "schema":"alina.github_dataset_job_result.v2",
-              "github_run_id":os.getenv("GITHUB_RUN_ID"),
-              "github_sha":os.getenv("GITHUB_SHA"),
               "job_id":job.get("job_id"),
               "source":job.get("source"),
               "suite":job.get("suite"),
-              "mode":job.get("mode"),
-              "analysis_outcome":os.getenv("ANALYSIS_OUTCOME"),
-              "materialization_completed":bool(root_text),
-              "materialized_file_count":file_count,
-              "materialized_bytes":byte_count,
+              "mode":mode,
+              "success":success,
+              "file_count":file_count,
+              "total_bytes":byte_count,
+              "paper_only":True,
+              "real_execution":False,
               "raw_dataset_uploaded":False,
               "dataset_paths_uploaded":False,
               "dataset_reports_uploaded":False,
-              "private_token_exposed":False,
-              "paper_only":True,
-              "real_execution":False,
           }
           (out/"GITHUB_DATASET_JOB_RESULT.json").write_text(
               json.dumps(proof,indent=2,sort_keys=True)+"\n",encoding="utf-8"
