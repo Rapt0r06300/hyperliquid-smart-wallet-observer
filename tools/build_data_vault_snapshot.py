@@ -274,19 +274,29 @@ def build_snapshot(
     ):
         candidate_files += 1
         seen.add(rel)
+        prior = previous.get(rel)
+
         try:
             stat = source.stat()
         except OSError:
             read_errors.append(rel)
+            if prior:
+                carried = dict(prior)
+                carried["present_local"] = True
+                carried["backup_stale"] = True
+                carried["backup_deferred_reason"] = "stat_error"
+                current_index[rel] = carried
             continue
         candidate_bytes += int(stat.st_size)
 
-        prior = previous.get(rel)
         if prior and _same_metadata(prior, stat.st_size, stat.st_mtime_ns):
             carried = dict(prior)
             carried["present_local"] = True
             carried["last_seen_snapshot"] = snapshot_id
             carried.pop("deleted_at_snapshot", None)
+            carried.pop("excluded_secret_at_snapshot", None)
+            carried.pop("backup_stale", None)
+            carried.pop("backup_deferred_reason", None)
             current_index[rel] = carried
             unchanged_fast += 1
             continue
@@ -295,6 +305,12 @@ def build_snapshot(
         copied = stable_copy(source, destination, rel)
         if copied is None:
             unstable.append(rel)
+            if prior:
+                carried = dict(prior)
+                carried["present_local"] = True
+                carried["backup_stale"] = True
+                carried["backup_deferred_reason"] = "unstable_during_copy"
+                current_index[rel] = carried
             continue
 
         secret_pattern = scan_text_for_secret(copied.staged_path)
@@ -306,6 +322,13 @@ def build_snapshot(
                     "reason": "secret_pattern",
                 }
             )
+            if prior:
+                carried = dict(prior)
+                carried["present_local"] = False
+                carried["excluded_secret_at_snapshot"] = snapshot_id
+                carried.pop("backup_stale", None)
+                carried.pop("backup_deferred_reason", None)
+                current_index[rel] = carried
             continue
 
         if prior and str(prior.get("sha256") or "").lower() == copied.sha256.lower():
@@ -313,6 +336,9 @@ def build_snapshot(
             carried["present_local"] = True
             carried["last_seen_snapshot"] = snapshot_id
             carried.pop("deleted_at_snapshot", None)
+            carried.pop("excluded_secret_at_snapshot", None)
+            carried.pop("backup_stale", None)
+            carried.pop("backup_deferred_reason", None)
             carried["size"] = copied.size
             carried["mtime_ns"] = copied.mtime_ns
             current_index[rel] = carried
@@ -366,6 +392,10 @@ def build_snapshot(
             1 for record in current_index.values()
             if record.get("present_local", True) is False
         ),
+        "stale_prior_file_count": sum(
+            1 for record in current_index.values()
+            if record.get("backup_stale") is True
+        ),
         "raw_bytes": sum(int(record.get("size") or 0) for record in current_index.values()),
         "files": dict(sorted(current_index.items())),
     }
@@ -389,6 +419,10 @@ def build_snapshot(
         "archived_deleted_files": sum(
             1 for record in current_index.values()
             if record.get("present_local", True) is False
+        ),
+        "stale_prior_files": sum(
+            1 for record in current_index.values()
+            if record.get("backup_stale") is True
         ),
         "changed_files": len(changed),
         "changed_bytes": changed_bytes,
@@ -418,6 +452,7 @@ def build_snapshot(
         "current_index_files": len(current_index),
         "present_local_files": snapshot_payload["present_local_files"],
         "archived_deleted_files": snapshot_payload["archived_deleted_files"],
+        "stale_prior_files": snapshot_payload["stale_prior_files"],
         "changed_files": len(changed),
         "changed_bytes": changed_bytes,
         "deleted_count": len(deleted),
