@@ -243,3 +243,15 @@ def test_requires_fresh_current_bbo_at_decision_time() -> None:
     )
     assert result.status == "UNMEASURABLE"
     assert result.reason == "HYPERLIQUID_BASELINE_OR_CURRENT_MISSING"
+
+
+def test_partial_coverage_is_fail_closed() -> None:
+    result = evaluate_event_lead_lag_candidate(
+        _event(coverage_state="partial"),
+        _upward_lag_tape(),
+        coin="BTC",
+        decision_ts_ms=1_200,
+        cost_floor_bps=1.0,
+    )
+    assert result.status == "REJECTED"
+    assert result.reason == "SOURCE_NOT_USABLE"
