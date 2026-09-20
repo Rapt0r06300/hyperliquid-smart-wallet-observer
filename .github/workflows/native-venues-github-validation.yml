@@ -1,0 +1,102 @@
+name: native-venues-github-validation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'tools/collecter_native_venues.py'
+      - 'src/hl_observer/ops/collecteur_registry.py'
+      - 'tests/test_native_venues_collector.py'
+      - 'tests/test_native_bybit_okx_venues.py'
+      - '.github/workflows/native-venues-github-validation.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tools/collecter_native_venues.py'
+      - 'src/hl_observer/ops/collecteur_registry.py'
+      - 'tests/test_native_venues_collector.py'
+      - 'tests/test_native_bybit_okx_venues.py'
+      - '.github/workflows/native-venues-github-validation.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_EXECUTION_ENABLED: 'false'
+      HYPERSMART_ENABLE_REAL_ORDERS: '0'
+      ENABLE_REAL_ORDERS: '0'
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Install project and pytest
+        run: |
+          python -m pip install --disable-pip-version-check -e .
+          python -m pip install --disable-pip-version-check pytest
+
+      - name: Targeted unit tests
+        env:
+          PYTHONPATH: src:tools:.
+        run: |
+          python -m pytest -q             tests/test_native_venues_collector.py             tests/test_native_bybit_okx_venues.py             --tb=line
+
+      - name: Bounded public-network smoke (diagnostic only)
+        continue-on-error: true
+        env:
+          PYTHONPATH: src:tools:.
+        run: |
+          ROOT="$RUNNER_TEMP/native-venues-runtime-$GITHUB_RUN_ID"
+          mkdir -p "$ROOT"
+          python tools/collecter_native_venues.py             --root "$ROOT"             --max-symbols 5             --duration-s 20
+
+          python - "$ROOT" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          hb_path = root / "runtime/data/native_venues_heartbeat.json"
+          data_path = root / "runtime/data/market_ticks/native_venues_market_ticks.current.jsonl"
+
+          if not hb_path.is_file():
+              raise SystemExit("NATIVE_HEARTBEAT_MISSING")
+          hb = json.loads(hb_path.read_text(encoding="utf-8"))
+
+          if int(hb.get("records_written") or 0) <= 0:
+              raise SystemExit("NATIVE_RECORDS_EMPTY")
+
+          last = hb.get("last_event_ms") or {}
+          missing = [v for v in ("bybit", "okx", "gate", "bitget") if int(last.get(v) or 0) <= 0]
+          if missing:
+              print("GITHUB_HOSTED_EGRESS_MISSING:" + ",".join(missing))
+
+          if not data_path.is_file() or data_path.stat().st_size <= 0:
+              raise SystemExit("NATIVE_DATASET_EMPTY")
+
+          print(json.dumps({
+              "records_written": hb["records_written"],
+              "last_event_ms": last,
+              "dataset_bytes": data_path.stat().st_size,
+              "read_only": hb.get("read_only"),
+              "real_execution": hb.get("real_execution"),
+          }, indent=2))
+          PY
