@@ -31,7 +31,7 @@ Le premier mode implémenté couvre :
 - copie dans l'artefact des **fichiers texte modifiés/non suivis uniquement**, avec redaction de secrets évidents ;
 - audit statique des sources : TODO/FIXME/PLACEHOLDER, `pass`, `NotImplementedError`, erreurs de syntaxe Python, chemins utilisateur codés en dur, doublons exacts et symboles fortement répétés ;
 - inventaire des datasets, replays, résultats, rapports et logs par métadonnées ;
-- détection des exécutables Python locaux sans les exécuter ;
+- détection des exécutables Python locaux + lecture de la version Python et de la liste des paquets installés, sans installation ;
 - lecture des ACL Windows du dossier ;
 - lecture des processus Alina/HyperSmart correspondants ;
 - lecture de l'espace disque ;
@@ -60,6 +60,8 @@ Dans le dossier observé, le workflow ne doit jamais exécuter :
 Les éventuels `git fetch` servent uniquement au **checkout GitHub séparé du runner** sous `C:\actions-runner\_work\...`, jamais au dossier local Alina.
 
 Les fichiers de preuve sont écrits sous `RUNNER_TEMP`, donc hors du dossier observé.
+
+Le Python déjà présent peut être exécuté avec `-B` pour lancer l’observateur depuis le checkout GitHub et lire `pip list`; aucun module du projet local n’est importé et aucune dépendance n’est installée.
 
 ## Données et logs
 
