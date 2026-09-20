@@ -95,21 +95,6 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache/CodeQL || true
           df -h /
 
-      - name: Require private dataset token
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${HYPERSMART_DATASET_TOKEN:-}" ]; then
-            echo "ALINA_DATASET_READ_TOKEN is missing."
-            exit 2
-          fi
-
-      - name: Install exact Alina analysis package
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --disable-pip-version-check -e .
-
       - name: Validate and normalize control
         id: job
         shell: bash
@@ -171,6 +156,21 @@ jobs:
               print(f"{k}={o[k]}")
           PY
           )
+
+      - name: Require private dataset token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${HYPERSMART_DATASET_TOKEN:-}" ]; then
+            echo "ALINA_DATASET_READ_TOKEN is missing."
+            exit 2
+          fi
+
+      - name: Install exact Alina analysis package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e .
 
       - name: Enforce paper/read-only guards
         shell: bash
@@ -325,6 +325,11 @@ jobs:
               "suite":job.get("suite"),
               "mode":job.get("mode"),
               "analysis_outcome":os.getenv("ANALYSIS_OUTCOME"),
+              "access_preflight":(
+                  "ready"
+                  if os.getenv("HYPERSMART_DATASET_TOKEN")
+                  else "blocked_missing_dataset_token"
+              ),
               "materialization_completed":bool(root_text),
               "materialized_file_count":file_count,
               "materialized_bytes":byte_count,
@@ -352,7 +357,10 @@ jobs:
           compression-level: 6
 
       - name: Fail closed if requested analysis failed
-        if: always() && steps.job.outputs.mode != 'prepare-only'
+        if: >-
+          always() &&
+          steps.analysis.outcome != 'skipped' &&
+          steps.job.outputs.mode != 'prepare-only'
         shell: bash
         env:
           ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
