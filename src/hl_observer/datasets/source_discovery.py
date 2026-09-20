@@ -21,6 +21,7 @@ COPY_EXACT_NAMES = {
 }
 CROSS_EXACT_NAMES = {"carnet_venues.jsonl"}
 REPLAY_EXACT_NAMES = {"candidates.jsonl", "marks.jsonl"}
+EVENT_INTELLIGENCE_EXACT_NAMES = {"events_r2.jsonl"}
 
 
 def is_dataset_workspace(root: str | Path) -> bool:
@@ -100,6 +101,12 @@ def _is_research_lab_source(path: Path) -> bool:
     return False
 
 
+def _is_event_intelligence_source(path: Path) -> bool:
+    name = path.name.casefold()
+    parts = {part.casefold() for part in path.parts}
+    return name in EVENT_INTELLIGENCE_EXACT_NAMES and "event_intelligence" in parts
+
+
 def _entry(root: Path, path: Path) -> dict[str, object]:
     try:
         size = path.stat().st_size
@@ -119,6 +126,7 @@ def discover_family_sources(root: str | Path) -> dict[str, list[Path]]:
         "logs": [],
         "sqlite": [],
         "research_lab": [],
+        "event_intelligence": [],
     }
     for path in _iter_real_files(resolved):
         name = path.name.casefold()
@@ -138,6 +146,8 @@ def discover_family_sources(root: str | Path) -> dict[str, list[Path]]:
             groups["sqlite"].append(path)
         if _is_research_lab_source(path):
             groups["research_lab"].append(path)
+        if _is_event_intelligence_source(path):
+            groups["event_intelligence"].append(path)
     for key, values in groups.items():
         groups[key] = sorted(set(values), key=lambda item: item.as_posix().casefold())
     return groups

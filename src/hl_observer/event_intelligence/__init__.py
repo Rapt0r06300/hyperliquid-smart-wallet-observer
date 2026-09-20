@@ -4,6 +4,7 @@ Network adapters are intentionally separate from pure contracts. All exposed
 research objects are read-only and no order path exists in this package.
 """
 
+from .archive import ArchiveAppendResult, EventArchiveCorruptError, EventIntelligenceArchive
 from .external_event import (
     ExternalEvent,
     ExternalEventDecision,
@@ -17,6 +18,7 @@ from .features import (
     compute_news_flow_features,
     compute_news_velocity_zscore,
 )
+from .health import evaluate_worldmonitor_health
 from .price_discovery import EventMarketReaction, measure_event_price_discovery
 from .worldmonitor import (
     PredictionShiftTracker,
@@ -29,6 +31,9 @@ from .worldmonitor import (
 )
 
 __all__ = [
+    "ArchiveAppendResult",
+    "EventArchiveCorruptError",
+    "EventIntelligenceArchive",
     "EventMarketReaction",
     "ExternalEvent",
     "ExternalEventDecision",
@@ -44,6 +49,7 @@ __all__ = [
     "WorldMonitorReadOnlyClient",
     "compute_news_flow_features",
     "compute_news_velocity_zscore",
+    "evaluate_worldmonitor_health",
     "measure_event_price_discovery",
     "normalize_cross_source_signals",
     "normalize_news_digest",
