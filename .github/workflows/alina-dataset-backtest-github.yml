@@ -3,6 +3,14 @@ name: alina-dataset-backtest-github
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: "Dataset source"
+        required: true
+        default: "full-cold"
+        type: choice
+        options:
+          - full-cold
+          - continuous
       suite:
         description: "Dataset suite to materialize and analyze"
         required: true
@@ -129,45 +137,72 @@ jobs:
         id: plan
         shell: bash
         env:
+          SOURCE_KIND: ${{ inputs.source }}
           SUITE: ${{ inputs.suite }}
           MAX_DOWNLOAD_GIB: ${{ inputs.max_download_gib }}
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/src:$GITHUB_WORKSPACE/tools"
-          python -m hl_observer.ops.dataset_bridge prepare \
-            --root "$GITHUB_WORKSPACE" \
-            --repo Rapt0r06300/hypersmart-datasets \
-            --release-id 371149058 \
-            --suite "$SUITE" \
-            --max-download-gib "$MAX_DOWNLOAD_GIB" \
-            --disk-reserve-gib 1
+
+          if [ "$SOURCE_KIND" = "full-cold" ]; then
+            python -m hl_observer.ops.dataset_bridge prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --release-id 371149058 \
+              --suite "$SUITE" \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1
+          else
+            python -m hl_observer.ops.continuous_vault prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --ref main \
+              --suite "$SUITE" \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1
+          fi
 
       - name: Download and reconstruct verified dataset subset
         id: prepare
         shell: bash
         env:
+          SOURCE_KIND: ${{ inputs.source }}
           SUITE: ${{ inputs.suite }}
           MAX_DOWNLOAD_GIB: ${{ inputs.max_download_gib }}
         run: |
           set -euo pipefail
           export PYTHONPATH="$GITHUB_WORKSPACE/src:$GITHUB_WORKSPACE/tools"
-          python -m hl_observer.ops.dataset_bridge prepare \
-            --root "$GITHUB_WORKSPACE" \
-            --repo Rapt0r06300/hypersmart-datasets \
-            --release-id 371149058 \
-            --suite "$SUITE" \
-            --download \
-            --stream-assets \
-            --max-download-gib "$MAX_DOWNLOAD_GIB" \
-            --disk-reserve-gib 1 \
-            --heartbeat-seconds 5
 
-          DATA_ROOT="$(python -m hl_observer.ops.dataset_bridge locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
+          if [ "$SOURCE_KIND" = "full-cold" ]; then
+            python -m hl_observer.ops.dataset_bridge prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --release-id 371149058 \
+              --suite "$SUITE" \
+              --download \
+              --stream-assets \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1 \
+              --heartbeat-seconds 5
+            DATA_ROOT="$(python -m hl_observer.ops.dataset_bridge locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
+          else
+            python -m hl_observer.ops.continuous_vault prepare \
+              --root "$GITHUB_WORKSPACE" \
+              --repo Rapt0r06300/hypersmart-datasets \
+              --ref main \
+              --suite "$SUITE" \
+              --download \
+              --max-download-gib "$MAX_DOWNLOAD_GIB" \
+              --disk-reserve-gib 1
+            DATA_ROOT="$(python -m hl_observer.ops.continuous_vault locate --root "$GITHUB_WORKSPACE" --suite "$SUITE")"
+          fi
+
           if [ -z "$DATA_ROOT" ] || [ ! -d "$DATA_ROOT" ]; then
             echo "Materialized dataset workspace missing: $DATA_ROOT"
             exit 3
           fi
           echo "data_root=$DATA_ROOT" >> "$GITHUB_OUTPUT"
+          echo "source_kind=$SOURCE_KIND" >> "$GITHUB_OUTPUT"
           du -sh "$DATA_ROOT" || true
           df -h /
 
@@ -228,6 +263,7 @@ jobs:
         if: always()
         shell: bash
         env:
+          SOURCE_KIND: ${{ inputs.source }}
           SUITE: ${{ inputs.suite }}
           ANALYSIS_MODE: ${{ inputs.analysis_mode }}
           DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
@@ -236,14 +272,15 @@ jobs:
           {
             echo "# Alina dataset backtest"
             echo
-            echo "- Suite: \`$SUITE\`"
-            echo "- Analysis mode: \`$ANALYSIS_MODE\`"
-            echo "- Analysis outcome: \`$ANALYSIS_OUTCOME\`"
-            echo "- Paper/read-only: **true**"
-            echo "- Real execution: **false**"
-            echo "- Live collection: **false**"
+            echo "- Source: $SOURCE_KIND"
+            echo "- Suite: $SUITE"
+            echo "- Analysis mode: $ANALYSIS_MODE"
+            echo "- Analysis outcome: $ANALYSIS_OUTCOME"
+            echo "- Paper/read-only: true"
+            echo "- Real execution: false"
+            echo "- Live collection: false"
             if [ -n "${DATA_ROOT:-}" ] && [ -d "$DATA_ROOT" ]; then
-              echo "- Workspace bytes: \`$(du -sb "$DATA_ROOT" | cut -f1)\`"
+              echo "- Workspace bytes: $(du -sb "$DATA_ROOT" | cut -f1)"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -276,12 +313,12 @@ jobs:
 
           {
             echo "{"
-            echo "  \"schema\": \"alina.github_hosted_dataset_backtest.v1\","
-            echo "  \"github_run_id\": \"${GITHUB_RUN_ID}\","
-            echo "  \"github_sha\": \"${GITHUB_SHA}\","
-            echo "  \"paper_only\": true,"
-            echo "  \"real_execution\": false,"
-            echo "  \"raw_dataset_uploaded\": false"
+            echo "  \\"schema\\": \\"alina.github_hosted_dataset_backtest.v1\\","
+            echo "  \\"github_run_id\\": \\"${GITHUB_RUN_ID}\\","
+            echo "  \\"github_sha\\": \\"${GITHUB_SHA}\\","
+            echo "  \\"paper_only\\": true,"
+            echo "  \\"real_execution\\": false,"
+            echo "  \\"raw_dataset_uploaded\\": false"
             echo "}"
           } > "$BUNDLE/GITHUB_HOSTED_RUN.json"
 
@@ -291,7 +328,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: alina-dataset-backtest-${{ inputs.suite }}-${{ github.run_id }}
+          name: alina-dataset-backtest-${{ inputs.source }}-${{ inputs.suite }}-${{ github.run_id }}
           path: ${{ steps.bundle.outputs.artifact_dir }}
           if-no-files-found: error
           retention-days: 30
