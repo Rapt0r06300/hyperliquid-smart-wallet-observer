@@ -59,3 +59,12 @@ def test_dataset_job_enforces_paper_read_only_and_streaming() -> None:
     )
     for needle in required:
         assert needle in text
+
+
+def test_dataset_job_validates_control_before_private_token_gate() -> None:
+    text = _text()
+    validate = text.index("Validate and normalize control")
+    token = text.index("Require private dataset token")
+    assert validate < token
+    assert "blocked_missing_dataset_token" in text
+    assert "steps.analysis.outcome != 'skipped'" in text
