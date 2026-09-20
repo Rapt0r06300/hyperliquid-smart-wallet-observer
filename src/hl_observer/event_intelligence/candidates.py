@@ -33,6 +33,7 @@ class EventLeadLagConfig:
     min_news_credibility: float = 40.0
     min_prediction_delta_pp: float = 5.0
     min_cross_source_severity: float = 0.50
+    min_event_confidence: float = 0.50
     min_corroboration_count: int = 1
     min_confirming_venues: int = 1
 
@@ -49,6 +50,8 @@ class EventLeadLagConfig:
             raise ValueError("age limits must be > 0")
         if self.min_prediction_delta_pp <= 0:
             raise ValueError("min_prediction_delta_pp must be > 0")
+        if not 0.0 <= float(self.min_event_confidence) <= 1.0:
+            raise ValueError("min_event_confidence must be in [0, 1]")
         if self.min_corroboration_count < 1 or self.min_confirming_venues < 1:
             raise ValueError("minimum counts must be >= 1")
 
@@ -321,6 +324,11 @@ def _event_quality_reason(
     row: WorldMonitorEvent,
     config: EventLeadLagConfig,
 ) -> str | None:
+    if (
+        float(row.event.classification_confidence)
+        < float(config.min_event_confidence)
+    ):
+        return "EVENT_CONFIDENCE_TOO_LOW"
     if row.event.corroboration_count < int(config.min_corroboration_count):
         return "INSUFFICIENT_CORROBORATION"
 
