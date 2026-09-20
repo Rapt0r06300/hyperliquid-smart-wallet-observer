@@ -230,6 +230,7 @@ def build_snapshot(
     previous_index_path: Path | None,
     snapshot_id: str,
     release_tag: str,
+    source_label: str,
     include_roots: tuple[str, ...],
     extra_exclude_prefixes: tuple[str, ...],
     small_pack_raw_limit: int,
@@ -355,7 +356,7 @@ def build_snapshot(
         "generated_at_utc": utc_now(),
         "snapshot_id": snapshot_id,
         "latest_release_tag": release_tag,
-        "source_label": "alina-smartflow-local",
+        "source_label": source_label,
         "file_count": len(current_index),
         "present_local_file_count": sum(
             1 for record in current_index.values()
@@ -376,7 +377,7 @@ def build_snapshot(
         "snapshot_id": snapshot_id,
         "release_tag": release_tag,
         "created_at_utc": utc_now(),
-        "source_label": "alina-smartflow-local",
+        "source_label": source_label,
         "include_roots": list(include_roots),
         "candidate_files": candidate_files,
         "candidate_bytes": candidate_bytes,
@@ -498,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--previous-index", type=Path, default=None)
     parser.add_argument("--snapshot-id", default="")
     parser.add_argument("--release-tag", default="")
+    parser.add_argument("--source-label", default="alina-project")
     parser.add_argument("--include-root", action="append", default=[])
     parser.add_argument("--exclude-prefix", action="append", default=[])
     parser.add_argument(
@@ -522,6 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         previous_index_path=args.previous_index,
         snapshot_id=snapshot_id,
         release_tag=release_tag,
+        source_label=str(args.source_label or 'alina-project'),
         include_roots=include_roots,
         extra_exclude_prefixes=tuple(args.exclude_prefix),
         small_pack_raw_limit=max(64, args.small_pack_mib) * 1024 * 1024,
