@@ -1,11 +1,7 @@
-name: collector-smoke-readonly-20260920
+name: collector-smoke-readonly-20260920-manual
 
 on:
-  push:
-    branches:
-      - smoke/collector-20260920
-    paths:
-      - '.github/workflows/collector-smoke-readonly-20260920.yml'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
