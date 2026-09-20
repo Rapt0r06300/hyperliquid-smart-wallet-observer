@@ -352,7 +352,10 @@ jobs:
           compression-level: 6
 
       - name: Fail closed if requested analysis failed
-        if: always() && steps.job.outputs.mode != 'prepare-only'
+        if: >-
+          always() &&
+          steps.job.outputs.mode != '' &&
+          steps.job.outputs.mode != 'prepare-only'
         shell: bash
         env:
           ANALYSIS_OUTCOME: ${{ steps.analysis.outcome }}
