@@ -59,3 +59,39 @@ def test_dataset_job_enforces_paper_read_only_and_streaming() -> None:
     )
     for needle in required:
         assert needle in text
+
+
+def test_dataset_job_public_evidence_is_exact_allowlist() -> None:
+    text = _text()
+    evidence = text.split("- name: Build public-safe evidence", 1)[1].split(
+        "- name: Upload sanitized proof only", 1
+    )[0]
+    required = (
+        '"job_id":job.get("job_id")',
+        '"source":job.get("source")',
+        '"suite":job.get("suite")',
+        '"mode":mode',
+        '"success":success',
+        '"file_count":file_count',
+        '"total_bytes":byte_count',
+        '"paper_only":True',
+        '"real_execution":False',
+        '"raw_dataset_uploaded":False',
+        '"dataset_paths_uploaded":False',
+        '"dataset_reports_uploaded":False',
+    )
+    for needle in required:
+        assert needle in evidence
+
+    forbidden = (
+        '"schema"',
+        '"github_run_id"',
+        '"github_sha"',
+        '"analysis_outcome"',
+        '"materialization_completed"',
+        '"materialized_file_count"',
+        '"materialized_bytes"',
+        '"private_token_exposed"',
+    )
+    for needle in forbidden:
+        assert needle not in evidence
