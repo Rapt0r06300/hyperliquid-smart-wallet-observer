@@ -246,16 +246,53 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Build compact public-safe report bundle
+        if: always()
+        id: bundle
+        shell: bash
+        env:
+          DATA_ROOT: ${{ steps.prepare.outputs.data_root }}
+        run: |
+          set -u
+          BUNDLE="$RUNNER_TEMP/alina-backtest-report-${GITHUB_RUN_ID}"
+          rm -rf "$BUNDLE"
+          mkdir -p "$BUNDLE"
+
+          if [ -d "$GITHUB_WORKSPACE/runtime/reports" ]; then
+            mkdir -p "$BUNDLE/project_runtime_reports"
+            cp -a "$GITHUB_WORKSPACE/runtime/reports/." "$BUNDLE/project_runtime_reports/" || true
+          fi
+
+          if compgen -G "$GITHUB_WORKSPACE/docs/research/datasets/DERNIER_REPLAY_DATASETS.*" > /dev/null; then
+            mkdir -p "$BUNDLE/compact_verdict"
+            cp "$GITHUB_WORKSPACE"/docs/research/datasets/DERNIER_REPLAY_DATASETS.* "$BUNDLE/compact_verdict/" || true
+          fi
+
+          if [ -n "${DATA_ROOT:-}" ] && [ -d "$DATA_ROOT/runtime/reports" ]; then
+            mkdir -p "$BUNDLE/dataset_runtime_reports"
+            cp -a "$DATA_ROOT/runtime/reports/." "$BUNDLE/dataset_runtime_reports/" || true
+          fi
+
+          {
+            echo "{"
+            echo "  \"schema\": \"alina.github_hosted_dataset_backtest.v1\","
+            echo "  \"github_run_id\": \"${GITHUB_RUN_ID}\","
+            echo "  \"github_sha\": \"${GITHUB_SHA}\","
+            echo "  \"paper_only\": true,"
+            echo "  \"real_execution\": false,"
+            echo "  \"raw_dataset_uploaded\": false"
+            echo "}"
+          } > "$BUNDLE/GITHUB_HOSTED_RUN.json"
+
+          echo "artifact_dir=$BUNDLE" >> "$GITHUB_OUTPUT"
+
       - name: Upload reports only
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: alina-dataset-backtest-${{ inputs.suite }}-${{ github.run_id }}
-          path: |
-            runtime/reports/**
-            docs/research/datasets/DERNIER_REPLAY_DATASETS.*
-            ${{ steps.prepare.outputs.data_root }}/runtime/reports/**
-          if-no-files-found: warn
+          path: ${{ steps.bundle.outputs.artifact_dir }}
+          if-no-files-found: error
           retention-days: 30
           compression-level: 6
 
