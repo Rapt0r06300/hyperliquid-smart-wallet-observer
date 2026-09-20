@@ -34,7 +34,7 @@ def test_load_continuous_pointer_decodes_private_contents(monkeypatch) -> None:
     }
 
     monkeypatch.setattr(
-        continuous_vault,
+        continuous_vault_bridge,
         "get_json",
         lambda path: _contents_payload(pointer),
     )
@@ -56,7 +56,7 @@ def test_load_continuous_pointer_rejects_wrong_repository(monkeypatch) -> None:
         },
     }
     monkeypatch.setattr(
-        continuous_vault,
+        continuous_vault_bridge,
         "get_json",
         lambda path: _contents_payload(pointer),
     )
@@ -65,7 +65,7 @@ def test_load_continuous_pointer_rejects_wrong_repository(monkeypatch) -> None:
         continuous_vault_bridge.load_continuous_pointer()
 
 
-def test_iter_continuous_records_keeps_archived_deleted_by_default() -> None:
+def test_iter_continuous_records_excludes_archived_and_stale_by_default() -> None:
     payload = {
         "schema": continuous_vault_bridge.INDEX_SCHEMA,
         "files": {
@@ -86,25 +86,52 @@ def test_iter_continuous_records_keeps_archived_deleted_by_default() -> None:
                 "size": 20,
                 "sha256": "2" * 64,
             },
+            "runtime/data/stale.jsonl": {
+                "present_local": True,
+                "backup_stale": True,
+                "release_tag": "tag-stale",
+                "storage": "zip_entry",
+                "asset": "stale.zip",
+                "size": 30,
+                "sha256": "3" * 64,
+            },
         },
     }
 
-    all_rows = list(continuous_vault_bridge.iter_continuous_records(payload))
     current_rows = list(
-        continuous_vault_bridge.iter_continuous_records(payload, present_only=True)
+        continuous_vault_bridge.iter_continuous_records(payload)
+    )
+    historical_rows = list(
+        continuous_vault_bridge.iter_continuous_records(
+            payload,
+            include_archived_deleted=True,
+        )
+    )
+    all_rows = list(
+        continuous_vault_bridge.iter_continuous_records(
+            payload,
+            include_archived_deleted=True,
+            include_stale_prior=True,
+        )
     )
 
+    assert [row.relative_path for row in current_rows] == [
+        "runtime/data/current.jsonl"
+    ]
+    assert {row.relative_path for row in historical_rows} == {
+        "runtime/data/current.jsonl",
+        "runtime/data/deleted.jsonl",
+    }
     assert {row.relative_path for row in all_rows} == {
         "runtime/data/current.jsonl",
         "runtime/data/deleted.jsonl",
+        "runtime/data/stale.jsonl",
     }
     assert {row.release_tag for row in all_rows} == {
         "tag-current",
         "tag-old",
+        "tag-stale",
     }
-    assert [row.relative_path for row in current_rows] == [
-        "runtime/data/current.jsonl"
-    ]
 
 
 def test_continuous_workspace_pointer_roundtrip(tmp_path: Path, monkeypatch) -> None:
