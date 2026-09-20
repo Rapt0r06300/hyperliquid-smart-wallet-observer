@@ -5,13 +5,13 @@ on:
     branches: ["**"]
     paths:
       - "src/hl_observer/event_intelligence/**"
-      - "tests/test_event_intelligence_foundation.py"
+      - "tests/test_event_intelligence_*.py"
       - ".github/workflows/event-intelligence-ci.yml"
   pull_request:
     branches: [main]
     paths:
       - "src/hl_observer/event_intelligence/**"
-      - "tests/test_event_intelligence_foundation.py"
+      - "tests/test_event_intelligence_*.py"
       - ".github/workflows/event-intelligence-ci.yml"
 
 permissions:
@@ -25,7 +25,7 @@ env:
   REAL_MAINNET_TRADING: "false"
 
 jobs:
-  causal-event-foundation:
+  event-intelligence-readonly:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -37,5 +37,5 @@ jobs:
           python-version: "3.11"
       - name: Install package and test dependencies
         run: python -m pip install -e ".[dev]"
-      - name: Event Intelligence causal tests
-        run: python -m pytest -q tests/test_event_intelligence_foundation.py
+      - name: Event Intelligence read-only tests
+        run: python -m pytest -q tests/test_event_intelligence_*.py
