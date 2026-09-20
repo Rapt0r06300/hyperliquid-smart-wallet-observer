@@ -31,7 +31,7 @@ jobs:
       - name: Explicit authorization gate
         shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
-          AUTHORIZATION_PHRASE: \${{ inputs.authorization_phrase }}
+          AUTHORIZATION_PHRASE: ${{ inputs.authorization_phrase }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:AUTHORIZATION_PHRASE -cne 'I_AUTHORIZE_READ_ONLY_OBSERVER') {
@@ -119,8 +119,8 @@ jobs:
       - name: Observe local project
         shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
-          OBSERVER_PYTHON: \${{ steps.python.outputs.python }}
-          OBSERVER_OUTPUT: \${{ steps.preflight.outputs.output }}
+          OBSERVER_PYTHON: ${{ steps.python.outputs.python }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PYTHONPATH = "$env:GITHUB_WORKSPACE;$env:GITHUB_WORKSPACE\tools"
@@ -131,7 +131,7 @@ jobs:
         if: always()
         shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
-          OBSERVER_OUTPUT: \${{ steps.preflight.outputs.output }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
         run: |
           $ErrorActionPreference = 'SilentlyContinue'
           if (-not $env:OBSERVER_OUTPUT) { exit 0 }
@@ -157,7 +157,7 @@ jobs:
         if: always()
         shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
-          OBSERVER_OUTPUT: \${{ steps.preflight.outputs.output }}
+          OBSERVER_OUTPUT: ${{ steps.preflight.outputs.output }}
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:OBSERVER_OUTPUT) { exit 0 }
@@ -182,8 +182,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: alina-local-readonly-observer-\${{ github.run_id }}
-          path: \${{ steps.preflight.outputs.output }}
+          name: alina-local-readonly-observer-${{ github.run_id }}
+          path: ${{ steps.preflight.outputs.output }}
           if-no-files-found: error
           retention-days: 14
           compression-level: 6
