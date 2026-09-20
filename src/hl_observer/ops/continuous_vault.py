@@ -33,7 +33,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--ref", default="main")
     parser.add_argument("--suite", choices=suite_names(), default=None)
     parser.add_argument("--download", action="store_true")
-    parser.add_argument("--present-only", action="store_true")
+    parser.add_argument(
+        "--include-archived-deleted",
+        action="store_true",
+        help="Inclut les fichiers conservés dans l'archive mais supprimés de la source courante.",
+    )
+    parser.add_argument(
+        "--include-stale-prior",
+        action="store_true",
+        help="Inclut les dernières copies connues de fichiers devenus instables pendant le snapshot.",
+    )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--max-download-gib", type=float, default=20.0)
     parser.add_argument("--disk-reserve-gib", type=float, default=1.0)
@@ -83,7 +92,8 @@ def main(argv: list[str] | None = None) -> int:
             suite=args.suite,
             repository=args.repo,
             ref=args.ref,
-            present_only=args.present_only,
+            include_archived_deleted=args.include_archived_deleted,
+            include_stale_prior=args.include_stale_prior,
             download=args.download,
             force=args.force,
             max_download_gib=args.max_download_gib,
