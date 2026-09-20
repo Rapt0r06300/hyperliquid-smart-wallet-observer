@@ -126,7 +126,7 @@ def environment_inventory(target: Path) -> dict[str, Any]:
     return {
         "interpreters": interpreters,
         "dependency_files": dependency_files,
-        "local_python_executed": False,
+        "target_project_modules_imported": False,
     }
 
 
@@ -188,7 +188,7 @@ def render_report(
         "## Local Python metadata",
         "",
         f"Interpreter executables found: {len(environment.get('interpreters') or [])}",
-        "The local Python interpreter is not executed by this audit.",
+        "The selected Python runs the observer from the GitHub workspace; target project modules are not imported.",
         "",
         "## Evidence files",
         "",
