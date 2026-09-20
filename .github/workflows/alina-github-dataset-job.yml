@@ -24,7 +24,6 @@ jobs:
     env:
       HYPERSMART_DATASET_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
       GH_TOKEN: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
-      ALINA_DATASET_HOME: ${{ runner.temp }}/alina-datasets
       HL_ENABLE_MAINNET_EXECUTION: '0'
       HL_ENABLE_TESTNET_EXECUTION: '0'
       REAL_MAINNET_TRADING: 'false'
@@ -77,6 +76,13 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.11'
+
+      - name: Bind dataset storage to ephemeral runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ALINA_DATASET_HOME=$RUNNER_TEMP/alina-datasets" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/alina-datasets"
 
       - name: Reclaim ephemeral disk
         shell: bash
