@@ -216,6 +216,47 @@ class DataVaultTests(unittest.TestCase):
         self.assertEqual(assets["tag-a"], {"pack.zip"})
         self.assertEqual(assets["tag-b"], {"part1.bin", "part2.bin"})
 
+    def test_current_restore_excludes_archived_deleted_by_default(self):
+        payload = {
+            "files": {
+                "runtime/data/current.jsonl": {
+                    "present_local": True,
+                    "release_tag": "tag-a",
+                    "storage": "zip_entry",
+                    "asset": "pack.zip",
+                    "size": 10,
+                    "sha256": "a",
+                },
+                "runtime/data/old.jsonl": {
+                    "present_local": False,
+                    "release_tag": "tag-old",
+                    "storage": "zip_entry",
+                    "asset": "old.zip",
+                    "size": 10,
+                    "sha256": "b",
+                },
+            }
+        }
+
+        current = select_records(
+            payload,
+            preset="economic-core",
+            contains=(),
+            prefixes=(),
+        )
+        self.assertIn("runtime/data/current.jsonl", current)
+        self.assertNotIn("runtime/data/old.jsonl", current)
+
+        historical = select_records(
+            payload,
+            preset="economic-core",
+            contains=(),
+            prefixes=(),
+            include_archived_deleted=True,
+        )
+        self.assertIn("runtime/data/current.jsonl", historical)
+        self.assertIn("runtime/data/old.jsonl", historical)
+
     def test_publish_list_contains_metadata_assets(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
