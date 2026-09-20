@@ -1,7 +1,7 @@
 """Event Intelligence primitives.
 
-Network adapters are intentionally separate from these pure contracts. The package
-contains no order path and all exposed research objects are read-only.
+Network adapters are intentionally separate from pure contracts. All exposed
+research objects are read-only and no order path exists in this package.
 """
 
 from .external_event import (
@@ -11,7 +11,22 @@ from .external_event import (
     ExternalEventType,
     SourceTier,
 )
+from .features import (
+    NewsFlowFeatures,
+    NewsVelocitySignal,
+    compute_news_flow_features,
+    compute_news_velocity_zscore,
+)
 from .price_discovery import EventMarketReaction, measure_event_price_discovery
+from .worldmonitor import (
+    PredictionShiftTracker,
+    WorldMonitorAuthRequired,
+    WorldMonitorEvent,
+    WorldMonitorHTTPError,
+    WorldMonitorReadOnlyClient,
+    normalize_cross_source_signals,
+    normalize_news_digest,
+)
 
 __all__ = [
     "EventMarketReaction",
@@ -19,6 +34,17 @@ __all__ = [
     "ExternalEventDecision",
     "ExternalEventReplayGuard",
     "ExternalEventType",
+    "NewsFlowFeatures",
+    "NewsVelocitySignal",
+    "PredictionShiftTracker",
     "SourceTier",
+    "WorldMonitorAuthRequired",
+    "WorldMonitorEvent",
+    "WorldMonitorHTTPError",
+    "WorldMonitorReadOnlyClient",
+    "compute_news_flow_features",
+    "compute_news_velocity_zscore",
     "measure_event_price_discovery",
+    "normalize_cross_source_signals",
+    "normalize_news_digest",
 ]
