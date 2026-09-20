@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from tools.local_readonly_observer_core import (
+from local_readonly_observer_core import (
     SOURCE_SUFFIXES,
     read_text_limited,
     redact_text,
