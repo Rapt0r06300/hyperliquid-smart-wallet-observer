@@ -172,7 +172,8 @@ def load_continuous_index(path: Path) -> dict[str, object]:
 def iter_continuous_records(
     index_payload: Mapping[str, object],
     *,
-    present_only: bool = False,
+    include_archived_deleted: bool = False,
+    include_stale_prior: bool = False,
 ) -> Iterable[DatasetRecord]:
     raw_files = index_payload.get("files")
     if not isinstance(raw_files, Mapping):
@@ -183,7 +184,12 @@ def iter_continuous_records(
             raw = raw_files.get(relative_path)
             if not isinstance(raw, Mapping):
                 continue
-            if present_only and raw.get("present_local", True) is not True:
+            if (
+                raw.get("present_local", True) is False
+                and not include_archived_deleted
+            ):
+                continue
+            if raw.get("backup_stale") is True and not include_stale_prior:
                 continue
             mapping = dict(raw)
             mapping["relative_path"] = relative_path
@@ -364,7 +370,8 @@ def prepare_continuous_suite(
     suite: str,
     repository: str = DEFAULT_REPOSITORY,
     ref: str = "main",
-    present_only: bool = False,
+    include_archived_deleted: bool = False,
+    include_stale_prior: bool = False,
     download: bool = False,
     force: bool = False,
     max_download_gib: float = 20.0,
@@ -384,7 +391,8 @@ def prepare_continuous_suite(
     all_records = list(
         iter_continuous_records(
             index_payload,
-            present_only=present_only,
+            include_archived_deleted=include_archived_deleted,
+            include_stale_prior=include_stale_prior,
         )
     )
     selected = select_suite_records(all_records, suite)
@@ -430,7 +438,8 @@ def prepare_continuous_suite(
         "streaming_disk_required_bytes": disk_required,
         "streaming_disk_free_bytes": int(free),
         "streaming_disk_ok": int(free) >= disk_required,
-        "present_only": bool(present_only),
+        "include_archived_deleted": bool(include_archived_deleted),
+        "include_stale_prior": bool(include_stale_prior),
         "workspace": str(workspace),
         "paper_read_only": True,
         "real_execution": False,
