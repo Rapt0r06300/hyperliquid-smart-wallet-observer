@@ -221,7 +221,9 @@ def verify_or_upload_assets(
                 raise PublishError(
                     f"existing asset size mismatch for {name}: {remote_size} != {size}"
                 )
-            if remote_digest and remote_digest != digest:
+            if not remote_digest:
+                raise PublishError(f"existing asset has no GitHub SHA-256 digest: {name}")
+            if remote_digest != digest:
                 raise PublishError(
                     f"existing asset digest mismatch for {name}: {remote_digest} != {digest}"
                 )
@@ -249,7 +251,9 @@ def verify_or_upload_assets(
             raise PublishError(
                 f"uploaded asset size mismatch for {name}: {uploaded_size} != {size}"
             )
-        if uploaded_digest and uploaded_digest != digest:
+        if not uploaded_digest:
+            raise PublishError(f"uploaded asset has no GitHub SHA-256 digest: {name}")
+        if uploaded_digest != digest:
             raise PublishError(
                 f"uploaded asset digest mismatch for {name}: {uploaded_digest} != {digest}"
             )
@@ -337,7 +341,9 @@ def publish_snapshot(
         if int(remote.get("size") or 0) != int(row["size"]):
             raise PublishError(f"final size mismatch: {row['name']}")
         remote_digest = _asset_digest(remote).lower()
-        if remote_digest and remote_digest != str(row["sha256"]).lower():
+        if not remote_digest:
+            raise PublishError(f"final asset has no GitHub SHA-256 digest: {row['name']}")
+        if remote_digest != str(row["sha256"]).lower():
             raise PublishError(f"final digest mismatch: {row['name']}")
 
     result = {
