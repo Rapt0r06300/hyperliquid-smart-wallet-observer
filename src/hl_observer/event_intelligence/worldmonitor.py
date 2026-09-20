@@ -68,6 +68,7 @@ class WorldMonitorEvent:
     @property
     def usable_for_signal(self) -> bool:
         return self.coverage_state.casefold() not in {
+            "partial",
             "stale",
             "unavailable",
             "error",
