@@ -56,7 +56,7 @@ Exemple :
 - aucun dataset brut n'est inclus dans l'artifact ;
 - aucun chemin ni rapport issu du dataset privé n'est copié dans l'artifact public ;
 - les sorties détaillées de préparation restent uniquement dans l'espace éphémère du runner ;
-- l'artifact public contient seulement une preuve synthétique (source, suite, compteurs, verdicts).
+- l'artifact public contient seulement une preuve synthétique allowlistée : `job_id`, `source`, `suite`, `mode`, `success`, `file_count`, `total_bytes`, `paper_only`, `real_execution`, `raw_dataset_uploaded`, `dataset_paths_uploaded`, `dataset_reports_uploaded`.
 
 Ce workflow utilise un chemin de contrôle différent des workflows self-hosted :
 
