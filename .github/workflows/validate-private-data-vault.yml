@@ -1,0 +1,43 @@
+name: validate-private-data-vault
+
+on:
+  push:
+    branches:
+      - ci/validate-private-data-vault
+    paths:
+      - '.github/workflows/validate-private-data-vault.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout private data-vault branch read-only
+        uses: actions/checkout@v4
+        with:
+          repository: Rapt0r06300/hypersmart-datasets
+          ref: feature/continuous-data-vault
+          token: ${{ secrets.ALINA_DATASET_READ_TOKEN }}
+          path: datasets
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compile Data Vault tools
+        run: |
+          python -m py_compile \
+            datasets/tools/data_vault_core.py \
+            datasets/tools/build_data_vault_snapshot.py \
+            datasets/tools/publish_data_vault_snapshot.py \
+            datasets/tools/restore_data_vault_snapshot.py
+
+      - name: Run Data Vault unit tests
+        env:
+          PYTHONPATH: datasets/tools
+        run: python -m unittest discover -s datasets/tests -p 'test_data_vault.py' -v
