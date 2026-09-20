@@ -26,6 +26,9 @@ def test_github_dataset_backtest_requires_private_dataset_token() -> None:
     assert "HYPERSMART_DATASET_TOKEN" in text
     assert "Rapt0r06300/hypersmart-datasets" in text
     assert "--release-id 371149058" in text
+    assert "hl_observer.ops.continuous_vault" in text
+    assert "full-cold" in text
+    assert "continuous" in text
 
 
 def test_github_dataset_backtest_is_paper_only() -> None:
@@ -58,6 +61,7 @@ def test_github_dataset_backtest_is_paper_only() -> None:
 def test_github_dataset_backtest_does_not_upload_raw_dataset() -> None:
     text = _text()
     assert '"raw_dataset_uploaded": false' in text
+    assert "--stream-assets" in text
     assert "Build compact public-safe report bundle" in text
     assert "project_runtime_reports" in text
     assert "dataset_runtime_reports" in text
