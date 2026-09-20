@@ -9,7 +9,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from tools.local_readonly_observer_core import (
+from local_readonly_observer_core import (
     ACTIVE_TOPS,
     SOURCE_SUFFIXES,
     read_text_limited,
