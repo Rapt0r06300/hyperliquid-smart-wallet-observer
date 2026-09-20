@@ -1,0 +1,81 @@
+name: data-vault-ci
+
+on:
+  push:
+    branches:
+      - feature/github-data-vault
+    paths:
+      - 'tools/data_vault_core.py'
+      - 'tools/build_data_vault_snapshot.py'
+      - 'tools/publish_data_vault_snapshot.py'
+      - 'tools/restore_data_vault_snapshot.py'
+      - 'tools/update_data_vault_pointer.py'
+      - 'tests/test_data_vault.py'
+      - '.github/workflows/data-vault-ci.yml'
+      - '.github/workflows/alina-continuous-data-vault.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tools/data_vault_core.py'
+      - 'tools/build_data_vault_snapshot.py'
+      - 'tools/publish_data_vault_snapshot.py'
+      - 'tools/restore_data_vault_snapshot.py'
+      - 'tools/update_data_vault_pointer.py'
+      - 'tests/test_data_vault.py'
+      - '.github/workflows/data-vault-ci.yml'
+      - '.github/workflows/alina-continuous-data-vault.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Compile vault tools
+        run: |
+          python -m py_compile \
+            tools/data_vault_core.py \
+            tools/build_data_vault_snapshot.py \
+            tools/publish_data_vault_snapshot.py \
+            tools/restore_data_vault_snapshot.py \
+            tools/update_data_vault_pointer.py
+
+      - name: Run isolated vault tests
+        env:
+          PYTHONPATH: tools
+        run: python -m unittest discover -s tests -p 'test_data_vault.py' -v
+
+      - name: Guard manual-only local workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path(".github/workflows/alina-continuous-data-vault.yml").read_text(encoding="utf-8")
+          preamble = text.split("jobs:", 1)[0]
+          assert "workflow_dispatch:" in preamble
+          assert "schedule:" not in preamble
+          assert "push:" not in preamble
+          assert "I_AUTHORIZE_DATA_VAULT_BACKUP" in text
+          assert r"C:\Users\rberm\Desktop\Projet AlinaSmartFlow" in text
+          assert "runs-on: [self-hosted, Windows, X64, alina-research]" in text
+          forbidden = (
+              "Remove-Item -LiteralPath $env:ALINA_LOCAL_TARGET",
+              "git reset",
+              "git clean",
+              "git checkout",
+          )
+          lowered = text.lower()
+          for needle in forbidden:
+              assert needle.lower() not in lowered, needle
+          print("manual-only + local non-destructive guard: OK")
+          PY
