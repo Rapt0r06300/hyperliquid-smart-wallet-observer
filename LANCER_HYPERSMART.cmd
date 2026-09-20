@@ -466,7 +466,7 @@ if errorlevel 1 (
   goto :fin
 )
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs status harvest
-echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + carnet L2 + marks + liq + venues + vaults + backfills.
+echo   [collecteurs HARVEST] allMids + BBO(HL+Binance) + userFills + Native(Bybit+OKX+Gate+Bitget) + carnet L2 + marks + liq + venues + vaults + backfills.
 REM === ITEM 1 : BARRIERE READY_CORE **BLOQUANTE** =============================================
 REM Apres le demarrage des collecteurs, on attend (fenetre BORNEE de warmup) que le socle CORE
 REM (allMids + BBO + userFills) PROUVE reellement sa vie. Tant que READY_CORE != true, le moteur,
@@ -553,6 +553,7 @@ REM #  en ajouter/retirer sans mettre a jour le registre du superviseur.
 REM ############################################################################
 :demarrer_collecteurs
 REM Profil HARVEST officiel (items 1/2) : socle CORE (allMids+BBO+userFills) PLUS la recolte dense
+REM multi-venue native (Bybit/OKX/Gate/Bitget) et les autres collecteurs HARVEST. Le superviseur evite les
 REM doublons et enregistre lui-meme les PID pour l'arret cible.
 "%HYPERSMART_PYTHON%" -m hl_observer.ops.superviseur_collecteurs demarrer-tous harvest
 exit /b %ERRORLEVEL%
