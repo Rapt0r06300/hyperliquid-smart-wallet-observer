@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from hl_observer.datasets.continuous_vault import (
+from hl_observer.datasets.continuous_vault_bridge import (
     load_continuous_pointer,
     prepare_continuous_suite,
     resolve_continuous_workspace,
