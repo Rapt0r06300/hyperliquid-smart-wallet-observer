@@ -253,7 +253,7 @@ class DataVaultTests(unittest.TestCase):
 
         current = select_records(
             payload,
-            preset="economic-core",
+            preset="all",
             contains=(),
             prefixes=(),
         )
@@ -263,7 +263,7 @@ class DataVaultTests(unittest.TestCase):
 
         historical = select_records(
             payload,
-            preset="economic-core",
+            preset="all",
             contains=(),
             prefixes=(),
             include_archived_deleted=True,
@@ -274,7 +274,7 @@ class DataVaultTests(unittest.TestCase):
 
         with_stale = select_records(
             payload,
-            preset="economic-core",
+            preset="all",
             contains=(),
             prefixes=(),
             include_archived_deleted=True,
