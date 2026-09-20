@@ -1,0 +1,312 @@
+name: collector-smoke-readonly-20260920
+
+on:
+  push:
+    branches:
+      - smoke/collector-20260920
+    paths:
+      - '.github/workflows/collector-smoke-readonly-20260920.yml'
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: collector-smoke-readonly-20260920
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Six-venue collector smoke (read-only)
+    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    timeout-minutes: 8
+    env:
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_EXECUTION_ENABLED: 'false'
+      HYPERSMART_ENABLE_REAL_ORDERS: '0'
+      ENABLE_REAL_ORDERS: '0'
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+
+    steps:
+      - name: Checkout exact branch SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          clean: true
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Mark smoke pending
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'Alina-Collector-Smoke'
+          }
+          $payload = @{
+            state = 'pending'
+            context = 'hypersmart/collector-smoke-github'
+            description = 'Read-only six-venue smoke is running'
+            target_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -Headers $headers -ContentType 'application/json' -Body $payload | Out-Null
+
+      - name: Prepare isolated Python
+        id: py
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidates = @()
+          $machinePython = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
+          if ($machinePython) { $candidates += $machinePython }
+          $cmd = Get-Command python -ErrorAction SilentlyContinue
+          if ($cmd) { $candidates += $cmd.Source }
+          $python = $null
+          foreach ($candidate in ($candidates | Select-Object -Unique)) {
+            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+              & $candidate -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 2)"
+              if ($LASTEXITCODE -eq 0) { $python = $candidate; break }
+            }
+          }
+          if (-not $python) { throw 'PYTHON_311_NOT_FOUND' }
+          $venv = Join-Path $env:RUNNER_TEMP "alina-collector-smoke-$env:GITHUB_RUN_ID"
+          & $python -m venv $venv
+          $venvPython = Join-Path $venv 'Scripts\python.exe'
+          & $venvPython -m pip install --disable-pip-version-check --quiet "httpx>=0.27,<1" "websockets>=12,<16"
+          if ($LASTEXITCODE -ne 0) { throw 'SMOKE_DEPENDENCY_INSTALL_FAILED' }
+          "python=$venvPython" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Run bounded real network smoke
+        id: smoke
+        shell: powershell
+        env:
+          SMOKE_PYTHON: ${{ steps.py.outputs.python }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools"
+          $script = Join-Path $env:RUNNER_TEMP "collector_smoke_$env:GITHUB_RUN_ID.py"
+          @'
+          import asyncio
+          import json
+          import time
+          import urllib.request
+          from pathlib import Path
+
+          import websockets
+
+          from hl_observer.collection.bybit_market_data import BybitPublicClient
+          from hl_observer.collection.okx_market_data import OkxPublicClient
+          from hl_observer.collection.gate_market_data import GatePublicClient
+          from hl_observer.collection.bitget_market_data import BitgetPublicClient
+
+          OUT = Path("collector_smoke_out")
+          OUT.mkdir(parents=True, exist_ok=True)
+          START_MS = int(time.time() * 1000)
+          ZERO_USER = "0x0000000000000000000000000000000000000000"
+
+          def post_json(url, payload, timeout=12):
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(payload).encode("utf-8"),
+                  headers={"Content-Type": "application/json", "User-Agent": "AlinaCollectorSmoke/1.0"},
+                  method="POST",
+              )
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  if resp.status != 200:
+                      raise RuntimeError(f"HTTP {resp.status} for {url}")
+                  return json.loads(resp.read().decode("utf-8-sig"))
+
+          def get_json(url, timeout=12):
+              req = urllib.request.Request(url, headers={"User-Agent": "AlinaCollectorSmoke/1.0"})
+              with urllib.request.urlopen(req, timeout=timeout) as resp:
+                  if resp.status != 200:
+                      raise RuntimeError(f"HTTP {resp.status} for {url}")
+                  return json.loads(resp.read().decode("utf-8-sig"))
+
+          def write_row(name, payload):
+              path = OUT / f"{name}.jsonl"
+              row = {
+                  "venue": name,
+                  "recv_ms": int(time.time() * 1000),
+                  "payload": payload,
+              }
+              with path.open("a", encoding="utf-8") as fh:
+                  fh.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+              return path
+
+          def assert_nonmajor(markets, venue):
+              bases = {str(x[0]).upper() for x in markets}
+              extra = sorted(bases - {"BTC", "ETH", "SOL"})
+              if not extra:
+                  raise AssertionError(f"{venue}: only BTC/ETH/SOL discovered")
+              return extra[:10]
+
+          async def first_market_message(client, symbols, venue, timeout_s=18):
+              agen = client.messages(symbols)
+              deadline = time.monotonic() + timeout_s
+              try:
+                  while True:
+                      remaining = deadline - time.monotonic()
+                      if remaining <= 0:
+                          raise TimeoutError(f"{venue}: no market-data frame")
+                      msg = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
+                      if not isinstance(msg, dict):
+                          continue
+                      if venue == "bybit":
+                          if str(msg.get("topic") or "").startswith(("orderbook.", "tickers.", "publicTrade.")):
+                              return msg
+                      elif venue == "okx":
+                          if isinstance(msg.get("data"), list) and msg.get("data"):
+                              return msg
+                      elif venue == "gate":
+                          if msg.get("event") == "update" or isinstance(msg.get("result"), dict):
+                              return msg
+                      elif venue == "bitget":
+                          if isinstance(msg.get("data"), list) and msg.get("data"):
+                              return msg
+              finally:
+                  try:
+                      await agen.aclose()
+                  except Exception:
+                      pass
+
+          async def hl_bbo():
+              async with websockets.connect("wss://api.hyperliquid.xyz/ws", ping_interval=20, ping_timeout=10) as ws:
+                  await ws.send(json.dumps({"method":"subscribe","subscription":{"type":"bbo","coin":"BTC"}}))
+                  deadline = time.monotonic() + 15
+                  while True:
+                      msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=max(0.1, deadline-time.monotonic())))
+                      if isinstance(msg, dict) and msg.get("channel") == "bbo":
+                          return msg
+
+          async def binance_bbo():
+              async with websockets.connect("wss://fstream.binance.com/ws/btcusdt@bookTicker", ping_interval=20, ping_timeout=10) as ws:
+                  msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=15))
+                  if not isinstance(msg, dict) or not msg.get("b") or not msg.get("a"):
+                      raise AssertionError("binance: invalid bookTicker")
+                  return msg
+
+          async def main():
+              summary = {
+                  "schema": "alina.collector_smoke.v1",
+                  "sha": None,
+                  "read_only": True,
+                  "real_execution": False,
+                  "venues": {},
+                  "userfills": {},
+              }
+
+              hl_meta = post_json("https://api.hyperliquid.xyz/info", {"type":"meta"})
+              universe = hl_meta.get("universe") if isinstance(hl_meta, dict) else None
+              if not isinstance(universe, list) or len(universe) < 4:
+                  raise AssertionError("hyperliquid: invalid/too-small universe")
+              hl_bases = [(str(x.get("name") or "").upper(), str(x.get("name") or "").upper()) for x in universe if isinstance(x, dict) and x.get("name")]
+              summary["venues"]["hyperliquid"] = {"markets": len(hl_bases), "nonmajors": assert_nonmajor(hl_bases, "hyperliquid")}
+
+              fills = post_json("https://api.hyperliquid.xyz/info", {"type":"userFills","user":ZERO_USER})
+              if not isinstance(fills, list):
+                  raise AssertionError("hyperliquid userFills did not return a list")
+              write_row("hyperliquid_userfills", {"count": len(fills), "shape": "list"})
+              summary["userfills"] = {"http_ok": True, "response_type": "list", "count": len(fills)}
+
+              bin_info = get_json("https://fapi.binance.com/fapi/v1/exchangeInfo")
+              symbols = [x for x in bin_info.get("symbols", []) if isinstance(x, dict) and x.get("status") == "TRADING"]
+              bin_markets = [(str(x.get("baseAsset") or "").upper(), str(x.get("symbol") or "").upper()) for x in symbols if x.get("baseAsset") and x.get("symbol")]
+              if len(bin_markets) < 4:
+                  raise AssertionError("binance: invalid/too-small futures universe")
+              summary["venues"]["binance"] = {"markets": len(bin_markets), "nonmajors": assert_nonmajor(bin_markets, "binance")}
+
+              clients = {
+                  "bybit": BybitPublicClient(),
+                  "okx": OkxPublicClient(),
+                  "gate": GatePublicClient(),
+                  "bitget": BitgetPublicClient(),
+              }
+              discoveries = {}
+              for venue, client in clients.items():
+                  rows = await asyncio.to_thread(client.discover_usdt_perpetuals)
+                  if not isinstance(rows, list) or len(rows) < 4:
+                      raise AssertionError(f"{venue}: invalid/too-small universe")
+                  discoveries[venue] = rows
+                  summary["venues"][venue] = {"markets": len(rows), "nonmajors": assert_nonmajor(rows, venue)}
+
+              tasks = {
+                  "hyperliquid": asyncio.create_task(hl_bbo()),
+                  "binance": asyncio.create_task(binance_bbo()),
+              }
+              for venue, client in clients.items():
+                  rows = discoveries[venue]
+                  preferred = [sym for base, sym in rows if str(base).upper() == "BTC"]
+                  symbol = preferred[0] if preferred else rows[0][1]
+                  tasks[venue] = asyncio.create_task(first_market_message(client, [symbol], venue))
+
+              for venue, task in tasks.items():
+                  payload = await asyncio.wait_for(task, timeout=25)
+                  path = write_row(venue, payload)
+                  if not path.exists() or path.stat().st_size <= 0:
+                      raise AssertionError(f"{venue}: output did not grow")
+                  recv_ms = int(time.time() * 1000)
+                  if recv_ms < START_MS or abs(int(time.time()*1000) - recv_ms) > 5000:
+                      raise AssertionError(f"{venue}: incoherent local receive timestamp")
+                  summary["venues"][venue]["file"] = str(path)
+                  summary["venues"][venue]["bytes"] = path.stat().st_size
+                  summary["venues"][venue]["message_received"] = True
+
+              for required in ("hyperliquid","binance","bybit","okx","gate","bitget"):
+                  row = summary["venues"].get(required) or {}
+                  if not row.get("message_received") or int(row.get("bytes") or 0) <= 0:
+                      raise AssertionError(f"{required}: smoke incomplete")
+
+              summary["finished_at_ms"] = int(time.time() * 1000)
+              summary["duration_ms"] = summary["finished_at_ms"] - START_MS
+              (OUT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+              print(json.dumps(summary, indent=2, ensure_ascii=False))
+
+          asyncio.run(main())
+          '@ | Set-Content -LiteralPath $script -Encoding UTF8
+          & $env:SMOKE_PYTHON $script
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload compact smoke evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: collector-smoke-${{ github.run_id }}
+          path: collector_smoke_out
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6
+
+      - name: Publish final smoke status
+        if: always()
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GITHUB_TOKEN"
+            Accept = 'application/vnd.github+json'
+            'X-GitHub-Api-Version' = '2022-11-28'
+            'User-Agent' = 'Alina-Collector-Smoke'
+          }
+          $ok = ($env:SMOKE_OUTCOME -eq 'success') -and ($env:UPLOAD_OUTCOME -in @('success','skipped'))
+          $state = if ($ok) { 'success' } else { 'failure' }
+          $desc = if ($ok) { '6 venues + userFills read-only smoke passed' } else { "smoke=$env:SMOKE_OUTCOME upload=$env:UPLOAD_OUTCOME" }
+          $payload = @{
+            state = $state
+            context = 'hypersmart/collector-smoke-github'
+            description = $desc
+            target_url = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GITHUB_SHA" -Headers $headers -ContentType 'application/json' -Body $payload | Out-Null
+          if (-not $ok) { exit 1 }
