@@ -49,6 +49,7 @@ class DatasetRecord:
     storage: str
     asset: str | None = None
     chunks: tuple[Mapping[str, object], ...] = ()
+    release_tag: str | None = None
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, object]) -> "DatasetRecord":
@@ -63,6 +64,7 @@ class DatasetRecord:
             storage=str(raw.get("storage") or ""),
             asset=str(raw.get("asset")) if raw.get("asset") else None,
             chunks=chunks,
+            release_tag=str(raw.get("release_tag")) if raw.get("release_tag") else None,
         )
 
     def needed_assets(self) -> tuple[str, ...]:
