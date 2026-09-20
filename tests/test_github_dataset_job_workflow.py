@@ -38,7 +38,7 @@ def test_dataset_job_uses_private_token_without_uploading_raw_data() -> None:
     assert "raw_dataset_uploaded" in text
     assert '"raw_dataset_uploaded":False' in text
     assert "data_root" not in text.split("Upload reports only", 1)[1]
-    assert "ALINA_DATASET_HOME:" in text
+    assert 'echo "ALINA_DATASET_HOME=$RUNNER_TEMP/alina-datasets" >> "$GITHUB_ENV"' in text
 
 
 def test_dataset_job_enforces_paper_read_only_and_streaming() -> None:
