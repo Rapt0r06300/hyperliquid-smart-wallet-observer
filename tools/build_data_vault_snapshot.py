@@ -462,6 +462,7 @@ def build_snapshot(
         "data_asset_count": len(data_assets),
         "data_asset_bytes": asset_bytes,
         "previous_index_present": bool(previous),
+        "has_delta": bool(changed or deleted or unstable or read_errors or secrets_skipped),
         "paper_only": True,
         "real_execution": False,
     }
