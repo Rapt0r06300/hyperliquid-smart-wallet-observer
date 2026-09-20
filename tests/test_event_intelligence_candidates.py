@@ -255,3 +255,35 @@ def test_partial_coverage_is_fail_closed() -> None:
     )
     assert result.status == "REJECTED"
     assert result.reason == "SOURCE_NOT_USABLE"
+
+
+def test_low_event_classification_confidence_is_rejected() -> None:
+    row = _event()
+    low_confidence = WorldMonitorEvent(
+        event=ExternalEvent(
+            event_id=row.event.event_id,
+            source=row.event.source,
+            event_type=row.event.event_type,
+            source_tier=row.event.source_tier,
+            retrieval_ts_ms=row.event.retrieval_ts_ms,
+            ingest_ts_ms=row.event.ingest_ts_ms,
+            methodology_version=row.event.methodology_version,
+            raw_evidence_ref=row.event.raw_evidence_ref,
+            classification_confidence=0.20,
+            corroboration_count=row.event.corroboration_count,
+        ),
+        kind=row.kind,
+        publisher=row.publisher,
+        importance_score=row.importance_score,
+        credibility_score=row.credibility_score,
+        coverage_state=row.coverage_state,
+    )
+    result = evaluate_event_lead_lag_candidate(
+        low_confidence,
+        _upward_lag_tape(),
+        coin="BTC",
+        decision_ts_ms=1_200,
+        cost_floor_bps=1.0,
+    )
+    assert result.status == "REJECTED"
+    assert result.reason == "EVENT_CONFIDENCE_TOO_LOW"
