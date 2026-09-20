@@ -40,7 +40,7 @@ jobs:
           persist-credentials: false
 
       - name: Mark smoke pending
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -60,7 +60,7 @@ jobs:
 
       - name: Prepare isolated Python
         id: py
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $ErrorActionPreference = 'Stop'
           $candidates = @()
@@ -85,7 +85,7 @@ jobs:
 
       - name: Run bounded real network smoke
         id: smoke
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           SMOKE_PYTHON: ${{ steps.py.outputs.python }}
         run: |
@@ -287,7 +287,7 @@ jobs:
 
       - name: Publish final smoke status
         if: always()
-        shell: powershell
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
