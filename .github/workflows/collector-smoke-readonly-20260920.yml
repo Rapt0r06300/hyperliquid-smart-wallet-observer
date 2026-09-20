@@ -79,9 +79,43 @@ jobs:
           $venv = Join-Path $env:RUNNER_TEMP "alina-collector-smoke-$env:GITHUB_RUN_ID"
           & $python -m venv $venv
           $venvPython = Join-Path $venv 'Scripts\python.exe'
-          & $venvPython -m pip install --disable-pip-version-check --quiet -e .
+          & $venvPython -m pip install --disable-pip-version-check --quiet -e . pytest
           if ($LASTEXITCODE -ne 0) { throw 'SMOKE_PROJECT_INSTALL_FAILED' }
           "python=$venvPython" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Run targeted native collector tests
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          SMOKE_PYTHON: ${{ steps.py.outputs.python }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          & $env:SMOKE_PYTHON -m pytest -q tests/test_native_venues_collector.py tests/test_native_bybit_okx_venues.py --tb=line
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run canonical native venues collector
+        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
+        env:
+          SMOKE_PYTHON: ${{ steps.py.outputs.python }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = "$env:GITHUB_WORKSPACE\src;$env:GITHUB_WORKSPACE\tools;$env:GITHUB_WORKSPACE"
+          $root = Join-Path $env:RUNNER_TEMP "native-venues-runtime-$env:GITHUB_RUN_ID"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          & $env:SMOKE_PYTHON .\tools\collecter_native_venues.py --root $root --max-symbols 5 --duration-s 20
+          if ($LASTEXITCODE -ne 0) { throw "NATIVE_COLLECTOR_EXIT_$LASTEXITCODE" }
+          $heartbeatPath = Join-Path $root 'runtime\data\native_venues_heartbeat.json'
+          if (-not (Test-Path -LiteralPath $heartbeatPath -PathType Leaf)) { throw 'NATIVE_HEARTBEAT_MISSING' }
+          $hb = Get-Content -LiteralPath $heartbeatPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ([int]$hb.records_written -le 0) { throw 'NATIVE_RECORDS_EMPTY' }
+          foreach ($venue in @('bybit','okx','gate','bitget')) {
+            $last = [long]$hb.last_event_ms.$venue
+            if ($last -le 0) { throw "NATIVE_VENUE_NO_EVENT_$venue" }
+          }
+          $dataset = Join-Path $root 'runtime\data\market_ticks\native_venues_market_ticks.current.jsonl'
+          if (-not (Test-Path -LiteralPath $dataset -PathType Leaf)) { throw 'NATIVE_DATASET_MISSING' }
+          if ((Get-Item -LiteralPath $dataset).Length -le 0) { throw 'NATIVE_DATASET_EMPTY' }
+          Write-Host ("NATIVE_CANONICAL_COLLECTOR_OK records=" + $hb.records_written)
 
       - name: Run bounded real network smoke
         id: smoke
