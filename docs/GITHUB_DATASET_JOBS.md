@@ -65,3 +65,28 @@ Ce workflow utilise un chemin de contrôle différent des workflows self-hosted 
 - pas `research/queue/`
 
 Il ne peut donc pas réveiller le runner PC par les déclencheurs existants.
+
+
+## État vérifié au 20 septembre 2026
+
+Le premier smoke GitHub-hosted a atteint le garde d'accès privé puis s'est arrêté exactement sur l'absence du secret `ALINA_DATASET_READ_TOKEN`.
+
+Un probe séparé a testé le `GITHUB_TOKEN` natif du dépôt public contre :
+
+`Rapt0r06300/hypersmart-datasets`
+
+Résultat : **HTTP 404**. Le token natif du dépôt public ne peut donc pas lire le dépôt privé frère.
+
+Conséquence : le dernier prérequis externe est réellement un jeton de lecture inter-repo stocké dans le secret Actions :
+
+`ALINA_DATASET_READ_TOKEN`
+
+Le jeton doit être limité au dépôt privé `Rapt0r06300/hypersmart-datasets` et à la lecture des contenus/releases nécessaires aux datasets. Aucun droit d'écriture n'est requis pour le workflow public de replay/backtest.
+
+Le connecteur GitHub utilisé depuis ChatGPT ne donne volontairement pas accès aux APIs GitHub Secrets ; ce secret ne peut donc pas être créé depuis cette conversation.
+
+Le contrôle smoke déjà ajouté :
+
+`control/github_dataset_jobs/copy-vault-prepare-20260920.json`
+
+reste une preuve historique de ce garde-fou. Une nouvelle requête immuable devra être ajoutée après configuration du secret pour refaire le smoke.
