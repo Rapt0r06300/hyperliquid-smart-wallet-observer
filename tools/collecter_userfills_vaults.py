@@ -295,22 +295,105 @@ def _sauver_curseurs(root: Path, cur: dict) -> None:
     tmp.replace(root / CURSEURS)
 
 
+def _cursor_ts_ms(value) -> int:
+    """Read both legacy scalar cursors and v2 timestamp+event-id cursors."""
+    if isinstance(value, dict):
+        value = value.get("ts_ms")
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _cursor_state(value) -> tuple[int, set[str], bool]:
+    """Return (timestamp, ids_at_timestamp, is_legacy_scalar)."""
+    if isinstance(value, dict):
+        ts_ms = _cursor_ts_ms(value)
+        ids = {
+            str(item)
+            for item in (value.get("event_ids_at_ts") or [])
+            if str(item or "")
+        }
+        return ts_ms, ids, False
+    return _cursor_ts_ms(value), set(), bool(value not in (None, "", 0, 0.0))
+
+
+def _fill_cursor_id(fill: dict) -> str:
+    return canonical_fill_id(fill)
+
+
 def fills_a_traiter(vault: str, fills: list[dict], curseurs: dict) -> list[dict]:
-    """Filtre anti-perte : snapshot INITIAL (curseur absent) → ignoré + curseur posé à maintenant ;
-    sinon (live OU snapshot de reconnexion) → seulement les fills STRICTEMENT plus récents que le curseur.
-    Met le curseur à jour. Rend la liste à traiter."""
+    """Lossless cursor for live/reconnect userFills.
+
+    V1 stored only a millisecond timestamp. That can drop a distinct fill sharing
+    the exact same exchange millisecond as the last processed fill. V2 stores the
+    boundary timestamp plus every canonical fill id seen at that timestamp.
+
+    Legacy scalar cursors keep their old strict timestamp semantics for the one
+    migration boundary, avoiding accidental duplicate paper actions. Once a newer
+    fill arrives, the cursor upgrades itself to v2.
+    """
     if not fills:
         return []
-    est_snap = bool(fills[0].get("isSnapshot"))
-    cur = float(curseurs.get(vault, 0) or 0)
-    if est_snap and cur == 0:                                     # première connexion : on ne trade pas l'historique
-        curseurs[vault] = max(f["ts_ms"] for f in fills)
-        return []
-    a_traiter = [f for f in fills if float(f["ts_ms"]) > cur]     # catch-up : uniquement les inconnus récents
-    if a_traiter:
-        curseurs[vault] = max(float(f["ts_ms"]) for f in a_traiter)
-    return a_traiter
 
+    est_snap = bool(fills[0].get("isSnapshot"))
+    raw_cursor = curseurs.get(vault, 0)
+    cur_ts, ids_at_cur, legacy = _cursor_state(raw_cursor)
+
+    normalized: list[tuple[int, str, dict]] = []
+    seen_batch: set[str] = set()
+    for fill in fills:
+        try:
+            ts_ms = int(float(fill.get("ts_ms") or 0))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if ts_ms <= 0:
+            continue
+        event_id = _fill_cursor_id(fill)
+        if event_id in seen_batch:
+            continue
+        seen_batch.add(event_id)
+        normalized.append((ts_ms, event_id, fill))
+    if not normalized:
+        return []
+
+    if est_snap and cur_ts == 0:
+        boundary = max(ts for ts, _event_id, _fill in normalized)
+        boundary_ids = sorted(
+            event_id for ts, event_id, _fill in normalized if ts == boundary
+        )
+        curseurs[vault] = {
+            "version": 2,
+            "ts_ms": boundary,
+            "event_ids_at_ts": boundary_ids,
+        }
+        return []
+
+    accepted: list[tuple[int, str, dict]] = []
+    for ts_ms, event_id, fill in normalized:
+        if ts_ms > cur_ts:
+            accepted.append((ts_ms, event_id, fill))
+        elif ts_ms == cur_ts and not legacy and event_id not in ids_at_cur:
+            accepted.append((ts_ms, event_id, fill))
+
+    if not accepted:
+        return []
+
+    max_ts = max(ts for ts, _event_id, _fill in accepted)
+    if max_ts == cur_ts and not legacy:
+        boundary_ids = ids_at_cur | {
+            event_id for ts, event_id, _fill in accepted if ts == max_ts
+        }
+    else:
+        boundary_ids = {
+            event_id for ts, event_id, _fill in accepted if ts == max_ts
+        }
+    curseurs[vault] = {
+        "version": 2,
+        "ts_ms": max_ts,
+        "event_ids_at_ts": sorted(boundary_ids),
+    }
+    return [fill for _ts, _event_id, fill in accepted]
 
 ETATS = {}
 
@@ -828,12 +911,21 @@ async def _worker(root: Path, file: asyncio.Queue) -> None:
     while True:
         vault, fills, t_ws = await file.get()
         try:
+            before_cursor = json.dumps(
+                curseurs.get(vault, 0), sort_keys=True, separators=(",", ":")
+            )
             a_traiter = fills_a_traiter(vault, fills, curseurs)
+            after_cursor = json.dumps(
+                curseurs.get(vault, 0), sort_keys=True, separators=(",", ":")
+            )
+            if before_cursor != after_cursor:
+                # Persist even an initial-snapshot boundary. Otherwise a restart before
+                # the first live fill loses the only durable dedup boundary.
+                _sauver_curseurs(root, curseurs)
             if a_traiter:
                 coins = set()
                 for f in a_traiter:
                     _traiter_un(root, f, coins, t_ws)
-                _sauver_curseurs(root, curseurs)
                 for coh in CO.COHORTES.values():                 # exits ÉVÉNEMENTIELS sur les coins bougés
                     CO.gerer_exits(coh, root, lecteur_l2=_lecteur_l2_marquage, close_run_id=RUN_ID)   # marquage book WS frais
         except Exception as exc:  # noqa: BLE001
@@ -912,9 +1004,6 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                             _HEARTBEAT_WS["dernier_exchange_ts"] = max(
                                 max(timestamps), _HEARTBEAT_WS["dernier_exchange_ts"] or 0
                             )
-                        dq = _WS_KEYS.setdefault(vault, collections.deque(maxlen=WS_KEYS_CAP))
-                        for rf in bruts:
-                            dq.append(SD.cle_fill(rf))
                     fills = UL.parser_message_userfills(
                         msg,
                         vault=vault,
@@ -929,6 +1018,15 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                     t_ws = recv_mono_ns / 1_000_000_000.0         # instant exact de réception WS
                     try:
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
+                        # Credit REST↔WS coverage only after the frame enters the
+                        # worker pipeline. QueueFull must remain visible to reconciliation.
+                        dq = _WS_KEYS.setdefault(
+                            vault, collections.deque(maxlen=WS_KEYS_CAP)
+                        )
+                        for rf in bruts:
+                            key = SD.cle_fill(rf)
+                            if key is not None:
+                                dq.append(key)
                     except asyncio.QueueFull:
                         _HEARTBEAT_WS["drops"] += len(fills)
                         print("[userfills] FILE SATUREE — drop (%s)" % vault[:10], flush=True)
@@ -957,7 +1055,12 @@ async def _garde_reconciliation_rest(root: Path, shards: list, *, intervalle_s: 
         n_appels, total_manquants, defaillants, appels_budget = 0, 0, set(), []
         for v, sid in vault_socket.items():
             # fenêtre BORNÉE (curseur − chevauchement), JAMAIS avant le démarrage (clés en mémoire depuis là) :
-            start = SD.fenetre_debut_ms(cur.get(v), _DEMARRAGE_MS, maintenant, overlap_ms=overlap_ms)
+            start = SD.fenetre_debut_ms(
+                _cursor_ts_ms(cur.get(v)),
+                _DEMARRAGE_MS,
+                maintenant,
+                overlap_ms=overlap_ms,
+            )
             try:
                 rep = await loop.run_in_executor(None, SD.userfills_by_time_rest, v, start)   # REST hors event-loop
                 n_appels += 1
