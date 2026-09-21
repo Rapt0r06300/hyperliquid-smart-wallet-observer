@@ -47,11 +47,29 @@ def test_data_not_ready_quand_core_malade():
 
 def test_sources_harvest_declare_toutes_les_sources_attendues():
     noms = {s.nom for s in PV.SOURCES_HARVEST}
-    for attendu in ("node-fills-global", "twap-slices", "hf-recorder", "l4-order-intent",
-                    "dydx-live", "bybit"):
-        assert attendu in noms, attendu                    # item 3 : jamais omises
+    for attendu in (
+        "node-fills-global",
+        "twap-slices",
+        "hf-recorder",
+        "l4-order-intent",
+        "dydx-live",
+        "native-venues",
+    ):
+        assert attendu in noms, attendu
+
+    native = next(s for s in PV.SOURCES_HARVEST if s.nom == "native-venues")
+    assert "BYBIT" in native.venue
+    assert "OKX" in native.venue
+    assert native.non_implementee is False
+
     non_impl = {s.nom for s in PV.SOURCES_HARVEST if s.non_implementee}
-    assert {"node-fills-global", "twap-slices", "hf-recorder", "l4-order-intent", "bybit"} <= non_impl
+    assert {
+        "node-fills-global",
+        "twap-slices",
+        "hf-recorder",
+        "l4-order-intent",
+    } <= non_impl
+    assert "native-venues" not in non_impl
 
 
 def test_panne_technique_bloque_core_et_harvest():
