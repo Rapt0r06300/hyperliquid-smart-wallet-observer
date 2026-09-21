@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Iterable, Sequence
 
 from hl_observer.event_intelligence.outcomes import EventCandidateMarkout
+from hl_observer.backtesting.anti_overfit_gate import sharpe
 from hl_observer.event_intelligence.validation import (
     EventStudyObservation,
     IncrementalEffect,
@@ -38,6 +39,7 @@ class EventScoreboardBundle:
     measured_count: int
     event_family: str
     asset: str
+    sharpe_per_trade: float | None
     paper_only: bool = True
     real_execution: bool = False
 
@@ -146,6 +148,7 @@ def build_event_scoreboard(
         measured_count=len(measured),
         event_family=str(event_family),
         asset=str(asset).upper(),
+        sharpe_per_trade=(round(sharpe(closed_pnls), 6) if len(closed_pnls) >= 2 else None),
     )
 
 
