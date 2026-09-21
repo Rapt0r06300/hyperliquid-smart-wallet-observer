@@ -21,6 +21,7 @@ on:
       - 'src/hl_observer/collection/userfills_live.py'
       - 'tools/collecter_userfills_vaults.py'
       - 'tools/collecter_bbo.py'
+      - 'tools/collecter_native_venues.py'
       - 'src/hl_observer/collection/okx_market_data.py'
       - 'src/hl_observer/data_sources/market_backfill.py'
       - 'src/hl_observer/datasets/v2_export.py'
@@ -44,6 +45,8 @@ on:
       - 'tests/test_collecter_bbo.py'
       - 'tests/test_okx_market_data.py'
       - 'tests/test_native_venue_transport_integrity.py'
+      - 'tests/test_native_venue_coordinator.py'
+      - 'tests/test_native_venues_collector.py'
       - 'tests/test_copy_vault_transport_timing.py'
       - 'tests/test_collecter_userfills_vaults.py'
       - 'tests/test_vault_fills_backfill.py'
@@ -88,6 +91,7 @@ jobs:
             src/hl_observer/collection/userfills_live.py \
             tools/collecter_userfills_vaults.py \
             tools/collecter_bbo.py \
+            tools/collecter_native_venues.py \
             src/hl_observer/collection/okx_market_data.py \
             src/hl_observer/data_sources/market_backfill.py \
             src/hl_observer/datasets/v2_export.py \
@@ -114,6 +118,8 @@ jobs:
             tests/test_collecter_bbo.py \
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py \
+            tests/test_native_venue_coordinator.py \
+            tests/test_native_venues_collector.py \
             tests/test_copy_vault_transport_timing.py \
             tests/test_collecter_userfills_vaults.py \
             tests/test_vault_fills_backfill.py
