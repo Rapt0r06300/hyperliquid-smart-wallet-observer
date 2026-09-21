@@ -222,6 +222,7 @@ def build_bundle(
     *,
     collector_version: str,
     cost_model_channels: tuple[str, ...] = (),
+    collection_queue_drops: int = 0,
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -245,6 +246,13 @@ def build_bundle(
             cost_model_applicable=False,
             cost_model_ready=False,
         )
+        queue_drops = max(0, int(collection_queue_drops))
+        if queue_drops:
+            integrity = dict(preliminary.get("integrity") or {})
+            integrity["gap_count"] = int(integrity.get("gap_count") or 0) + queue_drops
+            preliminary["integrity"] = integrity
+            preliminary["collection_queue_drops"] = queue_drops
+
         family = str(preliminary.get("family") or "")
         if family in set(cost_model_channels):
             preliminary["cost_model"] = {
@@ -279,6 +287,7 @@ def build_bundle(
         "schema": V2_SCHEMA,
         "repository": V2_REPOSITORY,
         "collector_version": str(collector_version),
+        "collection_queue_drops": max(0, int(collection_queue_drops)),
         "shard_count": len(manifests),
         "safe_count": sum(1 for row in manifests if row["quality_status"] == "SAFE"),
         "partial_count": sum(1 for row in manifests if row["quality_status"] == "PARTIAL"),

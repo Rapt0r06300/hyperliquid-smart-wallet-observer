@@ -25,6 +25,7 @@ on:
       - 'src/hl_observer/collection/okx_market_data.py'
       - 'src/hl_observer/data_sources/market_backfill.py'
       - 'src/hl_observer/datasets/v2_export.py'
+      - 'src/hl_observer/datasets/v2_pipeline.py'
       - 'tools/build_dataset_v2_manifest.py'
       - 'tools/collect_cloud_window.py'
       - 'tests/test_collector_feed_integrity.py'
@@ -34,6 +35,7 @@ on:
       - 'tests/test_tick_dataset.py'
       - 'tests/test_partitioned_tick_dataset.py'
       - 'tests/test_dataset_v2_export.py'
+      - 'tests/test_dataset_v2_pipeline.py'
       - 'tests/test_collect_cloud_window.py'
       - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_market.py'
@@ -95,6 +97,7 @@ jobs:
             src/hl_observer/collection/okx_market_data.py \
             src/hl_observer/data_sources/market_backfill.py \
             src/hl_observer/datasets/v2_export.py \
+            src/hl_observer/datasets/v2_pipeline.py \
             tools/build_dataset_v2_manifest.py \
             tools/collect_cloud_window.py
       - name: Run collector integrity tests
@@ -107,6 +110,7 @@ jobs:
             tests/test_tick_dataset.py \
             tests/test_partitioned_tick_dataset.py \
             tests/test_dataset_v2_export.py \
+            tests/test_dataset_v2_pipeline.py \
             tests/test_collect_cloud_window.py \
             tests/test_native_market_tape.py \
             tests/test_native_venue_market.py \

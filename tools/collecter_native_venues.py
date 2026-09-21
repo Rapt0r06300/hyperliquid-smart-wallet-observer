@@ -444,6 +444,7 @@ async def _run(
             root / TICK_DATASET_DIR,
             root / "runtime" / "data" / "dataset_v2_bundle" / "native_venues",
             collector_version=collector_version,
+            collection_queue_drops=dropped,
         )
         final = {
             "schema_version": "alina.native_venues_heartbeat.v1",

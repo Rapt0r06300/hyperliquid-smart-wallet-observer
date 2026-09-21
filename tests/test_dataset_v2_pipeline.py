@@ -141,3 +141,29 @@ def test_wrong_remote_digest_never_promotes_safe(tmp_path) -> None:
     assert verified["asset_verified"] is False
     assert verified["quality_status"] == "PARTIAL"
     assert verified["validation_allowed"] is False
+
+
+def test_collection_queue_drop_rejects_every_native_bundle_shard(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    writer.append(_event(1000))
+    writer.append(_event(1010))
+    writer.rotate_all()
+
+    index = build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="d" * 40,
+        collection_queue_drops=3,
+    )
+    assert index["collection_queue_drops"] == 3
+    assert index["reject_count"] == index["shard_count"] == 1
+    assert index["safe_count"] == 0
+
+    import json
+    manifest = json.loads(
+        next((tmp_path / "bundle" / "manifests").glob("*.json")).read_text()
+    )
+    assert manifest["collection_queue_drops"] == 3
+    assert manifest["integrity"]["gap_count"] >= 3
+    assert manifest["quality_status"] == "REJECT"
+    assert "SEQUENCE_OR_QUEUE_GAP" in manifest["quality_reasons"]
