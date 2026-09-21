@@ -513,6 +513,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
 
     import websockets
 
+    from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
     from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
     from hl_observer.collection.lead_lag_causal_checkpoints import (
         LeadLagCheckpointRequest,
@@ -589,7 +590,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     tape: list[dict] = []
     stats = {"ecrits": 0, "rejets": 0, "reconnexions_hl": 0, "reconnexions_bin": 0, "trous": 0,
              "frames_bookticker": 0, "frames_trades": 0, "shards_scelles": 0,
-             "frames_l2_hl": 0, "frames_trades_hl": 0, "raw_frames_received": 0,
+             "frames_l2_hl": 0, "frames_l2_bin": 0, "frames_trades_hl": 0,
+             "binance_l2_publications": 0, "raw_frames_received": 0,
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
@@ -617,6 +619,26 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             if gate is not None:
                 gate.mark_gap(reason="LOCAL_RAW_QUEUE_OVERFLOW")
         raw_queue.append(envelope)
+
+    binance_l2_latest: dict[str, dict[str, Any]] = {}
+
+    def publish_binance_l2(symbol: str, publication: Any) -> None:
+        row = dict(publication)
+        binance_l2_latest[str(symbol).upper()] = row
+        stats["binance_l2_publications"] += 1
+        if row.get("quality") == "EXPLOITABLE":
+            stats["frames_l2_bin"] += 1
+
+    binance_depth_collector = BinanceDepthLiveCollector(
+        sym.values(),
+        snapshot_limit=1000,
+        publication_depth=200,
+        tick_sink=queue_raw,
+        publication_sink=publish_binance_l2,
+    )
+
+    async def binance_depth() -> None:
+        await binance_depth_collector.run()
 
     def mark_hl_gap(*, received_ts_ms: int, connection_id: str, gap_ms: float) -> None:
         for gate in quality_gates.values():
@@ -1302,6 +1324,10 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                     "endpoint": "/info",
                     "access": "read_only",
                 },
+                "binance_deep_l2": {
+                    **binance_depth_collector.health(),
+                    "latest_symbols": len(binance_l2_latest),
+                },
                 "dataset": dataset.stats(),
                 "canonical_events": {
                     "path": str(canonical_writer.path),
@@ -1361,6 +1387,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         asyncio.create_task(c())
         for c in (hl, binance_bt, binance_ag, lead_lag_checkpoint_worker)
     ]
+    if sym:
+        taches.append(asyncio.create_task(binance_depth()))
     try:
         await ecrire_et_superviser()
     finally:
@@ -1420,7 +1448,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         print("[bbo] MODULE `websockets` MANQUANT -> lance:  pip install websockets  (collecteur inactif "
               "tant qu'il n'est pas installe).", flush=True)
         return 0
-    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker/trades..."
+    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker+depth100ms+trades..."
           % len(coins), flush=True)
     try:
         asyncio.run(_boucle(Path(a.root), coins))            # PERSISTANT : sort seulement sur fin de session
