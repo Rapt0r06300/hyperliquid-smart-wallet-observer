@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from hl_observer.collection.native_market_tape import native_tick_envelope
 
 
@@ -163,4 +165,5 @@ def test_okx_instrument_rule_change_is_taped() -> None:
     record = envelope.as_record(written_ts_ms=1700000000020)
     assert record["channel"] == "instrument_metadata"
     assert record["instrument"] == "BTC-USDT-SWAP"
-    assert record["raw_payload"]["data"][0]["tickSz"] == "0.1"
+    raw = json.loads(record["raw_payload"])
+    assert raw["data"][0]["tickSz"] == "0.1"
