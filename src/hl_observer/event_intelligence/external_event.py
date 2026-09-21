@@ -67,6 +67,8 @@ class ExternalEvent:
     severity: float | None = None
     classification_confidence: float = 1.0
     corroboration_count: int = 1
+    revision: int = 0
+    supersedes_revision: int | None = None
     real_execution: bool = False
 
     def __post_init__(self) -> None:
@@ -105,6 +107,16 @@ class ExternalEvent:
             raise ValueError("severity must be in [0, 1]")
         if isinstance(self.corroboration_count, bool) or self.corroboration_count < 1:
             raise ValueError("corroboration_count must be >= 1")
+        if isinstance(self.revision, bool) or not isinstance(self.revision, int) or self.revision < 0:
+            raise ValueError("revision must be a non-negative integer")
+        if self.supersedes_revision is not None:
+            if (
+                isinstance(self.supersedes_revision, bool)
+                or not isinstance(self.supersedes_revision, int)
+                or self.supersedes_revision < 0
+                or self.supersedes_revision >= self.revision
+            ):
+                raise ValueError("supersedes_revision must be lower than revision")
         if self.real_execution is not False:
             raise ValueError("external events are read-only; real_execution must be false")
 
@@ -115,8 +127,8 @@ class ExternalEvent:
         return self.ingest_ts_ms
 
     @property
-    def dedupe_key(self) -> tuple[str, str]:
-        return (self.source, self.event_id)
+    def dedupe_key(self) -> tuple[str, str, int]:
+        return (self.source, self.event_id, self.revision)
 
     def is_available_at(self, decision_ts_ms: int) -> bool:
         return int(decision_ts_ms) >= self.available_ts_ms
@@ -141,6 +153,8 @@ class ExternalEvent:
             "severity": self.severity,
             "classification_confidence": self.classification_confidence,
             "corroboration_count": self.corroboration_count,
+            "revision": self.revision,
+            "supersedes_revision": self.supersedes_revision,
             "methodology_version": self.methodology_version,
             "raw_evidence_ref": self.raw_evidence_ref,
             "real_execution": False,
@@ -156,10 +170,10 @@ class ExternalEventDecision:
 class ExternalEventReplayGuard:
     """Fail closed on future information and duplicate source events."""
 
-    def __init__(self, *, seen_keys: Iterable[tuple[str, str]] = ()) -> None:
+    def __init__(self, *, seen_keys: Iterable[tuple[str, str, int]] = ()) -> None:
         self._seen = set(seen_keys)
 
-    def seen_keys(self) -> frozenset[tuple[str, str]]:
+    def seen_keys(self) -> frozenset[tuple[str, str, int]]:
         return frozenset(self._seen)
 
     def observe(
