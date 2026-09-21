@@ -142,6 +142,8 @@ def _okx_identity(
         "funding-rate": "funding",
         "open-interest": "open_interest",
         "mark-price": "mark_price",
+        "index-tickers": "index_price",
+        "instruments": "instrument_metadata",
     }
     channel = channel_map.get(channel_raw)
     if channel is None:
