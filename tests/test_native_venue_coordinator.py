@@ -135,3 +135,63 @@ def test_stale_venue_is_excluded_fail_closed() -> None:
 
     assert coordinator.candidate_coins(now_ms=1_500, min_venues=2) == []
     assert coordinator.cross_venue_rows("ETH", now_ms=1_500) == []
+
+
+def test_cross_venue_rejects_unsynchronized_executable_legs() -> None:
+    coordinator = NativeVenueCoordinator(stale_after_ms=2_000)
+    coordinator.ingest_external_bbo(
+        venue="hyperliquid",
+        coin="BTC",
+        exchange_symbol="BTC",
+        bid=99.9,
+        ask=100.0,
+        exchange_ts_ms=1_000,
+        receive_ts_ms=1_000,
+        now_ms=1_400,
+    )
+    coordinator.ingest_external_bbo(
+        venue="binance",
+        coin="BTC",
+        exchange_symbol="BTCUSDT",
+        bid=101.0,
+        ask=101.1,
+        exchange_ts_ms=1_390,
+        receive_ts_ms=1_400,
+        now_ms=1_400,
+    )
+
+    assert coordinator.cross_venue_rows(
+        "BTC",
+        now_ms=1_400,
+        max_receive_skew_ms=250,
+    ) == []
+
+
+def test_cross_venue_can_require_real_l2() -> None:
+    coordinator = NativeVenueCoordinator(stale_after_ms=2_000)
+    coordinator.ingest_external_bbo(
+        venue="hyperliquid",
+        coin="ETH",
+        exchange_symbol="ETH",
+        bid=99.9,
+        ask=100.0,
+        exchange_ts_ms=1_000,
+        receive_ts_ms=1_010,
+        now_ms=1_020,
+    )
+    coordinator.ingest_external_bbo(
+        venue="binance",
+        coin="ETH",
+        exchange_symbol="ETHUSDT",
+        bid=101.0,
+        ask=101.1,
+        exchange_ts_ms=1_000,
+        receive_ts_ms=1_010,
+        now_ms=1_020,
+    )
+
+    assert coordinator.cross_venue_rows(
+        "ETH",
+        now_ms=1_020,
+        require_l2=True,
+    ) == []
