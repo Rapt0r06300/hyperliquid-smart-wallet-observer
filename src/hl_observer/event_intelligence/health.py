@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from hl_observer.event_intelligence.external_event import ExternalEvent
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
@@ -112,4 +113,62 @@ def evaluate_direct_source_health(
     )
 
 
-__all__ = ["evaluate_direct_source_health", "evaluate_worldmonitor_health"]
+@dataclass(frozen=True, slots=True)
+class IntelligenceGap:
+    source: str
+    detected_at_ms: int
+    last_success_ms: int | None
+    gap_age_ms: int | None
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class CoverageReport:
+    expected_families: tuple[str, ...]
+    observed_families: tuple[str, ...]
+    missing_families: tuple[str, ...]
+    coverage_ratio: float
+
+
+def detect_intelligence_gap(
+    *,
+    source: str,
+    last_success_ms: int | None,
+    now_ms: int,
+    max_age_ms: int,
+    fetch_ok: bool,
+) -> IntelligenceGap | None:
+    now = int(now_ms)
+    if not fetch_ok:
+        age = None if last_success_ms is None else max(0, now - int(last_success_ms))
+        return IntelligenceGap(str(source), now, last_success_ms, age, "FETCH_FAILED")
+    if last_success_ms is None:
+        return IntelligenceGap(str(source), now, None, None, "NEVER_OBSERVED")
+    age = now - int(last_success_ms)
+    if age < 0:
+        return IntelligenceGap(str(source), now, last_success_ms, None, "CLOCK_INCOHERENT")
+    if age > int(max_age_ms):
+        return IntelligenceGap(str(source), now, last_success_ms, age, "SOURCE_STALE")
+    return None
+
+
+def coverage_by_family(
+    events: Iterable[WorldMonitorEvent],
+    *,
+    expected_families: Iterable[str],
+) -> CoverageReport:
+    expected = tuple(sorted({str(value) for value in expected_families if str(value)}))
+    observed = tuple(sorted({str(row.kind) for row in events if row.usable_for_signal and str(row.kind)}))
+    missing = tuple(value for value in expected if value not in set(observed))
+    ratio = 1.0 if not expected else (len(expected) - len(missing)) / len(expected)
+    return CoverageReport(expected, observed, missing, round(ratio, 6))
+
+
+__all__ = [
+    "CoverageReport",
+    "IntelligenceGap",
+    "coverage_by_family",
+    "detect_intelligence_gap",
+    "evaluate_direct_source_health",
+    "evaluate_worldmonitor_health",
+]
