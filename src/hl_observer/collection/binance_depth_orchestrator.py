@@ -30,37 +30,64 @@ class BinanceDepthOrchestrator:
         self.max_buffer = int(max_buffer)
         self.exchange_ts_ms: int | None = None
         self.receive_ts_ms: int | None = None
+        self.receive_mono_ns: int | None = None
+        self.connection_id: str | None = None
         self.resync_count = 0
+        self.gap_count = 0
+        self.buffer_overflow_count = 0
+        self.last_status = "NO_DATA"
 
-    def _maj_ts(self, exchange_ts_ms, receive_ts_ms) -> None:
+    def _maj_ts(
+        self,
+        exchange_ts_ms,
+        receive_ts_ms,
+        receive_mono_ns=None,
+        connection_id=None,
+    ) -> None:
         if exchange_ts_ms is not None:
             self.exchange_ts_ms = int(exchange_ts_ms)
         if receive_ts_ms is not None:
             self.receive_ts_ms = int(receive_ts_ms)
+        if receive_mono_ns is not None:
+            self.receive_mono_ns = int(receive_mono_ns)
+        if connection_id:
+            incoming = str(connection_id)
+            if self.connection_id and incoming != self.connection_id:
+                self.needs_snapshot = True
+                self.book.desync = "CONNECTION_CHANGED"
+                self.buffer = []
+            self.connection_id = incoming
 
     def sur_diff(self, *, U: int, u: int, pu: int | None = None,
                  bids: Iterable[Any] = (), asks: Iterable[Any] = (),
-                 exchange_ts_ms: int | None = None, receive_ts_ms: int | None = None) -> str:
+                 exchange_ts_ms: int | None = None, receive_ts_ms: int | None = None,
+                 receive_mono_ns: int | None = None, connection_id: str | None = None) -> str:
         """Reçoit un diff WS. Buffer si pas encore de snapshot ; sinon applique ; DESYNC → resync auto."""
-        self._maj_ts(exchange_ts_ms, receive_ts_ms)
+        self._maj_ts(exchange_ts_ms, receive_ts_ms, receive_mono_ns, connection_id)
         d = {"U": int(U), "u": int(u), "pu": pu, "bids": list(bids), "asks": list(asks)}
 
         if self.needs_snapshot or self.book.last_update_id is None:
             self.buffer.append(d)
             if len(self.buffer) > self.max_buffer:
                 self.buffer.pop(0)                      # borne le buffer (garde les plus récents)
+                self.buffer_overflow_count += 1
+                self.gap_count += 1
+            self.last_status = BUFFERISE
             return BUFFERISE
 
         res = self.book.appliquer_diff(U=d["U"], u=d["u"], pu=d["pu"], bids=d["bids"], asks=d["asks"])
         if res.status.startswith("DESYNC"):
             self.needs_snapshot = True                  # resync automatique : redemander un snapshot
             self.buffer = [d]                           # et rebufferiser à partir de ce diff
+            self.gap_count += 1
+        self.last_status = res.status
         return res.status
 
     def sur_snapshot(self, *, last_update_id: int, bids: Iterable[Any] = (), asks: Iterable[Any] = (),
-                     exchange_ts_ms: int | None = None, receive_ts_ms: int | None = None) -> dict[str, Any]:
+                     exchange_ts_ms: int | None = None, receive_ts_ms: int | None = None,
+                     receive_mono_ns: int | None = None, connection_id: str | None = None) -> dict[str, Any]:
         """Pose le snapshot REST et rejoue le buffer. Si le buffer ne raccorde pas → nouveau snapshot requis."""
-        self._maj_ts(exchange_ts_ms, receive_ts_ms)
+        self._maj_ts(exchange_ts_ms, receive_ts_ms, receive_mono_ns, connection_id)
         self.book.appliquer_snapshot(last_update_id=last_update_id, bids=bids, asks=asks)
         self.needs_snapshot = False
         self.resync_count += 1
@@ -74,8 +101,17 @@ class BinanceDepthOrchestrator:
                 applied += 1
             elif r.status.startswith("DESYNC"):
                 self.needs_snapshot = True              # le buffer ne raccorde pas → re-snapshot
+                self.gap_count += 1
+                self.last_status = r.status
                 break
-        return {"applied_from_buffer": applied, "needs_snapshot": self.needs_snapshot}
+        if not self.needs_snapshot:
+            self.last_status = "EXPLOITABLE"
+        return {
+            "applied_from_buffer": applied,
+            "needs_snapshot": self.needs_snapshot,
+            "gap_count": self.gap_count,
+            "buffer_overflow_count": self.buffer_overflow_count,
+        }
 
     def besoin_resnapshot(self) -> bool:
         return self.needs_snapshot or not self.book.exploitable()
@@ -87,10 +123,15 @@ class BinanceDepthOrchestrator:
             "schema_version": SCHEMA_VERSION,
             "exchange_ts_ms": self.exchange_ts_ms,
             "receive_ts_ms": self.receive_ts_ms,
+            "receive_mono_ns": self.receive_mono_ns,
+            "connection_id": self.connection_id,
             "sequence": self.book.last_update_id,
             "quality": "EXPLOITABLE" if self.book.exploitable() else "DESYNC",
             "needs_resnapshot": self.besoin_resnapshot(),
             "resync_count": self.resync_count,
+            "gap_count": self.gap_count,
+            "buffer_overflow_count": self.buffer_overflow_count,
+            "last_status": self.last_status,
         })
         return snap
 
