@@ -7,7 +7,11 @@ on:
     paths:
       - 'tools/collecter_native_venues.py'
       - 'src/hl_observer/ops/collecteur_registry.py'
+      - 'src/hl_observer/ops/preuve_de_vie.py'
       - 'tests/test_native_venues_collector.py'
+      - 'tests/test_preuve_de_vie_niveaux.py'
+      - 'tests/test_superviseur_profil_harvest.py'
+      - 'tests/test_session_harvest.py'
       - 'tests/test_native_bybit_okx_venues.py'
       - '.github/workflows/native-venues-github-validation.yml'
   pull_request:
@@ -16,7 +20,11 @@ on:
     paths:
       - 'tools/collecter_native_venues.py'
       - 'src/hl_observer/ops/collecteur_registry.py'
+      - 'src/hl_observer/ops/preuve_de_vie.py'
       - 'tests/test_native_venues_collector.py'
+      - 'tests/test_preuve_de_vie_niveaux.py'
+      - 'tests/test_superviseur_profil_harvest.py'
+      - 'tests/test_session_harvest.py'
       - 'tests/test_native_bybit_okx_venues.py'
       - '.github/workflows/native-venues-github-validation.yml'
   workflow_dispatch: {}
@@ -57,7 +65,13 @@ jobs:
         env:
           PYTHONPATH: src:tools:.
         run: |
-          python -m pytest -q             tests/test_native_venues_collector.py             tests/test_native_bybit_okx_venues.py             --tb=line
+          python -m pytest -q \
+            tests/test_native_venues_collector.py \
+            tests/test_native_bybit_okx_venues.py \
+            tests/test_preuve_de_vie_niveaux.py \
+            tests/test_superviseur_profil_harvest.py \
+            tests/test_session_harvest.py \
+            --tb=line
 
       - name: Bounded public-network smoke (diagnostic only)
         continue-on-error: true
