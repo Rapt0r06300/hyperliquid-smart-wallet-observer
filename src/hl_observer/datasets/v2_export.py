@@ -47,6 +47,12 @@ def build_manifest_from_tick_shard(
     last_exchange: dict[tuple[str, str, str], int] = {}
     last_receive: dict[tuple[str, str, str], int] = {}
     last_mono: dict[tuple[str, str, str], int] = {}
+    connection_ids: set[str] = set()
+    transports: set[str] = set()
+    receive_exchange_deltas_ms: list[float] = []
+    transport_rtt_ms: list[float] = []
+    clock_offsets_ms: list[float] = []
+    reconnect_count_max = 0
 
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
@@ -71,6 +77,15 @@ def build_manifest_from_tick_shard(
                 missing_timestamp_count += 1
             if mono is None:
                 missing_monotonic_count += 1
+            connection_id = str(record.get("connection_id") or "")
+            if connection_id:
+                connection_ids.add(connection_id)
+            reconnect_count_max = max(
+                reconnect_count_max,
+                _int(record.get("reconnect_count")) or 0,
+            )
+            if receive is not None and exchange is not None:
+                receive_exchange_deltas_ms.append(float(receive - exchange))
             if receive is not None:
                 receive_times.append(receive)
                 previous = last_receive.get(key)
@@ -118,10 +133,20 @@ def build_manifest_from_tick_shard(
                 authenticated_explicit = False
             else:
                 public_only = public_only and provenance.get("access") == "read_only"
+                transport = str(provenance.get("transport") or "")
+                if transport:
+                    transports.add(transport)
                 if "authenticated" not in provenance:
                     authenticated_explicit = False
                 authenticated = provenance.get("authenticated")
                 authenticated_false = authenticated_false and authenticated is False
+            if isinstance(summary, Mapping):
+                rtt = _float(summary.get("transport_rtt_ms"))
+                if rtt is not None:
+                    transport_rtt_ms.append(rtt)
+                offset = _float(summary.get("clock_offset_ms"))
+                if offset is not None:
+                    clock_offsets_ms.append(offset)
             real_execution_false = real_execution_false and record.get("real_execution") is False
 
     if event_count <= 0:
@@ -162,6 +187,7 @@ def build_manifest_from_tick_shard(
                 False if authenticated_false and authenticated_explicit else None
             ),
             "real_execution": not bool(real_execution_false),
+            "transports": sorted(transports),
         },
         "integrity": {
             "gap_count": gap_count,
@@ -175,6 +201,12 @@ def build_manifest_from_tick_shard(
         "synchronization": {
             "first_exchange_ts_ms": min(exchange_times) if exchange_times else None,
             "last_exchange_ts_ms": max(exchange_times) if exchange_times else None,
+            "connection_ids": sorted(connection_ids),
+            "connection_count": len(connection_ids),
+            "max_reconnect_count": reconnect_count_max,
+            "receive_minus_exchange_ms": _stats(receive_exchange_deltas_ms),
+            "transport_rtt_ms": _stats(transport_rtt_ms),
+            "clock_offset_ms": _stats(clock_offsets_ms),
         },
         "reconciliation": {
             "status": str(reconciliation_status or "UNVERIFIED").upper()
@@ -234,6 +266,29 @@ def _slug(value: object) -> str:
         char.lower() if char.isalnum() else "-"
         for char in str(value or "")
     ).strip("-") or "unknown"
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None and not isinstance(value, bool) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _stats(values: Iterable[float]) -> dict[str, float | int | None]:
+    rows = sorted(float(value) for value in values)
+    if not rows:
+        return {"count": 0, "min": None, "p50": None, "p95": None, "max": None}
+    def percentile(fraction: float) -> float:
+        index = min(len(rows) - 1, max(0, int(round((len(rows) - 1) * fraction))))
+        return rows[index]
+    return {
+        "count": len(rows),
+        "min": round(rows[0], 6),
+        "p50": round(percentile(0.50), 6),
+        "p95": round(percentile(0.95), 6),
+        "max": round(rows[-1], 6),
+    }
 
 
 def _int(value: Any) -> int | None:
