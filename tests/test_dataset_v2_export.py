@@ -69,3 +69,26 @@ def test_mixed_shard_is_refused(tmp_path) -> None:
         assert "one source/channel/instrument" in str(exc)
     else:
         raise AssertionError("mixed shard must be refused")
+
+
+def test_missing_authenticated_provenance_is_not_silently_treated_as_false(tmp_path) -> None:
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    from hl_observer.collection.tick_dataset import TickEnvelope
+
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="hyperliquid_public_ws",
+            channel="bbo",
+            instrument="BTC",
+            event_kind="UPDATE",
+            raw_payload={"channel": "bbo"},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=123,
+            provenance={"access": "read_only"},
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["provenance"]["authenticated"] is None
