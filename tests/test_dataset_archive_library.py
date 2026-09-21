@@ -42,6 +42,7 @@ def test_suites_couvrent_archive_recherche_et_sqlite() -> None:
     assert "cross-venue-full" in SUITES
     assert "microstructure-full" in SUITES
     assert "research-lab-full" in SUITES
+    assert "event-intelligence-full" in SUITES
     assert "sqlite-core" in SUITES
     assert "sqlite-all-safe" in SUITES
     assert "full-archive" in SUITES
@@ -164,3 +165,18 @@ def test_runner_utilise_un_stockage_persistant_hors_checkout(tmp_path: Path, mon
     expected_root = research_home.resolve() / "datasets"
     assert cache == expected_root / "assets"
     assert workspace == expected_root / "workspaces" / "economic-full" / digest[:16]
+
+
+def test_event_intelligence_suite_selects_structured_collector_results() -> None:
+    rows = [
+        _record("runtime/data/event_intelligence/events_r2.jsonl", 10, "events.zip"),
+        _record("runtime/data/event_intelligence/worldmonitor/news.jsonl", 20, "wm.zip"),
+        _record("runtime/data/usgs/earthquakes.jsonl", 30, "usgs.zip"),
+        _record("runtime/data/unrelated/other.jsonl", 40, "other.zip"),
+    ]
+    selected = select_suite_records(rows, "event-intelligence-full")
+    assert [row.relative_path for row in selected] == [
+        "runtime/data/event_intelligence/events_r2.jsonl",
+        "runtime/data/event_intelligence/worldmonitor/news.jsonl",
+        "runtime/data/usgs/earthquakes.jsonl",
+    ]
