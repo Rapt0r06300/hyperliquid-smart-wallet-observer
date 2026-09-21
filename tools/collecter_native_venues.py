@@ -210,7 +210,61 @@ async def _run(
         max_symbols_per_venue=max_symbols,
         ccxt_snapshot_path=root / "data" / "ccxt_universe.json",
     )
+
+    def enqueue_bybit_instrument_metadata() -> int:
+        rows = getattr(coordinator.bybit_client, "last_instrument_metadata", ())
+        active = set(coordinator.symbols_for("bybit"))
+        if not rows or not active:
+            return 0
+        received_ts_ms = int(time.time() * 1_000)
+        receive_mono_ns = time.monotonic_ns()
+        emitted = 0
+        for raw in rows:
+            if not isinstance(raw, Mapping):
+                continue
+            symbol = str(raw.get("symbol") or "").upper()
+            if symbol not in active:
+                continue
+            price_filter = raw.get("priceFilter")
+            lot_filter = raw.get("lotSizeFilter")
+            price = dict(price_filter) if isinstance(price_filter, Mapping) else {}
+            lot = dict(lot_filter) if isinstance(lot_filter, Mapping) else {}
+            enqueue(
+                TickEnvelope(
+                    source_id="bybit_public_rest",
+                    channel="instrument_metadata",
+                    instrument=symbol,
+                    event_kind=FeedEventKind.SNAPSHOT,
+                    raw_payload=dict(raw),
+                    exchange_ts_ms=None,
+                    received_ts_ms=received_ts_ms,
+                    local_monotonic_ns=receive_mono_ns,
+                    connection_id=None,
+                    sequence=None,
+                    provenance={
+                        "url": f"{coordinator.bybit_client.rest_base_url}/v5/market/instruments-info",
+                        "network": "mainnet",
+                        "access": "read_only",
+                        "transport": "https",
+                        "authenticated": False,
+                        "collector": "native_venues",
+                    },
+                    parsed_summary={
+                        "status": raw.get("status"),
+                        "contract_type": raw.get("contractType"),
+                        "tick_size": price.get("tickSize"),
+                        "qty_step": lot.get("qtyStep"),
+                        "min_order_qty": lot.get("minOrderQty"),
+                        "min_notional_value": lot.get("minNotionalValue"),
+                        "funding_interval_minutes": raw.get("fundingInterval"),
+                        "data_gate_ready": False,
+                    },
+                )
+            )
+            emitted += 1
+        return emitted
     registry = await asyncio.to_thread(coordinator.discover)
+    enqueue_bybit_instrument_metadata()
     await asyncio.to_thread(coordinator.refresh_clock_sync)
     counts = {venue: len(coordinator.symbols_for(venue)) for venue in VENUES}
     if not any(counts.values()):
@@ -263,6 +317,7 @@ async def _run(
             await asyncio.sleep(universe_refresh_s)
             before = symbols_snapshot()
             refreshed = await asyncio.to_thread(coordinator.discover)
+            enqueue_bybit_instrument_metadata()
             after = symbols_snapshot()
             registry = refreshed
             counts = {venue: len(after[venue]) for venue in VENUES}
