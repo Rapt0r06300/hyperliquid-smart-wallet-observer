@@ -42,6 +42,7 @@ def build_manifest_from_tick_shard(
     event_count = 0
     public_only = True
     authenticated_false = True
+    authenticated_explicit = True
     real_execution_false = True
     last_exchange: dict[tuple[str, str, str], int] = {}
     last_receive: dict[tuple[str, str, str], int] = {}
@@ -114,11 +115,13 @@ def build_manifest_from_tick_shard(
             if not isinstance(provenance, Mapping):
                 public_only = False
                 authenticated_false = False
+                authenticated_explicit = False
             else:
                 public_only = public_only and provenance.get("access") == "read_only"
+                if "authenticated" not in provenance:
+                    authenticated_explicit = False
                 authenticated = provenance.get("authenticated")
-                if authenticated is not None:
-                    authenticated_false = authenticated_false and authenticated is False
+                authenticated_false = authenticated_false and authenticated is False
             real_execution_false = real_execution_false and record.get("real_execution") is False
 
     if event_count <= 0:
@@ -155,7 +158,9 @@ def build_manifest_from_tick_shard(
         "asset_verified": False,
         "provenance": {
             "public_data_only": bool(public_only),
-            "authenticated": False if authenticated_false else None,
+            "authenticated": (
+                False if authenticated_false and authenticated_explicit else None
+            ),
             "real_execution": not bool(real_execution_false),
         },
         "integrity": {
