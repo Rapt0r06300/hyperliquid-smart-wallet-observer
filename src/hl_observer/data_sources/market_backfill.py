@@ -212,6 +212,38 @@ class HistoricalBackfillHub:
     def backfill_many(self, requests):
         return [self.backfill(r) for r in requests]
 
+    def reconcile(self, request, live_records):
+        """Backfill the exact window then compare live capture with the reference source.
+
+        A failed/unavailable reference never becomes an implicit MATCHED result.
+        """
+        from hl_observer.collection.reconciliation import reconcile_records
+
+        result = self.backfill(request)
+        if result.status != "OK":
+            return {
+                "status": "UNAVAILABLE",
+                "backfill_status": result.status,
+                "backfill_error": result.error,
+                "live_count": len(tuple(live_records)),
+            }
+        live = tuple(live_records)
+        reference = tuple(
+            {
+                "event_id": row.event_id,
+                "exchange_symbol": row.exchange_symbol,
+                "exchange_timestamp": row.exchange_timestamp,
+                "sequence": row.sequence,
+            }
+            for row in result.records
+        )
+        report = reconcile_records(live, reference)
+        return {
+            **report.as_dict(),
+            "backfill_status": result.status,
+            "backfill_error": result.error,
+        }
+
 
 def _in_range(value, request):
     ts = _timestamp(value)
