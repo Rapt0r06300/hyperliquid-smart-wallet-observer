@@ -115,3 +115,52 @@ def test_native_tape_refuses_frame_without_receive_clock() -> None:
         )
         is None
     )
+
+
+def test_okx_index_price_is_taped() -> None:
+    envelope = native_tick_envelope(
+        "okx",
+        {
+            "arg": {"channel": "index-tickers", "instId": "BTC-USDT-SWAP"},
+            "data": [{"instId": "BTC-USDT-SWAP", "idxPx": "65000", "ts": "1700000000000"}],
+            "_alina_transport": {
+                "receive_wall_ts_ms": 1700000000010,
+                "receive_mono_ns": 123,
+                "connection_id": "okx-1",
+            },
+        },
+    )
+    assert envelope is not None
+    record = envelope.as_record(written_ts_ms=1700000000020)
+    assert record["channel"] == "index_price"
+    assert record["instrument"] == "BTC-USDT-SWAP"
+
+
+def test_okx_instrument_rule_change_is_taped() -> None:
+    envelope = native_tick_envelope(
+        "okx",
+        {
+            "arg": {"channel": "instruments", "instType": "SWAP"},
+            "data": [
+                {
+                    "instType": "SWAP",
+                    "instId": "BTC-USDT-SWAP",
+                    "tickSz": "0.1",
+                    "lotSz": "0.01",
+                    "minSz": "0.01",
+                    "state": "live",
+                    "ts": "1700000000000",
+                }
+            ],
+            "_alina_transport": {
+                "receive_wall_ts_ms": 1700000000010,
+                "receive_mono_ns": 123,
+                "connection_id": "okx-1",
+            },
+        },
+    )
+    assert envelope is not None
+    record = envelope.as_record(written_ts_ms=1700000000020)
+    assert record["channel"] == "instrument_metadata"
+    assert record["instrument"] == "BTC-USDT-SWAP"
+    assert record["raw_payload"]["data"][0]["tickSz"] == "0.1"
