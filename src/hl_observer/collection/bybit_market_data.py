@@ -327,6 +327,7 @@ class BybitPublicClient:
         if depth not in {1, 50, 200, 1000}:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
         self.orderbook_depth = depth
+        self.last_instrument_metadata: list[dict[str, object]] = []
 
     def fetch_instrument_metadata(self, *, timeout_s: float = 10.0) -> list[dict[str, object]]:
         """Return every public linear instrument row, preserving replay-critical rules."""
@@ -356,6 +357,7 @@ class BybitPublicClient:
                 cursor = str(result.get("nextPageCursor") or "")
                 if not cursor:
                     break
+        self.last_instrument_metadata = [dict(row) for row in rows]
         return rows
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
