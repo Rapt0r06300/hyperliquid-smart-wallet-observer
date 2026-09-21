@@ -924,14 +924,81 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                     async for raw in ws:
                         r = time.monotonic_ns()
                         recv_wall_ms = int(time.time() * 1000)
-                        if stats["dernier_bin_ns"] and (r - stats["dernier_bin_ns"]) / 1e6 > GAP_MS:
+                        gap_ms = (
+                            (r - stats["dernier_bin_ns"]) / 1e6
+                            if stats["dernier_bin_ns"]
+                            else 0.0
+                        )
+                        if gap_ms > GAP_MS:
                             stats["trous"] += 1
+                            queue_raw(
+                                TickEnvelope(
+                                    source_id="binance_usdm_public_readonly",
+                                    channel="connection",
+                                    instrument="*",
+                                    event_kind=FeedEventKind.GAP,
+                                    raw_payload={
+                                        "gap_ms": round(gap_ms, 3),
+                                        "reason": "BINANCE_BBO_WS_TEMPORAL_GAP",
+                                    },
+                                    received_ts_ms=recv_wall_ms,
+                                    local_monotonic_ns=r,
+                                    connection_id=connection_id,
+                                    reconnect_count=stats["reconnexions_bin"],
+                                    gap_count=stats["trous"],
+                                    provenance={
+                                        "url": WS_BINANCE,
+                                        "network": "mainnet",
+                                        "access": "read_only",
+                                        "transport": "websocket",
+                                    },
+                                )
+                            )
                         stats["dernier_bin_ns"] = r
-                        q = parser_bookticker_binance(json.loads(raw))
+                        stats["raw_frames_received"] += 1
+                        message = json.loads(raw)
+                        q = parser_bookticker_binance(message)
                         if q and q["symbol"] in inv:
                             stats["frames_bookticker"] += 1
                             coin_name = inv[q["symbol"]]
                             sequence = next_sequence("binance_bbo", coin_name)
+                            queue_raw(
+                                TickEnvelope(
+                                    source_id="binance_usdm_public_readonly",
+                                    channel="bbo",
+                                    instrument=coin_name,
+                                    event_kind=FeedEventKind.UPDATE,
+                                    raw_payload=message,
+                                    exchange_ts_ms=(
+                                        int(q["ts_ex"]) if q.get("ts_ex") else None
+                                    ),
+                                    received_ts_ms=recv_wall_ms,
+                                    local_monotonic_ns=r,
+                                    connection_id=connection_id,
+                                    sequence=(
+                                        int(q["update_id"])
+                                        if q.get("update_id") is not None
+                                        else sequence
+                                    ),
+                                    reconnect_count=stats["reconnexions_bin"],
+                                    gap_count=stats["trous"],
+                                    provenance={
+                                        "url": WS_BINANCE,
+                                        "network": "mainnet",
+                                        "access": "read_only",
+                                        "transport": "websocket",
+                                        "channel_semantics": "full_top_of_book",
+                                    },
+                                    parsed_summary={
+                                        "best_bid": q["bid"],
+                                        "best_ask": q["ask"],
+                                        "bid_size": q["bid_sz"],
+                                        "ask_size": q["ask_sz"],
+                                        "update_id": q.get("update_id"),
+                                        "data_gate_ready": False,
+                                    },
+                                )
+                            )
                             mag.maj_binance(
                                 q,
                                 coin_name,
@@ -970,11 +1037,44 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                     async for raw in ws:
                         r = time.monotonic_ns()
                         recv_wall_ms = int(time.time() * 1000)
-                        t = parser_aggtrade_binance(json.loads(raw))
+                        stats["raw_frames_received"] += 1
+                        message = json.loads(raw)
+                        t = parser_aggtrade_binance(message)
                         if t and t["symbol"] in inv:
                             stats["frames_trades"] += 1
                             coin_name = inv[t["symbol"]]
                             sequence = next_sequence("binance_trade", coin_name)
+                            queue_raw(
+                                TickEnvelope(
+                                    source_id="binance_usdm_public_readonly",
+                                    channel="trades",
+                                    instrument=coin_name,
+                                    event_kind=FeedEventKind.EVENT,
+                                    raw_payload=message,
+                                    exchange_ts_ms=(
+                                        int(t["ts_ex"]) if t.get("ts_ex") else None
+                                    ),
+                                    received_ts_ms=recv_wall_ms,
+                                    local_monotonic_ns=r,
+                                    connection_id=connection_id,
+                                    sequence=sequence,
+                                    reconnect_count=stats["reconnexions_bin"],
+                                    gap_count=stats["trous"],
+                                    provenance={
+                                        "url": WS_BINANCE,
+                                        "network": "mainnet",
+                                        "access": "read_only",
+                                        "transport": "websocket",
+                                        "channel_semantics": "event_stream",
+                                    },
+                                    parsed_summary={
+                                        "price": t["px"],
+                                        "size": t["sz"],
+                                        "aggressor_side": t["side"],
+                                        "data_gate_ready": False,
+                                    },
+                                )
+                            )
                             trade_event = {
                                 "venue": "BIN_TRADE",
                                 "coin": coin_name,
