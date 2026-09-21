@@ -23,6 +23,7 @@ from typing import Any, Callable, Mapping
 
 RACINE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RACINE / "src"))
+sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
