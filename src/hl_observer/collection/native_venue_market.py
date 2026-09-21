@@ -235,6 +235,78 @@ class MultiVenueMarketStore:
         venues = [snap.venue for snap in self.healthy(coin, now_ms=now_ms)]
         return list(combinations(venues, 2))
 
+    @staticmethod
+    def synchronization_skew_ms(
+        left: NativeMarketSnapshot,
+        right: NativeMarketSnapshot,
+    ) -> dict[str, float | None]:
+        """Return receive-clock and corrected exchange-clock skew evidence.
+
+        Exchange timestamps are only comparable after applying each venue clock
+        offset estimate. Missing clock-offset evidence stays missing.
+        """
+        receive_skew = abs(float(left.receive_ts_ms) - float(right.receive_ts_ms))
+        corrected_exchange_skew: float | None = None
+        if (
+            left.clock_offset_ms is not None
+            and right.clock_offset_ms is not None
+            and left.exchange_ts_ms > 0
+            and right.exchange_ts_ms > 0
+        ):
+            left_local = float(left.exchange_ts_ms) - float(left.clock_offset_ms)
+            right_local = float(right.exchange_ts_ms) - float(right.clock_offset_ms)
+            corrected_exchange_skew = abs(left_local - right_local)
+        return {
+            "receive_skew_ms": receive_skew,
+            "corrected_exchange_skew_ms": corrected_exchange_skew,
+        }
+
+    def synchronized_pairs(
+        self,
+        coin: str,
+        *,
+        now_ms: int,
+        max_receive_skew_ms: float = 250.0,
+        max_exchange_skew_ms: float = 250.0,
+        require_clock_offsets: bool = False,
+        require_l2: bool = False,
+    ) -> list[tuple[NativeMarketSnapshot, NativeMarketSnapshot, dict[str, float | None]]]:
+        """Return only causally comparable venue pairs.
+
+        Fail closed on feed-integrity evidence. BBO-only pairs remain usable for
+        diagnostics; execution/replay callers can require real L2.
+        """
+        rows = self.healthy(coin, now_ms=now_ms)
+        accepted: list[
+            tuple[NativeMarketSnapshot, NativeMarketSnapshot, dict[str, float | None]]
+        ] = []
+        for left, right in combinations(rows, 2):
+            if (
+                left.gap_count
+                or right.gap_count
+                or left.regression_count
+                or right.regression_count
+            ):
+                continue
+            if require_l2 and (
+                not left.bids
+                or not left.asks
+                or not right.bids
+                or not right.asks
+            ):
+                continue
+            evidence = self.synchronization_skew_ms(left, right)
+            receive_skew = evidence["receive_skew_ms"]
+            if receive_skew is None or receive_skew > float(max_receive_skew_ms):
+                continue
+            exchange_skew = evidence["corrected_exchange_skew_ms"]
+            if require_clock_offsets and exchange_skew is None:
+                continue
+            if exchange_skew is not None and exchange_skew > float(max_exchange_skew_ms):
+                continue
+            accepted.append((left, right, evidence))
+        return accepted
+
     def lead_lag_rows(
         self, coin: str, *, now_ms: int
     ) -> list[dict[str, float | int | str | None]]:
