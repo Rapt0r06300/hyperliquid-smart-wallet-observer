@@ -222,7 +222,6 @@ def evaluate_candidate_markout(
         latency_bps=latency_cost,
         total_cost_bps=total_cost,
         net_bps=net,
-        notional_usd=notional,
         net_pnl_usd=pnl,
         capacity_usd=capacity,
         fill_ratio=fill_ratio,
