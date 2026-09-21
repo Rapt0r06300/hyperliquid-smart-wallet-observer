@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Iterable
 
@@ -16,6 +17,7 @@ import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
+from hl_observer.collection.feed_integrity import FeedIntegrityState, estimate_clock_sync
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
@@ -42,6 +44,11 @@ def _int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _transport(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get("_alina_transport")
+    return value if isinstance(value, dict) else {}
 
 
 def parse_okx_swap_instruments(payload: dict[str, object]) -> list[tuple[str, str]]:
@@ -99,6 +106,11 @@ class OkxMarketState:
     open_interest: float | None = None
     funding_rate: float | None = None
     funding_interval_hours: float | None = None
+    receive_mono_ns: int | None = None
+    connection_id: str | None = None
+    transport_rtt_ms: float | None = None
+    clock_offset_ms: float | None = None
+    integrity: FeedIntegrityState = field(default_factory=FeedIntegrityState)
 
     def apply(self, payload: dict[str, object], *, receive_ts_ms: int | None = None) -> str:
         arg = payload.get("arg")
@@ -110,10 +122,19 @@ class OkxMarketState:
         inst = str(item.get("instId") or (arg.get("instId") if isinstance(arg, dict) else "") or self.inst_id).upper()
         if inst != self.inst_id.upper():
             return self._desync("SYMBOL_MISMATCH")
-        received = receive_ts_ms or int(time.time() * 1000)
+        meta = _transport(payload)
+        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
+        self.connection_id = str(meta.get("connection_id") or "") or self.connection_id
+        parsed_rtt = _float(meta.get("transport_rtt_ms"))
+        if parsed_rtt is not None:
+            self.transport_rtt_ms = parsed_rtt
+        parsed_offset = _float(meta.get("clock_offset_ms"))
+        if parsed_offset is not None:
+            self.clock_offset_ms = parsed_offset
 
         if channel in {"books5", "bbo-tbt", "books"}:
-            return self._apply_book(item, receive_ts_ms=received)
+            return self._apply_book(item, receive_ts_ms=received, receive_mono_ns=self.receive_mono_ns)
         if channel == "tickers":
             self.last = _coalesce(item.get("last"), self.last)
             self.volume_24h = _coalesce(item.get("vol24h"), self.volume_24h)
@@ -136,24 +157,33 @@ class OkxMarketState:
         self.receive_ts_ms = received
         return self.quality
 
-    def _apply_book(self, item: dict[str, object], *, receive_ts_ms: int) -> str:
+    def _apply_book(self, item: dict[str, object], *, receive_ts_ms: int, receive_mono_ns: int | None = None) -> str:
         seq = _int(item.get("seqId"))
         prev = _int(item.get("prevSeqId"))
-        if self.sequence is not None and seq is not None and seq < self.sequence:
-            return self._desync("SEQUENCE_REGRESSION")
-        if prev is not None and self.sequence is not None and prev not in {self.sequence, -1}:
-            return self._desync("SEQUENCE_GAP")
+        exchange_ts = _int(item.get("ts"))
+        ok, reasons = self.integrity.observe(
+            sequence=seq,
+            prev_sequence=prev,
+            exchange_ts_ms=exchange_ts,
+            receive_ts_ms=receive_ts_ms,
+            receive_mono_ns=receive_mono_ns,
+        )
+        if "DUPLICATE_SEQUENCE" in reasons:
+            self.receive_ts_ms = receive_ts_ms
+            return self.quality
+        if not ok:
+            return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
+
         bids = _parse_levels(item.get("bids"), reverse=True)
         asks = _parse_levels(item.get("asks"), reverse=False)
-        # books5 and bbo-tbt are snapshot channels. For ``books`` we deliberately
-        # require a full image here; callers wanting deep incremental books should
-        # use a dedicated sequenced book implementation rather than fabricate depth.
+        # books5 and bbo-tbt are full snapshots for their advertised depth.
+        # Incremental books need a dedicated reconstruction path.
         if bids:
             self.bids = tuple(bids)
         if asks:
             self.asks = tuple(asks)
         self.sequence = seq if seq is not None else self.sequence
-        self.exchange_ts_ms = _int(item.get("ts")) or self.exchange_ts_ms
+        self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms
         if self._valid_bbo():
             self.quality = EXPLOITABLE
@@ -187,6 +217,18 @@ class OkxMarketState:
             funding_rate=self.funding_rate,
             funding_interval_hours=self.funding_interval_hours,
             sequence=self.sequence,
+            connection_id=self.connection_id,
+            receive_mono_ns=self.receive_mono_ns,
+            transport_rtt_ms=self.transport_rtt_ms,
+            clock_offset_ms=self.clock_offset_ms,
+            gap_count=self.integrity.gaps,
+            duplicate_count=self.integrity.duplicates,
+            regression_count=(
+                self.integrity.regressions
+                + self.integrity.exchange_time_regressions
+                + self.integrity.receive_time_regressions
+                + self.integrity.monotonic_regressions
+            ),
             reason=self.reason,
         )
 
@@ -230,6 +272,30 @@ class OkxPublicClient:
             raise RuntimeError(f"OKX instruments error: {payload.get('msg', 'unknown')}")
         return parse_okx_swap_instruments(payload)
 
+    def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
+        with httpx.Client(timeout=timeout_s) as client:
+            response = client.get(f"{self.rest_base_url}/api/v5/public/time")
+            response.raise_for_status()
+            payload = response.json()
+        data = payload.get("data")
+        if str(payload.get("code", "0")) != "0" or not isinstance(data, list) or not data:
+            raise RuntimeError(f"OKX time error: {payload.get('msg', 'unknown')}")
+        server = _int(data[0].get("ts")) if isinstance(data[0], dict) else None
+        if server is None:
+            raise RuntimeError("OKX server time missing")
+        return server
+
+    def measure_clock_sync(self, *, timeout_s: float = 5.0):
+        sent = int(time.time() * 1_000)
+        server = self.server_time_ms(timeout_s=timeout_s)
+        received = int(time.time() * 1_000)
+        return estimate_clock_sync(
+            venue="okx",
+            server_ts_ms=server,
+            send_wall_ts_ms=sent,
+            receive_wall_ts_ms=received,
+        )
+
     async def messages(self, inst_ids: Iterable[str]) -> AsyncIterator[dict[str, object]]:
         inst_ids = tuple(sorted({str(value).upper() for value in inst_ids if str(value).strip()}))
         if not inst_ids:
@@ -242,14 +308,24 @@ class OkxPublicClient:
         attempt = 0
         while True:
             try:
+                connection_id = f"okx-{uuid.uuid4().hex}"
                 async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
                     async for raw in socket:
+                        receive_mono_ns = time.monotonic_ns()
+                        receive_wall_ts_ms = int(time.time() * 1_000)
                         if raw == "pong":
                             continue
                         payload = json.loads(raw)
                         if isinstance(payload, dict):
+                            latency = getattr(socket, "latency", None)
+                            payload["_alina_transport"] = {
+                                "connection_id": connection_id,
+                                "receive_wall_ts_ms": receive_wall_ts_ms,
+                                "receive_mono_ns": receive_mono_ns,
+                                "transport_rtt_ms": (float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None),
+                            }
                             yield payload
             except asyncio.CancelledError:
                 raise
