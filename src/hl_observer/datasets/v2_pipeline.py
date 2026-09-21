@@ -218,7 +218,7 @@ def build_bundle(
     output_root: str | Path,
     *,
     collector_version: str,
-    cost_model_channels: tuple[str, ...] = ("bbo", "l2Book", "trades"),
+    cost_model_channels: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -246,8 +246,8 @@ def build_bundle(
         if family in set(cost_model_channels):
             preliminary["cost_model"] = {
                 "applicable": True,
-                # Data capture itself cannot prove strategy-specific fees/slippage.
-                # Replays must explicitly attach their cost model before PnL proof.
+                # Only explicit execution/cost datasets should opt into this.
+                # Raw market-data SAFE status is independent from replay cost models.
                 "ready": False,
             }
         preliminary["reconciliation"] = {
