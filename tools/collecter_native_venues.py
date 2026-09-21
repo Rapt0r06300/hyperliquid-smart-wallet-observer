@@ -36,6 +36,7 @@ MARQUEUR = Path("runtime") / "data" / "lanceur_session_marqueur.txt"
 QUEUE_MAX = 100_000
 STREAM_NAME = "native_venues_market_ticks"
 VENUES = ("bybit", "okx", "gate", "bitget")
+DEFAULT_UNIVERSE_REFRESH_S = 900.0
 
 
 def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -158,6 +159,7 @@ async def _run(
     max_symbols: int,
     stale_after_ms: int,
     duration_s: float,
+    universe_refresh_s: float = DEFAULT_UNIVERSE_REFRESH_S,
 ) -> int:
     queue: deque[TickEnvelope] = deque()
     dropped = 0
@@ -168,6 +170,8 @@ async def _run(
     canonical_last_written = 0
     canonical_last_beat_ns = 0
     started = time.time()
+    universe_refreshes = 0
+    universe_changes = 0
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
 
     def enqueue(envelope: TickEnvelope) -> None:
@@ -213,6 +217,12 @@ async def _run(
         print("[native-venues] aucun marche decouvert sur Bybit/OKX/Gate/Bitget", flush=True)
         return 2
 
+    def symbols_snapshot() -> dict[str, tuple[str, ...]]:
+        return {
+            venue: tuple(coordinator.symbols_for(venue))
+            for venue in VENUES
+        }
+
     async def venue_loop(venue: str) -> None:
         method = getattr(coordinator, f"run_{venue}")
         while True:
@@ -230,9 +240,51 @@ async def _run(
                 )
                 await asyncio.sleep(min(30.0, 2.0 ** min(reconnects[venue], 4)))
 
-    tasks = [asyncio.create_task(venue_loop(venue)) for venue in VENUES]
+    managed_tasks: set[asyncio.Task[Any]] = set()
+    venue_tasks: dict[str, asyncio.Task[Any]] = {}
+
+    def start_venue_task(venue: str) -> None:
+        task = asyncio.create_task(venue_loop(venue))
+        venue_tasks[venue] = task
+        managed_tasks.add(task)
+
+    for venue in VENUES:
+        start_venue_task(venue)
+
     if counts.get("bybit") or counts.get("okx"):
-        tasks.append(asyncio.create_task(coordinator.run_clock_sync()))
+        clock_task = asyncio.create_task(coordinator.run_clock_sync())
+        managed_tasks.add(clock_task)
+
+    async def universe_refresh_loop() -> None:
+        nonlocal registry, counts, universe_refreshes, universe_changes
+        if universe_refresh_s <= 0:
+            return
+        while True:
+            await asyncio.sleep(universe_refresh_s)
+            before = symbols_snapshot()
+            refreshed = await asyncio.to_thread(coordinator.discover)
+            after = symbols_snapshot()
+            registry = refreshed
+            counts = {venue: len(after[venue]) for venue in VENUES}
+            universe_refreshes += 1
+            changed = [venue for venue in VENUES if before[venue] != after[venue]]
+            if not changed:
+                continue
+            universe_changes += len(changed)
+            print(
+                "[native-venues] univers change: %s -> redemarrage cible"
+                % ",".join(changed),
+                flush=True,
+            )
+            for venue in changed:
+                old_task = venue_tasks.get(venue)
+                if old_task is not None:
+                    old_task.cancel()
+                    await asyncio.gather(old_task, return_exceptions=True)
+                start_venue_task(venue)
+
+    refresh_task = asyncio.create_task(universe_refresh_loop())
+    managed_tasks.add(refresh_task)
     try:
         while True:
             await asyncio.sleep(0.25)
@@ -290,6 +342,9 @@ async def _run(
                     "stop_reason": stop_reason or None,
                     "discovered_registry_coins": len(registry),
                     "subscribed_symbols": counts,
+                    "universe_refreshes": universe_refreshes,
+                    "universe_changes": universe_changes,
+                    "universe_refresh_interval_s": universe_refresh_s,
                     "records_written": written,
                     "queue_depth": len(queue),
                     "queue_drops": dropped,
@@ -310,9 +365,11 @@ async def _run(
             if stop_reason:
                 break
     finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        current_tasks = list(managed_tasks)
+        for task in current_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*current_tasks, return_exceptions=True)
         while queue:
             batch = [queue.popleft() for _ in range(min(5_000, len(queue)))]
             written += writer.append_batch(batch)
@@ -323,6 +380,9 @@ async def _run(
             "state": "STOPPED",
             "discovered_registry_coins": len(registry),
             "subscribed_symbols": counts,
+            "universe_refreshes": universe_refreshes,
+            "universe_changes": universe_changes,
+            "universe_refresh_interval_s": universe_refresh_s,
             "records_written": written,
             "queue_depth": len(queue),
             "queue_drops": dropped,
@@ -350,6 +410,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-symbols", type=int, default=50)
     parser.add_argument("--stale-after-ms", type=int, default=1_500)
     parser.add_argument(
+        "--universe-refresh-s",
+        type=float,
+        default=DEFAULT_UNIVERSE_REFRESH_S,
+        help="Redecouverte periodique des listings; 0 desactive le refresh.",
+    )
+    parser.add_argument(
         "--duration-s",
         type=float,
         default=0.0,
@@ -363,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_symbols=max(1, min(int(args.max_symbols), 100)),
                 stale_after_ms=max(250, int(args.stale_after_ms)),
                 duration_s=max(0.0, float(args.duration_s)),
+                universe_refresh_s=max(0.0, float(args.universe_refresh_s)),
             )
         )
     except KeyboardInterrupt:
