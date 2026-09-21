@@ -91,3 +91,39 @@ def test_binance_trade_preserves_exchange_trade_id() -> None:
     assert tick.channel == "trades"
     assert tick.sequence == 123
     assert tick.parsed_summary["aggressor_side"] == "SELL"
+
+
+def test_plan_file_preserves_exact_exchange_symbols(tmp_path) -> None:
+    m = _module()
+    path = tmp_path / "plan.json"
+    path.write_text(
+        """{
+  "coins": [
+    {
+      "coin": "PEPE",
+      "symbols": {
+        "hyperliquid": "PEPE",
+        "binance": "1000PEPEUSDT",
+        "bybit": "1000PEPEUSDT",
+        "okx": "PEPE-USDT-SWAP"
+      }
+    },
+    {
+      "coin": "HYPE",
+      "symbols": {
+        "hyperliquid": "HYPE",
+        "bybit": "HYPEUSDT"
+      }
+    }
+  ]
+}
+""",
+        encoding="utf-8",
+    )
+    rows = m._load_plan_rows(path)
+    assert rows[0]["coin"] == "PEPE"
+    venue_lists = m._venue_lists(["HYPE", "PEPE"], rows)
+    assert venue_lists["binance"] == ["1000PEPEUSDT"]
+    assert venue_lists["bybit"] == ["1000PEPEUSDT", "HYPEUSDT"]
+    assert venue_lists["hyperliquid"] == ["HYPE", "PEPE"]
+    assert venue_lists["okx"] == ["PEPE-USDT-SWAP"]
