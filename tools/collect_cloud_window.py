@@ -358,6 +358,58 @@ async def _binance_stream(
             await asyncio.sleep(min(30.0, 2.0 ** min(reconnects, 5)))
 
 
+def _load_plan_rows(path: Path) -> list[dict[str, Any]]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("collection plan must be a JSON object")
+    raw_rows = payload.get("coins")
+    if not isinstance(raw_rows, list):
+        raw_rows = payload.get("selected")
+    if not isinstance(raw_rows, list):
+        raise ValueError("collection plan must contain coins or selected")
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        if not isinstance(raw, Mapping):
+            continue
+        coin = str(raw.get("coin") or "").strip().upper()
+        symbols = raw.get("symbols")
+        if not coin or not isinstance(symbols, Mapping):
+            continue
+        normalized = {
+            str(venue).strip().lower(): str(symbol).strip().upper()
+            for venue, symbol in symbols.items()
+            if str(venue).strip() and str(symbol).strip()
+        }
+        if normalized:
+            rows.append({"coin": coin, "symbols": normalized})
+    if not rows:
+        raise ValueError("collection plan contains no usable markets")
+    return rows
+
+
+def _venue_lists(
+    coins: list[str],
+    plan_rows: list[dict[str, Any]] | None,
+) -> dict[str, list[str]]:
+    if plan_rows is None:
+        return {
+            "hyperliquid": list(coins),
+            "binance": [f"{coin}USDT" for coin in coins],
+            "bybit": [f"{coin}USDT" for coin in coins],
+            "okx": [f"{coin}-USDT-SWAP" for coin in coins],
+        }
+    result = {"hyperliquid": [], "binance": [], "bybit": [], "okx": []}
+    for row in plan_rows:
+        symbols = row["symbols"]
+        for venue in result:
+            symbol = symbols.get(venue)
+            if symbol:
+                result[venue].append(str(symbol))
+    for venue in result:
+        result[venue] = sorted(set(result[venue]))
+    return result
+
+
 async def collect(
     output: Path,
     *,
@@ -365,6 +417,7 @@ async def collect(
     duration_s: float,
     collector_version: str,
     rotate_bytes: int,
+    plan_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     raw_root = output / "raw"
     assets_root = output / "assets"
@@ -380,9 +433,11 @@ async def collect(
     sink = AsyncPartitionSink(writer)
     writer_task = asyncio.create_task(sink.run())
 
-    bybit_symbols = [f"{coin}USDT" for coin in coins]
-    okx_symbols = [f"{coin}-USDT-SWAP" for coin in coins]
-    binance_symbols = [f"{coin}USDT" for coin in coins]
+    venue_lists = _venue_lists(coins, plan_rows)
+    hl_coins = venue_lists["hyperliquid"]
+    bybit_symbols = venue_lists["bybit"]
+    okx_symbols = venue_lists["okx"]
+    binance_symbols = venue_lists["binance"]
 
     binance_depth = BinanceDepthLiveCollector(
         binance_symbols,
@@ -395,15 +450,24 @@ async def collect(
         tick_sink=sink.emit,
     )
 
-    tasks = [
-        asyncio.create_task(_native_bybit(bybit_symbols, sink)),
-        asyncio.create_task(_native_okx(okx_symbols, sink)),
-        asyncio.create_task(_hyperliquid(coins, sink)),
-        asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo")),
-        asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades")),
-        asyncio.create_task(binance_depth.run()),
-        asyncio.create_task(binance_context.run()),
-    ]
+    tasks: list[asyncio.Task[Any]] = []
+    if bybit_symbols:
+        tasks.append(asyncio.create_task(_native_bybit(bybit_symbols, sink)))
+    if okx_symbols:
+        tasks.append(asyncio.create_task(_native_okx(okx_symbols, sink)))
+    if hl_coins:
+        tasks.append(asyncio.create_task(_hyperliquid(hl_coins, sink)))
+    if binance_symbols:
+        tasks.extend(
+            (
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo")),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades")),
+                asyncio.create_task(binance_depth.run()),
+                asyncio.create_task(binance_context.run()),
+            )
+        )
+    if not tasks:
+        raise RuntimeError("collection plan contains no supported venue streams")
     started = int(time.time() * 1_000)
     try:
         await asyncio.sleep(max(1.0, float(duration_s)))
@@ -450,6 +514,7 @@ async def collect(
         "ended_at_ms": int(time.time() * 1_000),
         "duration_s": round((int(time.time() * 1_000) - started) / 1000.0, 3),
         "coins": coins,
+        "venue_symbols": venue_lists,
         "collector_version": collector_version,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
@@ -499,18 +564,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Collect one bounded public market-data window.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--coins", default="BTC,ETH,SOL")
+    parser.add_argument("--plan-file")
     parser.add_argument("--duration-s", type=float, default=120.0)
     parser.add_argument("--collector-version", required=True)
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
 
-    coins = sorted(
-        {
-            token.strip().upper()
-            for token in str(args.coins).split(",")
-            if token.strip()
-        }
-    )
+    plan_rows = _load_plan_rows(Path(args.plan_file)) if args.plan_file else None
+    if plan_rows is not None:
+        coins = sorted({str(row["coin"]).upper() for row in plan_rows})
+    else:
+        coins = sorted(
+            {
+                token.strip().upper()
+                for token in str(args.coins).split(",")
+                if token.strip()
+            }
+        )
     if not coins:
         raise SystemExit("no coins")
     summary = asyncio.run(
@@ -520,6 +590,7 @@ def main() -> int:
             duration_s=max(1.0, float(args.duration_s)),
             collector_version=args.collector_version,
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
+            plan_rows=plan_rows,
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
