@@ -68,6 +68,14 @@ def snapshot_summary(snapshot: NativeMarketSnapshot) -> dict[str, Any]:
         "funding_rate": snapshot.funding_rate,
         "funding_interval_hours": snapshot.funding_interval_hours,
         "sequence": snapshot.sequence,
+        "update_id": snapshot.update_id,
+        "connection_id": snapshot.connection_id,
+        "receive_mono_ns": snapshot.receive_mono_ns,
+        "transport_rtt_ms": snapshot.transport_rtt_ms,
+        "clock_offset_ms": snapshot.clock_offset_ms,
+        "gap_count": snapshot.gap_count,
+        "duplicate_count": snapshot.duplicate_count,
+        "regression_count": snapshot.regression_count,
         "exchange_ts_ms": snapshot.exchange_ts_ms,
         "receive_ts_ms": snapshot.receive_ts_ms,
         "read_only": True,
@@ -89,8 +97,16 @@ def envelope_from_snapshot(
         raw_payload=dict(raw_payload),
         exchange_ts_ms=snapshot.exchange_ts_ms or None,
         received_ts_ms=snapshot.receive_ts_ms,
-        local_monotonic_ns=monotonic_ns if monotonic_ns is not None else time.monotonic_ns(),
+        local_monotonic_ns=(
+            monotonic_ns
+            if monotonic_ns is not None
+            else snapshot.receive_mono_ns
+            if snapshot.receive_mono_ns is not None
+            else time.monotonic_ns()
+        ),
+        connection_id=snapshot.connection_id,
         sequence=snapshot.sequence,
+        gap_count=snapshot.gap_count,
         provenance={
             "venue": snapshot.venue,
             "access": "public_read_only",
@@ -118,10 +134,15 @@ class RecordingNativeVenueCoordinator(NativeVenueCoordinator):
         return snapshot
 
     def ingest_bybit(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
-        return self._record(super().ingest_bybit(payload, **kwargs), payload)
+        snapshot = super().ingest_bybit(payload, **kwargs)
+        # When the canonical raw tape sink is configured, the parent already
+        # persisted this frame (including trade/liquidation frames that do not
+        # produce a market snapshot). Avoid duplicating the same Bybit frame.
+        return snapshot if self.tick_writer is not None else self._record(snapshot, payload)
 
     def ingest_okx(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
-        return self._record(super().ingest_okx(payload, **kwargs), payload)
+        snapshot = super().ingest_okx(payload, **kwargs)
+        return snapshot if self.tick_writer is not None else self._record(snapshot, payload)
 
     def ingest_gate(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
         return self._record(super().ingest_gate(payload, **kwargs), payload)
@@ -155,24 +176,33 @@ async def _run(
             last_event_ms[venue] = int(envelope.received_ts_ms)
         queue.append(envelope)
 
-    coordinator = RecordingNativeVenueCoordinator(
-        on_snapshot=enqueue,
-        stale_after_ms=stale_after_ms,
-        max_symbols_per_venue=max_symbols,
-        ccxt_snapshot_path=root / "data" / "ccxt_universe.json",
-    )
-    registry = await asyncio.to_thread(coordinator.discover)
-    counts = {venue: len(coordinator.symbols_for(venue)) for venue in VENUES}
-    if not any(counts.values()):
-        print("[native-venues] aucun marche decouvert sur Bybit/OKX/Gate/Bitget", flush=True)
-        return 2
-
     writer = TickDatasetWriter(
         root / TICK_DATASET_DIR,
         stream_name=STREAM_NAME,
         rotate_bytes=128 * 1024 * 1024,
         flush_every=1,
     )
+
+    class QueueTickWriter:
+        def append(self, envelope: TickEnvelope) -> int:
+            enqueue(envelope)
+            return 1
+
+    queue_tick_writer = QueueTickWriter()
+
+    coordinator = RecordingNativeVenueCoordinator(
+        on_snapshot=enqueue,
+        tick_writer=queue_tick_writer,
+        stale_after_ms=stale_after_ms,
+        max_symbols_per_venue=max_symbols,
+        ccxt_snapshot_path=root / "data" / "ccxt_universe.json",
+    )
+    registry = await asyncio.to_thread(coordinator.discover)
+    await asyncio.to_thread(coordinator.refresh_clock_sync)
+    counts = {venue: len(coordinator.symbols_for(venue)) for venue in VENUES}
+    if not any(counts.values()):
+        print("[native-venues] aucun marche decouvert sur Bybit/OKX/Gate/Bitget", flush=True)
+        return 2
 
     async def venue_loop(venue: str) -> None:
         method = getattr(coordinator, f"run_{venue}")
@@ -192,6 +222,8 @@ async def _run(
                 await asyncio.sleep(min(30.0, 2.0 ** min(reconnects[venue], 4)))
 
     tasks = [asyncio.create_task(venue_loop(venue)) for venue in VENUES]
+    if counts.get("bybit") or counts.get("okx"):
+        tasks.append(asyncio.create_task(coordinator.run_clock_sync()))
     try:
         while True:
             await asyncio.sleep(0.25)
