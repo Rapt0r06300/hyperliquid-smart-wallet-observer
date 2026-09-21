@@ -19,10 +19,11 @@ jobs:
   observe-local-project:
     name: Local READ-ONLY observer
     if: >-
+      false &&
       github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
       github.actor == 'Rapt0r06300' &&
       github.ref == 'refs/heads/main'
-    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    runs-on: ubuntu-latest # PC/self-hosted disabled by repository policy
     timeout-minutes: 30
 
     env:

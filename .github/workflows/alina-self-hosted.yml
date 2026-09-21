@@ -78,8 +78,9 @@ concurrency:
 
 jobs:
   gros-run-hypersmart:
-    # Aucun pull_request ne cible le PC. Seuls main + acteur propriétaire sont acceptés.
-    runs-on: [self-hosted, Windows, X64, hypersmart]
+    # Disabled: repository policy forbids PC/self-hosted runners.
+    if: ${{ false }}
+    runs-on: ubuntu-latest
     timeout-minutes: 1100
     env:
       HL_ENABLE_MAINNET_EXECUTION: '0'

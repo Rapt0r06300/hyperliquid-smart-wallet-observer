@@ -18,12 +18,13 @@ jobs:
   final-economic-run:
     name: HyperSmart final self-hosted v1
     if: >-
+      false &&
       github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'Rapt0r06300' &&
       github.event.repository.fork == false
-    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    runs-on: ubuntu-latest # PC/self-hosted disabled by repository policy
     timeout-minutes: 1100
     env:
       HL_ENABLE_MAINNET_EXECUTION: '0'
