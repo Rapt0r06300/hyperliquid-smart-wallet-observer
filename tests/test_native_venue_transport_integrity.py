@@ -37,7 +37,7 @@ def test_bybit_prefers_matching_engine_time_and_tracks_transport() -> None:
     assert snap.clock_offset_ms == -2.0
 
 
-def test_bybit_update_id_gap_fails_closed() -> None:
+def test_bybit_standard_depth_does_not_invent_gap_from_nonconsecutive_u() -> None:
     state = BybitMarketState("BTCUSDT")
     state.apply_orderbook(
         {
@@ -67,8 +67,8 @@ def test_bybit_update_id_gap_fails_closed() -> None:
         },
         receive_ts_ms=1_030,
     )
-    assert status == DESYNC
-    assert state.integrity.gaps == 1
+    assert status != DESYNC
+    assert state.integrity.gaps == 0
 
 
 def test_okx_gap_counter_is_preserved_in_snapshot() -> None:
@@ -105,3 +105,84 @@ def test_okx_gap_counter_is_preserved_in_snapshot() -> None:
     )
     assert status == DESYNC
     assert state.snapshot(now_ms=1_040).gap_count == 1
+
+
+def test_okx_books_reconstructs_400_level_style_deltas() -> None:
+    state = OkxMarketState("BTC-USDT-SWAP")
+    status = state.apply(
+        {
+            "arg": {"channel": "books", "instId": "BTC-USDT-SWAP"},
+            "action": "snapshot",
+            "data": [
+                {
+                    "ts": "1000",
+                    "seqId": 10,
+                    "prevSeqId": -1,
+                    "bids": [["100", "2", "0", "1"], ["99", "3", "0", "1"]],
+                    "asks": [["101", "4", "0", "1"], ["102", "5", "0", "1"]],
+                }
+            ],
+        },
+        receive_ts_ms=1_010,
+    )
+    assert status != DESYNC
+    assert state.book_ready
+
+    status = state.apply(
+        {
+            "arg": {"channel": "books", "instId": "BTC-USDT-SWAP"},
+            "action": "update",
+            "data": [
+                {
+                    "ts": "1020",
+                    "seqId": 11,
+                    "prevSeqId": 10,
+                    "bids": [["100", "0", "0", "0"], ["100.5", "1", "0", "1"]],
+                    "asks": [["101", "6", "0", "1"]],
+                }
+            ],
+        },
+        receive_ts_ms=1_030,
+    )
+    assert status != DESYNC
+    snap = state.snapshot(now_ms=1_040)
+    assert snap.bid == 100.5
+    assert snap.ask == 101.0
+    assert len(snap.bids) == 2
+    assert snap.asks[0].size == 6.0
+
+
+def test_okx_books_gap_discards_reconstructed_book() -> None:
+    state = OkxMarketState("ETH-USDT-SWAP")
+    state.apply(
+        {
+            "arg": {"channel": "books", "instId": "ETH-USDT-SWAP"},
+            "action": "snapshot",
+            "data": [{
+                "ts": "1000",
+                "seqId": 10,
+                "prevSeqId": -1,
+                "bids": [["10", "1", "0", "1"]],
+                "asks": [["11", "1", "0", "1"]],
+            }],
+        },
+        receive_ts_ms=1_010,
+    )
+    status = state.apply(
+        {
+            "arg": {"channel": "books", "instId": "ETH-USDT-SWAP"},
+            "action": "update",
+            "data": [{
+                "ts": "1020",
+                "seqId": 12,
+                "prevSeqId": 9,
+                "bids": [["10", "2", "0", "1"]],
+                "asks": [],
+            }],
+        },
+        receive_ts_ms=1_030,
+    )
+    assert status == DESYNC
+    assert not state.book_ready
+    assert not state.book_bids
+    assert not state.book_asks
