@@ -87,3 +87,16 @@ def test_quota_detecte_sur_reconnexions_repetees():
     p = PV.preuve_source(src, hb, now_ms=NOW, pid_vivant=_vivant, ecrites_precedentes=5)  # flux figé -> non sain
     c = PV.cause_source(src, p, ecrites=5, ecrites_precedentes=5, reconnexions=50, heartbeat_present=True)
     assert c["cause"] == PV.CAUSE_QUOTA
+
+
+def test_harvest_gate_exige_native_venues_sain_sans_elargir_core() -> None:
+    core_hbs = {s.nom: _hb() for s in CORE}
+    core_state = PV.evaluer_readiness(CORE, core_hbs, now_ms=NOW, pid_vivant=_vivant)
+    assert PV._niveau_ok(core_state, "core") is True
+    assert PV._niveau_ok(core_state, "harvest") is False
+
+    native = next(s for s in PV.SOURCES_HARVEST if s.nom == "native-venues")
+    srcs = CORE + (native,)
+    hbs = {**core_hbs, "native-venues": _hb()}
+    harvest_state = PV.evaluer_readiness(srcs, hbs, now_ms=NOW, pid_vivant=_vivant)
+    assert PV._niveau_ok(harvest_state, "harvest") is True
