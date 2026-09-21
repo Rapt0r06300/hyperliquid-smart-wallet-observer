@@ -35,6 +35,7 @@ class PartitionedTickDatasetWriter:
         self.rotate_bytes = max(1, int(rotate_bytes))
         self.flush_every = max(1, int(flush_every))
         self._writers: dict[tuple[str, str, str], TickDatasetWriter] = {}
+        self._last_connection: dict[tuple[str, str, str], str | None] = {}
 
     def _key(self, envelope: TickEnvelope) -> tuple[str, str, str]:
         return (
@@ -79,11 +80,42 @@ class PartitionedTickDatasetWriter:
             grouped[self._key(envelope)].append((index, envelope))
 
         output: list[dict[str, Any] | None] = [None] * len(batch)
-        for rows in grouped.values():
+        for key, rows in grouped.items():
+            # A reconnect defines a new causal epoch. Never let one immutable
+            # shard span two websocket connection_ids.
+            chunks: list[list[tuple[int, TickEnvelope]]] = []
+            current: list[tuple[int, TickEnvelope]] = []
+            current_connection: str | None | object = object()
+            for row in rows:
+                connection = (
+                    str(row[1].connection_id)
+                    if row[1].connection_id is not None
+                    else None
+                )
+                if current and connection != current_connection:
+                    chunks.append(current)
+                    current = []
+                current.append(row)
+                current_connection = connection
+            if current:
+                chunks.append(current)
+
             writer = self._writer(rows[0][1])
-            records = writer.append_batch_records(envelope for _index, envelope in rows)
-            for (index, _envelope), record in zip(rows, records):
-                output[index] = record
+            for chunk in chunks:
+                connection = (
+                    str(chunk[0][1].connection_id)
+                    if chunk[0][1].connection_id is not None
+                    else None
+                )
+                previous = self._last_connection.get(key)
+                if key in self._last_connection and connection != previous:
+                    writer.rotate()
+                self._last_connection[key] = connection
+                records = writer.append_batch_records(
+                    envelope for _index, envelope in chunk
+                )
+                for (index, _envelope), record in zip(chunk, records):
+                    output[index] = record
         if any(record is None for record in output):
             raise RuntimeError("partitioned writer failed to persist the full batch")
         return [record for record in output if record is not None]
