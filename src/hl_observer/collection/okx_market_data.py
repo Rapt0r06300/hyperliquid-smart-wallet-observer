@@ -383,6 +383,10 @@ class OkxPublicClient:
                 "mark-price",
             )
         ]
+        # OKX may change tick size / minimum trade amount while a collector is
+        # running. Capture the public instruments stream once per connection so
+        # the replay tape contains the exact rule changes effective at that time.
+        args.append({"channel": "instruments", "instType": "SWAP"})
         attempt = 0
         while True:
             try:
