@@ -13,6 +13,9 @@ on:
       - 'src/hl_observer/collection/native_venue_market.py'
       - 'src/hl_observer/collection/native_venue_coordinator.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
+      - 'src/hl_observer/collection/binance_depth_book.py'
+      - 'src/hl_observer/collection/binance_depth_orchestrator.py'
+      - 'tools/collecter_bbo.py'
       - 'src/hl_observer/collection/okx_market_data.py'
       - 'src/hl_observer/data_sources/market_backfill.py'
       - 'tests/test_collector_feed_integrity.py'
@@ -23,6 +26,9 @@ on:
       - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_bybit_market_data.py'
+      - 'tests/test_binance_depth_book.py'
+      - 'tests/test_binance_depth_orchestrator.py'
+      - 'tests/test_collecter_bbo.py'
       - 'tests/test_okx_market_data.py'
       - 'tests/test_native_venue_transport_integrity.py'
       - '.github/workflows/collector-replay-integrity-ci.yml'
@@ -58,6 +64,9 @@ jobs:
             src/hl_observer/collection/native_venue_market.py \
             src/hl_observer/collection/native_venue_coordinator.py \
             src/hl_observer/collection/bybit_market_data.py \
+            src/hl_observer/collection/binance_depth_book.py \
+            src/hl_observer/collection/binance_depth_orchestrator.py \
+            tools/collecter_bbo.py \
             src/hl_observer/collection/okx_market_data.py \
             src/hl_observer/data_sources/market_backfill.py
       - name: Run collector integrity tests
@@ -71,5 +80,8 @@ jobs:
             tests/test_native_market_tape.py \
             tests/test_native_venue_market.py \
             tests/test_bybit_market_data.py \
+            tests/test_binance_depth_book.py \
+            tests/test_binance_depth_orchestrator.py \
+            tests/test_collecter_bbo.py \
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py
