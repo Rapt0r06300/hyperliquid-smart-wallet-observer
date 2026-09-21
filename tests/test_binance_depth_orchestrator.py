@@ -74,3 +74,55 @@ def test_buffer_est_borne():
     for i in range(10):
         orch.sur_diff(U=100 + i, u=100 + i)          # tous bufferisés (pas de snapshot)
     assert len(orch.buffer) == 3                      # borné, garde les plus récents
+
+
+def test_publication_carries_transport_and_gap_evidence():
+    orch = O.BinanceDepthOrchestrator(max_buffer=1)
+    assert (
+        orch.sur_diff(
+            U=101,
+            u=101,
+            exchange_ts_ms=1000,
+            receive_ts_ms=1010,
+            receive_mono_ns=123456,
+            connection_id="bin-depth-1",
+        )
+        == O.BUFFERISE
+    )
+    # second buffered diff evicts the first -> evidence must record the loss
+    orch.sur_diff(
+        U=102,
+        u=102,
+        exchange_ts_ms=1020,
+        receive_ts_ms=1030,
+        receive_mono_ns=123999,
+        connection_id="bin-depth-1",
+    )
+    pub = orch.publier()
+    assert pub["receive_mono_ns"] == 123999
+    assert pub["connection_id"] == "bin-depth-1"
+    assert pub["buffer_overflow_count"] == 1
+    assert pub["gap_count"] == 1
+
+
+def test_connection_change_forces_fresh_snapshot():
+    orch = O.BinanceDepthOrchestrator(futures=True)
+    orch.sur_snapshot(
+        last_update_id=100,
+        bids=[[10.0, 1.0]],
+        asks=[[11.0, 1.0]],
+        receive_ts_ms=1000,
+        receive_mono_ns=1,
+        connection_id="bin-depth-a",
+    )
+    assert not orch.besoin_resnapshot()
+    assert orch.sur_diff(
+        U=101,
+        u=102,
+        pu=100,
+        bids=[[10.0, 2.0]],
+        receive_ts_ms=1010,
+        receive_mono_ns=2,
+        connection_id="bin-depth-b",
+    ) == O.BUFFERISE
+    assert orch.besoin_resnapshot()
