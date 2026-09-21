@@ -364,6 +364,7 @@ class BybitPublicClient:
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         metadata = self.fetch_instrument_metadata(timeout_s=timeout_s)
+        self.last_instrument_metadata = [dict(row) for row in metadata]
         return parse_bybit_linear_instruments({"result": {"list": metadata}})
 
     def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
