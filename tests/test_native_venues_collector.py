@@ -92,3 +92,11 @@ def test_native_collector_has_no_execution_surface() -> None:
     assert "private_key" not in text
     assert "place_order" not in text
     assert "cancel_order" not in text
+
+
+def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
+    text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
+    assert 'HB.battre(' in text
+    assert '"native-venues"' in text
+    assert 'required = ("bybit", "okx")' in text
+    assert '"required_venues_ready"' in text
