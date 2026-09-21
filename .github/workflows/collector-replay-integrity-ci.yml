@@ -36,6 +36,8 @@ on:
       - 'tests/test_okx_market_data.py'
       - 'tests/test_native_venue_transport_integrity.py'
       - 'tests/test_copy_vault_transport_timing.py'
+      - 'tests/test_collecter_userfills_vaults.py'
+      - 'tests/test_vault_fills_backfill.py'
       - '.github/workflows/collector-replay-integrity-ci.yml'
   workflow_dispatch:
 
@@ -94,4 +96,6 @@ jobs:
             tests/test_collecter_bbo.py \
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py \
-            tests/test_copy_vault_transport_timing.py
+            tests/test_copy_vault_transport_timing.py \
+            tests/test_collecter_userfills_vaults.py \
+            tests/test_vault_fills_backfill.py
