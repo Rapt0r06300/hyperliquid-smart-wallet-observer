@@ -132,7 +132,10 @@ def build_manifest_from_tick_shard(
                 authenticated_false = False
                 authenticated_explicit = False
             else:
-                public_only = public_only and provenance.get("access") == "read_only"
+                public_only = public_only and str(provenance.get("access") or "").lower() in {
+                    "read_only",
+                    "public_read_only",
+                }
                 transport = str(provenance.get("transport") or "")
                 if transport:
                     transports.add(transport)
