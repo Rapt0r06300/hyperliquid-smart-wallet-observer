@@ -173,6 +173,67 @@ def compute_news_velocity_zscore(
     )
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class EntityVelocity:
+    entity: str
+    current_mentions: int
+    baseline_mean_mentions: float | None
+    baseline_std_mentions: float | None
+    zscore: float | None
+
+
+def compute_entity_velocity(
+    events: Iterable[WorldMonitorEvent],
+    *,
+    as_of_ms: int,
+    entity: str,
+    short_window_ms: int = 300_000,
+    baseline_window_ms: int = 86_400_000,
+) -> EntityVelocity:
+    target = str(entity).strip().upper()
+    if not target:
+        raise ValueError("entity is required")
+    if short_window_ms <= 0 or baseline_window_ms < short_window_ms:
+        raise ValueError("invalid entity velocity windows")
+    rows = [
+        row
+        for row in events
+        if row.usable_for_signal
+        and target in {str(value).strip().upper() for value in row.event.entities}
+        and row.event.ingest_ts_ms <= int(as_of_ms)
+    ]
+    current_start = int(as_of_ms) - int(short_window_ms)
+    current = sum(row.event.ingest_ts_ms >= current_start for row in rows)
+    bucket_count = int(baseline_window_ms) // int(short_window_ms)
+    if bucket_count <= 0:
+        return EntityVelocity(target, current, None, None, None)
+    baseline_start = current_start - bucket_count * int(short_window_ms)
+    counts = [0 for _ in range(bucket_count)]
+    for row in rows:
+        ts = row.event.ingest_ts_ms
+        if not baseline_start <= ts < current_start:
+            continue
+        index = (ts - baseline_start) // int(short_window_ms)
+        if 0 <= index < bucket_count:
+            counts[index] += 1
+    mean = statistics.fmean(counts) if counts else None
+    std = statistics.pstdev(counts) if counts else None
+    zscore = (
+        (current - mean) / std
+        if mean is not None and std is not None and std > 0.0
+        else None
+    )
+    return EntityVelocity(
+        entity=target,
+        current_mentions=current,
+        baseline_mean_mentions=(round(mean, 8) if mean is not None else None),
+        baseline_std_mentions=(round(std, 8) if std is not None else None),
+        zscore=(round(zscore, 8) if zscore is not None else None),
+    )
+
+
 def _deduped_news(
     events: Iterable[WorldMonitorEvent],
     *,
@@ -196,8 +257,10 @@ def _deduped_news(
 
 
 __all__ = [
+    "EntityVelocity",
     "NewsFlowFeatures",
     "NewsVelocitySignal",
+    "compute_entity_velocity",
     "compute_news_flow_features",
     "compute_news_velocity_zscore",
 ]
