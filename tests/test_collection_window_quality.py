@@ -6,8 +6,18 @@ from hl_observer.collection.window_quality import PARTIAL, REJECT, SAFE, qualify
 def test_clean_reconciled_window_is_safe() -> None:
     report = qualify_window(
         [
-            {"exchange_ts_ms": 1_000, "receive_ts_ms": 1_010, "quality": "EXPLOITABLE"},
-            {"exchange_ts_ms": 1_020, "receive_ts_ms": 1_030, "quality": "EXPLOITABLE"},
+            {
+                "exchange_ts_ms": 1_000,
+                "receive_ts_ms": 1_010,
+                "receive_mono_ns": 1_000_000,
+                "quality": "EXPLOITABLE",
+            },
+            {
+                "exchange_ts_ms": 1_020,
+                "receive_ts_ms": 1_030,
+                "receive_mono_ns": 1_020_000,
+                "quality": "EXPLOITABLE",
+            },
         ],
         reconciliation_status="MATCHED",
         allowed_receive_gap_ms=100,
@@ -35,3 +45,19 @@ def test_missing_evidence_is_partial_and_gap_is_reject() -> None:
         reconciliation_status="MISMATCH",
     )
     assert rejected.status == REJECT
+
+
+def test_unverified_reconciliation_never_promotes_safe() -> None:
+    report = qualify_window(
+        [
+            {
+                "exchange_ts_ms": 1_000,
+                "receive_ts_ms": 1_010,
+                "receive_mono_ns": 1_000_000,
+                "quality": "EXPLOITABLE",
+            }
+        ]
+    )
+    assert report.status == PARTIAL
+    assert report.validation_allowed is False
+    assert "RECONCILIATION_UNVERIFIED" in report.reasons
