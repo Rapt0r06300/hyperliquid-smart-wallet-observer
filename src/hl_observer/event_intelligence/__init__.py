@@ -223,3 +223,80 @@ __all__ = [
     "stratify_numeric",
     "summarize_patterns",
 ]
+
+
+# Complete-120 public research surfaces.
+from .coverage import IDEA_COVERAGE, coverage_summary
+from .direct_sources import (
+    DIRECT_SOURCES,
+    DirectSourceReadOnlyClient,
+    normalize_eonet,
+    normalize_fred_observations,
+    normalize_gdacs,
+    normalize_gdelt_articles,
+    normalize_usgs,
+)
+from .macro import MacroEventClock, ScheduledMacroEvent
+from .market_features import MarketStateObservation, measure_event_market_features
+from .module_bridges import (
+    build_cross_venue_event_context,
+    build_lead_lag_event_context,
+    measure_copy_vault_event_reactions,
+)
+from .protocol import assert_forward_after_freeze, freeze_event_research
+from .regimes import EventRegime, classify_event_regime, map_event_to_assets
+from .scoreboard import build_event_scoreboard, build_scoreboard_slices
+from .sequences import build_propagation_pattern, summarize_patterns
+from .source_catalog import ClassificationEnvelope, build_source_catalog
+from .validation import (
+    bootstrap_mean_ci,
+    compare_source_latency,
+    incremental_effect,
+    market_session_utc,
+    permute_event_labels,
+    placebo_timestamps,
+    purged_chronological_split,
+    select_no_event_controls,
+    stratify,
+    stratify_numeric,
+)
+
+__all__ += [
+    "IDEA_COVERAGE",
+    "DIRECT_SOURCES",
+    "ClassificationEnvelope",
+    "DirectSourceReadOnlyClient",
+    "EventRegime",
+    "MacroEventClock",
+    "MarketStateObservation",
+    "ScheduledMacroEvent",
+    "assert_forward_after_freeze",
+    "bootstrap_mean_ci",
+    "build_cross_venue_event_context",
+    "build_event_scoreboard",
+    "build_lead_lag_event_context",
+    "build_propagation_pattern",
+    "build_scoreboard_slices",
+    "build_source_catalog",
+    "classify_event_regime",
+    "compare_source_latency",
+    "coverage_summary",
+    "freeze_event_research",
+    "incremental_effect",
+    "map_event_to_assets",
+    "market_session_utc",
+    "measure_copy_vault_event_reactions",
+    "measure_event_market_features",
+    "normalize_eonet",
+    "normalize_fred_observations",
+    "normalize_gdacs",
+    "normalize_gdelt_articles",
+    "normalize_usgs",
+    "permute_event_labels",
+    "placebo_timestamps",
+    "purged_chronological_split",
+    "select_no_event_controls",
+    "stratify",
+    "stratify_numeric",
+    "summarize_patterns",
+]
