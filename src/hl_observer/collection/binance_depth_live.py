@@ -26,7 +26,7 @@ from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://fapi.binance.com"
-WS_BASE_URL = "wss://fstream.binance.com/stream"
+WS_BASE_URL = "wss://fstream.binance.com/public/stream"
 SCHEMA_VERSION = "alina.binance_usdm_l2_live.v1"
 
 
