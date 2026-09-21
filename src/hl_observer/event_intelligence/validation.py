@@ -7,6 +7,7 @@ not merely to show that some events happened before profitable markouts.
 from __future__ import annotations
 
 import math
+import random
 import statistics
 from dataclasses import dataclass
 from typing import Iterable, Sequence
@@ -20,11 +21,15 @@ class EventStudyObservation:
     asset: str
     net_bps: float | None
     net_pnl_usd: float | None
+    end_ts_ms: int | None = None
     sample: str = "train"
     source_tier: str = ""
+    venue: str = ""
+    session: str = ""
     corroboration_count: int = 1
     velocity_zscore: float | None = None
     surprise_score: float | None = None
+    prediction_delta_pp: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +100,86 @@ def chronological_split(
         row for row in forward_raw if row.ts_ms > oos_cut + embargo
     )
     return ChronologicalSplit(train, oos, forward, embargo)
+
+
+
+def purged_chronological_split(
+    rows: Sequence[EventStudyObservation],
+    *,
+    train_fraction: float = 0.60,
+    oos_fraction: float = 0.20,
+    embargo_ms: int = 0,
+) -> ChronologicalSplit:
+    """Chronological split that also purges overlapping outcome windows."""
+
+    base = chronological_split(
+        rows,
+        train_fraction=train_fraction,
+        oos_fraction=oos_fraction,
+        embargo_ms=embargo_ms,
+    )
+    if not base.oos:
+        return base
+    oos_start = min(row.ts_ms for row in base.oos)
+    forward_start = min((row.ts_ms for row in base.forward), default=None)
+    train = tuple(
+        row
+        for row in base.train
+        if row.end_ts_ms is None or int(row.end_ts_ms) < oos_start
+    )
+    oos = tuple(
+        row
+        for row in base.oos
+        if forward_start is None
+        or row.end_ts_ms is None
+        or int(row.end_ts_ms) < forward_start
+    )
+    return ChronologicalSplit(train, oos, base.forward, base.embargo_ms)
+
+
+def market_session_utc(ts_ms: int) -> str:
+    """Coarse UTC session label for robustness slices."""
+
+    hour = (int(ts_ms) // 3_600_000) % 24
+    if 0 <= hour < 8:
+        return "ASIA"
+    if 8 <= hour < 13:
+        return "EUROPE"
+    if 13 <= hour < 21:
+        return "US"
+    return "OFF_HOURS"
+
+
+def permute_event_labels(
+    rows: Sequence[EventStudyObservation],
+    *,
+    seed: int = 0,
+) -> tuple[EventStudyObservation, ...]:
+    """Deterministic label-permutation placebo preserving timing/economics."""
+
+    labels = [row.event_family for row in rows]
+    rng = random.Random(int(seed))
+    rng.shuffle(labels)
+    return tuple(
+        EventStudyObservation(
+            observation_id=row.observation_id,
+            ts_ms=row.ts_ms,
+            event_family=labels[index],
+            asset=row.asset,
+            net_bps=row.net_bps,
+            net_pnl_usd=row.net_pnl_usd,
+            end_ts_ms=row.end_ts_ms,
+            sample=row.sample,
+            source_tier=row.source_tier,
+            venue=row.venue,
+            session=row.session or market_session_utc(row.ts_ms),
+            corroboration_count=row.corroboration_count,
+            velocity_zscore=row.velocity_zscore,
+            surprise_score=row.surprise_score,
+            prediction_delta_pp=row.prediction_delta_pp,
+        )
+        for index, row in enumerate(rows)
+    )
 
 
 def independent_event_count(
@@ -246,6 +331,8 @@ def stratify(
         "sample",
         "source_tier",
         "corroboration_count",
+        "venue",
+        "session",
     }
     if field not in allowed:
         raise ValueError("unsupported stratification field")
@@ -280,6 +367,9 @@ __all__ = [
     "EventStudyObservation",
     "IncrementalEffect",
     "chronological_split",
+    "purged_chronological_split",
+    "market_session_utc",
+    "permute_event_labels",
     "independent_event_count",
     "incremental_effect",
     "placebo_timestamps",
