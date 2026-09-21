@@ -3,6 +3,7 @@ from __future__ import annotations
 from hl_observer.collection.native_venue_market import (
     EXPLOITABLE,
     STALE,
+    MarketLevel,
     MultiVenueMarketStore,
     NativeMarketSnapshot,
     canonical_coin,
