@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from hl_observer.collection.bybit_market_data import BybitMarketState, parse_bybit_linear_instruments
+from hl_observer.collection.bybit_market_data import (
+    BybitMarketState,
+    BybitPublicClient,
+    parse_bybit_linear_instruments,
+)
 from hl_observer.collection.native_venue_market import DESYNC, EXPLOITABLE
 
 
@@ -129,3 +133,34 @@ def test_bybit_discovery_keeps_usdt_perpetuals_only() -> None:
         }
     }
     assert parse_bybit_linear_instruments(payload) == [("BTC", "BTCUSDT")]
+
+
+def test_bybit_discovery_retains_replay_critical_instrument_metadata(monkeypatch) -> None:
+    client = BybitPublicClient()
+    rows = [
+        {
+            "symbol": "BTCUSDT",
+            "baseCoin": "BTC",
+            "quoteCoin": "USDT",
+            "settleCoin": "USDT",
+            "status": "Trading",
+            "contractType": "LinearPerpetual",
+            "fundingInterval": 480,
+            "priceFilter": {"tickSize": "0.1"},
+            "lotSizeFilter": {
+                "qtyStep": "0.001",
+                "minOrderQty": "0.001",
+                "minNotionalValue": "5",
+            },
+        }
+    ]
+    monkeypatch.setattr(
+        client,
+        "fetch_instrument_metadata",
+        lambda **_kwargs: [dict(row) for row in rows],
+    )
+
+    assert client.discover_usdt_perpetuals() == [("BTC", "BTCUSDT")]
+    assert client.last_instrument_metadata[0]["priceFilter"]["tickSize"] == "0.1"
+    assert client.last_instrument_metadata[0]["lotSizeFilter"]["qtyStep"] == "0.001"
+    assert client.last_instrument_metadata[0]["fundingInterval"] == 480
