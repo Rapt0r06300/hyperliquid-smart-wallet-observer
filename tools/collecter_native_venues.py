@@ -28,6 +28,7 @@ from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinat
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
 from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
 from hl_observer.realtime.feed_quality import FeedEventKind
+import heartbeat_collecteur as HB
 
 HEARTBEAT = Path("runtime") / "data" / "native_venues_heartbeat.json"
 TICK_DATASET_DIR = Path("runtime") / "data" / "market_ticks"
@@ -163,6 +164,9 @@ async def _run(
     written = 0
     reconnects = {venue: 0 for venue in VENUES}
     last_event_ms = {venue: 0 for venue in VENUES}
+    last_exchange_ts = {venue: 0 for venue in VENUES}
+    canonical_last_written = 0
+    canonical_last_beat_ns = 0
     started = time.time()
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
 
@@ -174,6 +178,11 @@ async def _run(
         venue = envelope.source_id.split("_", 1)[0].lower()
         if venue in last_event_ms:
             last_event_ms[venue] = int(envelope.received_ts_ms)
+            if envelope.exchange_ts_ms is not None:
+                last_exchange_ts[venue] = max(
+                    int(last_exchange_ts[venue]),
+                    int(envelope.exchange_ts_ms),
+                )
         queue.append(envelope)
 
     writer = TickDatasetWriter(
@@ -241,6 +250,36 @@ async def _run(
                 stop_reason = "DURATION_REACHED"
 
             health = coordinator.health(now_ms=int(now * 1000))
+            now_ms = int(now * 1000)
+            now_mono_ns = time.monotonic_ns()
+            if now_mono_ns - canonical_last_beat_ns >= 2_000_000_000:
+                required = ("bybit", "okx")
+                required_ready = all(
+                    counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
+                    for venue in required
+                )
+                stale_limit_ms = max(10_000, int(stale_after_ms) * 4)
+                required_stale = any(
+                    last_event_ms.get(venue, 0) > 0
+                    and now_ms - int(last_event_ms[venue]) > stale_limit_ms
+                    for venue in required
+                )
+                HB.battre(
+                    root,
+                    "native-venues",
+                    pid=os.getpid(),
+                    n_ecrites=max(0, int(written) - int(canonical_last_written)),
+                    dernier_exchange_ts=max(last_exchange_ts.values()) or None,
+                    souscription_ack=required_ready,
+                    note="Bybit+OKX native public market data",
+                    metriques={
+                        "gaps_critiques": int(dropped),
+                        "reconnects": int(sum(reconnects.values())),
+                        "stale": bool(required_stale),
+                    },
+                )
+                canonical_last_written = int(written)
+                canonical_last_beat_ns = now_mono_ns
             _atomic_json(
                 root / HEARTBEAT,
                 {
@@ -256,6 +295,12 @@ async def _run(
                     "queue_drops": dropped,
                     "reconnects": reconnects,
                     "last_event_ms": last_event_ms,
+                    "last_exchange_ts": last_exchange_ts,
+                    "required_venues": ["bybit", "okx"],
+                    "required_venues_ready": all(
+                        counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
+                        for venue in ("bybit", "okx")
+                    ),
                     "coordinator_health": health,
                     "dataset": writer.stats(),
                     "read_only": True,
@@ -283,6 +328,12 @@ async def _run(
             "queue_drops": dropped,
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
+            "last_exchange_ts": last_exchange_ts,
+            "required_venues": ["bybit", "okx"],
+            "required_venues_ready": all(
+                counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
+                for venue in ("bybit", "okx")
+            ),
             "dataset": writer.stats(),
             "read_only": True,
             "real_execution": False,
