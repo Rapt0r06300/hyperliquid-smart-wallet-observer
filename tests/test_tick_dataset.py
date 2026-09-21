@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 from hl_observer.collection.tick_dataset import (
     SCHEMA_VERSION,
@@ -70,5 +71,13 @@ def test_tick_dataset_rotation_is_replayable_and_keeps_all_records(tmp_path) -> 
     records = list(writer.iter_records())
     assert [record["parsed_summary"] for record in records] == [{}, {}, {}]
     assert [record["exchange_ts_ms"] for record in records] == [1_000, 1_001, 1_002]
-    assert len(list((tmp_path / "ticks" / "shards").glob("*.jsonl.gz"))) == 3
+    shards = list((tmp_path / "ticks" / "shards").glob("*.jsonl.gz"))
+    assert len(shards) == 3
     assert writer.manifest_path.exists()
+    sidecars = list((tmp_path / "ticks" / "shards").glob("*.jsonl.gz.manifest.json"))
+    assert len(sidecars) == 3
+    metadata = json.loads(sidecars[0].read_text(encoding="utf-8"))
+    data_path = sidecars[0].with_name(metadata["file_name"])
+    assert metadata["sha256"] == hashlib.sha256(data_path.read_bytes()).hexdigest()
+    assert metadata["event_count"] == 1
+    assert metadata["bytes"] == data_path.stat().st_size
