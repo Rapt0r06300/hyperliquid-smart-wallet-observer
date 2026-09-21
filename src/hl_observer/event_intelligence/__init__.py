@@ -5,6 +5,11 @@ research objects are read-only and no order path exists in this package.
 """
 
 from .archive import ArchiveAppendResult, EventArchiveCorruptError, EventIntelligenceArchive
+from .candidates import (
+    EventLeadLagCandidate,
+    EventLeadLagConfig,
+    evaluate_event_lead_lag_candidate,
+)
 from .external_event import (
     ExternalEvent,
     ExternalEventDecision,
@@ -19,6 +24,7 @@ from .features import (
     compute_news_velocity_zscore,
 )
 from .health import evaluate_worldmonitor_health
+from .outcomes import EventCandidateMarkout, evaluate_candidate_markout
 from .price_discovery import EventMarketReaction, measure_event_price_discovery
 from .worldmonitor import (
     PredictionShiftTracker,
@@ -33,7 +39,10 @@ from .worldmonitor import (
 __all__ = [
     "ArchiveAppendResult",
     "EventArchiveCorruptError",
+    "EventCandidateMarkout",
     "EventIntelligenceArchive",
+    "EventLeadLagCandidate",
+    "EventLeadLagConfig",
     "EventMarketReaction",
     "ExternalEvent",
     "ExternalEventDecision",
@@ -49,6 +58,8 @@ __all__ = [
     "WorldMonitorReadOnlyClient",
     "compute_news_flow_features",
     "compute_news_velocity_zscore",
+    "evaluate_candidate_markout",
+    "evaluate_event_lead_lag_candidate",
     "evaluate_worldmonitor_health",
     "measure_event_price_discovery",
     "normalize_cross_source_signals",
