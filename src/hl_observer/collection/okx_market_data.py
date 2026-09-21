@@ -94,6 +94,9 @@ class OkxMarketState:
     stale_after_ms: int = 1_000
     bids: tuple[MarketLevel, ...] = ()
     asks: tuple[MarketLevel, ...] = ()
+    book_bids: dict[float, float] = field(default_factory=dict, repr=False)
+    book_asks: dict[float, float] = field(default_factory=dict, repr=False)
+    book_ready: bool = False
     sequence: int | None = None
     exchange_ts_ms: int = 0
     receive_ts_ms: int = 0
@@ -124,8 +127,14 @@ class OkxMarketState:
             return self._desync("SYMBOL_MISMATCH")
         meta = _transport(payload)
         received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        incoming_connection = str(meta.get("connection_id") or "") or None
+        connection_reset = bool(
+            incoming_connection
+            and self.connection_id
+            and incoming_connection != self.connection_id
+        )
         self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
-        self.connection_id = str(meta.get("connection_id") or "") or self.connection_id
+        self.connection_id = incoming_connection or self.connection_id
         parsed_rtt = _float(meta.get("transport_rtt_ms"))
         if parsed_rtt is not None:
             self.transport_rtt_ms = parsed_rtt
@@ -134,7 +143,14 @@ class OkxMarketState:
             self.clock_offset_ms = parsed_offset
 
         if channel in {"books5", "bbo-tbt", "books"}:
-            return self._apply_book(item, receive_ts_ms=received, receive_mono_ns=self.receive_mono_ns)
+            return self._apply_book(
+                item,
+                channel=channel,
+                action=str(payload.get("action") or "snapshot"),
+                receive_ts_ms=received,
+                receive_mono_ns=self.receive_mono_ns,
+                connection_reset=connection_reset,
+            )
         if channel == "tickers":
             self.last = _coalesce(item.get("last"), self.last)
             self.volume_24h = _coalesce(item.get("vol24h"), self.volume_24h)
@@ -157,31 +173,71 @@ class OkxMarketState:
         self.receive_ts_ms = received
         return self.quality
 
-    def _apply_book(self, item: dict[str, object], *, receive_ts_ms: int, receive_mono_ns: int | None = None) -> str:
+    def _apply_book(
+        self,
+        item: dict[str, object],
+        *,
+        channel: str,
+        action: str,
+        receive_ts_ms: int,
+        receive_mono_ns: int | None = None,
+        connection_reset: bool = False,
+    ) -> str:
         seq = _int(item.get("seqId"))
         prev = _int(item.get("prevSeqId"))
         exchange_ts = _int(item.get("ts"))
+        incremental = channel == "books"
+        is_snapshot = action == "snapshot" or not incremental
+
+        if connection_reset:
+            self.book_ready = False
+            self.book_bids.clear()
+            self.book_asks.clear()
+
+        if incremental and not is_snapshot and not self.book_ready:
+            return self._desync("DELTA_BEFORE_SNAPSHOT")
+
         ok, reasons = self.integrity.observe(
             sequence=seq,
             prev_sequence=prev,
             exchange_ts_ms=exchange_ts,
             receive_ts_ms=receive_ts_ms,
             receive_mono_ns=receive_mono_ns,
+            reset=connection_reset or (incremental and is_snapshot and self.book_ready),
         )
-        if "DUPLICATE_SEQUENCE" in reasons:
+        if "DUPLICATE_SEQUENCE" in reasons and incremental and not is_snapshot:
             self.receive_ts_ms = receive_ts_ms
             return self.quality
         if not ok:
+            self.book_ready = False if incremental else self.book_ready
+            if incremental:
+                self.book_bids.clear()
+                self.book_asks.clear()
             return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
 
-        bids = _parse_levels(item.get("bids"), reverse=True)
-        asks = _parse_levels(item.get("asks"), reverse=False)
-        # books5 and bbo-tbt are full snapshots for their advertised depth.
-        # Incremental books need a dedicated reconstruction path.
-        if bids:
-            self.bids = tuple(bids)
-        if asks:
-            self.asks = tuple(asks)
+        if incremental:
+            if is_snapshot:
+                self.book_bids.clear()
+                self.book_asks.clear()
+                self._apply_delta_side(self.book_bids, item.get("bids"))
+                self._apply_delta_side(self.book_asks, item.get("asks"))
+                self.book_ready = True
+            else:
+                self._apply_delta_side(self.book_bids, item.get("bids"))
+                self._apply_delta_side(self.book_asks, item.get("asks"))
+            self.bids = tuple(
+                MarketLevel(price=price, size=size)
+                for price, size in sorted(self.book_bids.items(), reverse=True)[:400]
+            )
+            self.asks = tuple(
+                MarketLevel(price=price, size=size)
+                for price, size in sorted(self.book_asks.items())[:400]
+            )
+        else:
+            self.bids = tuple(_parse_levels(item.get("bids"), reverse=True))
+            self.asks = tuple(_parse_levels(item.get("asks"), reverse=False))
+            self.book_ready = bool(self.bids and self.asks)
+
         self.sequence = seq if seq is not None else self.sequence
         self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms
@@ -192,6 +248,21 @@ class OkxMarketState:
             self.quality = UNMEASURABLE
             self.reason = "INVALID_BBO"
         return self.quality
+
+    @staticmethod
+    def _apply_delta_side(side: dict[float, float], raw: object) -> None:
+        if not isinstance(raw, list):
+            return
+        for row in raw:
+            if not isinstance(row, (list, tuple)) or len(row) < 2:
+                continue
+            price, size = _float(row[0]), _float(row[1])
+            if price is None or size is None or price <= 0:
+                continue
+            if size <= 0:
+                side.pop(price, None)
+            else:
+                side[price] = size
 
     def snapshot(self, *, now_ms: int | None = None) -> NativeMarketSnapshot:
         bid = self.bids[0].price if self.bids else 0.0
@@ -303,7 +374,7 @@ class OkxPublicClient:
         args = [
             {"channel": channel, "instId": inst_id}
             for inst_id in inst_ids
-            for channel in ("books5", "tickers", "funding-rate", "open-interest", "mark-price")
+            for channel in ("books", "tickers", "funding-rate", "open-interest", "mark-price")
         ]
         attempt = 0
         while True:
