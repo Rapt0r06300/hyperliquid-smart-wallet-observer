@@ -386,7 +386,12 @@ class BybitPublicClient:
         args = [
             topic
             for symbol in symbols
-            for topic in (f"orderbook.{self.orderbook_depth}.{symbol}", f"tickers.{symbol}")
+            for topic in (
+                f"orderbook.{self.orderbook_depth}.{symbol}",
+                f"tickers.{symbol}",
+                f"publicTrade.{symbol}",
+                f"allLiquidation.{symbol}",
+            )
         ]
         attempt = 0
         while True:
