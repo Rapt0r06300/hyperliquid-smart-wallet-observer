@@ -381,6 +381,7 @@ class OkxPublicClient:
                 "funding-rate",
                 "open-interest",
                 "mark-price",
+                "index-tickers",
             )
         ]
         # OKX may change tick size / minimum trade amount while a collector is
