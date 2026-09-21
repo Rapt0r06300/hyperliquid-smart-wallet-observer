@@ -518,6 +518,7 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
     from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
     from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
     from hl_observer.collection.tick_dataset import TickEnvelope
+    from hl_observer.datasets.v2_pipeline import build_bundle
     from hl_observer.collection.lead_lag_causal_checkpoints import (
         LeadLagCheckpointRequest,
         RollingShockCheckpointDetector,
@@ -1437,6 +1438,17 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                 canonical_events,
             )
         await asyncio.to_thread(dataset.rotate_all)
+        collector_version = (
+            str(os.getenv("ALINA_COLLECTOR_VERSION") or "").strip()
+            or str(os.getenv("GITHUB_SHA") or "").strip()
+            or "unversioned"
+        )
+        await asyncio.to_thread(
+            build_bundle,
+            root / TICK_DATASET_DIR,
+            root / "runtime" / "data" / "dataset_v2_bundle" / "bbo",
+            collector_version=collector_version,
+        )
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover
