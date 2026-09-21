@@ -12,6 +12,8 @@ import statistics
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+from hl_observer.event_intelligence.external_event import ExternalEvent
+
 
 @dataclass(frozen=True, slots=True)
 class EventStudyObservation:
@@ -347,6 +349,85 @@ def stratify(
     }
 
 
+
+@dataclass(frozen=True, slots=True)
+class SourceLatencyComparison:
+    primary_source: str
+    aggregator_source: str
+    primary_ingest_ts_ms: int
+    aggregator_ingest_ts_ms: int
+    aggregator_lag_ms: int
+
+
+def compare_source_latency(
+    primary: ExternalEvent,
+    aggregator: ExternalEvent,
+) -> SourceLatencyComparison:
+    return SourceLatencyComparison(
+        primary_source=primary.source,
+        aggregator_source=aggregator.source,
+        primary_ingest_ts_ms=int(primary.ingest_ts_ms),
+        aggregator_ingest_ts_ms=int(aggregator.ingest_ts_ms),
+        aggregator_lag_ms=int(aggregator.ingest_ts_ms) - int(primary.ingest_ts_ms),
+    )
+
+
+def bootstrap_mean_ci(
+    values: Sequence[float],
+    *,
+    confidence: float = 0.95,
+    resamples: int = 2_000,
+    seed: int = 0,
+) -> tuple[float, float] | None:
+    finite = [float(value) for value in values if math.isfinite(float(value))]
+    if len(finite) < 2:
+        return None
+    if not 0.0 < float(confidence) < 1.0:
+        raise ValueError("confidence must be in (0,1)")
+    if int(resamples) < 100:
+        raise ValueError("resamples must be >= 100")
+    rng = random.Random(int(seed))
+    means = []
+    for _ in range(int(resamples)):
+        sample = [rng.choice(finite) for _ in range(len(finite))]
+        means.append(statistics.fmean(sample))
+    means.sort()
+    alpha = (1.0 - float(confidence)) / 2.0
+    lo = means[int(alpha * (len(means) - 1))]
+    hi = means[int((1.0 - alpha) * (len(means) - 1))]
+    return round(lo, 8), round(hi, 8)
+
+
+def stratify_numeric(
+    rows: Iterable[EventStudyObservation],
+    *,
+    field: str,
+    thresholds: Sequence[float],
+) -> dict[str, tuple[EventStudyObservation, ...]]:
+    allowed = {"velocity_zscore", "surprise_score", "prediction_delta_pp"}
+    if field not in allowed:
+        raise ValueError("unsupported numeric stratification field")
+    cuts = sorted(float(value) for value in thresholds)
+    groups: dict[str, list[EventStudyObservation]] = {}
+    for row in rows:
+        value = getattr(row, field)
+        if value is None or not math.isfinite(float(value)):
+            key = "UNMEASURABLE"
+        else:
+            parsed = float(value)
+            lower = float("-inf")
+            key = ""
+            for cut in cuts:
+                if parsed <= cut:
+                    key = f"({lower},{cut}]"
+                    break
+                lower = cut
+            if not key:
+                key = f"({lower},inf)"
+        groups.setdefault(key, []).append(row)
+    return {key: tuple(values) for key, values in sorted(groups.items())}
+
+
 def _finite_values(values: Iterable[float | None]) -> list[float]:
     output: list[float] = []
     for value in values:
@@ -366,13 +447,17 @@ __all__ = [
     "ChronologicalSplit",
     "EventStudyObservation",
     "IncrementalEffect",
+    "SourceLatencyComparison",
     "chronological_split",
     "purged_chronological_split",
     "market_session_utc",
     "permute_event_labels",
     "independent_event_count",
     "incremental_effect",
+    "compare_source_latency",
+    "bootstrap_mean_ci",
     "placebo_timestamps",
     "select_no_event_controls",
     "stratify",
+    "stratify_numeric",
 ]
