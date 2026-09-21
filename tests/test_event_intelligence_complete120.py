@@ -21,7 +21,15 @@ from hl_observer.event_intelligence.external_event import (
     ExternalEventType,
     SourceTier,
 )
+from hl_observer.event_intelligence.health import (
+    coverage_by_family,
+    detect_intelligence_gap,
+)
 from hl_observer.event_intelligence.macro import MacroEventClock, ScheduledMacroEvent
+from hl_observer.event_intelligence.market_context import (
+    AuxMarketMetrics,
+    compare_event_market_context,
+)
 from hl_observer.event_intelligence.market_features import (
     MarketStateObservation,
     measure_event_market_features,
@@ -33,6 +41,10 @@ from hl_observer.event_intelligence.module_bridges import (
     measure_copy_vault_event_reactions,
 )
 from hl_observer.event_intelligence.outcomes import EventCandidateMarkout
+from hl_observer.event_intelligence.provenance import (
+    cluster_external_events,
+    score_provenance,
+)
 from hl_observer.event_intelligence.protocol import (
     assert_forward_after_freeze,
     freeze_event_research,
@@ -63,6 +75,8 @@ from hl_observer.event_intelligence.validation import (
     chronological_split,
     compare_source_latency,
     independent_event_count,
+    bootstrap_mean_ci,
+    compare_source_latency,
     market_session_utc,
     permute_event_labels,
     placebo_timestamps,
@@ -71,6 +85,8 @@ from hl_observer.event_intelligence.validation import (
     stratify_numeric,
 )
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
+from hl_observer.collection.native_venue_market import MarketLevel, NativeMarketSnapshot
+from hl_observer.event_intelligence.features import compute_entity_velocity
 
 
 class _Response:
@@ -654,3 +670,170 @@ def test_source_latency_bootstrap_and_numeric_slices_are_causal_research_tools()
         thresholds=(1.0, 3.0),
     )
     assert sum(len(group) for group in slices.values()) == 2
+
+
+
+def test_provenance_cluster_counts_independent_sources_and_triangulation() -> None:
+    primary = ExternalEvent(
+        event_id="same-story-primary",
+        source="official",
+        event_type=ExternalEventType.GEOPOLITICAL,
+        source_tier=SourceTier.PRIMARY_OFFICIAL,
+        retrieval_ts_ms=1_000,
+        ingest_ts_ms=1_000,
+        methodology_version="v1",
+        raw_evidence_ref="official:1",
+        entities=("BTC",),
+        regions=("MENA",),
+    )
+    wire = ExternalEvent(
+        event_id="same-story-wire",
+        source="wire",
+        event_type=ExternalEventType.GEOPOLITICAL,
+        source_tier=SourceTier.WIRE,
+        retrieval_ts_ms=1_100,
+        ingest_ts_ms=1_100,
+        methodology_version="v1",
+        raw_evidence_ref="wire:1",
+        entities=("BTC",),
+        regions=("MENA",),
+    )
+    score = score_provenance([primary, wire])
+    assert score.independent_sources == 2
+    assert score.triangulated is True
+    assert score.corroboration_latency_ms == 100
+
+    clusters = cluster_external_events([primary, wire], time_bucket_ms=5_000)
+    assert len(clusters) == 1
+    assert clusters[0].provenance.independent_sources == 2
+
+
+def test_health_tracks_gaps_and_family_coverage() -> None:
+    gap = detect_intelligence_gap(
+        source="gdelt",
+        last_success_ms=1_000,
+        now_ms=3_000,
+        max_age_ms=500,
+        fetch_ok=True,
+    )
+    assert gap is not None
+    assert gap.reason == "SOURCE_STALE"
+
+    report = coverage_by_family(
+        [_wm(kind="news")],
+        expected_families=("news", "prediction", "cross_source"),
+    )
+    assert report.coverage_ratio == pytest.approx(1 / 3)
+    assert set(report.missing_families) == {"prediction", "cross_source"}
+
+
+def test_primary_vs_worldmonitor_latency_is_measured_not_assumed() -> None:
+    primary = _external(ts=1_000)
+    aggregator = ExternalEvent(
+        event_id="agg",
+        source="worldmonitor",
+        event_type=ExternalEventType.NEWS,
+        source_tier=SourceTier.AGGREGATOR,
+        retrieval_ts_ms=1_250,
+        ingest_ts_ms=1_250,
+        methodology_version="v1",
+        raw_evidence_ref="agg:1",
+    )
+    comparison = compare_source_latency(primary, aggregator)
+    assert comparison.aggregator_lag_ms == 250
+
+
+def test_bootstrap_ci_and_numeric_strata_are_deterministic() -> None:
+    ci_a = bootstrap_mean_ci([1.0, 2.0, 3.0, 4.0], resamples=200, seed=4)
+    ci_b = bootstrap_mean_ci([1.0, 2.0, 3.0, 4.0], resamples=200, seed=4)
+    assert ci_a == ci_b
+    assert ci_a is not None and ci_a[0] <= 2.5 <= ci_a[1]
+
+    rows = [
+        EventStudyObservation(
+            "a", 1_000, "news", "BTC", 1.0, 0.01, velocity_zscore=0.5
+        ),
+        EventStudyObservation(
+            "b", 2_000, "news", "BTC", 1.0, 0.01, velocity_zscore=3.0
+        ),
+    ]
+    groups = stratify_numeric(rows, field="velocity_zscore", thresholds=(1.0, 2.0))
+    assert sum(len(value) for value in groups.values()) == 2
+
+
+def test_entity_velocity_detects_entity_specific_spike() -> None:
+    rows = []
+    for index in range(8):
+        ts = 1_000 + index * 1_000
+        rows.append(_wm(ts=ts, entities=("BTC",)))
+    rows.extend(
+        [
+            _wm(ts=10_100, entities=("BTC",)),
+            _wm(ts=10_200, entities=("BTC",)),
+            _wm(ts=10_300, entities=("BTC",)),
+        ]
+    )
+    signal = compute_entity_velocity(
+        rows,
+        as_of_ms=10_500,
+        entity="BTC",
+        short_window_ms=1_000,
+        baseline_window_ms=8_000,
+    )
+    assert signal.current_mentions == 3
+    assert signal.entity == "BTC"
+
+
+def test_market_context_measures_spread_depth_obi_oi_funding_and_liquidations() -> None:
+    pre = NativeMarketSnapshot.build(
+        venue="hyperliquid",
+        coin="BTC",
+        exchange_symbol="BTC",
+        bid=99.9,
+        ask=100.1,
+        exchange_ts_ms=900,
+        receive_ts_ms=900,
+        now_ms=900,
+        bids=(MarketLevel(99.9, 2.0),),
+        asks=(MarketLevel(100.1, 1.0),),
+        volume_24h=1_000.0,
+        open_interest=500.0,
+        funding_rate=0.0001,
+    )
+    post = NativeMarketSnapshot.build(
+        venue="hyperliquid",
+        coin="BTC",
+        exchange_symbol="BTC",
+        bid=99.8,
+        ask=100.2,
+        exchange_ts_ms=1_100,
+        receive_ts_ms=1_100,
+        now_ms=1_100,
+        bids=(MarketLevel(99.8, 1.0),),
+        asks=(MarketLevel(100.2, 3.0),),
+        volume_24h=1_200.0,
+        open_interest=550.0,
+        funding_rate=0.0002,
+    )
+    delta = compare_event_market_context(
+        pre,
+        post,
+        pre_aux=AuxMarketMetrics(
+            aggressive_buy_usd=100,
+            aggressive_sell_usd=80,
+            liquidation_usd=10,
+        ),
+        post_aux=AuxMarketMetrics(
+            aggressive_buy_usd=200,
+            aggressive_sell_usd=50,
+            liquidation_usd=60,
+        ),
+    )
+    assert delta.spread_delta_bps > 0
+    assert delta.bid_depth_delta_usd < 0
+    assert delta.ask_depth_delta_usd > 0
+    assert delta.obi_delta is not None
+    assert delta.open_interest_delta == pytest.approx(50.0)
+    assert delta.funding_rate_delta == pytest.approx(0.0001)
+    assert delta.aggressive_flow_delta_usd == pytest.approx(130.0)
+    assert delta.liquidation_delta_usd == pytest.approx(50.0)
