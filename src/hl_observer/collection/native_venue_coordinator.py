@@ -61,6 +61,7 @@ class NativeVenueCoordinator:
         self._okx_states: dict[str, OkxMarketState] = {}
         self._gate_states: dict[str, GateMarketState] = {}
         self._bitget_states: dict[str, BitgetMarketState] = {}
+        self._clock_sync: dict[str, dict[str, float | int | str]] = {}
         self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
         self._ccxt_priority = set(
             load_native_collection_candidates(self.ccxt_snapshot_path)
@@ -92,6 +93,36 @@ class NativeVenueCoordinator:
         self.registry = dict(sorted(discovered.items()))
         note_coins(self.registry.keys(), now_s=time.time() if now_s is None else now_s)
         return {coin: dict(venues) for coin, venues in self.registry.items()}
+
+    def refresh_clock_sync(self) -> dict[str, dict[str, float | int | str]]:
+        """Measure public venue clocks and retain RTT/offset evidence."""
+        samples: dict[str, dict[str, float | int | str]] = {}
+        for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client)):
+            measure = getattr(client, "measure_clock_sync", None)
+            if not callable(measure):
+                continue
+            try:
+                sample = measure()
+            except Exception as exc:
+                samples[venue] = {"status": "UNAVAILABLE", "error": type(exc).__name__}
+                continue
+            row = sample.as_dict() if hasattr(sample, "as_dict") else dict(sample)
+            row["status"] = "OK"
+            samples[venue] = row
+        self._clock_sync = samples
+        return {venue: dict(row) for venue, row in samples.items()}
+
+    def _with_clock_sync(self, payload: Mapping[str, object], venue: str) -> dict[str, object]:
+        message = dict(payload)
+        sync = self._clock_sync.get(venue)
+        if not sync or sync.get("status") != "OK":
+            return message
+        meta = message.get("_alina_transport")
+        transport = dict(meta) if isinstance(meta, Mapping) else {}
+        transport["clock_offset_ms"] = sync.get("offset_ms")
+        transport["clock_probe_rtt_ms"] = sync.get("rtt_ms")
+        message["_alina_transport"] = transport
+        return message
 
     def symbols_for(self, venue: str) -> list[str]:
         venue_key = str(venue).strip().lower()
@@ -212,6 +243,7 @@ class NativeVenueCoordinator:
             "bitget_symbols": len(self.symbols_for("bitget")),
             "candidate_coins_2plus_venues": candidates,
             "ccxt_native_candidates_prioritized": len(self._ccxt_priority),
+            "clock_sync": {venue: dict(row) for venue, row in self._clock_sync.items()},
             "real_execution": False,
         }
 
@@ -221,7 +253,7 @@ class NativeVenueCoordinator:
             return
         async for payload in self.bybit_client.messages(symbols):
             now = int(time.time() * 1000)
-            self.ingest_bybit(payload, receive_ts_ms=now, now_ms=now)
+            self.ingest_bybit(self._with_clock_sync(payload, "bybit"), now_ms=now)
 
     async def run_okx(self) -> None:
         symbols = self.symbols_for("okx")
@@ -229,7 +261,7 @@ class NativeVenueCoordinator:
             return
         async for payload in self.okx_client.messages(symbols):
             now = int(time.time() * 1000)
-            self.ingest_okx(payload, receive_ts_ms=now, now_ms=now)
+            self.ingest_okx(self._with_clock_sync(payload, "okx"), now_ms=now)
 
     async def run_gate(self) -> None:
         symbols = self.symbols_for("gate")
@@ -247,6 +279,7 @@ class NativeVenueCoordinator:
         """Run both native public collectors until cancelled."""
         if discover_first or not self.registry:
             await asyncio.to_thread(self.discover)
+        await asyncio.to_thread(self.refresh_clock_sync)
         await asyncio.gather(self.run_bybit(), self.run_okx(), self.run_gate(), self.run_bitget())
 
 
