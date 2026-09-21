@@ -35,11 +35,12 @@ def test_ouvrir_cree_session_active_et_declare_toutes_les_sources(tmp_path):
     # item 3 : TOUTES les sources attendues sont déclarées dans le catalogue.
     declarees = {v["source"] for v in cat["sources"].values()}
     for attendu in ("allmids-collector", "bbo-collector", "userfills-live",
-                    "node-fills-global", "twap-slices", "bybit", "dydx-live"):
+                    "node-fills-global", "twap-slices", "native-venues", "dydx-live"):
         assert attendu in declarees, attendu
-    # une non-implémentée est DÉCLARÉE absente (raison), jamais inventée vivante.
-    bybit = next(v for v in cat["sources"].values() if v["source"] == "bybit")
-    assert bybit["raison_absence"] and bybit["sante"] == "GRISE"
+    # Les venues natives sont désormais implémentées : sans heartbeat elles sont
+    # déclarées absentes, jamais maquillées en source non implémentée.
+    native = next(v for v in cat["sources"].values() if v["source"] == "native-venues")
+    assert native["raison_absence"] and native["sante"] == "ROUGE"
     # une CORE fraîche est vivante avec compteurs réels.
     allmids = next(v for v in cat["sources"].values() if v["source"] == "allmids-collector")
     assert allmids["sante"] == "VERTE" and allmids["evenements_recus"] == 5
