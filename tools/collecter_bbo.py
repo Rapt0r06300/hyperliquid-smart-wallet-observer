@@ -466,17 +466,41 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
             if not buf:
                 break
             fo.write(buf)
-    os.replace(tmp, dossier / nom)                            # atomique -> shard IMMUABLE (jamais reouvert)
+    final = dossier / nom
+    os.replace(tmp, final)                                    # atomique -> shard IMMUABLE
+    import hashlib
+    digest = hashlib.sha256()
+    with final.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    manifest = {
+        "schema_version": "alina.bbo_shard_manifest.v2",
+        "file_name": nom,
+        "sha256": digest.hexdigest(),
+        "bytes": final.stat().st_size,
+        "source": "hyperliquid_binance_synchronized_bbo",
+        "read_only": True,
+        "real_execution": False,
+    }
+    sidecar = final.with_name(final.name + ".manifest.json")
+    sidecar_tmp = sidecar.with_suffix(sidecar.suffix + ".tmp")
+    sidecar_tmp.write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(sidecar_tmp, sidecar)
     src.write_text("", encoding="utf-8")                      # la tape vivante repart a zero (= recent)
-    # PRÉSERVATION (Flo 25/07) : on NE SUPPRIME PLUS les vieux shards — « il te faut des données, on
-    # n'écrase pas les anciennes sessions ». Le set de travail reste borné à max_shards (fraîcheur/scan
-    # rapide) ; au-delà, on DÉPLACE le plus vieux vers bbo_shards_archive/ (immuable, jamais effacé).
+    # PRÉSERVATION : le set de travail reste borné ; les vieux shards + manifests
+    # sont déplacés ensemble vers l'archive, jamais supprimés.
     shards = sorted(dossier.glob("bbo_tape_*.jsonl.gz"))
     archive = root / ARCHIVE_DIR
-    for vieux in shards[:-max_shards]:                        # rétention bornée du SET DE TRAVAIL, sans perte
+    for vieux in shards[:-max_shards]:
         try:
             archive.mkdir(parents=True, exist_ok=True)
-            os.replace(vieux, archive / vieux.name)          # ARCHIVE (déplace), ne supprime jamais
+            os.replace(vieux, archive / vieux.name)
+            vieux_manifest = vieux.with_name(vieux.name + ".manifest.json")
+            if vieux_manifest.exists():
+                os.replace(vieux_manifest, archive / vieux_manifest.name)
         except OSError:
             pass
     return nom
