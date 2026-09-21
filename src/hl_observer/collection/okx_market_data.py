@@ -374,7 +374,14 @@ class OkxPublicClient:
         args = [
             {"channel": channel, "instId": inst_id}
             for inst_id in inst_ids
-            for channel in ("books", "tickers", "funding-rate", "open-interest", "mark-price")
+            for channel in (
+                "books",
+                "trades",
+                "tickers",
+                "funding-rate",
+                "open-interest",
+                "mark-price",
+            )
         ]
         attempt = 0
         while True:
