@@ -260,8 +260,44 @@ class NativeVenueCoordinator:
     def candidate_coins(self, *, now_ms: int, min_venues: int = 2) -> list[str]:
         return self.store.candidate_coins(now_ms=now_ms, min_venues=min_venues)
 
-    def cross_venue_rows(self, coin: str, *, now_ms: int) -> list[CrossSourceDiscrepancy]:
-        return compare_cross_source_prices(self.store.cross_source_prices(coin, now_ms=now_ms))
+    def cross_venue_rows(
+        self,
+        coin: str,
+        *,
+        now_ms: int,
+        max_receive_skew_ms: float = 250.0,
+        max_exchange_skew_ms: float = 250.0,
+        require_clock_offsets: bool = False,
+        require_l2: bool = False,
+    ) -> list[CrossSourceDiscrepancy]:
+        """Return the best discrepancy only when its actual legs are synchronized.
+
+        The comparator may choose different venues for executable buy/sell than
+        for diagnostic mid-price extremes. Therefore synchronization is checked
+        on source_achat/source_vente, not on the mid-price labels.
+        """
+        candidates = compare_cross_source_prices(
+            self.store.cross_source_prices(coin, now_ms=now_ms)
+        )
+        if not candidates:
+            return []
+        synchronized = self.store.synchronized_pairs(
+            coin,
+            now_ms=now_ms,
+            max_receive_skew_ms=max_receive_skew_ms,
+            max_exchange_skew_ms=max_exchange_skew_ms,
+            require_clock_offsets=require_clock_offsets,
+            require_l2=require_l2,
+        )
+        allowed = {
+            frozenset((left.venue, right.venue))
+            for left, right, _evidence in synchronized
+        }
+        return [
+            row
+            for row in candidates
+            if frozenset((row.source_achat, row.source_vente)) in allowed
+        ]
 
     def lead_lag_rows(self, coin: str, *, now_ms: int) -> list[dict[str, float | int | str]]:
         return self.store.lead_lag_rows(coin, now_ms=now_ms)
