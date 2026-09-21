@@ -328,9 +328,16 @@ def _funding_interval_ms(item: dict[str, object]) -> int | None:
 class OkxPublicClient:
     """Native public REST/WS client; no auth and no order endpoints."""
 
-    def __init__(self, *, rest_base_url: str = REST_BASE_URL, ws_url: str = PUBLIC_WS_URL) -> None:
+    def __init__(
+        self,
+        *,
+        rest_base_url: str = REST_BASE_URL,
+        ws_url: str = PUBLIC_WS_URL,
+        session_refresh_s: float = 900.0,
+    ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
+        self.session_refresh_s = max(60.0, float(session_refresh_s))
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
@@ -392,6 +399,7 @@ class OkxPublicClient:
         while True:
             try:
                 connection_id = f"okx-{uuid.uuid4().hex}"
+                session_started = time.monotonic()
                 async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
@@ -410,6 +418,8 @@ class OkxPublicClient:
                                 "transport_rtt_ms": (float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None),
                             }
                             yield payload
+                            if time.monotonic() - session_started >= self.session_refresh_s:
+                                return
             except asyncio.CancelledError:
                 raise
             except Exception:
