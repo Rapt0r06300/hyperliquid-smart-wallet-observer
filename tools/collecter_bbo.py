@@ -515,6 +515,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     import websockets
 
     from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
+    from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
     from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
     from hl_observer.collection.lead_lag_causal_checkpoints import (
         LeadLagCheckpointRequest,
@@ -640,6 +641,14 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
 
     async def binance_depth() -> None:
         await binance_depth_collector.run()
+
+    binance_market_context_collector = BinanceMarketContextCollector(
+        sym.values(),
+        tick_sink=queue_raw,
+    )
+
+    async def binance_market_context() -> None:
+        await binance_market_context_collector.run()
 
     def mark_hl_gap(*, received_ts_ms: int, connection_id: str, gap_ms: float) -> None:
         for gate in quality_gates.values():
@@ -1329,6 +1338,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                     **binance_depth_collector.health(),
                     "latest_symbols": len(binance_l2_latest),
                 },
+                "binance_market_context": binance_market_context_collector.health(),
                 "dataset": dataset.stats(),
                 "canonical_events": {
                     "path": str(canonical_writer.path),
@@ -1390,6 +1400,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     ]
     if sym:
         taches.append(asyncio.create_task(binance_depth()))
+        taches.append(asyncio.create_task(binance_market_context()))
     try:
         await ecrire_et_superviser()
     finally:
@@ -1449,7 +1460,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         print("[bbo] MODULE `websockets` MANQUANT -> lance:  pip install websockets  (collecteur inactif "
               "tant qu'il n'est pas installe).", flush=True)
         return 0
-    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker+depth100ms+trades..."
+    print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker+depth100ms+trades+mark/funding/OI/liquidations..."
           % len(coins), flush=True)
     try:
         asyncio.run(_boucle(Path(a.root), coins))            # PERSISTANT : sort seulement sur fin de session
