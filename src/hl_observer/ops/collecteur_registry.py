@@ -175,9 +175,17 @@ def collecteurs_pour_profil(profil: str | None = "core") -> tuple[dict[str, Any]
 
 
 def collecteurs_requis_pour_run(profil: str | None) -> frozenset[str]:
-    """Requis pour ce lancement; experimental-paper ne devient jamais CORE."""
+    """Return collectors whose absence must fail the requested runtime profile.
+
+    CORE remains the minimal runtime contract. HARVEST additionally requires the
+    native multi-venue collector because Bybit/OKX are first-class market sources
+    for Cross-Venue and Lead-Lag; silently running harvest without them would
+    produce an incomplete dataset while appearing healthy.
+    """
     normalise = normaliser_profil(profil)
     requis = set(COLLECTEURS_REQUIS)
+    if normalise in {"harvest", "all"}:
+        requis.add("native-venues")
     if experimental_paper_demande() and normalise in {"harvest", "all"}:
         requis.add("experimental-paper")
     return frozenset(requis)
