@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.event_intelligence.archive import EventIntelligenceArchive
+from hl_observer.event_intelligence.coverage import IDEA_COVERAGE, coverage_summary
 from hl_observer.event_intelligence.candidates import EventLeadLagCandidate
 from hl_observer.event_intelligence.direct_sources import (
     DirectSourceError,
@@ -21,6 +22,10 @@ from hl_observer.event_intelligence.external_event import (
     SourceTier,
 )
 from hl_observer.event_intelligence.macro import MacroEventClock, ScheduledMacroEvent
+from hl_observer.event_intelligence.market_features import (
+    MarketStateObservation,
+    measure_event_market_features,
+)
 from hl_observer.event_intelligence.module_bridges import (
     LeaderAction,
     build_cross_venue_event_context,
@@ -41,6 +46,11 @@ from hl_observer.event_intelligence.scoreboard import (
     ScoredEventOutcome,
     build_event_scoreboard,
 )
+from hl_observer.event_intelligence.source_catalog import (
+    ClassificationEnvelope,
+    build_source_catalog,
+    source_pair_role,
+)
 from hl_observer.event_intelligence.sequences import (
     PropagationStage,
     StageObservation,
@@ -49,13 +59,16 @@ from hl_observer.event_intelligence.sequences import (
 )
 from hl_observer.event_intelligence.validation import (
     EventStudyObservation,
+    bootstrap_mean_ci,
     chronological_split,
+    compare_source_latency,
     independent_event_count,
     market_session_utc,
     permute_event_labels,
     placebo_timestamps,
     purged_chronological_split,
     select_no_event_controls,
+    stratify_numeric,
 )
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
 
@@ -495,3 +508,149 @@ def test_propagation_patterns_capture_prediction_news_market_hl_sequence() -> No
 
     stats = summarize_patterns([pattern])
     assert stats[pattern.pattern_id].observations == 1
+
+
+
+def test_retained_idea_registry_is_exactly_120_and_all_implemented() -> None:
+    summary = coverage_summary()
+    assert summary["count"] == 120
+    assert summary["min_id"] == 1
+    assert summary["max_id"] == 120
+    assert summary["unique_ids"] == 120
+    assert summary["all_implemented"] is True
+    assert [row.idea_id for row in IDEA_COVERAGE] == list(range(1, 121))
+    assert all(row.component for row in IDEA_COVERAGE)
+
+
+def test_source_catalog_is_versioned_unique_read_only_and_evidence_bound() -> None:
+    catalog = build_source_catalog(version="test-v1")
+    assert catalog.version == "test-v1"
+    assert len(catalog.source_ids) == len(set(catalog.source_ids))
+    assert "worldmonitor.news" in catalog.source_ids
+    assert "usgs_earthquakes" in catalog.source_ids
+
+    primary = catalog.get("usgs_earthquakes")
+    aggregator = catalog.get("worldmonitor.news")
+    assert primary is not None and primary.primary is True
+    assert aggregator is not None and aggregator.primary is False
+    assert primary.read_only is True
+    assert aggregator.read_only is True
+    assert source_pair_role(primary, aggregator) == (
+        "PRIMARY_SPEED_PLUS_AGGREGATOR_CORROBORATION"
+    )
+
+    with pytest.raises(ValueError, match="source evidence refs"):
+        ClassificationEnvelope(
+            label="macro_shock",
+            confidence=0.8,
+            methodology_version="v1",
+            evidence_refs=(),
+            model_id="classifier-v1",
+        )
+
+    envelope = ClassificationEnvelope(
+        label="macro_shock",
+        confidence=0.8,
+        methodology_version="v1",
+        evidence_refs=("fred:CPI:2026-09",),
+        model_id="classifier-v1",
+    )
+    assert envelope.evidence_refs == ("fred:CPI:2026-09",)
+
+
+def test_event_market_features_measure_spread_depth_ofi_oi_funding_and_liquidations() -> None:
+    rows = [
+        MarketStateObservation(
+            ts_ms=900,
+            venue="hyperliquid",
+            asset="BTC",
+            bid=99.99,
+            ask=100.01,
+            bid_depth_usd=500.0,
+            ask_depth_usd=500.0,
+            aggressive_buy_usd=100.0,
+            aggressive_sell_usd=100.0,
+            open_interest_usd=1_000_000.0,
+            funding_rate=0.0001,
+            liquidation_long_usd=0.0,
+            liquidation_short_usd=0.0,
+        ),
+        MarketStateObservation(
+            ts_ms=1_100,
+            venue="hyperliquid",
+            asset="BTC",
+            bid=99.95,
+            ask=100.05,
+            bid_depth_usd=250.0,
+            ask_depth_usd=250.0,
+            aggressive_buy_usd=300.0,
+            aggressive_sell_usd=100.0,
+            open_interest_usd=1_050_000.0,
+            funding_rate=0.0002,
+            liquidation_long_usd=25_000.0,
+            liquidation_short_usd=5_000.0,
+        ),
+    ]
+    delta = measure_event_market_features(
+        rows,
+        event_ts_ms=1_000,
+        venue="hyperliquid",
+        asset="BTC",
+        pre_window_ms=500,
+        post_window_ms=500,
+    )
+    assert delta is not None
+    assert delta.spread_expansion_bps is not None
+    assert delta.spread_expansion_bps > 0
+    assert delta.depth_change_usd == pytest.approx(-500.0)
+    assert delta.depth_withdrawal_ratio == pytest.approx(0.5)
+    assert delta.order_flow_imbalance_change == pytest.approx(0.5)
+    assert delta.aggressive_volume_change_usd == pytest.approx(200.0)
+    assert delta.open_interest_change_usd == pytest.approx(50_000.0)
+    assert delta.funding_change == pytest.approx(0.0001)
+    assert delta.liquidation_long_change_usd == pytest.approx(25_000.0)
+    assert delta.liquidation_short_change_usd == pytest.approx(5_000.0)
+
+
+def test_source_latency_bootstrap_and_numeric_slices_are_causal_research_tools() -> None:
+    primary = ExternalEvent(
+        event_id="same",
+        source="usgs.earthquakes",
+        event_type=ExternalEventType.NATURAL,
+        source_tier=SourceTier.PRIMARY_OFFICIAL,
+        retrieval_ts_ms=1_000,
+        ingest_ts_ms=1_000,
+        methodology_version="v1",
+        raw_evidence_ref="primary",
+    )
+    aggregator = ExternalEvent(
+        event_id="same",
+        source="worldmonitor.cross_source",
+        event_type=ExternalEventType.NATURAL,
+        source_tier=SourceTier.AGGREGATOR,
+        retrieval_ts_ms=1_500,
+        ingest_ts_ms=1_500,
+        methodology_version="v1",
+        raw_evidence_ref="wm",
+    )
+    comparison = compare_source_latency(primary, aggregator)
+    assert comparison.aggregator_lag_ms == 500
+
+    ci = bootstrap_mean_ci([1.0, 2.0, 3.0, 4.0], resamples=500, seed=7)
+    assert ci is not None
+    assert ci[0] <= 2.5 <= ci[1]
+
+    rows = [
+        EventStudyObservation(
+            "a", 1_000, "news", "BTC", 1.0, 0.01, velocity_zscore=0.5
+        ),
+        EventStudyObservation(
+            "b", 2_000, "news", "BTC", 2.0, 0.02, velocity_zscore=4.0
+        ),
+    ]
+    slices = stratify_numeric(
+        rows,
+        field="velocity_zscore",
+        thresholds=(1.0, 3.0),
+    )
+    assert sum(len(group) for group in slices.values()) == 2
