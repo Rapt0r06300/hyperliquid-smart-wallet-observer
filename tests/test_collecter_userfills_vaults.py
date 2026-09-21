@@ -78,27 +78,77 @@ def test_journal_liquidation_separe_live_causal_et_snapshot(tmp_path, monkeypatc
     assert rows[1]["is_snapshot"] is True
 
 
-def _f(ts, snap=False):
-    return {"coin": "SOL", "ts_ms": ts, "isSnapshot": snap, "hash": "h%d" % ts}
+def _f(ts, snap=False, suffix=""):
+    return {
+        "vault": "0xV",
+        "coin": "SOL",
+        "ts_ms": ts,
+        "isSnapshot": snap,
+        "hash": "h%d%s" % (ts, suffix),
+        "px": 100.0,
+        "sz": 1.0,
+        "dir": "Open Long",
+    }
 
 
 def test_snapshot_initial_ignore_et_curseur_pose():
     cur = {}
-    a = C.fills_a_traiter("0xV", [_f(100, snap=True), _f(200, snap=True)], cur)
-    assert a == [] and cur["0xV"] == 200                            # rien tradé, curseur = dernier ts
+    fills = [_f(100, snap=True), _f(200, snap=True, suffix="a"), _f(200, snap=True, suffix="b")]
+    a = C.fills_a_traiter("0xV", fills, cur)
+    assert a == []
+    assert cur["0xV"]["version"] == 2
+    assert cur["0xV"]["ts_ms"] == 200
+    assert len(cur["0xV"]["event_ids_at_ts"]) == 2
 
 
-def test_reconnexion_rejoue_les_inconnus_recents():
+def test_reconnexion_rejoue_les_inconnus_recents_et_migre_legacy():
     cur = {"0xV": 200}
-    # snapshot de reconnexion : fills 150 (déjà vu) et 300 (survenu pendant la coupure)
-    a = C.fills_a_traiter("0xV", [_f(150, snap=True), _f(300, snap=True)], cur)
-    assert [f["ts_ms"] for f in a] == [300] and cur["0xV"] == 300   # catch-up : seulement le récent
+    a = C.fills_a_traiter(
+        "0xV",
+        [_f(150, snap=True), _f(300, snap=True)],
+        cur,
+    )
+    assert [f["ts_ms"] for f in a] == [300]
+    assert cur["0xV"]["version"] == 2
+    assert cur["0xV"]["ts_ms"] == 300
 
 
-def test_live_filtre_sur_curseur():
-    cur = {"0xV": 300}
-    a = C.fills_a_traiter("0xV", [_f(300), _f(400), _f(500)], cur)  # 300 = curseur (pas strictement >)
-    assert [f["ts_ms"] for f in a] == [400, 500] and cur["0xV"] == 500
+def test_live_filtre_sur_curseur_v2():
+    seed = _f(300, suffix="a")
+    cur = {
+        "0xV": {
+            "version": 2,
+            "ts_ms": 300,
+            "event_ids_at_ts": [C._fill_cursor_id(seed)],
+        }
+    }
+    nouveau_meme_ms = _f(300, suffix="b")
+    a = C.fills_a_traiter(
+        "0xV",
+        [seed, nouveau_meme_ms, _f(400), _f(500)],
+        cur,
+    )
+    assert [f["hash"] for f in a] == ["h300b", "h400", "h500"]
+    assert cur["0xV"]["ts_ms"] == 500
+
+
+def test_deux_fills_distincts_meme_milliseconde_ne_sont_pas_perdus():
+    cur = {}
+    first = _f(1000, suffix="a")
+    second = _f(1000, suffix="b")
+
+    accepted = C.fills_a_traiter("0xV", [first], cur)
+    assert accepted == [first]
+    assert cur["0xV"]["ts_ms"] == 1000
+
+    accepted = C.fills_a_traiter("0xV", [first, second], cur)
+    assert accepted == [second]
+    assert len(cur["0xV"]["event_ids_at_ts"]) == 2
+
+
+def test_cursor_timestamp_helper_accepte_ancien_et_nouveau_format():
+    assert C._cursor_ts_ms(1234) == 1234
+    assert C._cursor_ts_ms({"version": 2, "ts_ms": 5678}) == 5678
 
 
 def test_fill_persiste_avec_horodatage_de_reception_causale(tmp_path, monkeypatch):
