@@ -26,6 +26,8 @@ class ScoredEventOutcome:
     sample: str = "train"
     velocity_zscore: float | None = None
     surprise_score: float | None = None
+    venue: str = "hyperliquid"
+    prediction_delta_pp: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,11 +196,15 @@ def _to_study(row: ScoredEventOutcome) -> EventStudyObservation:
         asset=outcome.coin.upper(),
         net_bps=outcome.net_bps,
         net_pnl_usd=outcome.net_pnl_usd,
+        end_ts_ms=outcome.exit_ts_ms,
         sample=str(row.sample),
         source_tier=str(row.source_tier),
+        venue=str(row.venue),
+        session="",
         corroboration_count=int(row.corroboration_count),
         velocity_zscore=row.velocity_zscore,
         surprise_score=row.surprise_score,
+        prediction_delta_pp=row.prediction_delta_pp,
     )
 
 
