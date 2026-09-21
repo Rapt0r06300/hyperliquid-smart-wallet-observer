@@ -509,14 +509,15 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
 
 # ─────────────────────────────── boucle WS PERSISTANTE (asyncio) ───────────────────────────────
 
-async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/O réseau)
+async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> None:  # pragma: no cover (I/O réseau)
     import asyncio
 
     import websockets
 
     from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
     from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
-    from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    from hl_observer.collection.tick_dataset import TickEnvelope
     from hl_observer.collection.lead_lag_causal_checkpoints import (
         LeadLagCheckpointRequest,
         RollingShockCheckpointDetector,
@@ -548,7 +549,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
     atomic_bbo_cache = CF.CacheDedup()
-    dataset = TickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
+    dataset = PartitionedTickDatasetWriter(root / TICK_DATASET_DIR, flush_every=1)
     canonical_writer = CanonicalEventWriter(
         root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
     )
@@ -1391,6 +1392,8 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 )
                 heartbeat_canonique["dernier_ecrit"] = total_ecrit
                 heartbeat_canonique["dernier_ts_ns"] = now_ns
+            if duration_s > 0 and duree_s >= float(duration_s):
+                return
             marq = MARQUEUR.read_text(encoding="utf-8").strip() if MARQUEUR.exists() else marqueur0
             if marq != marqueur0:                              # anti-orphelin : la session a changé -> stop
                 return
@@ -1433,6 +1436,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                 canonical_writer.append,
                 canonical_events,
             )
+        await asyncio.to_thread(dataset.rotate_all)
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover
@@ -1441,6 +1445,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     p = argparse.ArgumentParser(description="Collecteur BBO rapide HL/Binance (PERSISTANT, lecture seule).")
     p.add_argument("--root", default=".")
     p.add_argument("--coins", default="AUTO")   # AUTO = majors + coins fréquents des liquidations (journal)
+    p.add_argument(
+        "--duration-s",
+        type=float,
+        default=0.0,
+        help="0 = persistant; >0 = arrêt propre après cette durée (runner GitHub).",
+    )
     a = p.parse_args(argv)
     if a.coins.strip().upper() == "AUTO":
         requested_coins = coins_couverture(a.root)
@@ -1469,7 +1479,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     print("[bbo] demarrage PERSISTANT : %d coins, WS HL bbo+l2Book+trades + Binance bookTicker+depth100ms+trades+mark/funding/OI/liquidations..."
           % len(coins), flush=True)
     try:
-        asyncio.run(_boucle(Path(a.root), coins))            # PERSISTANT : sort seulement sur fin de session
+        asyncio.run(
+            _boucle(
+                Path(a.root),
+                coins,
+                duration_s=max(0.0, float(a.duration_s)),
+            )
+        )
     except KeyboardInterrupt:
         return 0
     except Exception as exc:                                 # noqa: BLE001 — une panne DOIT etre visible
