@@ -45,6 +45,14 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 @dataclass(slots=True)
 class TickEnvelope:
     source_id: str
@@ -128,6 +136,7 @@ class TickDatasetWriter:
         self.records_written = 0
         self.bytes_written = 0
         self.shards_written = 0
+        self._current_records = 0
         self._first_received_ts_ms: int | None = None
         self._last_received_ts_ms: int | None = None
 
@@ -181,6 +190,7 @@ class TickDatasetWriter:
             os.fsync(handle.fileno())
         count = len(batch)
         self.records_written += count
+        self._current_records += count
         self.bytes_written += len(encoded.encode("utf-8"))
         if self.current_path.stat().st_size >= self.rotate_bytes:
             self.rotate()
@@ -201,8 +211,29 @@ class TickDatasetWriter:
             while chunk := source.read(1024 * 1024):
                 target.write(chunk)
         os.replace(temporary_path, final_path)
+        shard_manifest = {
+            "schema_version": "alina.tick_shard_manifest.v2",
+            "stream_name": self.stream_name,
+            "file_name": final_path.name,
+            "sha256": _sha256_file(final_path),
+            "bytes": final_path.stat().st_size,
+            "event_count": self._current_records,
+            "first_received_ts_ms": self._first_received_ts_ms,
+            "last_received_ts_ms": self._last_received_ts_ms,
+            "read_only": True,
+            "real_execution": False,
+        }
+        sidecar = final_path.with_name(final_path.name + ".manifest.json")
+        temporary_sidecar = sidecar.with_suffix(sidecar.suffix + ".tmp")
+        temporary_sidecar.write_text(
+            json.dumps(shard_manifest, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+        os.replace(temporary_sidecar, sidecar)
+
         self.current_path.write_text("", encoding="utf-8")
         self.shards_written += 1
+        self._current_records = 0
         self._first_received_ts_ms = None
         self._last_received_ts_ms = None
         self._write_manifest()
@@ -236,6 +267,7 @@ class TickDatasetWriter:
             "records_written": self.records_written,
             "bytes_written": self.bytes_written,
             "shards_written": self.shards_written,
+            "current_records": self._current_records,
             "first_received_ts_ms": self._first_received_ts_ms,
             "last_received_ts_ms": self._last_received_ts_ms,
             "read_only": True,
@@ -250,6 +282,14 @@ class TickDatasetWriter:
                 path.name
                 for path in sorted(
                     self.shards_directory.glob(f"{self.stream_name}.*.jsonl.gz")
+                )
+            ],
+            "immutable_shard_manifests": [
+                path.name
+                for path in sorted(
+                    self.shards_directory.glob(
+                        f"{self.stream_name}.*.jsonl.gz.manifest.json"
+                    )
                 )
             ],
         }
