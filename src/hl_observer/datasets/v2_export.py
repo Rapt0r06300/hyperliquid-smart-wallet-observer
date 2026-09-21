@@ -54,6 +54,8 @@ def build_manifest_from_tick_shard(
     transport_rtt_ms: list[float] = []
     clock_offsets_ms: list[float] = []
     reconnect_count_max = 0
+    gap_counter_values: list[int] = []
+    reconnect_counter_values: list[int] = []
 
     with gzip.open(path, "rt", encoding="utf-8") as handle:
         for line in handle:
@@ -81,10 +83,16 @@ def build_manifest_from_tick_shard(
             connection_id = str(record.get("connection_id") or "")
             if connection_id:
                 connection_ids.add(connection_id)
-            reconnect_count_max = max(
-                reconnect_count_max,
-                _int(record.get("reconnect_count")) or 0,
-            )
+            record_gap_counter = _int(record.get("gap_count"))
+            if record_gap_counter is not None:
+                gap_counter_values.append(record_gap_counter)
+            record_reconnect_counter = _int(record.get("reconnect_count"))
+            if record_reconnect_counter is not None:
+                reconnect_counter_values.append(record_reconnect_counter)
+                reconnect_count_max = max(
+                    reconnect_count_max,
+                    record_reconnect_counter,
+                )
             if receive is not None and exchange is not None:
                 receive_exchange_deltas_ms.append(float(receive - exchange))
             if receive is not None:
@@ -192,6 +200,14 @@ def build_manifest_from_tick_shard(
             "use PartitionedTickDatasetWriter"
         )
 
+    if gap_counter_values:
+        gap_count += max(gap_counter_values) - min(gap_counter_values)
+    reconnect_delta = (
+        max(reconnect_counter_values) - min(reconnect_counter_values)
+        if reconnect_counter_values
+        else 0
+    )
+
     source = next(iter(sources))
     channel = next(iter(channels))
     instrument = next(iter(instruments))
@@ -239,6 +255,7 @@ def build_manifest_from_tick_shard(
             "connection_ids": sorted(connection_ids),
             "connection_count": len(connection_ids),
             "max_reconnect_count": reconnect_count_max,
+            "reconnect_delta": reconnect_delta,
             "receive_minus_exchange_ms": _stats(receive_exchange_deltas_ms),
             "transport_rtt_ms": _stats(transport_rtt_ms),
             "clock_offset_ms": _stats(clock_offsets_ms),
