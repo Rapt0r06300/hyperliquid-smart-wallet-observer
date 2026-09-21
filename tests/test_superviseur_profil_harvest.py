@@ -6,7 +6,7 @@
   présent sur le disque. Les briques encore BLOCKED (node fills, HF recorder, TWAP, Bybit)
   restent honnêtement HORS profil tant qu'un collecteur réseau réel n'est pas branché.
 - dYdX reste disponible comme connecteur legacy explicite, mais est dormant dans HARVEST.
-- Le CLI `demarrer-tous` BLOQUE (exit 3) dès qu'un collecteur REQUIS (= CORE) n'a pas démarré :
+- Le CLI `demarrer-tous` BLOQUE (exit 3) dès qu'un collecteur requis pour le profil n'a pas démarré :
   le moteur ne doit jamais tourner au-dessus d'une source obligatoire morte.
 """
 from __future__ import annotations
@@ -53,10 +53,10 @@ def test_cli_demarrer_tous_bloque_si_source_obligatoire_absente(monkeypatch):
     monkeypatch.setattr(SC, "demarrer_tous", _ko)
     assert SC._cli(["demarrer-tous", "harvest"]) == 3
 
-    # tout le CORE démarré (un non-requis manquant ne bloque pas) -> exit 0
+    # CORE + native-venues sont requis en HARVEST ; un autre collecteur manquant ne bloque pas.
     def _ok(root, **kw):
         return {"run_id": "r", "profil": "harvest", "selectionnes": 12,
-                "pids": {n: 1 for n in SC.COLLECTEURS_CORE}, "reutilises": [],
+                "pids": {n: 1 for n in SC.collecteurs_requis_pour_run("harvest")}, "reutilises": [],
                 "manquants": ["vault-collector"]}
 
     monkeypatch.setattr(SC, "demarrer_tous", _ok)
@@ -94,3 +94,9 @@ def test_lanceur_principal_ne_contient_aucune_commande_dydx_executable():
         and not ligne.lstrip().lower().startswith(("rem ", "::"))
     ]
     assert actives == []
+
+
+def test_native_venues_est_requis_en_harvest_mais_pas_en_core():
+    assert "native-venues" in SC.collecteurs_requis_pour_run("harvest")
+    assert "native-venues" in SC.collecteurs_requis_pour_run("all")
+    assert "native-venues" not in SC.collecteurs_requis_pour_run("core")
