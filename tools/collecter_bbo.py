@@ -37,7 +37,8 @@ from hl_observer.config.cross_venue_instruments import (  # noqa: E402
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
-WS_BINANCE = "wss://fstream.binance.com/stream"
+WS_BINANCE_PUBLIC = "wss://fstream.binance.com/public/stream"
+WS_BINANCE_MARKET = "wss://fstream.binance.com/market/stream"
 SORTIE = Path("runtime") / "data" / "bbo_synchro.jsonl"
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"     # chaque message BBO (monotone) -> lead-lag fin
 ATOMIC_BBO_TAPE = Path("runtime") / "data" / "cross_venue_atomic_bbo.jsonl"
@@ -961,7 +962,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
         while True:
             try:
-                async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
+                async with websockets.connect("%s?streams=%s" % (WS_BINANCE_PUBLIC, streams), ping_interval=20) as ws:
                     bin_bbo_connection_serial += 1
                     connection_id = "bin-bbo-%d-%d" % (
                         int(time.time() * 1000),
