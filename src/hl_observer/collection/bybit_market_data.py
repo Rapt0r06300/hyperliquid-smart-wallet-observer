@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Iterable
 
@@ -17,6 +18,7 @@ import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
+from hl_observer.collection.feed_integrity import FeedIntegrityState, estimate_clock_sync
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
@@ -43,6 +45,11 @@ def _int(value: object) -> int | None:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _transport(payload: dict[str, object]) -> dict[str, object]:
+    value = payload.get("_alina_transport")
+    return value if isinstance(value, dict) else {}
 
 
 def _levels(raw: Iterable[Iterable[object]], *, reverse: bool) -> list[MarketLevel]:
@@ -110,6 +117,13 @@ class BybitMarketState:
     open_interest: float | None = None
     funding_rate: float | None = None
     funding_interval_hours: float | None = None
+    receive_mono_ns: int | None = None
+    connection_id: str | None = None
+    transport_rtt_ms: float | None = None
+    clock_offset_ms: float | None = None
+    integrity: FeedIntegrityState = field(
+        default_factory=lambda: FeedIntegrityState(strict_consecutive_sequence=True)
+    )
 
     def apply_orderbook(self, payload: dict[str, object], *, receive_ts_ms: int | None = None) -> str:
         data = payload.get("data")
@@ -119,14 +133,31 @@ class BybitMarketState:
         message_symbol = str(data.get("s") or self.symbol).upper()
         if message_symbol != self.symbol.upper():
             return self._desync("SYMBOL_MISMATCH")
+
+        meta = _transport(payload)
+        received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
+        receive_mono = _int(meta.get("receive_mono_ns"))
+        connection_id = str(meta.get("connection_id") or "") or None
+        rtt = _float(meta.get("transport_rtt_ms"))
+        clock_offset = _float(meta.get("clock_offset_ms"))
         update_id = _int(data.get("u"))
         sequence = _int(data.get("seq"))
+        exchange_ts = _int(payload.get("cts")) or _int(data.get("cts")) or _int(payload.get("ts"))
+        had_snapshot = self.has_snapshot
+
         if kind == "snapshot":
             self.bids.clear()
             self.asks.clear()
             self._apply_side(self.bids, data.get("b"))
             self._apply_side(self.asks, data.get("a"))
             self.has_snapshot = True
+            ok, reasons = self.integrity.observe(
+                sequence=update_id,
+                exchange_ts_ms=exchange_ts,
+                receive_ts_ms=received,
+                receive_mono_ns=receive_mono,
+                reset=had_snapshot,
+            )
         elif kind == "delta":
             if not self.has_snapshot:
                 return self._desync("DELTA_BEFORE_SNAPSHOT")
@@ -134,20 +165,41 @@ class BybitMarketState:
                 self.has_snapshot = False
                 self.bids.clear()
                 self.asks.clear()
+                self.integrity.observe(
+                    sequence=update_id,
+                    exchange_ts_ms=exchange_ts,
+                    receive_ts_ms=received,
+                    receive_mono_ns=receive_mono,
+                    reset=True,
+                )
                 return self._desync("BYBIT_SERVICE_RESTART")
-            if self.update_id is not None and update_id is not None and update_id < self.update_id:
-                return self._desync("UPDATE_ID_REGRESSION")
-            if self.sequence is not None and sequence is not None and sequence < self.sequence:
-                return self._desync("SEQUENCE_REGRESSION")
+            ok, reasons = self.integrity.observe(
+                sequence=update_id,
+                exchange_ts_ms=exchange_ts,
+                receive_ts_ms=received,
+                receive_mono_ns=receive_mono,
+            )
+            if "DUPLICATE_SEQUENCE" in reasons:
+                self.receive_ts_ms = received
+                self.receive_mono_ns = receive_mono
+                return self.quality
+            if not ok:
+                return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
             self._apply_side(self.bids, data.get("b"))
             self._apply_side(self.asks, data.get("a"))
         else:
             return self._desync("UNKNOWN_ORDERBOOK_TYPE")
 
+        if not ok:
+            return self._desync(reasons[0] if reasons else "FEED_INTEGRITY")
         self.update_id = update_id if update_id is not None else self.update_id
         self.sequence = sequence if sequence is not None else self.sequence
-        self.exchange_ts_ms = _int(payload.get("ts")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or int(time.time() * 1000)
+        self.exchange_ts_ms = exchange_ts or self.exchange_ts_ms
+        self.receive_ts_ms = received
+        self.receive_mono_ns = receive_mono
+        self.connection_id = connection_id or self.connection_id
+        self.transport_rtt_ms = rtt if rtt is not None else self.transport_rtt_ms
+        self.clock_offset_ms = clock_offset if clock_offset is not None else self.clock_offset_ms
         self.quality = EXPLOITABLE if self._valid_bbo() else UNMEASURABLE
         self.reason = "" if self.quality == EXPLOITABLE else "INVALID_BBO"
         return self.quality
@@ -164,17 +216,24 @@ class BybitMarketState:
         symbol = str(item.get("symbol") or self.symbol).upper()
         if symbol != self.symbol.upper():
             return self._desync("SYMBOL_MISMATCH")
+        meta = _transport(payload)
         self.last = _coalesce_float(item.get("lastPrice"), self.last)
         self.mark = _coalesce_float(item.get("markPrice"), self.mark)
         self.index = _coalesce_float(item.get("indexPrice"), self.index)
         self.volume_24h = _coalesce_float(item.get("volume24h"), self.volume_24h)
         self.open_interest = _coalesce_float(item.get("openInterest"), self.open_interest)
         self.funding_rate = _coalesce_float(item.get("fundingRate"), self.funding_rate)
-        self.funding_interval_hours = _coalesce_float(
-            item.get("fundingIntervalHour"), self.funding_interval_hours
-        )
+        self.funding_interval_hours = _coalesce_float(item.get("fundingIntervalHour"), self.funding_interval_hours)
         self.exchange_ts_ms = _int(payload.get("ts")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or self.receive_ts_ms or int(time.time() * 1000)
+        self.receive_ts_ms = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or self.receive_ts_ms or int(time.time() * 1000)
+        self.receive_mono_ns = _int(meta.get("receive_mono_ns")) or self.receive_mono_ns
+        self.connection_id = str(meta.get("connection_id") or "") or self.connection_id
+        parsed_rtt = _float(meta.get("transport_rtt_ms"))
+        if parsed_rtt is not None:
+            self.transport_rtt_ms = parsed_rtt
+        parsed_offset = _float(meta.get("clock_offset_ms"))
+        if parsed_offset is not None:
+            self.clock_offset_ms = parsed_offset
         return self.quality
 
     def snapshot(self, *, now_ms: int | None = None, depth: int = 50) -> NativeMarketSnapshot:
@@ -203,6 +262,19 @@ class BybitMarketState:
             funding_rate=self.funding_rate,
             funding_interval_hours=self.funding_interval_hours,
             sequence=self.sequence,
+            update_id=self.update_id,
+            connection_id=self.connection_id,
+            receive_mono_ns=self.receive_mono_ns,
+            transport_rtt_ms=self.transport_rtt_ms,
+            clock_offset_ms=self.clock_offset_ms,
+            gap_count=self.integrity.gaps,
+            duplicate_count=self.integrity.duplicates,
+            regression_count=(
+                self.integrity.regressions
+                + self.integrity.exchange_time_regressions
+                + self.integrity.receive_time_regressions
+                + self.integrity.monotonic_regressions
+            ),
             reason=self.reason,
         )
 
@@ -261,6 +333,37 @@ class BybitPublicClient:
                     break
         return sorted(set(rows))
 
+    def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
+        with httpx.Client(timeout=timeout_s) as client:
+            response = client.get(f"{self.rest_base_url}/v5/market/time")
+            response.raise_for_status()
+            payload = response.json()
+        if int(payload.get("retCode", -1)) != 0:
+            raise RuntimeError(f"Bybit time error: {payload.get('retMsg', 'unknown')}")
+        result = payload.get("result")
+        if isinstance(result, dict):
+            nano = _int(result.get("timeNano"))
+            if nano is not None:
+                return nano // 1_000_000
+            seconds = _int(result.get("timeSecond"))
+            if seconds is not None:
+                return seconds * 1_000
+        server = _int(payload.get("time"))
+        if server is None:
+            raise RuntimeError("Bybit server time missing")
+        return server
+
+    def measure_clock_sync(self, *, timeout_s: float = 5.0):
+        sent = int(time.time() * 1_000)
+        server = self.server_time_ms(timeout_s=timeout_s)
+        received = int(time.time() * 1_000)
+        return estimate_clock_sync(
+            venue="bybit",
+            server_ts_ms=server,
+            send_wall_ts_ms=sent,
+            receive_wall_ts_ms=received,
+        )
+
     async def messages(self, symbols: Iterable[str]) -> AsyncIterator[dict[str, object]]:
         symbols = tuple(sorted({str(symbol).upper() for symbol in symbols if str(symbol).strip()}))
         if not symbols:
@@ -269,12 +372,22 @@ class BybitPublicClient:
         attempt = 0
         while True:
             try:
+                connection_id = f"bybit-{uuid.uuid4().hex}"
                 async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
                     async for raw in socket:
+                        receive_mono_ns = time.monotonic_ns()
+                        receive_wall_ts_ms = int(time.time() * 1_000)
                         payload = json.loads(raw)
                         if isinstance(payload, dict):
+                            latency = getattr(socket, "latency", None)
+                            payload["_alina_transport"] = {
+                                "connection_id": connection_id,
+                                "receive_wall_ts_ms": receive_wall_ts_ms,
+                                "receive_mono_ns": receive_mono_ns,
+                                "transport_rtt_ms": (float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None),
+                            }
                             yield payload
             except asyncio.CancelledError:
                 raise
