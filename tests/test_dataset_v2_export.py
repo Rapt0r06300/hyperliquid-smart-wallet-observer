@@ -92,3 +92,87 @@ def test_missing_authenticated_provenance_is_not_silently_treated_as_false(tmp_p
     [shard] = writer.rotate_all()
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["provenance"]["authenticated"] is None
+
+
+def test_okx_prev_sequence_gap_is_counted_in_manifest(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="okx_public_ws",
+            channel="l2Book",
+            instrument="BTC-USDT-SWAP",
+            event_kind="UPDATE",
+            raw_payload={"arg": {"channel": "books"}},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=100,
+            connection_id="okx-1",
+            sequence=10,
+            provenance={"access": "read_only", "authenticated": False},
+            parsed_summary={"prev_sequence": -1},
+        )
+    )
+    writer.append(
+        TickEnvelope(
+            source_id="okx_public_ws",
+            channel="l2Book",
+            instrument="BTC-USDT-SWAP",
+            event_kind="UPDATE",
+            raw_payload={"arg": {"channel": "books"}},
+            exchange_ts_ms=1010,
+            received_ts_ms=1015,
+            local_monotonic_ns=200,
+            connection_id="okx-1",
+            sequence=12,
+            provenance={"access": "read_only", "authenticated": False},
+            parsed_summary={"prev_sequence": 8},
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["gap_count"] == 1
+
+
+def test_binance_previous_update_gap_is_counted_in_manifest(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="binance_usdm_public",
+            channel="l2Book",
+            instrument="BTCUSDT",
+            event_kind="INCREMENTAL",
+            raw_payload={"e": "depthUpdate"},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=100,
+            connection_id="bin-1",
+            sequence=100,
+            provenance={"access": "read_only", "authenticated": False},
+            parsed_summary={
+                "first_update_id": 99,
+                "previous_update_id": 98,
+            },
+        )
+    )
+    writer.append(
+        TickEnvelope(
+            source_id="binance_usdm_public",
+            channel="l2Book",
+            instrument="BTCUSDT",
+            event_kind="INCREMENTAL",
+            raw_payload={"e": "depthUpdate"},
+            exchange_ts_ms=1010,
+            received_ts_ms=1015,
+            local_monotonic_ns=200,
+            connection_id="bin-1",
+            sequence=105,
+            provenance={"access": "read_only", "authenticated": False},
+            parsed_summary={
+                "first_update_id": 104,
+                "previous_update_id": 99,
+            },
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["gap_count"] >= 1
