@@ -121,9 +121,7 @@ class BybitMarketState:
     connection_id: str | None = None
     transport_rtt_ms: float | None = None
     clock_offset_ms: float | None = None
-    integrity: FeedIntegrityState = field(
-        default_factory=lambda: FeedIntegrityState(strict_consecutive_sequence=True)
-    )
+    integrity: FeedIntegrityState = field(default_factory=FeedIntegrityState)
 
     def apply_orderbook(self, payload: dict[str, object], *, receive_ts_ms: int | None = None) -> str:
         data = payload.get("data")
@@ -138,6 +136,13 @@ class BybitMarketState:
         received = receive_ts_ms or _int(meta.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         receive_mono = _int(meta.get("receive_mono_ns"))
         connection_id = str(meta.get("connection_id") or "") or None
+        connection_changed = bool(
+            connection_id and self.connection_id and connection_id != self.connection_id
+        )
+        if connection_changed:
+            self.has_snapshot = False
+            self.bids.clear()
+            self.asks.clear()
         rtt = _float(meta.get("transport_rtt_ms"))
         clock_offset = _float(meta.get("clock_offset_ms"))
         update_id = _int(data.get("u"))
@@ -156,7 +161,7 @@ class BybitMarketState:
                 exchange_ts_ms=exchange_ts,
                 receive_ts_ms=received,
                 receive_mono_ns=receive_mono,
-                reset=had_snapshot,
+                reset=had_snapshot or connection_changed,
             )
         elif kind == "delta":
             if not self.has_snapshot:
@@ -236,7 +241,7 @@ class BybitMarketState:
             self.clock_offset_ms = parsed_offset
         return self.quality
 
-    def snapshot(self, *, now_ms: int | None = None, depth: int = 50) -> NativeMarketSnapshot:
+    def snapshot(self, *, now_ms: int | None = None, depth: int = 200) -> NativeMarketSnapshot:
         bids = _levels(((p, s) for p, s in self.bids.items()), reverse=True)[:depth]
         asks = _levels(((p, s) for p, s in self.asks.items()), reverse=False)[:depth]
         bid = bids[0].price if bids else 0.0
@@ -309,9 +314,19 @@ def _coalesce_float(value: object, current: float | None) -> float | None:
 class BybitPublicClient:
     """Small native public REST/WS client suitable for collectors and discovery."""
 
-    def __init__(self, *, rest_base_url: str = REST_BASE_URL, ws_url: str = PUBLIC_LINEAR_WS_URL) -> None:
+    def __init__(
+        self,
+        *,
+        rest_base_url: str = REST_BASE_URL,
+        ws_url: str = PUBLIC_LINEAR_WS_URL,
+        orderbook_depth: int = 200,
+    ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
+        depth = int(orderbook_depth)
+        if depth not in {1, 50, 200, 1000}:
+            raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
+        self.orderbook_depth = depth
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         rows: list[tuple[str, str]] = []
@@ -368,7 +383,11 @@ class BybitPublicClient:
         symbols = tuple(sorted({str(symbol).upper() for symbol in symbols if str(symbol).strip()}))
         if not symbols:
             return
-        args = [topic for symbol in symbols for topic in (f"orderbook.50.{symbol}", f"tickers.{symbol}")]
+        args = [
+            topic
+            for symbol in symbols
+            for topic in (f"orderbook.{self.orderbook_depth}.{symbol}", f"tickers.{symbol}")
+        ]
         attempt = 0
         while True:
             try:
