@@ -86,7 +86,14 @@ def snapshot_depuis_positions(vault: str, positions: dict[str, dict], *, nav_usd
             "n_positions": len(pos), "source": "userfills_live", "read_only": True, "real_execution": False}
 
 
-def parser_message_userfills(msg: Any, *, vault: str = "", received_at_ms: int | None = None) -> list[dict]:
+def parser_message_userfills(
+    msg: Any,
+    *,
+    vault: str = "",
+    received_at_ms: int | None = None,
+    receive_mono_ns: int | None = None,
+    connection_id: str | None = None,
+) -> list[dict]:
     """Normalise un message WS userFills en conservant DEUX horloges distinctes.
 
     ``ts_ms`` vient de l'exchange (fill ``time``). ``received_at_ms`` est l'heure murale locale de
@@ -142,6 +149,10 @@ def parser_message_userfills(msg: Any, *, vault: str = "", received_at_ms: int |
                  "tid": f.get("tid"), "oid": f.get("oid"),
                  "start_position": start_pos, "isSnapshot": est_snapshot,
                  "source": "LIVE_WS",
+                 "recv_mono_ns": (
+                     int(receive_mono_ns) if receive_mono_ns is not None else None
+                 ),
+                 "connection_id": str(connection_id) if connection_id else None,
                  "frame_sequence": frame_event.frame_sequence,
                  "event_index_in_frame": frame_event.event_index_in_frame,
                  "stable_event_id": frame_event.stable_event_id}
