@@ -226,7 +226,6 @@ def evaluate_candidate_markout(
         capacity_usd=capacity,
         fill_ratio=fill_ratio,
         entry_latency_ms=entry.receive_ts_ms - candidate.decision_ts_ms,
-        real_execution=False,
     )
 
 
