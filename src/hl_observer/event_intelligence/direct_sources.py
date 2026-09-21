@@ -12,8 +12,6 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
-from urllib.parse import urlencode
-
 import httpx
 
 from hl_observer.event_intelligence.external_event import (
