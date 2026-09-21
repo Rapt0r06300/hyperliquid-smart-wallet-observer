@@ -174,7 +174,7 @@ def _binance_bbo_envelope(
         source_id="binance_usdm_public",
         channel="bbo",
         instrument=symbol,
-        event_kind=FeedEventKind.UPDATE,
+        event_kind=FeedEventKind.SNAPSHOT,
         raw_payload=dict(raw),
         exchange_ts_ms=exchange_ts,
         received_ts_ms=received_ts_ms,

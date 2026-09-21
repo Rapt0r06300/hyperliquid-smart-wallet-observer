@@ -198,7 +198,7 @@ class NativeVenueCoordinator:
             BybitMarketState(symbol=symbol, stale_after_ms=self.stale_after_ms),
         )
         topic = str(message.get("topic") or "")
-        if topic.startswith("orderbook."):
+        if topic.startswith("orderbook.") or _looks_like_bybit_orderbook(message):
             state.apply_orderbook(message, receive_ts_ms=receive_ts_ms)
         elif topic.startswith("tickers.") or _looks_like_bybit_ticker(message):
             state.apply_ticker(message, receive_ts_ms=receive_ts_ms)
@@ -375,6 +375,19 @@ def _bybit_symbol(payload: Mapping[str, object]) -> str:
             return symbol
     topic = str(payload.get("topic") or "")
     return topic.rsplit(".", 1)[-1].upper() if "." in topic else ""
+
+
+def _looks_like_bybit_orderbook(payload: Mapping[str, object]) -> bool:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    kind = str(payload.get("type") or "")
+    return (
+        kind in {"snapshot", "delta"}
+        and isinstance(data.get("b"), list)
+        and isinstance(data.get("a"), list)
+        and bool(str(data.get("s") or "").strip())
+    )
 
 
 def _looks_like_bybit_ticker(payload: Mapping[str, object]) -> bool:
