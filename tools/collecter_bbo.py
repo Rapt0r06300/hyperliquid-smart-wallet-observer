@@ -673,6 +673,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                     "network": "mainnet",
                     "access": "read_only",
                     "transport": "websocket",
+                    "authenticated": False,
                 },
             )
         )
@@ -714,6 +715,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
             "network": "mainnet",
             "access": "read_only",
             "transport": "websocket",
+            "authenticated": False,
             "channel_semantics": (
                 "full_snapshot" if channel in {"bbo", "l2Book"} else "event_stream"
             ),
@@ -1003,10 +1005,11 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE,
+                                        "url": WS_BINANCE_PUBLIC,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
+                                        "authenticated": False,
                                     },
                                 )
                             )
@@ -1039,10 +1042,11 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE,
+                                        "url": WS_BINANCE_PUBLIC,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
+                                        "authenticated": False,
                                         "channel_semantics": "full_top_of_book",
                                     },
                                     parsed_summary={
@@ -1084,7 +1088,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
         streams = "/".join("%s@trade" % s.lower() for s in sym.values())
         while True:
             try:
-                async with websockets.connect("%s?streams=%s" % (WS_BINANCE, streams), ping_interval=20) as ws:
+                async with websockets.connect("%s?streams=%s" % (WS_BINANCE_MARKET, streams), ping_interval=20) as ws:
                     bin_trade_connection_serial += 1
                     connection_id = "bin-trade-%d-%d" % (
                         int(time.time() * 1000),
@@ -1117,10 +1121,11 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE,
+                                        "url": WS_BINANCE_MARKET,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
+                                        "authenticated": False,
                                         "channel_semantics": "event_stream",
                                     },
                                     parsed_summary={
@@ -1228,6 +1233,7 @@ async def _boucle(root: Path, coins: list[str]) -> None:  # pragma: no cover (I/
                                 "network": "mainnet",
                                 "access": "read_only",
                                 "transport": "http",
+                                "authenticated": False,
                                 "purpose": "lead_lag_causal_checkpoint",
                                 "trigger": request.as_dict(),
                             },
