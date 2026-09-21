@@ -66,12 +66,15 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     start = _int(manifest.get("start_ts_ms"))
     end = _int(manifest.get("end_ts_ms"))
     digest = str(manifest.get("sha256") or "")
+    collector_version = str(manifest.get("collector_version") or "").strip()
     if event_count is None or event_count <= 0:
         severe.append("NO_EVENTS")
     if size is None or size <= 0:
         severe.append("EMPTY_ASSET")
     if len(digest) != 64:
         severe.append("INVALID_SHA256")
+    if not collector_version or collector_version.lower() in {"unknown", "unversioned"}:
+        reasons.append("COLLECTOR_VERSION_UNPINNED")
     if start is None or end is None or start <= 0 or end < start:
         reasons.append("INVALID_TIME_BOUNDS")
 
