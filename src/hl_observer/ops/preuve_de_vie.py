@@ -64,13 +64,21 @@ class SourceAttendue:
     exige_souscription_ack: bool = True  # False pour une source REST sans abonnement WS
 
 
-# Profil HARVEST : socle CORE = OBLIGATOIRE ; récolte dense = secondaire (DEGRADED si muette, pas bloquant).
+# Profil HARVEST : le socle CORE reste minimal. Le collecteur multi-venue natif
+# est une exigence du niveau HARVEST (voir _niveau_ok) sans devenir une exigence
+# du mode CORE seul.
 SOURCES_HARVEST: tuple[SourceAttendue, ...] = (
     SourceAttendue("allmids-collector", "HYPERLIQUID", "allMids", True,
                    exige_exchange_ts=False, exige_souscription_ack=False),
     SourceAttendue("bbo-collector", "HYPERLIQUID+BINANCE", "bbo", True),
     SourceAttendue("userfills-live", "HYPERLIQUID", "userFills", True,
                    exige_exchange_ts=False),
+    SourceAttendue(
+        "native-venues",
+        "BYBIT+OKX",
+        "orderbook+trades+funding+open-interest",
+        False,
+    ),
     SourceAttendue("carnet-collector", "HYPERLIQUID", "l2Book", False),
     SourceAttendue("marks-collector", "HYPERLIQUID", "marks", False),
     SourceAttendue("liq-collector", "HYPERLIQUID", "liquidations", False),
@@ -91,7 +99,6 @@ SOURCES_HARVEST: tuple[SourceAttendue, ...] = (
                    exige_exchange_ts=False, non_implementee=True),
     SourceAttendue("l4-order-intent", "HYPERLIQUID", "L4", False,
                    exige_exchange_ts=False, non_implementee=True),
-    SourceAttendue("bybit", "BYBIT", "trades", False, exige_exchange_ts=False, non_implementee=True),
 )
 
 
@@ -316,11 +323,23 @@ def attendre_readiness(lecteur_etat: Callable[[float], EtatRuntime], *, timeout_
 
 
 def _niveau_ok(etat: EtatRuntime, niveau: str) -> bool:
-    """Condition de passage de la barrière (item 1) : `core` exige READY_CORE ; `harvest` exige au moins
-    CORE vivant (COMPLET ou DEGRADE_DOCUMENTE), jamais DATA_NOT_READY."""
+    """Condition de passage de la barrière.
+
+    CORE exige uniquement le socle historique. HARVEST exige en plus la preuve
+    de vie du collecteur natif Bybit+OKX, sans rendre ce collecteur obligatoire
+    pour un lancement CORE explicite.
+    """
     if niveau == "core":
         return bool(etat.ready_core)
-    return etat.niveau_harvest != STATUT_DATA_NOT_READY
+    native = next(
+        (preuve for preuve in etat.preuves if preuve.nom == "native-venues"),
+        None,
+    )
+    return (
+        etat.niveau_harvest != STATUT_DATA_NOT_READY
+        and native is not None
+        and native.sain
+    )
 
 
 def evaluer_avec_attente(lecteur: Callable[[], EtatRuntime], *, niveau: str, timeout_s: float,
@@ -424,8 +443,9 @@ def evaluer_depuis_disque(root: str | Path, sources: Sequence[SourceAttendue] = 
 def main(argv: list[str] | None = None) -> int:
     """CLI BLOQUANT (item 1) : `python -m hl_observer.ops.preuve_de_vie [racine] [--niveau core|harvest]`.
     `--niveau core` (défaut) : exit 0 SEULEMENT si READY_CORE (allMids+BBO+userFills prouvés vivants),
-    sinon 2 (DATA_NOT_READY) → le lanceur ne démarre pas le moteur. `--niveau harvest` : 0 si CORE vivant
-    (COMPLET ou DEGRADE_DOCUMENTE), 2 sinon ; le niveau HARVEST exact est affiché et va au catalogue."""
+    sinon 2 (DATA_NOT_READY). `--niveau harvest` exige aussi native-venues sain
+    (Bybit+OKX réellement observés), même si d'autres sources secondaires restent documentées
+    comme dégradées."""
     import argparse
     import time
     p = argparse.ArgumentParser(description="Preuve de vie bloquante des sources.")
