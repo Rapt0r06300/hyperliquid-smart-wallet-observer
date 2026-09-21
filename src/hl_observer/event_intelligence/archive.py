@@ -47,7 +47,7 @@ class EventIntelligenceArchive:
 
     def __init__(self, path: str | Path = DEFAULT_ARCHIVE_PATH) -> None:
         self.path = Path(path)
-        self._seen: dict[tuple[str, str], tuple[int, str]] = {}
+        self._seen: dict[tuple[str, str, int], tuple[int, str]] = {}
         self._last_sequence = 0
         self._last_record_sha256 = ""
         self._load_existing()
@@ -192,12 +192,16 @@ class EventIntelligenceArchive:
         self._last_record_sha256 = previous_sha256
 
 
-def _dedupe_key(payload: dict[str, object]) -> tuple[str, str]:
+def _dedupe_key(payload: dict[str, object]) -> tuple[str, str, int]:
     source = str(payload.get("source") or "").strip()
     event_id = str(payload.get("event_id") or "").strip()
-    if not source or not event_id:
+    try:
+        revision = int(payload.get("revision") or 0)
+    except (TypeError, ValueError) as exc:
+        raise EventArchiveCorruptError("ARCHIVE_REVISION_INVALID") from exc
+    if not source or not event_id or revision < 0:
         raise EventArchiveCorruptError("ARCHIVE_EVENT_IDENTITY_MISSING")
-    return source, event_id
+    return source, event_id, revision
 
 
 __all__ = [
