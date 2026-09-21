@@ -1,15 +1,11 @@
-"""Event Intelligence primitives.
+"""Event Intelligence public research surface.
 
-Network adapters are intentionally separate from pure contracts. All exposed
-research objects are read-only and no order path exists in this package.
+All adapters are read-only. No order endpoint or real-execution path exists here.
 """
 
 from .archive import ArchiveAppendResult, EventArchiveCorruptError, EventIntelligenceArchive
-from .candidates import (
-    EventLeadLagCandidate,
-    EventLeadLagConfig,
-    evaluate_event_lead_lag_candidate,
-)
+from .candidates import EventLeadLagCandidate, EventLeadLagConfig, evaluate_event_lead_lag_candidate
+from .coverage import IDEA_COVERAGE, IdeaCoverage, coverage_summary
 from .direct_sources import (
     DIRECT_SOURCES,
     DirectSourceError,
@@ -47,11 +43,8 @@ from .health import (
     evaluate_worldmonitor_health,
 )
 from .macro import MacroEventClock, MacroWindow, ScheduledMacroEvent
-from .market_context import (
-    AuxMarketMetrics,
-    EventMarketContextDelta,
-    compare_event_market_context,
-)
+from .market_context import AuxMarketMetrics, EventMarketContextDelta, compare_event_market_context
+from .market_features import EventMarketFeatureDelta, MarketStateObservation, measure_event_market_features
 from .module_bridges import (
     CopyVaultLeaderEventStats,
     CrossVenueEventContext,
@@ -63,17 +56,8 @@ from .module_bridges import (
 )
 from .outcomes import EventCandidateMarkout, evaluate_candidate_markout
 from .price_discovery import EventMarketReaction, measure_event_price_discovery
-from .protocol import (
-    EventResearchFreeze,
-    assert_forward_after_freeze,
-    freeze_event_research,
-)
-from .provenance import (
-    EventCluster,
-    ProvenanceScore,
-    cluster_external_events,
-    score_provenance,
-)
+from .protocol import EventResearchFreeze, assert_forward_after_freeze, freeze_event_research
+from .provenance import EventCluster, ProvenanceScore, cluster_external_events, score_provenance
 from .regimes import (
     AssetRelevance,
     EventRegime,
@@ -95,6 +79,13 @@ from .sequences import (
     StageObservation,
     build_propagation_pattern,
     summarize_patterns,
+)
+from .source_catalog import (
+    ClassificationEnvelope,
+    SourceCatalogSnapshot,
+    SourceDescriptor,
+    build_source_catalog,
+    source_pair_role,
 )
 from .validation import (
     ChronologicalSplit,
@@ -129,6 +120,7 @@ __all__ = [
     "AssetRelevance",
     "AuxMarketMetrics",
     "ChronologicalSplit",
+    "ClassificationEnvelope",
     "CopyVaultLeaderEventStats",
     "CoverageReport",
     "CrossVenueEventContext",
@@ -144,6 +136,7 @@ __all__ = [
     "EventLeadLagCandidate",
     "EventLeadLagConfig",
     "EventMarketContextDelta",
+    "EventMarketFeatureDelta",
     "EventMarketReaction",
     "EventRegime",
     "EventRegimeLabel",
@@ -154,12 +147,15 @@ __all__ = [
     "ExternalEventDecision",
     "ExternalEventReplayGuard",
     "ExternalEventType",
+    "IDEA_COVERAGE",
+    "IdeaCoverage",
     "IncrementalEffect",
     "IntelligenceGap",
     "LeadLagEventContext",
     "LeaderAction",
     "MacroEventClock",
     "MacroWindow",
+    "MarketStateObservation",
     "NewsFlowFeatures",
     "NewsVelocitySignal",
     "PatternStats",
@@ -169,6 +165,8 @@ __all__ = [
     "ProvenanceScore",
     "ScheduledMacroEvent",
     "ScoredEventOutcome",
+    "SourceCatalogSnapshot",
+    "SourceDescriptor",
     "SourceLatencyComparison",
     "SourceTier",
     "StageObservation",
@@ -184,6 +182,7 @@ __all__ = [
     "build_lead_lag_event_context",
     "build_propagation_pattern",
     "build_scoreboard_slices",
+    "build_source_catalog",
     "chronological_split",
     "classify_event_regime",
     "cluster_external_events",
@@ -193,6 +192,7 @@ __all__ = [
     "compute_news_flow_features",
     "compute_news_velocity_zscore",
     "coverage_by_family",
+    "coverage_summary",
     "detect_intelligence_gap",
     "evaluate_candidate_markout",
     "evaluate_direct_source_health",
@@ -206,6 +206,7 @@ __all__ = [
     "map_event_to_assets",
     "market_session_utc",
     "measure_copy_vault_event_reactions",
+    "measure_event_market_features",
     "measure_event_price_discovery",
     "normalize_cross_source_signals",
     "normalize_eonet",
@@ -219,83 +220,7 @@ __all__ = [
     "purged_chronological_split",
     "score_provenance",
     "select_no_event_controls",
-    "stratify",
-    "stratify_numeric",
-    "summarize_patterns",
-]
-
-
-# Complete-120 public research surfaces.
-from .coverage import IDEA_COVERAGE, coverage_summary
-from .direct_sources import (
-    DIRECT_SOURCES,
-    DirectSourceReadOnlyClient,
-    normalize_eonet,
-    normalize_fred_observations,
-    normalize_gdacs,
-    normalize_gdelt_articles,
-    normalize_usgs,
-)
-from .macro import MacroEventClock, ScheduledMacroEvent
-from .market_features import MarketStateObservation, measure_event_market_features
-from .module_bridges import (
-    build_cross_venue_event_context,
-    build_lead_lag_event_context,
-    measure_copy_vault_event_reactions,
-)
-from .protocol import assert_forward_after_freeze, freeze_event_research
-from .regimes import EventRegime, classify_event_regime, map_event_to_assets
-from .scoreboard import build_event_scoreboard, build_scoreboard_slices
-from .sequences import build_propagation_pattern, summarize_patterns
-from .source_catalog import ClassificationEnvelope, build_source_catalog
-from .validation import (
-    bootstrap_mean_ci,
-    compare_source_latency,
-    incremental_effect,
-    market_session_utc,
-    permute_event_labels,
-    placebo_timestamps,
-    purged_chronological_split,
-    select_no_event_controls,
-    stratify,
-    stratify_numeric,
-)
-
-__all__ += [
-    "IDEA_COVERAGE",
-    "DIRECT_SOURCES",
-    "ClassificationEnvelope",
-    "DirectSourceReadOnlyClient",
-    "EventRegime",
-    "MacroEventClock",
-    "MarketStateObservation",
-    "ScheduledMacroEvent",
-    "assert_forward_after_freeze",
-    "bootstrap_mean_ci",
-    "build_cross_venue_event_context",
-    "build_event_scoreboard",
-    "build_lead_lag_event_context",
-    "build_propagation_pattern",
-    "build_scoreboard_slices",
-    "build_source_catalog",
-    "classify_event_regime",
-    "compare_source_latency",
-    "coverage_summary",
-    "freeze_event_research",
-    "incremental_effect",
-    "map_event_to_assets",
-    "market_session_utc",
-    "measure_copy_vault_event_reactions",
-    "measure_event_market_features",
-    "normalize_eonet",
-    "normalize_fred_observations",
-    "normalize_gdacs",
-    "normalize_gdelt_articles",
-    "normalize_usgs",
-    "permute_event_labels",
-    "placebo_timestamps",
-    "purged_chronological_split",
-    "select_no_event_controls",
+    "source_pair_role",
     "stratify",
     "stratify_numeric",
     "summarize_patterns",
