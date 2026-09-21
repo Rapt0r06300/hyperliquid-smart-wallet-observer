@@ -320,6 +320,7 @@ class BybitPublicClient:
         rest_base_url: str = REST_BASE_URL,
         ws_url: str = PUBLIC_LINEAR_WS_URL,
         orderbook_depth: int = 200,
+        session_refresh_s: float = 900.0,
     ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
@@ -327,6 +328,7 @@ class BybitPublicClient:
         if depth not in {1, 50, 200, 1000}:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
         self.orderbook_depth = depth
+        self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.last_instrument_metadata: list[dict[str, object]] = []
 
     def fetch_instrument_metadata(self, *, timeout_s: float = 10.0) -> list[dict[str, object]]:
@@ -413,6 +415,7 @@ class BybitPublicClient:
         while True:
             try:
                 connection_id = f"bybit-{uuid.uuid4().hex}"
+                session_started = time.monotonic()
                 async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
@@ -429,6 +432,8 @@ class BybitPublicClient:
                                 "transport_rtt_ms": (float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None),
                             }
                             yield payload
+                            if time.monotonic() - session_started >= self.session_refresh_s:
+                                return
             except asyncio.CancelledError:
                 raise
             except Exception:
