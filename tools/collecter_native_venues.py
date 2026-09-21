@@ -277,11 +277,24 @@ async def _run(
             for venue in VENUES
         }
 
+    rediscovery_lock = asyncio.Lock()
+
     async def venue_loop(venue: str) -> None:
         method = getattr(coordinator, f"run_{venue}")
         while True:
             try:
                 await method()
+                # Bybit/OKX deliberately rotate public subscriptions so the
+                # universe can be refreshed without restarting the collector.
+                if venue in {"bybit", "okx"}:
+                    async with rediscovery_lock:
+                        await asyncio.to_thread(coordinator.discover)
+                        counts.update(
+                            {
+                                name: len(coordinator.symbols_for(name))
+                                for name in VENUES
+                            }
+                        )
                 await asyncio.sleep(1.0)
             except asyncio.CancelledError:
                 raise
