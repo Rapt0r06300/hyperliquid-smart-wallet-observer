@@ -334,13 +334,23 @@ def _journal(root: Path, fill: dict, cohorte: str, decision: dict | None, recu_m
     etat = "OUVERTURE" if d.get("ouverture") else ("FERMETURE" if d.get("fermeture") else (
         "REDUCTION" if d.get("reduction") else ("REFUS:" + str(d.get("refus")) if d.get("refus") else "AUCUN")))
     vault = str(fill.get("vault") or "")
+    try:
+        received_at_ms = int(fill.get("received_at_ms"))
+    except (TypeError, ValueError, OverflowError):
+        received_at_ms = int(recu_ms)
+    fill_ts = float(fill.get("ts_ms") or received_at_ms)
     ligne = {"recu_ms": int(recu_ms), "cohorte": cohorte, "coin": fill.get("coin"), "vault": vault,
              "vault_short": vault[:12],
              "dir": fill.get("dir"), "sz": fill.get("sz"), "px": fill.get("px"),
              "hash": fill.get("hash"), "tid": fill.get("tid"), "oid": fill.get("oid"),
              "source": fill.get("source"), "isSnapshot": fill.get("isSnapshot"),
-             "received_at_ms": int(recu_ms), "fill_ts_ms": fill.get("ts_ms"),
-             "latence_fill_decision_ms": round(recu_ms - float(fill.get("ts_ms") or recu_ms)),
+             "received_at_ms": received_at_ms, "processed_at_ms": int(recu_ms),
+             "recv_mono_ns": fill.get("recv_mono_ns"),
+             "connection_id": fill.get("connection_id"),
+             "fill_ts_ms": fill.get("ts_ms"),
+             "latence_fill_receive_ms": round(received_at_ms - fill_ts),
+             "latence_receive_process_ms": round(recu_ms - received_at_ms),
+             "latence_fill_decision_ms": round(recu_ms - fill_ts),
              "decision": etat, "run_id": RUN_ID}
     with (root / JOURNAL).open("a", encoding="utf-8") as f:
         f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
@@ -783,7 +793,15 @@ async def _l2_dynamique(root: Path, *, sync_s: float = 1.0) -> None:
 def _traiter_un(root: Path, fill: dict, coins_a_verifier: set, t_ws_mono: float) -> None:
     import time as _t
     recu = _t.time() * 1000
-    persisted_fill = {**fill, "received_at_ms": int(recu)}
+    try:
+        received = int(fill.get("received_at_ms"))
+    except (TypeError, ValueError, OverflowError):
+        received = int(recu)
+    persisted_fill = {
+        **fill,
+        "received_at_ms": received,
+        "processed_at_ms": int(recu),
+    }
     with (root / FILLS_LIVE).open("a", encoding="utf-8") as f:
         f.write(json.dumps(persisted_fill, ensure_ascii=False) + "\n")
     coins_a_verifier.add(fill.get("coin"))
@@ -845,9 +863,16 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
     tombe, SEUL son groupe de 5 se reconnecte ; le curseur + la dédup rejouent ses fills manqués (catch-up)."""
     import websockets
     connus = {v.lower(): v for v in vaults}
+    connection_serial = 0
     while True:
         try:
             async with websockets.connect(WS_URL, ping_interval=20, max_size=2 ** 22) as ws:
+                connection_serial += 1
+                connection_id = "userfills-%s-%d-%d" % (
+                    socket_id,
+                    int(time.time() * 1000),
+                    connection_serial,
+                )
                 _WS_PAR_SOCKET[socket_id] = ws                    # exposé au garde REST↔WS (reconnexion ciblée)
                 for i, v in enumerate(vaults):
                     await ws.send(json.dumps({"method": "subscribe", "subscription": {"type": "userFills", "user": v}}))
@@ -856,6 +881,8 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                 print("[userfills] socket %s — %d abonnements userFills demandes" % (socket_id, len(vaults)), flush=True)
                 confirmes: set = set()                            # vaults ayant envoyé ≥1 message = ABONNEMENT CONFIRMÉ
                 async for brut in ws:
+                    recv_mono_ns = time.monotonic_ns()
+                    recv_wall_ms = int(time.time() * 1000)
                     try:
                         msg = json.loads(brut)
                     except ValueError:
@@ -888,12 +915,18 @@ async def _userfills_multiplex(root: Path, vaults: list, file: asyncio.Queue, so
                         dq = _WS_KEYS.setdefault(vault, collections.deque(maxlen=WS_KEYS_CAP))
                         for rf in bruts:
                             dq.append(SD.cle_fill(rf))
-                    fills = UL.parser_message_userfills(msg, vault=vault)
+                    fills = UL.parser_message_userfills(
+                        msg,
+                        vault=vault,
+                        received_at_ms=recv_wall_ms,
+                        receive_mono_ns=recv_mono_ns,
+                        connection_id=connection_id,
+                    )
                     if not fills:
                         continue
                     _HEARTBEAT_WS["fills"] += len(fills)
                     _journal_liquidations(root, UL.liquidations_confirmees(fills), socket_id=socket_id)  # CONFIRMÉES only
-                    t_ws = time.monotonic()                       # HORLOGE MONOTONE LOCALE : réception WS
+                    t_ws = recv_mono_ns / 1_000_000_000.0         # instant exact de réception WS
                     try:
                         file.put_nowait((vault, fills, t_ws))     # ne bloque JAMAIS la réception
                     except asyncio.QueueFull:
