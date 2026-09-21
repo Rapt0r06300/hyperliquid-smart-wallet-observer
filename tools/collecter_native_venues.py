@@ -26,7 +26,9 @@ sys.path.insert(0, str(RACINE / "src"))
 
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
-from hl_observer.collection.tick_dataset import TickDatasetWriter, TickEnvelope
+from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.datasets.v2_pipeline import build_bundle
 from hl_observer.realtime.feed_quality import FeedEventKind
 import heartbeat_collecteur as HB
 
@@ -113,6 +115,7 @@ def envelope_from_snapshot(
             "venue": snapshot.venue,
             "access": "public_read_only",
             "transport": "websocket",
+            "authenticated": False,
             "collector": "native_venues",
         },
         parsed_summary=snapshot_summary(snapshot),
@@ -189,9 +192,8 @@ async def _run(
                 )
         queue.append(envelope)
 
-    writer = TickDatasetWriter(
+    writer = PartitionedTickDatasetWriter(
         root / TICK_DATASET_DIR,
-        stream_name=STREAM_NAME,
         rotate_bytes=128 * 1024 * 1024,
         flush_every=1,
     )
@@ -431,6 +433,18 @@ async def _run(
         while queue:
             batch = [queue.popleft() for _ in range(min(5_000, len(queue)))]
             written += writer.append_batch(batch)
+        await asyncio.to_thread(writer.rotate_all)
+        collector_version = (
+            str(os.getenv("ALINA_COLLECTOR_VERSION") or "").strip()
+            or str(os.getenv("GITHUB_SHA") or "").strip()
+            or "unversioned"
+        )
+        bundle = await asyncio.to_thread(
+            build_bundle,
+            root / TICK_DATASET_DIR,
+            root / "runtime" / "data" / "dataset_v2_bundle" / "native_venues",
+            collector_version=collector_version,
+        )
         final = {
             "schema_version": "alina.native_venues_heartbeat.v1",
             "ts": time.time(),
@@ -453,6 +467,7 @@ async def _run(
                 for venue in ("bybit", "okx")
             ),
             "dataset": writer.stats(),
+            "dataset_v2_bundle": bundle,
             "read_only": True,
             "real_execution": False,
         }
