@@ -73,6 +73,14 @@ class NativeMarketSnapshot:
     funding_rate: float | None = None
     funding_interval_hours: float | None = None
     sequence: int | None = None
+    update_id: int | None = None
+    connection_id: str | None = None
+    receive_mono_ns: int | None = None
+    transport_rtt_ms: float | None = None
+    clock_offset_ms: float | None = None
+    gap_count: int = 0
+    duplicate_count: int = 0
+    regression_count: int = 0
     reason: str = ""
     real_execution: bool = False
 
@@ -100,6 +108,14 @@ class NativeMarketSnapshot:
         funding_rate: float | None = None,
         funding_interval_hours: float | None = None,
         sequence: int | None = None,
+        update_id: int | None = None,
+        connection_id: str | None = None,
+        receive_mono_ns: int | None = None,
+        transport_rtt_ms: float | None = None,
+        clock_offset_ms: float | None = None,
+        gap_count: int = 0,
+        duplicate_count: int = 0,
+        regression_count: int = 0,
         reason: str = "",
     ) -> "NativeMarketSnapshot":
         now = int(time.time() * 1000) if now_ms is None else int(now_ms)
@@ -135,6 +151,14 @@ class NativeMarketSnapshot:
             funding_rate=_float_or_none(funding_rate),
             funding_interval_hours=_finite_positive(funding_interval_hours),
             sequence=int(sequence) if sequence is not None else None,
+            update_id=int(update_id) if update_id is not None else None,
+            connection_id=str(connection_id) if connection_id else None,
+            receive_mono_ns=int(receive_mono_ns) if receive_mono_ns is not None else None,
+            transport_rtt_ms=_float_or_none(transport_rtt_ms),
+            clock_offset_ms=_float_or_none(clock_offset_ms),
+            gap_count=max(0, int(gap_count)),
+            duplicate_count=max(0, int(duplicate_count)),
+            regression_count=max(0, int(regression_count)),
             reason=derived_reason,
             real_execution=False,
         )
@@ -211,7 +235,9 @@ class MultiVenueMarketStore:
         venues = [snap.venue for snap in self.healthy(coin, now_ms=now_ms)]
         return list(combinations(venues, 2))
 
-    def lead_lag_rows(self, coin: str, *, now_ms: int) -> list[dict[str, float | int | str]]:
+    def lead_lag_rows(
+        self, coin: str, *, now_ms: int
+    ) -> list[dict[str, float | int | str | None]]:
         return [
             {
                 "venue": snap.venue,
@@ -221,6 +247,15 @@ class MultiVenueMarketStore:
                 "ask": snap.ask,
                 "exchange_ts_ms": snap.exchange_ts_ms,
                 "receive_ts_ms": snap.receive_ts_ms,
+                "receive_mono_ns": snap.receive_mono_ns,
+                "connection_id": snap.connection_id,
+                "sequence": snap.sequence,
+                "update_id": snap.update_id,
+                "transport_rtt_ms": snap.transport_rtt_ms,
+                "clock_offset_ms": snap.clock_offset_ms,
+                "gap_count": snap.gap_count,
+                "duplicate_count": snap.duplicate_count,
+                "regression_count": snap.regression_count,
             }
             for snap in self.healthy(coin, now_ms=now_ms)
         ]
