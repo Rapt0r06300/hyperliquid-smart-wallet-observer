@@ -23,6 +23,12 @@ on:
       - 'tests/test_native_venue_market.py'
       - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_transport_integrity.py'
+      - 'tests/test_dataset_v2_pipeline.py'
+      - 'tests/test_dataset_v2_export.py'
+      - 'tests/test_partitioned_tick_dataset.py'
+      - 'src/hl_observer/datasets/v2_pipeline.py'
+      - 'src/hl_observer/datasets/v2_export.py'
+      - 'src/hl_observer/collection/partitioned_tick_dataset.py'
   pull_request:
     branches:
       - main
@@ -81,6 +87,9 @@ jobs:
             tests/test_native_venue_market.py \
             tests/test_native_market_tape.py \
             tests/test_native_venue_transport_integrity.py \
+            tests/test_partitioned_tick_dataset.py \
+            tests/test_dataset_v2_export.py \
+            tests/test_dataset_v2_pipeline.py \
             tests/test_preuve_de_vie_niveaux.py \
             tests/test_superviseur_profil_harvest.py \
             tests/test_session_harvest.py \
@@ -90,6 +99,7 @@ jobs:
         continue-on-error: true
         env:
           PYTHONPATH: src:tools:.
+          ALINA_COLLECTOR_VERSION: ${{ github.sha }}
         run: |
           ROOT="$RUNNER_TEMP/native-venues-runtime-$GITHUB_RUN_ID"
           mkdir -p "$ROOT"
@@ -102,7 +112,7 @@ jobs:
 
           root = Path(sys.argv[1])
           hb_path = root / "runtime/data/native_venues_heartbeat.json"
-          data_path = root / "runtime/data/market_ticks/native_venues_market_ticks.current.jsonl"
+          bundle_path = root / "runtime/data/dataset_v2_bundle/native_venues/BUNDLE_INDEX.json"
 
           if not hb_path.is_file():
               raise SystemExit("NATIVE_HEARTBEAT_MISSING")
@@ -116,13 +126,21 @@ jobs:
           if missing:
               print("GITHUB_HOSTED_EGRESS_MISSING:" + ",".join(missing))
 
-          if not data_path.is_file() or data_path.stat().st_size <= 0:
-              raise SystemExit("NATIVE_DATASET_EMPTY")
+          if not bundle_path.is_file():
+              raise SystemExit("NATIVE_V2_BUNDLE_MISSING")
+          bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+          if int(bundle.get("shard_count") or 0) <= 0:
+              raise SystemExit("NATIVE_V2_SHARDS_EMPTY")
+          assets = list((bundle_path.parent / "assets").glob("*.jsonl.gz"))
+          if len(assets) != int(bundle["shard_count"]):
+              raise SystemExit("NATIVE_V2_ASSET_COUNT_MISMATCH")
 
           print(json.dumps({
               "records_written": hb["records_written"],
               "last_event_ms": last,
-              "dataset_bytes": data_path.stat().st_size,
+              "v2_shards": bundle["shard_count"],
+              "v2_asset_bytes": sum(path.stat().st_size for path in assets),
+              "collector_version": bundle.get("collector_version"),
               "read_only": hb.get("read_only"),
               "real_execution": hb.get("real_execution"),
           }, indent=2))
