@@ -47,6 +47,7 @@ def build_manifest_from_tick_shard(
     last_exchange: dict[tuple[str, str, str], int] = {}
     last_receive: dict[tuple[str, str, str], int] = {}
     last_mono: dict[tuple[str, str, str], int] = {}
+    last_sequence: dict[tuple[str, str, str], int] = {}
     connection_ids: set[str] = set()
     transports: set[str] = set()
     receive_exchange_deltas_ms: list[float] = []
@@ -120,11 +121,42 @@ def build_manifest_from_tick_shard(
             if str(record.get("event_kind") or "").upper() == "GAP":
                 gap_count += 1
             summary = record.get("parsed_summary")
+            sequence = _int(record.get("sequence"))
+            previous_sequence = last_sequence.get(key)
+            sequence_gap = False
             if isinstance(summary, Mapping):
                 if str(summary.get("quality") or "").upper() == "DESYNC":
                     desync_count += 1
                 if summary.get("needs_resnapshot") is True:
                     desync_count += 1
+
+                # Venue-provided continuity evidence. This is intentionally
+                # limited to streams whose protocol publishes predecessor IDs.
+                reported_previous = _int(
+                    summary.get(
+                        "prev_sequence",
+                        summary.get("previous_update_id"),
+                    )
+                )
+                first_update = _int(summary.get("first_update_id"))
+                if channel == "l2Book" and previous_sequence is not None:
+                    if (
+                        reported_previous is not None
+                        and reported_previous not in {-1, previous_sequence}
+                    ):
+                        sequence_gap = True
+                    if (
+                        first_update is not None
+                        and first_update > previous_sequence + 1
+                    ):
+                        sequence_gap = True
+            if sequence_gap:
+                gap_count += 1
+            if sequence is not None:
+                if previous_sequence is not None and sequence < previous_sequence:
+                    regression_count += 1
+                if previous_sequence is None or sequence > previous_sequence:
+                    last_sequence[key] = sequence
 
             provenance = record.get("provenance")
             if not isinstance(provenance, Mapping):
