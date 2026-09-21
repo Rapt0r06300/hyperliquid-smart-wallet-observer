@@ -9,6 +9,7 @@ on:
       - 'src/hl_observer/collection/reconciliation.py'
       - 'src/hl_observer/collection/shard_writer.py'
       - 'src/hl_observer/collection/tick_dataset.py'
+      - 'src/hl_observer/collection/partitioned_tick_dataset.py'
       - 'src/hl_observer/collection/native_market_tape.py'
       - 'src/hl_observer/collection/native_venue_market.py'
       - 'src/hl_observer/collection/native_venue_coordinator.py'
@@ -22,11 +23,15 @@ on:
       - 'tools/collecter_bbo.py'
       - 'src/hl_observer/collection/okx_market_data.py'
       - 'src/hl_observer/data_sources/market_backfill.py'
+      - 'src/hl_observer/datasets/v2_export.py'
+      - 'tools/build_dataset_v2_manifest.py'
       - 'tests/test_collector_feed_integrity.py'
       - 'tests/test_collection_window_quality.py'
       - 'tests/test_collection_reconciliation.py'
       - 'tests/test_collection_shard_writer.py'
       - 'tests/test_tick_dataset.py'
+      - 'tests/test_partitioned_tick_dataset.py'
+      - 'tests/test_dataset_v2_export.py'
       - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_bybit_market_data.py'
@@ -69,6 +74,7 @@ jobs:
             src/hl_observer/collection/reconciliation.py \
             src/hl_observer/collection/shard_writer.py \
             src/hl_observer/collection/tick_dataset.py \
+            src/hl_observer/collection/partitioned_tick_dataset.py \
             src/hl_observer/collection/native_market_tape.py \
             src/hl_observer/collection/native_venue_market.py \
             src/hl_observer/collection/native_venue_coordinator.py \
@@ -81,7 +87,9 @@ jobs:
             tools/collecter_userfills_vaults.py \
             tools/collecter_bbo.py \
             src/hl_observer/collection/okx_market_data.py \
-            src/hl_observer/data_sources/market_backfill.py
+            src/hl_observer/data_sources/market_backfill.py \
+            src/hl_observer/datasets/v2_export.py \
+            tools/build_dataset_v2_manifest.py
       - name: Run collector integrity tests
         run: |
           python -m pytest -q \
@@ -90,6 +98,8 @@ jobs:
             tests/test_collection_reconciliation.py \
             tests/test_collection_shard_writer.py \
             tests/test_tick_dataset.py \
+            tests/test_partitioned_tick_dataset.py \
+            tests/test_dataset_v2_export.py \
             tests/test_native_market_tape.py \
             tests/test_native_venue_market.py \
             tests/test_bybit_market_data.py \
