@@ -13,7 +13,6 @@ from typing import Iterable
 
 from hl_observer.event_intelligence.candidates import EventLeadLagCandidate
 from hl_observer.event_intelligence.regimes import (
-    AssetRelevance,
     EventRegime,
     classify_event_regime,
     map_event_to_assets,
