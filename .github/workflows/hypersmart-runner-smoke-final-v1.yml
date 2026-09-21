@@ -24,12 +24,13 @@ jobs:
   smoke:
     name: Preuve GitHub vers PC HyperSmart
     if: >-
+      false &&
       github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
       github.event_name == 'workflow_dispatch' &&
       github.ref == 'refs/heads/main' &&
       github.actor == 'Rapt0r06300' &&
       github.event.repository.fork == false
-    runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]
+    runs-on: ubuntu-latest # PC/self-hosted disabled by repository policy
     timeout-minutes: 10
     env:
       HL_ENABLE_MAINNET_EXECUTION: '0'
