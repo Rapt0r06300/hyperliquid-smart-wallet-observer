@@ -8,6 +8,8 @@ on:
       - 'src/hl_observer/collection/window_quality.py'
       - 'src/hl_observer/collection/reconciliation.py'
       - 'src/hl_observer/collection/shard_writer.py'
+      - 'src/hl_observer/collection/tick_dataset.py'
+      - 'src/hl_observer/collection/native_market_tape.py'
       - 'src/hl_observer/collection/native_venue_market.py'
       - 'src/hl_observer/collection/native_venue_coordinator.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
@@ -17,6 +19,8 @@ on:
       - 'tests/test_collection_window_quality.py'
       - 'tests/test_collection_reconciliation.py'
       - 'tests/test_collection_shard_writer.py'
+      - 'tests/test_tick_dataset.py'
+      - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_bybit_market_data.py'
       - 'tests/test_okx_market_data.py'
@@ -44,7 +48,28 @@ jobs:
         run: python -m pip install --disable-pip-version-check -e ".[dev]"
       - name: Compile collector modules
         run: |
-          python -m py_compile             src/hl_observer/collection/feed_integrity.py             src/hl_observer/collection/window_quality.py             src/hl_observer/collection/reconciliation.py             src/hl_observer/collection/shard_writer.py             src/hl_observer/collection/native_venue_market.py             src/hl_observer/collection/native_venue_coordinator.py             src/hl_observer/collection/bybit_market_data.py             src/hl_observer/collection/okx_market_data.py
+          python -m py_compile \
+            src/hl_observer/collection/feed_integrity.py \
+            src/hl_observer/collection/window_quality.py \
+            src/hl_observer/collection/reconciliation.py \
+            src/hl_observer/collection/shard_writer.py \
+            src/hl_observer/collection/tick_dataset.py \
+            src/hl_observer/collection/native_market_tape.py \
+            src/hl_observer/collection/native_venue_market.py \
+            src/hl_observer/collection/native_venue_coordinator.py \
+            src/hl_observer/collection/bybit_market_data.py \
+            src/hl_observer/collection/okx_market_data.py \
+            src/hl_observer/data_sources/market_backfill.py
       - name: Run collector integrity tests
         run: |
-          python -m pytest -q             tests/test_collector_feed_integrity.py             tests/test_collection_window_quality.py             tests/test_collection_reconciliation.py             tests/test_collection_shard_writer.py             tests/test_native_venue_market.py             tests/test_bybit_market_data.py             tests/test_okx_market_data.py             tests/test_native_venue_transport_integrity.py
+          python -m pytest -q \
+            tests/test_collector_feed_integrity.py \
+            tests/test_collection_window_quality.py \
+            tests/test_collection_reconciliation.py \
+            tests/test_collection_shard_writer.py \
+            tests/test_tick_dataset.py \
+            tests/test_native_market_tape.py \
+            tests/test_native_venue_market.py \
+            tests/test_bybit_market_data.py \
+            tests/test_okx_market_data.py \
+            tests/test_native_venue_transport_integrity.py
