@@ -328,25 +328,39 @@ class BybitPublicClient:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
         self.orderbook_depth = depth
 
-    def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
-        rows: list[tuple[str, str]] = []
+    def fetch_instrument_metadata(self, *, timeout_s: float = 10.0) -> list[dict[str, object]]:
+        """Return every public linear instrument row, preserving replay-critical rules."""
+        rows: list[dict[str, object]] = []
         cursor = ""
         with httpx.Client(timeout=timeout_s) as client:
             while True:
                 params: dict[str, object] = {"category": "linear", "limit": 1000}
                 if cursor:
                     params["cursor"] = cursor
-                response = client.get(f"{self.rest_base_url}/v5/market/instruments-info", params=params)
+                response = client.get(
+                    f"{self.rest_base_url}/v5/market/instruments-info",
+                    params=params,
+                )
                 response.raise_for_status()
                 payload = response.json()
                 if int(payload.get("retCode", -1)) != 0:
-                    raise RuntimeError(f"Bybit instruments error: {payload.get('retMsg', 'unknown')}")
-                rows.extend(parse_bybit_linear_instruments(payload))
-                result = payload.get("result") or {}
-                cursor = str(result.get("nextPageCursor") or "") if isinstance(result, dict) else ""
+                    raise RuntimeError(
+                        f"Bybit instruments error: {payload.get('retMsg', 'unknown')}"
+                    )
+                result = payload.get("result")
+                if not isinstance(result, dict):
+                    raise RuntimeError("Bybit instruments result missing")
+                page = result.get("list")
+                if isinstance(page, list):
+                    rows.extend(dict(item) for item in page if isinstance(item, dict))
+                cursor = str(result.get("nextPageCursor") or "")
                 if not cursor:
                     break
-        return sorted(set(rows))
+        return rows
+
+    def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
+        metadata = self.fetch_instrument_metadata(timeout_s=timeout_s)
+        return parse_bybit_linear_instruments({"result": {"list": metadata}})
 
     def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
         with httpx.Client(timeout=timeout_s) as client:
