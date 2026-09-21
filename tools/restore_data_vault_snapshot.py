@@ -62,6 +62,18 @@ PRESETS: dict[str, tuple[str, ...]] = {
         "funding",
         "fee",
     ),
+    "event-intelligence": (
+        "event_intelligence",
+        "event-intelligence",
+        "events_r2.jsonl",
+        "worldmonitor",
+        "gdelt",
+        "usgs",
+        "eonet",
+        "gdacs",
+        "prediction",
+        "external_event",
+    ),
     "all": (),
 }
 

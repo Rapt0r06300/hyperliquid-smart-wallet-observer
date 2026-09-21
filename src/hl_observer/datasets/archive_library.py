@@ -80,6 +80,19 @@ RESEARCH_LAB_PATTERNS = (
     "histor",
 )
 
+EVENT_INTELLIGENCE_PATTERNS = (
+    "event_intelligence",
+    "event-intelligence",
+    "events_r2.jsonl",
+    "worldmonitor",
+    "gdelt",
+    "usgs",
+    "eonet",
+    "gdacs",
+    "prediction",
+    "external_event",
+)
+
 SQLITE_PRIMARY_PATHS = (
     "runtime/data/hypersmart_simulation_session.sqlite3",
     "data/hl_observer.sqlite3",
@@ -172,6 +185,16 @@ SUITES: dict[str, DatasetSuite] = {
         description="Archives de recherche, scénarios, replays, backtests et historiques repérés.",
         patterns=RESEARCH_LAB_PATTERNS,
         runner="research_inventory",
+    ),
+    "event-intelligence-full": DatasetSuite(
+        name="event-intelligence-full",
+        label="Event Intelligence complet",
+        description=(
+            "Événements externes structurés, provenance, World Monitor, sources directes "
+            "et résultats de recherche Event Intelligence archivés pour replay/backtest."
+        ),
+        patterns=EVENT_INTELLIGENCE_PATTERNS,
+        runner="event_intelligence_research",
     ),
     "sqlite-core": DatasetSuite(
         name="sqlite-core",
@@ -497,7 +520,7 @@ def render_library_markdown(
             "- `economic-core` sert de contrôle rapide du pipeline.",
             "- `economic-full` est la suite large prioritaire pour les trois moteurs actifs.",
             "- Les suites par famille servent aux recherches ciblées et aux futurs replays dédiés.",
-            "- `microstructure-full` et `research-lab-full` alimentent la recherche de nouvelles hypothèses.",
+            "- `microstructure-full`, `research-lab-full` et `event-intelligence-full` alimentent la recherche de nouvelles hypothèses.",
             "- `sqlite-core` récupère uniquement les deux grosses bases canoniques connues.",
             "- `sqlite-all-safe` récupère toutes les bases `.sqlite3` dont le nom ne porte pas un marqueur de corruption/quarantaine.",
             "- `full-archive` représente toute la sauvegarde; elle ne doit pas être téléchargée inutilement en bloc.",

@@ -220,6 +220,36 @@ class DataVaultTests(unittest.TestCase):
         self.assertEqual(assets["tag-a"], {"pack.zip"})
         self.assertEqual(assets["tag-b"], {"part1.bin", "part2.bin"})
 
+        event_payload = {
+            "files": {
+                "runtime/data/event_intelligence/events_r2.jsonl": {
+                    "release_tag": "tag-event",
+                    "storage": "zip_entry",
+                    "asset": "event.zip",
+                    "size": 12,
+                    "sha256": "c",
+                },
+                "runtime/data/unrelated.jsonl": {
+                    "release_tag": "tag-other",
+                    "storage": "zip_entry",
+                    "asset": "other.zip",
+                    "size": 13,
+                    "sha256": "d",
+                },
+            }
+        }
+        event_selected = select_records(
+            event_payload,
+            preset="event-intelligence",
+            contains=(),
+            prefixes=(),
+        )
+        self.assertIn(
+            "runtime/data/event_intelligence/events_r2.jsonl",
+            event_selected,
+        )
+        self.assertNotIn("runtime/data/unrelated.jsonl", event_selected)
+
     def test_current_restore_excludes_archived_deleted_by_default(self):
         payload = {
             "files": {
