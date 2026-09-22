@@ -164,7 +164,7 @@ class BinanceDepthLiveCollector:
         self._emit_tick(
             TickEnvelope(
                 source_id="binance_usdm_public",
-                channel="l2Book",
+                channel="l2Book_snapshot",
                 instrument=key,
                 event_kind=FeedEventKind.SNAPSHOT,
                 raw_payload=payload,
@@ -173,7 +173,7 @@ class BinanceDepthLiveCollector:
                 local_monotonic_ns=receive_mono_ns,
                 connection_id=connection_id,
                 sequence=last_update_id,
-                gap_count=state.gap_count,
+                gap_count=0,
                 provenance={
                     "url": f"{self.rest_base_url}/fapi/v1/depth",
                     "network": "mainnet",
@@ -183,12 +183,18 @@ class BinanceDepthLiveCollector:
                     "snapshot_limit": self.snapshot_limit,
                     "request_send_wall_ms": send_wall_ms,
                     "request_receive_wall_ms": receive_wall_ms,
+                    "gap_count_semantics": "event_delta",
                 },
                 parsed_summary={
                     "bid_levels": len(bids),
                     "ask_levels": len(asks),
                     "needs_resnapshot": bool(result["needs_snapshot"]),
-                    "gap_count": state.gap_count,
+                    "cumulative_gap_count": state.gap_count,
+                    "book_state": (
+                        "BUFFERING_SNAPSHOT"
+                        if bool(result["needs_snapshot"])
+                        else "EXPLOITABLE"
+                    ),
                     "data_gate_ready": False,
                 },
             )
@@ -232,6 +238,7 @@ class BinanceDepthLiveCollector:
                             if state is None:
                                 continue
                             self.frames_received += 1
+                            gaps_before = state.gap_count
                             status = state.sur_diff(
                                 U=frame["U"],
                                 u=frame["u"],
@@ -245,6 +252,13 @@ class BinanceDepthLiveCollector:
                                 receive_mono_ns=receive_mono_ns,
                                 connection_id=connection_id,
                             )
+                            gap_delta = max(0, state.gap_count - gaps_before)
+                            if status == BUFFERISE:
+                                book_state = "BUFFERING_SNAPSHOT"
+                            elif status.startswith("DESYNC"):
+                                book_state = "DESYNC"
+                            else:
+                                book_state = "EXPLOITABLE"
                             self._emit_tick(
                                 TickEnvelope(
                                     source_id="binance_usdm_public",
@@ -259,7 +273,7 @@ class BinanceDepthLiveCollector:
                                     local_monotonic_ns=receive_mono_ns,
                                     connection_id=connection_id,
                                     sequence=frame["u"],
-                                    gap_count=state.gap_count,
+                                    gap_count=gap_delta,
                                     provenance={
                                         "url": self.websocket_url(),
                                         "network": "mainnet",
@@ -267,12 +281,13 @@ class BinanceDepthLiveCollector:
                                         "transport": "websocket",
                                         "authenticated": False,
                                         "stream": "diff_depth_100ms",
+                                        "gap_count_semantics": "event_delta",
                                     },
                                     parsed_summary={
                                         "first_update_id": frame["U"],
                                         "previous_update_id": frame["pu"],
-                                        "needs_resnapshot": state.besoin_resnapshot(),
-                                        "gap_count": state.gap_count,
+                                        "book_state": book_state,
+                                        "cumulative_gap_count": state.gap_count,
                                         "buffer_overflow_count": state.buffer_overflow_count,
                                         "data_gate_ready": False,
                                     },
