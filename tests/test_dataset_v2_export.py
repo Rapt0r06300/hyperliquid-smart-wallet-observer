@@ -176,3 +176,100 @@ def test_binance_previous_update_gap_is_counted_in_manifest(tmp_path) -> None:
     [shard] = writer.rotate_all()
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["integrity"]["gap_count"] >= 1
+
+
+def test_binance_futures_predecessor_id_is_authoritative_for_continuity(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for exchange_ts, sequence, previous, first in (
+        (1000, 105, 100, 103),
+        (1010, 110, 105, 108),
+        (1020, 115, 110, 113),
+    ):
+        writer.append(
+            TickEnvelope(
+                source_id="binance_usdm_public",
+                channel="l2Book",
+                instrument="BTCUSDT",
+                event_kind="INCREMENTAL",
+                raw_payload={"e": "depthUpdate"},
+                exchange_ts_ms=exchange_ts,
+                received_ts_ms=exchange_ts + 5,
+                local_monotonic_ns=exchange_ts * 1000,
+                connection_id="bin-1",
+                sequence=sequence,
+                gap_count=0,
+                provenance={
+                    "access": "read_only",
+                    "authenticated": False,
+                    "transport": "websocket",
+                    "gap_count_semantics": "event_delta",
+                },
+                parsed_summary={
+                    "first_update_id": first,
+                    "previous_update_id": previous,
+                    "book_state": "EXPLOITABLE",
+                },
+            )
+        )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["gap_count"] == 0
+    assert manifest["integrity"]["desync_count"] == 0
+
+
+def test_binance_bootstrap_state_is_not_desync_but_real_gap_is_counted(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="binance_usdm_public",
+            channel="l2Book",
+            instrument="ETHUSDT",
+            event_kind="INCREMENTAL",
+            raw_payload={"e": "depthUpdate"},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=100,
+            connection_id="bin-1",
+            sequence=100,
+            gap_count=0,
+            provenance={
+                "access": "read_only",
+                "authenticated": False,
+                "transport": "websocket",
+                "gap_count_semantics": "event_delta",
+            },
+            parsed_summary={
+                "previous_update_id": 99,
+                "book_state": "BUFFERING_SNAPSHOT",
+            },
+        )
+    )
+    writer.append(
+        TickEnvelope(
+            source_id="binance_usdm_public",
+            channel="l2Book",
+            instrument="ETHUSDT",
+            event_kind="INCREMENTAL",
+            raw_payload={"e": "depthUpdate"},
+            exchange_ts_ms=1010,
+            received_ts_ms=1015,
+            local_monotonic_ns=200,
+            connection_id="bin-1",
+            sequence=105,
+            gap_count=1,
+            provenance={
+                "access": "read_only",
+                "authenticated": False,
+                "transport": "websocket",
+                "gap_count_semantics": "event_delta",
+            },
+            parsed_summary={
+                "previous_update_id": 100,
+                "book_state": "DESYNC",
+            },
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["gap_count"] >= 1
+    assert manifest["integrity"]["desync_count"] == 1
