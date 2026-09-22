@@ -1,88 +1,114 @@
-# GitHub-hosted dataset backtests
+# GitHub-hosted Dataset V2 backtests
 
 ## Architecture canonique
 
-Le dépôt public Alina SmartFlow fournit les moteurs de replay/backtest et les ponts de données.
+La seule source dataset autorisée pour les nouveaux replays/backtests est :
 
-Le dépôt privé :
+`Rapt0r06300/alina-smartflow-datasets-v2`
 
-`Rapt0r06300/hypersmart-datasets`
+Le dépôt `Rapt0r06300/hypersmart-datasets` est LEGACY et ne doit jamais être
+importé automatiquement dans Dataset V2.
 
-reste le **control plane** des données lourdes et des exécutions GitHub-hosted. Le workflow canonique de lancement est :
+Le dépôt principal Alina contient :
+- les collecteurs ;
+- les moteurs de replay/backtest ;
+- les contrôles de qualité ;
+- les lecteurs SAFE-only.
 
-`.github/workflows/github-hosted-backtest.yml`
+Le dépôt Dataset V2 contient :
+- le control plane (catalogue, index, manifests) sur `main` ;
+- les données lourdes dans des GitHub Releases immuables ;
+- uniquement des données nouvelles collectées après la création de V2.
 
-dans le dépôt privé datasets.
+## Collecte GitHub-hosted
 
-Cela évite de faire transiter les données privées par un workflow du dépôt public et permet au workflow privé d'utiliser son propre `GITHUB_TOKEN` pour lire ses Releases.
+La campagne automatique canonique est :
 
-## Ce que cette branche ajoute au moteur Alina
+`.github/workflows/collect-market-data-v2.yml`
 
-- matérialisation FULL/COLD en streaming avec `--stream-assets` ;
-- téléchargement/vérification d'un asset à la fois ;
-- purge de l'asset temporaire après reconstruction ;
-- vérification SHA-256 des fichiers reconstruits ;
-- pont `continuous_vault` vers les snapshots incrémentaux GitHub ;
-- CLI `python -m hl_observer.ops.continuous_vault` ;
-- compatibilité du workspace Continuous Vault avec les runners économiques existants ;
-- mémoire cumulative permettant de conserver des données déjà archivées même lorsqu'elles ne sont plus présentes localement.
+dans `alina-smartflow-datasets-v2`.
 
-## Sources de données
+Elle checkout le `main` courant d'Alina sur un runner GitHub-hosted, sans PC
+utilisateur et sans self-hosted runner.
 
-Deux couches GitHub sont complémentaires :
+Sources principales :
+- Hyperliquid ;
+- Binance ;
+- Bybit ;
+- OKX.
 
-- **FULL/COLD** : snapshot historique massif, Release privée ID `371149058` ;
-- **Continuous Vault** : nouveaux snapshots incrémentaux immuables, référencés par `catalog/CONTINUOUS_VAULT_POINTER.json` après le premier backup autorisé.
+Les fenêtres sont bornées, partitionnées par source/canal/instrument et peuvent
+se chevaucher légèrement entre campagnes afin de réduire le risque de trou.
 
-Le bridge Continuous Vault sait lire plusieurs Releases historiques parce que chaque fichier de l'index porte son `release_tag`.
+## Données collectées
 
-## Suites
+Selon la disponibilité publique de chaque venue :
+- BBO ;
+- L2 profond ;
+- trades ;
+- mark/index/oracle ;
+- funding courant et settlements historiques réels ;
+- open interest ;
+- liquidations ;
+- volume ;
+- métadonnées instrument (tick size, lot size, minimums, statut) ;
+- timestamps exchange/réception/monotone ;
+- IDs de connexion et séquences ;
+- RTT/offset d'horloge lorsque mesurables.
 
-Les suites restent celles du `dataset_bridge` existant :
+Aucune valeur absente n'est remplacée par zéro.
 
-- `economic-core`
-- `economic-full`
-- `copy-vault-full`
-- `lead-lag-full`
-- `cross-venue-full`
-- `microstructure-full`
-- `research-lab-full`
-- `sqlite-core`
-- `sqlite-all-safe`
+## Qualification
 
-Aucune stratégie parallèle n'est créée.
+Cycle logique :
 
-## Disque des runners GitHub
+`INCOMING -> QUARANTINE -> SAFE | REJECT`
 
-Le mode `--stream-assets` réduit le pic de stockage :
+Un shard ne peut devenir `SAFE` que si les preuves nécessaires sont présentes :
+- SHA-256 et taille ;
+- provenance publique/read-only ;
+- intégrité (gaps/régressions/désynchronisation) ;
+- horodatage causal ;
+- contraintes de synchronisation ;
+- réconciliation historique quand la famille l'exige ;
+- asset GitHub distant revalidé contre son digest.
 
-1. télécharger un asset ;
-2. vérifier son SHA-256 ;
-3. reconstruire les fichiers utiles ;
-4. vérifier les fichiers reconstruits ;
-5. supprimer l'asset temporaire ;
-6. passer au suivant.
+Les trades/fills ne deviennent pas SAFE sur la seule continuité WebSocket :
+ils exigent une réconciliation explicite quand une source de référence existe.
 
-Le pic disque est donc proche de :
+## Publication
 
-`volume brut sélectionné + plus gros asset + réserve`
+Les fichiers lourds sont publiés comme assets de GitHub Releases. Le publisher :
+1. construit les manifests depuis les octets réellement collectés ;
+2. upload les assets ;
+3. relit les métadonnées GitHub ;
+4. compare taille + SHA-256 ;
+5. seulement ensuite finalise le statut ;
+6. publie `RUN_MANIFEST.json`.
 
-au lieu de :
+Une Release incomplète sans `RUN_MANIFEST.json` n'est pas une source de validation.
 
-`volume brut sélectionné + tous les assets téléchargés`.
+## Replays/backtests
 
-Une suite qui dépasse malgré tout l'espace d'un runner GitHub-hosted échoue proprement ; aucune donnée n'est tronquée silencieusement.
+Les lecteurs V2 :
+- sélectionnent uniquement les entrées `SAFE` ;
+- refusent les dépôts étrangers ;
+- téléchargent seulement les shards utiles à la fenêtre demandée ;
+- revérifient taille et SHA-256 ;
+- conservent la provenance de sélection.
 
-## Sécurité
+Les replays/backtests restent paper/read-only. Aucune collecte ou donnée ne doit
+autoriser implicitement une exécution réelle.
 
-Les runners économiques restent paper/read-only. Les workflows privés doivent continuer à imposer :
+## GitHub-hosted uniquement
 
-- mainnet execution = 0 ;
-- testnet execution = 0 ;
-- real trading = false ;
-- aucune collecte live pendant les replays ;
-- vérification des SHA-256 ;
-- plafond de téléchargement ;
-- artefacts de sortie limités aux rapports/verdicts.
+Les workflows dataset doivent rester :
+- `runs-on: ubuntu-latest` ou autre runner GitHub-hosted ;
+- sans `self-hosted` ;
+- sans accès au PC utilisateur ;
+- sans clé de trading ;
+- sans endpoint d'ordre.
 
-Les données brutes restent dans le dépôt privé datasets / ses Releases.
+Les grosses campagnes doivent être découpées en fenêtres/jobs afin de rester
+bien sous la limite d'exécution d'un job et de pouvoir relancer seulement le
+morceau défaillant.
