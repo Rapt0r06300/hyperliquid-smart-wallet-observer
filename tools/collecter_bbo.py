@@ -1667,6 +1667,18 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     p.add_argument("--root", default=".")
     p.add_argument("--coins", default="AUTO")   # AUTO = majors + coins fréquents des liquidations (journal)
     p.add_argument(
+        "--coin-shard-count",
+        type=int,
+        default=1,
+        help="Découpe déterministe des marchés HL/Binance sur N runners.",
+    )
+    p.add_argument(
+        "--coin-shard-index",
+        type=int,
+        default=0,
+        help="Index 0-based du shard de marchés à collecter.",
+    )
+    p.add_argument(
         "--duration-s",
         type=float,
         default=0.0,
@@ -1683,6 +1695,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
         hl_meta_received_ts_ms = int(time.time() * 1000)
         universe = extraire_symboles_hyperliquid(hl_meta)
         coins, rejected = resoudre_symboles_hyperliquid(requested_coins, universe)
+        coin_shard_count = max(1, int(a.coin_shard_count))
+        coin_shard_index = int(a.coin_shard_index)
+        if not 0 <= coin_shard_index < coin_shard_count:
+            print("[bbo] --coin-shard-index hors borne.", flush=True)
+            return 2
+        coins = coins[coin_shard_index::coin_shard_count]
     except Exception as exc:  # noqa: BLE001 - required live source must fail visibly
         print("[bbo] /info meta indisponible ou invalide: %r" % exc, flush=True)
         return 2
