@@ -14,6 +14,8 @@ from typing import Any
 import httpx
 
 from hl_observer.collection.bybit_market_data import BybitPublicClient
+from hl_observer.collection.bitget_market_data import BitgetPublicClient
+from hl_observer.collection.gate_market_data import GatePublicClient
 from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.config.cross_venue_instruments import BINANCE_PERP_EXCEPTIONS
 from hl_observer.markets.universe import is_exotic_market
@@ -142,6 +144,26 @@ def discover_cloud_universe(
     except Exception as exc:
         venues["okx"] = {}
         errors["okx"] = type(exc).__name__
+
+    try:
+        client = GatePublicClient()
+        venues["gate"] = _normalize_against_hl(
+            client.discover_usdt_perpetuals(),
+            hl_coins=hl_coins,
+        )
+    except Exception as exc:
+        venues["gate"] = {}
+        errors["gate"] = type(exc).__name__
+
+    try:
+        client = BitgetPublicClient()
+        venues["bitget"] = _normalize_against_hl(
+            client.discover_usdt_perpetuals(),
+            hl_coins=hl_coins,
+        )
+    except Exception as exc:
+        venues["bitget"] = {}
+        errors["bitget"] = type(exc).__name__
 
     joined: dict[str, dict[str, str]] = defaultdict(dict)
     for venue, mapping in venues.items():

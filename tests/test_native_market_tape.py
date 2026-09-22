@@ -198,3 +198,49 @@ def test_bybit_instrument_metadata_snapshot_is_replayable() -> None:
     assert record["parsed_summary"]["lot_size"] == "0.001"
     assert record["parsed_summary"]["min_notional"] == "5"
     assert record["provenance"]["timestamp_semantics"] == "server_observation_time"
+
+
+def test_gate_orderbook_frame_is_taped_with_update_bounds() -> None:
+    envelope = native_tick_envelope(
+        "gate",
+        {
+            "channel": "futures.order_book_update",
+            "event": "update",
+            "result": {
+                "t": 1995,
+                "contract": "BTC_USDT",
+                "U": 10,
+                "u": 12,
+                "b": [{"p": "100", "s": 1}],
+                "a": [{"p": "101", "s": 1}],
+            },
+            "_alina_transport": _transport(),
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "l2Book"
+    assert envelope.instrument == "BTC_USDT"
+    assert envelope.exchange_ts_ms == 1995
+    assert envelope.sequence == 12
+    assert envelope.parsed_summary["first_update_id"] == 10
+
+
+def test_bitget_trade_frame_is_taped() -> None:
+    envelope = native_tick_envelope(
+        "bitget",
+        {
+            "arg": {
+                "instType": "USDT-FUTURES",
+                "channel": "trade",
+                "instId": "ETHUSDT",
+            },
+            "data": [
+                {"ts": "1995", "price": "2000", "size": "1", "side": "buy"}
+            ],
+            "_alina_transport": _transport(),
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "trades"
+    assert envelope.instrument == "ETHUSDT"
+    assert envelope.exchange_ts_ms == 1995

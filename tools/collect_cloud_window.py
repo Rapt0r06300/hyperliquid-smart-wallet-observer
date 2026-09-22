@@ -35,6 +35,8 @@ from hl_observer.collection.native_funding_history import (
     fetch_okx_funding_settlements,
 )
 from hl_observer.collection.bybit_market_data import BybitPublicClient
+from hl_observer.collection.bitget_market_data import BitgetPublicClient
+from hl_observer.collection.gate_market_data import GatePublicClient
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
@@ -344,11 +346,17 @@ async def _native_with_clock_sync(
     # Acquire one explicit sample before admitting market frames when possible.
     await refresh_probe()
     probe_task = asyncio.create_task(probe_loop())
+    connection_id = f"{venue}-{uuid.uuid4().hex}"
     try:
         async for payload in client.messages(symbols):
+            receive_wall_ts_ms = int(time.time() * 1_000)
+            receive_mono_ns = time.monotonic_ns()
             message = dict(payload)
             meta = message.get("_alina_transport")
             transport = dict(meta) if isinstance(meta, Mapping) else {}
+            transport.setdefault("receive_wall_ts_ms", receive_wall_ts_ms)
+            transport.setdefault("receive_mono_ns", receive_mono_ns)
+            transport.setdefault("connection_id", connection_id)
             if sync:
                 transport["clock_offset_ms"] = sync.get("offset_ms")
                 transport["clock_probe_rtt_ms"] = sync.get("rtt_ms")
@@ -374,6 +382,8 @@ async def _collect_instrument_metadata(
         "hyperliquid": {"records": 0, "status": "NO_DATA"},
         "bybit": {"records": 0, "status": "NO_DATA"},
         "okx": {"records": 0, "status": "NO_DATA"},
+        "gate": {"records": 0, "status": "NO_DATA"},
+        "bitget": {"records": 0, "status": "NO_DATA"},
     }
 
     hl_coins = {str(value).upper() for value in venue_lists.get("hyperliquid", [])}
@@ -790,8 +800,17 @@ def _venue_lists(
             "binance": [f"{coin}USDT" for coin in coins],
             "bybit": [f"{coin}USDT" for coin in coins],
             "okx": [f"{coin}-USDT-SWAP" for coin in coins],
+            "gate": [f"{coin}_USDT" for coin in coins],
+            "bitget": [f"{coin}USDT" for coin in coins],
         }
-    result = {"hyperliquid": [], "binance": [], "bybit": [], "okx": []}
+    result = {
+        "hyperliquid": [],
+        "binance": [],
+        "bybit": [],
+        "okx": [],
+        "gate": [],
+        "bitget": [],
+    }
     for row in plan_rows:
         symbols = row["symbols"]
         for venue in result:
@@ -833,6 +852,8 @@ async def collect(
     bybit_symbols = venue_lists["bybit"]
     okx_symbols = venue_lists["okx"]
     binance_symbols = venue_lists["binance"]
+    gate_symbols = venue_lists["gate"]
+    bitget_symbols = venue_lists["bitget"]
 
     instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
 
@@ -865,6 +886,28 @@ async def collect(
         tasks.append(asyncio.create_task(_native_bybit(bybit_symbols, sink)))
     if okx_symbols:
         tasks.append(asyncio.create_task(_native_okx(okx_symbols, sink)))
+    if gate_symbols:
+        tasks.append(
+            asyncio.create_task(
+                _native_with_clock_sync(
+                    "gate",
+                    GatePublicClient(),
+                    gate_symbols,
+                    sink,
+                )
+            )
+        )
+    if bitget_symbols:
+        tasks.append(
+            asyncio.create_task(
+                _native_with_clock_sync(
+                    "bitget",
+                    BitgetPublicClient(),
+                    bitget_symbols,
+                    sink,
+                )
+            )
+        )
     if hl_coins:
         tasks.append(
             asyncio.create_task(

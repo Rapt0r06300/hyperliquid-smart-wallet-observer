@@ -184,7 +184,9 @@ def test_plan_file_preserves_exact_exchange_symbols(tmp_path) -> None:
         "hyperliquid": "PEPE",
         "binance": "1000PEPEUSDT",
         "bybit": "1000PEPEUSDT",
-        "okx": "PEPE-USDT-SWAP"
+        "okx": "PEPE-USDT-SWAP",
+        "gate": "PEPE_USDT",
+        "bitget": "PEPEUSDT"
       }
     },
     {
@@ -206,6 +208,8 @@ def test_plan_file_preserves_exact_exchange_symbols(tmp_path) -> None:
     assert venue_lists["bybit"] == ["1000PEPEUSDT", "HYPEUSDT"]
     assert venue_lists["hyperliquid"] == ["HYPE", "PEPE"]
     assert venue_lists["okx"] == ["PEPE-USDT-SWAP"]
+    assert venue_lists["gate"] == ["PEPE_USDT"]
+    assert venue_lists["bitget"] == ["PEPEUSDT"]
 
 
 def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
@@ -452,3 +456,44 @@ def test_binance_aggtrade_is_separate_reconcilable_family() -> None:
     assert tick.parsed_summary["first_trade_id"] == 700
     assert tick.parsed_summary["last_trade_id"] == 702
     assert tick.parsed_summary["aggressor_side"] == "BUY"
+
+
+def test_native_transport_adds_receive_clock_when_client_has_none() -> None:
+    import asyncio
+
+    m = _module()
+
+    class Client:
+        async def messages(self, _symbols):
+            yield {
+                "arg": {
+                    "instType": "USDT-FUTURES",
+                    "channel": "trade",
+                    "instId": "BTCUSDT",
+                },
+                "data": [{"ts": "1000", "price": "100", "size": "1"}],
+            }
+
+    class Sink:
+        def __init__(self) -> None:
+            self.rows = []
+
+        def emit(self, row) -> None:
+            self.rows.append(row)
+
+    sink = Sink()
+    asyncio.run(
+        m._native_with_clock_sync(
+            "bitget",
+            Client(),
+            ["BTCUSDT"],
+            sink,
+            probe_interval_s=60,
+        )
+    )
+    assert len(sink.rows) == 1
+    row = sink.rows[0]
+    assert row.received_ts_ms > 0
+    assert row.local_monotonic_ns is not None
+    assert row.connection_id is not None
+    assert row.connection_id.startswith("bitget-")

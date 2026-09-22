@@ -110,6 +110,10 @@ def native_tick_envelope(
         parsed = _bybit_identity(message)
     elif venue_key == "okx":
         parsed = _okx_identity(message)
+    elif venue_key == "gate":
+        parsed = _gate_identity(message)
+    elif venue_key == "bitget":
+        parsed = _bitget_identity(message)
     else:
         return None
     if parsed is None:
@@ -238,6 +242,65 @@ def _okx_identity(
         "prev_sequence": _int(first.get("prevSeqId")),
     }
     return channel, instrument, exchange_ts, sequence, summary
+
+
+def _gate_identity(
+    payload: Mapping[str, Any],
+) -> tuple[str, str, int | None, int | None, dict[str, Any]] | None:
+    channel_raw = str(payload.get("channel") or "")
+    result = payload.get("result")
+    if channel_raw != "futures.order_book_update" or not isinstance(result, Mapping):
+        return None
+    instrument = str(result.get("contract") or result.get("s") or "").upper()
+    if not instrument:
+        return None
+    sequence = _int(result.get("u"))
+    return (
+        "l2Book",
+        instrument,
+        _int(result.get("t")) or _int(payload.get("time_ms")),
+        sequence,
+        {
+            "source_channel": channel_raw,
+            "event": str(payload.get("event") or ""),
+            "first_update_id": _int(result.get("U")),
+            "last_update_id": sequence,
+        },
+    )
+
+
+def _bitget_identity(
+    payload: Mapping[str, Any],
+) -> tuple[str, str, int | None, int | None, dict[str, Any]] | None:
+    arg = payload.get("arg")
+    if not isinstance(arg, Mapping):
+        return None
+    channel_raw = str(arg.get("channel") or "")
+    instrument = str(arg.get("instId") or "").upper()
+    data = payload.get("data")
+    rows = data if isinstance(data, list) else []
+    first = rows[0] if rows and isinstance(rows[0], Mapping) else {}
+    if not channel_raw or not instrument or not rows:
+        return None
+    channel = {
+        "books": "l2Book",
+        "books1": "l2Book",
+        "ticker": "ticker",
+        "trade": "trades",
+    }.get(channel_raw)
+    if channel is None:
+        return None
+    return (
+        channel,
+        instrument,
+        _max_int(row.get("ts") for row in rows if isinstance(row, Mapping)),
+        _int(first.get("seq")) or _int(first.get("seqId")),
+        {
+            "event_count": len(rows),
+            "source_channel": channel_raw,
+            "action": str(payload.get("action") or ""),
+        },
+    )
 
 
 def _topic_symbol(topic: str) -> str:
