@@ -561,6 +561,9 @@ async def _boucle(
 
     from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
     from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
+    from hl_observer.collection.hyperliquid_funding_history import (
+        fetch_hyperliquid_funding_settlements,
+    )
     from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
     from hl_observer.collection.tick_dataset import TickEnvelope
     from hl_observer.datasets.v2_pipeline import build_bundle
@@ -582,6 +585,8 @@ async def _boucle(
         stable_event_id,
     )
     from hl_observer.runtime.lead_lag_event_runtime import LeadLagEventPaperRuntime
+
+    collection_start_wall_ms = int(time.time() * 1000)
 
     # Hyperliquid subscription names are case-sensitive (for example kPEPE),
     # while all internal joins intentionally use normalized upper-case keys.
@@ -657,6 +662,7 @@ async def _boucle(
     stats = {"ecrits": 0, "rejets": 0, "reconnexions_hl": 0, "reconnexions_bin": 0, "trous": 0,
              "frames_bookticker": 0, "frames_trades": 0, "shards_scelles": 0,
              "frames_l2_hl": 0, "frames_l2_bin": 0, "frames_trades_hl": 0,
+             "hl_funding_settlements": 0, "hl_funding_history_error": "",
              "binance_l2_publications": 0, "raw_frames_received": 0,
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
@@ -1588,6 +1594,20 @@ async def _boucle(
         for t in taches:
             t.cancel()
         await asyncio.gather(*taches, return_exceptions=True)
+        try:
+            funding_rows = await fetch_hyperliquid_funding_settlements(
+                symboles_hl.values(),
+                start_ms=collection_start_wall_ms,
+                end_ms=int(time.time() * 1000),
+            )
+            for funding_envelope in funding_rows:
+                queue_raw(funding_envelope)
+            stats["hl_funding_settlements"] = len(funding_rows)
+            stats["hl_funding_history_error"] = ""
+        except Exception as exc:  # bounded public backfill; absence stays observable
+            stats["hl_funding_history_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )[:500]
         while raw_queue:
             batch = [raw_queue.popleft() for _ in range(min(5_000, len(raw_queue)))]
             durable_records = await asyncio.to_thread(
