@@ -195,3 +195,46 @@ def test_cross_venue_can_require_real_l2() -> None:
         now_ms=1_020,
         require_l2=True,
     ) == []
+
+
+def test_symbol_shards_are_disjoint_and_preserve_ranked_coverage() -> None:
+    left = NativeVenueCoordinator(
+        bybit_client=_BybitDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        max_symbols_per_venue=3,
+        symbol_shard_count=2,
+        symbol_shard_index=0,
+        ccxt_snapshot_path=None,
+    )
+    right = NativeVenueCoordinator(
+        bybit_client=_BybitDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        max_symbols_per_venue=3,
+        symbol_shard_count=2,
+        symbol_shard_index=1,
+        ccxt_snapshot_path=None,
+    )
+    left.discover(now_s=100.0)
+    right.discover(now_s=100.0)
+
+    left_symbols = left.symbols_for("bybit")
+    right_symbols = right.symbols_for("bybit")
+    assert set(left_symbols).isdisjoint(right_symbols)
+    assert set(left_symbols) | set(right_symbols) == {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+    assert len(left_symbols) == 2
+    assert len(right_symbols) == 1
+
+
+def test_invalid_symbol_shard_index_is_rejected() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        NativeVenueCoordinator(
+            symbol_shard_count=2,
+            symbol_shard_index=2,
+            ccxt_snapshot_path=None,
+        )
