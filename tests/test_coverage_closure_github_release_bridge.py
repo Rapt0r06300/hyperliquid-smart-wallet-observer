@@ -48,10 +48,18 @@ def test_sha256_gh_path_and_run_text(tmp_path, monkeypatch) -> None:
 
 def test_load_release_and_release_assets(monkeypatch) -> None:
     monkeypatch.setattr(bridge, "_run_gh_text", lambda args: json.dumps({"name":"R","assets":[]}))
-    assert bridge.load_release("o/r", 1)["name"] == "R"
+    assert bridge.load_release(bridge.DEFAULT_REPOSITORY, 1)["name"] == "R"
+
+    with pytest.raises(bridge.DatasetBridgeError, match="EXPLICIT_V2_RELEASE_REQUIRED"):
+        bridge.load_release()
+    with pytest.raises(bridge.DatasetBridgeError, match="LEGACY_DATASET_BLOCKED"):
+        bridge.load_release(bridge.LEGACY_REPOSITORY, bridge.LEGACY_RELEASE_ID)
+    with pytest.raises(bridge.DatasetBridgeError, match="UNAPPROVED_DATASET_REPOSITORY"):
+        bridge.load_release("other/repository", 1)
+
     monkeypatch.setattr(bridge, "_run_gh_text", lambda args: "[]")
     with pytest.raises(bridge.DatasetBridgeError, match="Réponse GitHub invalide"):
-        bridge.load_release()
+        bridge.load_release(bridge.DEFAULT_REPOSITORY, 1)
     result = bridge.release_assets({"assets":[None, {}, {"name":"a","id":"1","size":"2","digest":"sha256:ff"}]})
     assert list(result) == ["a"] and result["a"].asset_id == 1
     assert bridge.release_assets({}) == {}
