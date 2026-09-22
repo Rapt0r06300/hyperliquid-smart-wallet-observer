@@ -793,11 +793,27 @@ async def collect(
     vault_shard_index: int = 0,
     rotate_bytes: int,
     collection_run_id: str | None = None,
+    frozen_selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    selected_rows, selection = await asyncio.to_thread(
-        discover_vaults,
-        max_vaults=max_vaults,
-    )
+    if frozen_selection is None:
+        selected_rows, selection = await asyncio.to_thread(
+            discover_vaults,
+            max_vaults=max_vaults,
+        )
+    else:
+        selection = dict(frozen_selection)
+        raw_rows = selection.get("vaults")
+        if not isinstance(raw_rows, list):
+            raise ValueError("frozen selection must contain a vaults list")
+        selected_rows = [
+            dict(row)
+            for row in raw_rows
+            if isinstance(row, Mapping) and str(row.get("address") or "").strip()
+        ][: max(1, int(max_vaults))]
+        if not selected_rows:
+            raise ValueError("frozen selection contains no usable vaults")
+        selection["vaults"] = selected_rows
+        selection["vault_count"] = len(selected_rows)
     shard_count = max(1, int(vault_shard_count))
     shard_index = int(vault_shard_index)
     if not 0 <= shard_index < shard_count:
@@ -951,11 +967,19 @@ def main() -> int:
     parser.add_argument("--duration-s", type=float, default=300.0)
     parser.add_argument("--collector-version", required=True)
     parser.add_argument("--collection-run-id")
+    parser.add_argument("--selection-file")
     parser.add_argument("--max-vaults", type=int, default=100)
     parser.add_argument("--vault-shard-count", type=int, default=1)
     parser.add_argument("--vault-shard-index", type=int, default=0)
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
+    frozen_selection = None
+    if args.selection_file:
+        payload = json.loads(Path(args.selection_file).read_text(encoding="utf-8"))
+        if not isinstance(payload, Mapping):
+            raise SystemExit("selection file must contain a JSON object")
+        frozen_selection = payload
+
     summary = asyncio.run(
         collect(
             Path(args.output),
@@ -966,6 +990,7 @@ def main() -> int:
             vault_shard_index=int(args.vault_shard_index),
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
             collection_run_id=args.collection_run_id,
+            frozen_selection=frozen_selection,
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
