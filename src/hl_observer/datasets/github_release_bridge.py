@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
-DEFAULT_REPOSITORY = "Rapt0r06300/hypersmart-datasets"
-DEFAULT_RELEASE_ID = 371149058
+DEFAULT_REPOSITORY = "Rapt0r06300/alina-smartflow-datasets-v2"
+DEFAULT_RELEASE_ID: int | None = None
+LEGACY_REPOSITORY = "Rapt0r06300/hypersmart-datasets"
+LEGACY_RELEASE_ID = 371149058
 CORE_METADATA_ASSETS = (
     "FULL_UPLOADED_FILE_MANIFEST.jsonl.gz",
     "FULL_RELEASE_ASSET_MANIFEST.json",
@@ -25,7 +27,24 @@ OPTIONAL_METADATA_ASSETS = (
 
 
 class DatasetBridgeError(RuntimeError):
-    """Erreur contrôlée du pont vers hypersmart-datasets."""
+    """Controlled dataset bridge error."""
+
+
+def _validated_source(repository: str, release_id: int | None) -> tuple[str, int]:
+    repo = str(repository or "").strip()
+    if repo.casefold() == LEGACY_REPOSITORY.casefold() or release_id == LEGACY_RELEASE_ID:
+        raise DatasetBridgeError(
+            "LEGACY_DATASET_BLOCKED: hypersmart-datasets/FULL-COLD cannot be used by Alina V2."
+        )
+    if repo != DEFAULT_REPOSITORY:
+        raise DatasetBridgeError(
+            f"UNAPPROVED_DATASET_REPOSITORY: {repo or '<empty>'}; expected {DEFAULT_REPOSITORY}"
+        )
+    if release_id is None or int(release_id) <= 0:
+        raise DatasetBridgeError(
+            "EXPLICIT_V2_RELEASE_REQUIRED: select a verified release from alina-smartflow-datasets-v2."
+        )
+    return repo, int(release_id)
 
 
 @dataclass(frozen=True)
@@ -118,8 +137,9 @@ def _run_gh_text(arguments: Sequence[str]) -> str:
 
 def load_release(
     repository: str = DEFAULT_REPOSITORY,
-    release_id: int = DEFAULT_RELEASE_ID,
+    release_id: int | None = DEFAULT_RELEASE_ID,
 ) -> dict[str, object]:
+    repository, release_id = _validated_source(repository, release_id)
     raw = _run_gh_text(["api", f"repos/{repository}/releases/{release_id}"])
     payload = json.loads(raw)
     if not isinstance(payload, dict):
@@ -213,7 +233,7 @@ def ensure_metadata(
     root: Path,
     *,
     repository: str = DEFAULT_REPOSITORY,
-    release_id: int = DEFAULT_RELEASE_ID,
+    release_id: int | None = DEFAULT_RELEASE_ID,
     force: bool = False,
 ) -> tuple[dict[str, object], dict[str, ReleaseAsset], Path]:
     release = load_release(repository, release_id)
