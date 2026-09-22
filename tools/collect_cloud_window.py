@@ -758,6 +758,7 @@ async def collect(
     rotate_bytes: int,
     plan_rows: list[dict[str, Any]] | None = None,
     collection_run_id: str | None = None,
+    min_free_disk_bytes: int = 2 * 1024 * 1024 * 1024,
 ) -> dict[str, Any]:
     raw_root = output / "raw"
     assets_root = output / "assets"
@@ -827,9 +828,43 @@ async def collect(
         f"market-{str(collector_version)[:12]}-{started}"
     )
     funding_history: dict[str, dict[str, Any]] = {}
-    try:
+    stop_event = asyncio.Event()
+    stop_reason = "DURATION_REACHED"
+    disk_free_bytes_at_stop: int | None = None
+
+    async def duration_guard() -> None:
+        nonlocal stop_reason
         await asyncio.sleep(max(1.0, float(duration_s)))
+        stop_reason = "DURATION_REACHED"
+        stop_event.set()
+
+    async def disk_guard() -> None:
+        nonlocal stop_reason, disk_free_bytes_at_stop
+        threshold = max(0, int(min_free_disk_bytes))
+        if threshold <= 0:
+            return
+        while not stop_event.is_set():
+            usage = await asyncio.to_thread(shutil.disk_usage, output)
+            disk_free_bytes_at_stop = int(usage.free)
+            if int(usage.free) < threshold:
+                stop_reason = "LOW_DISK_SPACE"
+                stop_event.set()
+                return
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=15.0)
+            except TimeoutError:
+                pass
+
+    guard_tasks = [
+        asyncio.create_task(duration_guard()),
+        asyncio.create_task(disk_guard()),
+    ]
+    try:
+        await stop_event.wait()
     finally:
+        for guard in guard_tasks:
+            guard.cancel()
+        await asyncio.gather(*guard_tasks, return_exceptions=True)
         ended_for_funding = int(time.time() * 1_000)
         # Final independent REST sample while the live websocket window is still
         # open, so reference coverage includes the tail of the capture.
@@ -959,6 +994,9 @@ async def collect(
         "venue_symbols": venue_lists,
         "collector_version": collector_version,
         "collection_run_id": run_id,
+        "stop_reason": stop_reason,
+        "min_free_disk_bytes": max(0, int(min_free_disk_bytes)),
+        "disk_free_bytes_at_stop": disk_free_bytes_at_stop,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "queue_drops": {
@@ -1026,6 +1064,12 @@ def main() -> int:
     parser.add_argument("--collector-version", required=True)
     parser.add_argument("--collection-run-id")
     parser.add_argument("--rotate-mb", type=int, default=64)
+    parser.add_argument(
+        "--min-free-disk-gb",
+        type=float,
+        default=2.0,
+        help="Seal and publish early if free runner disk falls below this threshold; 0 disables.",
+    )
     args = parser.parse_args()
 
     plan_rows = _load_plan_rows(Path(args.plan_file)) if args.plan_file else None
@@ -1050,6 +1094,7 @@ def main() -> int:
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
             plan_rows=plan_rows,
             collection_run_id=args.collection_run_id,
+            min_free_disk_bytes=max(0, int(float(args.min_free_disk_gb) * 1024**3)),
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
