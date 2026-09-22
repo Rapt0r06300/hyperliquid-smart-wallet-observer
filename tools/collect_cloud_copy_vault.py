@@ -333,14 +333,18 @@ async def _dynamic_l2_collector(
                 max_size=2**23,
             ) as socket:
                 subscribed: set[str] = set()
+                send_lock = asyncio.Lock()
+
+                async def send_json(payload: Mapping[str, Any]) -> None:
+                    async with send_lock:
+                        await socket.send(json.dumps(dict(payload)))
+
                 for coin in sorted(known_coins):
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "method": "subscribe",
-                                "subscription": {"type": "l2Book", "coin": coin},
-                            }
-                        )
+                    await send_json(
+                        {
+                            "method": "subscribe",
+                            "subscription": {"type": "l2Book", "coin": coin},
+                        }
                     )
                     subscribed.add(coin)
                     await asyncio.sleep(0.03)
@@ -350,22 +354,27 @@ async def _dynamic_l2_collector(
                         coin = str(await request_queue.get()).strip().upper()
                         try:
                             if coin and coin not in subscribed:
-                                await socket.send(
-                                    json.dumps(
-                                        {
-                                            "method": "subscribe",
-                                            "subscription": {
-                                                "type": "l2Book",
-                                                "coin": coin,
-                                            },
-                                        }
-                                    )
+                                await send_json(
+                                    {
+                                        "method": "subscribe",
+                                        "subscription": {
+                                            "type": "l2Book",
+                                            "coin": coin,
+                                        },
+                                    }
                                 )
                                 subscribed.add(coin)
                         finally:
                             request_queue.task_done()
 
+                async def heartbeat() -> None:
+                    while True:
+                        await asyncio.sleep(30.0)
+                        await send_json({"method": "ping"})
+                        state["heartbeats"] = state.get("heartbeats", 0) + 1
+
                 sender_task = asyncio.create_task(sender())
+                heartbeat_task = asyncio.create_task(heartbeat())
                 attempt = 0
                 try:
                     async for raw_text in socket:
@@ -389,7 +398,12 @@ async def _dynamic_l2_collector(
                             state["frames"] = state.get("frames", 0) + 1
                 finally:
                     sender_task.cancel()
-                    await asyncio.gather(sender_task, return_exceptions=True)
+                    heartbeat_task.cancel()
+                    await asyncio.gather(
+                        sender_task,
+                        heartbeat_task,
+                        return_exceptions=True,
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -489,21 +503,33 @@ async def _socket_group(
                 close_timeout=5,
                 max_size=2**23,
             ) as socket:
+                send_lock = asyncio.Lock()
+
+                async def send_json(payload: Mapping[str, Any]) -> None:
+                    async with send_lock:
+                        await socket.send(json.dumps(dict(payload)))
+
                 for vault in vaults:
-                    await socket.send(
-                        json.dumps(
-                            {
-                                "method": "subscribe",
-                                "subscription": {
-                                    "type": "userFills",
-                                    "user": vault,
-                                },
-                            }
-                        )
+                    await send_json(
+                        {
+                            "method": "subscribe",
+                            "subscription": {
+                                "type": "userFills",
+                                "user": vault,
+                            },
+                        }
                     )
                     await asyncio.sleep(0.15)
+
+                async def heartbeat() -> None:
+                    while True:
+                        await asyncio.sleep(30.0)
+                        await send_json({"method": "ping"})
+
+                heartbeat_task = asyncio.create_task(heartbeat())
                 attempt = 0
-                async for raw_text in socket:
+                try:
+                    async for raw_text in socket:
                     mono = time.monotonic_ns()
                     wall = int(time.time() * 1_000)
                     try:
@@ -555,6 +581,9 @@ async def _socket_group(
                             continue
                         live_ids[vault].add(canonical_fill_id(fill))
                         live_fill_counts[vault] += 1
+                finally:
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -943,6 +972,7 @@ async def collect(
         "l2_coin_count": len(l2_known_coins),
         "l2_frames": l2_state.get("frames", 0),
         "l2_reconnects": l2_state.get("reconnects", 0),
+        "l2_heartbeats": l2_state.get("heartbeats", 0),
         "position_snapshots_start": position_snapshots_start,
         "position_snapshots_end": position_snapshots_end,
         "accepted_frames": sink.accepted,
