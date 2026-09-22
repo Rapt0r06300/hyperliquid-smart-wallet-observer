@@ -469,7 +469,7 @@ async def _socket_group(
     vaults: list[str],
     sink: AsyncTickSink,
     *,
-    selection_ts_ms: int,
+    collection_start_ms: int,
     live_ids: dict[str, set[str]],
     live_fill_counts: dict[str, int],
     reconnect_counts: dict[str, int],
@@ -541,8 +541,9 @@ async def _socket_group(
                             l2_known_coins.add(coin)
                             l2_request_queue.put_nowait(coin)
 
-                    # Only forward, non-snapshot fills observed after selection count
-                    # toward causal reconciliation.
+                    # Only forward, non-snapshot fills observed after this lane
+                    # actually started count toward causal reconciliation. The
+                    # frozen selection timestamp is provenance, not observation time.
                     if envelope.channel != "copy_vault_fills":
                         continue
                     for fill in fills:
@@ -550,7 +551,7 @@ async def _socket_group(
                             ts_ms = int(fill.get("ts_ms") or 0)
                         except (TypeError, ValueError, OverflowError):
                             continue
-                        if ts_ms < int(selection_ts_ms):
+                        if ts_ms < int(collection_start_ms):
                             continue
                         live_ids[vault].add(canonical_fill_id(fill))
                         live_fill_counts[vault] += 1
@@ -860,6 +861,10 @@ async def collect(
         sink,
         phase="START",
     )
+    # A frozen universe can be selected well before a hosted runner lane starts.
+    # Reconciliation must begin when this lane can actually observe forward fills,
+    # otherwise queue delay is misclassified as missing WebSocket data.
+    collection_start_ms = int(time.time() * 1_000)
     groups = [
         vaults[index:index + MAX_SUBSCRIPTIONS_PER_SOCKET]
         for index in range(0, len(vaults), MAX_SUBSCRIPTIONS_PER_SOCKET)
@@ -869,7 +874,7 @@ async def collect(
             _socket_group(
                 group,
                 sink,
-                selection_ts_ms=selection_ts_ms,
+                collection_start_ms=collection_start_ms,
                 live_ids=live_ids,
                 live_fill_counts=live_fill_counts,
                 reconnect_counts=reconnect_counts,
@@ -905,7 +910,7 @@ async def collect(
     end_ms = int(time.time() * 1_000)
     reports = await reconcile_forward_window(
         vaults,
-        start_ms=selection_ts_ms,
+        start_ms=collection_start_ms,
         end_ms=end_ms,
         live_ids=live_ids,
     )
@@ -927,8 +932,9 @@ async def collect(
         "schema": "alina.copy_vault_cloud_window.v1",
         "collection_run_id": run_id,
         "selection_ts_ms": selection_ts_ms,
+        "collection_start_ts_ms": collection_start_ms,
         "end_ts_ms": end_ms,
-        "duration_s": round((end_ms - selection_ts_ms) / 1000.0, 3),
+        "duration_s": round((end_ms - collection_start_ms) / 1000.0, 3),
         "vault_count": len(vaults),
         "vault_universe_count": selection.get("full_vault_count"),
         "vault_shard_count": selection.get("vault_shard_count"),
