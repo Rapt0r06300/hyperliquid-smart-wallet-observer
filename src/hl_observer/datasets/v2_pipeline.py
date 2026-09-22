@@ -265,6 +265,7 @@ def build_bundle(
     collector_version: str,
     cost_model_channels: tuple[str, ...] = (),
     collection_queue_drops: int = 0,
+    collection_run_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -272,6 +273,7 @@ def build_bundle(
     """
     source_root = Path(shard_root)
     output = Path(output_root)
+    run_id = str(collection_run_id or "").strip() or None
     assets_dir = output / "assets"
     manifests_dir = output / "manifests"
     assets_dir.mkdir(parents=True, exist_ok=True)
@@ -319,6 +321,8 @@ def build_bundle(
             shutil.copyfile(shard, asset_path)
 
         preliminary["release_asset"] = asset_name
+        if run_id is not None:
+            preliminary["collection_run_id"] = run_id
         preliminary["local_source_path"] = str(shard)
         preliminary["local_asset_path"] = str(asset_path)
         preliminary = finalize_manifest(preliminary)
@@ -329,6 +333,7 @@ def build_bundle(
         "schema": V2_SCHEMA,
         "repository": V2_REPOSITORY,
         "collector_version": str(collector_version),
+        "collection_run_id": run_id,
         "collection_queue_drops": max(0, int(collection_queue_drops)),
         "shard_count": len(manifests),
         "safe_count": sum(1 for row in manifests if row["quality_status"] == "SAFE"),
