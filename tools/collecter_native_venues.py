@@ -165,6 +165,7 @@ async def _run(
     duration_s: float,
     universe_refresh_s: float = DEFAULT_UNIVERSE_REFRESH_S,
     enabled_venues: tuple[str, ...] = VENUES,
+    rotate_bytes: int = 512 * 1024 * 1024,
 ) -> int:
     queue: deque[TickEnvelope] = deque()
     dropped = 0
@@ -199,7 +200,7 @@ async def _run(
 
     writer = PartitionedTickDatasetWriter(
         root / TICK_DATASET_DIR,
-        rotate_bytes=128 * 1024 * 1024,
+        rotate_bytes=max(8 * 1024 * 1024, int(rotate_bytes)),
         flush_every=1,
     )
 
@@ -498,6 +499,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--stale-after-ms", type=int, default=1_500)
     parser.add_argument(
+        "--rotate-mb",
+        type=int,
+        default=512,
+        help="Taille cible des shards immuables; borne 8..1536 MiB.",
+    )
+    parser.add_argument(
         "--universe-refresh-s",
         type=float,
         default=DEFAULT_UNIVERSE_REFRESH_S,
@@ -527,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
                         if token.strip()
                     }
                 ),
+                rotate_bytes=max(8, min(int(args.rotate_mb), 1536)) * 1024 * 1024,
             )
         )
     except KeyboardInterrupt:
