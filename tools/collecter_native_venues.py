@@ -27,6 +27,10 @@ sys.path.insert(0, str(RACINE / "tools"))
 
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
+from hl_observer.collection.native_funding_history import (
+    fetch_bybit_funding_settlements,
+    fetch_okx_funding_settlements,
+)
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.datasets.v2_pipeline import build_bundle
@@ -181,6 +185,7 @@ async def _run(
     canonical_last_written = 0
     canonical_last_beat_ns = 0
     started = time.time()
+    collection_start_wall_ms = int(started * 1000)
     universe_refreshes = 0
     universe_changes = 0
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
@@ -279,6 +284,13 @@ async def _run(
     enqueue_bybit_instrument_metadata()
     await asyncio.to_thread(coordinator.refresh_clock_sync)
     counts = {venue: len(coordinator.symbols_for(venue)) for venue in enabled_venues}
+    funding_symbols_seen: dict[str, set[str]] = {
+        venue: set(coordinator.symbols_for(venue))
+        for venue in enabled_venues
+        if venue in {"bybit", "okx"}
+    }
+    funding_history_counts = {"bybit": 0, "okx": 0}
+    funding_history_errors = {"bybit": "", "okx": ""}
     if not any(counts.values()):
         print("[native-venues] aucun marche decouvert sur Bybit/OKX/Gate/Bitget", flush=True)
         return 2
@@ -336,6 +348,8 @@ async def _run(
             after = symbols_snapshot()
             registry = refreshed
             counts = {venue: len(after[venue]) for venue in enabled_venues}
+            for venue in funding_symbols_seen:
+                funding_symbols_seen[venue].update(after.get(venue, ()))
             universe_refreshes += 1
             changed = [venue for venue in enabled_venues if before[venue] != after[venue]]
             if not changed:
@@ -442,6 +456,31 @@ async def _run(
             if not task.done():
                 task.cancel()
         await asyncio.gather(*current_tasks, return_exceptions=True)
+        funding_end_wall_ms = int(time.time() * 1000)
+        if "bybit" in enabled_venues:
+            try:
+                rows = await fetch_bybit_funding_settlements(
+                    funding_symbols_seen.get("bybit", set()),
+                    start_ms=collection_start_wall_ms,
+                    end_ms=funding_end_wall_ms,
+                )
+                for envelope in rows:
+                    enqueue(envelope)
+                funding_history_counts["bybit"] = len(rows)
+            except Exception as exc:
+                funding_history_errors["bybit"] = f"{type(exc).__name__}: {exc}"[:500]
+        if "okx" in enabled_venues:
+            try:
+                rows = await fetch_okx_funding_settlements(
+                    funding_symbols_seen.get("okx", set()),
+                    start_ms=collection_start_wall_ms,
+                    end_ms=funding_end_wall_ms,
+                )
+                for envelope in rows:
+                    enqueue(envelope)
+                funding_history_counts["okx"] = len(rows)
+            except Exception as exc:
+                funding_history_errors["okx"] = f"{type(exc).__name__}: {exc}"[:500]
         while queue:
             batch = [queue.popleft() for _ in range(min(5_000, len(queue)))]
             written += writer.append_batch(batch)
@@ -474,6 +513,8 @@ async def _run(
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
             "last_exchange_ts": last_exchange_ts,
+            "funding_history_counts": funding_history_counts,
+            "funding_history_errors": funding_history_errors,
             "required_venues": [
                 venue for venue in ("bybit", "okx") if venue in enabled_venues
             ],
