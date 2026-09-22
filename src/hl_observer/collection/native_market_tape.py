@@ -60,7 +60,7 @@ def native_instrument_metadata_envelope(
             "timestamp_semantics": (
                 "server_observation_time"
                 if observed_server_ts_ms is not None
-                else "receive_time_only"
+                else "receive_observation_time_only"
             ),
             "real_execution": False,
         },
