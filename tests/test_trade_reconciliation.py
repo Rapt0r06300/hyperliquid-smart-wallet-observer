@@ -9,6 +9,7 @@ import httpx
 from hl_observer.collection.trade_reconciliation import (
     HyperliquidTradeReferenceSampler,
     live_trade_ids,
+    safe_hyperliquid_reference_interval_s,
     reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
     reconcile_okx_trade_shard,
@@ -376,6 +377,25 @@ def test_binance_full_reference_page_is_split_before_match(tmp_path) -> None:
         assert report["matched_count"] == 2
 
     asyncio.run(scenario())
+
+
+def test_hyperliquid_reference_sampler_scales_poll_interval_to_ip_weight_budget() -> None:
+    assert safe_hyperliquid_reference_interval_s(1, 5.0) == 5.0
+    assert safe_hyperliquid_reference_interval_s(3, 5.0) == 8.0
+    assert safe_hyperliquid_reference_interval_s(6, 5.0) == 15.0
+    assert safe_hyperliquid_reference_interval_s(12, 5.0) == 30.0
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _r: httpx.Response(200, json=[])))
+    sampler = HyperliquidTradeReferenceSampler(
+        ["BTC", "ETH", "SOL", "HYPE", "AAVE", "ADA"],
+        interval_s=5.0,
+        client=client,
+    )
+    stats = sampler.stats()
+    assert stats["requested_interval_s"] == 5.0
+    assert stats["effective_interval_s"] == 15.0
+    assert stats["estimated_base_weight_per_min"] <= stats["base_weight_budget_per_min"]
+    asyncio.run(client.aclose())
 
 
 def test_hyperliquid_reference_sampler_matches_exact_tids_from_canonical_shard(tmp_path) -> None:

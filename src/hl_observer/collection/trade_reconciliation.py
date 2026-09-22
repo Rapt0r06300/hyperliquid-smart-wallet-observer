@@ -7,15 +7,40 @@ No aggregate-vs-individual trade substitution is allowed.
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import gzip
 import json
+import math
 import time
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+HYPERLIQUID_INFO_BASE_WEIGHT = 20.0
+DEFAULT_HYPERLIQUID_REFERENCE_BASE_WEIGHT_BUDGET_PER_MIN = 480.0
+
+
+def safe_hyperliquid_reference_interval_s(
+    coin_count: int,
+    requested_interval_s: float,
+    *,
+    base_weight_budget_per_min: float = DEFAULT_HYPERLIQUID_REFERENCE_BASE_WEIGHT_BUDGET_PER_MIN,
+) -> float:
+    """Return a conservative poll cadence for Hyperliquid recentTrades.
+
+    Hyperliquid applies an aggregate 1200 REST-weight/minute IP limit. recentTrades
+    is an info request with base weight 20 and extra weight for returned rows. This
+    guard budgets only 480 weight/minute to the base requests, deliberately leaving
+    headroom for response-size weight and the other public reconciliation calls.
+    """
+    count = max(0, int(coin_count))
+    requested = max(1.0, float(requested_interval_s))
+    budget = max(1.0, float(base_weight_budget_per_min))
+    if count <= 0:
+        return requested
+    minimum = (count * HYPERLIQUID_INFO_BASE_WEIGHT * 60.0) / budget
+    return max(requested, float(math.ceil(minimum)))
 
 
 def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
@@ -71,13 +96,20 @@ class HyperliquidTradeReferenceSampler:
         *,
         info_url: str = "https://api.hyperliquid.xyz/info",
         interval_s: float = 2.0,
+        base_weight_budget_per_min: float = DEFAULT_HYPERLIQUID_REFERENCE_BASE_WEIGHT_BUDGET_PER_MIN,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.coins = tuple(
             sorted({str(coin).strip().upper() for coin in coins if str(coin).strip()})
         )
         self.info_url = str(info_url)
-        self.interval_s = max(1.0, float(interval_s))
+        self.requested_interval_s = max(1.0, float(interval_s))
+        self.base_weight_budget_per_min = max(1.0, float(base_weight_budget_per_min))
+        self.interval_s = safe_hyperliquid_reference_interval_s(
+            len(self.coins),
+            self.requested_interval_s,
+            base_weight_budget_per_min=self.base_weight_budget_per_min,
+        )
         self._owns_client = client is None
         self.client = client or httpx.AsyncClient(timeout=10.0)
         self._lock = asyncio.Lock()
@@ -136,8 +168,17 @@ class HyperliquidTradeReferenceSampler:
             await self.client.aclose()
 
     def stats(self) -> dict[str, Any]:
+        estimated_base_weight = (
+            (len(self.coins) * HYPERLIQUID_INFO_BASE_WEIGHT * 60.0) / self.interval_s
+            if self.coins
+            else 0.0
+        )
         return {
             "polls": int(self.polls),
+            "requested_interval_s": self.requested_interval_s,
+            "effective_interval_s": self.interval_s,
+            "base_weight_budget_per_min": self.base_weight_budget_per_min,
+            "estimated_base_weight_per_min": round(estimated_base_weight, 3),
             "poll_errors": {coin: int(value) for coin, value in self.poll_errors.items()},
             "successful_polls": {
                 coin: len(rows) for coin, rows in self._success_wall_ms.items()
@@ -527,7 +568,10 @@ def _int(value: Any) -> int | None:
 
 
 __all__ = [
+    "DEFAULT_HYPERLIQUID_REFERENCE_BASE_WEIGHT_BUDGET_PER_MIN",
+    "HYPERLIQUID_INFO_BASE_WEIGHT",
     "HyperliquidTradeReferenceSampler",
+    "safe_hyperliquid_reference_interval_s",
     "live_trade_ids",
     "reconcile_binance_aggtrade_shard",
     "reconcile_bybit_trade_shard",
