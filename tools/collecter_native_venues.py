@@ -186,6 +186,12 @@ async def _run(
     canonical_last_beat_ns = 0
     started = time.time()
     collection_start_wall_ms = int(started * 1000)
+    github_run_id = str(os.getenv("GITHUB_RUN_ID") or "").strip()
+    collection_run_id = (
+        str(os.getenv("ALINA_COLLECTION_RUN_ID") or "").strip()
+        or (f"github-{github_run_id}" if github_run_id else "")
+        or f"native-{collection_start_wall_ms}"
+    )
     universe_refreshes = 0
     universe_changes = 0
     marker0 = (root / MARQUEUR).read_text(encoding="utf-8").strip() if (root / MARQUEUR).exists() else ""
@@ -500,6 +506,7 @@ async def _run(
             root / "runtime" / "data" / "dataset_v2_bundle" / "native_venues",
             collector_version=collector_version,
             collection_queue_drops=dropped,
+            collection_run_id=collection_run_id,
         )
         final = {
             "schema_version": "alina.native_venues_heartbeat.v1",
@@ -532,6 +539,7 @@ async def _run(
             ),
             "dataset": writer.stats(),
             "dataset_v2_bundle": bundle,
+            "collection_run_id": collection_run_id,
             "read_only": True,
             "real_execution": False,
         }
