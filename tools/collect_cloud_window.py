@@ -281,25 +281,28 @@ async def _native_with_clock_sync(
 ) -> None:
     sync: dict[str, float | int] = {}
 
+    async def refresh_probe() -> None:
+        try:
+            sample = await asyncio.to_thread(client.measure_clock_sync)
+            sync["offset_ms"] = float(sample.offset_ms)
+            sync["rtt_ms"] = float(sample.rtt_ms)
+            sync["server_ts_ms"] = int(sample.server_ts_ms)
+            sync["probe_receive_wall_ts_ms"] = int(sample.receive_wall_ts_ms)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Missing clock evidence must remain missing; raw market capture continues.
+            sync.clear()
+
     async def probe_loop() -> None:
         while True:
-            try:
-                sample = await asyncio.to_thread(client.measure_clock_sync)
-                sync["offset_ms"] = float(sample.offset_ms)
-                sync["rtt_ms"] = float(sample.rtt_ms)
-                sync["server_ts_ms"] = int(sample.server_ts_ms)
-                sync["probe_receive_wall_ts_ms"] = int(sample.receive_wall_ts_ms)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # Missing clock evidence must remain missing; raw market capture continues.
-                sync.clear()
             await asyncio.sleep(max(10.0, float(probe_interval_s)))
+            await refresh_probe()
 
+    # Acquire one explicit sample before admitting market frames when possible.
+    await refresh_probe()
     probe_task = asyncio.create_task(probe_loop())
     try:
-        # Populate the first sample before the stream gets busy when possible.
-        await asyncio.sleep(0)
         async for payload in client.messages(symbols):
             message = dict(payload)
             meta = message.get("_alina_transport")
