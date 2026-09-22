@@ -135,6 +135,18 @@ class HyperliquidTradeReferenceSampler:
         if self._owns_client:
             await self.client.aclose()
 
+    def stats(self) -> dict[str, Any]:
+        return {
+            "polls": int(self.polls),
+            "poll_errors": {coin: int(value) for coin, value in self.poll_errors.items()},
+            "successful_polls": {
+                coin: len(rows) for coin, rows in self._success_wall_ms.items()
+            },
+            "reference_trade_ids": {
+                coin: len(rows) for coin, rows in self._rows.items()
+            },
+        }
+
     def reconcile(
         self,
         path: str | Path,
