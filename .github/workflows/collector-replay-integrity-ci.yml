@@ -18,6 +18,9 @@ on:
       - 'src/hl_observer/collection/binance_depth_orchestrator.py'
       - 'src/hl_observer/collection/binance_depth_live.py'
       - 'src/hl_observer/collection/binance_market_context.py'
+      - 'src/hl_observer/collection/binance_funding_history.py'
+      - 'src/hl_observer/collection/hyperliquid_funding_history.py'
+      - 'src/hl_observer/collection/native_funding_history.py'
       - 'src/hl_observer/collection/userfills_live.py'
       - 'tools/collecter_userfills_vaults.py'
       - 'tools/collecter_bbo.py'
@@ -46,6 +49,9 @@ on:
       - 'tests/test_binance_depth_orchestrator.py'
       - 'tests/test_binance_depth_live.py'
       - 'tests/test_binance_market_context.py'
+      - 'tests/test_binance_funding_history.py'
+      - 'tests/test_hyperliquid_funding_history.py'
+      - 'tests/test_native_funding_history.py'
       - 'tests/test_collecter_bbo.py'
       - 'tests/test_okx_market_data.py'
       - 'tests/test_native_venue_transport_integrity.py'
@@ -92,6 +98,9 @@ jobs:
             src/hl_observer/collection/binance_depth_orchestrator.py \
             src/hl_observer/collection/binance_depth_live.py \
             src/hl_observer/collection/binance_market_context.py \
+            src/hl_observer/collection/binance_funding_history.py \
+            src/hl_observer/collection/hyperliquid_funding_history.py \
+            src/hl_observer/collection/native_funding_history.py \
             src/hl_observer/collection/userfills_live.py \
             tools/collecter_userfills_vaults.py \
             tools/collecter_bbo.py \
@@ -123,6 +132,9 @@ jobs:
             tests/test_binance_depth_orchestrator.py \
             tests/test_binance_depth_live.py \
             tests/test_binance_market_context.py \
+            tests/test_binance_funding_history.py \
+            tests/test_hyperliquid_funding_history.py \
+            tests/test_native_funding_history.py \
             tests/test_collecter_bbo.py \
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py \
