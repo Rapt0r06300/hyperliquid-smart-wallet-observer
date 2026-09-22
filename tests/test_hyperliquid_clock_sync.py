@@ -63,3 +63,31 @@ def test_hyperliquid_clock_probe_ignores_unrelated_or_stale_messages() -> None:
     sample = probe.observe(_message(1_015), received_wall_ts_ms=1_020)
     assert sample is not None
     assert probe.evidence(now_ms=1_121) == {}
+
+
+
+def test_hyperliquid_clock_probe_refreshes_after_interval() -> None:
+    probe = HyperliquidClockSyncProbe(
+        refresh_interval_ms=60_000,
+        request_timeout_ms=5_000,
+    )
+    assert probe.refresh_due(now_ms=1_000) is True
+    probe.mark_subscribe_sent(1_000)
+    assert probe.refresh_due(now_ms=2_000) is False
+    sample = probe.observe(_message(1_015), received_wall_ts_ms=1_020)
+    assert sample is not None
+    assert probe.refresh_due(now_ms=61_019) is False
+    assert probe.refresh_due(now_ms=61_020) is True
+
+
+def test_hyperliquid_clock_probe_recovers_after_response_timeout() -> None:
+    probe = HyperliquidClockSyncProbe(
+        refresh_interval_ms=60_000,
+        request_timeout_ms=5_000,
+    )
+    probe.mark_subscribe_sent(1_000)
+    assert probe.refresh_due(now_ms=6_000) is False
+    assert probe.refresh_due(now_ms=6_001) is True
+    assert probe.last_error == "CLOCK_PROBE_RESPONSE_TIMEOUT"
+    assert probe.failures == 1
+    assert probe.unsubscribe_message()["method"] == "unsubscribe"
