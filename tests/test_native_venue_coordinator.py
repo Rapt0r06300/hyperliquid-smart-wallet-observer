@@ -306,3 +306,47 @@ def test_venue_session_recycles_and_re_reads_symbol_universe() -> None:
         assert set(client.message_calls[-1]) == {"BTCUSDT", "ETHUSDT"}
 
     asyncio.run(scenario())
+
+
+class _MetadataBybitDiscovery:
+    last_instrument_metadata = [
+        {
+            "symbol": "BTCUSDT",
+            "status": "Trading",
+            "priceFilter": {"tickSize": "0.1"},
+            "lotSizeFilter": {"qtyStep": "0.001", "minOrderQty": "0.001"},
+        }
+    ]
+
+    def discover_usdt_perpetuals(self):
+        return [("BTC", "BTCUSDT")]
+
+    def server_time_ms(self):
+        return 1_700_000_000_000
+
+
+class _CaptureWriter:
+    def __init__(self) -> None:
+        self.rows = []
+
+    def append(self, envelope):
+        self.rows.append(envelope)
+        return 1
+
+
+def test_discovery_persists_bybit_instrument_rules() -> None:
+    writer = _CaptureWriter()
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_MetadataBybitDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        tick_writer=writer,
+    )
+    coordinator.discover(now_s=100.0)
+    assert len(writer.rows) == 1
+    row = writer.rows[0].as_record(written_ts_ms=1_700_000_000_100)
+    assert row["source_id"] == "bybit_public_rest"
+    assert row["channel"] == "instrument_metadata"
+    assert row["instrument"] == "BTCUSDT"
+    assert row["parsed_summary"]["tick_size"] == "0.1"
