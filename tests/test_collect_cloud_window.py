@@ -151,6 +151,7 @@ def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
     index = m._bundle_index(
         manifests,
         collector_version="a" * 40,
+        collection_run_id="market-test-run",
         queue_drops={
             ("bybit_public_ws", "l2Book", "BTCUSDT"): 2,
             ("okx_public_ws", "l2Book", "BTC-USDT-SWAP"): 1,
@@ -158,6 +159,7 @@ def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
     )
     assert index["schema"] == "alina.dataset_bundle.v2"
     assert index["repository"] == "Rapt0r06300/alina-smartflow-datasets-v2"
+    assert index["collection_run_id"] == "market-test-run"
     assert index["shard_count"] == 3
     assert index["safe_count"] == 1
     assert index["partial_count"] == 1
