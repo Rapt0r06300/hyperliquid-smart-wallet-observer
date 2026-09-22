@@ -27,7 +27,7 @@ CROSS_VENUE_REQUIRED_FAMILIES: dict[str, frozenset[str]] = {
         {
             "bbo",
             "l2Book",
-            "trades",
+            "agg_trades",
             "mark_funding",
             "open_interest",
             "instrument_metadata",
@@ -58,7 +58,7 @@ CROSS_VENUE_REQUIRED_FAMILIES: dict[str, frozenset[str]] = {
 
 LEAD_LAG_REQUIRED_FAMILIES: dict[str, frozenset[str]] = {
     "hyperliquid": frozenset({"bbo", "l2Book", "trades", "instrument_metadata"}),
-    "binance": frozenset({"bbo", "l2Book", "trades", "instrument_metadata"}),
+    "binance": frozenset({"bbo", "l2Book", "agg_trades", "instrument_metadata"}),
     "bybit": frozenset({"l2Book", "trades", "ticker", "instrument_metadata"}),
     "okx": frozenset({"l2Book", "trades", "ticker", "instrument_metadata"}),
 }
