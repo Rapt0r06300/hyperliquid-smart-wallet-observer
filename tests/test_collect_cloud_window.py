@@ -267,3 +267,80 @@ def test_cloud_native_frame_carries_clock_probe_evidence() -> None:
     assert summary["clock_offset_ms"] == -3.5
     assert summary["clock_probe_rtt_ms"] == 12.0
     assert summary["transport_rtt_ms"] == 8.0
+
+
+def test_cloud_window_backfills_funding_per_venue_fail_closed(monkeypatch) -> None:
+    import asyncio
+
+    m = _module()
+
+    class Sink:
+        def __init__(self) -> None:
+            self.rows = []
+
+        def emit(self, envelope) -> None:
+            self.rows.append(envelope)
+
+    def row(source: str, instrument: str):
+        return m.TickEnvelope(
+            source_id=source,
+            channel="funding_settlement",
+            instrument=instrument,
+            event_kind="EVENT",
+            raw_payload={"fundingRate": "0.0001"},
+            exchange_ts_ms=2_000,
+            received_ts_ms=2_010,
+            local_monotonic_ns=123,
+            connection_id=None,
+            sequence=1,
+            provenance={
+                "access": "read_only",
+                "transport": "https",
+                "authenticated": False,
+            },
+            parsed_summary={"funding_rate": 0.0001},
+        )
+
+    async def ok_hl(symbols, **_kwargs):
+        assert symbols == ["BTC"]
+        return [row("hyperliquid_public_rest", "BTC")]
+
+    async def ok_binance(symbols, **_kwargs):
+        assert symbols == ["BTCUSDT"]
+        return [row("binance_usdm_public_rest", "BTCUSDT")]
+
+    async def fail_bybit(_symbols, **_kwargs):
+        raise RuntimeError("temporary upstream failure")
+
+    async def ok_okx(symbols, **_kwargs):
+        assert symbols == ["BTC-USDT-SWAP"]
+        return [row("okx_public_rest", "BTC-USDT-SWAP")]
+
+    monkeypatch.setattr(m, "fetch_hyperliquid_funding_settlements", ok_hl)
+    monkeypatch.setattr(m, "fetch_binance_funding_settlements", ok_binance)
+    monkeypatch.setattr(m, "fetch_bybit_funding_settlements", fail_bybit)
+    monkeypatch.setattr(m, "fetch_okx_funding_settlements", ok_okx)
+
+    sink = Sink()
+    result = asyncio.run(
+        m._collect_funding_settlements(
+            {
+                "hyperliquid": ["BTC"],
+                "binance": ["BTCUSDT"],
+                "bybit": ["BTCUSDT"],
+                "okx": ["BTC-USDT-SWAP"],
+            },
+            sink,
+            start_ms=1_000,
+            end_ms=3_000,
+        )
+    )
+
+    assert len(sink.rows) == 3
+    assert all(item.channel == "funding_settlement" for item in sink.rows)
+    assert result["hyperliquid"] == {"status": "OK", "records": 1}
+    assert result["binance"] == {"status": "OK", "records": 1}
+    assert result["okx"] == {"status": "OK", "records": 1}
+    assert result["bybit"]["status"] == "ERROR"
+    assert result["bybit"]["records"] == 0
+    assert result["bybit"]["error"] == "RuntimeError"
