@@ -135,3 +135,38 @@ def test_snapshot_from_old_connection_never_reanchors_new_epoch() -> None:
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+def test_rest_snapshot_uses_separate_partition_and_zero_event_gap() -> None:
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "lastUpdateId": 100,
+                    "E": 1000,
+                    "T": 999,
+                    "bids": [["100", "1"]],
+                    "asks": [["101", "1"]],
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        ticks = []
+        collector = BinanceDepthLiveCollector(
+            ["BTCUSDT"],
+            http_client=client,
+            tick_sink=ticks.append,
+        )
+        await collector.resync_symbol("BTCUSDT", connection_id="bin-test")
+        assert len(ticks) == 1
+        tick = ticks[0]
+        assert tick.channel == "l2Book_snapshot"
+        assert tick.gap_count == 0
+        assert tick.provenance["gap_count_semantics"] == "event_delta"
+        await client.aclose()
+
+    asyncio.run(scenario())
