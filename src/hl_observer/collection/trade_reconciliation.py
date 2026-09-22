@@ -7,9 +7,11 @@ No aggregate-vs-individual trade substitution is allowed.
 from __future__ import annotations
 
 import asyncio
+import asyncio
 import gzip
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +55,159 @@ def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
                 event_count += 1
                 ids.add(trade_id)
     return ids, event_count
+
+
+class HyperliquidTradeReferenceSampler:
+    """Continuously sample public recentTrades so long windows remain reconcilable.
+
+    The REST sampler is independent from the WebSocket connection. Exact Hyperliquid
+    trade IDs (tid) are accumulated with their exchange timestamps. No synthetic row
+    is created when a poll fails.
+    """
+
+    def __init__(
+        self,
+        coins: Iterable[str],
+        *,
+        info_url: str = "https://api.hyperliquid.xyz/info",
+        interval_s: float = 2.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.coins = tuple(
+            sorted({str(coin).strip().upper() for coin in coins if str(coin).strip()})
+        )
+        self.info_url = str(info_url)
+        self.interval_s = max(1.0, float(interval_s))
+        self._owns_client = client is None
+        self.client = client or httpx.AsyncClient(timeout=10.0)
+        self._lock = asyncio.Lock()
+        self._rows: dict[str, dict[str, int]] = {coin: {} for coin in self.coins}
+        self._success_wall_ms: dict[str, list[int]] = {coin: [] for coin in self.coins}
+        self.poll_errors: dict[str, int] = {coin: 0 for coin in self.coins}
+        self.polls = 0
+
+    async def sample_once(self) -> None:
+        async with self._lock:
+            sampled_wall_ms = int(time.time() * 1_000)
+
+            async def one(coin: str) -> None:
+                try:
+                    response = await self.client.post(
+                        self.info_url,
+                        json={"type": "recentTrades", "coin": coin},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception:
+                    self.poll_errors[coin] += 1
+                    return
+                rows = payload if isinstance(payload, list) else []
+                if not isinstance(rows, list):
+                    self.poll_errors[coin] += 1
+                    return
+                accepted = 0
+                for row in rows:
+                    if not isinstance(row, Mapping):
+                        continue
+                    tid = row.get("tid")
+                    ts = _int(row.get("time"))
+                    if tid in {None, ""} or ts is None:
+                        continue
+                    self._rows[coin][str(tid)] = ts
+                    accepted += 1
+                # An empty but valid response is still a successful public poll.
+                self._success_wall_ms[coin].append(sampled_wall_ms)
+                if accepted:
+                    # Bound retained history to the active process horizon. The
+                    # caller owns a bounded collection job, so this remains finite.
+                    pass
+
+            await asyncio.gather(*(one(coin) for coin in self.coins))
+            self.polls += 1
+
+    async def run(self) -> None:
+        await self.sample_once()
+        while True:
+            await asyncio.sleep(self.interval_s)
+            await self.sample_once()
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self.client.aclose()
+
+    def reconcile(
+        self,
+        path: str | Path,
+        *,
+        symbol: str,
+        start_ms: int,
+        end_ms: int,
+    ) -> dict[str, Any]:
+        coin = str(symbol).strip().upper()
+        live_ids, live_events = live_trade_ids(path, venue="hyperliquid")
+        refs = self._rows.get(coin, {})
+        ref_ids = {
+            trade_id
+            for trade_id, ts in refs.items()
+            if int(start_ms) <= int(ts) <= int(end_ms)
+        }
+        reference_times = [
+            int(ts)
+            for ts in refs.values()
+            if int(start_ms) <= int(ts) <= int(end_ms)
+        ]
+        all_reference_times = list(refs.values())
+        if not self._success_wall_ms.get(coin):
+            return {
+                "status": "UNAVAILABLE",
+                "reason": "HYPERLIQUID_REFERENCE_NO_SUCCESSFUL_POLL",
+                "live_count": len(live_ids),
+            }
+        if live_ids and not ref_ids:
+            return {
+                "status": "PARTIAL",
+                "reason": "HYPERLIQUID_REFERENCE_EMPTY_FOR_LIVE_WINDOW",
+                "live_count": len(live_ids),
+                "reference_count": 0,
+            }
+
+        # Coverage is provable when accumulated reference history reaches at least
+        # the first and last live trade timestamps in the shard. Exact ID matching
+        # then establishes completeness inside that covered interval.
+        coverage_start = min(all_reference_times) if all_reference_times else None
+        coverage_end = max(all_reference_times) if all_reference_times else None
+        if live_ids and (
+            coverage_start is None
+            or coverage_end is None
+            or coverage_start > int(start_ms)
+            or coverage_end < int(end_ms)
+        ):
+            return {
+                "status": "PARTIAL",
+                "reason": "REFERENCE_DOES_NOT_COVER_WINDOW",
+                "live_count": len(live_ids),
+                "reference_count": len(ref_ids),
+                "reference_first_ts_ms": coverage_start,
+                "reference_last_ts_ms": coverage_end,
+                "poll_errors": int(self.poll_errors.get(coin, 0)),
+            }
+
+        report = _compare(
+            live_ids,
+            ref_ids,
+            live_event_count=live_events,
+            reference_event_count=len(ref_ids),
+            reference_coverage="ACCUMULATED_RECENT_TRADES",
+        )
+        report["poll_errors"] = int(self.poll_errors.get(coin, 0))
+        report["successful_polls"] = len(self._success_wall_ms.get(coin, []))
+        report["reference_first_ts_ms"] = (
+            min(reference_times) if reference_times else None
+        )
+        report["reference_last_ts_ms"] = (
+            max(reference_times) if reference_times else None
+        )
+        return report
 
 
 async def reconcile_bybit_trade_shard(
@@ -352,6 +507,7 @@ def _int(value: Any) -> int | None:
 
 
 __all__ = [
+    "HyperliquidTradeReferenceSampler",
     "live_trade_ids",
     "reconcile_binance_aggtrade_shard",
     "reconcile_bybit_trade_shard",
