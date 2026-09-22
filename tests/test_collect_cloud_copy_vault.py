@@ -213,13 +213,16 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
             "observation_only": True,
             "vaults": [{"address": address}],
         },
+        collection_run_id="copy-vault-test-run",
     )
     assert fill_id
     assert index["collection_kind"] == "copy_vault_forward"
+    assert index["collection_run_id"] == "copy-vault-test-run"
     manifest_paths = list((output / "manifests").glob("*.json"))
     assert len(manifest_paths) == 1
     manifest = json.loads(manifest_paths[0].read_text(encoding="utf-8"))
     assert manifest["family"] == "copy_vault_fills"
+    assert manifest["collection_run_id"] == "copy-vault-test-run"
     assert manifest["reconciliation"]["status"] == "MATCHED"
     assert manifest["copy_vault_selection"]["forward_only"] is True
     # Before GitHub release upload the asset is intentionally not SAFE yet.
