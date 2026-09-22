@@ -98,5 +98,7 @@ def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
     text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
     assert 'HB.battre(' in text
     assert '"native-venues"' in text
-    assert 'required = ("bybit", "okx")' in text
+    assert 'venue for venue in ("bybit", "okx") if venue in enabled_venues' in text
     assert '"required_venues_ready"' in text
+    assert "counts.get(venue, 0) > 0" in text
+    assert "last_event_ms.get(venue, 0) > 0" in text
