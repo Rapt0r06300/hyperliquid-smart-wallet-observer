@@ -31,6 +31,7 @@ on:
       - 'src/hl_observer/data_sources/market_backfill.py'
       - 'src/hl_observer/datasets/v2_export.py'
       - 'src/hl_observer/datasets/v2_pipeline.py'
+      - 'src/hl_observer/datasets/replay_coverage.py'
       - 'src/hl_observer/datasets/cross_venue_window.py'
       - 'src/hl_observer/datasets/strategy_data_contracts.py'
       - 'tools/build_dataset_v2_manifest.py'
@@ -45,6 +46,7 @@ on:
       - 'tests/test_partitioned_tick_dataset.py'
       - 'tests/test_dataset_v2_export.py'
       - 'tests/test_dataset_v2_pipeline.py'
+      - 'tests/test_replay_coverage.py'
       - 'tests/test_cross_venue_window.py'
       - 'tests/test_strategy_data_contracts.py'
       - 'tests/test_collect_cloud_window.py'
@@ -119,6 +121,7 @@ jobs:
             src/hl_observer/data_sources/market_backfill.py \
             src/hl_observer/datasets/v2_export.py \
             src/hl_observer/datasets/v2_pipeline.py \
+            src/hl_observer/datasets/replay_coverage.py \
             src/hl_observer/datasets/cross_venue_window.py \
             src/hl_observer/datasets/strategy_data_contracts.py \
             tools/build_dataset_v2_manifest.py \
@@ -136,6 +139,7 @@ jobs:
             tests/test_partitioned_tick_dataset.py \
             tests/test_dataset_v2_export.py \
             tests/test_dataset_v2_pipeline.py \
+            tests/test_replay_coverage.py \
             tests/test_cross_venue_window.py \
             tests/test_strategy_data_contracts.py \
             tests/test_collect_cloud_window.py \
