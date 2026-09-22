@@ -27,6 +27,11 @@ from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.datasets.v2_export import build_manifest_from_tick_shard, write_manifest
+from hl_observer.datasets.v2_pipeline import (
+    V2_REPOSITORY,
+    V2_SCHEMA,
+    finalize_manifest,
+)
 from hl_observer.realtime.feed_quality import FeedEventKind
 
 WS_HYPERLIQUID = "wss://api.hyperliquid.xyz/ws"
@@ -498,6 +503,7 @@ async def collect(
                 int(manifest["integrity"].get("gap_count") or 0) + drops
             )
             manifest["collection_queue_drops"] = drops
+        manifest = finalize_manifest(manifest)
 
         asset_name = f"{manifest['dataset_id']}.jsonl.gz"
         asset_path = assets_root / asset_name
@@ -507,6 +513,29 @@ async def collect(
         manifest_path = manifests_root / f"{manifest['dataset_id']}.json"
         write_manifest(manifest, manifest_path)
         manifests.append(manifest)
+
+    bundle_index = {
+        "schema": V2_SCHEMA,
+        "repository": V2_REPOSITORY,
+        "collector_version": collector_version,
+        "collection_queue_drops": sum(int(value) for value in sink.drops.values()),
+        "shard_count": len(manifests),
+        "safe_count": sum(1 for row in manifests if row.get("quality_status") == "SAFE"),
+        "partial_count": sum(1 for row in manifests if row.get("quality_status") == "PARTIAL"),
+        "reject_count": sum(1 for row in manifests if row.get("quality_status") == "REJECT"),
+        "dataset_ids": [str(row["dataset_id"]) for row in manifests],
+        "manifests": [
+            f"manifests/{row['dataset_id']}.json"
+            for row in manifests
+        ],
+        "assets": [
+            f"assets/{row['release_asset']}"
+            for row in manifests
+        ],
+        "read_only": True,
+        "real_execution": False,
+    }
+    write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
 
     summary = {
         "schema": "alina.cloud_collection_window.v1",
@@ -522,6 +551,13 @@ async def collect(
             "|".join(key): value for key, value in sorted(sink.drops.items())
         },
         "asset_count": len(manifests),
+        "bundle_index": {
+            "schema": bundle_index["schema"],
+            "shard_count": bundle_index["shard_count"],
+            "safe_count": bundle_index["safe_count"],
+            "partial_count": bundle_index["partial_count"],
+            "reject_count": bundle_index["reject_count"],
+        },
         "assets": [
             {
                 "dataset_id": row["dataset_id"],
