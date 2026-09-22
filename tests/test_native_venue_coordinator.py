@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from hl_observer.collection.coin_universe import clear, coins
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 
@@ -281,7 +282,6 @@ def test_discovery_refresh_detects_new_listing_without_restart() -> None:
         assert health["discovery_refreshes"] >= 1
         assert health["universe_changes"] >= 1
 
-    import asyncio
     asyncio.run(scenario())
 
 
@@ -305,5 +305,4 @@ def test_venue_session_recycles_and_re_reads_symbol_universe() -> None:
         await coordinator.run_bybit()
         assert set(client.message_calls[-1]) == {"BTCUSDT", "ETHUSDT"}
 
-    import asyncio
     asyncio.run(scenario())
