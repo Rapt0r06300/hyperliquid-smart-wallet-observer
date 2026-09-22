@@ -605,6 +605,14 @@ async def _hyperliquid(
                             message,
                             received_wall_ts_ms=receive_wall_ms,
                         )
+                        if clock_probe.refresh_due(now_ms=receive_wall_ms):
+                            await socket.send(
+                                json.dumps(clock_probe.unsubscribe_message())
+                            )
+                            clock_probe.mark_subscribe_sent(receive_wall_ms)
+                            await socket.send(
+                                json.dumps(clock_probe.subscription_message())
+                            )
                     clock_evidence = (
                         clock_probe.evidence(now_ms=receive_wall_ms)
                         if clock_probe is not None
