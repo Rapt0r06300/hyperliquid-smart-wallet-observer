@@ -446,12 +446,14 @@ def _bundle_index(
     manifests: list[dict[str, Any]],
     *,
     collector_version: str,
+    collection_run_id: str,
     queue_drops: Mapping[tuple[str, str, str], int],
 ) -> dict[str, Any]:
     return {
         "schema": V2_SCHEMA,
         "repository": V2_REPOSITORY,
         "collector_version": str(collector_version),
+        "collection_run_id": str(collection_run_id),
         "collection_queue_drops": sum(
             max(0, int(value)) for value in queue_drops.values()
         ),
@@ -539,6 +541,7 @@ async def collect(
     collector_version: str,
     rotate_bytes: int,
     plan_rows: list[dict[str, Any]] | None = None,
+    collection_run_id: str | None = None,
 ) -> dict[str, Any]:
     raw_root = output / "raw"
     assets_root = output / "assets"
@@ -590,6 +593,9 @@ async def collect(
     if not tasks:
         raise RuntimeError("collection plan contains no supported venue streams")
     started = int(time.time() * 1_000)
+    run_id = str(collection_run_id or "").strip() or (
+        f"market-{str(collector_version)[:12]}-{started}"
+    )
     try:
         await asyncio.sleep(max(1.0, float(duration_s)))
     finally:
@@ -619,6 +625,7 @@ async def collect(
                 int(manifest["integrity"].get("gap_count") or 0) + drops
             )
             manifest["collection_queue_drops"] = drops
+        manifest["collection_run_id"] = run_id
         manifest = finalize_manifest(manifest)
 
         asset_name = f"{manifest['dataset_id']}.jsonl.gz"
@@ -633,6 +640,7 @@ async def collect(
     bundle_index = _bundle_index(
         manifests,
         collector_version=collector_version,
+        collection_run_id=run_id,
         queue_drops=sink.drops,
     )
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
@@ -645,6 +653,7 @@ async def collect(
         "coins": coins,
         "venue_symbols": venue_lists,
         "collector_version": collector_version,
+        "collection_run_id": run_id,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "queue_drops": {
@@ -703,6 +712,7 @@ def main() -> int:
     parser.add_argument("--plan-file")
     parser.add_argument("--duration-s", type=float, default=120.0)
     parser.add_argument("--collector-version", required=True)
+    parser.add_argument("--collection-run-id")
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
 
@@ -727,6 +737,7 @@ def main() -> int:
             collector_version=args.collector_version,
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
             plan_rows=plan_rows,
+            collection_run_id=args.collection_run_id,
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
