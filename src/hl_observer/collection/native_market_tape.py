@@ -12,6 +12,85 @@ from typing import Any
 from hl_observer.collection.tick_dataset import TickEnvelope
 
 
+def native_instrument_metadata_envelope(
+    venue: str,
+    row: Mapping[str, Any],
+    *,
+    received_ts_ms: int,
+    receive_mono_ns: int,
+    observed_server_ts_ms: int | None = None,
+) -> TickEnvelope | None:
+    """Persist one public instrument-rule snapshot for causal replay.
+
+    The server timestamp is an observation time, never an invented effective
+    change time. The raw exchange row is preserved verbatim.
+    """
+    venue_key = str(venue or "").strip().lower()
+    if venue_key == "bybit":
+        instrument = str(row.get("symbol") or "").upper()
+    elif venue_key == "okx":
+        instrument = str(row.get("instId") or "").upper()
+    else:
+        return None
+    if not instrument:
+        return None
+    price_filter = row.get("priceFilter")
+    lot_filter = row.get("lotSizeFilter")
+    return TickEnvelope(
+        source_id=f"{venue_key}_public_rest",
+        channel="instrument_metadata",
+        instrument=instrument,
+        event_kind="SNAPSHOT",
+        raw_payload=dict(row),
+        received_ts_ms=int(received_ts_ms),
+        exchange_ts_ms=(
+            int(observed_server_ts_ms)
+            if observed_server_ts_ms is not None
+            else None
+        ),
+        local_monotonic_ns=int(receive_mono_ns),
+        connection_id=None,
+        sequence=None,
+        provenance={
+            "access": "read_only",
+            "network": "mainnet",
+            "venue": venue_key,
+            "transport": "https",
+            "authenticated": False,
+            "timestamp_semantics": (
+                "server_observation_time"
+                if observed_server_ts_ms is not None
+                else "receive_time_only"
+            ),
+            "real_execution": False,
+        },
+        parsed_summary={
+            "status": row.get("status", row.get("state")),
+            "tick_size": (
+                price_filter.get("tickSize")
+                if venue_key == "bybit" and isinstance(price_filter, Mapping)
+                else row.get("tickSz")
+            ),
+            "lot_size": (
+                lot_filter.get("qtyStep")
+                if venue_key == "bybit" and isinstance(lot_filter, Mapping)
+                else row.get("lotSz")
+            ),
+            "min_size": (
+                lot_filter.get("minOrderQty")
+                if venue_key == "bybit" and isinstance(lot_filter, Mapping)
+                else row.get("minSz")
+            ),
+            "min_notional": (
+                lot_filter.get("minNotionalValue")
+                if venue_key == "bybit" and isinstance(lot_filter, Mapping)
+                else None
+            ),
+            "data_gate_ready": False,
+        },
+    )
+
+
 def native_tick_envelope(
     venue: str,
     payload: Mapping[str, Any],
@@ -186,4 +265,4 @@ def _max_int(values: Any) -> int | None:
     return max(parsed) if parsed else None
 
 
-__all__ = ["native_tick_envelope"]
+__all__ = ["native_instrument_metadata_envelope", "native_tick_envelope"]
