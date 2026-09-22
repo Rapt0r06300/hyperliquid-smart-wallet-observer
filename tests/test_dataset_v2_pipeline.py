@@ -84,7 +84,7 @@ def test_remote_digest_is_required_before_safe(tmp_path) -> None:
     )
     assert verified["quality_status"] == "SAFE"
     assert verified["validation_allowed"] is True
-    assert verified["proof_of_pnl_allowed"] is True
+    assert verified["proof_of_pnl_allowed"] is False
 
 
 def test_gap_inside_shard_is_rejected_even_with_remote_hash(tmp_path) -> None:
@@ -426,3 +426,54 @@ def test_explicit_trade_reconciliation_mismatch_is_rejected() -> None:
     assert rejected["quality_status"] == "REJECT"
     assert rejected["validation_allowed"] is False
     assert "RECONCILIATION_MISMATCH" in rejected["quality_reasons"]
+
+
+def test_binance_agg_trade_family_requires_explicit_matched_reference() -> None:
+    manifest = {
+        "event_count": 2,
+        "bytes": 100,
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1010,
+        "sha256": "a" * 64,
+        "collector_version": "b" * 40,
+        "family": "agg_trades",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "required_channels": [],
+        "observed_channels": ["agg_trades"],
+        "cost_model": {"applicable": False, "ready": False},
+        "reconciliation": {"status": "UNVERIFIED"},
+    }
+    status, reasons = assess_manifest(manifest)
+    assert status == "PARTIAL"
+    assert "RECONCILIATION_MATCH_REQUIRED" in reasons
+
+    reconciled = attach_reconciliation(
+        manifest,
+        {
+            "status": "MATCHED",
+            "live_count": 2,
+            "reference_count": 2,
+            "matched_count": 2,
+            "missing_from_live": 0,
+            "live_only": 0,
+            "duplicate_live_keys": 0,
+        },
+    )
+    assert reconciled["quality_status"] == "SAFE"
+    assert reconciled["validation_allowed"] is True
+    assert reconciled["proof_of_pnl_allowed"] is False
