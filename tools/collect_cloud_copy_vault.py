@@ -500,7 +500,7 @@ async def _socket_group(
     vaults: list[str],
     sink: AsyncTickSink,
     *,
-    collection_start_ms: int,
+    observation_start_ms: dict[str, int],
     live_ids: dict[str, set[str]],
     live_fill_counts: dict[str, int],
     reconnect_counts: dict[str, int],
@@ -534,6 +534,10 @@ async def _socket_group(
                                 "user": vault,
                             },
                         }
+                    )
+                    observation_start_ms.setdefault(
+                        vault,
+                        int(time.time() * 1_000),
                     )
                     await asyncio.sleep(0.15)
 
@@ -597,7 +601,8 @@ async def _socket_group(
                                 ts_ms = int(fill.get("ts_ms") or 0)
                             except (TypeError, ValueError, OverflowError):
                                 continue
-                            if ts_ms < int(collection_start_ms):
+                            start_ms = observation_start_ms.get(vault)
+                            if start_ms is None or ts_ms < int(start_ms):
                                 continue
                             live_ids[vault].add(canonical_fill_id(fill))
                             live_fill_counts[vault] += 1
@@ -702,7 +707,7 @@ async def exact_window_backfill(
 async def reconcile_forward_window(
     vaults: list[str],
     *,
-    start_ms: int,
+    start_ms_by_vault: Mapping[str, int],
     end_ms: int,
     live_ids: Mapping[str, set[str]],
 ) -> dict[str, dict[str, Any]]:
@@ -712,10 +717,29 @@ async def reconcile_forward_window(
         timeout=15.0,
     ) as client:
         for vault in vaults:
+            start_ms = start_ms_by_vault.get(vault)
+            if start_ms is None:
+                reports[vault] = {
+                    "status": "UNAVAILABLE",
+                    "live_count": len(live_ids.get(vault, set())),
+                    "reference_count": 0,
+                    "matched_count": 0,
+                    "missing_from_live": 0,
+                    "live_only": len(live_ids.get(vault, set())),
+                    "duplicate_live_keys": 0,
+                    "audit": {
+                        "status": "PARTIAL",
+                        "reason": "NO_LIVE_SUBSCRIPTION_START",
+                        "requested_start_ms": None,
+                        "requested_end_ms": int(end_ms),
+                        "rows": 0,
+                    },
+                }
+                continue
             rows, audit = await exact_window_backfill(
                 client,
                 vault,
-                start_ms=start_ms,
+                start_ms=int(start_ms),
                 end_ms=end_ms,
             )
             reference_ids = {
@@ -902,6 +926,7 @@ async def collect(
 
     live_ids: dict[str, set[str]] = defaultdict(set)
     live_fill_counts: dict[str, int] = defaultdict(int)
+    observation_start_ms: dict[str, int] = {}
     reconnect_counts: dict[str, int] = defaultdict(int)
     l2_request_queue: asyncio.Queue[str] = asyncio.Queue()
     l2_known_coins: set[str] = set()
@@ -912,9 +937,10 @@ async def collect(
         phase="START",
     )
     # A frozen universe can be selected well before a hosted runner lane starts.
-    # Reconciliation must begin when this lane can actually observe forward fills,
-    # otherwise queue delay is misclassified as missing WebSocket data.
-    collection_start_ms = int(time.time() * 1_000)
+    # Each vault gets its own observation start immediately after its subscription
+    # request is sent; queue delay and subscription startup are never treated as
+    # missing WebSocket fills.
+    collection_launch_ms = int(time.time() * 1_000)
     groups = [
         vaults[index:index + MAX_SUBSCRIPTIONS_PER_SOCKET]
         for index in range(0, len(vaults), MAX_SUBSCRIPTIONS_PER_SOCKET)
@@ -924,7 +950,7 @@ async def collect(
             _socket_group(
                 group,
                 sink,
-                collection_start_ms=collection_start_ms,
+                observation_start_ms=observation_start_ms,
                 live_ids=live_ids,
                 live_fill_counts=live_fill_counts,
                 reconnect_counts=reconnect_counts,
@@ -960,7 +986,7 @@ async def collect(
     end_ms = int(time.time() * 1_000)
     reports = await reconcile_forward_window(
         vaults,
-        start_ms=collection_start_ms,
+        start_ms_by_vault=observation_start_ms,
         end_ms=end_ms,
         live_ids=live_ids,
     )
@@ -978,13 +1004,19 @@ async def collect(
         selection=selection,
         collection_run_id=run_id,
     )
+    effective_start_ms = min(
+        observation_start_ms.values(),
+        default=collection_launch_ms,
+    )
     summary = {
         "schema": "alina.copy_vault_cloud_window.v1",
         "collection_run_id": run_id,
         "selection_ts_ms": selection_ts_ms,
-        "collection_start_ts_ms": collection_start_ms,
+        "collection_launch_ts_ms": collection_launch_ms,
+        "collection_start_ts_ms": effective_start_ms,
+        "vault_observation_start_ts_ms": dict(sorted(observation_start_ms.items())),
         "end_ts_ms": end_ms,
-        "duration_s": round((end_ms - collection_start_ms) / 1000.0, 3),
+        "duration_s": round((end_ms - effective_start_ms) / 1000.0, 3),
         "vault_count": len(vaults),
         "vault_universe_count": selection.get("full_vault_count"),
         "vault_shard_count": selection.get("vault_shard_count"),
