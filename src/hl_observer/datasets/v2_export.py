@@ -127,7 +127,11 @@ def build_manifest_from_tick_shard(
                     regression_count += 1
                 last_mono[key] = max(previous or mono, mono)
 
-            identity = (
+            # Receive-only snapshots (for example Hyperliquid
+            # activeAssetCtx) are observations, not exchange events. Two
+            # identical payloads received at different instants are therefore
+            # legitimate repeated observations, not provable duplicates.
+            identity = None if receive_only_allowed and exchange is None else (
                 source,
                 channel,
                 instrument,
@@ -135,10 +139,11 @@ def build_manifest_from_tick_shard(
                 record.get("sequence"),
                 record.get("raw_sha256"),
             )
-            if identity in identities:
-                duplicate_count += 1
-            else:
-                identities.add(identity)
+            if identity is not None:
+                if identity in identities:
+                    duplicate_count += 1
+                else:
+                    identities.add(identity)
 
             if str(record.get("event_kind") or "").upper() == "GAP":
                 gap_count += 1
