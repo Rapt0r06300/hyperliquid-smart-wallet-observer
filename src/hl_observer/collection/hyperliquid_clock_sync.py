@@ -21,6 +21,7 @@ CLOCK_PROBE_USER = "0x0000000000000000000000000000000000000000"
 DEFAULT_MAX_PROBE_RTT_MS = 100.0
 DEFAULT_MAX_SAMPLE_AGE_MS = 180_000
 DEFAULT_REFRESH_INTERVAL_MS = 60_000
+DEFAULT_REQUEST_TIMEOUT_MS = 5_000
 
 
 class HyperliquidClockSyncProbe:
@@ -33,6 +34,7 @@ class HyperliquidClockSyncProbe:
         max_probe_rtt_ms: float = DEFAULT_MAX_PROBE_RTT_MS,
         max_sample_age_ms: int = DEFAULT_MAX_SAMPLE_AGE_MS,
         refresh_interval_ms: int = DEFAULT_REFRESH_INTERVAL_MS,
+        request_timeout_ms: int = DEFAULT_REQUEST_TIMEOUT_MS,
     ) -> None:
         normalized = str(user or "").strip()
         if (
@@ -45,6 +47,7 @@ class HyperliquidClockSyncProbe:
         self.max_probe_rtt_ms = max(0.0, float(max_probe_rtt_ms))
         self.max_sample_age_ms = max(1, int(max_sample_age_ms))
         self.refresh_interval_ms = max(10_000, int(refresh_interval_ms))
+        self.request_timeout_ms = max(1_000, int(request_timeout_ms))
         self.last_sample: ClockSyncSample | None = None
         self._pending_send_wall_ts_ms: int | None = None
         self.attempts = 0
@@ -73,7 +76,11 @@ class HyperliquidClockSyncProbe:
     def refresh_due(self, *, now_ms: int | None = None) -> bool:
         now = int(time.time() * 1_000) if now_ms is None else int(now_ms)
         if self._pending_send_wall_ts_ms is not None:
-            return False
+            if now - self._pending_send_wall_ts_ms <= self.request_timeout_ms:
+                return False
+            self._pending_send_wall_ts_ms = None
+            self.failures += 1
+            self.last_error = "CLOCK_PROBE_RESPONSE_TIMEOUT"
         if self.last_sample is None:
             return True
         return now - int(self.last_sample.receive_wall_ts_ms) >= self.refresh_interval_ms
@@ -176,5 +183,6 @@ __all__ = [
     "DEFAULT_MAX_PROBE_RTT_MS",
     "DEFAULT_MAX_SAMPLE_AGE_MS",
     "DEFAULT_REFRESH_INTERVAL_MS",
+    "DEFAULT_REQUEST_TIMEOUT_MS",
     "HyperliquidClockSyncProbe",
 ]
