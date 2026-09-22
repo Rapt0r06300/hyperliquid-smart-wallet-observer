@@ -260,6 +260,211 @@ def userfills_envelope(
     )
 
 
+def l2_envelope(
+    message: Mapping[str, Any],
+    *,
+    receive_wall_ms: int,
+    receive_mono_ns: int,
+    connection_id: str,
+    reconnect_count: int = 0,
+) -> TickEnvelope | None:
+    if str(message.get("channel") or "") != "l2Book":
+        return None
+    data = message.get("data")
+    if not isinstance(data, Mapping):
+        return None
+    coin = str(data.get("coin") or "").strip().upper()
+    if not coin:
+        return None
+    try:
+        exchange_ts_ms = int(data.get("time")) if data.get("time") is not None else None
+    except (TypeError, ValueError, OverflowError):
+        exchange_ts_ms = None
+    levels = data.get("levels")
+    bid_levels = ask_levels = 0
+    if isinstance(levels, list):
+        if len(levels) > 0 and isinstance(levels[0], list):
+            bid_levels = len(levels[0])
+        if len(levels) > 1 and isinstance(levels[1], list):
+            ask_levels = len(levels[1])
+    return TickEnvelope(
+        source_id="hyperliquid_public_copy_l2",
+        channel="copy_vault_l2",
+        instrument=coin,
+        event_kind=FeedEventKind.SNAPSHOT,
+        raw_payload=dict(message),
+        exchange_ts_ms=exchange_ts_ms,
+        received_ts_ms=receive_wall_ms,
+        local_monotonic_ns=receive_mono_ns,
+        connection_id=connection_id,
+        reconnect_count=int(reconnect_count),
+        provenance={
+            "url": WS_URL,
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "websocket",
+            "authenticated": False,
+            "copy_vault_execution_evidence": True,
+        },
+        parsed_summary={
+            "bid_levels": bid_levels,
+            "ask_levels": ask_levels,
+            "data_gate_ready": False,
+        },
+    )
+
+
+async def _dynamic_l2_collector(
+    sink: AsyncTickSink,
+    request_queue: asyncio.Queue[str],
+    known_coins: set[str],
+    state: dict[str, int],
+) -> None:
+    """Maintain one public HL L2 socket and dynamically subscribe leader coins."""
+    attempt = 0
+    while True:
+        connection_id = f"copy-l2-{uuid.uuid4().hex}"
+        try:
+            async with websockets.connect(
+                WS_URL,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+                max_size=2**23,
+            ) as socket:
+                subscribed: set[str] = set()
+                for coin in sorted(known_coins):
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "method": "subscribe",
+                                "subscription": {"type": "l2Book", "coin": coin},
+                            }
+                        )
+                    )
+                    subscribed.add(coin)
+                    await asyncio.sleep(0.03)
+
+                async def sender() -> None:
+                    while True:
+                        coin = str(await request_queue.get()).strip().upper()
+                        try:
+                            if coin and coin not in subscribed:
+                                await socket.send(
+                                    json.dumps(
+                                        {
+                                            "method": "subscribe",
+                                            "subscription": {
+                                                "type": "l2Book",
+                                                "coin": coin,
+                                            },
+                                        }
+                                    )
+                                )
+                                subscribed.add(coin)
+                        finally:
+                            request_queue.task_done()
+
+                sender_task = asyncio.create_task(sender())
+                attempt = 0
+                try:
+                    async for raw_text in socket:
+                        mono = time.monotonic_ns()
+                        wall = int(time.time() * 1_000)
+                        try:
+                            message = json.loads(raw_text)
+                        except (TypeError, ValueError):
+                            continue
+                        if not isinstance(message, Mapping):
+                            continue
+                        envelope = l2_envelope(
+                            message,
+                            receive_wall_ms=wall,
+                            receive_mono_ns=mono,
+                            connection_id=connection_id,
+                            reconnect_count=state.get("reconnects", 0),
+                        )
+                        if envelope is not None:
+                            sink.emit(envelope)
+                            state["frames"] = state.get("frames", 0) + 1
+                finally:
+                    sender_task.cancel()
+                    await asyncio.gather(sender_task, return_exceptions=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            state["reconnects"] = state.get("reconnects", 0) + 1
+            await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
+            attempt += 1
+
+
+async def collect_position_snapshots(
+    vaults: list[str],
+    sink: AsyncTickSink,
+    *,
+    phase: str,
+) -> int:
+    """Capture public clearinghouse state as a leader-position anchor."""
+    semaphore = asyncio.Semaphore(8)
+    count = 0
+
+    async with httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz",
+        timeout=15.0,
+    ) as client:
+        async def one(vault: str) -> TickEnvelope | None:
+            async with semaphore:
+                sent_ms = int(time.time() * 1_000)
+                try:
+                    response = await client.post(
+                        "/info",
+                        json={"type": "clearinghouseState", "user": vault},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception:
+                    return None
+                mono = time.monotonic_ns()
+                received_ms = int(time.time() * 1_000)
+                if not isinstance(payload, Mapping):
+                    return None
+                positions = payload.get("assetPositions")
+                position_count = len(positions) if isinstance(positions, list) else 0
+                return TickEnvelope(
+                    source_id="hyperliquid_public_info",
+                    channel="copy_vault_positions",
+                    instrument=vault,
+                    event_kind=FeedEventKind.SNAPSHOT,
+                    raw_payload=dict(payload),
+                    exchange_ts_ms=None,
+                    received_ts_ms=received_ms,
+                    local_monotonic_ns=mono,
+                    connection_id=None,
+                    provenance={
+                        "url": INFO_URL,
+                        "network": "mainnet",
+                        "access": "read_only",
+                        "transport": "https",
+                        "authenticated": False,
+                        "request_type": "clearinghouseState",
+                        "request_send_wall_ms": sent_ms,
+                        "request_receive_wall_ms": received_ms,
+                    },
+                    parsed_summary={
+                        "phase": phase,
+                        "position_count": position_count,
+                        "data_gate_ready": False,
+                    },
+                )
+
+        rows = await asyncio.gather(*(one(vault) for vault in vaults))
+        for envelope in rows:
+            if envelope is not None:
+                sink.emit(envelope)
+                count += 1
+    return count
+
+
 async def _socket_group(
     vaults: list[str],
     sink: AsyncTickSink,
@@ -268,6 +473,8 @@ async def _socket_group(
     live_ids: dict[str, set[str]],
     live_fill_counts: dict[str, int],
     reconnect_counts: dict[str, int],
+    l2_request_queue: asyncio.Queue[str],
+    l2_known_coins: set[str],
 ) -> None:
     attempt = 0
     group_key = "-".join(vault[:8] for vault in vaults)
@@ -323,6 +530,16 @@ async def _socket_group(
                         continue
                     envelope.reconnect_count = reconnect_counts.get(vault, 0)
                     sink.emit(envelope)
+
+                    # Pre-warm execution L2 from every observed coin, including the
+                    # initial userFills snapshot. Snapshot fills never count as forward
+                    # signals; they are used only to decide what public market data to
+                    # observe before a future leader action.
+                    for fill in fills:
+                        coin = str(fill.get("coin") or "").strip().upper()
+                        if coin and coin not in l2_known_coins:
+                            l2_known_coins.add(coin)
+                            l2_request_queue.put_nowait(coin)
 
                     # Only forward, non-snapshot fills observed after selection count
                     # toward causal reconciliation.
@@ -611,6 +828,14 @@ async def collect(
     live_ids: dict[str, set[str]] = defaultdict(set)
     live_fill_counts: dict[str, int] = defaultdict(int)
     reconnect_counts: dict[str, int] = defaultdict(int)
+    l2_request_queue: asyncio.Queue[str] = asyncio.Queue()
+    l2_known_coins: set[str] = set()
+    l2_state: dict[str, int] = {"frames": 0, "reconnects": 0}
+    position_snapshots_start = await collect_position_snapshots(
+        vaults,
+        sink,
+        phase="START",
+    )
     groups = [
         vaults[index:index + MAX_SUBSCRIPTIONS_PER_SOCKET]
         for index in range(0, len(vaults), MAX_SUBSCRIPTIONS_PER_SOCKET)
@@ -624,10 +849,22 @@ async def collect(
                 live_ids=live_ids,
                 live_fill_counts=live_fill_counts,
                 reconnect_counts=reconnect_counts,
+                l2_request_queue=l2_request_queue,
+                l2_known_coins=l2_known_coins,
             )
         )
         for group in groups
     ]
+    tasks.append(
+        asyncio.create_task(
+            _dynamic_l2_collector(
+                sink,
+                l2_request_queue,
+                l2_known_coins,
+                l2_state,
+            )
+        )
+    )
 
     try:
         await asyncio.sleep(max(1.0, float(duration_s)))
@@ -636,6 +873,11 @@ async def collect(
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
+    position_snapshots_end = await collect_position_snapshots(
+        vaults,
+        sink,
+        phase="END",
+    )
     end_ms = int(time.time() * 1_000)
     reports = await reconcile_forward_window(
         vaults,
@@ -666,6 +908,11 @@ async def collect(
         "vault_shard_count": selection.get("vault_shard_count"),
         "vault_shard_index": selection.get("vault_shard_index"),
         "socket_groups": len(groups),
+        "l2_coin_count": len(l2_known_coins),
+        "l2_frames": l2_state.get("frames", 0),
+        "l2_reconnects": l2_state.get("reconnects", 0),
+        "position_snapshots_start": position_snapshots_start,
+        "position_snapshots_end": position_snapshots_end,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
