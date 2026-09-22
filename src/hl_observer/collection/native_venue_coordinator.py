@@ -49,11 +49,17 @@ class NativeVenueCoordinator:
         tick_writer: Any | None = None,
         stale_after_ms: int = 1_000,
         max_symbols_per_venue: int = 100,
+        symbol_shard_count: int = 1,
+        symbol_shard_index: int = 0,
         clock_sync_interval_s: float = 60.0,
         ccxt_snapshot_path: str | Path | None = "data/ccxt_universe.json",
     ) -> None:
         self.stale_after_ms = int(stale_after_ms)
         self.max_symbols_per_venue = max(1, int(max_symbols_per_venue))
+        self.symbol_shard_count = max(1, int(symbol_shard_count))
+        self.symbol_shard_index = int(symbol_shard_index)
+        if not 0 <= self.symbol_shard_index < self.symbol_shard_count:
+            raise ValueError("symbol_shard_index must be in [0, symbol_shard_count)")
         self.bybit_client = bybit_client or BybitPublicClient()
         self.okx_client = okx_client or OkxPublicClient()
         self.gate_client = gate_client or GatePublicClient()
@@ -152,7 +158,8 @@ class NativeVenueCoordinator:
             key=lambda item: (item[0] not in self._ccxt_priority, -len(item[1]), item[0]),
         )
         symbols = [venues[venue_key] for _coin, venues in ranked if venue_key in venues]
-        return symbols[: self.max_symbols_per_venue]
+        selected = symbols[: self.max_symbols_per_venue]
+        return selected[self.symbol_shard_index :: self.symbol_shard_count]
 
     def ingest_external_bbo(
         self,
@@ -314,6 +321,8 @@ class NativeVenueCoordinator:
             "bitget_symbols": len(self.symbols_for("bitget")),
             "candidate_coins_2plus_venues": candidates,
             "ccxt_native_candidates_prioritized": len(self._ccxt_priority),
+            "symbol_shard_index": self.symbol_shard_index,
+            "symbol_shard_count": self.symbol_shard_count,
             "clock_sync": {venue: dict(row) for venue, row in self._clock_sync.items()},
             "raw_tick_writer_enabled": self.tick_writer is not None,
             "real_execution": False,
