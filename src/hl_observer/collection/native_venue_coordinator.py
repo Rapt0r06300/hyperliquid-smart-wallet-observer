@@ -27,7 +27,11 @@ from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
 )
-from hl_observer.collection.native_venue_market import MultiVenueMarketStore, NativeMarketSnapshot
+from hl_observer.collection.native_venue_market import (
+    MarketLevel,
+    MultiVenueMarketStore,
+    NativeMarketSnapshot,
+)
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
 from hl_observer.markets.ccxt_universe import load_native_collection_candidates
 
@@ -247,8 +251,25 @@ class NativeVenueCoordinator:
         exchange_ts_ms: int,
         receive_ts_ms: int,
         now_ms: int | None = None,
+        bids: tuple[MarketLevel, ...] = (),
+        asks: tuple[MarketLevel, ...] = (),
+        sequence: int | None = None,
+        update_id: int | None = None,
+        connection_id: str | None = None,
+        receive_mono_ns: int | None = None,
+        transport_rtt_ms: float | None = None,
+        clock_offset_ms: float | None = None,
+        gap_count: int = 0,
+        duplicate_count: int = 0,
+        regression_count: int = 0,
+        reason: str = "",
     ) -> NativeMarketSnapshot:
-        """Normalize an existing read-only Hyperliquid/Binance BBO into the store."""
+        """Normalize an existing read-only HL/Binance observation into the store.
+
+        External collectors own their transport. This adapter must preserve their
+        causality/integrity evidence instead of collapsing it to price-only BBO.
+        Missing evidence stays missing so strict replay gates fail closed.
+        """
         snapshot = NativeMarketSnapshot.build(
             venue=venue,
             coin=coin,
@@ -259,6 +280,18 @@ class NativeVenueCoordinator:
             receive_ts_ms=receive_ts_ms,
             now_ms=now_ms,
             stale_after_ms=self.stale_after_ms,
+            bids=bids,
+            asks=asks,
+            sequence=sequence,
+            update_id=update_id,
+            connection_id=connection_id,
+            receive_mono_ns=receive_mono_ns,
+            transport_rtt_ms=transport_rtt_ms,
+            clock_offset_ms=clock_offset_ms,
+            gap_count=gap_count,
+            duplicate_count=duplicate_count,
+            regression_count=regression_count,
+            reason=reason,
         )
         self.store.put(snapshot)
         return snapshot
