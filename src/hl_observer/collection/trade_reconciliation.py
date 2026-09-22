@@ -547,6 +547,8 @@ def _trade_id(row: Mapping[str, Any], venue: str) -> str | None:
         value = row.get("tradeId")
     elif key == "binance":
         value = row.get("a")
+    elif key == "hyperliquid":
+        value = row.get("tid")
     else:
         return None
     return None if value in {None, ""} else str(value)

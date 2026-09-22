@@ -143,7 +143,8 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
     assert uploaded == ["asset-0.jsonl.gz", "asset-1.jsonl.gz", "RUN_MANIFEST.json"]
     assert not any(name.startswith("dataset-") and name.endswith(".json") for name in uploaded)
     assert result["shard_count"] == 2
-    assert result["safe_coverage_matrix"]["safe_partitions"] == 2
+    # Coverage rows are partitions by coin+venue+family, not raw shard count.
+    assert result["safe_coverage_matrix"]["safe_partitions"] == 1
     assert result["safe_coverage_matrix"]["coins"] == ["BTC"]
     assert (bundle / "RUN_MANIFEST.json").is_file()
 

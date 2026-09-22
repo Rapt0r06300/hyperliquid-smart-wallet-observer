@@ -18,11 +18,10 @@ def test_binance_clock_probe_estimates_public_server_offset(monkeypatch) -> None
             transport=httpx.MockTransport(handler),
         )
         values = iter([1.000, 1.020])
-        monkeypatch.setattr(
-            "hl_observer.collection.binance_clock_sync.time.time",
-            lambda: next(values),
+        probe = BinanceClockSyncProbe(
+            http_client=client,
+            wall_time=lambda: next(values),
         )
-        probe = BinanceClockSyncProbe(http_client=client)
         sample = await probe.sample_once()
         assert sample is not None
         assert sample.rtt_ms == 20.0

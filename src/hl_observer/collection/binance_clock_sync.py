@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import httpx
@@ -20,6 +20,7 @@ class BinanceClockSyncProbe:
         rest_base_url: str = REST_BASE_URL,
         interval_s: float = 60.0,
         http_client: httpx.AsyncClient | None = None,
+        wall_time: Callable[[], float] | None = None,
     ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.interval_s = max(10.0, float(interval_s))
@@ -28,12 +29,13 @@ class BinanceClockSyncProbe:
             base_url=self.rest_base_url,
             timeout=10.0,
         )
+        self._wall_time = wall_time or time.time
         self.last_sample: ClockSyncSample | None = None
         self.failures = 0
         self.last_error = ""
 
     async def sample_once(self) -> ClockSyncSample | None:
-        sent = int(time.time() * 1_000)
+        sent = int(self._wall_time() * 1_000)
         try:
             response = await self.http.get("/fapi/v1/time")
             response.raise_for_status()
@@ -43,7 +45,7 @@ class BinanceClockSyncProbe:
             self.failures += 1
             self.last_error = f"{type(exc).__name__}: {exc}"[:500]
             return None
-        received = int(time.time() * 1_000)
+        received = int(self._wall_time() * 1_000)
         sample = estimate_clock_sync(
             venue="binance",
             server_ts_ms=server,
