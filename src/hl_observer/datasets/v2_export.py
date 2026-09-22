@@ -55,6 +55,7 @@ def build_manifest_from_tick_shard(
     clock_offsets_ms: list[float] = []
     reconnect_count_max = 0
     gap_counter_values: list[int] = []
+    event_gap_deltas: list[int] = []
     reconnect_counter_values: list[int] = []
 
     with gzip.open(path, "rt", encoding="utf-8") as handle:
@@ -84,8 +85,6 @@ def build_manifest_from_tick_shard(
             if connection_id:
                 connection_ids.add(connection_id)
             record_gap_counter = _int(record.get("gap_count"))
-            if record_gap_counter is not None:
-                gap_counter_values.append(record_gap_counter)
             record_reconnect_counter = _int(record.get("reconnect_count"))
             if record_reconnect_counter is not None:
                 reconnect_counter_values.append(record_reconnect_counter)
@@ -133,9 +132,10 @@ def build_manifest_from_tick_shard(
             previous_sequence = last_sequence.get(key)
             sequence_gap = False
             if isinstance(summary, Mapping):
-                if str(summary.get("quality") or "").upper() == "DESYNC":
-                    desync_count += 1
-                if summary.get("needs_resnapshot") is True:
+                if (
+                    str(summary.get("quality") or "").upper() == "DESYNC"
+                    or str(summary.get("book_state") or "").upper() == "DESYNC"
+                ):
                     desync_count += 1
 
                 # Venue-provided continuity evidence. This is intentionally
@@ -148,12 +148,10 @@ def build_manifest_from_tick_shard(
                 )
                 first_update = _int(summary.get("first_update_id"))
                 if channel == "l2Book" and previous_sequence is not None:
-                    if (
-                        reported_previous is not None
-                        and reported_previous not in {-1, previous_sequence}
-                    ):
-                        sequence_gap = True
-                    if (
+                    if reported_previous is not None:
+                        if reported_previous not in {-1, previous_sequence}:
+                            sequence_gap = True
+                    elif (
                         first_update is not None
                         and first_update > previous_sequence + 1
                     ):
@@ -179,6 +177,12 @@ def build_manifest_from_tick_shard(
                 transport = str(provenance.get("transport") or "")
                 if transport:
                     transports.add(transport)
+                gap_semantics = str(provenance.get("gap_count_semantics") or "").lower()
+                if record_gap_counter is not None:
+                    if gap_semantics == "event_delta":
+                        event_gap_deltas.append(max(0, record_gap_counter))
+                    else:
+                        gap_counter_values.append(record_gap_counter)
                 if "authenticated" not in provenance:
                     authenticated_explicit = False
                 authenticated = provenance.get("authenticated")
@@ -202,6 +206,8 @@ def build_manifest_from_tick_shard(
 
     if gap_counter_values:
         gap_count += max(gap_counter_values) - min(gap_counter_values)
+    if event_gap_deltas:
+        gap_count += sum(event_gap_deltas)
     reconnect_delta = (
         max(reconnect_counter_values) - min(reconnect_counter_values)
         if reconnect_counter_values
