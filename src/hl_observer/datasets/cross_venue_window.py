@@ -9,6 +9,8 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from hl_observer.datasets.strategy_data_contracts import get_strategy_data_contract
+
 SAFE = "SAFE"
 PARTIAL = "PARTIAL"
 REJECT = "REJECT"
@@ -178,6 +180,52 @@ def build_cross_venue_window_manifest(
     }
 
 
+def build_strategy_window_manifest(
+    manifests: Iterable[Mapping[str, Any]],
+    *,
+    strategy: str,
+    canonical_coin: str,
+    venues: Iterable[str],
+    instrument_mapping_exact: bool,
+    sync_report: Mapping[str, Any] | None,
+    min_overlap_ms: int = 1_000,
+) -> dict[str, Any]:
+    """Apply the declared replay data contract for one strategy/window."""
+    contract = get_strategy_data_contract(strategy)
+    required = contract.for_venues(venues)
+    result = build_cross_venue_window_manifest(
+        manifests,
+        canonical_coin=canonical_coin,
+        required_families_by_venue=required,
+        instrument_mapping_exact=instrument_mapping_exact,
+        sync_report=sync_report,
+        min_overlap_ms=min_overlap_ms,
+        max_p95_receive_skew_ms=(
+            float(contract.max_receive_skew_ms)
+            if contract.max_receive_skew_ms is not None
+            else 250.0
+        ),
+        max_receive_skew_ms=(
+            float(contract.max_receive_skew_ms)
+            if contract.max_receive_skew_ms is not None
+            else 500.0
+        ),
+        min_sync_samples=contract.min_sync_samples,
+        require_same_collection_run=contract.require_same_collection_run,
+    )
+    result["schema"] = "alina.strategy_window.v1"
+    result["strategy"] = contract.strategy
+    result["contract"] = {
+        "max_receive_skew_ms": contract.max_receive_skew_ms,
+        "max_exchange_skew_ms": contract.max_exchange_skew_ms,
+        "min_sync_samples": contract.min_sync_samples,
+        "require_exact_instrument_mapping": contract.require_exact_instrument_mapping,
+        "require_same_collection_run": contract.require_same_collection_run,
+        "require_reconciliation": contract.require_reconciliation,
+    }
+    return result
+
+
 def _int(value: Any) -> int | None:
     try:
         return int(value) if value is not None and not isinstance(value, bool) else None
@@ -198,4 +246,5 @@ __all__ = [
     "REJECT",
     "SAFE",
     "build_cross_venue_window_manifest",
+    "build_strategy_window_manifest",
 ]
