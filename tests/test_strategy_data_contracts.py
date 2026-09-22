@@ -15,9 +15,10 @@ def test_cross_venue_contract_requires_depth_trades_and_context() -> None:
     assert {"bbo", "l2Book", "trades", "activeAssetCtx"}.issubset(
         contract.required_families_by_venue["hyperliquid"]
     )
-    assert {"bbo", "l2Book", "trades", "mark_funding", "open_interest"}.issubset(
+    assert {"bbo", "l2Book", "agg_trades", "mark_funding", "open_interest"}.issubset(
         contract.required_families_by_venue["binance"]
     )
+    assert "trades" not in contract.required_families_by_venue["binance"]
     assert {"l2Book", "trades", "ticker"}.issubset(
         contract.required_families_by_venue["bybit"]
     )
@@ -60,7 +61,7 @@ def test_missing_required_families_never_silently_pass() -> None:
     )
     assert "trades" in missing["hyperliquid"]
     assert "activeAssetCtx" in missing["hyperliquid"]
-    assert "trades" in missing["binance"]
+    assert "agg_trades" in missing["binance"]
     assert "mark_funding" in missing["binance"]
 
 
