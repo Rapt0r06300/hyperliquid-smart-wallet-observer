@@ -236,3 +236,37 @@ def test_mesurer_lead_lag_detecte_que_binance_MENE():
     c_lead = m.mesurer_lead_lag(serie, lag_ms=200.0)            # au bon lag -> forte corrélation
     assert c_lead is not None and c_lead > 0.5
     assert m.mesurer_lead_lag(serie[:5], lag_ms=200.0) is None  # trop peu de points -> None honnête
+
+
+def test_parser_active_asset_ctx_hl_preserves_market_context() -> None:
+    m = _mod()
+    row = m.parser_active_asset_ctx_hl(
+        {
+            "channel": "activeAssetCtx",
+            "data": {
+                "coin": "BTC",
+                "ctx": {
+                    "markPx": "65001.5",
+                    "midPx": "65001.0",
+                    "oraclePx": "64999.8",
+                    "funding": "0.0000125",
+                    "openInterest": "1234.5",
+                    "premium": "0.00002",
+                    "dayNtlVlm": "9876543.21",
+                    "prevDayPx": "64000",
+                },
+            },
+        }
+    )
+    assert row == {
+        "coin": "BTC",
+        "mark_px": 65001.5,
+        "mid_px": 65001.0,
+        "oracle_px": 64999.8,
+        "funding_rate": 0.0000125,
+        "open_interest": 1234.5,
+        "premium": 0.00002,
+        "day_notional_volume": 9876543.21,
+        "prev_day_px": 64000.0,
+    }
+    assert m.parser_active_asset_ctx_hl({"channel": "bbo", "data": {}}) is None
