@@ -166,6 +166,15 @@ def _hyperliquid_envelope(
                     "prev_day_price": _float(ctx.get("prevDayPx")),
                 }
             )
+    provenance = {
+        "url": WS_HYPERLIQUID,
+        "network": "mainnet",
+        "access": "read_only",
+        "transport": "websocket",
+        "authenticated": False,
+    }
+    if channel == "activeAssetCtx":
+        provenance["timestamp_semantics"] = "receive_observation_time_only"
     return TickEnvelope(
         source_id="hyperliquid_public_ws",
         channel=channel,
@@ -177,13 +186,7 @@ def _hyperliquid_envelope(
         local_monotonic_ns=int(receive_mono_ns),
         connection_id=connection_id,
         sequence=None,
-        provenance={
-            "url": WS_HYPERLIQUID,
-            "network": "mainnet",
-            "access": "read_only",
-            "transport": "websocket",
-            "authenticated": False,
-        },
+        provenance=provenance,
         parsed_summary=parsed_summary,
     )
 
