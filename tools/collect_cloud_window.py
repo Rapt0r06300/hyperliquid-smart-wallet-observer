@@ -578,56 +578,73 @@ async def _hyperliquid(
                 close_timeout=5,
                 max_size=2**23,
             ) as socket:
+                send_lock = asyncio.Lock()
+
+                async def send_json(payload: Mapping[str, Any]) -> None:
+                    async with send_lock:
+                        await socket.send(json.dumps(dict(payload)))
+
                 if clock_probe is not None:
                     clock_probe.mark_subscribe_sent()
-                    await socket.send(json.dumps(clock_probe.subscription_message()))
+                    await send_json(clock_probe.subscription_message())
+
                 for coin in coins:
                     for channel in ("bbo", "l2Book", "trades", "activeAssetCtx"):
-                        await socket.send(
-                            json.dumps(
-                                {
-                                    "method": "subscribe",
-                                    "subscription": {"type": channel, "coin": coin},
-                                }
-                            )
+                        await send_json(
+                            {
+                                "method": "subscribe",
+                                "subscription": {"type": channel, "coin": coin},
+                            }
                         )
-                async for raw_text in socket:
-                    receive_mono_ns = time.monotonic_ns()
-                    receive_wall_ms = int(time.time() * 1_000)
-                    try:
-                        message = json.loads(raw_text)
-                    except (TypeError, ValueError):
-                        continue
-                    if not isinstance(message, Mapping):
-                        continue
-                    if clock_probe is not None:
-                        clock_probe.observe(
+
+                async def heartbeat() -> None:
+                    while True:
+                        await asyncio.sleep(30.0)
+                        await send_json({"method": "ping"})
+
+                heartbeat_task = asyncio.create_task(heartbeat())
+                try:
+                    async for raw_text in socket:
+                        receive_mono_ns = time.monotonic_ns()
+                        receive_wall_ms = int(time.time() * 1_000)
+                        try:
+                            message = json.loads(raw_text)
+                        except (TypeError, ValueError):
+                            continue
+                        if not isinstance(message, Mapping):
+                            continue
+
+                        if clock_probe is not None:
+                            clock_probe.observe(
+                                message,
+                                received_wall_ts_ms=receive_wall_ms,
+                            )
+                            if clock_probe.refresh_due(now_ms=receive_wall_ms):
+                                await send_json(clock_probe.unsubscribe_message())
+                                clock_probe.mark_subscribe_sent(receive_wall_ms)
+                                await send_json(clock_probe.subscription_message())
+
+                        if message.get("channel") in {"subscriptionResponse", "pong"}:
+                            continue
+
+                        clock_evidence = (
+                            clock_probe.evidence(now_ms=receive_wall_ms)
+                            if clock_probe is not None
+                            else None
+                        )
+                        envelope = _hyperliquid_envelope(
                             message,
-                            received_wall_ts_ms=receive_wall_ms,
+                            received_ts_ms=receive_wall_ms,
+                            receive_mono_ns=receive_mono_ns,
+                            connection_id=connection_id,
+                            clock_evidence=clock_evidence,
                         )
-                        if clock_probe.refresh_due(now_ms=receive_wall_ms):
-                            await socket.send(
-                                json.dumps(clock_probe.unsubscribe_message())
-                            )
-                            clock_probe.mark_subscribe_sent(receive_wall_ms)
-                            await socket.send(
-                                json.dumps(clock_probe.subscription_message())
-                            )
-                    clock_evidence = (
-                        clock_probe.evidence(now_ms=receive_wall_ms)
-                        if clock_probe is not None
-                        else None
-                    )
-                    envelope = _hyperliquid_envelope(
-                        message,
-                        received_ts_ms=receive_wall_ms,
-                        receive_mono_ns=receive_mono_ns,
-                        connection_id=connection_id,
-                        clock_evidence=clock_evidence,
-                    )
-                    if envelope is not None:
-                        envelope.reconnect_count = reconnects
-                        sink.emit(envelope)
+                        if envelope is not None:
+                            envelope.reconnect_count = reconnects
+                            sink.emit(envelope)
+                finally:
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
         except asyncio.CancelledError:
             raise
         except Exception:
