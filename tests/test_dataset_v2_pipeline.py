@@ -379,3 +379,50 @@ def test_missing_exchange_timestamp_without_explicit_semantics_stays_partial(tmp
     )
     assert verified["quality_status"] == "PARTIAL"
     assert "MISSING_EXCHANGE_OR_RECEIVE_TIMESTAMP" in verified["quality_reasons"]
+
+
+def test_explicit_trade_reconciliation_mismatch_is_rejected() -> None:
+    manifest = {
+        "event_count": 2,
+        "bytes": 100,
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1010,
+        "sha256": "a" * 64,
+        "collector_version": "b" * 40,
+        "family": "trades",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "required_channels": [],
+        "observed_channels": ["trades"],
+        "cost_model": {"applicable": False, "ready": False},
+        "reconciliation": {"status": "UNVERIFIED"},
+    }
+    rejected = attach_reconciliation(
+        manifest,
+        {
+            "status": "MISMATCH",
+            "live_count": 2,
+            "reference_count": 2,
+            "matched_count": 1,
+            "missing_from_live": 1,
+            "live_only": 1,
+            "duplicate_live_keys": 0,
+        },
+    )
+    assert rejected["quality_status"] == "REJECT"
+    assert rejected["validation_allowed"] is False
+    assert "RECONCILIATION_MISMATCH" in rejected["quality_reasons"]
