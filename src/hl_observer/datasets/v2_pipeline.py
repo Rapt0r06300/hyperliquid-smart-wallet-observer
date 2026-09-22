@@ -23,7 +23,6 @@ _SNAPSHOT_CHANNELS = {
 }
 _MATCHED_RECONCILIATION_FAMILIES = {
     "trades",
-    "funding",
     "fills",
     "userfills",
     "user_fills",
