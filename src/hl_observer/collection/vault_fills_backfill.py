@@ -366,7 +366,8 @@ def couverture(fills: list[dict]) -> dict:
             "fills_par_vault": par_vault, "t0_ms": min(ts), "t1_ms": max(ts)}
 
 
-CAP_USERFILLS = 10_000            # userFillsByTime plafonne aux ~10k fills RÉCENTS (limite officielle)
+CAP_USERFILLS = 2_000             # maximum returned by one userFillsByTime response
+RETENTION_USERFILLS = 10_000       # only the 10k most recent fills are queryable
 
 
 def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_debut_ms: int | None = None,
@@ -401,4 +402,4 @@ def auditer_couverture(fills: list[dict], *, cap: int = CAP_USERFILLS, lookback_
 
 __all__ = ["plan_de_requetes", "parser_fills", "normaliser_vault", "fill_identity", "canonical_fill_id", "dedupliquer",
            "reconstruire_episodes", "marquer_retraits", "entrees_alpha", "couverture", "auditer_couverture",
-           "CAP_USERFILLS", "MS_PAR_HEURE"]
+           "CAP_USERFILLS", "RETENTION_USERFILLS", "MS_PAR_HEURE"]
