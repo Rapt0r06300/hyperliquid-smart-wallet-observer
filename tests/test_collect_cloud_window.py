@@ -344,3 +344,32 @@ def test_cloud_window_backfills_funding_per_venue_fail_closed(monkeypatch) -> No
     assert result["bybit"]["status"] == "ERROR"
     assert result["bybit"]["records"] == 0
     assert result["bybit"]["error"] == "RuntimeError"
+
+
+def test_binance_aggtrade_is_separate_reconcilable_family() -> None:
+    m = _module()
+    tick = m._binance_trade_envelope(
+        {
+            "data": {
+                "e": "aggTrade",
+                "s": "BTCUSDT",
+                "a": 500,
+                "f": 700,
+                "l": 702,
+                "p": "65000",
+                "q": "1.2",
+                "T": 1000,
+                "m": False,
+            }
+        },
+        received_ts_ms=1005,
+        receive_mono_ns=100,
+        connection_id="bin-agg-test",
+    )
+    assert tick is not None
+    assert tick.channel == "agg_trades"
+    assert tick.sequence == 500
+    assert tick.parsed_summary["aggregate_trade_id"] == 500
+    assert tick.parsed_summary["first_trade_id"] == 700
+    assert tick.parsed_summary["last_trade_id"] == 702
+    assert tick.parsed_summary["aggressor_side"] == "BUY"
