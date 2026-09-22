@@ -273,3 +273,35 @@ def test_binance_bootstrap_state_is_not_desync_but_real_gap_is_counted(tmp_path)
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["integrity"]["gap_count"] >= 1
     assert manifest["integrity"]["desync_count"] == 1
+
+
+def test_receive_only_repeated_observations_are_not_duplicates(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for received, mono in ((1000, 100), (1010, 200)):
+        writer.append(
+            TickEnvelope(
+                source_id="hyperliquid_public_ws",
+                channel="activeAssetCtx",
+                instrument="BTC",
+                event_kind="SNAPSHOT",
+                raw_payload={
+                    "channel": "activeAssetCtx",
+                    "data": {"coin": "BTC", "ctx": {"markPx": "100"}},
+                },
+                exchange_ts_ms=None,
+                received_ts_ms=received,
+                local_monotonic_ns=mono,
+                connection_id="hl-1",
+                sequence=None,
+                provenance={
+                    "access": "read_only",
+                    "authenticated": False,
+                    "transport": "websocket",
+                    "timestamp_semantics": "receive_observation_time_only",
+                },
+            )
+        )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["integrity"]["duplicate_count"] == 0
+    assert manifest["integrity"]["duplicates_deduped"] is True
