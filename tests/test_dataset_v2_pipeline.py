@@ -6,6 +6,7 @@ from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatas
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.datasets.v2_pipeline import (
     assess_manifest,
+    attach_reconciliation,
     build_bundle,
     verify_remote_asset,
 )
@@ -167,3 +168,116 @@ def test_collection_queue_drop_rejects_every_native_bundle_shard(tmp_path) -> No
     assert manifest["integrity"]["gap_count"] >= 3
     assert manifest["quality_status"] == "REJECT"
     assert "SEQUENCE_OR_QUEUE_GAP" in manifest["quality_reasons"]
+
+
+def test_trade_shard_requires_explicit_matched_reconciliation(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    trade = TickEnvelope(
+        source_id="bybit_public_ws",
+        channel="trades",
+        instrument="BTCUSDT",
+        event_kind="EVENT",
+        raw_payload={"topic": "publicTrade.BTCUSDT", "ts": 1000, "data": [{"i": "a"}]},
+        exchange_ts_ms=1000,
+        received_ts_ms=1005,
+        local_monotonic_ns=1_000_000,
+        connection_id="ws-1",
+        sequence=1,
+        provenance={
+            "access": "read_only",
+            "transport": "websocket",
+            "authenticated": False,
+        },
+    )
+    writer.append(trade)
+    writer.rotate_all()
+
+    build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="e" * 40,
+    )
+    import json
+    manifest_path = next((tmp_path / "bundle" / "manifests").glob("*.json"))
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["family"] == "trades"
+    assert manifest["reconciliation"]["status"] == "UNVERIFIED"
+    assert manifest["quality_status"] == "PARTIAL"
+    assert "RECONCILIATION_MATCH_REQUIRED" in manifest["quality_reasons"]
+
+    asset = tmp_path / "bundle" / "assets" / manifest["release_asset"]
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    verified = verify_remote_asset(
+        manifest,
+        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        release_tag="data-v2-run-trades",
+        release_id=30,
+        asset_id=40,
+        asset_name=manifest["release_asset"],
+        remote_size=asset.stat().st_size,
+        remote_digest="sha256:" + digest,
+    )
+    assert verified["quality_status"] == "PARTIAL"
+
+    reconciled = attach_reconciliation(
+        verified,
+        {
+            "status": "MATCHED",
+            "live_count": 1,
+            "reference_count": 1,
+            "matched_count": 1,
+            "missing_from_live": 0,
+            "live_only": 0,
+            "duplicate_live_keys": 0,
+            "backfill_status": "OK",
+        },
+    )
+    assert reconciled["quality_status"] == "SAFE"
+    assert reconciled["validation_allowed"] is True
+
+
+def test_partial_trade_reconciliation_never_promotes_safe(tmp_path) -> None:
+    manifest = {
+        "event_count": 1,
+        "bytes": 10,
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1000,
+        "sha256": "f" * 64,
+        "collector_version": "f" * 40,
+        "family": "trades",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "required_channels": [],
+        "observed_channels": ["trades"],
+        "cost_model": {"applicable": False, "ready": False},
+        "reconciliation": {"status": "UNVERIFIED"},
+    }
+    partial = attach_reconciliation(
+        manifest,
+        {
+            "status": "PARTIAL",
+            "live_count": 10,
+            "reference_count": 11,
+            "matched_count": 10,
+            "missing_from_live": 1,
+            "live_only": 0,
+            "duplicate_live_keys": 0,
+            "backfill_status": "OK",
+        },
+    )
+    assert partial["quality_status"] == "PARTIAL"
+    assert "RECONCILIATION_MATCH_REQUIRED" in partial["quality_reasons"]
