@@ -44,6 +44,33 @@ def test_hyperliquid_l2_frame_becomes_replay_tick() -> None:
     assert tick.local_monotonic_ns == 123456
 
 
+def test_hyperliquid_frame_carries_clock_probe_evidence() -> None:
+    m = _module()
+    tick = m._hyperliquid_envelope(
+        {
+            "channel": "bbo",
+            "data": {
+                "coin": "BTC",
+                "time": 1000,
+                "bbo": [
+                    {"px": "100", "sz": "1", "n": 1},
+                    {"px": "101", "sz": "2", "n": 1},
+                ],
+            },
+        },
+        received_ts_ms=1010,
+        receive_mono_ns=123456,
+        connection_id="hl-clock-test",
+        clock_evidence={
+            "clock_offset_ms": -1.5,
+            "clock_probe_rtt_ms": 20.0,
+        },
+    )
+    assert tick is not None
+    assert tick.parsed_summary["clock_offset_ms"] == -1.5
+    assert tick.parsed_summary["clock_probe_rtt_ms"] == 20.0
+
+
 def test_binance_bbo_keeps_update_id_and_transport_clock() -> None:
     m = _module()
     tick = m._binance_bbo_envelope(
