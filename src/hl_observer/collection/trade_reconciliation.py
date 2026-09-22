@@ -6,6 +6,7 @@ No aggregate-vs-individual trade substitution is allowed.
 """
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
 from collections.abc import Mapping
@@ -34,7 +35,15 @@ def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
             if not isinstance(raw, Mapping):
                 continue
             data = raw.get("data")
-            rows = data if isinstance(data, list) else [data] if isinstance(data, Mapping) else []
+            if isinstance(data, list):
+                rows = data
+            elif isinstance(data, Mapping):
+                rows = [data]
+            elif str(venue).lower() == "binance":
+                # Binance cloud envelopes preserve the raw stream payload itself.
+                rows = [raw]
+            else:
+                rows = []
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
@@ -192,6 +201,100 @@ async def reconcile_okx_trade_shard(
     )
 
 
+
+async def reconcile_binance_aggtrade_shard(
+    path: str | Path,
+    *,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    client: httpx.AsyncClient | None = None,
+    limit: int = 1000,
+    max_requests: int = 240,
+    throttle_s: float = 0.55,
+) -> dict[str, Any]:
+    """Reconcile Binance aggregate-trade WS ids against public REST aggTrades.
+
+    REST supports explicit bounded time windows. Full pages are recursively split
+    until each interval is demonstrably exhausted; hitting the request budget
+    remains PARTIAL instead of silently claiming completeness.
+    """
+    own_client = client is None
+    http = client or httpx.AsyncClient(base_url="https://fapi.binance.com", timeout=10.0)
+    start = int(start_ms)
+    end = int(end_ms)
+    if end < start:
+        if own_client:
+            await http.aclose()
+        return {"status": "UNAVAILABLE", "reason": "INVALID_WINDOW"}
+
+    reference: dict[str, Mapping[str, Any]] = {}
+    pending: list[tuple[int, int]] = [(start, end)]
+    requests = 0
+    try:
+        while pending:
+            left, right = pending.pop()
+            if requests >= max(1, int(max_requests)):
+                return {
+                    "status": "PARTIAL",
+                    "reason": "REFERENCE_REQUEST_BUDGET_EXHAUSTED",
+                    "reference_count": len(reference),
+                    "requests": requests,
+                }
+            response = await http.get(
+                "/fapi/v1/aggTrades",
+                params={
+                    "symbol": str(symbol).upper(),
+                    "startTime": left,
+                    "endTime": right,
+                    "limit": min(1000, max(1, int(limit))),
+                },
+            )
+            requests += 1
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                return {
+                    "status": "UNAVAILABLE",
+                    "reason": "BINANCE_REFERENCE_INVALID",
+                    "requests": requests,
+                }
+            rows = [row for row in payload if isinstance(row, Mapping)]
+            for row in rows:
+                trade_id = row.get("a")
+                ts = _int(row.get("T"))
+                if trade_id not in {None, ""} and ts is not None and start <= ts <= end:
+                    reference[str(trade_id)] = row
+
+            if len(rows) >= min(1000, max(1, int(limit))) and left < right:
+                midpoint = left + (right - left) // 2
+                if midpoint <= left:
+                    return {
+                        "status": "PARTIAL",
+                        "reason": "REFERENCE_DENSITY_UNRESOLVED",
+                        "reference_count": len(reference),
+                        "requests": requests,
+                    }
+                pending.append((midpoint + 1, right))
+                pending.append((left, midpoint))
+            if throttle_s > 0 and pending:
+                await asyncio.sleep(float(throttle_s))
+    except Exception as exc:
+        return _error_report("BINANCE_REFERENCE_ERROR", exc)
+    finally:
+        if own_client:
+            await http.aclose()
+
+    live_ids, live_events = live_trade_ids(path, venue="binance")
+    return _compare(
+        live_ids,
+        set(reference),
+        live_event_count=live_events,
+        reference_event_count=len(reference),
+        reference_coverage="EXPLICIT_BOUNDED_REST_WINDOW",
+    )
+
+
 def _compare(
     live_ids: set[str],
     reference_ids: set[str],
@@ -226,6 +329,8 @@ def _trade_id(row: Mapping[str, Any], venue: str) -> str | None:
         value = row.get("i", row.get("execId"))
     elif key == "okx":
         value = row.get("tradeId")
+    elif key == "binance":
+        value = row.get("a")
     else:
         return None
     return None if value in {None, ""} else str(value)
@@ -248,6 +353,7 @@ def _int(value: Any) -> int | None:
 
 __all__ = [
     "live_trade_ids",
+    "reconcile_binance_aggtrade_shard",
     "reconcile_bybit_trade_shard",
     "reconcile_okx_trade_shard",
 ]
