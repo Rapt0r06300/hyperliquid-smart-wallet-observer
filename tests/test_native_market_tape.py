@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 
-from hl_observer.collection.native_market_tape import native_tick_envelope
+from hl_observer.collection.native_market_tape import (
+    native_instrument_metadata_envelope,
+    native_tick_envelope,
+)
 
 
 def _transport() -> dict:
@@ -167,3 +170,31 @@ def test_okx_instrument_rule_change_is_taped() -> None:
     assert record["instrument"] == "BTC-USDT-SWAP"
     raw = json.loads(record["raw_payload"])
     assert raw["data"][0]["tickSz"] == "0.1"
+
+
+def test_bybit_instrument_metadata_snapshot_is_replayable() -> None:
+    envelope = native_instrument_metadata_envelope(
+        "bybit",
+        {
+            "symbol": "BTCUSDT",
+            "status": "Trading",
+            "priceFilter": {"tickSize": "0.1"},
+            "lotSizeFilter": {
+                "qtyStep": "0.001",
+                "minOrderQty": "0.001",
+                "minNotionalValue": "5",
+            },
+        },
+        received_ts_ms=1_700_000_000_010,
+        receive_mono_ns=123456,
+        observed_server_ts_ms=1_700_000_000_005,
+    )
+    assert envelope is not None
+    record = envelope.as_record(written_ts_ms=1_700_000_000_020)
+    assert record["channel"] == "instrument_metadata"
+    assert record["instrument"] == "BTCUSDT"
+    assert record["exchange_ts_ms"] == 1_700_000_000_005
+    assert record["parsed_summary"]["tick_size"] == "0.1"
+    assert record["parsed_summary"]["lot_size"] == "0.001"
+    assert record["parsed_summary"]["min_notional"] == "5"
+    assert record["provenance"]["timestamp_semantics"] == "server_observation_time"
