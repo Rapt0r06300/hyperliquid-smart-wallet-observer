@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
+from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
     finalize_manifest,
@@ -245,6 +246,7 @@ def publish_bundle(
             1 for row in final_manifests if row.get("quality_status") == "REJECT"
         ),
         "manifests": final_manifests,
+        "safe_coverage_matrix": build_safe_coverage_matrix(final_manifests),
         "read_only": True,
         "real_execution": False,
     }
