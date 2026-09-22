@@ -152,10 +152,20 @@ def publish_bundle(
             raise PublishError(f"Invalid manifest: {path}")
         manifests.append(payload)
 
+    # GitHub caps uploaded assets at 1000 per Release. Final shard manifests
+    # are embedded in RUN_MANIFEST.json, so only data assets + one run manifest
+    # are uploaded. Refuse oversized releases before spending time on uploads.
+    if len(manifests) > 999:
+        raise PublishError(
+            f"bundle has {len(manifests)} shards; maximum is 999 data assets "
+            "per release when reserving one slot for RUN_MANIFEST.json"
+        )
+
     notes = (
         "Alina SmartFlow dataset V2 collection run.\n\n"
         f"Collector SHA: {index.get('collector_version')}\n"
         f"Shards: {len(manifests)}\n"
+        "Final shard manifests are consolidated in RUN_MANIFEST.json.\n"
         "Only manifests with quality_status=SAFE and validation_allowed=true "
         "may be used by validation replays/backtests."
     )
@@ -206,7 +216,6 @@ def publish_bundle(
         final_path = final_dir / f"{verified['dataset_id']}.json"
         write_manifest(verified, final_path)
         final_manifests.append(verified)
-        upload_file(repository=repository, tag=tag, path=final_path)
 
     run_manifest = {
         "schema": "alina.dataset_run_manifest.v2",
