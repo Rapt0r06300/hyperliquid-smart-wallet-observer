@@ -146,3 +146,38 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
     assert result["safe_coverage_matrix"]["safe_partitions"] == 2
     assert result["safe_coverage_matrix"]["coins"] == ["BTC"]
     assert (bundle / "RUN_MANIFEST.json").is_file()
+
+
+
+def test_upload_file_retries_transient_release_visibility_race(tmp_path, monkeypatch) -> None:
+    module = _module()
+    asset = tmp_path / "asset.jsonl.gz"
+    asset.write_bytes(b"payload")
+
+    calls = []
+
+    class Result:
+        def __init__(self, returncode: int, stderr: str = "") -> None:
+            self.returncode = returncode
+            self.stderr = stderr
+            self.stdout = ""
+
+    def fake_run(args, *, check=True):
+        calls.append((list(args), check))
+        if len(calls) == 1:
+            return Result(1, "release not found")
+        return Result(0)
+
+    sleeps = []
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    module.upload_file(
+        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        tag="copy-vault-v2-test-s1",
+        path=asset,
+    )
+
+    assert len(calls) == 2
+    assert all(check is False for _args, check in calls)
+    assert sleeps == [1.0]
