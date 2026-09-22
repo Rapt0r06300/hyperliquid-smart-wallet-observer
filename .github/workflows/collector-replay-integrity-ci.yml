@@ -14,6 +14,7 @@ on:
       - 'src/hl_observer/collection/native_venue_market.py'
       - 'src/hl_observer/collection/native_venue_coordinator.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
+      - 'src/hl_observer/collection/binance_clock_sync.py'
       - 'src/hl_observer/collection/binance_depth_book.py'
       - 'src/hl_observer/collection/binance_depth_orchestrator.py'
       - 'src/hl_observer/collection/binance_depth_live.py'
@@ -54,6 +55,7 @@ on:
       - 'tests/test_native_market_tape.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_bybit_market_data.py'
+      - 'tests/test_binance_clock_sync.py'
       - 'tests/test_binance_depth_book.py'
       - 'tests/test_binance_depth_orchestrator.py'
       - 'tests/test_binance_depth_live.py'
@@ -104,6 +106,7 @@ jobs:
             src/hl_observer/collection/native_venue_market.py \
             src/hl_observer/collection/native_venue_coordinator.py \
             src/hl_observer/collection/bybit_market_data.py \
+            src/hl_observer/collection/binance_clock_sync.py \
             src/hl_observer/collection/binance_depth_book.py \
             src/hl_observer/collection/binance_depth_orchestrator.py \
             src/hl_observer/collection/binance_depth_live.py \
@@ -147,6 +150,7 @@ jobs:
             tests/test_native_market_tape.py \
             tests/test_native_venue_market.py \
             tests/test_bybit_market_data.py \
+            tests/test_binance_clock_sync.py \
             tests/test_binance_depth_book.py \
             tests/test_binance_depth_orchestrator.py \
             tests/test_binance_depth_live.py \
