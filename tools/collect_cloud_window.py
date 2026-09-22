@@ -20,6 +20,7 @@ from typing import Any, Mapping
 import httpx
 import websockets
 
+from hl_observer.collection.binance_clock_sync import BinanceClockSyncProbe
 from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
 from hl_observer.collection.binance_funding_history import (
     fetch_binance_funding_settlements,
@@ -128,6 +129,7 @@ def _hyperliquid_envelope(
     received_ts_ms: int,
     receive_mono_ns: int,
     connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
 ) -> TickEnvelope | None:
     channel = str(message.get("channel") or "")
     data = message.get("data")
@@ -244,6 +246,7 @@ def _binance_bbo_envelope(
             "authenticated": False,
         },
         parsed_summary={
+            **dict(clock_evidence or {}),
             "best_bid": bid,
             "best_ask": ask,
             "bid_size": _float(raw.get("B")),
@@ -259,6 +262,7 @@ def _binance_trade_envelope(
     received_ts_ms: int,
     receive_mono_ns: int,
     connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
 ) -> TickEnvelope | None:
     raw = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
     if not isinstance(raw, Mapping) or str(raw.get("e") or "") not in {"trade", "aggTrade"}:
@@ -294,6 +298,7 @@ def _binance_trade_envelope(
             "authenticated": False,
         },
         parsed_summary={
+            **dict(clock_evidence or {}),
             "price": price,
             "size": size,
             "aggressor_side": "SELL" if raw.get("m") is True else "BUY",
@@ -605,6 +610,7 @@ async def _binance_stream(
     sink: AsyncPartitionSink,
     *,
     mode: str,
+    clock_probe: BinanceClockSyncProbe | None = None,
 ) -> None:
     if mode == "bbo":
         base = WS_BINANCE_PUBLIC
@@ -647,6 +653,7 @@ async def _binance_stream(
                         received_ts_ms=wall,
                         receive_mono_ns=mono,
                         connection_id=connection_id,
+                        clock_evidence=clock_probe.evidence() if clock_probe is not None else None,
                     )
                     if envelope is not None:
                         envelope.reconnect_count = reconnects
@@ -782,15 +789,18 @@ async def collect(
 
     instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
 
+    binance_clock = BinanceClockSyncProbe() if binance_symbols else None
     binance_depth = BinanceDepthLiveCollector(
         binance_symbols,
         tick_sink=sink.emit,
         publication_depth=200,
         snapshot_limit=1000,
+        clock_sync_provider=(binance_clock.evidence if binance_clock is not None else None),
     )
     binance_context = BinanceMarketContextCollector(
         binance_symbols,
         tick_sink=sink.emit,
+        clock_sync_provider=(binance_clock.evidence if binance_clock is not None else None),
     )
     hyperliquid_trade_reference = (
         HyperliquidTradeReferenceSampler(
@@ -814,9 +824,10 @@ async def collect(
     if binance_symbols:
         tasks.extend(
             (
-                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo")),
-                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades")),
-                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="agg_trades")),
+                asyncio.create_task(binance_clock.run()) if binance_clock is not None else asyncio.create_task(asyncio.sleep(0)),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo", clock_probe=binance_clock)),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades", clock_probe=binance_clock)),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="agg_trades", clock_probe=binance_clock)),
                 asyncio.create_task(binance_depth.run()),
                 asyncio.create_task(binance_context.run()),
             )
@@ -873,6 +884,8 @@ async def collect(
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if binance_clock is not None:
+            await binance_clock.close()
         funding_history = await _collect_funding_settlements(
             venue_lists,
             sink,
@@ -1023,6 +1036,9 @@ async def collect(
             for row in manifests
         ],
         "instrument_metadata": instrument_metadata,
+        "binance_clock_sync": (
+            binance_clock.health() if binance_clock is not None else {"status": "NO_DATA"}
+        ),
         "binance_depth": binance_depth.health(),
         "binance_context": binance_context.health(),
         "funding_history": funding_history,
