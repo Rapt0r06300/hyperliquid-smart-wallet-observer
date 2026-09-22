@@ -164,13 +164,17 @@ async def _run(
     stale_after_ms: int,
     duration_s: float,
     universe_refresh_s: float = DEFAULT_UNIVERSE_REFRESH_S,
+    enabled_venues: tuple[str, ...] = VENUES,
 ) -> int:
     queue: deque[TickEnvelope] = deque()
     dropped = 0
     written = 0
-    reconnects = {venue: 0 for venue in VENUES}
-    last_event_ms = {venue: 0 for venue in VENUES}
-    last_exchange_ts = {venue: 0 for venue in VENUES}
+    enabled_venues = tuple(venue for venue in VENUES if venue in set(enabled_venues))
+    if not enabled_venues:
+        raise ValueError("enabled_venues must contain at least one supported venue")
+    reconnects = {venue: 0 for venue in enabled_venues}
+    last_event_ms = {venue: 0 for venue in enabled_venues}
+    last_exchange_ts = {venue: 0 for venue in enabled_venues}
     canonical_last_written = 0
     canonical_last_beat_ns = 0
     started = time.time()
@@ -269,7 +273,7 @@ async def _run(
     registry = await asyncio.to_thread(coordinator.discover)
     enqueue_bybit_instrument_metadata()
     await asyncio.to_thread(coordinator.refresh_clock_sync)
-    counts = {venue: len(coordinator.symbols_for(venue)) for venue in VENUES}
+    counts = {venue: len(coordinator.symbols_for(venue)) for venue in enabled_venues}
     if not any(counts.values()):
         print("[native-venues] aucun marche decouvert sur Bybit/OKX/Gate/Bitget", flush=True)
         return 2
@@ -277,7 +281,7 @@ async def _run(
     def symbols_snapshot() -> dict[str, tuple[str, ...]]:
         return {
             venue: tuple(coordinator.symbols_for(venue))
-            for venue in VENUES
+            for venue in enabled_venues
         }
 
     async def venue_loop(venue: str) -> None:
@@ -308,7 +312,7 @@ async def _run(
         venue_tasks[venue] = task
         managed_tasks.add(task)
 
-    for venue in VENUES:
+    for venue in enabled_venues:
         start_venue_task(venue)
 
     if counts.get("bybit") or counts.get("okx"):
@@ -326,9 +330,9 @@ async def _run(
             enqueue_bybit_instrument_metadata()
             after = symbols_snapshot()
             registry = refreshed
-            counts = {venue: len(after[venue]) for venue in VENUES}
+            counts = {venue: len(after[venue]) for venue in enabled_venues}
             universe_refreshes += 1
-            changed = [venue for venue in VENUES if before[venue] != after[venue]]
+            changed = [venue for venue in enabled_venues if before[venue] != after[venue]]
             if not changed:
                 continue
             universe_changes += len(changed)
@@ -366,7 +370,9 @@ async def _run(
             now_ms = int(now * 1000)
             now_mono_ns = time.monotonic_ns()
             if now_mono_ns - canonical_last_beat_ns >= 2_000_000_000:
-                required = ("bybit", "okx")
+                required = tuple(
+                    venue for venue in ("bybit", "okx") if venue in enabled_venues
+                )
                 required_ready = all(
                     counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
                     for venue in required
@@ -412,10 +418,10 @@ async def _run(
                     "reconnects": reconnects,
                     "last_event_ms": last_event_ms,
                     "last_exchange_ts": last_exchange_ts,
-                    "required_venues": ["bybit", "okx"],
+                    "required_venues": list(required),
                     "required_venues_ready": all(
                         counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
-                        for venue in ("bybit", "okx")
+                        for venue in required
                     ),
                     "coordinator_health": health,
                     "dataset": writer.stats(),
@@ -463,10 +469,12 @@ async def _run(
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
             "last_exchange_ts": last_exchange_ts,
-            "required_venues": ["bybit", "okx"],
+            "required_venues": [
+                venue for venue in ("bybit", "okx") if venue in enabled_venues
+            ],
             "required_venues_ready": all(
                 counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
-                for venue in ("bybit", "okx")
+                for venue in ("bybit", "okx") if venue in enabled_venues
             ),
             "dataset": writer.stats(),
             "dataset_v2_bundle": bundle,
@@ -483,6 +491,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--root", default=str(RACINE))
     parser.add_argument("--max-symbols", type=int, default=50)
+    parser.add_argument(
+        "--venues",
+        default=",".join(VENUES),
+        help="Comma-separated subset of bybit,okx,gate,bitget.",
+    )
     parser.add_argument("--stale-after-ms", type=int, default=1_500)
     parser.add_argument(
         "--universe-refresh-s",
@@ -505,6 +518,15 @@ def main(argv: list[str] | None = None) -> int:
                 stale_after_ms=max(250, int(args.stale_after_ms)),
                 duration_s=max(0.0, float(args.duration_s)),
                 universe_refresh_s=max(0.0, float(args.universe_refresh_s)),
+                enabled_venues=tuple(
+                    venue
+                    for venue in VENUES
+                    if venue in {
+                        token.strip().lower()
+                        for token in str(args.venues).split(",")
+                        if token.strip()
+                    }
+                ),
             )
         )
     except KeyboardInterrupt:
