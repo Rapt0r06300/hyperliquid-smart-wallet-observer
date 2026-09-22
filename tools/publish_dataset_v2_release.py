@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -124,19 +125,47 @@ def release_asset_map(release: Mapping[str, Any]) -> dict[str, Mapping[str, Any]
 
 
 def upload_file(*, repository: str, tag: str, path: Path) -> None:
+    """Upload one asset with bounded retries for GitHub release visibility races."""
     if not path.is_file():
         raise PublishError(f"Missing upload file: {path}")
-    _run(
-        [
-            "release",
-            "upload",
-            tag,
-            str(path),
-            "--repo",
-            repository,
-            "--clobber",
-        ]
-    )
+
+    args = [
+        "release",
+        "upload",
+        tag,
+        str(path),
+        "--repo",
+        repository,
+        "--clobber",
+    ]
+    max_attempts = 6
+    for attempt in range(1, max_attempts + 1):
+        process = _run(args, check=False)
+        if process.returncode == 0:
+            return
+
+        detail = (process.stderr or process.stdout or "").strip()
+        lowered = detail.lower()
+        transient = any(
+            marker in lowered
+            for marker in (
+                "release not found",
+                "http 404",
+                "status 404",
+                "502 bad gateway",
+                "503 service unavailable",
+                "timeout",
+                "timed out",
+                "connection reset",
+            )
+        )
+        if not transient or attempt >= max_attempts:
+            raise PublishError(f"gh {' '.join(args)} failed: {detail}")
+
+        # GitHub can expose a newly created release through one endpoint before
+        # the release-upload lookup sees its tag. Back off, then retry the exact
+        # idempotent --clobber upload instead of failing an otherwise valid lane.
+        time.sleep(min(20.0, float(2 ** (attempt - 1))))
 
 
 def publish_bundle(
