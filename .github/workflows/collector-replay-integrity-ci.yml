@@ -20,6 +20,7 @@ on:
       - 'src/hl_observer/collection/binance_depth_live.py'
       - 'src/hl_observer/collection/binance_market_context.py'
       - 'src/hl_observer/collection/binance_funding_history.py'
+      - 'src/hl_observer/collection/hyperliquid_clock_sync.py'
       - 'src/hl_observer/collection/hyperliquid_funding_history.py'
       - 'src/hl_observer/collection/native_funding_history.py'
       - 'src/hl_observer/collection/userfills_live.py'
@@ -61,6 +62,7 @@ on:
       - 'tests/test_binance_depth_live.py'
       - 'tests/test_binance_market_context.py'
       - 'tests/test_binance_funding_history.py'
+      - 'tests/test_hyperliquid_clock_sync.py'
       - 'tests/test_hyperliquid_funding_history.py'
       - 'tests/test_native_funding_history.py'
       - 'tests/test_collecter_bbo.py'
@@ -112,6 +114,7 @@ jobs:
             src/hl_observer/collection/binance_depth_live.py \
             src/hl_observer/collection/binance_market_context.py \
             src/hl_observer/collection/binance_funding_history.py \
+            src/hl_observer/collection/hyperliquid_clock_sync.py \
             src/hl_observer/collection/hyperliquid_funding_history.py \
             src/hl_observer/collection/native_funding_history.py \
             src/hl_observer/collection/userfills_live.py \
@@ -156,6 +159,7 @@ jobs:
             tests/test_binance_depth_live.py \
             tests/test_binance_market_context.py \
             tests/test_binance_funding_history.py \
+            tests/test_hyperliquid_clock_sync.py \
             tests/test_hyperliquid_funding_history.py \
             tests/test_native_funding_history.py \
             tests/test_collecter_bbo.py \
