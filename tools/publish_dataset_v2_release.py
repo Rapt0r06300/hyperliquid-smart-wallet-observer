@@ -23,8 +23,22 @@ from hl_observer.datasets.v2_pipeline import (
 )
 
 
+MAX_RELEASE_ASSETS = 1000
+CONTROL_ASSET_SLOTS = 1
+
+
 class PublishError(RuntimeError):
     pass
+
+
+def validate_release_capacity(shard_count: int) -> None:
+    count = max(0, int(shard_count))
+    maximum = MAX_RELEASE_ASSETS - CONTROL_ASSET_SLOTS
+    if count > maximum:
+        raise PublishError(
+            f"bundle has {count} shards; maximum is {maximum} data assets "
+            "per release when reserving one slot for RUN_MANIFEST.json"
+        )
 
 
 def _gh() -> str:
@@ -155,11 +169,7 @@ def publish_bundle(
     # GitHub caps uploaded assets at 1000 per Release. Final shard manifests
     # are embedded in RUN_MANIFEST.json, so only data assets + one run manifest
     # are uploaded. Refuse oversized releases before spending time on uploads.
-    if len(manifests) > 999:
-        raise PublishError(
-            f"bundle has {len(manifests)} shards; maximum is 999 data assets "
-            "per release when reserving one slot for RUN_MANIFEST.json"
-        )
+    validate_release_capacity(len(manifests))
 
     notes = (
         "Alina SmartFlow dataset V2 collection run.\n\n"
