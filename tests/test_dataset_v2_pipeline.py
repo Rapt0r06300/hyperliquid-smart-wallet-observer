@@ -281,3 +281,101 @@ def test_partial_trade_reconciliation_never_promotes_safe(tmp_path) -> None:
     )
     assert partial["quality_status"] == "PARTIAL"
     assert "RECONCILIATION_MATCH_REQUIRED" in partial["quality_reasons"]
+
+
+def test_receive_observation_snapshot_can_be_safe_without_exchange_timestamp(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    event = TickEnvelope(
+        source_id="hyperliquid_public_ws",
+        channel="activeAssetCtx",
+        instrument="BTC",
+        event_kind="SNAPSHOT",
+        raw_payload={"channel": "activeAssetCtx", "data": {"coin": "BTC"}},
+        exchange_ts_ms=None,
+        received_ts_ms=1_005,
+        local_monotonic_ns=1_000_000,
+        connection_id="hl-1",
+        sequence=None,
+        provenance={
+            "access": "read_only",
+            "transport": "websocket",
+            "authenticated": False,
+            "timestamp_semantics": "receive_observation_time_only",
+        },
+        parsed_summary={"mark_price": 100.0},
+    )
+    writer.append(event)
+    writer.rotate_all()
+
+    build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="9" * 40,
+    )
+    import json
+    manifest = json.loads(next((tmp_path / "bundle" / "manifests").glob("*.json")).read_text())
+    assert manifest["integrity"]["missing_timestamp_count"] == 0
+    assert manifest["quality_status"] == "PARTIAL"
+    assert "REMOTE_ASSET_NOT_VERIFIED" in manifest["quality_reasons"]
+
+    asset = tmp_path / "bundle" / "assets" / manifest["release_asset"]
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    verified = verify_remote_asset(
+        manifest,
+        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        release_tag="data-v2-receive-only",
+        release_id=90,
+        asset_id=91,
+        asset_name=manifest["release_asset"],
+        remote_size=asset.stat().st_size,
+        remote_digest="sha256:" + digest,
+    )
+    assert verified["quality_status"] == "SAFE"
+    assert verified["validation_allowed"] is True
+
+
+def test_missing_exchange_timestamp_without_explicit_semantics_stays_partial(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    event = TickEnvelope(
+        source_id="hyperliquid_public_ws",
+        channel="activeAssetCtx",
+        instrument="ETH",
+        event_kind="SNAPSHOT",
+        raw_payload={"channel": "activeAssetCtx", "data": {"coin": "ETH"}},
+        exchange_ts_ms=None,
+        received_ts_ms=2_005,
+        local_monotonic_ns=2_000_000,
+        connection_id="hl-1",
+        sequence=None,
+        provenance={
+            "access": "read_only",
+            "transport": "websocket",
+            "authenticated": False,
+        },
+    )
+    writer.append(event)
+    writer.rotate_all()
+
+    build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="8" * 40,
+    )
+    import json
+    manifest = json.loads(next((tmp_path / "bundle" / "manifests").glob("*.json")).read_text())
+    assert manifest["integrity"]["missing_timestamp_count"] == 1
+
+    asset = tmp_path / "bundle" / "assets" / manifest["release_asset"]
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    verified = verify_remote_asset(
+        manifest,
+        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        release_tag="data-v2-missing-time",
+        release_id=92,
+        asset_id=93,
+        asset_name=manifest["release_asset"],
+        remote_size=asset.stat().st_size,
+        remote_digest="sha256:" + digest,
+    )
+    assert verified["quality_status"] == "PARTIAL"
+    assert "MISSING_EXCHANGE_OR_RECEIVE_TIMESTAMP" in verified["quality_reasons"]
