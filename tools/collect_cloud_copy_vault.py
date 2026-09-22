@@ -705,6 +705,7 @@ def build_copy_vault_bundle(
     reconciliation: Mapping[str, Mapping[str, Any]],
     queue_drops: Mapping[tuple[str, str, str], int],
     selection: Mapping[str, Any],
+    collection_run_id: str,
 ) -> dict[str, Any]:
     assets = output / "assets"
     manifests_dir = output / "manifests"
@@ -744,6 +745,7 @@ def build_copy_vault_bundle(
             integrity["gap_count"] = int(integrity.get("gap_count") or 0) + dropped
             preliminary["integrity"] = integrity
             preliminary["collection_queue_drops"] = dropped
+        preliminary["collection_run_id"] = str(collection_run_id)
         preliminary["copy_vault_selection"] = {
             "selected_at_ms": selection.get("selected_at_ms"),
             "observation_only": True,
@@ -763,6 +765,7 @@ def build_copy_vault_bundle(
         "schema": V2_SCHEMA,
         "repository": V2_REPOSITORY,
         "collector_version": collector_version,
+        "collection_run_id": str(collection_run_id),
         "collection_kind": "copy_vault_forward",
         "selection": dict(selection),
         "collection_queue_drops": sum(int(v) for v in queue_drops.values()),
@@ -789,6 +792,7 @@ async def collect(
     vault_shard_count: int = 1,
     vault_shard_index: int = 0,
     rotate_bytes: int,
+    collection_run_id: str | None = None,
 ) -> dict[str, Any]:
     selected_rows, selection = await asyncio.to_thread(
         discover_vaults,
@@ -812,6 +816,10 @@ async def collect(
     if not vaults:
         raise RuntimeError("selected Copy-Vault shard is empty")
     selection_ts_ms = int(selection["selected_at_ms"])
+    run_id = str(collection_run_id or "").strip() or (
+        f"copy-vault-{str(collector_version)[:12]}-{selection_ts_ms}-"
+        f"s{shard_index}of{shard_count}"
+    )
 
     raw_root = output / "raw"
     writer = PartitionedTickDatasetWriter(
@@ -897,9 +905,11 @@ async def collect(
         reconciliation=reports,
         queue_drops=sink.drops,
         selection=selection,
+        collection_run_id=run_id,
     )
     summary = {
         "schema": "alina.copy_vault_cloud_window.v1",
+        "collection_run_id": run_id,
         "selection_ts_ms": selection_ts_ms,
         "end_ts_ms": end_ms,
         "duration_s": round((end_ms - selection_ts_ms) / 1000.0, 3),
@@ -940,6 +950,7 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration-s", type=float, default=300.0)
     parser.add_argument("--collector-version", required=True)
+    parser.add_argument("--collection-run-id")
     parser.add_argument("--max-vaults", type=int, default=100)
     parser.add_argument("--vault-shard-count", type=int, default=1)
     parser.add_argument("--vault-shard-index", type=int, default=0)
@@ -954,6 +965,7 @@ def main() -> int:
             vault_shard_count=max(1, int(args.vault_shard_count)),
             vault_shard_index=int(args.vault_shard_index),
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
+            collection_run_id=args.collection_run_id,
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
