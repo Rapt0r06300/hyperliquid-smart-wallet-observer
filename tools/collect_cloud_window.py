@@ -26,6 +26,7 @@ from hl_observer.collection.binance_funding_history import (
     fetch_binance_funding_settlements,
 )
 from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
+from hl_observer.collection.hyperliquid_clock_sync import HyperliquidClockSyncProbe
 from hl_observer.collection.hyperliquid_funding_history import (
     fetch_hyperliquid_funding_settlements,
 )
@@ -129,6 +130,7 @@ def _hyperliquid_envelope(
     received_ts_ms: int,
     receive_mono_ns: int,
     connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
 ) -> TickEnvelope | None:
     channel = str(message.get("channel") or "")
     data = message.get("data")
@@ -166,6 +168,7 @@ def _hyperliquid_envelope(
     if not instrument:
         return None
     parsed_summary: dict[str, Any] = {
+        **dict(clock_evidence or {}),
         "event_count": event_count,
         "data_gate_ready": False,
     }
@@ -558,7 +561,12 @@ async def _native_okx(symbols: list[str], sink: AsyncPartitionSink) -> None:
     )
 
 
-async def _hyperliquid(coins: list[str], sink: AsyncPartitionSink) -> None:
+async def _hyperliquid(
+    coins: list[str],
+    sink: AsyncPartitionSink,
+    *,
+    clock_probe: HyperliquidClockSyncProbe | None = None,
+) -> None:
     reconnects = 0
     while True:
         connection_id = f"hl-cloud-{uuid.uuid4().hex}"
@@ -570,6 +578,9 @@ async def _hyperliquid(coins: list[str], sink: AsyncPartitionSink) -> None:
                 close_timeout=5,
                 max_size=2**23,
             ) as socket:
+                if clock_probe is not None:
+                    clock_probe.mark_subscribe_sent()
+                    await socket.send(json.dumps(clock_probe.subscription_message()))
                 for coin in coins:
                     for channel in ("bbo", "l2Book", "trades", "activeAssetCtx"):
                         await socket.send(
@@ -589,11 +600,22 @@ async def _hyperliquid(coins: list[str], sink: AsyncPartitionSink) -> None:
                         continue
                     if not isinstance(message, Mapping):
                         continue
+                    if clock_probe is not None:
+                        clock_probe.observe(
+                            message,
+                            received_wall_ts_ms=receive_wall_ms,
+                        )
+                    clock_evidence = (
+                        clock_probe.evidence(now_ms=receive_wall_ms)
+                        if clock_probe is not None
+                        else None
+                    )
                     envelope = _hyperliquid_envelope(
                         message,
                         received_ts_ms=receive_wall_ms,
                         receive_mono_ns=receive_mono_ns,
                         connection_id=connection_id,
+                        clock_evidence=clock_evidence,
                     )
                     if envelope is not None:
                         envelope.reconnect_count = reconnects
@@ -789,6 +811,7 @@ async def collect(
 
     instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
 
+    hyperliquid_clock = HyperliquidClockSyncProbe() if hl_coins else None
     binance_clock = BinanceClockSyncProbe() if binance_symbols else None
     binance_depth = BinanceDepthLiveCollector(
         binance_symbols,
@@ -818,7 +841,15 @@ async def collect(
     if okx_symbols:
         tasks.append(asyncio.create_task(_native_okx(okx_symbols, sink)))
     if hl_coins:
-        tasks.append(asyncio.create_task(_hyperliquid(hl_coins, sink)))
+        tasks.append(
+            asyncio.create_task(
+                _hyperliquid(
+                    hl_coins,
+                    sink,
+                    clock_probe=hyperliquid_clock,
+                )
+            )
+        )
         if hyperliquid_trade_reference is not None:
             tasks.append(asyncio.create_task(hyperliquid_trade_reference.run()))
     if binance_symbols:
@@ -1036,6 +1067,11 @@ async def collect(
             for row in manifests
         ],
         "instrument_metadata": instrument_metadata,
+        "hyperliquid_clock_sync": (
+            hyperliquid_clock.health()
+            if hyperliquid_clock is not None
+            else {"status": "NO_DATA"}
+        ),
         "binance_clock_sync": (
             binance_clock.health() if binance_clock is not None else {"status": "NO_DATA"}
         ),
