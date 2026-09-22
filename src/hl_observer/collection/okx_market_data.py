@@ -338,6 +338,7 @@ class OkxPublicClient:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
+        self.last_instrument_metadata: list[dict[str, object]] = []
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
@@ -348,6 +349,10 @@ class OkxPublicClient:
             payload = response.json()
         if str(payload.get("code", "0")) != "0":
             raise RuntimeError(f"OKX instruments error: {payload.get('msg', 'unknown')}")
+        data = payload.get("data")
+        self.last_instrument_metadata = [
+            dict(item) for item in data if isinstance(item, dict)
+        ] if isinstance(data, list) else []
         return parse_okx_swap_instruments(payload)
 
     def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
