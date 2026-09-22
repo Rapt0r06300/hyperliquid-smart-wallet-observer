@@ -17,12 +17,16 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping
 
+import httpx
 import websockets
 
 from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
 from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
 from hl_observer.collection.bybit_market_data import BybitPublicClient
-from hl_observer.collection.native_market_tape import native_tick_envelope
+from hl_observer.collection.native_market_tape import (
+    native_instrument_metadata_envelope,
+    native_tick_envelope,
+)
 from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
@@ -35,6 +39,7 @@ from hl_observer.datasets.v2_pipeline import (
 from hl_observer.realtime.feed_quality import FeedEventKind
 
 WS_HYPERLIQUID = "wss://api.hyperliquid.xyz/ws"
+INFO_HYPERLIQUID = "https://api.hyperliquid.xyz/info"
 WS_BINANCE_PUBLIC = "wss://fstream.binance.com/public/stream"
 WS_BINANCE_MARKET = "wss://fstream.binance.com/market/stream"
 
@@ -323,6 +328,119 @@ async def _native_with_clock_sync(
         await asyncio.gather(probe_task, return_exceptions=True)
 
 
+async def _collect_instrument_metadata(
+    venue_lists: Mapping[str, list[str]],
+    sink: AsyncPartitionSink,
+) -> dict[str, Any]:
+    """Capture public replay-critical instrument rules at window start."""
+    result: dict[str, Any] = {
+        "hyperliquid": {"records": 0, "status": "NO_DATA"},
+        "bybit": {"records": 0, "status": "NO_DATA"},
+        "okx": {"records": 0, "status": "NO_DATA"},
+    }
+
+    hl_coins = {str(value).upper() for value in venue_lists.get("hyperliquid", [])}
+    if hl_coins:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(INFO_HYPERLIQUID, json={"type": "meta"})
+                response.raise_for_status()
+                payload = response.json()
+            rows = payload.get("universe") if isinstance(payload, Mapping) else None
+            receive_wall = int(time.time() * 1_000)
+            receive_mono = time.monotonic_ns()
+            count = 0
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, Mapping):
+                    continue
+                coin = str(row.get("name") or "").upper()
+                if coin not in hl_coins:
+                    continue
+                sink.emit(
+                    TickEnvelope(
+                        source_id="hyperliquid_public_rest",
+                        channel="instrument_metadata",
+                        instrument=coin,
+                        event_kind=FeedEventKind.SNAPSHOT,
+                        raw_payload=dict(row),
+                        exchange_ts_ms=None,
+                        received_ts_ms=receive_wall,
+                        local_monotonic_ns=receive_mono,
+                        connection_id=None,
+                        sequence=None,
+                        provenance={
+                            "url": INFO_HYPERLIQUID,
+                            "network": "mainnet",
+                            "access": "read_only",
+                            "transport": "https",
+                            "authenticated": False,
+                            "timestamp_semantics": "receive_observation_time_only",
+                        },
+                        parsed_summary={
+                            "sz_decimals": row.get("szDecimals"),
+                            "max_leverage": row.get("maxLeverage"),
+                            "margin_table_id": row.get("marginTableId"),
+                            "only_isolated": row.get("onlyIsolated"),
+                            "is_delisted": row.get("isDelisted"),
+                            "data_gate_ready": False,
+                        },
+                    )
+                )
+                count += 1
+            result["hyperliquid"] = {"records": count, "status": "OK" if count else "NO_DATA"}
+        except Exception as exc:
+            result["hyperliquid"] = {
+                "records": 0,
+                "status": "ERROR",
+                "error": type(exc).__name__,
+            }
+
+    for venue in ("bybit", "okx"):
+        symbols = {str(value).upper() for value in venue_lists.get(venue, [])}
+        if not symbols:
+            continue
+        client = BybitPublicClient() if venue == "bybit" else OkxPublicClient()
+        try:
+            if venue == "bybit":
+                rows = await asyncio.to_thread(client.fetch_instrument_metadata)
+            else:
+                await asyncio.to_thread(client.discover_usdt_perpetuals)
+                rows = list(getattr(client, "last_instrument_metadata", []) or [])
+            try:
+                server_ts = await asyncio.to_thread(client.server_time_ms)
+            except Exception:
+                server_ts = None
+            receive_wall = int(time.time() * 1_000)
+            receive_mono = time.monotonic_ns()
+            count = 0
+            for row in rows:
+                if not isinstance(row, Mapping):
+                    continue
+                symbol = str(
+                    row.get("symbol") if venue == "bybit" else row.get("instId")
+                ).upper()
+                if symbol not in symbols:
+                    continue
+                envelope = native_instrument_metadata_envelope(
+                    venue,
+                    row,
+                    received_ts_ms=receive_wall,
+                    receive_mono_ns=receive_mono,
+                    observed_server_ts_ms=server_ts,
+                )
+                if envelope is not None:
+                    sink.emit(envelope)
+                    count += 1
+            result[venue] = {"records": count, "status": "OK" if count else "NO_DATA"}
+        except Exception as exc:
+            result[venue] = {
+                "records": 0,
+                "status": "ERROR",
+                "error": type(exc).__name__,
+            }
+    return result
+
+
 async def _native_bybit(symbols: list[str], sink: AsyncPartitionSink) -> None:
     await _native_with_clock_sync(
         "bybit",
@@ -563,6 +681,8 @@ async def collect(
     okx_symbols = venue_lists["okx"]
     binance_symbols = venue_lists["binance"]
 
+    instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
+
     binance_depth = BinanceDepthLiveCollector(
         binance_symbols,
         tick_sink=sink.emit,
@@ -679,6 +799,7 @@ async def collect(
             }
             for row in manifests
         ],
+        "instrument_metadata": instrument_metadata,
         "binance_depth": binance_depth.health(),
         "binance_context": binance_context.health(),
         "read_only": True,
