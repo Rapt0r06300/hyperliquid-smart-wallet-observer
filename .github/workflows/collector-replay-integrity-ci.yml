@@ -22,6 +22,7 @@ on:
       - 'src/hl_observer/collection/hyperliquid_funding_history.py'
       - 'src/hl_observer/collection/native_funding_history.py'
       - 'src/hl_observer/collection/userfills_live.py'
+      - 'src/hl_observer/collection/trade_reconciliation.py'
       - 'tools/collecter_userfills_vaults.py'
       - 'tools/collect_cloud_copy_vault.py'
       - 'tools/collecter_bbo.py'
@@ -37,6 +38,7 @@ on:
       - 'tests/test_collector_feed_integrity.py'
       - 'tests/test_collection_window_quality.py'
       - 'tests/test_collection_reconciliation.py'
+      - 'tests/test_trade_reconciliation.py'
       - 'tests/test_collection_shard_writer.py'
       - 'tests/test_tick_dataset.py'
       - 'tests/test_partitioned_tick_dataset.py'
@@ -106,6 +108,7 @@ jobs:
             src/hl_observer/collection/hyperliquid_funding_history.py \
             src/hl_observer/collection/native_funding_history.py \
             src/hl_observer/collection/userfills_live.py \
+            src/hl_observer/collection/trade_reconciliation.py \
             tools/collecter_userfills_vaults.py \
             tools/collect_cloud_copy_vault.py \
             tools/collecter_bbo.py \
@@ -124,6 +127,7 @@ jobs:
             tests/test_collector_feed_integrity.py \
             tests/test_collection_window_quality.py \
             tests/test_collection_reconciliation.py \
+            tests/test_trade_reconciliation.py \
             tests/test_collection_shard_writer.py \
             tests/test_tick_dataset.py \
             tests/test_partitioned_tick_dataset.py \
