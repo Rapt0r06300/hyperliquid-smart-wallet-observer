@@ -23,6 +23,7 @@ _SNAPSHOT_CHANNELS = {
     "funding_settlement",
 }
 _MATCHED_RECONCILIATION_FAMILIES = {
+    "agg_trades",
     "trades",
     "fills",
     "userfills",
@@ -198,7 +199,9 @@ def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     result["quality_status"] = status
     result["quality_reasons"] = reasons
     result["validation_allowed"] = status == "SAFE"
-    result["proof_of_pnl_allowed"] = status == "SAFE"
+    # Data integrity authorizes validation only. Profitable PnL must be proven
+    # separately by replay/backtest/forward evidence after all costs.
+    result["proof_of_pnl_allowed"] = False
     return result
 
 
