@@ -173,3 +173,95 @@ def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
         "assets/partial-1.jsonl.gz",
         "assets/reject-1.jsonl.gz",
     ]
+
+
+def test_hyperliquid_active_asset_ctx_is_preserved_without_fake_exchange_time() -> None:
+    m = _module()
+    tick = m._hyperliquid_envelope(
+        {
+            "channel": "activeAssetCtx",
+            "data": {
+                "coin": "BTC",
+                "ctx": {
+                    "markPx": "100.5",
+                    "midPx": "100.4",
+                    "oraclePx": "100.3",
+                    "funding": "0.0001",
+                    "openInterest": "1234",
+                    "premium": "0.0002",
+                    "dayNtlVlm": "5000000",
+                },
+            },
+        },
+        received_ts_ms=1010,
+        receive_mono_ns=123456,
+        connection_id="hl-ctx-test",
+    )
+    assert tick is not None
+    assert tick.channel == "activeAssetCtx"
+    assert tick.instrument == "BTC"
+    assert tick.exchange_ts_ms is None
+    assert tick.parsed_summary["mark_price"] == 100.5
+    assert tick.parsed_summary["oracle_price"] == 100.3
+    assert tick.parsed_summary["funding_rate"] == 0.0001
+    assert tick.parsed_summary["open_interest"] == 1234.0
+
+
+def test_cloud_native_frame_carries_clock_probe_evidence() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    m = _module()
+
+    class Sink:
+        def __init__(self) -> None:
+            self.rows = []
+
+        def emit(self, envelope) -> None:
+            self.rows.append(envelope)
+
+    class Client:
+        def measure_clock_sync(self):
+            return SimpleNamespace(
+                offset_ms=-3.5,
+                rtt_ms=12.0,
+                server_ts_ms=1000,
+                receive_wall_ts_ms=1010,
+            )
+
+        async def messages(self, _symbols):
+            yield {
+                "topic": "orderbook.200.BTCUSDT",
+                "type": "snapshot",
+                "cts": 1000,
+                "data": {
+                    "s": "BTCUSDT",
+                    "b": [["100", "1"]],
+                    "a": [["101", "1"]],
+                    "u": 1,
+                    "seq": 1,
+                },
+                "_alina_transport": {
+                    "connection_id": "bybit-cloud-test",
+                    "receive_wall_ts_ms": 1010,
+                    "receive_mono_ns": 123,
+                    "transport_rtt_ms": 8.0,
+                },
+            }
+
+    sink = Sink()
+    asyncio.run(
+        m._native_with_clock_sync(
+            "bybit",
+            Client(),
+            ["BTCUSDT"],
+            sink,
+            probe_interval_s=60,
+        )
+    )
+    assert len(sink.rows) == 1
+    record = sink.rows[0].as_record(written_ts_ms=1020)
+    summary = record["parsed_summary"]
+    assert summary["clock_offset_ms"] == -3.5
+    assert summary["clock_probe_rtt_ms"] == 12.0
+    assert summary["transport_rtt_ms"] == 8.0
