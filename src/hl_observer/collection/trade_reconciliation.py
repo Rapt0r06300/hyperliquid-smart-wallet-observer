@@ -384,7 +384,15 @@ async def reconcile_binance_aggtrade_shard(
         return {"status": "UNAVAILABLE", "reason": "INVALID_WINDOW"}
 
     reference: dict[str, Mapping[str, Any]] = {}
-    pending: list[tuple[int, int]] = [(start, end)]
+    # Binance documents bounded time queries; keep every initial request below
+    # one hour, then split again when a page is saturated.
+    pending: list[tuple[int, int]] = []
+    cursor = start
+    max_interval_ms = 55 * 60 * 1_000
+    while cursor <= end:
+        right = min(end, cursor + max_interval_ms)
+        pending.append((cursor, right))
+        cursor = right + 1
     requests = 0
     try:
         while pending:
