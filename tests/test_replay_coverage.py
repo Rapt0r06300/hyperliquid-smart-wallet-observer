@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from hl_observer.datasets.replay_coverage import (
-    assess_replay_contract,
-    build_safe_coverage_matrix,
-)
+from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
 
 
 def _manifest(
@@ -66,9 +63,10 @@ def test_safe_coverage_matrix_ignores_unverified_and_partial() -> None:
     assert matrix["safe_partitions"] == 1
     assert matrix["coins"] == ["BTC"]
     assert matrix["rows"][0]["dataset_ids"] == ["safe"]
+    assert matrix["authoritative_for_replay"] is False
 
 
-def test_replay_contract_requires_common_safe_overlap() -> None:
+def test_safe_coverage_matrix_merges_overlapping_intervals() -> None:
     matrix = build_safe_coverage_matrix(
         [
             _manifest(
@@ -76,51 +74,27 @@ def test_replay_contract_requires_common_safe_overlap() -> None:
                 family="l2Book",
                 symbol="BTCUSDT",
                 start=1000,
-                end=5000,
-                dataset_id="bb-l2",
+                end=2000,
+                dataset_id="a",
             ),
             _manifest(
                 venue="bybit",
-                family="trades",
+                family="l2Book",
                 symbol="BTCUSDT",
                 start=1500,
-                end=4500,
-                dataset_id="bb-trades",
-            ),
-            _manifest(
-                venue="okx",
-                family="l2Book",
-                symbol="BTC-USDT-SWAP",
-                start=2000,
-                end=4000,
-                dataset_id="okx-l2",
-            ),
-            _manifest(
-                venue="okx",
-                family="trades",
-                symbol="BTC-USDT-SWAP",
-                start=2500,
-                end=3500,
-                dataset_id="okx-trades",
+                end=3000,
+                dataset_id="b",
             ),
         ]
     )
-    report = assess_replay_contract(
-        matrix,
-        coin="BTC",
-        requirements={
-            "bybit": ["l2Book", "trades"],
-            "okx": ["l2Book", "trades"],
-        },
-        min_overlap_ms=500,
-    )
-    assert report["status"] == "READY"
-    assert report["overlap_start_ts_ms"] == 2500
-    assert report["overlap_end_ts_ms"] == 3500
-    assert report["overlap_ms"] == 1000
+    row = matrix["rows"][0]
+    assert row["shard_count"] == 2
+    assert row["event_count"] == 20
+    assert row["intervals"] == [{"start_ts_ms": 1000, "end_ts_ms": 3000}]
+    assert row["covered_ms"] == 2000
 
 
-def test_replay_contract_missing_family_fails_closed() -> None:
+def test_safe_coverage_matrix_canonicalizes_cross_venue_symbols() -> None:
     matrix = build_safe_coverage_matrix(
         [
             _manifest(
@@ -128,45 +102,18 @@ def test_replay_contract_missing_family_fails_closed() -> None:
                 family="l2Book",
                 symbol="ETHUSDT",
                 start=1000,
-                end=5000,
-                dataset_id="bb-l2",
-            )
-        ]
-    )
-    report = assess_replay_contract(
-        matrix,
-        coin="ETH",
-        requirements={"bybit": ["l2Book", "trades"]},
-    )
-    assert report["status"] == "NO_GO"
-    assert report["missing"] == ["bybit:trades"]
-
-
-def test_replay_contract_disjoint_intervals_are_no_go() -> None:
-    matrix = build_safe_coverage_matrix(
-        [
+                end=2000,
+                dataset_id="bybit",
+            ),
             _manifest(
-                venue="bybit",
+                venue="okx",
                 family="l2Book",
-                symbol="SOLUSDT",
+                symbol="ETH-USDT-SWAP",
                 start=1000,
-                end=1500,
-                dataset_id="l2",
-            ),
-            _manifest(
-                venue="bybit",
-                family="trades",
-                symbol="SOLUSDT",
-                start=2000,
-                end=2500,
-                dataset_id="trades",
+                end=2000,
+                dataset_id="okx",
             ),
         ]
     )
-    report = assess_replay_contract(
-        matrix,
-        coin="SOL",
-        requirements={"bybit": ["l2Book", "trades"]},
-    )
-    assert report["status"] == "NO_GO"
-    assert report["overlap_ms"] == 0
+    assert matrix["coins"] == ["ETH"]
+    assert matrix["venues"] == ["bybit", "okx"]
