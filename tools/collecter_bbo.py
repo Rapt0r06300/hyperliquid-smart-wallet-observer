@@ -561,6 +561,9 @@ async def _boucle(
 
     from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
     from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
+    from hl_observer.collection.binance_funding_history import (
+        fetch_binance_funding_settlements,
+    )
     from hl_observer.collection.hyperliquid_funding_history import (
         fetch_hyperliquid_funding_settlements,
     )
@@ -663,6 +666,7 @@ async def _boucle(
              "frames_bookticker": 0, "frames_trades": 0, "shards_scelles": 0,
              "frames_l2_hl": 0, "frames_l2_bin": 0, "frames_trades_hl": 0,
              "hl_funding_settlements": 0, "hl_funding_history_error": "",
+             "binance_funding_settlements": 0, "binance_funding_history_error": "",
              "binance_l2_publications": 0, "raw_frames_received": 0,
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
@@ -1606,6 +1610,20 @@ async def _boucle(
             stats["hl_funding_history_error"] = ""
         except Exception as exc:  # bounded public backfill; absence stays observable
             stats["hl_funding_history_error"] = (
+                f"{type(exc).__name__}: {exc}"
+            )[:500]
+        try:
+            binance_funding_rows = await fetch_binance_funding_settlements(
+                sym.values(),
+                start_ms=collection_start_wall_ms,
+                end_ms=int(time.time() * 1000),
+            )
+            for funding_envelope in binance_funding_rows:
+                queue_raw(funding_envelope)
+            stats["binance_funding_settlements"] = len(binance_funding_rows)
+            stats["binance_funding_history_error"] = ""
+        except Exception as exc:
+            stats["binance_funding_history_error"] = (
                 f"{type(exc).__name__}: {exc}"
             )[:500]
         while raw_queue:
