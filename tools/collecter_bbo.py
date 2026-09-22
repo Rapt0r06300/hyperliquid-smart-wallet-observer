@@ -591,6 +591,22 @@ async def _boucle(
     lead_lag_runtime = LeadLagEventPaperRuntime(root)
     sym = {c: symbole_binance(c) for c in coins if symbole_binance(c)}
     coins_set = set(coins)   # LIQUIDATION_LIVE_COVERAGE : le HL bbo est écrit pour TOUS les coins (memes/HL-only
+    hl_instrument_meta: dict[str, dict[str, Any]] = {}
+    if isinstance(hl_meta, Mapping) and isinstance(hl_meta.get("universe"), list):
+        for raw_meta in hl_meta["universe"]:
+            if not isinstance(raw_meta, Mapping):
+                continue
+            meta_coin = str(raw_meta.get("name") or "").strip().upper()
+            if meta_coin in coins_set:
+                hl_instrument_meta[meta_coin] = {
+                    "name": raw_meta.get("name"),
+                    "sz_decimals": raw_meta.get("szDecimals"),
+                    "max_leverage": raw_meta.get("maxLeverage"),
+                    "only_isolated": raw_meta.get("onlyIsolated"),
+                    "margin_table_id": raw_meta.get("marginTableId"),
+                    "is_delisted": raw_meta.get("isDelisted"),
+                    "observed_receive_ts_ms": hl_meta_received_ts_ms,
+                }
     #                          inclus) ; la jambe Binance (sym) ne couvre que les coins réellement listés là-bas.
     from hl_observer.collection import collecte_fiable as CF
     cache = CF.CacheDedup()
@@ -1006,6 +1022,7 @@ async def _boucle(
                                     quote["coin"],
                                     received_ts_ms=received_ts_ms,
                                 ),
+                                "instrument_metadata": hl_instrument_meta.get(quote["coin"]),
                             }
                             mag.maj_hl(
                                 quote,
@@ -1070,6 +1087,7 @@ async def _boucle(
                                     book["coin"],
                                     received_ts_ms=received_ts_ms,
                                 ),
+                                "instrument_metadata": hl_instrument_meta.get(book["coin"]),
                             }
                             continue
 
@@ -1108,6 +1126,10 @@ async def _boucle(
                                         trade_coin,
                                         received_ts_ms=received_ts_ms,
                                     )
+                                    for trade_coin in quality_by_coin
+                                },
+                                "instrument_metadata_by_coin": {
+                                    trade_coin: hl_instrument_meta.get(trade_coin)
                                     for trade_coin in quality_by_coin
                                 },
                             }
