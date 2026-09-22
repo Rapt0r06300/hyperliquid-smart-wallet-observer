@@ -30,10 +30,15 @@ from hl_observer.collection.native_market_tape import (
 from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.collection.trade_reconciliation import (
+    reconcile_bybit_trade_shard,
+    reconcile_okx_trade_shard,
+)
 from hl_observer.datasets.v2_export import build_manifest_from_tick_shard, write_manifest
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
     V2_SCHEMA,
+    attach_reconciliation,
     finalize_manifest,
 )
 from hl_observer.realtime.feed_quality import FeedEventKind
@@ -756,6 +761,46 @@ async def collect(
         shutil.move(str(shard), asset_path)
         manifest["release_asset"] = asset_name
         manifest["bytes"] = asset_path.stat().st_size
+
+        if str(manifest.get("family") or "") == "trades":
+            venue = str(manifest.get("venue") or "").lower()
+            sync = manifest.get("synchronization")
+            sync_map = sync if isinstance(sync, Mapping) else {}
+            reference_start = (
+                _int(sync_map.get("first_exchange_ts_ms"))
+                or _int(manifest.get("start_ts_ms"))
+                or 0
+            )
+            reference_end = (
+                _int(sync_map.get("last_exchange_ts_ms"))
+                or _int(manifest.get("end_ts_ms"))
+                or reference_start
+            )
+            if venue == "bybit":
+                report = await reconcile_bybit_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
+            elif venue == "okx":
+                report = await reconcile_okx_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
+            else:
+                manifest = attach_reconciliation(
+                    manifest,
+                    {
+                        "status": "UNAVAILABLE",
+                        "reason": "NO_EXACT_PUBLIC_TRADE_REFERENCE",
+                    },
+                )
+
         manifest_path = manifests_root / f"{manifest['dataset_id']}.json"
         write_manifest(manifest, manifest_path)
         manifests.append(manifest)
