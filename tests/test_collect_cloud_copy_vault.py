@@ -228,3 +228,19 @@ def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
     # Before GitHub release upload the asset is intentionally not SAFE yet.
     assert manifest["quality_status"] == "PARTIAL"
     assert "REMOTE_ASSET_NOT_VERIFIED" in manifest["quality_reasons"]
+
+
+
+def test_copy_vault_lane_respects_hyperliquid_unique_user_limit() -> None:
+    allowed = ["0x" + f"{index:040x}" for index in range(10)]
+    assert C.validate_user_subscription_budget(allowed) == 10
+
+    too_many = ["0x" + f"{index:040x}" for index in range(11)]
+    import pytest
+    with pytest.raises(ValueError, match="10 per IP"):
+        C.validate_user_subscription_budget(too_many)
+
+
+def test_copy_vault_lane_counts_unique_users_only() -> None:
+    address = "0x" + "1" * 40
+    assert C.validate_user_subscription_budget([address, address.upper()]) == 1
