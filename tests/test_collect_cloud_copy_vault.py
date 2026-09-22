@@ -244,3 +244,22 @@ def test_copy_vault_lane_respects_hyperliquid_unique_user_limit() -> None:
 def test_copy_vault_lane_counts_unique_users_only() -> None:
     address = "0x" + "1" * 40
     assert C.validate_user_subscription_budget([address, address.upper()]) == 1
+
+
+
+def test_reconcile_requires_per_vault_subscription_start() -> None:
+    address = "0x" + "5" * 40
+
+    async def scenario() -> None:
+        result = await C.reconcile_forward_window(
+            [address],
+            start_ms_by_vault={},
+            end_ms=20_000,
+            live_ids={},
+        )
+        report = result[address]
+        assert report["status"] == "UNAVAILABLE"
+        assert report["audit"]["reason"] == "NO_LIVE_SUBSCRIPTION_START"
+        assert report["audit"]["requested_start_ms"] is None
+
+    asyncio.run(scenario())
