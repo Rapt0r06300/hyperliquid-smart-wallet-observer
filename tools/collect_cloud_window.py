@@ -21,7 +21,17 @@ import httpx
 import websockets
 
 from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
+from hl_observer.collection.binance_funding_history import (
+    fetch_binance_funding_settlements,
+)
 from hl_observer.collection.binance_market_context import BinanceMarketContextCollector
+from hl_observer.collection.hyperliquid_funding_history import (
+    fetch_hyperliquid_funding_settlements,
+)
+from hl_observer.collection.native_funding_history import (
+    fetch_bybit_funding_settlements,
+    fetch_okx_funding_settlements,
+)
 from hl_observer.collection.bybit_market_data import BybitPublicClient
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
@@ -449,6 +459,71 @@ async def _collect_instrument_metadata(
     return result
 
 
+async def _collect_funding_settlements(
+    venue_lists: Mapping[str, list[str]],
+    sink: AsyncPartitionSink,
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> dict[str, dict[str, Any]]:
+    """Backfill authoritative realized funding for the exact collection window.
+
+    Every venue is isolated: one public API failure is visible in the summary and
+    never becomes a synthetic zero-rate settlement.
+    """
+    specs = {
+        "hyperliquid": (
+            fetch_hyperliquid_funding_settlements,
+            list(venue_lists.get("hyperliquid", [])),
+        ),
+        "binance": (
+            fetch_binance_funding_settlements,
+            list(venue_lists.get("binance", [])),
+        ),
+        "bybit": (
+            fetch_bybit_funding_settlements,
+            list(venue_lists.get("bybit", [])),
+        ),
+        "okx": (
+            fetch_okx_funding_settlements,
+            list(venue_lists.get("okx", [])),
+        ),
+    }
+
+    async def one(
+        venue: str,
+        fetcher: Any,
+        symbols: list[str],
+    ) -> tuple[str, dict[str, Any]]:
+        if not symbols:
+            return venue, {"status": "NO_DATA", "records": 0}
+        try:
+            rows = await fetcher(
+                symbols,
+                start_ms=int(start_ms),
+                end_ms=int(end_ms),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return venue, {
+                "status": "ERROR",
+                "records": 0,
+                "error": type(exc).__name__,
+            }
+        for envelope in rows:
+            sink.emit(envelope)
+        return venue, {
+            "status": "OK" if rows else "NO_DATA",
+            "records": len(rows),
+        }
+
+    result = await asyncio.gather(
+        *(one(venue, fetcher, symbols) for venue, (fetcher, symbols) in specs.items())
+    )
+    return {venue: row for venue, row in result}
+
+
 async def _native_bybit(symbols: list[str], sink: AsyncPartitionSink) -> None:
     await _native_with_clock_sync(
         "bybit",
@@ -724,12 +799,20 @@ async def collect(
     run_id = str(collection_run_id or "").strip() or (
         f"market-{str(collector_version)[:12]}-{started}"
     )
+    funding_history: dict[str, dict[str, Any]] = {}
     try:
         await asyncio.sleep(max(1.0, float(duration_s)))
     finally:
+        ended_for_funding = int(time.time() * 1_000)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        funding_history = await _collect_funding_settlements(
+            venue_lists,
+            sink,
+            start_ms=started,
+            end_ms=ended_for_funding,
+        )
         await sink.close()
         await writer_task
 
@@ -850,6 +933,7 @@ async def collect(
         "instrument_metadata": instrument_metadata,
         "binance_depth": binance_depth.health(),
         "binance_context": binance_context.health(),
+        "funding_history": funding_history,
         "read_only": True,
         "real_execution": False,
     }
