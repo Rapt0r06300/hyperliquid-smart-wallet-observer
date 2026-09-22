@@ -12,6 +12,7 @@ from hl_observer.data_sources.official_archive_backfill import (
     binance_usdm_aggtrades_url,
     bybit_trades_url,
     fetch_official_archive_day,
+    fetch_official_archive_stream,
     iter_days,
 )
 
@@ -114,3 +115,20 @@ def test_archive_event_limit_is_enforced() -> None:
         max_events=2,
     )
     assert len(result.events) == 2
+
+
+def test_streaming_archive_does_not_materialize_events() -> None:
+    payload = _zip_csv(
+        "1,100.5,0.25,10,12,1790000000000,true\n"
+        "2,100.6,0.50,13,15,1790000000100,false\n"
+    )
+    checksum = hashlib.sha256(payload).hexdigest().encode() + b"  archive.zip\n"
+    result = fetch_official_archive_stream(
+        venue="binance",
+        coin="BTC",
+        symbol="BTCUSDT",
+        day=date(2026, 9, 20),
+        fetch_bytes=lambda url: checksum if url.endswith(".CHECKSUM") else payload,
+    )
+    assert not isinstance(result.events, tuple)
+    assert [event.sequence for event in result.events] == [1, 2]

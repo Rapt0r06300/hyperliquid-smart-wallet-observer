@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
-from hl_observer.data_sources.official_archive_backfill import fetch_official_archive_day, iter_days
+from hl_observer.data_sources.official_archive_backfill import fetch_official_archive_stream, iter_days
 from hl_observer.datasets.v2_pipeline import build_bundle
 
 
@@ -42,16 +42,26 @@ def main() -> int:
     archives = []
     total = 0
     for day in days:
-        result = fetch_official_archive_day(
+        result = fetch_official_archive_stream(
             venue=args.venue,
             coin=args.coin,
             symbol=args.symbol,
             day=day,
             max_events=max(1, int(args.max_events_per_day)),
         )
-        for offset in range(0, len(result.events), 5000):
-            writer.append_batch(result.events[offset:offset + 5000])
-        total += len(result.events)
+        count = 0
+        batch = []
+        for event in result.events:
+            batch.append(event)
+            count += 1
+            if len(batch) >= 5000:
+                writer.append_batch(batch)
+                batch.clear()
+        if batch:
+            writer.append_batch(batch)
+        if count <= 0:
+            raise SystemExit(f"NO_ARCHIVE_EVENTS:{day.isoformat()}")
+        total += count
         archives.append({
             "venue": result.venue,
             "coin": result.coin,
@@ -60,7 +70,7 @@ def main() -> int:
             "source_url": result.source_url,
             "compressed_sha256": result.compressed_sha256,
             "checksum_verified": result.checksum_verified,
-            "event_count": len(result.events),
+            "event_count": count,
         })
 
     shards = writer.rotate_all()
