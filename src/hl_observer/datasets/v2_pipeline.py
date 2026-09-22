@@ -20,6 +20,7 @@ _WS_TRANSPORTS = {"websocket"}
 _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
     "open_interest",
+    "funding_settlement",
 }
 _MATCHED_RECONCILIATION_FAMILIES = {
     "trades",
