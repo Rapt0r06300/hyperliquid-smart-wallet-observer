@@ -8,90 +8,49 @@ def _text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def test_dataset_job_only_triggers_on_dedicated_control_path() -> None:
+def test_legacy_dataset_job_is_manual_only() -> None:
     text = _text()
     preamble = text.split("jobs:", 1)[0]
-    assert "push:" in preamble
-    assert "branches: [main]" in preamble
-    assert "control/github_dataset_jobs/*.json" in preamble
-    assert "workflow_dispatch:" not in preamble
-    assert "research/queue" not in text
-    assert "control/alina_jobs" not in text
-    assert "control/alina_final_jobs" not in text
+    assert "alina-github-dataset-job-legacy-disabled" in preamble
+    assert "workflow_dispatch:" in preamble
+    assert "push:" not in preamble
+    assert "schedule:" not in preamble
+    assert "pull_request:" not in preamble
 
 
-def test_dataset_job_is_github_hosted_and_actor_gated() -> None:
+def test_legacy_dataset_job_is_unreachable_and_github_hosted() -> None:
     text = _text()
+    assert "if: ${{ false }}" in text
     assert "runs-on: ubuntu-latest" in text
     assert "runs-on: [self-hosted" not in text
-    assert "github.actor == 'Rapt0r06300'" in text
-    assert "github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer'" in text
-    assert "github.ref == 'refs/heads/main'" in text
-    assert "Exactly one changed file is required." in text
-    assert "Control file must be newly added." in text
 
 
-def test_dataset_job_uses_private_token_without_uploading_raw_data() -> None:
+def test_legacy_dataset_job_has_minimal_permissions_and_no_secret() -> None:
     text = _text()
-    assert "secrets.ALINA_DATASET_READ_TOKEN" in text
-    assert "HYPERSMART_DATASET_TOKEN" in text
-    assert "raw_dataset_uploaded" in text
-    assert '"raw_dataset_uploaded":False' in text
-    assert '"dataset_paths_uploaded":False' in text
-    assert '"dataset_reports_uploaded":False' in text
-    assert "cp -a" not in text
-    assert "Upload sanitized proof only" in text
-    assert 'echo "ALINA_DATASET_HOME=$RUNNER_TEMP/alina-datasets" >> "$GITHUB_ENV"' in text
+    assert "permissions:\n  contents: read" in text
+    assert "secrets." not in text
+    assert "TOKEN" not in text
+    assert "upload-artifact" not in text
+    assert "contents: write" not in text
 
 
-def test_dataset_job_enforces_paper_read_only_and_streaming() -> None:
+def test_legacy_dataset_job_points_only_to_canonical_v2() -> None:
     text = _text()
-    required = (
-        "HL_ENABLE_MAINNET_EXECUTION: '0'",
-        "HL_ENABLE_TESTNET_EXECUTION: '0'",
-        "REAL_MAINNET_TRADING: 'false'",
-        "TESTNET_EXECUTION_ENABLED: 'false'",
-        "HYPERSMART_ENABLE_REAL_ORDERS: '0'",
-        "ENABLE_REAL_ORDERS: '0'",
-        "HYPERSMART_ANALYSIS_LOCAL_ONLY: '1'",
-        "--stream-assets",
-        "--no-start-collection",
-    )
-    for needle in required:
-        assert needle in text
+    assert "legacy hypersmart-datasets source has been deleted" in text
+    assert "Alina Dataset V2 is the only permitted dataset source" in text
+    assert "Rapt0r06300/alina-smartflow-datasets-v2" in text
+    assert "exit 1" in text
 
 
-def test_dataset_job_public_evidence_is_exact_allowlist() -> None:
+def test_legacy_dataset_job_cannot_collect_or_publish_data() -> None:
     text = _text()
-    evidence = text.split("- name: Build public-safe evidence", 1)[1].split(
-        "- name: Upload sanitized proof only", 1
-    )[0]
-    required = (
-        '"job_id":job.get("job_id")',
-        '"source":job.get("source")',
-        '"suite":job.get("suite")',
-        '"mode":mode',
-        '"success":success',
-        '"file_count":file_count',
-        '"total_bytes":byte_count',
-        '"paper_only":True',
-        '"real_execution":False',
-        '"raw_dataset_uploaded":False',
-        '"dataset_paths_uploaded":False',
-        '"dataset_reports_uploaded":False',
-    )
-    for needle in required:
-        assert needle in evidence
-
     forbidden = (
-        '"schema"',
-        '"github_run_id"',
-        '"github_sha"',
-        '"analysis_outcome"',
-        '"materialization_completed"',
-        '"materialized_file_count"',
-        '"materialized_bytes"',
-        '"private_token_exposed"',
+        "--stream-assets",
+        "--start-collection",
+        "git push",
+        "cp -a",
+        "hl_observer.datasets",
+        "ALINA_DATASET_HOME",
     )
     for needle in forbidden:
-        assert needle not in evidence
+        assert needle not in text

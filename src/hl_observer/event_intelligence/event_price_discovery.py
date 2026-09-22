@@ -1,4 +1,4 @@
-"""Measure causal information-to-market price discovery across native venues.
+"""Measure causal event-to-market price discovery across native venues.
 
 The output is research evidence only. It does not declare an event causal, does not
 estimate executable PnL, and never submits orders. All timing uses Alina receive

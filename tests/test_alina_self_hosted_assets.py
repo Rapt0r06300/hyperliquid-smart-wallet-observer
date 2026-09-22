@@ -19,9 +19,11 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def test_workflow_cible_uniquement_le_runner_windows_hypersmart() -> None:
+def test_workflow_self_hosted_reste_desactive_et_ne_cible_pas_le_pc() -> None:
     text = _text(WORKFLOW)
-    assert "runs-on: [self-hosted, Windows, X64, hypersmart]" in text
+    assert "if: ${{ false }}" in text
+    assert "runs-on: ubuntu-latest" in text
+    assert "runs-on: [self-hosted" not in text
     assert "control/alina_jobs/*.json" in text
     assert "workflow_dispatch:" in text
     assert "pull_request:" not in text

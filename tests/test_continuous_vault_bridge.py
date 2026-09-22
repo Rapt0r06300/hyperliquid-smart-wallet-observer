@@ -21,7 +21,7 @@ def _contents_payload(payload: dict[str, object]) -> dict[str, object]:
 def test_load_continuous_pointer_decodes_private_contents(monkeypatch) -> None:
     pointer = {
         "schema": continuous_vault_bridge.POINTER_SCHEMA,
-        "repository": "Rapt0r06300/hypersmart-datasets",
+        "repository": continuous_vault_bridge.DEFAULT_REPOSITORY,
         "latest_snapshot_id": "snap-1",
         "latest_release_id": 123,
         "latest_release_tag": "alina-vault-snap-1",

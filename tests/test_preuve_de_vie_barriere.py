@@ -55,8 +55,9 @@ def test_attente_expire_si_core_jamais_pret():
 def test_niveau_ok_core_vs_harvest():
     assert PV._niveau_ok(_etat(True), "core") is True
     assert PV._niveau_ok(_etat(False), "core") is False
-    # harvest : DEGRADE_DOCUMENTE passe (CORE vivant), DATA_NOT_READY échoue.
-    assert PV._niveau_ok(_etat(True, PV.HARVEST_DEGRADE), "harvest") is True
+    # harvest exige aussi une preuve native-venues saine. Un état core-only sans
+    # cette preuve reste honnêtement indisponible, même en DEGRADE_DOCUMENTE.
+    assert PV._niveau_ok(_etat(True, PV.HARVEST_DEGRADE), "harvest") is False
     assert PV._niveau_ok(_etat(False, PV.STATUT_DATA_NOT_READY), "harvest") is False
 
 

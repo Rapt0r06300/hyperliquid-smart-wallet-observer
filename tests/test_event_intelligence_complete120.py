@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from hl_observer.event_intelligence.archive import EventIntelligenceArchive
-from hl_observer.event_intelligence.coverage import IDEA_COVERAGE, coverage_summary
+from hl_observer.event_intelligence.idea_coverage import IDEA_COVERAGE, coverage_summary
 from hl_observer.event_intelligence.candidates import EventLeadLagCandidate
 from hl_observer.event_intelligence.direct_sources import (
     DirectSourceError,

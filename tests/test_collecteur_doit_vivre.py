@@ -98,7 +98,7 @@ def test_le_cablage_existe_boucle_lanceur_et_handler_Q():
                errors="replace").read()
     runner = open(str(RACINE / "src" / "hl_observer" / "ops" / "collector_runner.py"), encoding="utf-8", errors="replace").read()
     assert "hl_observer.ops.collector_runner" in boucle
-    assert "collecteur_doit_vivre" in runner and "arret propre anti-orphelin" in runner
+    assert "collecteur_doit_vivre" in runner and "arrêt propre anti-orphelin" in runner
     assert "lanceur_session_marqueur.txt" in runner
     assert "lanceur_session_marqueur.txt" in lanceur
     assert "boucle_collecteur" in ps1 and "Stopping collector loop tree" in ps1

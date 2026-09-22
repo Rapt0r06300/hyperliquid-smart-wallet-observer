@@ -54,6 +54,10 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         ("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000"),
         ("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000"),
         ("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000"),
+        # Adaptive sizing is a distinct risk feature. Keeping it enabled here
+        # would reject the deliberately small $100 persistence fixtures before
+        # the ledger behavior under test can run.
+        ("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0"),
     ):
         monkeypatch.setenv(var, val)
 
@@ -2256,7 +2260,7 @@ def test_ui_simulation_marks_open_position_with_latest_public_trade_price(tmp_pa
     assert "publicTradesWS" in second["equity"]["market_mark_sources"]
     assert second["bot_simulation"]["open_positions"][0]["mark_price"] == 2020.0
     assert second["equity"]["unrealized_pnl_usdc"] > 0
-    assert second["equity"]["current_equity_usdt"] > 1000.0
+    assert second["equity"]["current_equity_usdt"] > 100.0
 
 
 def test_ui_simulation_overview_cache_is_scoped_by_limit(tmp_path: Path):

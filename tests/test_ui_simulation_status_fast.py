@@ -63,6 +63,12 @@ def _planchers_permissifs_pour_tester_la_persistance(monkeypatch):
         ("HYPERSMART_DIRECT_COPY_MIN_LIQUIDITY", "0.0"),
         # sans allMids en test, le prix du leader sert de mid (sinon veto CURRENT_MID_REQUIRED)
         ("HYPERSMART_LEADER_MID_FALLBACK_MAX_AGE_MS", "600000"),
+        # Isolate persistence/economic-writer behavior from portfolio caps.
+        # The caps remain enabled and covered in their dedicated risk tests.
+        ("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000"),
+        ("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000"),
+        ("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000"),
+        ("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000"),
     ):
         monkeypatch.setenv(var, val)
 
@@ -671,7 +677,7 @@ def test_status_rejects_external_arbitrage_without_measured_execution_costs(tmp_
     assert len(state.simulation_virtual_positions) == 0
 
 
-def test_economic_writer_closes_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
+def test_economic_writer_reverses_existing_paper_position_when_fusion_consensus_flips(tmp_path, monkeypatch):
     monkeypatch.setenv("HL_DATABASE_URL", f"sqlite:///{(tmp_path / 'session.sqlite3').as_posix()}")
     monkeypatch.setenv("HL_LOGS_DIR", str(tmp_path / "logs"))
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
@@ -734,9 +740,13 @@ def test_economic_writer_closes_existing_paper_position_when_fusion_consensus_fl
     }), encoding="utf-8")
 
     report = writer.tick(current_ms=event_ms + 1)
-    assert report["fusion"]["applied_count"] == 1
+    # A reversal is two explicit paper actions: open the accepted SHORT and
+    # close the prior LONG. Counting both keeps the ledger auditable.
+    assert report["fusion"]["applied_count"] == 2
     assert state.simulation_reproduced_exits_total == 1
     assert any(row.get("bot_replay_action") == "FUSION_DIRECT_PAPER_CLOSE" for row in state.simulation_ledger_events)
+    assert len(state.simulation_virtual_positions) == 1
+    assert next(iter(state.simulation_virtual_positions.values()))["side"] == "SHORT"
     assert state.simulation_realized_pnl_usdc > 0
 
     before = json.dumps(state.simulation_ledger_events, sort_keys=True, default=str)

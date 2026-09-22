@@ -1,4 +1,4 @@
-"""Machine-readable coverage registry for the 120 retained Event Intelligence ideas.
+"""Machine-readable idea coverage registry for the 120 retained Event Intelligence ideas.
 
 The registry is intentionally strict: every retained idea has an explicit owner
 component and implementation status so future work cannot silently drop items.

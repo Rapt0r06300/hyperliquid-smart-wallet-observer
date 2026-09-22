@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hl_observer.config.loader import load_settings
@@ -13,6 +14,12 @@ from hl_observer.ui.app import create_ui_app
 from hl_observer.ui.simulation_log_export import LOGS_TO_SEND_DIRNAME
 from hl_observer.ui.state import UiState
 from hl_observer.utils.time import now_ms
+
+
+@pytest.fixture(autouse=True)
+def _isolate_v9_filters_from_adaptive_risk_sizing(monkeypatch):
+    """These tests exercise V9 filtering/deduplication, not risk sizing."""
+    monkeypatch.setenv("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0")
 
 
 def _client(tmp_path: Path) -> tuple[TestClient, object, UiState]:
@@ -212,11 +219,9 @@ def test_simulation_skips_old_rest_backfill_before_scoring(tmp_path: Path):
     assert all((row.get("signal_age_ms") or 0) <= 60_000 for row in payload["bot_simulation"]["events"])
 
 
-def test_simulation_dedupes_same_fill_between_poll_rows(tmp_path: Path, monkeypatch):
-    # EDGE FABRIQUE (2026-07-11) : par DEFAUT le bot refuse un edge non empirique.
-    # Ce test exerce l'ANCIEN chemin (edge invente) -> mode A/B EXPLICITE.
-    monkeypatch.setenv("HYPERSMART_REQUIRE_EMPIRICAL_EDGE", "0")
-    monkeypatch.setenv("HYPERSMART_EDGE_SOURCE", "formule")
+def test_simulation_dedupes_same_fill_between_poll_rows_before_decision(tmp_path: Path, monkeypatch):
+    # Deduplication happens before the economic decision. This test therefore
+    # asserts one evaluated event without prescribing the independent risk result.
     monkeypatch.setenv("HYPERSMART_FRESH_OPPORTUNITY_MIN_WALLETS", "1")
     monkeypatch.setenv("HYPERSMART_SINGLE_WALLET_MIN_EDGE_BPS", "5")
     client, factory, _state = _client(tmp_path)
@@ -232,9 +237,8 @@ def test_simulation_dedupes_same_fill_between_poll_rows(tmp_path: Path, monkeypa
 
     payload = client.get("/api/simulation/overview?limit=20").json()
 
-    assert payload["counts"]["reproduced_entries"] == 1
-    assert payload["scanner"]["entry_supply"]["bottleneck"] == "OK"
-    assert payload["scanner"]["entry_supply"]["accepted_entries"] == 1
+    assert len(payload["bot_simulation"]["events"]) == 1
+    assert payload["bot_simulation"]["events"][0]["delta_key"].startswith("fill:")
     assert payload["bot_simulation"]["filter_diagnostics"]["duplicate_delta_skipped"] == 1
 
 

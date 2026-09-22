@@ -14,7 +14,8 @@ import tools.collecter_allmids as CA
 
 
 def _base(root, snaps, *, carnet=None, gele=False, allmids=None, ts_allmids_ms=None,
-          retenus=("0xAAA",), now=1_000_000_000_000.0):
+          retenus=("0xAAA",), now=1_000_000_000_000.0,
+          edge_brut_bps=45.0, edge_net_mesure_bps=33.0):
     (root / "runtime" / "data").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "runtime" / "data" / "vault_snapshots.jsonl").write_text(
@@ -28,7 +29,12 @@ def _base(root, snaps, *, carnet=None, gele=False, allmids=None, ts_allmids_ms=N
     if allmids is not None:
         (root / "runtime" / "data" / "hl_allmids.json").write_text(json.dumps({"ts_ms": ts_allmids_ms, "mids": allmids}))
     if gele:
-        geler(root, horizon_ms=900_000.0, edge_brut_bps=45.0, edge_net_mesure_bps=33.0)
+        geler(
+            root,
+            horizon_ms=900_000.0,
+            edge_brut_bps=edge_brut_bps,
+            edge_net_mesure_bps=edge_net_mesure_bps,
+        )
 
 
 def _snaps_move(vault="0xAAA", coin="HYPE", szi0=0.0, szi1=1000.0, px=20.0, nav=100_000, now=1_000_000_000_000.0):
@@ -90,7 +96,14 @@ def test_sans_carnet_frais_NO_TRADE_et_coin_file_au_carnet(tmp_path):
 def test_ouvre_quand_L2_frais_ET_edge_mesure(tmp_path):
     """Les DEUX conditions réunies : prix/profondeur = L2 réel, edge = mesuré − coût L2, admission OK."""
     now = 1_000_000_000_000.0
-    _base(tmp_path, _snaps_move(), carnet=_carnet(bid=19.99, ask=20.01, taille=5000.0), gele=True)
+    _base(
+        tmp_path,
+        _snaps_move(),
+        carnet=_carnet(bid=19.99, ask=20.01, taille=5000.0),
+        gele=True,
+        edge_brut_bps=90.0,
+        edge_net_mesure_bps=70.0,
+    )
     sigs, refus = signaux_vaults(tmp_path, now_ms=now)
     assert len(sigs) == 1
     s = sigs[0]
@@ -98,8 +111,9 @@ def test_ouvre_quand_L2_frais_ET_edge_mesure(tmp_path):
     assert s.prix_entree == 20.01                                        # ask L2 réel (taker long)
     assert s.notional_usd == 50.0                                        # $100 paper budget: cible 50, profondeur 5000
     assert s.meta["fill_partiel"] is False and s.meta["l2_age_ms"] <= 1000   # L2 < 1 s
-    # edge net = edge_brut mesuré (45) − coût A/R L2 réel (spread+2×slippage+frais) ; mesuré, pas inventé
-    assert s.meta["edge_brut_mesure_bps"] == 45.0 and s.edge_estime_bps < 45.0
+    # edge net = edge_brut mesuré (90) − coût A/R L2 réel (spread+2×slippage+frais) ; mesuré, pas inventé
+    # et reste assez élevé pour dépasser honnêtement le plancher de PnL attendu de 0,25 $.
+    assert s.meta["edge_brut_mesure_bps"] == 90.0 and s.edge_estime_bps < 90.0
     assert MP.admettre(s, MP.charger_store(tmp_path), now_ms=now) == (True, None)
 
 

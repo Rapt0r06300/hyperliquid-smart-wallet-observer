@@ -51,6 +51,21 @@ def test_gate_bloque_un_secret_dans_environnement():
     assert "WALLET_OR_SECRET_CONFIGURATION_PRESENT" in report["blockers"]
 
 
+def test_gate_bloque_une_seed_de_wallet_dans_environnement():
+    env = _safe_env()
+    env["HYPERSMART_WALLET_SEED"] = "present"
+    report = build_report(ROOT, environ=env)
+    assert report["status"] == "BLOCKED"
+    assert "WALLET_OR_SECRET_CONFIGURATION_PRESENT" in report["blockers"]
+
+
+def test_gate_ignore_une_graine_de_cache_non_secrete():
+    env = _safe_env()
+    env["SITES_NPM_CACHE_SEED"] = "cache-v1"
+    report = build_report(ROOT, environ=env)
+    assert "WALLET_OR_SECRET_CONFIGURATION_PRESENT" not in report["blockers"]
+
+
 def test_gate_expose_les_incidents_runtime_sans_les_masquer():
     report = build_report(ROOT, environ=_safe_env())
     assert "runtime_incidents" in report

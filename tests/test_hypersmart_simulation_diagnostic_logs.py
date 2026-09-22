@@ -24,6 +24,7 @@ def test_simulation_overview_writes_logs_to_send_folder(tmp_path: Path, monkeypa
     monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")
     monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0")
     settings = load_settings()
     settings.database_url = f"sqlite:///{tmp_path / 'data' / 'ui.sqlite3'}"
     settings.logs_dir = tmp_path / "logs"

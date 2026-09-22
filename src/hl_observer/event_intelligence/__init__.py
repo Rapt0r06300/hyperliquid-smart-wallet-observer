@@ -5,7 +5,7 @@ All adapters are read-only. No order endpoint or real-execution path exists here
 
 from .archive import ArchiveAppendResult, EventArchiveCorruptError, EventIntelligenceArchive
 from .candidates import EventLeadLagCandidate, EventLeadLagConfig, evaluate_event_lead_lag_candidate
-from .coverage import IDEA_COVERAGE, IdeaCoverage, coverage_summary
+from .idea_coverage import IDEA_COVERAGE, IdeaCoverage, coverage_summary
 from .direct_sources import (
     DIRECT_SOURCES,
     DirectSourceError,
@@ -55,7 +55,7 @@ from .module_bridges import (
     measure_copy_vault_event_reactions,
 )
 from .outcomes import EventCandidateMarkout, evaluate_candidate_markout
-from .price_discovery import EventMarketReaction, measure_event_price_discovery
+from .event_price_discovery import EventMarketReaction, measure_event_price_discovery
 from .protocol import EventResearchFreeze, assert_forward_after_freeze, freeze_event_research
 from .provenance import EventCluster, ProvenanceScore, cluster_external_events, score_provenance
 from .regimes import (

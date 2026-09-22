@@ -12,12 +12,14 @@ def _workflow() -> str:
     return WORKFLOW.read_text(encoding="utf-8", errors="replace")
 
 
-def test_smoke_uses_only_the_dedicated_runner_and_manual_fallback() -> None:
+def test_smoke_is_manual_but_disabled_and_never_targets_the_pc() -> None:
     text = _workflow()
     assert "workflow_dispatch:" in text
     assert "pull_request:" not in text
     assert "push:" not in text
-    assert "runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]" in text
+    assert "false &&" in text
+    assert "runs-on: ubuntu-latest" in text
+    assert "runs-on: [self-hosted" not in text
     assert "github.actor == 'Rapt0r06300'" in text
     assert "github.ref == 'refs/heads/main'" in text
     assert "github.event.repository.fork == false" in text

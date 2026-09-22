@@ -34,11 +34,21 @@ EXECUTION_FLAGS = (
 SECRET_ENV_FIELDS = (
     "private_key",
     "mnemonic",
-    "seed",
     "wallet_address",
     "signer",
     "api_secret",
     "secret_key",
+)
+
+SEED_SECRET_CONTEXTS = (
+    "wallet",
+    "private",
+    "mnemonic",
+    "signer",
+    "secret",
+    "hyperliquid",
+    "hypersmart",
+    "alina",
 )
 
 
@@ -63,6 +73,16 @@ def _wallet_report(environ: Mapping[str, str]) -> dict[str, Any]:
             if field in key and str(value or "").strip():
                 config[field] = "PRESENT"
                 break
+    for key, value in lower_env.items():
+        if not str(value or "").strip() or "seed" not in key:
+            continue
+        normalized = key.replace("-", "_")
+        seed_is_sensitive = normalized in {"seed", "seed_phrase"} or any(
+            context in normalized for context in SEED_SECRET_CONTEXTS
+        ) or normalized.startswith("hl_seed")
+        if seed_is_sensitive:
+            config["seed"] = "PRESENT"
+            break
     return verifier_absence_wallet(config)
 
 

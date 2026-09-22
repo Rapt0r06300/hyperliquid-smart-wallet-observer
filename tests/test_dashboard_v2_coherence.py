@@ -70,7 +70,7 @@ def test_la_courbe_INCLUT_le_net_carry(tmp_path, monkeypatch):
     root = _ledger(tmp_path, [_close(1000, -5.0)])
     d = _appel(_req_root(root))
     assert d["inclut_carry"] is True
-    assert d["points"][-1]["equity"] == 995.0
+    assert d["points"][-1]["equity"] == 95.0
     assert d["points"][-1]["pnl"] == -5.0
     assert d["amplitude_usd"] > 0, "la courbe doit BOUGER quand le carry perd 5$"
 
@@ -85,7 +85,7 @@ def test_le_PASSE_n_est_PAS_reecrit(tmp_path, monkeypatch):
     root = _ledger(tmp_path, [_close(1000, -3.0), _close(2000, -2.0)])
     d = _appel(_req_root(root))
     assert d["points"][1]["equity"] == 97.0, "un CLOSE passé garde sa valeur"
-    assert d["points"][2]["equity"] == 995.0, "le 2e CLOSE passé ne bouge pas non plus"
+    assert d["points"][2]["equity"] == 95.0, "le 2e CLOSE passé ne bouge pas non plus"
     # le funding réglé (+5) n'entre QUE dans le point courant : -5 réalisé + 5 réglé = 0
     assert d["points"][-1]["pnl"] == 0.0
     assert d["points"][-1].get("inclut_funding_courant") is True

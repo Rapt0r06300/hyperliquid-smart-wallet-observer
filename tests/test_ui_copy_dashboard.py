@@ -279,7 +279,14 @@ def test_ui_simulation_overview_explains_empty_state(tmp_path):
     assert any(row["reason"] == "NO_LEADER_WALLET_IMPORTED" for row in payload["no_trade_reasons"])
 
 
-def test_ui_simulation_overview_detects_multi_wallet_consensus(tmp_path):
+def test_ui_simulation_overview_detects_multi_wallet_consensus(tmp_path, monkeypatch):
+    # This test targets consensus detection. Adaptive sizing and portfolio caps
+    # have dedicated coverage and would otherwise reject the small UI fixture.
+    monkeypatch.setenv("HYPERSMART_ADAPTIVE_PAPER_SIZING", "0")
+    monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_NET_DIRECTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "1000")
+    monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "1000")
     client, factory = _client_and_db(tmp_path)
     base_ms = now_ms() + 1_000
     with factory() as session:
