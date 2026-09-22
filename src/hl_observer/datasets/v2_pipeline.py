@@ -146,8 +146,14 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     }
     family = str(manifest.get("family") or "").lower()
     if family in _MATCHED_RECONCILIATION_FAMILIES:
-        if reconciliation_status != "MATCHED":
+        if reconciliation_status == "MATCHED":
+            pass
+        elif reconciliation_status in {"MISMATCH", "ERROR", "REJECT"}:
+            severe.append("RECONCILIATION_MISMATCH")
+        else:
             reasons.append("RECONCILIATION_MATCH_REQUIRED")
+    elif reconciliation_status in {"MISMATCH", "ERROR", "REJECT"}:
+        severe.append("RECONCILIATION_MISMATCH")
     elif reconciliation_status not in allowed_reconciliation:
         reasons.append("RECONCILIATION_NOT_VERIFIED")
 
