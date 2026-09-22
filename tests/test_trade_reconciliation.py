@@ -8,6 +8,7 @@ import httpx
 
 from hl_observer.collection.trade_reconciliation import (
     live_trade_ids,
+    reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
     reconcile_okx_trade_shard,
 )
@@ -27,6 +28,19 @@ def _write_shard(path, *, venue: str, rows: list[dict]) -> None:
                 }
                 for row in rows
             ],
+        }
+    elif venue == "binance":
+        # One aggregate trade per envelope, matching collect_cloud_window.
+        raw = {
+            "e": "aggTrade",
+            "s": "BTCUSDT",
+            "a": rows[0]["id"],
+            "T": rows[0]["ts"],
+            "p": "100",
+            "q": "1",
+            "f": rows[0]["id"],
+            "l": rows[0]["id"],
+            "m": False,
         }
     else:
         raw = {
@@ -234,3 +248,130 @@ def test_live_trade_ids_parses_canonical_raw_payload_text(tmp_path) -> None:
     ids, count = live_trade_ids(path, venue="okx")
     assert ids == {"9001", "9002"}
     assert count == 2
+
+
+def test_binance_aggtrade_ids_are_extracted_from_raw_envelopes(tmp_path) -> None:
+    path = tmp_path / "binance.jsonl.gz"
+    _write_shard(path, venue="binance", rows=[{"id": 10, "ts": 1000}])
+    ids, count = live_trade_ids(path, venue="binance")
+    assert ids == {"10"}
+    assert count == 1
+
+
+def test_binance_aggtrade_exact_rest_match(tmp_path) -> None:
+    path = tmp_path / "binance.jsonl.gz"
+    # Write two envelopes because Binance aggregate stream emits one event/frame.
+    _write_shard(path, venue="binance", rows=[{"id": 10, "ts": 1000}])
+    with gzip.open(path, "at", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "raw_payload": {
+                        "e": "aggTrade",
+                        "s": "BTCUSDT",
+                        "a": 11,
+                        "T": 1010,
+                        "p": "100",
+                        "q": "1",
+                        "f": 11,
+                        "l": 11,
+                        "m": False,
+                    }
+                }
+            )
+            + "\n"
+        )
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            assert request.url.path == "/fapi/v1/aggTrades"
+            return httpx.Response(
+                200,
+                json=[
+                    {"a": 10, "T": 1000, "p": "100", "q": "1"},
+                    {"a": 11, "T": 1010, "p": "100", "q": "1"},
+                ],
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        report = await reconcile_binance_aggtrade_shard(
+            path,
+            symbol="BTCUSDT",
+            start_ms=1000,
+            end_ms=1020,
+            client=client,
+            throttle_s=0,
+        )
+        await client.aclose()
+        assert report["status"] == "MATCHED"
+        assert report["matched_count"] == 2
+        assert report["reference_coverage"] == "EXPLICIT_BOUNDED_REST_WINDOW"
+
+    asyncio.run(scenario())
+
+
+def test_binance_full_reference_page_is_split_before_match(tmp_path) -> None:
+    path = tmp_path / "binance.jsonl.gz"
+    _write_shard(path, venue="binance", rows=[{"id": 10, "ts": 1000}])
+    with gzip.open(path, "at", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "raw_payload": {
+                        "e": "aggTrade",
+                        "s": "BTCUSDT",
+                        "a": 11,
+                        "T": 1020,
+                        "p": "100",
+                        "q": "1",
+                        "f": 11,
+                        "l": 11,
+                        "m": False,
+                    }
+                }
+            )
+            + "\n"
+        )
+
+    async def scenario() -> None:
+        calls = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            left = int(request.url.params["startTime"])
+            right = int(request.url.params["endTime"])
+            calls.append((left, right))
+            if left == 1000 and right == 1020:
+                # Saturated page proves only that this interval needs refinement.
+                return httpx.Response(
+                    200,
+                    json=[
+                        {"a": 10, "T": 1000},
+                        {"a": 11, "T": 1020},
+                    ],
+                )
+            if right <= 1010:
+                return httpx.Response(200, json=[{"a": 10, "T": 1000}])
+            return httpx.Response(200, json=[{"a": 11, "T": 1020}])
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        report = await reconcile_binance_aggtrade_shard(
+            path,
+            symbol="BTCUSDT",
+            start_ms=1000,
+            end_ms=1020,
+            client=client,
+            limit=2,
+            throttle_s=0,
+        )
+        await client.aclose()
+        assert len(calls) == 3
+        assert report["status"] == "MATCHED"
+        assert report["matched_count"] == 2
+
+    asyncio.run(scenario())
