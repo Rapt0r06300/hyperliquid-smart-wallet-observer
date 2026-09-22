@@ -69,6 +69,31 @@ def test_binance_bbo_keeps_update_id_and_transport_clock() -> None:
     assert tick.connection_id == "bin-test"
 
 
+def test_binance_bbo_carries_clock_probe_evidence() -> None:
+    m = _module()
+    tick = m._binance_bbo_envelope(
+        {
+            "data": {
+                "s": "BTCUSDT",
+                "b": "100",
+                "a": "101",
+                "T": 1000,
+                "u": 77,
+            }
+        },
+        received_ts_ms=1010,
+        receive_mono_ns=999,
+        connection_id="bin-test",
+        clock_evidence={
+            "clock_offset_ms": -2.5,
+            "clock_probe_rtt_ms": 9.0,
+        },
+    )
+    assert tick is not None
+    assert tick.parsed_summary["clock_offset_ms"] == -2.5
+    assert tick.parsed_summary["clock_probe_rtt_ms"] == 9.0
+
+
 def test_binance_trade_preserves_exchange_trade_id() -> None:
     m = _module()
     tick = m._binance_trade_envelope(
@@ -91,6 +116,33 @@ def test_binance_trade_preserves_exchange_trade_id() -> None:
     assert tick.channel == "trades"
     assert tick.sequence == 123
     assert tick.parsed_summary["aggressor_side"] == "SELL"
+
+
+def test_binance_trade_carries_clock_probe_evidence() -> None:
+    m = _module()
+    tick = m._binance_trade_envelope(
+        {
+            "data": {
+                "e": "aggTrade",
+                "s": "ETHUSDT",
+                "p": "2000",
+                "q": "0.5",
+                "T": 1000,
+                "a": 123,
+                "m": False,
+            }
+        },
+        received_ts_ms=1005,
+        receive_mono_ns=100,
+        connection_id="bin-trade-test",
+        clock_evidence={
+            "clock_offset_ms": 3.0,
+            "clock_probe_rtt_ms": 12.0,
+        },
+    )
+    assert tick is not None
+    assert tick.parsed_summary["clock_offset_ms"] == 3.0
+    assert tick.parsed_summary["clock_probe_rtt_ms"] == 12.0
 
 
 def test_plan_file_preserves_exact_exchange_symbols(tmp_path) -> None:
