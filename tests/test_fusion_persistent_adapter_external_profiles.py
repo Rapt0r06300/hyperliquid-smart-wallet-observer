@@ -741,6 +741,10 @@ def test_direct_close_requires_exact_position_instance(monkeypatch):
 
 
 def test_direct_ab_entry_and_exit_costs_are_both_in_net_pnl(monkeypatch):
+    # This test targets DIRECT_AB execution-cost semantics, not portfolio concentration.
+    # Keep production risk defaults intact; relax only this isolated test fixture.
+    monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "200")
+    monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "200")
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
     monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")
@@ -811,6 +815,10 @@ def test_direct_ab_entry_and_exit_costs_are_both_in_net_pnl(monkeypatch):
 
 
 def test_direct_ab_missing_execution_cost_is_rejected(monkeypatch):
+    # This test targets DIRECT_AB execution-cost semantics, not portfolio concentration.
+    # Keep production risk defaults intact; relax only this isolated test fixture.
+    monkeypatch.setenv("HYPERSMART_MAX_COIN_NOTIONAL_PCT", "200")
+    monkeypatch.setenv("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", "200")
     monkeypatch.setenv("HYPERSMART_EXTERNAL_GITHUB_DIRECT_MATERIALIZATION", "1")
     monkeypatch.setenv("HYPERSMART_AB_RESEARCH_ACK", "1")
     monkeypatch.setenv("HYPERSMART_LEDGER_SCOPE", "EXPERIMENTAL")

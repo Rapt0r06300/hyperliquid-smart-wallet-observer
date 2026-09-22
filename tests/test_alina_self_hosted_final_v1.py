@@ -17,11 +17,12 @@ def _text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def test_final_workflow_isolated_from_legacy_queue() -> None:
+def test_final_workflow_isolated_from_legacy_queue_and_pc_disabled() -> None:
     text = _text(WORKFLOW)
     assert "control/alina_final_jobs/*.json" in text
-    assert "runs-on: [self-hosted, Windows, X64, hypersmart-final-v1]" in text
-    assert "runs-on: [self-hosted, Windows, X64, hypersmart]" not in text
+    assert "false &&" in text
+    assert "runs-on: ubuntu-latest # PC/self-hosted disabled by repository policy" in text
+    assert "runs-on: [self-hosted" not in text
     assert "SELF_HOSTED_STALE_SHA_REFUSED" in text
     assert "commits/main" in text
     assert "FINAL_CONTROL_ONLY_COMMIT_REQUIRED" in text
