@@ -238,3 +238,72 @@ def test_invalid_symbol_shard_index_is_rejected() -> None:
             symbol_shard_index=2,
             ccxt_snapshot_path=None,
         )
+
+
+class _MutableBybitDiscovery:
+    def __init__(self) -> None:
+        self.rows = [("BTC", "BTCUSDT")]
+        self.message_calls: list[tuple[str, ...]] = []
+
+    def discover_usdt_perpetuals(self):
+        return list(self.rows)
+
+    async def messages(self, symbols):
+        self.message_calls.append(tuple(symbols))
+        while True:
+            await asyncio.sleep(3600)
+            yield {}
+
+
+def test_discovery_refresh_detects_new_listing_without_restart() -> None:
+    async def scenario() -> None:
+        client = _MutableBybitDiscovery()
+        coordinator = NativeVenueCoordinator(
+            bybit_client=client,
+            okx_client=_EmptyDiscovery(),
+            gate_client=_EmptyDiscovery(),
+            bitget_client=_EmptyDiscovery(),
+        )
+        coordinator.discover(now_s=100.0)
+        assert "ETH" not in coordinator.registry
+
+        client.rows.append(("ETH", "ETHUSDT"))
+        coordinator.discovery_refresh_interval_s = 0.01
+        task = asyncio.create_task(coordinator.run_discovery_refresh())
+        try:
+            await asyncio.sleep(0.04)
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+        assert coordinator.registry["ETH"]["bybit"] == "ETHUSDT"
+        health = coordinator.health(now_ms=100_000)
+        assert health["discovery_refreshes"] >= 1
+        assert health["universe_changes"] >= 1
+
+    import asyncio
+    asyncio.run(scenario())
+
+
+def test_venue_session_recycles_and_re_reads_symbol_universe() -> None:
+    async def scenario() -> None:
+        client = _MutableBybitDiscovery()
+        coordinator = NativeVenueCoordinator(
+            bybit_client=client,
+            okx_client=_EmptyDiscovery(),
+            gate_client=_EmptyDiscovery(),
+            bitget_client=_EmptyDiscovery(),
+        )
+        coordinator.discover(now_s=100.0)
+        coordinator.venue_session_s = 0.01
+
+        await coordinator.run_bybit()
+        assert client.message_calls[-1] == ("BTCUSDT",)
+
+        client.rows.append(("ETH", "ETHUSDT"))
+        coordinator.discover(now_s=101.0)
+        await coordinator.run_bybit()
+        assert set(client.message_calls[-1]) == {"BTCUSDT", "ETHUSDT"}
+
+    import asyncio
+    asyncio.run(scenario())
