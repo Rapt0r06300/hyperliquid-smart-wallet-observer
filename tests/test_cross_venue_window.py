@@ -66,7 +66,7 @@ def test_clean_same_run_cross_venue_window_can_be_safe() -> None:
     )
     assert result["quality_status"] == SAFE
     assert result["validation_allowed"] is True
-    assert result["proof_of_pnl_allowed"] is True
+    assert result["proof_of_pnl_allowed"] is False
     assert result["collection_run_id"] == "market-run-1"
     assert result["window"]["overlap_ms"] == 1_000
     assert result["quality_reasons"] == []
