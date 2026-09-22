@@ -52,6 +52,8 @@ class NativeVenueCoordinator:
         symbol_shard_count: int = 1,
         symbol_shard_index: int = 0,
         clock_sync_interval_s: float = 60.0,
+        discovery_refresh_interval_s: float = 300.0,
+        venue_session_s: float = 300.0,
         ccxt_snapshot_path: str | Path | None = "data/ccxt_universe.json",
     ) -> None:
         self.stale_after_ms = int(stale_after_ms)
@@ -66,6 +68,10 @@ class NativeVenueCoordinator:
         self.bitget_client = bitget_client or BitgetPublicClient()
         self.tick_writer = tick_writer
         self.clock_sync_interval_s = max(10.0, float(clock_sync_interval_s))
+        self.discovery_refresh_interval_s = max(
+            30.0, float(discovery_refresh_interval_s)
+        )
+        self.venue_session_s = max(30.0, float(venue_session_s))
         self.store = MultiVenueMarketStore(stale_after_ms=self.stale_after_ms)
         self.registry: dict[str, dict[str, str]] = {}
         self._bybit_states: dict[str, BybitMarketState] = {}
@@ -73,6 +79,9 @@ class NativeVenueCoordinator:
         self._gate_states: dict[str, GateMarketState] = {}
         self._bitget_states: dict[str, BitgetMarketState] = {}
         self._clock_sync: dict[str, dict[str, float | int | str]] = {}
+        self._active_symbols: dict[str, tuple[str, ...]] = {}
+        self._discovery_refreshes = 0
+        self._universe_changes = 0
         self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
         self._ccxt_priority = set(
             load_native_collection_candidates(self.ccxt_snapshot_path)
@@ -149,6 +158,23 @@ class NativeVenueCoordinator:
         while True:
             await asyncio.sleep(self.clock_sync_interval_s)
             await asyncio.to_thread(self.refresh_clock_sync)
+
+    async def run_discovery_refresh(self) -> None:
+        """Refresh public venue universes; session recycling picks changes up."""
+        while True:
+            await asyncio.sleep(self.discovery_refresh_interval_s)
+            before = tuple(
+                (coin, tuple(sorted(venues.items())))
+                for coin, venues in sorted(self.registry.items())
+            )
+            await asyncio.to_thread(self.discover)
+            after = tuple(
+                (coin, tuple(sorted(venues.items())))
+                for coin, venues in sorted(self.registry.items())
+            )
+            self._discovery_refreshes += 1
+            if after != before:
+                self._universe_changes += 1
 
     def symbols_for(self, venue: str) -> list[str]:
         venue_key = str(venue).strip().lower()
@@ -325,6 +351,14 @@ class NativeVenueCoordinator:
             "symbol_shard_count": self.symbol_shard_count,
             "clock_sync": {venue: dict(row) for venue, row in self._clock_sync.items()},
             "raw_tick_writer_enabled": self.tick_writer is not None,
+            "active_symbols": {
+                venue: list(symbols)
+                for venue, symbols in sorted(self._active_symbols.items())
+            },
+            "discovery_refreshes": self._discovery_refreshes,
+            "universe_changes": self._universe_changes,
+            "discovery_refresh_interval_s": self.discovery_refresh_interval_s,
+            "venue_session_s": self.venue_session_s,
             "real_execution": False,
         }
 
@@ -332,29 +366,61 @@ class NativeVenueCoordinator:
         symbols = self.symbols_for("bybit")
         if not symbols:
             return
-        async for payload in self.bybit_client.messages(symbols):
-            now = int(time.time() * 1000)
-            self.ingest_bybit(self._with_clock_sync(payload, "bybit"), now_ms=now)
+        self._active_symbols["bybit"] = tuple(symbols)
+        try:
+            async with asyncio.timeout(self.venue_session_s):
+                async for payload in self.bybit_client.messages(symbols):
+                    now = int(time.time() * 1000)
+                    self.ingest_bybit(self._with_clock_sync(payload, "bybit"), now_ms=now)
+        except TimeoutError:
+            return
+        finally:
+            self._active_symbols.pop("bybit", None)
 
     async def run_okx(self) -> None:
         symbols = self.symbols_for("okx")
         if not symbols:
             return
-        async for payload in self.okx_client.messages(symbols):
-            now = int(time.time() * 1000)
-            self.ingest_okx(self._with_clock_sync(payload, "okx"), now_ms=now)
+        self._active_symbols["okx"] = tuple(symbols)
+        try:
+            async with asyncio.timeout(self.venue_session_s):
+                async for payload in self.okx_client.messages(symbols):
+                    now = int(time.time() * 1000)
+                    self.ingest_okx(self._with_clock_sync(payload, "okx"), now_ms=now)
+        except TimeoutError:
+            return
+        finally:
+            self._active_symbols.pop("okx", None)
 
     async def run_gate(self) -> None:
         symbols = self.symbols_for("gate")
-        if not symbols: return
-        async for payload in self.gate_client.messages(symbols):
-            now = int(time.time() * 1000); self.ingest_gate(payload, receive_ts_ms=now, now_ms=now)
+        if not symbols:
+            return
+        self._active_symbols["gate"] = tuple(symbols)
+        try:
+            async with asyncio.timeout(self.venue_session_s):
+                async for payload in self.gate_client.messages(symbols):
+                    now = int(time.time() * 1000)
+                    self.ingest_gate(payload, receive_ts_ms=now, now_ms=now)
+        except TimeoutError:
+            return
+        finally:
+            self._active_symbols.pop("gate", None)
 
     async def run_bitget(self) -> None:
         symbols = self.symbols_for("bitget")
-        if not symbols: return
-        async for payload in self.bitget_client.messages(symbols):
-            now = int(time.time() * 1000); self.ingest_bitget(payload, receive_ts_ms=now, now_ms=now)
+        if not symbols:
+            return
+        self._active_symbols["bitget"] = tuple(symbols)
+        try:
+            async with asyncio.timeout(self.venue_session_s):
+                async for payload in self.bitget_client.messages(symbols):
+                    now = int(time.time() * 1000)
+                    self.ingest_bitget(payload, receive_ts_ms=now, now_ms=now)
+        except TimeoutError:
+            return
+        finally:
+            self._active_symbols.pop("bitget", None)
 
     async def run(self, *, discover_first: bool = True) -> None:
         """Run both native public collectors until cancelled."""
@@ -369,6 +435,7 @@ class NativeVenueCoordinator:
         ]
         if self.symbols_for("bybit") or self.symbols_for("okx"):
             tasks.append(self.run_clock_sync())
+        tasks.append(self.run_discovery_refresh())
         await asyncio.gather(*tasks)
 
 
