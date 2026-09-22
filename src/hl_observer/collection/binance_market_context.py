@@ -163,6 +163,7 @@ class BinanceMarketContextCollector:
         http_client: httpx.AsyncClient | None = None,
         tick_sink: Callable[[TickEnvelope], Any] | None = None,
         context_sink: Callable[[str, Mapping[str, Any]], Any] | None = None,
+        clock_sync_provider: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self.symbols = tuple(
             sorted({str(value).strip().upper() for value in symbols if str(value).strip()})
@@ -178,6 +179,7 @@ class BinanceMarketContextCollector:
         )
         self.tick_sink = tick_sink
         self.context_sink = context_sink
+        self.clock_sync_provider = clock_sync_provider
         self.latest: dict[str, dict[str, Any]] = {}
         self.frames = 0
         self.open_interest_samples = 0
@@ -267,6 +269,7 @@ class BinanceMarketContextCollector:
                                     "authenticated": False,
                                 },
                                 parsed_summary={
+                                    **self._clock_evidence(),
                                     **parsed["summary"],
                                     "data_gate_ready": False,
                                 },
@@ -334,6 +337,7 @@ class BinanceMarketContextCollector:
                             "request_receive_wall_ms": receive_wall_ms,
                         },
                         parsed_summary={
+                            **self._clock_evidence(),
                             "open_interest": oi,
                             "data_gate_ready": False,
                         },
@@ -392,6 +396,7 @@ class BinanceMarketContextCollector:
                         "request_receive_wall_ms": receive_wall_ms,
                     },
                     parsed_summary={
+                        **self._clock_evidence(),
                         **{key: value for key, value in row.items() if key != "raw"},
                         "data_gate_ready": False,
                     },
@@ -399,6 +404,15 @@ class BinanceMarketContextCollector:
             )
             self.metadata_samples += 1
         return len(rows)
+
+    def _clock_evidence(self) -> dict[str, Any]:
+        if self.clock_sync_provider is None:
+            return {}
+        try:
+            row = self.clock_sync_provider()
+        except Exception:
+            return {}
+        return dict(row) if isinstance(row, Mapping) else {}
 
     def health(self) -> dict[str, Any]:
         return {
@@ -411,6 +425,7 @@ class BinanceMarketContextCollector:
             "rest_failures": self.rest_failures,
             "latest_symbols": len(self.latest),
             "last_error": self.last_error,
+            "clock_sync": self._clock_evidence(),
             "read_only": True,
             "real_execution": False,
         }
