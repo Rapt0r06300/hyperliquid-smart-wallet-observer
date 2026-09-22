@@ -165,6 +165,8 @@ async def _run(
     duration_s: float,
     universe_refresh_s: float = DEFAULT_UNIVERSE_REFRESH_S,
     enabled_venues: tuple[str, ...] = VENUES,
+    symbol_shard_count: int = 1,
+    symbol_shard_index: int = 0,
     rotate_bytes: int = 512 * 1024 * 1024,
 ) -> int:
     queue: deque[TickEnvelope] = deque()
