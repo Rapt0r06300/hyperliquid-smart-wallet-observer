@@ -168,18 +168,16 @@ def qualify_window(
         and effective_gap > int(allowed_receive_gap_ms)
     ):
         reasons.append("RECEIVE_GAP_TOO_LARGE")
-    if (
-        allowed_transport_rtt_ms is not None
-        and max_rtt is not None
-        and max_rtt > float(allowed_transport_rtt_ms)
-    ):
-        reasons.append("TRANSPORT_RTT_TOO_HIGH")
-    if (
-        allowed_abs_clock_offset_ms is not None
-        and max_offset is not None
-        and max_offset > float(allowed_abs_clock_offset_ms)
-    ):
-        reasons.append("CLOCK_OFFSET_TOO_LARGE")
+    if allowed_transport_rtt_ms is not None:
+        if max_rtt is None:
+            reasons.append("MISSING_TRANSPORT_RTT")
+        elif max_rtt > float(allowed_transport_rtt_ms):
+            reasons.append("TRANSPORT_RTT_TOO_HIGH")
+    if allowed_abs_clock_offset_ms is not None:
+        if max_offset is None:
+            reasons.append("MISSING_CLOCK_OFFSET")
+        elif max_offset > float(allowed_abs_clock_offset_ms):
+            reasons.append("CLOCK_OFFSET_TOO_LARGE")
 
     required = {str(value).strip() for value in required_channels if str(value).strip()}
     missing_channels = sorted(required - observed_channels)
