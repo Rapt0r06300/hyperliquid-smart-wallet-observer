@@ -134,6 +134,60 @@ def test_no_temporal_overlap_is_rejected() -> None:
     assert "NO_TEMPORAL_OVERLAP" in result["quality_reasons"]
 
 
+def test_exchange_clock_sync_needs_enough_samples_before_safe() -> None:
+    sync = _sync()
+    sync.update(
+        {
+            "exchange_sync_sample_count": 1,
+            "p95_exchange_skew_ms": 20.0,
+            "max_exchange_skew_ms": 40.0,
+        }
+    )
+    result = build_cross_venue_window_manifest(
+        _clean_components(),
+        canonical_coin="BTC",
+        required_families_by_venue={
+            "hyperliquid": {"l2Book", "trades"},
+            "binance": {"l2Book", "trades"},
+        },
+        instrument_mapping_exact=True,
+        sync_report=sync,
+        max_p95_exchange_skew_ms=100.0,
+        max_exchange_skew_ms=100.0,
+        min_sync_samples=20,
+    )
+    assert result["quality_status"] == PARTIAL
+    assert result["validation_allowed"] is False
+    assert "PAIR_SYNC_EXCHANGE_SAMPLE_TOO_SMALL" in result["quality_reasons"]
+    assert result["pair_synchronization"]["exchange_sync_sample_count"] == 1
+
+
+def test_exchange_clock_sync_can_pass_with_sufficient_samples() -> None:
+    sync = _sync()
+    sync.update(
+        {
+            "exchange_sync_sample_count": 200,
+            "p95_exchange_skew_ms": 20.0,
+            "max_exchange_skew_ms": 40.0,
+        }
+    )
+    result = build_cross_venue_window_manifest(
+        _clean_components(),
+        canonical_coin="BTC",
+        required_families_by_venue={
+            "hyperliquid": {"l2Book", "trades"},
+            "binance": {"l2Book", "trades"},
+        },
+        instrument_mapping_exact=True,
+        sync_report=sync,
+        max_p95_exchange_skew_ms=100.0,
+        max_exchange_skew_ms=100.0,
+        min_sync_samples=20,
+    )
+    assert result["quality_status"] == SAFE
+    assert result["validation_allowed"] is True
+
+
 def test_sync_gap_is_rejected_even_when_components_are_safe() -> None:
     sync = _sync()
     sync["gap_count"] = 1
