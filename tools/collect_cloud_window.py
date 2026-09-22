@@ -363,6 +363,43 @@ async def _binance_stream(
             await asyncio.sleep(min(30.0, 2.0 ** min(reconnects, 5)))
 
 
+def _bundle_index(
+    manifests: list[dict[str, Any]],
+    *,
+    collector_version: str,
+    queue_drops: Mapping[tuple[str, str, str], int],
+) -> dict[str, Any]:
+    return {
+        "schema": V2_SCHEMA,
+        "repository": V2_REPOSITORY,
+        "collector_version": str(collector_version),
+        "collection_queue_drops": sum(
+            max(0, int(value)) for value in queue_drops.values()
+        ),
+        "shard_count": len(manifests),
+        "safe_count": sum(
+            1 for row in manifests if row.get("quality_status") == "SAFE"
+        ),
+        "partial_count": sum(
+            1 for row in manifests if row.get("quality_status") == "PARTIAL"
+        ),
+        "reject_count": sum(
+            1 for row in manifests if row.get("quality_status") == "REJECT"
+        ),
+        "dataset_ids": [str(row["dataset_id"]) for row in manifests],
+        "manifests": [
+            f"manifests/{row['dataset_id']}.json"
+            for row in manifests
+        ],
+        "assets": [
+            f"assets/{row['release_asset']}"
+            for row in manifests
+        ],
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def _load_plan_rows(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, Mapping):
@@ -514,27 +551,11 @@ async def collect(
         write_manifest(manifest, manifest_path)
         manifests.append(manifest)
 
-    bundle_index = {
-        "schema": V2_SCHEMA,
-        "repository": V2_REPOSITORY,
-        "collector_version": collector_version,
-        "collection_queue_drops": sum(int(value) for value in sink.drops.values()),
-        "shard_count": len(manifests),
-        "safe_count": sum(1 for row in manifests if row.get("quality_status") == "SAFE"),
-        "partial_count": sum(1 for row in manifests if row.get("quality_status") == "PARTIAL"),
-        "reject_count": sum(1 for row in manifests if row.get("quality_status") == "REJECT"),
-        "dataset_ids": [str(row["dataset_id"]) for row in manifests],
-        "manifests": [
-            f"manifests/{row['dataset_id']}.json"
-            for row in manifests
-        ],
-        "assets": [
-            f"assets/{row['release_asset']}"
-            for row in manifests
-        ],
-        "read_only": True,
-        "real_execution": False,
-    }
+    bundle_index = _bundle_index(
+        manifests,
+        collector_version=collector_version,
+        queue_drops=sink.drops,
+    )
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
 
     summary = {
