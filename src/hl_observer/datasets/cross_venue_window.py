@@ -127,6 +127,7 @@ def build_cross_venue_window_manifest(
     maximum = _float(sync.get("max_receive_skew_ms"))
     exchange_p95 = _float(sync.get("p95_exchange_skew_ms"))
     exchange_maximum = _float(sync.get("max_exchange_skew_ms"))
+    exchange_sample_count = _int(sync.get("exchange_sync_sample_count")) or 0
     sync_gaps = _int(sync.get("gap_count")) or 0
     if sync_status not in {"MATCHED", "PASS"}:
         reasons.append("PAIR_SYNC_UNVERIFIED")
@@ -143,6 +144,11 @@ def build_cross_venue_window_manifest(
     elif maximum > float(max_receive_skew_ms):
         reasons.append("PAIR_SYNC_MAX_TOO_HIGH")
 
+    if (
+        max_p95_exchange_skew_ms is not None
+        or max_exchange_skew_ms is not None
+    ) and exchange_sample_count < max(1, int(min_sync_samples)):
+        reasons.append("PAIR_SYNC_EXCHANGE_SAMPLE_TOO_SMALL")
     if max_p95_exchange_skew_ms is not None:
         if exchange_p95 is None:
             reasons.append("PAIR_SYNC_EXCHANGE_P95_MISSING")
@@ -182,6 +188,7 @@ def build_cross_venue_window_manifest(
             "sample_count": sample_count,
             "p95_receive_skew_ms": p95,
             "max_receive_skew_ms": maximum,
+            "exchange_sync_sample_count": exchange_sample_count,
             "p95_exchange_skew_ms": exchange_p95,
             "max_exchange_skew_ms": exchange_maximum,
             "gap_count": sync_gaps,
