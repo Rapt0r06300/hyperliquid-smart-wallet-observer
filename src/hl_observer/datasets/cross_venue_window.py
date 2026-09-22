@@ -27,6 +27,8 @@ def build_cross_venue_window_manifest(
     min_overlap_ms: int = 1_000,
     max_p95_receive_skew_ms: float = 250.0,
     max_receive_skew_ms: float = 500.0,
+    max_p95_exchange_skew_ms: float | None = None,
+    max_exchange_skew_ms: float | None = None,
     min_sync_samples: int = 20,
     require_same_collection_run: bool = True,
 ) -> dict[str, Any]:
@@ -123,6 +125,8 @@ def build_cross_venue_window_manifest(
     sample_count = _int(sync.get("sample_count")) or 0
     p95 = _float(sync.get("p95_receive_skew_ms"))
     maximum = _float(sync.get("max_receive_skew_ms"))
+    exchange_p95 = _float(sync.get("p95_exchange_skew_ms"))
+    exchange_maximum = _float(sync.get("max_exchange_skew_ms"))
     sync_gaps = _int(sync.get("gap_count")) or 0
     if sync_status not in {"MATCHED", "PASS"}:
         reasons.append("PAIR_SYNC_UNVERIFIED")
@@ -138,6 +142,17 @@ def build_cross_venue_window_manifest(
         reasons.append("PAIR_SYNC_MAX_MISSING")
     elif maximum > float(max_receive_skew_ms):
         reasons.append("PAIR_SYNC_MAX_TOO_HIGH")
+
+    if max_p95_exchange_skew_ms is not None:
+        if exchange_p95 is None:
+            reasons.append("PAIR_SYNC_EXCHANGE_P95_MISSING")
+        elif exchange_p95 > float(max_p95_exchange_skew_ms):
+            reasons.append("PAIR_SYNC_EXCHANGE_P95_TOO_HIGH")
+    if max_exchange_skew_ms is not None:
+        if exchange_maximum is None:
+            reasons.append("PAIR_SYNC_EXCHANGE_MAX_MISSING")
+        elif exchange_maximum > float(max_exchange_skew_ms):
+            reasons.append("PAIR_SYNC_EXCHANGE_MAX_TOO_HIGH")
 
     if severe:
         status = REJECT
@@ -167,6 +182,8 @@ def build_cross_venue_window_manifest(
             "sample_count": sample_count,
             "p95_receive_skew_ms": p95,
             "max_receive_skew_ms": maximum,
+            "p95_exchange_skew_ms": exchange_p95,
+            "max_exchange_skew_ms": exchange_maximum,
             "gap_count": sync_gaps,
         },
         "quality_status": status,
@@ -210,6 +227,8 @@ def build_strategy_window_manifest(
             if contract.max_receive_skew_ms is not None
             else 500.0
         ),
+        max_p95_exchange_skew_ms=contract.max_exchange_skew_ms,
+        max_exchange_skew_ms=contract.max_exchange_skew_ms,
         min_sync_samples=contract.min_sync_samples,
         require_same_collection_run=contract.require_same_collection_run,
     )
