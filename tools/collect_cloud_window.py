@@ -129,7 +129,6 @@ def _hyperliquid_envelope(
     received_ts_ms: int,
     receive_mono_ns: int,
     connection_id: str,
-    clock_evidence: Mapping[str, Any] | None = None,
 ) -> TickEnvelope | None:
     channel = str(message.get("channel") or "")
     data = message.get("data")
@@ -216,6 +215,7 @@ def _binance_bbo_envelope(
     received_ts_ms: int,
     receive_mono_ns: int,
     connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
 ) -> TickEnvelope | None:
     raw = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
     if not isinstance(raw, Mapping):
