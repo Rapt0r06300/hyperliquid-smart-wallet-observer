@@ -216,6 +216,8 @@ async def _run(
         tick_writer=queue_tick_writer,
         stale_after_ms=stale_after_ms,
         max_symbols_per_venue=max_symbols,
+        symbol_shard_count=symbol_shard_count,
+        symbol_shard_index=symbol_shard_index,
         ccxt_snapshot_path=root / "data" / "ccxt_universe.json",
     )
 
@@ -497,6 +499,18 @@ def main(argv: list[str] | None = None) -> int:
         default=",".join(VENUES),
         help="Comma-separated subset of bybit,okx,gate,bitget.",
     )
+    parser.add_argument(
+        "--symbol-shard-count",
+        type=int,
+        default=1,
+        help="Split the ranked max-symbol universe into N deterministic lanes.",
+    )
+    parser.add_argument(
+        "--symbol-shard-index",
+        type=int,
+        default=0,
+        help="Zero-based lane index within --symbol-shard-count.",
+    )
     parser.add_argument("--stale-after-ms", type=int, default=1_500)
     parser.add_argument(
         "--rotate-mb",
@@ -534,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
                         if token.strip()
                     }
                 ),
+                symbol_shard_count=max(1, int(args.symbol_shard_count)),
+                symbol_shard_index=int(args.symbol_shard_index),
                 rotate_bytes=max(8, min(int(args.rotate_mb), 1536)) * 1024 * 1024,
             )
         )
