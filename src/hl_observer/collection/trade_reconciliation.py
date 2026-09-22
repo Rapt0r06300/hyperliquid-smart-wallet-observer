@@ -26,6 +26,11 @@ def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
             if not isinstance(record, Mapping):
                 continue
             raw = record.get("raw_payload")
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
             if not isinstance(raw, Mapping):
                 continue
             data = raw.get("data")
