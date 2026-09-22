@@ -228,6 +228,37 @@ def parser_l2_hl(msg: Any) -> dict | None:
     }
 
 
+def parser_active_asset_ctx_hl(msg: Any) -> dict | None:
+    """Normalize public Hyperliquid activeAssetCtx without inventing a timestamp."""
+    if not isinstance(msg, dict) or msg.get("channel") != "activeAssetCtx":
+        return None
+    data = msg.get("data")
+    if not isinstance(data, dict):
+        return None
+    coin = str(data.get("coin") or "").upper()
+    ctx = data.get("ctx")
+    if not coin or not isinstance(ctx, dict):
+        return None
+
+    def number(name: str) -> float | None:
+        try:
+            value = ctx.get(name)
+            return float(value) if value is not None else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    return {
+        "coin": coin,
+        "mark_px": number("markPx"),
+        "mid_px": number("midPx"),
+        "oracle_px": number("oraclePx"),
+        "funding_rate": number("funding"),
+        "open_interest": number("openInterest"),
+        "premium": number("premium"),
+        "day_notional_volume": number("dayNtlVlm"),
+        "prev_day_px": number("prevDayPx"),
+    }
+
 def parser_trades_hl(msg: Any) -> list[dict]:
     """WS HL public ``trades`` -> independent exchange events.
 
@@ -555,6 +586,7 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
         root / "runtime" / "data" / "canonical_events" / "canonical_market_events.jsonl"
     )
     raw_queue: deque[TickEnvelope] = deque()
+    hl_asset_ctx: dict[str, dict[str, Any]] = {}
     lead_lag_checkpoint_queue: asyncio.Queue[LeadLagCheckpointRequest] = asyncio.Queue(
         maxsize=128
     )
@@ -723,6 +755,18 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
             ),
         }
 
+    def latest_hl_asset_ctx(coin: str, *, received_ts_ms: int) -> dict[str, Any] | None:
+        row = hl_asset_ctx.get(str(coin).upper())
+        if not row:
+            return None
+        observed = int(row.get("observed_receive_ts_ms") or 0)
+        if observed <= 0 or observed > received_ts_ms:
+            return None
+        return {
+            **row,
+            "asset_ctx_age_ms": max(0, received_ts_ms - observed),
+        }
+
     async def hl():
         nonlocal hl_connection_serial
         while True:
@@ -759,7 +803,7 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                             )
                         )
                     for coin_name in coins:
-                        for subscription_type in ("bbo", "l2Book", "trades"):
+                        for subscription_type in ("bbo", "l2Book", "trades", "activeAssetCtx"):
                             await ws.send(
                                 json.dumps(
                                     {
@@ -848,6 +892,23 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                         )
                         queue_raw(envelope)
 
+                        asset_ctx = parser_active_asset_ctx_hl(message)
+                        if asset_ctx and asset_ctx["coin"] in coins_set:
+                            asset_ctx = {
+                                **asset_ctx,
+                                "observed_receive_ts_ms": received_ts_ms,
+                                "observed_mono_ns": received_mono_ns,
+                                "connection_id": connection_id,
+                            }
+                            hl_asset_ctx[asset_ctx["coin"]] = asset_ctx
+                            envelope.parsed_summary = {
+                                **asset_ctx,
+                                "timestamp_basis": "local_receive_time",
+                                "exchange_timestamp_available": False,
+                                "data_gate_ready": False,
+                            }
+                            continue
+
                         quote = parser_bbo_hl(message)
                         if quote and quote["coin"] in coins_set:
                             gate = quality_gates[("bbo", quote["coin"])]
@@ -868,6 +929,10 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                                 "feed_quality_score": quality.feed_quality_score,
                                 "data_gate_ready": quality.ready,
                                 "quality_reasons": list(quality.reasons),
+                                "asset_ctx": latest_hl_asset_ctx(
+                                    quote["coin"],
+                                    received_ts_ms=received_ts_ms,
+                                ),
                             }
                             mag.maj_hl(
                                 quote,
@@ -928,6 +993,10 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                                 "feed_quality_score": quality.feed_quality_score,
                                 "data_gate_ready": quality.ready,
                                 "quality_reasons": list(quality.reasons),
+                                "asset_ctx": latest_hl_asset_ctx(
+                                    book["coin"],
+                                    received_ts_ms=received_ts_ms,
+                                ),
                             }
                             continue
 
@@ -961,6 +1030,13 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
                             envelope.parsed_summary = {
                                 "trade_count": len(trades),
                                 "quality_by_coin": quality_by_coin,
+                                "asset_ctx_by_coin": {
+                                    trade_coin: latest_hl_asset_ctx(
+                                        trade_coin,
+                                        received_ts_ms=received_ts_ms,
+                                    )
+                                    for trade_coin in quality_by_coin
+                                },
                             }
             except Exception:  # noqa: BLE001 - reconnect only after a real failure
                 stats["reconnexions_hl"] += 1
@@ -1519,7 +1595,7 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
 
 
 __all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_symboles_hyperliquid",
-           "resoudre_symboles_hyperliquid", "parser_bbo_hl", "parser_l2_hl", "parser_trades_hl",
+           "resoudre_symboles_hyperliquid", "parser_bbo_hl", "parser_l2_hl", "parser_active_asset_ctx_hl", "parser_trades_hl",
            "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
            "AGE_MAX_MS", "FENETRE_SYNCHRO_MS", "GAP_MS", "SHARD_OCTETS", "MAX_SHARDS",
