@@ -32,6 +32,7 @@ on:
       - 'src/hl_observer/datasets/v2_export.py'
       - 'src/hl_observer/datasets/v2_pipeline.py'
       - 'src/hl_observer/datasets/cross_venue_window.py'
+      - 'src/hl_observer/datasets/strategy_data_contracts.py'
       - 'tools/build_dataset_v2_manifest.py'
       - 'tools/collect_cloud_window.py'
       - 'tools/publish_dataset_v2_release.py'
@@ -45,6 +46,7 @@ on:
       - 'tests/test_dataset_v2_export.py'
       - 'tests/test_dataset_v2_pipeline.py'
       - 'tests/test_cross_venue_window.py'
+      - 'tests/test_strategy_data_contracts.py'
       - 'tests/test_collect_cloud_window.py'
       - 'tests/test_publish_dataset_v2_release.py'
       - 'tests/test_native_market_tape.py'
@@ -118,6 +120,7 @@ jobs:
             src/hl_observer/datasets/v2_export.py \
             src/hl_observer/datasets/v2_pipeline.py \
             src/hl_observer/datasets/cross_venue_window.py \
+            src/hl_observer/datasets/strategy_data_contracts.py \
             tools/build_dataset_v2_manifest.py \
             tools/collect_cloud_window.py \
             tools/publish_dataset_v2_release.py
@@ -134,6 +137,7 @@ jobs:
             tests/test_dataset_v2_export.py \
             tests/test_dataset_v2_pipeline.py \
             tests/test_cross_venue_window.py \
+            tests/test_strategy_data_contracts.py \
             tests/test_collect_cloud_window.py \
             tests/test_publish_dataset_v2_release.py \
             tests/test_native_market_tape.py \
