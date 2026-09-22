@@ -21,6 +21,13 @@ _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
     "open_interest",
 }
+_MATCHED_RECONCILIATION_FAMILIES = {
+    "trades",
+    "funding",
+    "fills",
+    "userfills",
+    "user_fills",
+}
 
 
 def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
@@ -48,9 +55,14 @@ def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
             for key in ("gap_count", "regression_count", "desync_count")
         )
 
-    family = str(manifest.get("family") or "")
+    family = str(manifest.get("family") or "").lower()
     if transports and transports.issubset({"https", "http"}) and family in _SNAPSHOT_CHANNELS:
         return "SNAPSHOT_VERIFIED"
+    # Event families with an official historical/reference source must be
+    # reconciled against that source. A clean websocket connection alone is
+    # not enough proof that every trade/fill/funding event was captured.
+    if family in _MATCHED_RECONCILIATION_FAMILIES:
+        return "UNVERIFIED"
     if transports.intersection(_WS_TRANSPORTS) and connection_count == 1 and clean:
         return "SOURCE_CONTINUITY_VERIFIED"
     return "UNVERIFIED"
@@ -132,7 +144,11 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         "SOURCE_CONTINUITY_VERIFIED",
         "SNAPSHOT_VERIFIED",
     }
-    if reconciliation_status not in allowed_reconciliation:
+    family = str(manifest.get("family") or "").lower()
+    if family in _MATCHED_RECONCILIATION_FAMILIES:
+        if reconciliation_status != "MATCHED":
+            reasons.append("RECONCILIATION_MATCH_REQUIRED")
+    elif reconciliation_status not in allowed_reconciliation:
         reasons.append("RECONCILIATION_NOT_VERIFIED")
 
     required = {
@@ -178,6 +194,32 @@ def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     result["validation_allowed"] = status == "SAFE"
     result["proof_of_pnl_allowed"] = status == "SAFE"
     return result
+
+
+def attach_reconciliation(
+    manifest: Mapping[str, Any],
+    report: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Attach an explicit post-hoc reconciliation report and re-assess quality.
+
+    Only a report whose status is exactly MATCHED can satisfy event families
+    that require historical/reference reconciliation. PARTIAL/MISMATCH/ERROR
+    remain visible and cannot be promoted.
+    """
+    result = dict(manifest)
+    status = str(report.get("status") or "UNVERIFIED").upper()
+    result["reconciliation"] = {
+        "status": status,
+        "live_count": _int(report.get("live_count")),
+        "reference_count": _int(report.get("reference_count")),
+        "matched_count": _int(report.get("matched_count")),
+        "missing_from_live": _int(report.get("missing_from_live")),
+        "live_only": _int(report.get("live_only")),
+        "duplicate_live_keys": _int(report.get("duplicate_live_keys")),
+        "backfill_status": report.get("backfill_status"),
+        "backfill_error": report.get("backfill_error"),
+    }
+    return finalize_manifest(result)
 
 
 def verify_remote_asset(
@@ -313,6 +355,7 @@ __all__ = [
     "V2_REPOSITORY",
     "V2_SCHEMA",
     "assess_manifest",
+    "attach_reconciliation",
     "build_bundle",
     "finalize_manifest",
     "infer_reconciliation_status",
