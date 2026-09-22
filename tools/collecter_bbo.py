@@ -86,9 +86,8 @@ def extraire_symboles_hyperliquid(meta: Any) -> list[str]:
     return symbols
 
 
-def charger_symboles_hyperliquid(*, timeout: float = 8.0) -> list[str]:
-    """Read the live universe through Hyperliquid's read-only ``/info`` API."""
-
+def charger_meta_hyperliquid(*, timeout: float = 8.0) -> dict[str, Any]:
+    """Read the raw public Hyperliquid perpetual metadata through /info."""
     import urllib.request
 
     request = urllib.request.Request(
@@ -99,7 +98,14 @@ def charger_symboles_hyperliquid(*, timeout: float = 8.0) -> list[str]:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed HTTPS URL
         payload = json.loads(response.read().decode("utf-8-sig"))
-    return extraire_symboles_hyperliquid(payload)
+    if not isinstance(payload, dict) or not isinstance(payload.get("universe"), list):
+        raise ValueError("reponse /info meta invalide")
+    return payload
+
+
+def charger_symboles_hyperliquid(*, timeout: float = 8.0) -> list[str]:
+    """Read the live universe through Hyperliquid's read-only /info API."""
+    return extraire_symboles_hyperliquid(charger_meta_hyperliquid(timeout=timeout))
 
 
 def resoudre_symboles_hyperliquid(
@@ -540,7 +546,15 @@ def sceller_shard(root: Path, *, seuil_octets: int = SHARD_OCTETS, max_shards: i
 
 # ─────────────────────────────── boucle WS PERSISTANTE (asyncio) ───────────────────────────────
 
-async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> None:  # pragma: no cover (I/O réseau)
+async def _boucle(
+    root: Path,
+    coins: list[str],
+    *,
+    duration_s: float = 0.0,
+    hl_meta: Mapping[str, Any] | None = None,
+    hl_meta_received_ts_ms: int | None = None,
+    hl_meta_receive_mono_ns: int | None = None,
+) -> None:  # pragma: no cover (I/O réseau)
     import asyncio
 
     import websockets
@@ -655,6 +669,65 @@ async def _boucle(root: Path, coins: list[str], *, duration_s: float = 0.0) -> N
             if gate is not None:
                 gate.mark_gap(reason="LOCAL_RAW_QUEUE_OVERFLOW")
         raw_queue.append(envelope)
+
+    def queue_hyperliquid_instrument_metadata() -> int:
+        if not isinstance(hl_meta, Mapping):
+            return 0
+        universe = hl_meta.get("universe")
+        if not isinstance(universe, list):
+            return 0
+        received_ts_ms = (
+            int(hl_meta_received_ts_ms)
+            if hl_meta_received_ts_ms is not None
+            else int(time.time() * 1000)
+        )
+        receive_mono_ns = (
+            int(hl_meta_receive_mono_ns)
+            if hl_meta_receive_mono_ns is not None
+            else time.monotonic_ns()
+        )
+        emitted = 0
+        for raw in universe:
+            if not isinstance(raw, Mapping):
+                continue
+            exact_name = str(raw.get("name") or "").strip()
+            coin = exact_name.upper()
+            if not exact_name or coin not in coins_set:
+                continue
+            queue_raw(
+                TickEnvelope(
+                    source_id="hyperliquid_public_rest",
+                    channel="instrument_metadata",
+                    instrument=coin,
+                    event_kind=FeedEventKind.SNAPSHOT,
+                    raw_payload=dict(raw),
+                    exchange_ts_ms=None,
+                    received_ts_ms=received_ts_ms,
+                    local_monotonic_ns=receive_mono_ns,
+                    connection_id=None,
+                    sequence=None,
+                    provenance={
+                        "url": INFO_HL,
+                        "network": "mainnet",
+                        "access": "read_only",
+                        "transport": "https",
+                        "authenticated": False,
+                        "request_type": "meta",
+                    },
+                    parsed_summary={
+                        "name": exact_name,
+                        "sz_decimals": raw.get("szDecimals"),
+                        "max_leverage": raw.get("maxLeverage"),
+                        "only_isolated": raw.get("onlyIsolated"),
+                        "margin_table_id": raw.get("marginTableId"),
+                        "data_gate_ready": False,
+                    },
+                )
+            )
+            emitted += 1
+        return emitted
+
+    queue_hyperliquid_instrument_metadata()
 
     binance_l2_latest: dict[str, dict[str, Any]] = {}
 
@@ -1545,7 +1618,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
     else:
         requested_coins = [c.strip() for c in a.coins.split(",") if c.strip()]
     try:
-        universe = charger_symboles_hyperliquid()
+        hl_meta_receive_mono_ns = time.monotonic_ns()
+        hl_meta = charger_meta_hyperliquid()
+        hl_meta_received_ts_ms = int(time.time() * 1000)
+        universe = extraire_symboles_hyperliquid(hl_meta)
         coins, rejected = resoudre_symboles_hyperliquid(requested_coins, universe)
     except Exception as exc:  # noqa: BLE001 - required live source must fail visibly
         print("[bbo] /info meta indisponible ou invalide: %r" % exc, flush=True)
@@ -1572,6 +1648,9 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover
                 Path(a.root),
                 coins,
                 duration_s=max(0.0, float(a.duration_s)),
+                hl_meta=hl_meta,
+                hl_meta_received_ts_ms=hl_meta_received_ts_ms,
+                hl_meta_receive_mono_ns=hl_meta_receive_mono_ns,
             )
         )
     except KeyboardInterrupt:
@@ -1594,7 +1673,7 @@ def resume(root: str | Path = ".") -> dict[str, Any]:
         return {"duree_continue_s": 0, "ecrits": 0, "taux_rejet": None, "verdict": "PAS_ENCORE_LANCE"}
 
 
-__all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_symboles_hyperliquid",
+__all__ = ["symbole_binance", "extraire_symboles_hyperliquid", "charger_meta_hyperliquid", "charger_symboles_hyperliquid",
            "resoudre_symboles_hyperliquid", "parser_bbo_hl", "parser_l2_hl", "parser_active_asset_ctx_hl", "parser_trades_hl",
            "parser_bookticker_binance", "parser_aggtrade_binance", "dispatch_lead_lag_trade",
            "MagasinBBO", "mesurer_lead_lag", "sceller_shard", "resume",
