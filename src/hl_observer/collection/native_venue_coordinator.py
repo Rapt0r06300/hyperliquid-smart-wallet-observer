@@ -23,7 +23,10 @@ from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPubl
 from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
 from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
-from hl_observer.collection.native_market_tape import native_tick_envelope
+from hl_observer.collection.native_market_tape import (
+    native_instrument_metadata_envelope,
+    native_tick_envelope,
+)
 from hl_observer.collection.native_venue_market import MultiVenueMarketStore, NativeMarketSnapshot
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
 from hl_observer.markets.ccxt_universe import load_native_collection_candidates
@@ -110,9 +113,55 @@ class NativeVenueCoordinator:
                 symbol = str(exchange_symbol or "").strip().upper()
                 if base and symbol:
                     discovered.setdefault(base, {})[venue] = symbol
+            self._record_discovery_metadata(venue, client, rows)
         self.registry = dict(sorted(discovered.items()))
         note_coins(self.registry.keys(), now_s=time.time() if now_s is None else now_s)
         return {coin: dict(venues) for coin, venues in self.registry.items()}
+
+    def _record_discovery_metadata(
+        self,
+        venue: str,
+        client: Any,
+        discovered_rows: Any,
+    ) -> None:
+        if self.tick_writer is None or venue not in {"bybit", "okx"}:
+            return
+        metadata = getattr(client, "last_instrument_metadata", None)
+        if not isinstance(metadata, list) or not metadata:
+            return
+        allowed = {
+            str(symbol).strip().upper()
+            for _coin, symbol in discovered_rows
+            if str(symbol).strip()
+        }
+        if not allowed:
+            return
+        observed_server_ts_ms: int | None = None
+        server_time = getattr(client, "server_time_ms", None)
+        if callable(server_time):
+            try:
+                observed_server_ts_ms = int(server_time())
+            except Exception:
+                observed_server_ts_ms = None
+        received_ts_ms = int(time.time() * 1000)
+        receive_mono_ns = time.monotonic_ns()
+        for row in metadata:
+            if not isinstance(row, Mapping):
+                continue
+            symbol = str(
+                row.get("symbol") if venue == "bybit" else row.get("instId")
+            ).strip().upper()
+            if symbol not in allowed:
+                continue
+            envelope = native_instrument_metadata_envelope(
+                venue,
+                row,
+                received_ts_ms=received_ts_ms,
+                receive_mono_ns=receive_mono_ns,
+                observed_server_ts_ms=observed_server_ts_ms,
+            )
+            if envelope is not None:
+                self.tick_writer.append(envelope)
 
     def refresh_clock_sync(self) -> dict[str, dict[str, float | int | str]]:
         """Measure public venue clocks and retain RTT/offset evidence."""
