@@ -12,6 +12,10 @@ on:
     branches: ["**"]
   workflow_dispatch: {}
 
+concurrency:
+  group: labo-continu-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

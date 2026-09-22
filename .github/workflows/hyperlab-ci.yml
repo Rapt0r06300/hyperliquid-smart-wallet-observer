@@ -2,6 +2,10 @@ name: hyperlab-ci
 # HyperLab CI fail-closed: package + dev/test deps + research deps are mandatory.
 on: [push, pull_request]
 
+concurrency:
+  group: hyperlab-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

@@ -77,6 +77,10 @@ on:
       - '.github/workflows/collector-replay-integrity-ci.yml'
   workflow_dispatch:
 
+concurrency:
+  group: collector-replay-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
