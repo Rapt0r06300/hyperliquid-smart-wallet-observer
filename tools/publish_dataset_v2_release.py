@@ -233,6 +233,7 @@ def publish_bundle(
         "release_id": release_id,
         "release_tag": tag,
         "collector_version": index.get("collector_version"),
+        "collection_run_id": index.get("collection_run_id"),
         "shard_count": len(final_manifests),
         "safe_count": sum(
             1 for row in final_manifests if row.get("quality_status") == "SAFE"
