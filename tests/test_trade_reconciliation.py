@@ -7,6 +7,7 @@ import json
 import httpx
 
 from hl_observer.collection.trade_reconciliation import (
+    HyperliquidTradeReferenceSampler,
     live_trade_ids,
     reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
@@ -373,5 +374,94 @@ def test_binance_full_reference_page_is_split_before_match(tmp_path) -> None:
         assert len(calls) == 3
         assert report["status"] == "MATCHED"
         assert report["matched_count"] == 2
+
+    asyncio.run(scenario())
+
+
+def test_hyperliquid_reference_sampler_matches_exact_tids_from_canonical_shard(tmp_path) -> None:
+    path = tmp_path / "hl.jsonl.gz"
+    raw = {
+        "channel": "trades",
+        "data": [
+            {"coin": "BTC", "tid": 101, "time": 1000, "px": "100", "sz": "1"},
+            {"coin": "BTC", "tid": 102, "time": 1010, "px": "101", "sz": "2"},
+        ],
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {"raw_payload": json.dumps(raw, separators=(",", ":"))}
+            )
+            + "\n"
+        )
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode("utf-8"))
+            assert body == {"type": "recentTrades", "coin": "BTC"}
+            return httpx.Response(
+                200,
+                json=[
+                    {"coin": "BTC", "tid": 99, "time": 900},
+                    {"coin": "BTC", "tid": 101, "time": 1000},
+                    {"coin": "BTC", "tid": 102, "time": 1010},
+                    {"coin": "BTC", "tid": 103, "time": 1100},
+                ],
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        sampler = HyperliquidTradeReferenceSampler(
+            ["BTC"],
+            client=client,
+            interval_s=1.0,
+        )
+        await sampler.sample_once()
+        report = sampler.reconcile(
+            path,
+            symbol="BTC",
+            start_ms=1000,
+            end_ms=1010,
+        )
+        assert report["status"] == "MATCHED"
+        assert report["matched_count"] == 2
+        assert report["missing_from_live"] == 0
+        assert report["live_only"] == 0
+        assert sampler.stats()["reference_trade_ids"]["BTC"] == 4
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_hyperliquid_reference_sampler_fails_closed_without_window_coverage(tmp_path) -> None:
+    path = tmp_path / "hl-partial.jsonl.gz"
+    raw = {
+        "channel": "trades",
+        "data": [{"coin": "BTC", "tid": 101, "time": 1000}],
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"raw_payload": json.dumps(raw)}) + "\n")
+
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=[
+                    {"coin": "BTC", "tid": 101, "time": 1000},
+                    {"coin": "BTC", "tid": 102, "time": 1005},
+                ],
+            )
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        sampler = HyperliquidTradeReferenceSampler(["BTC"], client=client)
+        await sampler.sample_once()
+        report = sampler.reconcile(
+            path,
+            symbol="BTC",
+            start_ms=900,
+            end_ms=1010,
+        )
+        assert report["status"] == "PARTIAL"
+        assert report["reason"] == "REFERENCE_DOES_NOT_COVER_WINDOW"
+        await client.aclose()
 
     asyncio.run(scenario())
