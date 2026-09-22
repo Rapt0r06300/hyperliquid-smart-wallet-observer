@@ -1,7 +1,7 @@
 """REGISTRE UNIQUE des collecteurs + arrêt CIBLÉ (25/07, Fix 4 & 5) — prouvé sans Windows.
 
-Prouve : (1) une seule source de 17 collecteurs avec métadonnées cohérentes ; (2) démarrage enregistre
-les PID ; (3) enregistrer_pids mappe par signature ; (4) status_detaille rend 17 composants ;
+Prouve : (1) une seule source canonique de collecteurs avec métadonnées cohérentes ; (2) démarrage enregistre
+les PID ; (3) enregistrer_pids mappe par signature ; (4) status_detaille rend tout le registre ;
 (5) arrêt CIBLÉ ne vise QUE les PID enregistrés + signés registre + enfants + port + verrou — et NE TUE
 JAMAIS un process étranger (même s'il contient « hl_observer » dans sa ligne de commande).
 """
@@ -13,13 +13,13 @@ from pathlib import Path
 from hl_observer.ops import superviseur_collecteurs as SC
 
 
-def test_registre_19_coherent():
-    assert len(SC.REGISTRE) == 20            # +dydx-live (collecteur dYdX v4 read-only, 2026-08-01)
+def test_registre_canonique_coherent():
+    assert len(SC.REGISTRE) == 21            # registre canonique actuel, dont dydx-live read-only
     noms = [c["nom"] for c in SC.REGISTRE]
     assert len(set(noms)) == len(noms), "noms uniques"
     for c in SC.REGISTRE:                       # limite > 1,5x cadence (règle anti-relance d'un vivant)
         assert c["limite_minutes"] * 60.0 > c["intervalle_s"] * 1.5, c["nom"]
-    # les 17 scripts existent sur le disque
+    # tous les scripts du registre existent sur le disque
     root = Path(__file__).resolve().parents[1]
     for c in SC.REGISTRE:
         assert (root / c["script"]).exists(), c["script"]
