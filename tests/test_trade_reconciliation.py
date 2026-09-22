@@ -218,3 +218,19 @@ def test_reference_mismatch_is_explicit(tmp_path) -> None:
         assert report["live_only"] == 1
 
     asyncio.run(scenario())
+
+
+def test_live_trade_ids_parses_canonical_raw_payload_text(tmp_path) -> None:
+    path = tmp_path / "okx-canonical.jsonl.gz"
+    raw = {
+        "arg": {"channel": "trades", "instId": "BTC-USDT-SWAP"},
+        "data": [
+            {"tradeId": "9001", "ts": "1000", "instId": "BTC-USDT-SWAP"},
+            {"tradeId": "9002", "ts": "1010", "instId": "BTC-USDT-SWAP"},
+        ],
+    }
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"raw_payload": json.dumps(raw, separators=(",", ":"))}) + "\n")
+    ids, count = live_trade_ids(path, venue="okx")
+    assert ids == {"9001", "9002"}
+    assert count == 2
