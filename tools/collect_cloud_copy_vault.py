@@ -57,6 +57,7 @@ from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
 WS_URL = "wss://api.hyperliquid.xyz/ws"
 INFO_URL = "https://api.hyperliquid.xyz/info"
 MAX_SUBSCRIPTIONS_PER_SOCKET = 5
+MAX_UNIQUE_USERS_PER_IP = 10
 
 
 class AsyncTickSink:
@@ -410,6 +411,22 @@ async def _dynamic_l2_collector(
             state["reconnects"] = state.get("reconnects", 0) + 1
             await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
             attempt += 1
+
+
+def validate_user_subscription_budget(vaults: list[str]) -> int:
+    """Enforce Hyperliquid's per-IP unique user subscription ceiling."""
+    unique = {
+        str(vault).strip().lower()
+        for vault in vaults
+        if str(vault).strip()
+    }
+    count = len(unique)
+    if count > MAX_UNIQUE_USERS_PER_IP:
+        raise ValueError(
+            f"Copy-Vault lane has {count} unique users; "
+            f"Hyperliquid limit is {MAX_UNIQUE_USERS_PER_IP} per IP"
+        )
+    return count
 
 
 async def collect_position_snapshots(
@@ -864,6 +881,7 @@ async def collect(
     vaults = [str(row["address"]).lower() for row in selected_rows]
     if not vaults:
         raise RuntimeError("selected Copy-Vault shard is empty")
+    validate_user_subscription_budget(vaults)
     selection_ts_ms = int(selection["selected_at_ms"])
     run_id = str(collection_run_id or "").strip() or (
         f"copy-vault-{str(collector_version)[:12]}-{selection_ts_ms}-"
