@@ -41,6 +41,7 @@ from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.collection.trade_reconciliation import (
+    reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
     reconcile_okx_trade_shard,
 )
@@ -266,10 +267,16 @@ def _binance_trade_envelope(
     size = _float(raw.get("q"))
     if not symbol or price is None or size is None or price <= 0 or size <= 0:
         return None
-    sequence = _int(raw.get("t")) or _int(raw.get("a"))
+    event_type = str(raw.get("e") or "")
+    channel = "agg_trades" if event_type == "aggTrade" else "trades"
+    sequence = (
+        _int(raw.get("a"))
+        if event_type == "aggTrade"
+        else _int(raw.get("t"))
+    )
     return TickEnvelope(
         source_id="binance_usdm_public",
-        channel="trades",
+        channel=channel,
         instrument=symbol,
         event_kind=FeedEventKind.EVENT,
         raw_payload=dict(raw),
@@ -289,6 +296,9 @@ def _binance_trade_envelope(
             "price": price,
             "size": size,
             "aggressor_side": "SELL" if raw.get("m") is True else "BUY",
+            "aggregate_trade_id": _int(raw.get("a")),
+            "first_trade_id": _int(raw.get("f")),
+            "last_trade_id": _int(raw.get("l")),
             "data_gate_ready": False,
         },
     )
@@ -603,6 +613,10 @@ async def _binance_stream(
         base = WS_BINANCE_MARKET
         suffix = "trade"
         parser = _binance_trade_envelope
+    elif mode == "agg_trades":
+        base = WS_BINANCE_MARKET
+        suffix = "aggTrade"
+        parser = _binance_trade_envelope
     else:
         raise ValueError(mode)
 
@@ -789,6 +803,7 @@ async def collect(
             (
                 asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo")),
                 asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades")),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="agg_trades")),
                 asyncio.create_task(binance_depth.run()),
                 asyncio.create_task(binance_context.run()),
             )
@@ -845,7 +860,8 @@ async def collect(
         manifest["release_asset"] = asset_name
         manifest["bytes"] = asset_path.stat().st_size
 
-        if str(manifest.get("family") or "") == "trades":
+        family = str(manifest.get("family") or "")
+        if family in {"trades", "agg_trades"}:
             venue = str(manifest.get("venue") or "").lower()
             sync = manifest.get("synchronization")
             sync_map = sync if isinstance(sync, Mapping) else {}
@@ -859,7 +875,7 @@ async def collect(
                 or _int(manifest.get("end_ts_ms"))
                 or reference_start
             )
-            if venue == "bybit":
+            if venue == "bybit" and family == "trades":
                 report = await reconcile_bybit_trade_shard(
                     asset_path,
                     symbol=str(manifest.get("symbol") or ""),
@@ -867,8 +883,16 @@ async def collect(
                     end_ms=reference_end,
                 )
                 manifest = attach_reconciliation(manifest, report)
-            elif venue == "okx":
+            elif venue == "okx" and family == "trades":
                 report = await reconcile_okx_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
+            elif venue == "binance" and family == "agg_trades":
+                report = await reconcile_binance_aggtrade_shard(
                     asset_path,
                     symbol=str(manifest.get("symbol") or ""),
                     start_ms=reference_start,
