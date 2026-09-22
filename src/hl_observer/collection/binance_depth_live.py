@@ -73,6 +73,7 @@ class BinanceDepthLiveCollector:
         http_client: httpx.AsyncClient | None = None,
         tick_sink: Callable[[TickEnvelope], Any] | None = None,
         publication_sink: Callable[[str, Mapping[str, Any]], Any] | None = None,
+        clock_sync_provider: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         self.symbols = tuple(
             sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
@@ -90,6 +91,7 @@ class BinanceDepthLiveCollector:
         )
         self.tick_sink = tick_sink
         self.publication_sink = publication_sink
+        self.clock_sync_provider = clock_sync_provider
         self.states = {
             symbol: BinanceDepthOrchestrator(futures=True)
             for symbol in self.symbols
@@ -186,6 +188,7 @@ class BinanceDepthLiveCollector:
                     "gap_count_semantics": "event_delta",
                 },
                 parsed_summary={
+                    **self._clock_evidence(),
                     "bid_levels": len(bids),
                     "ask_levels": len(asks),
                     "needs_resnapshot": bool(result["needs_snapshot"]),
@@ -284,6 +287,7 @@ class BinanceDepthLiveCollector:
                                         "gap_count_semantics": "event_delta",
                                     },
                                     parsed_summary={
+                                        **self._clock_evidence(),
                                         "first_update_id": frame["U"],
                                         "previous_update_id": frame["pu"],
                                         "book_state": book_state,
@@ -324,6 +328,7 @@ class BinanceDepthLiveCollector:
                 1 for state in self.states.values() if not state.besoin_resnapshot()
             ),
             "last_error": self.last_error,
+            "clock_sync": self._clock_evidence(),
             "read_only": True,
             "real_execution": False,
         }
@@ -340,6 +345,15 @@ class BinanceDepthLiveCollector:
                 self._resync_pending.discard(symbol)
 
         asyncio.create_task(worker())
+
+    def _clock_evidence(self) -> dict[str, Any]:
+        if self.clock_sync_provider is None:
+            return {}
+        try:
+            row = self.clock_sync_provider()
+        except Exception:
+            return {}
+        return dict(row) if isinstance(row, Mapping) else {}
 
     def _emit_tick(self, envelope: TickEnvelope) -> None:
         if self.tick_sink is not None:
