@@ -427,7 +427,11 @@ async def _run(
                     "state": "STOPPING" if stop_reason else "RUNNING",
                     "stop_reason": stop_reason or None,
                     "discovered_registry_coins": len(registry),
-                    "subscribed_symbols": counts,
+                    "subscribed_symbols": {
+                        venue: len(coordinator.symbols_for(venue))
+                        for venue in VENUES
+                    },
+                    "initial_subscribed_symbols": counts,
                     "universe_refreshes": universe_refreshes,
                     "universe_changes": universe_changes,
                     "universe_refresh_interval_s": universe_refresh_s,
@@ -503,7 +507,11 @@ async def _run(
             "duration_s": round(time.time() - started, 3),
             "state": "STOPPED",
             "discovered_registry_coins": len(registry),
-            "subscribed_symbols": counts,
+            "subscribed_symbols": {
+                venue: len(coordinator.symbols_for(venue))
+                for venue in VENUES
+            },
+            "initial_subscribed_symbols": counts,
             "universe_refreshes": universe_refreshes,
             "universe_changes": universe_changes,
             "universe_refresh_interval_s": universe_refresh_s,
