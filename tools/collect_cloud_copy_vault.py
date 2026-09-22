@@ -491,7 +491,6 @@ async def _socket_group(
     l2_known_coins: set[str],
 ) -> None:
     attempt = 0
-    group_key = "-".join(vault[:8] for vault in vaults)
     known = {vault.lower(): vault.lower() for vault in vaults}
     while True:
         connection_id = f"copy-vault-{uuid.uuid4().hex}"
@@ -530,57 +529,61 @@ async def _socket_group(
                 attempt = 0
                 try:
                     async for raw_text in socket:
-                    mono = time.monotonic_ns()
-                    wall = int(time.time() * 1_000)
-                    try:
-                        message = json.loads(raw_text)
-                    except (TypeError, ValueError):
-                        continue
-                    if not isinstance(message, Mapping):
-                        continue
-                    if message.get("channel") == "subscriptionResponse":
-                        continue
-                    data = message.get("data")
-                    user = str(data.get("user") or "").lower() if isinstance(data, Mapping) else ""
-                    vault = known.get(user)
-                    if vault is None:
-                        continue
-                    envelope, fills = userfills_envelope(
-                        message,
-                        vault=vault,
-                        receive_wall_ms=wall,
-                        receive_mono_ns=mono,
-                        connection_id=connection_id,
-                    )
-                    if envelope is None:
-                        continue
-                    envelope.reconnect_count = reconnect_counts.get(vault, 0)
-                    sink.emit(envelope)
-
-                    # Pre-warm execution L2 from every observed coin, including the
-                    # initial userFills snapshot. Snapshot fills never count as forward
-                    # signals; they are used only to decide what public market data to
-                    # observe before a future leader action.
-                    for fill in fills:
-                        coin = str(fill.get("coin") or "").strip().upper()
-                        if coin and coin not in l2_known_coins:
-                            l2_known_coins.add(coin)
-                            l2_request_queue.put_nowait(coin)
-
-                    # Only forward, non-snapshot fills observed after this lane
-                    # actually started count toward causal reconciliation. The
-                    # frozen selection timestamp is provenance, not observation time.
-                    if envelope.channel != "copy_vault_fills":
-                        continue
-                    for fill in fills:
+                        mono = time.monotonic_ns()
+                        wall = int(time.time() * 1_000)
                         try:
-                            ts_ms = int(fill.get("ts_ms") or 0)
-                        except (TypeError, ValueError, OverflowError):
+                            message = json.loads(raw_text)
+                        except (TypeError, ValueError):
                             continue
-                        if ts_ms < int(collection_start_ms):
+                        if not isinstance(message, Mapping):
                             continue
-                        live_ids[vault].add(canonical_fill_id(fill))
-                        live_fill_counts[vault] += 1
+                        if message.get("channel") in {"subscriptionResponse", "pong"}:
+                            continue
+
+                        data = message.get("data")
+                        user = (
+                            str(data.get("user") or "").lower()
+                            if isinstance(data, Mapping)
+                            else ""
+                        )
+                        vault = known.get(user)
+                        if vault is None:
+                            continue
+
+                        envelope, fills = userfills_envelope(
+                            message,
+                            vault=vault,
+                            receive_wall_ms=wall,
+                            receive_mono_ns=mono,
+                            connection_id=connection_id,
+                        )
+                        if envelope is None:
+                            continue
+                        envelope.reconnect_count = reconnect_counts.get(vault, 0)
+                        sink.emit(envelope)
+
+                        # Pre-warm public execution L2 from every observed coin,
+                        # including the initial snapshot. Snapshot fills never count
+                        # as forward copy signals.
+                        for fill in fills:
+                            coin = str(fill.get("coin") or "").strip().upper()
+                            if coin and coin not in l2_known_coins:
+                                l2_known_coins.add(coin)
+                                l2_request_queue.put_nowait(coin)
+
+                        # Selection time is only universe provenance. Forward
+                        # reconciliation starts when this hosted lane can observe.
+                        if envelope.channel != "copy_vault_fills":
+                            continue
+                        for fill in fills:
+                            try:
+                                ts_ms = int(fill.get("ts_ms") or 0)
+                            except (TypeError, ValueError, OverflowError):
+                                continue
+                            if ts_ms < int(collection_start_ms):
+                                continue
+                            live_ids[vault].add(canonical_fill_id(fill))
+                            live_fill_counts[vault] += 1
                 finally:
                     heartbeat_task.cancel()
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
