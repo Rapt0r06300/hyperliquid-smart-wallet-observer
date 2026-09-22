@@ -569,13 +569,31 @@ async def collect(
     duration_s: float,
     collector_version: str,
     max_vaults: int,
+    vault_shard_count: int = 1,
+    vault_shard_index: int = 0,
     rotate_bytes: int,
 ) -> dict[str, Any]:
     selected_rows, selection = await asyncio.to_thread(
         discover_vaults,
         max_vaults=max_vaults,
     )
+    shard_count = max(1, int(vault_shard_count))
+    shard_index = int(vault_shard_index)
+    if not 0 <= shard_index < shard_count:
+        raise ValueError("vault_shard_index must be within vault_shard_count")
+    full_count = len(selected_rows)
+    selected_rows = selected_rows[shard_index::shard_count]
+    selection = {
+        **selection,
+        "full_vault_count": full_count,
+        "vault_count": len(selected_rows),
+        "vault_shard_count": shard_count,
+        "vault_shard_index": shard_index,
+        "vaults": selected_rows,
+    }
     vaults = [str(row["address"]).lower() for row in selected_rows]
+    if not vaults:
+        raise RuntimeError("selected Copy-Vault shard is empty")
     selection_ts_ms = int(selection["selected_at_ms"])
 
     raw_root = output / "raw"
@@ -644,6 +662,9 @@ async def collect(
         "end_ts_ms": end_ms,
         "duration_s": round((end_ms - selection_ts_ms) / 1000.0, 3),
         "vault_count": len(vaults),
+        "vault_universe_count": selection.get("full_vault_count"),
+        "vault_shard_count": selection.get("vault_shard_count"),
+        "vault_shard_index": selection.get("vault_shard_index"),
         "socket_groups": len(groups),
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
@@ -672,7 +693,9 @@ def main() -> int:
     parser.add_argument("--output", required=True)
     parser.add_argument("--duration-s", type=float, default=300.0)
     parser.add_argument("--collector-version", required=True)
-    parser.add_argument("--max-vaults", type=int, default=20)
+    parser.add_argument("--max-vaults", type=int, default=100)
+    parser.add_argument("--vault-shard-count", type=int, default=1)
+    parser.add_argument("--vault-shard-index", type=int, default=0)
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
     summary = asyncio.run(
@@ -680,7 +703,9 @@ def main() -> int:
             Path(args.output),
             duration_s=max(1.0, float(args.duration_s)),
             collector_version=str(args.collector_version),
-            max_vaults=max(1, min(int(args.max_vaults), 40)),
+            max_vaults=max(1, min(int(args.max_vaults), CV.MAX_VAULTS_PUBLICS)),
+            vault_shard_count=max(1, int(args.vault_shard_count)),
+            vault_shard_index=int(args.vault_shard_index),
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
         )
     )
