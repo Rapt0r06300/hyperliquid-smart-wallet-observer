@@ -170,7 +170,9 @@ def build_cross_venue_window_manifest(
         "quality_status": status,
         "quality_reasons": sorted(set(severe + reasons)),
         "validation_allowed": status == SAFE,
-        "proof_of_pnl_allowed": status == SAFE,
+        # Data completeness authorizes replay only. Profitability is a separate
+        # output of the costed replay/backtest and must never be inferred here.
+        "proof_of_pnl_allowed": False,
         "read_only": True,
         "real_execution": False,
     }
