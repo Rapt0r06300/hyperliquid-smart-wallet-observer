@@ -41,6 +41,7 @@ from hl_observer.collection.okx_market_data import OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.collection.trade_reconciliation import (
+    HyperliquidTradeReferenceSampler,
     reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
     reconcile_okx_trade_shard,
@@ -790,6 +791,15 @@ async def collect(
         binance_symbols,
         tick_sink=sink.emit,
     )
+    hyperliquid_trade_reference = (
+        HyperliquidTradeReferenceSampler(
+            hl_coins,
+            info_url=INFO_HYPERLIQUID,
+            interval_s=5.0,
+        )
+        if hl_coins
+        else None
+    )
 
     tasks: list[asyncio.Task[Any]] = []
     if bybit_symbols:
@@ -798,6 +808,8 @@ async def collect(
         tasks.append(asyncio.create_task(_native_okx(okx_symbols, sink)))
     if hl_coins:
         tasks.append(asyncio.create_task(_hyperliquid(hl_coins, sink)))
+        if hyperliquid_trade_reference is not None:
+            tasks.append(asyncio.create_task(hyperliquid_trade_reference.run()))
     if binance_symbols:
         tasks.extend(
             (
@@ -819,6 +831,10 @@ async def collect(
         await asyncio.sleep(max(1.0, float(duration_s)))
     finally:
         ended_for_funding = int(time.time() * 1_000)
+        # Final independent REST sample while the live websocket window is still
+        # open, so reference coverage includes the tail of the capture.
+        if hyperliquid_trade_reference is not None:
+            await hyperliquid_trade_reference.sample_once()
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -828,6 +844,8 @@ async def collect(
             start_ms=started,
             end_ms=ended_for_funding,
         )
+        if hyperliquid_trade_reference is not None:
+            await hyperliquid_trade_reference.close()
         await sink.close()
         await writer_task
 
@@ -885,6 +903,18 @@ async def collect(
                 manifest = attach_reconciliation(manifest, report)
             elif venue == "okx" and family == "trades":
                 report = await reconcile_okx_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
+            elif (
+                venue == "hyperliquid"
+                and family == "trades"
+                and hyperliquid_trade_reference is not None
+            ):
+                report = hyperliquid_trade_reference.reconcile(
                     asset_path,
                     symbol=str(manifest.get("symbol") or ""),
                     start_ms=reference_start,
@@ -958,6 +988,11 @@ async def collect(
         "binance_depth": binance_depth.health(),
         "binance_context": binance_context.health(),
         "funding_history": funding_history,
+        "hyperliquid_trade_reference": (
+            hyperliquid_trade_reference.stats()
+            if hyperliquid_trade_reference is not None
+            else None
+        ),
         "read_only": True,
         "real_execution": False,
     }
