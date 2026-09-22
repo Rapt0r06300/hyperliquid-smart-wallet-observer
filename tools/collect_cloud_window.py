@@ -128,11 +128,39 @@ def _hyperliquid_envelope(
         exchange_ts = max(present) if present else None
         event_kind = FeedEventKind.EVENT
         event_count = len(rows)
+    elif channel == "activeAssetCtx" and isinstance(data, Mapping):
+        instrument = str(data.get("coin") or "").upper()
+        ctx = data.get("ctx")
+        if not isinstance(ctx, Mapping):
+            return None
+        # Hyperliquid does not attach an event timestamp to activeAssetCtx.
+        # Preserve that fact instead of fabricating one.
+        exchange_ts = None
+        event_kind = FeedEventKind.SNAPSHOT
     else:
         return None
 
     if not instrument:
         return None
+    parsed_summary: dict[str, Any] = {
+        "event_count": event_count,
+        "data_gate_ready": False,
+    }
+    if channel == "activeAssetCtx" and isinstance(data, Mapping):
+        ctx = data.get("ctx")
+        if isinstance(ctx, Mapping):
+            parsed_summary.update(
+                {
+                    "mark_price": _float(ctx.get("markPx")),
+                    "mid_price": _float(ctx.get("midPx")),
+                    "oracle_price": _float(ctx.get("oraclePx")),
+                    "funding_rate": _float(ctx.get("funding")),
+                    "open_interest": _float(ctx.get("openInterest")),
+                    "premium": _float(ctx.get("premium")),
+                    "day_notional_volume": _float(ctx.get("dayNtlVlm")),
+                    "prev_day_price": _float(ctx.get("prevDayPx")),
+                }
+            )
     return TickEnvelope(
         source_id="hyperliquid_public_ws",
         channel=channel,
@@ -151,10 +179,7 @@ def _hyperliquid_envelope(
             "transport": "websocket",
             "authenticated": False,
         },
-        parsed_summary={
-            "event_count": event_count,
-            "data_gate_ready": False,
-        },
+        parsed_summary=parsed_summary,
     )
 
 
@@ -246,20 +271,71 @@ def _binance_trade_envelope(
     )
 
 
+async def _native_with_clock_sync(
+    venue: str,
+    client: Any,
+    symbols: list[str],
+    sink: AsyncPartitionSink,
+    *,
+    probe_interval_s: float = 60.0,
+) -> None:
+    sync: dict[str, float | int] = {}
+
+    async def probe_loop() -> None:
+        while True:
+            try:
+                sample = await asyncio.to_thread(client.measure_clock_sync)
+                sync["offset_ms"] = float(sample.offset_ms)
+                sync["rtt_ms"] = float(sample.rtt_ms)
+                sync["server_ts_ms"] = int(sample.server_ts_ms)
+                sync["probe_receive_wall_ts_ms"] = int(sample.receive_wall_ts_ms)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Missing clock evidence must remain missing; raw market capture continues.
+                sync.clear()
+            await asyncio.sleep(max(10.0, float(probe_interval_s)))
+
+    probe_task = asyncio.create_task(probe_loop())
+    try:
+        # Populate the first sample before the stream gets busy when possible.
+        await asyncio.sleep(0)
+        async for payload in client.messages(symbols):
+            message = dict(payload)
+            meta = message.get("_alina_transport")
+            transport = dict(meta) if isinstance(meta, Mapping) else {}
+            if sync:
+                transport["clock_offset_ms"] = sync.get("offset_ms")
+                transport["clock_probe_rtt_ms"] = sync.get("rtt_ms")
+                transport["clock_probe_server_ts_ms"] = sync.get("server_ts_ms")
+                transport["clock_probe_receive_wall_ts_ms"] = sync.get(
+                    "probe_receive_wall_ts_ms"
+                )
+            message["_alina_transport"] = transport
+            envelope = native_tick_envelope(venue, message)
+            if envelope is not None:
+                sink.emit(envelope)
+    finally:
+        probe_task.cancel()
+        await asyncio.gather(probe_task, return_exceptions=True)
+
+
 async def _native_bybit(symbols: list[str], sink: AsyncPartitionSink) -> None:
-    client = BybitPublicClient(orderbook_depth=200)
-    async for payload in client.messages(symbols):
-        envelope = native_tick_envelope("bybit", payload)
-        if envelope is not None:
-            sink.emit(envelope)
+    await _native_with_clock_sync(
+        "bybit",
+        BybitPublicClient(orderbook_depth=200),
+        symbols,
+        sink,
+    )
 
 
 async def _native_okx(symbols: list[str], sink: AsyncPartitionSink) -> None:
-    client = OkxPublicClient()
-    async for payload in client.messages(symbols):
-        envelope = native_tick_envelope("okx", payload)
-        if envelope is not None:
-            sink.emit(envelope)
+    await _native_with_clock_sync(
+        "okx",
+        OkxPublicClient(),
+        symbols,
+        sink,
+    )
 
 
 async def _hyperliquid(coins: list[str], sink: AsyncPartitionSink) -> None:
@@ -275,7 +351,7 @@ async def _hyperliquid(coins: list[str], sink: AsyncPartitionSink) -> None:
                 max_size=2**23,
             ) as socket:
                 for coin in coins:
-                    for channel in ("bbo", "l2Book", "trades"):
+                    for channel in ("bbo", "l2Book", "trades", "activeAssetCtx"):
                         await socket.send(
                             json.dumps(
                                 {
