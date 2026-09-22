@@ -121,3 +121,8 @@ def test_couverture_mesuree():
     ], vault="0xA")
     cov = VB.couverture(fills)
     assert cov["n_fills"] == 2 and cov["span_h"] == 1.0 and cov["coins"] == ["BTC", "SOL"] and cov["n_vaults"] == 1
+
+
+def test_userfills_response_cap_and_retention_are_distinct():
+    assert VB.CAP_USERFILLS == 2_000
+    assert VB.RETENTION_USERFILLS == 10_000
