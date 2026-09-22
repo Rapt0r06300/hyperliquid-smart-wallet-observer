@@ -127,3 +127,49 @@ def test_plan_file_preserves_exact_exchange_symbols(tmp_path) -> None:
     assert venue_lists["bybit"] == ["1000PEPEUSDT", "HYPEUSDT"]
     assert venue_lists["hyperliquid"] == ["HYPE", "PEPE"]
     assert venue_lists["okx"] == ["PEPE-USDT-SWAP"]
+
+
+def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
+    m = _module()
+    manifests = [
+        {
+            "dataset_id": "safe-1",
+            "release_asset": "safe-1.jsonl.gz",
+            "quality_status": "SAFE",
+        },
+        {
+            "dataset_id": "partial-1",
+            "release_asset": "partial-1.jsonl.gz",
+            "quality_status": "PARTIAL",
+        },
+        {
+            "dataset_id": "reject-1",
+            "release_asset": "reject-1.jsonl.gz",
+            "quality_status": "REJECT",
+        },
+    ]
+    index = m._bundle_index(
+        manifests,
+        collector_version="a" * 40,
+        queue_drops={
+            ("bybit_public_ws", "l2Book", "BTCUSDT"): 2,
+            ("okx_public_ws", "l2Book", "BTC-USDT-SWAP"): 1,
+        },
+    )
+    assert index["schema"] == "alina.dataset_bundle.v2"
+    assert index["repository"] == "Rapt0r06300/alina-smartflow-datasets-v2"
+    assert index["shard_count"] == 3
+    assert index["safe_count"] == 1
+    assert index["partial_count"] == 1
+    assert index["reject_count"] == 1
+    assert index["collection_queue_drops"] == 3
+    assert index["manifests"] == [
+        "manifests/safe-1.json",
+        "manifests/partial-1.json",
+        "manifests/reject-1.json",
+    ]
+    assert index["assets"] == [
+        "assets/safe-1.jsonl.gz",
+        "assets/partial-1.jsonl.gz",
+        "assets/reject-1.jsonl.gz",
+    ]
