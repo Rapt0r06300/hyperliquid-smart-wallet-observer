@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any
 
 
+_RECEIVE_ONLY_CHANNELS = {"activeAssetCtx", "instrument_metadata"}
+_RECEIVE_ONLY_SEMANTIC = "receive_observation_time_only"
+
+
 def build_manifest_from_tick_shard(
     shard_path: str | Path,
     *,
@@ -50,6 +54,7 @@ def build_manifest_from_tick_shard(
     last_sequence: dict[tuple[str, str, str], int] = {}
     connection_ids: set[str] = set()
     transports: set[str] = set()
+    timestamp_semantics: set[str] = set()
     receive_exchange_deltas_ms: list[float] = []
     transport_rtt_ms: list[float] = []
     clock_offsets_ms: list[float] = []
@@ -77,7 +82,17 @@ def build_manifest_from_tick_shard(
             receive = _int(record.get("received_ts_ms", record.get("recv_wall_ts_ms")))
             exchange = _int(record.get("exchange_ts_ms"))
             mono = _int(record.get("local_monotonic_ns", record.get("recv_mono_ns")))
-            if receive is None or exchange is None:
+            provenance = record.get("provenance")
+            semantic = (
+                str(provenance.get("timestamp_semantics") or "").strip().lower()
+                if isinstance(provenance, Mapping)
+                else ""
+            )
+            receive_only_allowed = (
+                channel in _RECEIVE_ONLY_CHANNELS
+                and semantic == _RECEIVE_ONLY_SEMANTIC
+            )
+            if receive is None or (exchange is None and not receive_only_allowed):
                 missing_timestamp_count += 1
             if mono is None:
                 missing_monotonic_count += 1
@@ -164,7 +179,6 @@ def build_manifest_from_tick_shard(
                 if previous_sequence is None or sequence > previous_sequence:
                     last_sequence[key] = sequence
 
-            provenance = record.get("provenance")
             if not isinstance(provenance, Mapping):
                 public_only = False
                 authenticated_false = False
@@ -177,6 +191,11 @@ def build_manifest_from_tick_shard(
                 transport = str(provenance.get("transport") or "")
                 if transport:
                     transports.add(transport)
+                semantic_value = str(
+                    provenance.get("timestamp_semantics") or ""
+                ).strip().lower()
+                if semantic_value:
+                    timestamp_semantics.add(semantic_value)
                 gap_semantics = str(provenance.get("gap_count_semantics") or "").lower()
                 if record_gap_counter is not None:
                     if gap_semantics == "event_delta":
@@ -245,6 +264,7 @@ def build_manifest_from_tick_shard(
             ),
             "real_execution": not bool(real_execution_false),
             "transports": sorted(transports),
+            "timestamp_semantics": sorted(timestamp_semantics),
         },
         "integrity": {
             "gap_count": gap_count,
