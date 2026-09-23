@@ -157,6 +157,50 @@ def test_exact_window_backfill_splits_at_2000_response_cap() -> None:
     asyncio.run(scenario())
 
 
+def test_exact_window_backfill_fails_closed_when_request_budget_is_exhausted() -> None:
+    address = "0x" + "6" * 40
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode())
+            start = int(body["startTime"])
+            rows = [
+                {
+                    "coin": "BTC",
+                    "px": "100",
+                    "sz": "1",
+                    "side": "B",
+                    "time": start + index,
+                    "dir": "Open Long",
+                    "hash": f"0x{index:064x}",
+                    "tid": index,
+                    "oid": index,
+                }
+                for index in range(C.CAP_USERFILLS)
+            ]
+            return httpx.Response(200, json=rows)
+
+        client = httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        )
+        rows, audit = await C.exact_window_backfill(
+            client,
+            address,
+            start_ms=10_000,
+            end_ms=30_000,
+            max_requests=2,
+        )
+        await client.aclose()
+        assert rows == []
+        assert audit["status"] == "PARTIAL"
+        assert audit["requests"] == 2
+        assert audit["request_budget_exhausted"] is True
+        assert audit["pending_windows"] > 0
+
+    asyncio.run(scenario())
+
+
 def test_bundle_keeps_forward_selection_metadata(tmp_path: Path) -> None:
     raw = tmp_path / "raw"
     output = tmp_path / "bundle"
@@ -261,5 +305,30 @@ def test_reconcile_requires_per_vault_subscription_start() -> None:
         assert report["status"] == "UNAVAILABLE"
         assert report["audit"]["reason"] == "NO_LIVE_SUBSCRIPTION_START"
         assert report["audit"]["requested_start_ms"] is None
+
+    asyncio.run(scenario())
+
+
+def test_reconcile_timeout_is_unavailable_not_matched(monkeypatch) -> None:
+    address = "0x" + "7" * 40
+
+    async def slow_backfill(*_args, **_kwargs):
+        await asyncio.sleep(1.0)
+        return [], {"status": "COMPLETE"}
+
+    monkeypatch.setattr(C, "exact_window_backfill", slow_backfill)
+    monkeypatch.setattr(C, "RECONCILIATION_PER_VAULT_TIMEOUT_S", 0.01)
+
+    async def scenario() -> None:
+        result = await C.reconcile_forward_window(
+            [address],
+            start_ms_by_vault={address: 10_000},
+            end_ms=20_000,
+            live_ids={address: set()},
+        )
+        report = result[address]
+        assert report["status"] == "UNAVAILABLE"
+        assert report["audit"]["status"] == "PARTIAL"
+        assert report["audit"]["reason"] == "REFERENCE_TIMEOUT"
 
     asyncio.run(scenario())

@@ -58,6 +58,8 @@ WS_URL = "wss://api.hyperliquid.xyz/ws"
 INFO_URL = "https://api.hyperliquid.xyz/info"
 MAX_SUBSCRIPTIONS_PER_SOCKET = 5
 MAX_UNIQUE_USERS_PER_IP = 10
+MAX_RECONCILIATION_REQUESTS_PER_VAULT = 512
+RECONCILIATION_PER_VAULT_TIMEOUT_S = 90.0
 
 
 class AsyncTickSink:
@@ -648,6 +650,7 @@ async def exact_window_backfill(
     start_ms: int,
     end_ms: int,
     min_window_ms: int = 1_000,
+    max_requests: int = MAX_RECONCILIATION_REQUESTS_PER_VAULT,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Adaptive exact-window REST reconciliation using the 2,000 response cap."""
     pending: deque[tuple[int, int]] = deque([(int(start_ms), int(end_ms))])
@@ -656,8 +659,12 @@ async def exact_window_backfill(
     capped_minimum: list[dict[str, Any]] = []
     requests = 0
     splits = 0
+    request_budget_exhausted = False
 
     while pending:
+        if requests >= max(1, int(max_requests)):
+            request_budget_exhausted = True
+            break
         left, right = pending.popleft()
         requests += 1
         try:
@@ -693,13 +700,19 @@ async def exact_window_backfill(
 
     rows = dedupliquer(accepted)
     return rows, {
-        "status": "COMPLETE" if not failures and not capped_minimum else "PARTIAL",
+        "status": (
+            "COMPLETE"
+            if not failures and not capped_minimum and not request_budget_exhausted
+            else "PARTIAL"
+        ),
         "requested_start_ms": int(start_ms),
         "requested_end_ms": int(end_ms),
         "requests": requests,
         "splits": splits,
         "failed_windows": failures,
         "cap_blocked_windows": capped_minimum,
+        "request_budget_exhausted": request_budget_exhausted,
+        "pending_windows": len(pending),
         "rows": len(rows),
     }
 
@@ -736,12 +749,36 @@ async def reconcile_forward_window(
                     },
                 }
                 continue
-            rows, audit = await exact_window_backfill(
-                client,
-                vault,
-                start_ms=int(start_ms),
-                end_ms=end_ms,
-            )
+            try:
+                rows, audit = await asyncio.wait_for(
+                    exact_window_backfill(
+                        client,
+                        vault,
+                        start_ms=int(start_ms),
+                        end_ms=end_ms,
+                    ),
+                    timeout=RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                )
+            except TimeoutError:
+                observed = set(live_ids.get(vault, set()))
+                reports[vault] = {
+                    "status": "UNAVAILABLE",
+                    "live_count": len(observed),
+                    "reference_count": 0,
+                    "matched_count": 0,
+                    "missing_from_live": 0,
+                    "live_only": len(observed),
+                    "duplicate_live_keys": 0,
+                    "audit": {
+                        "status": "PARTIAL",
+                        "reason": "REFERENCE_TIMEOUT",
+                        "timeout_s": RECONCILIATION_PER_VAULT_TIMEOUT_S,
+                        "requested_start_ms": int(start_ms),
+                        "requested_end_ms": int(end_ms),
+                        "rows": 0,
+                    },
+                }
+                continue
             reference_ids = {
                 canonical_fill_id({**row, "vault": vault})
                 for row in rows
