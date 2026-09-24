@@ -8,9 +8,15 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-
-_RECEIVE_ONLY_CHANNELS = {"activeAssetCtx", "instrument_metadata"}
-_RECEIVE_ONLY_SEMANTIC = "receive_observation_time_only"
+_RECEIVE_ONLY_CHANNELS = {
+    "activeAssetCtx",
+    "external_events",
+    "instrument_metadata",
+}
+_RECEIVE_ONLY_SEMANTICS = {
+    "causal_event_availability",
+    "receive_observation_time_only",
+}
 
 
 def build_manifest_from_tick_shard(
@@ -90,7 +96,7 @@ def build_manifest_from_tick_shard(
             )
             receive_only_allowed = (
                 channel in _RECEIVE_ONLY_CHANNELS
-                and semantic == _RECEIVE_ONLY_SEMANTIC
+                and semantic in _RECEIVE_ONLY_SEMANTICS
             )
             if receive is None or (exchange is None and not receive_only_allowed):
                 missing_timestamp_count += 1

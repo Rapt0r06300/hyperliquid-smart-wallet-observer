@@ -132,3 +132,15 @@ Ce fichier est la source de vérité de couverture. **Implémenté** signifie qu
 - Les scores World Monitor et classifications ne sont jamais des ordres BUY/SELL.
 - Les contrôles NO_EVENT, placebos, N indépendant, purge/embargo, OOS et forward restent obligatoires avant promotion.
 - Le critère final n'est pas le nombre de features mais l'amélioration du **PnL net incrémental** après tous coûts, capacité, fill et latence.
+
+## Câblage canonique modules ↔ Dataset V2
+
+`event_intelligence.integration_registry` associe les 120 idées, sans trou, aux
+familles `copy_vault`, `lead_lag`, `cross_venue_dislocation` et `arbitrage`, ainsi
+qu'aux familles de données V2 nécessaires. Son digest est embarqué dans chaque
+manifeste `external_events` produit par `collect_event_intelligence_v2.py`.
+
+La collecte est publique, GET-only, paper/read-only et exécutée sur GitHub Hosted.
+En l'absence de référence indépendante exacte, ces shards restent honnêtement
+`PARTIAL`, `validation_allowed=false` et `proof_of_pnl_allowed=false`. Le câblage
+structurel des 120 idées n'est donc jamais présenté comme une preuve de rentabilité.

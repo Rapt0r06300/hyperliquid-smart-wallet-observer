@@ -6,7 +6,9 @@ on:
     paths:
       - "src/hl_observer/event_intelligence/**"
       - "src/hl_observer/datasets/source_discovery.py"
+      - "src/hl_observer/datasets/v2_export.py"
       - "tests/test_event_intelligence_*.py"
+      - "tools/collect_event_intelligence_v2.py"
       - "tests/test_dataset_source_discovery.py"
       - ".github/workflows/event-intelligence-ci.yml"
   pull_request:
@@ -14,8 +16,10 @@ on:
     paths:
       - "src/hl_observer/event_intelligence/**"
       - "src/hl_observer/datasets/source_discovery.py"
+      - "src/hl_observer/datasets/v2_export.py"
       - "tests/test_dataset_source_discovery.py"
       - "tests/test_event_intelligence_*.py"
+      - "tools/collect_event_intelligence_v2.py"
       - ".github/workflows/event-intelligence-ci.yml"
 
 permissions:
