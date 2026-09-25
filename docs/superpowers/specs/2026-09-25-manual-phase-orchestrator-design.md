@@ -320,6 +320,300 @@ Capture or poll, where available:
 Documented venue downtime does not make missing market data replay-safe, but it explains the gap and prevents misdiagnosing the collector.
 
 
+### Mandatory closure of current collector gaps
+
+Implementation must explicitly remove the following limitations observed in the current repository/workflows. These are not optional optimizations.
+
+#### Cloud universe and campaign creation
+
+The normal `COLLECT` path must stop creating the fixed market campaign:
+
+`BTC,ETH,SOL,XRP,DOGE,BNB,AVAX,LINK,SUI,ADA,TRX,TON,WIF,ARB,OP,APT`
+
+as if that were the complete collection universe.
+
+Instead:
+
+- run native venue discovery at the start of every collection epoch;
+- persist the complete discovered universe and all venue-native symbols;
+- retain markets seen on only one venue as Tier-C discovery evidence when useful;
+- build every cross-venue intersection, not only HL/Binance pairs;
+- shard dynamically from measured throughput;
+- preserve majors/high-value active candidates in Tier A while rotating broad coverage;
+- fail visibly if one venue discovery fails rather than silently treating the smaller universe as complete.
+
+Any `max_coins` option remains a bounded diagnostic/testing control, not the production definition of the universe.
+
+#### Copy-Vault scheduler redesign
+
+The current pattern of creating hundreds of one-vault-lane campaigns and serializing them is not the normal production design.
+
+The implementation must:
+
+- remove the mismatch where a Copy-Vault campaign requests a long collection duration but the worker silently caps a unit to 300 seconds;
+- separate **broad REST observation** from **scarce user-specific WebSocket observation**;
+- perform rate-budgeted broad state sweeps over the complete frozen vault universe;
+- compare current versus prior `clearinghouseState`/position fingerprints;
+- schedule expensive `userFillsByTime` only for changed/active candidates or explicitly sampled audit candidates;
+- use the priority WebSocket pool for the best causally selected leaders;
+- keep explicit fairness/coverage debt so low-priority vaults are periodically revisited;
+- record the last successful observation time per vault and expose vault-staleness distribution;
+- maintain leader-exit/reduce evidence for selected leaders;
+- never let old lane backlog from a previous epoch consume current collection capacity.
+
+The goal is not to subscribe to all vaults. The goal is to observe the complete universe efficiently and devote low-latency resources where they create the most economic information.
+
+#### Binance hardening
+
+Production Binance USD-M collection must include, according to module/tier need:
+
+- dedicated current public WebSocket endpoints rather than legacy/deprecated URLs;
+- real-time BBO/book-ticker;
+- diff-depth at the fastest sustainable public cadence for Tier A;
+- correct snapshot bridge using `lastUpdateId`, `U`, `u`, and `pu`;
+- raw trades/aggTrades with buyer-maker/aggressor information;
+- mark/index/premium/funding context;
+- open interest;
+- liquidation stream;
+- contract/instrument metadata and rule changes;
+- server-time/clock evidence;
+- planned WebSocket rotation before exchange-side lifetime termination;
+- official public trade/archive reconciliation.
+
+A Binance snapshot after a gap restores current state but must not certify the missing historical depth interval.
+
+#### Bybit hardening
+
+Tier-A Bybit collection should use **two complementary depth paths** when measured capacity permits:
+
+1. fast orderbook/BBO (for detection and receive-time ordering);
+2. full order book initialized from the official full REST snapshot and maintained with full-depth deltas (for capacity/slippage).
+
+Requirements:
+
+- buffer deltas during initialization;
+- use `u` as the consecutive update identifier for the full-book protocol;
+- do **not** require `seq` to be consecutive, because it is a cross-sequence/version field;
+- `u=1`, service restart, tick/lot configuration change, symbol state transition, or detected update loss forces a fresh synchronization;
+- preserve `cts` matching-engine time separately from service `ts`;
+- capture public trades, ticker/BBO, liquidations, mark/index, funding, OI, funding interval/cap, volume and instrument rules;
+- collect the public system-status stream to annotate venue incidents;
+- use official historical order-book/trade downloads as a repair/verification source when the exact interval/product is available.
+
+The existing generic integrity helper is not sufficient unless configured with Bybit-specific `u` semantics.
+
+#### OKX hardening
+
+OKX must preserve and validate:
+
+- BBO plus deep incremental books;
+- `seqId` / `prevSeqId` continuity using current documented reset semantics;
+- explicit snapshots/resets;
+- trades;
+- funding;
+- open interest;
+- mark price;
+- index price;
+- liquidation/context feeds where public and useful;
+- instruments stream including tick/lot/min-size/status changes;
+- public time and system-status evidence.
+
+Do not use historical JSON-book checksum behavior as the primary current integrity rule.
+
+Official OKX high-resolution historical L2 data is a preferred repair/verification layer when available for the affected instrument/time interval.
+
+#### Gate hardening
+
+The current lightweight Gate collector must be expanded beyond a small depth-only stream.
+
+Production requirements include:
+
+- correct `U`/`u` update-window semantics;
+- authoritative base/full snapshot synchronization;
+- zero-size deletion semantics;
+- real-time BBO/book-ticker where available;
+- fast bounded L2 plus deeper capacity evidence for Tier A;
+- public trades with IDs/side fields where available;
+- ticker/mark/index;
+- funding and funding schedule;
+- open interest;
+- liquidations where public;
+- contract metadata/status/precision;
+- clock/liveness evidence;
+- deterministic reconnect/resync.
+
+Gate's official downloadable futures `orderbooks`, `orderbooks_slice`, trades, mark prices and funding history should be used to repair or verify eligible gaps.
+
+A simple test such as `u > previous_u + 1` is not an adequate substitute for the venue's documented update-window relationship.
+
+#### Bitget hardening
+
+The current JSON adapter is a fallback/coverage path, not the desired Tier-A implementation.
+
+Tier-A Bitget should consume the official SBE public feeds where GitHub runner capacity allows:
+
+- BestBidAsk;
+- Depth50 full snapshots at the documented high-frequency cadence;
+- public trades.
+
+Requirements:
+
+- preserve every original binary frame before decoding;
+- validate SBE schema/template/version;
+- preserve matching-engine `ts`, service-push `sts`, local receive wall time and local monotonic time;
+- use `seq` to detect loss/out-of-order messages;
+- handle sequence reset/version/precision changes explicitly;
+- maintain full-snapshot replacement semantics for Depth50;
+- collect JSON/REST context for funding, OI, mark/index, instrument metadata/status and broader Tier-B/C coverage;
+- in JSON incremental books, a size of zero removes the price level rather than leaving a zero-sized level resident in local state;
+- use official Bitget depth/transaction history downloads for repair/verification where applicable.
+
+#### Hyperliquid market-data hardening
+
+Hyperliquid collection must keep separate evidence families for:
+
+- BBO;
+- self-contained L2 snapshots;
+- trades;
+- all mids;
+- asset contexts/oracle/mark/funding/OI-equivalent context exposed by the public API;
+- metadata/instrument state;
+- liquidation/event evidence relevant to active research;
+- Copy-Vault user state/fills/funding.
+
+Because a new Hyperliquid L2 snapshot restores current state but not every missed historical transition, live Tier-A redundancy and short durable checkpoint cadence are mandatory where free exact historical repair is unavailable.
+
+Requester-pays historical S3 data may be supported as an optional external evidence source but can never be required for the zero-cost normal path.
+
+### Module data-readiness authority
+
+The code-level strategy dependency authority must be upgraded from source-name presence to **evidence-family readiness**.
+
+For each active strategy family, readiness must identify the actual data required for:
+
+- signal observation;
+- causal replay;
+- executable entry;
+- executable exit;
+- costs;
+- capacity;
+- latency/timing;
+- funding/holding context;
+- markout/adverse selection;
+- economic certification.
+
+A module cannot become economically ready merely because strings such as `bbo-collector` and `carnet-collector` exist in an available-source set.
+
+At minimum:
+
+**Copy-Vault economic readiness** requires causally selected leader evidence, reconciled fills/position state, entry and leader-exit evidence, market BBO/L2 around those events, sizing/NAV context, fees, latency/slippage/capacity, and holding/funding context where applicable.
+
+**Lead-Lag economic readiness** requires synchronized lead and lag feeds, timing uncertainty, BBO/L2, trades/order flow, entry/exit capacity, fees/slippage/latency, and forward markouts.
+
+**Cross-Venue economic readiness** requires simultaneous two-leg BBO/L2, same-clock receive evidence, complete executable depth on all four required sides across entry/exit, venue/instrument rules, fees, latency, funding if relevant, and convergence/timeout exit evidence.
+
+Missing one execution-critical evidence family yields `UNMEASURABLE`, not a default value.
+
+### Executable depth curves and capacity tapes
+
+For Tier-A instruments, the collector derives (without discarding raw L2) a compact capacity tape at predeclared notionals, for example:
+
+`10 / 25 / 50 / 100 / 250 / 500 / 1000 USD`
+
+and larger sizes when supported by liquidity.
+
+For each side and timestamp record:
+
+- executable VWAP;
+- worst consumed price;
+- filled notional;
+- fill ratio;
+- spread cost relative to contemporaneous reference/mid;
+- incremental depth slippage;
+- cumulative depth;
+- book age;
+- source book sequence/snapshot ID.
+
+Cross-Venue additionally records the minimum simultaneous capacity across both legs for entry and exit.
+
+These derived tapes reduce replay compute and make capacity regressions auditable, but raw L2 remains the source of truth.
+
+### Fee and instrument-rule provenance
+
+Economic evidence requires versioned costs and trading rules, not hard-coded eternal constants.
+
+The collector/control plane must preserve, where publicly obtainable or explicitly configured:
+
+- maker/taker fee schedule and effective source;
+- any account-tier assumption used by paper simulation;
+- funding interval, funding cap and realized funding;
+- tick size;
+- quantity/lot step;
+- minimum order size/notional;
+- contract multiplier;
+- leverage/margin constraints relevant to capacity;
+- instrument listing, delisting, pre-market and trading-state transitions.
+
+A fee/rule value with no provenance or effective interval may not silently qualify an economic proof.
+
+### Quality-driven adaptive promotion
+
+Tier assignment is not only based on volume or symbol popularity. The planner uses collection health and economic information gain.
+
+Promote a market/stream when it exhibits:
+
+- Copy-Vault leader activity;
+- repeated causal Lead-Lag shocks;
+- recurring executable cross-venue spread;
+- unusual OI/funding/liquidation/order-flow changes;
+- insufficient depth certainty for an otherwise promising candidate.
+
+Demote or split a shard when:
+
+- writer queue pressure grows;
+- parser/processing lag grows;
+- rate-limit headroom becomes unsafe;
+- drop/gap rate rises;
+- publication throughput cannot keep up.
+
+The collector may reduce Tier-C breadth temporarily to protect Tier-A integrity, but it must preserve a documented coverage debt and later rotate neglected markets back into observation.
+
+### Collection liveness SLOs
+
+The autonomous collection system publishes liveness objectives and actual measurements per shard.
+
+At minimum track:
+
+- time from predecessor dispatch to successor queued;
+- time from queued to runner start;
+- time from runner start to all required subscriptions live;
+- proven overlap duration;
+- durable checkpoint age;
+- time since last valid event per required stream;
+- time since last successful universe refresh;
+- time since last successful Copy-Vault broad sweep;
+- watchdog recovery count;
+- consecutive failed generations.
+
+A shard whose durable checkpoint age or required-stream silence exceeds policy is unhealthy even if the workflow process itself is still running.
+
+The watchdog reacts to **data liveness**, not merely GitHub workflow status.
+
+### Automatic continuation is the default
+
+After the user switches Alina to `COLLECT`, no further "continue", "restart", or "launch the collectors again" instruction is required.
+
+The system remains in autonomous collection across arbitrarily many bounded GitHub-hosted jobs until one of these events occurs:
+
+- the user switches to `ANALYZE`;
+- the user switches to `IDLE`;
+- a fail-closed safety condition makes continued collection invalid.
+
+Temporary API failures, runner failures, GitHub queue delays, individual venue outages, parser crashes, or publication retries do **not** change user intent. The watchdog and successor relay continue attempting bounded recovery while the phase remains `COLLECT`.
+
+A safety stop records a terminal reason and does not silently resume potentially invalid capture until the condition is demonstrably cleared.
+
+
 ### Raw-first capture: WAL before normalization
 
 Every WebSocket or public REST market-data response used for replay must enter an append-only raw write-ahead log before normalized/derived rows are considered durable.
@@ -927,7 +1221,30 @@ Implementation is accepted only when tests prove all of the following:
 51. the watchdog restores a missing collector generation without requiring user intervention;
 52. a COLLECT -> ANALYZE transition disables further relay and causes active collectors to seal and stop cleanly;
 53. no current normal COLLECT path creates replay/backtest/PnL campaigns in parallel;
-54. existing relevant campaign, dataset, reconciliation, and collector tests continue to pass.
+54. the production market universe is not defined by the current fixed 16-coin campaign list;
+55. production discovery does not silently truncate the universe through a diagnostic `max_coins` default;
+56. the Copy-Vault worker no longer silently converts an intended long unit into an unrelated 300-second sweep;
+57. broad Copy-Vault observation and priority user-specific WebSocket observation are independently scheduled;
+58. vault freshness/coverage debt is measurable across the complete frozen universe;
+59. Binance depth certification validates the official `U/u/pu` bridge and resynchronizes after failure;
+60. Bybit full-book certification enforces consecutive `u` while allowing non-consecutive cross-`seq`;
+61. Bybit captures separate matching-engine and service timestamps and system-status evidence;
+62. OKX certification validates current `seqId/prevSeqId` semantics and does not require deprecated JSON checksum behavior;
+63. Gate certification implements documented update-window/base-snapshot semantics rather than a naive integer-gap test;
+64. Gate production collection covers execution/context channels required by active modules, not depth alone;
+65. Bitget SBE raw frames can be durably captured/decoded/certified for Tier-A streams;
+66. Bitget zero-size incremental updates delete levels correctly in fallback JSON book state;
+67. Gate and Bitget instrument metadata/rule snapshots are available to economic replay;
+68. official Bybit/OKX/Gate/Bitget archive repair paths preserve provenance and cannot silently overwrite live evidence;
+69. Hyperliquid zero-cost continuity does not rely on requester-pays archives;
+70. module readiness is based on evidence-family completeness rather than only collector-name presence;
+71. Tier-A capacity tapes are reproducible from the referenced raw L2 and include VWAP/fill/age provenance;
+72. fees and instrument rules used by economic proof have source/effective-time provenance;
+73. adaptive tiering protects execution-critical data before lower-priority breadth and records coverage debt;
+74. collector liveness is judged from actual data/checkpoint freshness, not only workflow process status;
+75. temporary runner/API/publication failures do not require a new user command while phase remains `COLLECT`;
+76. the only normal user-controlled stop conditions for autonomous collection are transition to `ANALYZE` or `IDLE`;
+77. existing relevant campaign, dataset, reconciliation, and collector tests continue to pass.
 
 ## Non-goals
 
