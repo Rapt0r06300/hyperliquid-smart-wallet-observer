@@ -265,6 +265,7 @@ def test_partial_trade_reconciliation_never_promotes_safe(tmp_path) -> None:
         "observed_channels": ["trades"],
         "cost_model": {"applicable": False, "ready": False},
         "reconciliation": {"status": "UNVERIFIED"},
+        "replay_compatible": True,
     }
     partial = attach_reconciliation(
         manifest,
@@ -410,6 +411,7 @@ def test_explicit_trade_reconciliation_mismatch_is_rejected() -> None:
         "observed_channels": ["trades"],
         "cost_model": {"applicable": False, "ready": False},
         "reconciliation": {"status": "UNVERIFIED"},
+        "replay_compatible": True,
     }
     rejected = attach_reconciliation(
         manifest,
@@ -457,6 +459,7 @@ def test_binance_agg_trade_family_requires_explicit_matched_reference() -> None:
         "observed_channels": ["agg_trades"],
         "cost_model": {"applicable": False, "ready": False},
         "reconciliation": {"status": "UNVERIFIED"},
+        "replay_compatible": True,
     }
     status, reasons = assess_manifest(manifest)
     assert status == "PARTIAL"
@@ -477,3 +480,41 @@ def test_binance_agg_trade_family_requires_explicit_matched_reference() -> None:
     assert reconciled["quality_status"] == "SAFE"
     assert reconciled["validation_allowed"] is True
     assert reconciled["proof_of_pnl_allowed"] is False
+
+def test_safe_requires_explicit_replay_compatibility() -> None:
+    manifest = {
+        "event_count": 1,
+        "bytes": 10,
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1000,
+        "sha256": "a" * 64,
+        "collector_version": "a" * 40,
+        "family": "funding_settlement",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["https"],
+        },
+        "synchronization": {"connection_count": 0},
+        "required_channels": [],
+        "observed_channels": ["funding_settlement"],
+        "cost_model": {"applicable": False, "ready": False},
+        "reconciliation": {"status": "SNAPSHOT_VERIFIED"},
+    }
+    status, reasons = assess_manifest(manifest)
+    assert status == "PARTIAL"
+    assert "REPLAY_COMPATIBILITY_NOT_PROVEN" in reasons
+    manifest["replay_compatible"] = True
+    status, reasons = assess_manifest(manifest)
+    assert status == "SAFE"
+    assert reasons == []
