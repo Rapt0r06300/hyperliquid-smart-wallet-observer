@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 import time
+
+import pytest
 
 from hl_observer.control_plane.campaign_adapters import (
     AdapterContext,
@@ -176,3 +179,39 @@ def test_copy_vault_default_respects_hyperliquid_user_limit(tmp_path):
     )
     pos = cmd.index("--max-vaults")
     assert cmd[pos + 1] == "10"
+
+
+def test_copy_vault_dynamic_shards_cover_full_frozen_universe(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text('{"vaults":[]}', encoding="utf-8")
+    digest = hashlib.sha256(selection.read_bytes()).hexdigest()
+    cmd, _ = build_command(
+        context(
+            "copy_vault_collection",
+            output_root=str(tmp_path / "out"),
+            duration_s=1,
+            max_vaults=47,
+            vault_shard_count=5,
+            vault_shard_index=4,
+            selection_file=str(selection),
+            selection_sha256=digest,
+        )
+    )
+    assert cmd[cmd.index("--max-vaults") + 1] == "47"
+    assert cmd[cmd.index("--vault-shard-count") + 1] == "5"
+    assert cmd[cmd.index("--vault-shard-index") + 1] == "4"
+    assert cmd[cmd.index("--selection-file") + 1] == str(selection)
+
+
+def test_copy_vault_rejects_partition_above_ten_users_per_lane(tmp_path):
+    with pytest.raises(ValueError, match="10 unique users per IP"):
+        build_command(
+            context(
+                "copy_vault_collection",
+                output_root=str(tmp_path),
+                duration_s=1,
+                max_vaults=47,
+                vault_shard_count=4,
+                vault_shard_index=0,
+            )
+        )
