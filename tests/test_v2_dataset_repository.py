@@ -23,6 +23,7 @@ def _safe_row(**overrides):
         "bytes": 123,
         "event_count": 10,
         "quality_status": "SAFE",
+        "replay_compatible": True,
         "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
         "release_tag": "v2-test",
         "release_asset": "x.jsonl.gz",
@@ -67,3 +68,8 @@ def test_time_window_uses_overlap_not_filename_guessing() -> None:
     }
     rows = select_safe_shards(index, start_ts_ms=150, end_ts_ms=250)
     assert [row.dataset_id for row in rows] == ["hit", "new"]
+
+
+def test_selector_refuses_safe_without_replay_compatibility() -> None:
+    index={"shards":[_safe_row(dataset_id="no-replay", replay_compatible=False)]}
+    assert select_safe_shards(index) == []
