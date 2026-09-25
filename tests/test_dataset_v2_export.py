@@ -305,3 +305,26 @@ def test_receive_only_repeated_observations_are_not_duplicates(tmp_path) -> None
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["integrity"]["duplicate_count"] == 0
     assert manifest["integrity"]["duplicates_deduped"] is True
+
+def test_trade_manifest_counts_underlying_trade_events_exactly(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="hyperliquid_public_ws",
+            channel="trades",
+            instrument="BTC",
+            event_kind="EVENT",
+            raw_payload={"channel": "trades", "data": [{"tid": 1}, {"tid": 2}, {"tid": 3}]},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=100,
+            connection_id="hl-1",
+            sequence=None,
+            provenance={"access": "read_only", "authenticated": False, "transport": "websocket"},
+            parsed_summary={"event_count": 3},
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["record_count"] == 1
+    assert manifest["trade_count"] == 3
