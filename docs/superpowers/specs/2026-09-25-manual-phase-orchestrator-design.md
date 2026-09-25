@@ -7743,7 +7743,12 @@ The final long-tail sweep classifies repeated public-bot ideas as follows unless
 - triangular/graph arbitrage -> existing route graph / Relative Value;
 - stablecoin quote-basis -> Collateral Risk + Relative Value;
 - HLP/vault deposits/withdrawals -> Copy-Vault / Backstop context;
+- liquidation-conditioned passive liquidity provision -> Forced-Flow + Execution Alpha, not a separate module;
+- Hawkes/self-exciting event-intensity models -> order-flow/Forced-Flow feature family unless independent OOS economics appear;
+- basket/index/constituent dispersion -> Cross-Instrument Relative Value or Options Volatility sleeve, not a duplicate engine;
+- on-chain exchange/bridge/stablecoin flows -> Lead-Lag/regime/context features with explicit observation latency and entity-label uncertainty;
 - native order types such as Chase -> Execution Alpha;
+- pre-execution/split-client-block observability -> `WATCHLIST/UNMEASURABLE` unless a GitHub/cloud-compatible read-only source becomes replayable without a self-hosted node;
 - generic grid/martingale/DCA -> not a first-class module;
 - generic RSI/MACD/indicator bots -> baselines;
 - generic AI/LLM directional agents -> not a distinct economic edge;
@@ -8931,7 +8936,12 @@ The following numbered items form the normative acceptance catalog. Each item is
 588. HLP/vault-flow observations remain Copy-Vault/Backstop context until they demonstrate incremental OOS predictive value;
 589. public generic AI, sentiment, grid, martingale, indicator and Kelly implementations do not become first-class edge modules merely through prevalence;
 590. V6.10 records corpus saturation as declining novel-mechanism yield rather than claiming exhaustive coverage of all public bots;
-591. all V6.10 additions remain paper/read-only and cannot introduce live option orders, signed Chase actions, private keys or user-PC services.
+591. all V6.10 additions remain paper/read-only and cannot introduce live option orders, signed Chase actions, private keys or user-PC services;
+592. liquidation-conditioned market making is evaluated as Forced-Flow-conditioned Execution Alpha rather than a duplicate standalone module;
+593. Hawkes/event-intensity, basket-dispersion and on-chain flow findings enter existing feature/relative-value layers unless independent OOS economics prove a new mechanism;
+594. on-chain exchange/bridge-flow features record source-label uncertainty and observation latency before Lead-Lag use;
+595. pre-execution/split-client-block information remains WATCHLIST/UNMEASURABLE while it requires infrastructure incompatible with the GitHub-only/no-user-PC constraint;
+596. future cloud-accessible pre-execution evidence may enter research only as read-only replayable data and must pass causality, latency and cost gates before promotion.
 
 ## Non-goals
 
