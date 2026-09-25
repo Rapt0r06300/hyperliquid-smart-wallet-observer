@@ -1,5 +1,13 @@
 name: dataset-v2-bridge-smoke
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/hl_observer/datasets/v2_repository.py'
+      - 'src/hl_observer/ops/v2_dataset_bridge.py'
+      - 'tests/test_v2_dataset_repository.py'
+      - 'tests/test_v2_dataset_bridge.py'
+      - '.github/workflows/dataset-v2-bridge-smoke.yml'
   schedule:
     - cron: '25 * * * *'
   workflow_dispatch:
