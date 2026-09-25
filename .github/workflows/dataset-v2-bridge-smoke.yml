@@ -41,7 +41,10 @@ jobs:
         run: |
           python -m hl_observer.ops.v2_dataset_bridge plan             --families bbo             --max-shards 1             --output "$RUNNER_TEMP/v2-bridge-smoke"             > "$RUNNER_TEMP/v2-plan.json"
           cat "$RUNNER_TEMP/v2-plan.json"
+          SAFE_SHARDS="$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/v2-plan.json"))["safe_shards"])')"
+          echo "SAFE_SHARDS=$SAFE_SHARDS" >> "$GITHUB_ENV"
       - name: Materialize one live SAFE shard
+        if: env.SAFE_SHARDS != '0'
         run: |
           python -m hl_observer.ops.v2_dataset_bridge materialize             --families bbo             --max-shards 1             --output "$RUNNER_TEMP/v2-bridge-smoke"             > "$RUNNER_TEMP/v2-materialize.json"
           test -s "$RUNNER_TEMP/v2-bridge-smoke/runtime/reports/datasets/SELECTION_PROVENANCE.json"
@@ -55,3 +58,8 @@ jobs:
           assert p["real_execution"] is False
           print(json.dumps({"selected_shards":p["selected_shards"],"selected_events":p["selected_events"],"selected_bytes":p["selected_bytes"]},sort_keys=True))
           PY
+      - name: Report honest no-SAFE state
+        if: env.SAFE_SHARDS == '0'
+        run: |
+          echo "Dataset V2 reachable, but no SAFE+replay-compatible BBO shard currently matches."
+          echo "This is an honest no-data state, not a replay success."
