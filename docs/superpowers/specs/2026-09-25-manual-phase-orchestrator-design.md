@@ -3794,7 +3794,8 @@ This specification intentionally preserves all previously validated design layer
 - **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification;
 - **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution;
 - **Venue Microstructure V6.5:** venue-class-aware collection/routing across visible CLOB, hidden-liquidity, RFQ and native multi-leg markets with fee-latency/account-tier economics;
-- **Selective L4 & Backstop Intelligence V6.6:** event-window order-level truth, L2 queue calibration without live probing, and post-backstop inventory/unwind research.
+- **Selective L4 & Backstop Intelligence V6.6:** event-window order-level truth, L2 queue calibration without live probing, and post-backstop inventory/unwind research;
+- **Outcome Relative Value V6.7:** HIP-4 internal parity, cross-venue event equivalence and outcome↔perp/options relative-value research under settlement-semantic certification.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -6583,6 +6584,259 @@ High-signal sources supporting V6.6 include:
 - **public forensic liquidation work:** separates market liquidation, backstop absorption and ADL, motivating an additional inventory-aftermath state rather than ending analysis at absorption.
 
 
+
+### Profitability Convergence V6.7 — HIP-4 outcome relative value
+
+The saturation pass identified one genuinely independent opportunity family outside ordinary perpetuals: **HIP-4 outcome markets**.
+
+HIP-4 outcomes are fully collateralized contracts with bounded settlement. They introduce non-linear, dated payoff structures that are economically different from perps, funding carry, spot/perp basis and ordinary market making.
+
+V6.7 treats HIP-4 as a **candidate relative-value/event-derivatives family**, not as an automatic production module.
+
+### Outcome semantic contract
+
+For every outcome instrument store point-in-time:
+
+- outcome id;
+- side ids/names;
+- question id where applicable;
+- encoded contract description;
+- underlying;
+- target/threshold(s);
+- expiry/settlement timestamp;
+- settlement price/source;
+- interpolation/rounding rule;
+- quote token;
+- settleFraction domain;
+- deployer;
+- fee scale;
+- question/fallback structure;
+- split/merge/negate capabilities;
+- market status;
+- specification revision.
+
+No two outcome contracts are considered equivalent because their labels look similar.
+
+Cross-venue equivalence requires matching:
+
+- underlying;
+- strike/threshold;
+- settlement timestamp/timezone;
+- settlement data source;
+- interpolation/rounding;
+- payout definition;
+- cancellation/invalid-market rules;
+- quote/collateral currency;
+- settlement finality.
+
+### Candidate Sleeve 1 — Internal YES/NO Parity
+
+For a binary outcome whose complementary sides settle to one unit of quote value in total, test executable parity relationships such as:
+
+```text
+ask_yes + ask_no + all_costs < settlement_pair_value
+```
+
+or the symmetric unwind relationship where executable bids exceed the recoverable combined value.
+
+Where protocol split/merge operations are available, compare:
+
+- direct book execution;
+- split then sell one/both legs;
+- buy complementary legs then merge;
+- hold-to-settlement;
+- NO_TRADE.
+
+Requirements:
+
+- use current/historical fee semantics;
+- maker rebates are never assumed where outcome rules do not provide them;
+- split/merge actions are modeled only when actually available for the contract/version;
+- quote-token conversion costs are explicit;
+- capital lock/time-to-expiry is explicit;
+- no theoretical parity edge is credited if operational actions cannot realize it in the paper model.
+
+### Candidate Sleeve 2 — Multi-Outcome / Question Parity
+
+For mutually exclusive exhaustive question outcomes, test whether the executable price set violates the protocol's settlement identities.
+
+Potential structures include:
+
+- sum-of-YES parity;
+- NO/negate relationships;
+- complete-set merge;
+- fallback-outcome consistency.
+
+Every relationship is generated from official question metadata rather than hard-coded assumptions.
+
+The solver should build a small payoff matrix:
+
+```text
+state x instrument -> payout
+```
+
+and search for bounded-cost portfolios whose terminal payout dominates their entry cost across all valid states.
+
+This is a deterministic payoff check first, economic trade candidate second.
+
+Fees, liquidity, action costs and capital-time can eliminate a theoretical arbitrage.
+
+### Candidate Sleeve 3 — Cross-Venue Outcome Parity
+
+When the **same economically defined event** trades on another venue, build a semantic-compatibility edge between contracts.
+
+Candidate venues may include public prediction/outcome CLOBs such as Polymarket or Kalshi where access/data terms permit research.
+
+For each paired event store:
+
+- semantic equivalence score;
+- settlement-source equivalence;
+- expiry difference;
+- payout-currency basis;
+- fee model;
+- executable BBO/depth;
+- venue health;
+- settlement/counterparty haircut;
+- transfer/collateral fragmentation;
+- data latency.
+
+Research:
+
+- direct cross-venue binary spread;
+- maker on one outcome venue / hedge on another;
+- convergence as expiry approaches;
+- venue-specific participant-flow lead-lag.
+
+No "risk-free arbitrage" label is allowed unless payoff equivalence is exact across all settlement states and every execution/settlement cost is included.
+
+### Candidate Sleeve 4 — Outcome ↔ Perp / Options Parity
+
+Recurring price outcomes create a direct relationship between:
+
+- current underlying/perp price;
+- threshold;
+- time to expiry;
+- expected volatility/distribution;
+- outcome-implied probability.
+
+For BTC/crypto price outcomes, test fair-value challengers in increasing sophistication:
+
+1. simple empirical return distribution;
+2. realized-volatility distribution;
+3. regime-conditioned distribution;
+4. perp/order-flow conditioned distribution;
+5. options-implied distribution from certified Deribit/options features;
+6. ensemble calibrated strictly on TRAIN.
+
+The outcome market price is compared to a **probability distribution**, not to the perp price linearly.
+
+Candidate features:
+
+- distance-to-strike in volatility units;
+- time-to-expiry;
+- implied binary probability;
+- outcome-vs-model residual;
+- YES/NO microprice;
+- perp microprice/OFI;
+- options risk reversal/skew;
+- realized vs implied volatility;
+- scheduled funding/TWAP/forced-flow state;
+- settlement-source mark/oracle dynamics.
+
+Rules:
+
+- Black-Scholes/digital formulas are baselines, not truth;
+- crypto returns are not assumed lognormal;
+- options-derived distributions require point-in-time surfaces;
+- delta hedging costs/turnover are explicit if a hedge is part of the strategy;
+- near-expiry models must account for settlement interpolation/source mechanics exactly;
+- no future settlement mark is visible before settlement.
+
+### Settlement-Window Specialist Lane
+
+Known settlement times create a specialized event window.
+
+Track:
+
+- time-to-settlement;
+- settlement-source update cadence;
+- last pre-settlement source observation;
+- first post-settlement source observation;
+- interpolation inputs where the contract uses them;
+- outcome-book spread/depth;
+- perp/spot volatility;
+- probability sensitivity to a small underlying move.
+
+Test:
+
+- price-discovery lead-lag between outcome and perp;
+- late repricing delay;
+- liquidity withdrawal near expiry;
+- over/underreaction after a large underlying move;
+- post-settlement residual/cleanup only where contracts continue to expose tradable state.
+
+Because edge half-life may become extremely short near settlement, GitHub-hosted latency limitations must be applied honestly. A discovered theoretical edge that requires unavailable sub-second execution remains `UNEXECUTABLE`.
+
+### Outcome Fee / Rule Versioning
+
+HIP-4 fee and market rules are versioned state.
+
+For every replay window preserve:
+
+- base outcome trading fee;
+- deployer fee scale;
+- open/close/burn/settlement fee semantics;
+- maker rebate policy;
+- quote token;
+- minimum trade/notional;
+- outcome action availability.
+
+Current announcements or current documentation cannot be back-applied to earlier outcome periods.
+
+### Outcome module relationship
+
+HIP-4 research does not create an isolated architecture silo.
+
+It reuses:
+
+- Venue Health;
+- Dynamic Cost State;
+- Execution Truth;
+- Cross-Venue Route Graph;
+- Options/Volatility Intelligence;
+- Lead-Lag;
+- Cross-Module Intent Netting;
+- deterministic replay;
+- OOS/forward gates.
+
+Initial state:
+
+`DISCOVERY_ONLY -> MEASURE_ONLY -> G3/G4 CANDIDATE`.
+
+### HIP-4 promotion standard
+
+A HIP-4 sleeve can be promoted only if:
+
+- contract semantics are machine-verified;
+- point-in-time outcome metadata is retained;
+- execution books are replay-grade;
+- all fee/settlement/collateral costs are modeled;
+- effective independent event count is sufficient;
+- frozen OOS economics are positive;
+- capacity and capital-time contribution can matter toward the +4 USD/day milestone;
+- edge does not rely on unavailable latency.
+
+### V6.7 research basis
+
+High-signal sources supporting V6.7 include:
+
+- **Hyperliquid official HIP-4 documentation:** outcomes are fully collateralized bounded-settlement contracts with complementary side payouts and staged support for questions/multiple outcomes;
+- **Hyperliquid official outcomeMeta / settledOutcome APIs:** expose machine-readable point-in-time outcome specifications and settlement information;
+- **Hyperliquid official contract specifications:** recurring price outcomes define exact threshold, expiry and mark-price settlement mechanics, including interpolation;
+- **Hyperliquid official deployer/action docs:** split/merge/negate and fee-scale semantics create protocol-native parity relationships that must be modeled exactly;
+- **public HIP-4 codebases:** independently converge on three research mechanisms — outcome market making, cross-venue event relative value and underlying/perp parity — but their profitability claims are not imported into Alina.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -7652,7 +7906,28 @@ The following numbered items form the normative acceptance catalog. Each item is
 488. current liquidation rules are not back-applied to historical periods without rule-version evidence;
 489. portfolio-margin/collateral liquidations are separated from ordinary perp liquidations where public evidence supports the distinction;
 490. V6.6 remains a scoped research/certification layer and does not globally block modules that do not depend on queue-exact execution;
-491. all V6.6 additions remain paper/read-only and cannot authorize real orders, live queue probes, signed actions or private-key use.
+491. all V6.6 additions remain paper/read-only and cannot authorize real orders, live queue probes, signed actions or private-key use;
+492. HIP-4/outcome instruments are treated as a distinct bounded-payoff class rather than ordinary perps;
+493. every outcome candidate stores machine-readable settlement semantics, quote token, fee scale, expiry and specification revision;
+494. cross-venue outcome equivalence requires matching underlying, strike, expiry, settlement source/rule, payout and invalid-market semantics;
+495. same label or similar question wording is never sufficient to claim outcome equivalence;
+496. internal YES/NO parity uses executable prices and all fees/action/capital-time costs;
+497. split/merge/negate economics are modeled only when those protocol actions are valid for the contract/version;
+498. theoretical complete-set parity cannot be credited when liquidity or protocol actions cannot realize it;
+499. multi-outcome/question arbitrage is generated from an explicit payoff matrix and official question metadata;
+500. cross-venue outcome arbitrage cannot be labeled risk-free unless payoff equivalence holds in every valid settlement state;
+501. outcome↔perp valuation models output probabilities/distributions rather than linear price targets;
+502. simple empirical/realized-vol models are frozen baselines before options-implied or ML challengers;
+503. options-implied outcome models use point-in-time surfaces and cannot access later IV/skew observations;
+504. outcome delta-hedging experiments include hedge turnover, fees, slippage and basis/mark risk;
+505. settlement-window research uses the exact contract settlement timestamp/source/interpolation rule;
+506. theoretical near-expiry edges that require latency unavailable to GitHub-hosted Alina remain UNEXECUTABLE;
+507. HIP-4 fee/deployer-scale/maker-rebate/action rules are versioned and current rules are not back-applied historically;
+508. outcome quote/collateral currency conversion and capital lock are explicit economic costs;
+509. HIP-4 research reuses shared Venue Health, Execution Truth, Cost State, Options, Lead-Lag and Intent-Netting infrastructure rather than creating duplicate engines;
+510. HIP-4 starts DISCOVERY_ONLY/MEASURE_ONLY and cannot become a production/core module without scoped G3/G4, frozen OOS and forward evidence;
+511. public HIP-4 bot performance claims remain hypothesis sources only;
+512. all V6.7 work remains paper/read-only and cannot introduce signed outcome actions, private keys or live trading.
 
 ## Non-goals
 
@@ -7662,7 +7937,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7 modules without scoped evidence gates;
+- assume two outcome markets are equivalent from names alone;
+- call an outcome parity trade risk-free without exact settlement-state equivalence;
 - mirror the full Hyperliquid raw-node/L4 corpus by default when bounded evidence windows suffice;
 - classify a public wallet as a protocol/backstop actor without verified provenance;
 - treat all venue books as equivalent visible CLOB liquidity;
