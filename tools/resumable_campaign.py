@@ -121,7 +121,7 @@ def main() -> int:
 
     if args.command in {"start", "acquire-lease"}:
         token = acquire_lease(manifest, args.owner or "manual", max(60, int(args.ttl_s)))
-        if args.command == "start":
+        if args.command == "start" and manifest.status != "RUNNING":
             transition(manifest, "RUNNING", "worker_started")
         save(path, manifest, args.expected_digest)
         print(f"::add-mask::{token}")
