@@ -1027,6 +1027,522 @@ The collection epoch is attached to each frozen selection and campaign so stale 
 REST reconciliation and frozen-selection rules remain causal. No pre-selection future information may be admitted as forward proof.
 
 
+## Strategy / PnL Acceleration VNext
+
+The collection architecture is necessary but not sufficient. The three active research families must also be redesigned to maximize **provable after-cost daily net PnL** rather than waiting passively for rare legacy signals.
+
+The first economic milestone is standardized across all three modules:
+
+> **at least +4 USD net per UTC day per module**, measured after fees, spread, slippage, latency, capacity, funding where applicable, and realistic fill assumptions.
+
+This is a research target, not a guarantee. Promotion remains fail-closed. If the evidence does not support the target, the result is negative or `UNMEASURABLE`; thresholds, costs, or validation rules may not be weakened merely to obtain a positive number.
+
+After the +4 USD/day milestone, optimization targets the highest scalable daily net PnL compatible with the approved paper-capital, drawdown, capacity, causality, OOS and forward constraints.
+
+### Speed-to-proof principle
+
+Reducing time-to-proof must come from:
+
+- more independent executable opportunities per day;
+- better information extraction from the same raw data;
+- better venue/order-type routing;
+- better sizing of high-confidence/high-capacity opportunities;
+- broader markets and leaders;
+- faster causal observation;
+- eliminating artificial hard-coded bottlenecks.
+
+It must **not** come from:
+
+- reducing the number of independent days required for validation;
+- using future information;
+- ignoring fees/slippage/latency;
+- counting unfilled maker orders as fills;
+- double-counting overlapping signals;
+- increasing notional beyond verified capacity;
+- relaxing OOS/forward separation.
+
+### Confidence-aware adaptive paper sizing
+
+Fixed tiny notionals are no longer the default production research policy.
+
+The current code contains fixed values such as approximately 15 USD for legacy Cross-Venue, 25 USD for some Lead-Lag timing experiments, and 150 USD for Copy-Vault. These values are useful diagnostics but can make the time required to reach a dollar-denominated objective artificially long.
+
+VNext evaluates a predeclared sizing ladder, bounded by the existing paper-capital contract and executable capacity.
+
+For every candidate, define a conservative expected net edge after all measured costs and a confidence/shrinkage factor derived only from information available at decision time or frozen TRAIN parameters.
+
+Paper notional is bounded by:
+
+- remaining approved paper capital;
+- entry and exit executable L2 capacity;
+- per-module/per-coin/per-venue concentration limits;
+- correlated-signal exposure;
+- uncertainty-adjusted expected edge;
+- drawdown/risk budget;
+- verified fill probability for passive execution.
+
+Raw estimated edge is never used as an unrestricted Kelly bet.
+
+If Kelly-like sizing is explored, it must be fractional/shrunk for parameter uncertainty and capped by the stricter capacity/risk limits. An opportunity with weak or unstable evidence receives less size even if its point estimate is high.
+
+All sizing variants remain paper/read-only.
+
+### Common efficient price and venue residual layer
+
+Lead-Lag and Cross-Venue share a causal multi-venue price-discovery layer.
+
+For each coin and timestamp construct, using only currently observable data:
+
+- a robust multi-venue efficient/reference price;
+- venue-specific residual from that reference;
+- venue quote age;
+- venue reliability/clock quality;
+- spread/depth/liquidity state;
+- recent signed trade flow;
+- L2 imbalance/microprice state.
+
+The reference must not be a naive unweighted mean.
+
+Candidate methods include frozen/train-only weights from:
+
+- liquidity/depth;
+- price-discovery/information-share estimates;
+- recent causal cross-impact quality;
+- robust median/trimmed consensus;
+- combinations proven incrementally useful OOS.
+
+A venue whose quote is stale, desynchronized, or outside certified timing quality is excluded/downweighted before residual calculation.
+
+Raw pairwise spread remains available, but Cross-Venue may not assume that every pairwise deviation is an arbitrage. Stablecoin quote basis, funding expectations, contract specification differences, persistent venue premia and market state must be represented when relevant.
+
+### Copy-Vault V10+: anticipatory-leader engine
+
+Copy-Vault is upgraded from a simple delayed copier into a causal leader-information engine.
+
+#### Observation-latency classes
+
+Copy delay is evidence-dependent.
+
+- priority leaders observed through live user-specific WebSocket use measured observation-to-decision latency;
+- broad REST-discovered leaders use their actual slower polling/reconciliation latency;
+- legacy fixed 60-second delay remains only as a stress/compatibility scenario, not the universal production assumption.
+
+Every replay records the actual latency class.
+
+#### Leader information score
+
+Leader quality uses more than historical vault PnL.
+
+Causal features may include:
+
+- market-adjusted forward markouts after the leader fill;
+- persistence of those markouts across chronological splits;
+- whether the wallet tends to lead or follow the multi-venue efficient price;
+- post-trade residual movement on Binance/OKX/Bybit/other leaders;
+- entry efficiency versus contemporaneous L2;
+- consistency across coins and regimes;
+- position-change conviction relative to account/NAV;
+- realised versus unrealised contribution;
+- concentration and drawdown;
+- leader-exit quality;
+- frequency and independence of opportunities.
+
+A profitable wallet that merely reacts after the dominant venue already moved may be a poor copy candidate.
+
+An anticipatory wallet whose flow repeatedly precedes subsequent market movement may receive a higher priority, subject to held-out persistence.
+
+Wallet scores use shrinkage/minimum-history rules so a tiny lucky sample cannot dominate ranking.
+
+#### Metaorder lifecycle
+
+Copy-Vault must reconstruct and evaluate the full causal lifecycle:
+
+- first observable OPEN;
+- ADD/pyramiding;
+- REDUCE;
+- CLOSE;
+- direction flip;
+- inactivity/time-stop.
+
+Do not require multiple leader fills before every possible entry by default.
+
+VNext explicitly compares:
+
+- first-fill entry;
+- second-confirmation entry;
+- continuation/metaorder entry;
+- position-delta-triggered entry.
+
+A single-fill entry is admissible only when its decision-time leader-quality and execution evidence meet the frozen policy.
+
+#### Proportional replication
+
+A leader REDUCE is not automatically a full follower CLOSE.
+
+Evaluate causal proportional policies based on:
+
+- leader position delta;
+- leader NAV/account value;
+- follower current position;
+- paper capital and capacity.
+
+Candidate policies include:
+
+- proportional ADD;
+- proportional REDUCE;
+- full CLOSE only on leader CLOSE;
+- protective close when leader-quality or execution edge collapses.
+
+The current full-follower-exit-on-first-REDUCE behavior remains a benchmark rather than the only allowed mechanism.
+
+#### Decay-aware copy gate
+
+For each leader cohort estimate on TRAIN how rapidly informational value decays after the observed leader event.
+
+At decision time, skip the copy when measured observation latency plus expected execution delay is beyond the frozen profitable decay window.
+
+This prevents copying a genuinely good trader after the useful information has already been incorporated by the market.
+
+#### Multi-leader consensus
+
+When multiple independently selected high-quality leaders align on the same coin/direction within a causal window, evaluate a consensus confidence boost.
+
+Conflicting leaders reduce size or produce no trade.
+
+A consensus signal must not count correlated duplicate vaults/related child vaults as independent votes.
+
+#### Dynamic risk budget
+
+Replace blanket one-entry-per-coin/day and one/two-entry-per-vault/day rules with a causal risk budget based on:
+
+- current paper exposure;
+- leader independence;
+- coin correlation;
+- recent opportunity count;
+- available L2 capacity;
+- expected net edge confidence.
+
+Legacy daily caps remain conservative benchmark variants.
+
+### Lead-Lag V8+: multi-venue cross-impact engine
+
+Lead-Lag is no longer defined as one fixed shock threshold from one leader venue to Hyperliquid.
+
+#### Directed venue graph
+
+For every eligible coin build a causal directed graph over:
+
+- Hyperliquid;
+- Binance;
+- Bybit;
+- OKX;
+- Gate;
+- Bitget.
+
+Edges represent frozen/train-estimated predictive cross-impact from venue A to venue B under a specific market state.
+
+The graph can change by:
+
+- coin;
+- volatility regime;
+- liquidity regime;
+- time horizon;
+- event type.
+
+No venue is permanently assumed to be the leader.
+
+#### Multi-feature microstructure signal
+
+Candidate decision-time features include:
+
+- multi-venue returns;
+- order-flow imbalance;
+- trade-flow imbalance;
+- top-of-book imbalance;
+- multi-level L2 shape;
+- microprice;
+- queue depletion/refill;
+- spread changes;
+- quote age;
+- aggressive trade bursts;
+- liquidation bursts;
+- funding/OI changes;
+- venue residual from the efficient-price layer;
+- cross-asset leader movement.
+
+Start with transparent linear/sparse models and feature families. A nonlinear layer is promoted only if it adds robust incremental OOS value above the simpler baseline.
+
+#### State-dependent thresholds and horizons
+
+Fixed `8/12/20 bps` shock thresholds and only `1s/5s` horizons are retained as benchmark grids, not universal rules.
+
+VNext predeclares broader but bounded candidate horizons such as sub-second, 1s, several seconds and longer short-horizon windows when the certified tape supports them.
+
+Thresholds are normalized by current:
+
+- spread;
+- volatility;
+- L2 depth/liquidity state;
+- expected costs;
+- timing uncertainty.
+
+The trade gate is expected **net** edge after costs, not raw shock size.
+
+#### Continuation versus reversal
+
+The same shock may imply continuation in one book state and reversal in another.
+
+VNext keeps distinct mechanisms for:
+
+- continuation;
+- residual reversion;
+- extreme-shock reversal;
+- cross-asset continuation;
+- no-trade.
+
+A state classifier chooses only among mechanisms frozen on TRAIN and independently tested OOS.
+
+#### Execution-mode router
+
+For an admitted Lead-Lag signal, compare:
+
+- taker entry / taker exit;
+- queue-proven maker entry / taker exit;
+- marketable-limit variants;
+- no trade.
+
+Maker is selected only when queue position, fill probability and adverse-selection markout remain positive after costs.
+
+A nominal maker rebate is never sufficient proof of profitability.
+
+### Cross-Venue V7+: smart dislocation router
+
+Cross-Venue is redesigned around all supported venue intersections rather than a mostly HL/Binance legacy pair.
+
+#### Full route universe
+
+For six venues, enumerate all eligible pairwise venue combinations and both directional long/short legs.
+
+For every route evaluate independently:
+
+- executable entry;
+- executable exit;
+- depth/capacity;
+- quote freshness;
+- timing;
+- fees;
+- funding if the hold may cross settlement;
+- instrument/quote-currency normalization;
+- venue state.
+
+No route is preferred because it is historical.
+
+#### Smart order routing
+
+Each leg may use the best certified liquidity path rather than a single fixed venue if the strategy definition and paper-capital constraints permit it.
+
+A unified order-book view may split a paper order across compatible venues to reduce implicit cost, while preserving venue-level fill provenance.
+
+Cross-Venue must distinguish:
+
+- signal venue pair;
+- actual execution route;
+- hedge route;
+- exit route.
+
+All legs must remain auditable.
+
+#### Order-type combinations
+
+Evaluate, with realistic fill models:
+
+- taker/taker;
+- maker/taker;
+- taker/maker;
+- maker/maker only when both queue fills are independently defensible.
+
+For passive legs include:
+
+- queue position;
+- queue ahead;
+- cancellations;
+- observed trade consumption;
+- fill probability;
+- adverse-selection markout;
+- expiration/cancel policy.
+
+An unfilled passive leg creates no fictitious PnL.
+
+#### Non-atomic execution penalty
+
+Cross-Venue cannot assume both legs fill simultaneously.
+
+Every candidate route models:
+
+- first-leg fill;
+- hedge delay;
+- second-leg failure probability;
+- temporary directional exposure;
+- emergency/marketable hedge cost;
+- cancel/replace behavior;
+- one-leg adverse move.
+
+Expected route value includes this non-atomic risk penalty.
+
+#### Residual dislocation instead of raw basis only
+
+A cross-venue trade is generated from a deviation relative to the common efficient price/equilibrium, not merely a raw midpoint difference.
+
+Candidate residual mechanisms include:
+
+- one venue stale/lagging relative to consensus;
+- temporary liquidity shock;
+- order-flow-induced overshoot;
+- venue-specific residual mean reversion;
+- funding/basis-adjusted deviation.
+
+This avoids treating persistent structural premia as arbitrage.
+
+#### Adaptive confirmation
+
+The current persistence requirement of multiple observations within roughly one/two seconds remains a benchmark.
+
+VNext compares causal confirmation policies based on:
+
+- residual magnitude;
+- residual decay rate;
+- quote freshness;
+- book imbalance;
+- multi-venue confirmation;
+- expected net after waiting.
+
+A very high-quality short-lived dislocation may justify immediate entry; a noisy marginal dislocation may require persistence.
+
+The waiting cost itself is measured.
+
+#### Dynamic sizing and route splitting
+
+For each route evaluate a capacity ladder and choose conservative size from:
+
+- simultaneous entry capacity;
+- expected exit capacity;
+- uncertainty-adjusted net edge;
+- hedge risk;
+- capital availability.
+
+Do not keep a universal 15 USD production notional.
+
+### Cross-module opportunity allocator
+
+The three families remain independently provable, but the paper system also evaluates a portfolio allocator to avoid wasting capital on low-edge opportunities while high-edge opportunities are available.
+
+At every decision point, eligible paper opportunities are ranked by a conservative score such as:
+
+`expected_net_usd_lcb / capital_at_risk / expected_holding_time`
+
+subject to:
+
+- module minimum exposure/fairness for independent proof;
+- capital cap;
+- correlated coin exposure;
+- venue concentration;
+- drawdown budget;
+- capacity;
+- no double counting of the same underlying event.
+
+A Cross-Venue and Lead-Lag signal arising from the same market shock may be economically correlated; the allocator must not pretend they are independent diversification.
+
+Module scoreboards continue to report standalone results separately.
+
+### Hypothesis factory without p-hacking
+
+Increasing strategy breadth creates multiple-testing risk.
+
+Every VNext research batch therefore freezes before held-out evaluation:
+
+- feature families;
+- mechanisms;
+- parameter grid/ranges;
+- sizing policies;
+- route families;
+- regime definitions;
+- trial count/correction method;
+- TRAIN/validation/OOS/forward boundaries.
+
+The system may search broadly on TRAIN, but only frozen candidates reach held-out data.
+
+Failed variants remain in the experiment ledger; they are not silently deleted.
+
+Sequential research iterations may use previous held-out results only to define a **new future experiment**, never to re-label the already-seen holdout as fresh.
+
+### Daily-PnL proof contract
+
+For every module publish:
+
+- gross PnL/day;
+- fees/day;
+- spread/slippage/day;
+- latency/adverse-selection cost/day;
+- funding/day where applicable;
+- net PnL/day;
+- number of executable opportunities/day;
+- filled trades/day;
+- average net USD/trade;
+- median net USD/trade;
+- profit factor;
+- hit rate;
+- drawdown;
+- expected shortfall;
+- capital utilization;
+- capacity utilization;
+- distinct coins/leaders/routes;
+- concentration;
+- OOS/forward status.
+
+The canonical +4 USD/day milestone requires positive after-cost daily performance under the frozen proof policy; it cannot be inferred from one exceptional trade or a single profitable day.
+
+The scoreboard separately reports:
+
+- mean daily net;
+- median daily net;
+- lower-confidence-bound daily net;
+- percentage of positive days.
+
+Optimization prioritizes robust scalable daily net rather than raw cumulative PnL.
+
+### Required stress tests before promotion
+
+Any candidate that appears highly profitable is re-run under adverse but plausible paper stresses:
+
+- higher fees;
+- extra latency;
+- older book;
+- worse queue position;
+- lower maker fill;
+- extra slippage;
+- reduced L2 capacity;
+- delayed leader observation;
+- missing one venue;
+- quote-staleness shock.
+
+A candidate whose edge vanishes under tiny perturbations is not treated as "mega PnL" quality.
+
+### Research basis
+
+The VNext design is informed by external research reviewed on 2026-09-25, while repository data remains the authority for promotion decisions.
+
+High-signal sources include:
+
+- Albers, Cucuringu, Howison, Shestopaloff, *Fragmentation, Price Formation, and Cross-Impact in Bitcoin Markets* (Oxford / peer-reviewed version DOI 10.1080/1350486X.2022.2080083): multi-venue order-book/trade features, leader-lagger networks, mean divergence, transaction-cost sensitivity and maker/taker distinctions.
+- Albers et al., *To Make, or to Take, That Is the Question* (2026 preprint/live experiment): maker fill probability is entangled with adverse selection and queue position; passive execution cannot be credited from fee savings alone.
+- Henker et al., *Athena: Smart order routing on centralized crypto exchanges using a unified order book* (2024, DOI 10.1002/nem.2266): unified multi-exchange books and order splitting can reduce implicit execution cost.
+- Baker & McHale, *Optimal Betting Under Parameter Uncertainty: Improving the Kelly Criterion* (Decision Analysis, DOI 10.1287/deca.2013.0271): sizing should shrink when edge estimates are uncertain.
+- *Binance Leads, but Some Wallets Anticipate* (2026 Research Square preprint): aggregate Hyperliquid flow follows Binance, but a persistent minority of wallets exhibits out-of-sample anticipatory behavior; this motivates wallet-level anticipation scoring rather than copying broad leaderboards.
+- *When Does Order Flow Matter? State-Dependent L2 Liquidity-State Transitions in Crypto Futures* (2026 preprint): L2 state/shape and incremental order-flow value are asset/regime dependent, supporting state-specific Lead-Lag policies.
+
+These sources motivate hypotheses. They do not themselves prove profitability in Alina.
+
+
 ## Analysis phase
 
 The analysis phase is an ordered state machine:
@@ -1066,7 +1582,7 @@ Keep existing TRAIN/validation/OOS/forward causality rules and all execution-cos
 
 Evaluate module-level net PnL after explicit fees, spread, slippage, latency, capacity, and fill assumptions.
 
-The target remains a separately proven net result of at least 4 USD per module. PnL may not be combined across modules to rescue a failing module.
+The first standardized target is a separately proven net result of at least 4 USD per UTC day per module under the frozen proof contract. PnL may not be combined across modules to rescue a failing module. After that milestone, the objective is the highest robust scalable daily net PnL supported by OOS/forward evidence.
 
 ### SCOREBOARD
 
@@ -1244,7 +1760,43 @@ Implementation is accepted only when tests prove all of the following:
 74. collector liveness is judged from actual data/checkpoint freshness, not only workflow process status;
 75. temporary runner/API/publication failures do not require a new user command while phase remains `COLLECT`;
 76. the only normal user-controlled stop conditions for autonomous collection are transition to `ANALYZE` or `IDLE`;
-77. existing relevant campaign, dataset, reconciliation, and collector tests continue to pass.
+77. the canonical first economic milestone is +4 USD net per UTC day per module, not merely +4 USD cumulative;
+78. Copy-Vault priority WebSocket leaders use measured observation latency rather than an unconditional 60-second delay;
+79. Copy-Vault broad REST candidates retain their actual slower latency class;
+80. Copy-Vault leader quality can include market-adjusted forward markout and cross-venue anticipation features without lookahead;
+81. reactive leaderboard success alone cannot qualify a leader if copyable forward markout is non-positive after measured delay/costs;
+82. Copy-Vault evaluates first-fill, confirmation and continuation entries under frozen policies;
+83. Copy-Vault proportional ADD/REDUCE/CLOSE policies are evaluated against the legacy full-exit-on-first-REDUCE benchmark;
+84. Copy-Vault dynamic risk budgets can replace crude daily entry caps only when exposure/correlation/capacity are enforced;
+85. related/child vaults cannot be counted as independent multi-leader consensus votes;
+86. Lead-Lag can build a directed multi-venue leader/lagger graph across all supported venues;
+87. Lead-Lag can use a common efficient-price residual plus L2/order-flow/microprice features;
+88. Lead-Lag feature layers must demonstrate incremental held-out value over simpler baselines;
+89. Lead-Lag thresholds/horizons may adapt to volatility/liquidity state but must be frozen before held-out evaluation;
+90. Lead-Lag continuation, reversal and no-trade mechanisms remain distinct auditable hypotheses;
+91. Lead-Lag maker execution requires queue-proven fill and adverse-selection evidence;
+92. Cross-Venue evaluates every eligible venue pair/direction rather than defaulting to HL/Binance;
+93. Cross-Venue supports a unified multi-venue executable book and auditable smart-order-routing experiments;
+94. Cross-Venue route value includes fees, spread, slippage, latency, funding where relevant and non-atomic hedge risk;
+95. Cross-Venue passive legs cannot generate PnL unless their queue-aware fill is proven;
+96. Cross-Venue residual/equilibrium signals distinguish structural venue premia from temporary dislocations;
+97. Cross-Venue confirmation wait cost is explicitly measured and immediate-entry policies may compete fairly with persistence policies;
+98. fixed 15/25/150 USD diagnostic notionals are not mandatory production sizing;
+99. adaptive sizing is capped by approved paper capital, simultaneous L2 capacity, drawdown and concentration;
+100. any Kelly-like sizing is fractional/shrunk for parameter uncertainty and cannot override capacity/risk caps;
+101. opportunity sizing uses uncertainty-adjusted expected net edge rather than raw in-sample PnL;
+102. cross-module allocation cannot double-count correlated opportunities arising from the same market event;
+103. module standalone PnL remains separately reportable even when a portfolio allocator is evaluated;
+104. research batches freeze hypotheses/feature families/parameter ranges/sizing/route families before held-out evaluation;
+105. failed strategy variants remain in the experiment ledger and cannot be silently discarded;
+106. previously seen holdout data cannot be reused as a fresh holdout for the same experiment;
+107. daily-PnL proof reports gross, fees, slippage, latency/adverse-selection, funding where applicable and net;
+108. daily-PnL proof reports executable opportunities/day, filled trades/day, mean/median net per trade and capital utilization;
+109. +4 USD/day cannot be certified from one exceptional trade or one positive day;
+110. scoreboard includes mean, median and lower-confidence-bound daily net plus positive-day fraction;
+111. high-PnL candidates are stress-tested under worse fees, latency, queue position, slippage and capacity before promotion;
+112. research-driven improvements may maximize PnL only while paper/read-only and real-order flags remain disabled;
+113. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
