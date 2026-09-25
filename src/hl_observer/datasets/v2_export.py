@@ -17,6 +17,28 @@ _RECEIVE_ONLY_SEMANTICS = {
     "causal_event_availability",
     "receive_observation_time_only",
 }
+_REPLAYABLE_CHANNELS = {
+    "activeAssetCtx",
+    "agg_trades",
+    "bbo",
+    "copy_vault_fills",
+    "copy_vault_l2",
+    "copy_vault_positions",
+    "copy_vault_selection",
+    "copy_vault_snapshot",
+    "external_events",
+    "fills",
+    "funding",
+    "funding_settlement",
+    "instrument_metadata",
+    "l2Book",
+    "mark_price",
+    "open_interest",
+    "ticker",
+    "trades",
+    "user_fills",
+    "userfills",
+}
 
 
 def build_manifest_from_tick_shard(
@@ -259,6 +281,27 @@ def build_manifest_from_tick_shard(
     sha256 = digest.hexdigest()
     dataset_id = _dataset_id(source, channel, instrument, start, end, sha256)
 
+    replay_reasons = []
+    if channel not in _REPLAYABLE_CHANNELS:
+        replay_reasons.append("NO_REPLAY_ADAPTER")
+    if event_count <= 0:
+        replay_reasons.append("NO_RECORDS")
+    if gap_count > 0:
+        replay_reasons.append("GAP")
+    if regression_count > 0:
+        replay_reasons.append("OUT_OF_ORDER")
+    if duplicate_count > 0:
+        replay_reasons.append("DUPLICATES_PRESENT")
+    if missing_timestamp_count > 0:
+        replay_reasons.append("MISSING_CAUSAL_TIMESTAMP")
+    if missing_monotonic_count > 0 and not timestamp_semantics.intersection(
+        _RECEIVE_ONLY_SEMANTICS
+    ):
+        replay_reasons.append("MISSING_MONOTONIC_TIMESTAMP")
+    if desync_count > 0:
+        replay_reasons.append("DESYNC")
+    replay_compatible = not replay_reasons
+
     return {
         "schema": "alina.shard_manifest.v2",
         "dataset_id": dataset_id,
@@ -272,6 +315,9 @@ def build_manifest_from_tick_shard(
         "event_count": event_count,
         "record_count": event_count,
         "trade_count": trade_count,
+        "replay_compatible": replay_compatible,
+        "replay_schema_version": "alina.replay.v1",
+        "replay_reason": "SMOKE_OK" if replay_compatible else ",".join(replay_reasons),
         "collector_version": str(collector_version),
         "source": source,
         "quality_status": "PARTIAL",
