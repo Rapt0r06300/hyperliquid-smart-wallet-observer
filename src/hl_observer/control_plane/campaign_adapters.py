@@ -279,98 +279,122 @@ def run_one_unit(
     ctx: AdapterContext,
     runner: Callable[..., Any] = subprocess.run,
 ) -> AdapterResult:
+    """Execute one bounded campaign unit.
+
+    Economic units may require a SAFE Dataset V2 materialization first. That
+    prerequisite and the economic command run in the SAME hosted job so no
+    ephemeral runner state is assumed to survive a continuation.
+    """
     remaining = ctx.soft_deadline_epoch - time.time()
     if remaining <= 5:
         payload = {"status": "CONTINUATION_REQUIRED", "reason": "soft_deadline"}
         return AdapterResult(payload["status"], _digest(payload), payload, False)
 
-    try:
-        cmd, output_root = build_command(ctx)
-    except ValueError as exc:
-        payload = {
-            "status": "FAILED",
-            "reason": "invalid_partition",
-            "failure_category": "QUALITY",
-            "detail": str(exc),
-        }
-        return AdapterResult(payload["status"], _digest(payload), payload, False)
+    phases: list[dict[str, Any]] = []
+    max_phases = 2 if ctx.kind in {"backtest", "module_pnl_proof"} else 1
 
-    if output_root is not None:
-        output_root.mkdir(parents=True, exist_ok=True)
+    for _ in range(max_phases):
+        remaining = ctx.soft_deadline_epoch - time.time()
+        if remaining <= 5:
+            payload = {
+                "status": "CONTINUATION_REQUIRED",
+                "reason": "soft_deadline",
+                "phases": phases,
+            }
+            return AdapterResult(payload["status"], _digest(payload), payload, bool(phases))
 
-    materialize_payload: dict[str, Any] | None = None
-    if ctx.kind in ECONOMIC_KINDS:
-        workspace = _workspace(ctx)
-        materialize_cmd = _materialize_command(ctx, workspace)
-        materialize_timeout = max(
-            60,
-            min(7200, int(max(60.0, remaining * 0.45))),
-        )
         try:
-            materialized = _run(
-                runner,
-                materialize_cmd,
-                timeout=materialize_timeout,
+            cmd, output_root = build_command(ctx)
+        except ValueError as exc:
+            payload = {
+                "status": "FAILED",
+                "reason": "invalid_partition",
+                "detail": str(exc),
+                "phases": phases,
+            }
+            return AdapterResult(payload["status"], _digest(payload), payload, False)
+
+        if output_root is not None:
+            output_root.mkdir(parents=True, exist_ok=True)
+        timeout = max(1, int(remaining - 5))
+        try:
+            cp = runner(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                cwd=str(ROOT),
             )
         except subprocess.TimeoutExpired:
             payload = {
                 "status": "CONTINUATION_REQUIRED",
-                "reason": "dataset_materialization_timeout",
-                "command": materialize_cmd[:4],
+                "reason": "adapter_timeout",
+                "command": cmd[:3],
+                "phases": phases,
             }
-            return AdapterResult(payload["status"], _digest(payload), payload, False)
-        if materialized.returncode != 0:
-            payload = _failure_payload(materialize_cmd, materialized)
-            payload["reason"] = "dataset_materialization_failed"
-            return AdapterResult("FAILED", _digest(payload), payload, False)
-        materialize_payload = {
-            "returncode": 0,
-            "stdout": str(materialized.stdout or "")[-8000:],
-            "stderr": str(materialized.stderr or "")[-8000:],
+            return AdapterResult(payload["status"], _digest(payload), payload, bool(phases))
+
+        stdout = cp.stdout[-8000:]
+        stderr = cp.stderr[-8000:]
+        phase = {
+            "command": cmd[:3],
+            "returncode": int(cp.returncode),
+            "stdout": stdout,
+            "stderr": stderr,
         }
-        remaining = ctx.soft_deadline_epoch - time.time()
-        if remaining <= 10:
+        phases.append(phase)
+
+        if cp.returncode != 0:
+            category = "TEMPORARY_EXTERNAL" if any(
+                token in (stdout + stderr).lower()
+                for token in ("timeout", "temporar", "503", "502", "connection reset")
+            ) else "QUALITY"
             payload = {
-                "status": "CONTINUATION_REQUIRED",
-                "reason": "soft_deadline_after_materialization",
-                "materialization": materialize_payload,
+                "status": "FAILED",
+                "reason": "adapter_failed",
+                "failure_category": category,
+                "returncode": cp.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "phases": phases,
             }
-            return AdapterResult(payload["status"], _digest(payload), payload, False)
+            return AdapterResult("FAILED", _digest(payload), payload, False)
 
-    timeout = max(1, int(ctx.soft_deadline_epoch - time.time() - 5))
-    try:
-        cp = _run(runner, cmd, timeout=timeout)
-    except subprocess.TimeoutExpired:
+        is_materialization = (
+            ctx.kind in {"backtest", "module_pnl_proof"}
+            and "hl_observer.ops.v2_dataset_bridge" in cmd
+            and "materialize" in cmd
+            and output_root is not None
+        )
+        if is_materialization:
+            marker = Path(output_root) / ".alina_campaign_materialized"
+            marker.write_text("SAFE_V2_MATERIALIZED\n", encoding="utf-8")
+            continue
+
         payload = {
-            "status": "CONTINUATION_REQUIRED",
-            "reason": "adapter_timeout",
-            "command": cmd[:4],
+            "status": "COMPLETE",
+            "returncode": 0,
+            "stdout": stdout,
+            "stderr": stderr,
+            "output_root": str(output_root) if output_root is not None else None,
+            "bundle_root": (
+                str(output_root)
+                if ctx.kind in {
+                    "market_collection",
+                    "copy_vault_collection",
+                    "official_archive_collection",
+                    "event_intelligence_collection",
+                }
+                else None
+            ),
+            "phases": phases,
         }
-        return AdapterResult(payload["status"], _digest(payload), payload, False)
-
-    if cp.returncode != 0:
-        payload = _failure_payload(cmd, cp)
-        return AdapterResult("FAILED", _digest(payload), payload, False)
+        return AdapterResult("COMPLETE", _digest(payload), payload, True)
 
     payload = {
-        "status": "COMPLETE",
-        "returncode": 0,
-        "stdout": str(cp.stdout or "")[-8000:],
-        "stderr": str(cp.stderr or "")[-8000:],
-        "output_root": str(output_root) if output_root is not None else None,
-        "bundle_root": (
-            str(output_root)
-            if ctx.kind
-            in {
-                "market_collection",
-                "copy_vault_collection",
-                "official_archive_collection",
-                "event_intelligence_collection",
-            }
-            else None
-        ),
+        "status": "FAILED",
+        "reason": "economic_phase_incomplete",
+        "phases": phases,
     }
-    if materialize_payload is not None:
-        payload["materialization"] = materialize_payload
-        payload["safe_workspace"] = str(_workspace(ctx))
-    return AdapterResult("COMPLETE", _digest(payload), payload, True)
+    return AdapterResult("FAILED", _digest(payload), payload, False)
