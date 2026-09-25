@@ -130,10 +130,26 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
 
     workspace = Path(str(ctx.partition.get("workspace_root") or out / "workspace"))
     if ctx.kind == "replay":
-        return [
+        cmd = [
             py, "-m", "hl_observer.ops.v2_dataset_bridge", "materialize",
             "--output", str(workspace),
-        ], workspace
+        ]
+        for key, flag in (
+            ("families", "--families"),
+            ("venues", "--venues"),
+            ("symbols", "--symbols"),
+        ):
+            value = ctx.partition.get(key)
+            if value:
+                cmd.extend([flag, str(value)])
+        for key, flag in (
+            ("start_ts_ms", "--start-ts-ms"),
+            ("end_ts_ms", "--end-ts-ms"),
+        ):
+            value = ctx.partition.get(key)
+            if value is not None:
+                cmd.extend([flag, str(int(value))])
+        return cmd, workspace
 
     if ctx.kind in {"backtest", "module_pnl_proof"}:
         if not (workspace / "runtime" / "data").is_dir():
