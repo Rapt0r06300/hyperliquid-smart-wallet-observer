@@ -152,7 +152,8 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
         return cmd, workspace
 
     if ctx.kind in {"backtest", "module_pnl_proof"}:
-        if not (workspace / "runtime" / "data").is_dir():
+        marker = workspace / ".alina_campaign_materialized"
+        if not marker.is_file():
             materialize = [
                 py, "-m", "hl_observer.ops.v2_dataset_bridge", "materialize",
                 "--output", str(workspace),
@@ -205,6 +206,28 @@ def run_one_unit(
     stdout = cp.stdout[-8000:]
     stderr = cp.stderr[-8000:]
     if cp.returncode == 0:
+        if (
+            ctx.kind in {"backtest", "module_pnl_proof"}
+            and output_root is not None
+            and "hl_observer.ops.v2_dataset_bridge" in cmd
+            and "materialize" in cmd
+        ):
+            marker = Path(output_root) / ".alina_campaign_materialized"
+            marker.write_text("SAFE_V2_MATERIALIZED\n", encoding="utf-8")
+            payload = {
+                "status": "CONTINUATION_REQUIRED",
+                "reason": "safe_workspace_materialized",
+                "returncode": 0,
+                "stdout": stdout,
+                "stderr": stderr,
+                "output_root": str(output_root),
+            }
+            return AdapterResult(
+                "CONTINUATION_REQUIRED",
+                _digest(payload),
+                payload,
+                True,
+            )
         payload = {
             "status": "COMPLETE",
             "returncode": 0,
