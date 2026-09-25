@@ -50,6 +50,7 @@ def build_manifest_from_tick_shard(
     missing_monotonic_count = 0
     desync_count = 0
     event_count = 0
+    trade_count = 0
     public_only = True
     authenticated_false = True
     authenticated_explicit = True
@@ -80,6 +81,12 @@ def build_manifest_from_tick_shard(
             source = str(record.get("source_id") or "")
             channel = str(record.get("channel") or "")
             instrument = str(record.get("instrument") or "")
+            if channel in {"trades", "agg_trades", "fills", "userfills", "user_fills", "copy_vault_fills"}:
+                parsed = record.get("parsed_summary")
+                count = _int(parsed.get("event_count")) if isinstance(parsed, Mapping) else None
+                if count is None and channel == "copy_vault_fills" and isinstance(parsed, Mapping):
+                    count = _int(parsed.get("fill_count"))
+                trade_count += max(1, int(count or 1))
             sources.add(source)
             channels.add(channel)
             instruments.add(instrument)
@@ -263,6 +270,8 @@ def build_manifest_from_tick_shard(
         "sha256": sha256,
         "bytes": path.stat().st_size,
         "event_count": event_count,
+        "record_count": event_count,
+        "trade_count": trade_count,
         "collector_version": str(collector_version),
         "source": source,
         "quality_status": "PARTIAL",
