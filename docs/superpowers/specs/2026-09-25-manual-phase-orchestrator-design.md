@@ -3750,6 +3750,9 @@ Maintain small specialist promotion lanes when distinct opportunity families hav
 - same-coin multi-venue dislocation;
 - venue-consensus/lagger shock;
 - liquidation/forced-flow event;
+- native TWAP / scheduled-flow event;
+- medium-horizon trend/breakout event;
+- cross-instrument relative-value/basis event;
 - cross-asset spillover;
 - stale-quote/resilience event.
 
@@ -3786,7 +3789,8 @@ This specification intentionally preserves all previously validated design layer
 - **Acceptance Architecture V2:** scoped G0-G5 gates, dependency DAG and graceful degradation;
 - **Module Optimization V3:** edge portfolios, champion/challenger, decay monitoring and compute prioritization;
 - **Opportunity Expansion V4:** massive pre-gate candidate funnel and independent-opportunity accounting;
-- **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis.
+- **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis;
+- **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -3797,6 +3801,403 @@ The preferred resolution to conflict is:
 3. preserve exact final economic evaluation;
 4. reduce optional breadth/complexity before weakening quality;
 5. use narrower scopes/tiers/cascades rather than global blocking.
+
+
+
+### Profitability Convergence V6 — friction-first path to +4 USD net/day
+
+The next architecture layer treats the first economic milestone — **+4 USD net/day proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
+
+The core diagnosis from existing Alina evidence is that many simple ideas have shown **small gross predictability but insufficient economic amplitude after friction**. Therefore the system must stop treating every statistically interesting signal as an equally valuable research direction.
+
+The V6 rule is:
+
+> **prefer mechanisms capable of producing sufficiently large, sufficiently frequent, sufficiently capacitated after-cost opportunities; use micro-signals mainly to improve execution or timing unless they independently clear the full economic proof.**
+
+The target remains paper-only and evidence-driven. No module may be activated merely because external literature reports an effect.
+
+#### Economic-distance-to-target accounting
+
+For every promoted module, edge sleeve and serious challenger, estimate conservatively:
+
+```text
+gross_edge_bps
+- explicit_fees_bps
+- spread_cost_bps
+- expected_slippage_bps
+- delay_cost_bps
+- adverse_selection_bps
+- hedge_or_legging_cost_bps
+- funding_or_holding_cost_bps
+= expected_net_edge_bps
+```
+
+Then translate the edge into an economic throughput estimate:
+
+```text
+conservative_net_usd_day
+= independent_opportunities_per_day
+  * admitted_fraction
+  * expected_fill_probability
+  * expected_net_usd_per_filled_opportunity
+  * capacity_scaling
+```
+
+All terms must come from certified data or explicitly conservative assumptions.
+
+Track:
+
+- `target_gap_usd_day = max(0, 4.0 - conservative_net_usd_day)`;
+- net USD/day lower confidence bound;
+- independent opportunity count/day, not raw signal count;
+- capacity-limited and capital-limited USD/day;
+- turnover and cost drag/day;
+- capital-time efficiency;
+- compute/data cost of the research lane;
+- dominant bottleneck: `EDGE / FREQUENCY / FILL / CAPACITY / COST / DATA / EVIDENCE`.
+
+No point estimate can mark the target as proven. The proof scoreboard uses frozen OOS/forward evidence and conservative uncertainty bounds.
+
+#### Research-value scheduler
+
+The research-compute allocator should prioritize work by expected reduction in the target gap, for example:
+
+```text
+research_value
+≈ probability_of_clearing_next_gate
+  * plausible_incremental_net_usd_day
+  * independence_value
+  / (compute_cost + data_cost + implementation_cost)
+```
+
+This is a scheduling heuristic, not a profitability estimator.
+
+Requirements:
+
+- untouched OOS/forward data never influences the probability estimate used to tune a candidate;
+- a cheap but structurally dead idea stays dead;
+- a high-upside mechanism with missing data may receive collection priority without receiving paper capital;
+- a near-miss that fails only because of execution cost may receive execution research priority;
+- a candidate with tiny gross amplitude cannot outrank a larger structural edge merely because its backtest has many observations;
+- exploration budget remains mandatory so the scheduler cannot lock permanently onto today's leaders.
+
+### Shared Execution Alpha Core
+
+Execution becomes a first-class shared optimizer across all modules, not a fixed cost subtraction and not a standalone source of imaginary alpha.
+
+For every economically eligible opportunity, compare causally and on the same decision timestamp:
+
+- immediate taker;
+- passive maker;
+- maker with bounded timeout then taker;
+- short causal wait;
+- alternate venue;
+- split routing across certified depth;
+- `NO_TRADE`.
+
+The route evaluator estimates:
+
+- queue/fill probability where measurable;
+- expected spread paid or captured;
+- fee/rebate;
+- depth slippage;
+- latency;
+- adverse-selection markout;
+- cancellation/timeout risk;
+- missed-opportunity cost;
+- hedge/legging risk for multi-leg positions;
+- remaining alpha half-life.
+
+Rules:
+
+- fee savings alone can never justify maker execution;
+- maker improvement is credited only after fill probability and adverse selection;
+- if `observation_latency + decision_latency + expected_fill_latency >= alpha_half_life`, reject or select a faster route;
+- microprice/OFI/order-book imbalance remain execution features unless they independently clear full after-cost strategy proof;
+- every module reports `signal_alpha` separately from `execution_alpha_or_cost`;
+- route policy must beat simple taker and simple maker baselines OOS before promotion.
+
+This layer is allowed to rescue a genuine gross edge from excessive friction; it is not allowed to manufacture edge by optimistic fills.
+
+### Candidate Module 4 — Forced-Flow / Liquidation V2
+
+Liquidation research becomes a first-class candidate module rather than an incidental signal.
+
+The module maintains a broad **high-leverage universe** distinct from the smart-wallet universe.
+
+Per wallet/position where observable, maintain causal state such as:
+
+- current notional;
+- leverage/margin state;
+- liquidation-distance proxy;
+- coin;
+- side;
+- position concentration;
+- recent size change;
+- freshness/confidence.
+
+Aggregate into a **liquidation-threshold density map** by coin and price bucket.
+
+The exact economic evaluator must combine, where available:
+
+- vulnerable notional near current price;
+- executable depth to the vulnerable zone;
+- expected forced-notional/depth ratio;
+- open-interest change;
+- taker-flow asymmetry;
+- book depletion/resilience;
+- realized liquidation fills/events;
+- cross-venue price impact;
+- cross-asset propagation.
+
+Model a causal state machine such as:
+
+`BUILDUP -> NUCLEATION -> CASCADE -> ABSORPTION -> RECOVERY`
+
+but do not assume every cascade has a universal precursor.
+
+Independent edge sleeves to test include:
+
+- forced-flow continuation while liquidity is withdrawing;
+- overshoot/reversal after forced flow exhausts;
+- absorption/backstop response;
+- cross-asset propagation after a large forced event;
+- venue-to-venue transmission;
+- post-deleveraging recovery conditional on OI clearing.
+
+Requirements:
+
+- no generic "large liquidation = buy/sell" rule;
+- no claim of predicting exogenous shock cascades;
+- event clustering prevents one liquidation cascade from becoming hundreds of independent samples;
+- promotion requires executable post-cost markout at horizons Alina can actually reach;
+- the old low-leverage smart-wallet population cannot be reused as the only liquidation universe.
+
+### Candidate Module 5 — Scheduled Flow / Native TWAP & Metaorder
+
+Hyperliquid native TWAP activity receives its own specialist lane because protocol-native TWAP programs can expose parent-order information while active and TWAP child fills are identifiable.
+
+Where the read-only/public data path provides the evidence, maintain:
+
+- TWAP/program identifier;
+- wallet;
+- coin;
+- side;
+- total announced size;
+- configured duration;
+- activation time;
+- executed size/notional;
+- estimated remaining size;
+- progress fraction;
+- slice cadence;
+- participation versus market volume;
+- same-side active TWAP dominance;
+- opposite-side TWAP netting;
+- book tilt/depth response;
+- post-completion markout.
+
+Use `userTwapSliceFills` / time-bounded TWAP slice history and public on-chain/indexed TWAP state only where provenance is explicit and replayable.
+
+Test separate hypotheses rather than one universal direction:
+
+- continuation during a sufficiently large remaining program;
+- liquidity absorption/book-tilt during visible execution;
+- cost/impact differential between visible TWAP and latent metaorder flow;
+- interaction between a hidden same-direction metaorder and already-visible TWAP flow;
+- completion-time impact decay/reversal;
+- execution avoidance: do not cross into a known adverse scheduled flow when waiting has higher expected value.
+
+Requirements:
+
+- do not infer unobserved parent size as fact;
+- if active parent-order parameters are unavailable from the current source, label them `UNMEASURABLE` and use only proven slice history;
+- visible TWAP flow is not automatically informed flow;
+- front-running is not assumed profitable;
+- exact direction, horizon and execution policy must be validated OOS after costs.
+
+### Scheduled/clock-time specialist lane
+
+Scheduled-flow research may test recurring deterministic market-clock effects, including:
+
+- quarter-hour boundaries;
+- funding settlement windows;
+- known TWAP slice cadence;
+- venue maintenance/restart windows where applicable;
+- session transitions.
+
+Every periodic hypothesis must be preregistered, compared with non-boundary placebos, and tested after costs.
+
+Clock-time structure may improve event generation or execution timing even if it never becomes a standalone module.
+
+### Candidate Module 6 — Medium-Horizon Trend / Breakout
+
+Create a separate medium-horizon trend family rather than resurrecting killed residual-momentum experiments.
+
+Candidate causal horizons may include:
+
+- 15 minutes;
+- 1 hour;
+- 4 hours;
+- 12 hours;
+- 24 hours;
+
+with holding periods chosen to keep expected move amplitude materially larger than round-trip friction.
+
+Candidate features may include:
+
+- own-asset time-series trend;
+- breakout/range expansion;
+- volatility expansion;
+- volume/trade-intensity confirmation;
+- open-interest confirmation;
+- multi-venue confirmation;
+- market/beta residualization;
+- cross-sectional dispersion/regime state;
+- CTREND-style multi-horizon price/volume ensembles as challengers.
+
+Rules:
+
+- residual momentum variants already killed by Alina remain killed unless the mechanism/data/horizon materially changes;
+- cross-sectional momentum is not assumed superior to time-series trend;
+- high turnover is penalized explicitly;
+- long/short baskets must include borrow/funding/hedge economics where relevant;
+- dynamic universe construction must avoid survivorship bias;
+- no trend candidate is promoted unless net edge survives realistic fees/slippage and regime splits.
+
+### Candidate Module 7 — Cross-Instrument Relative Value
+
+Extend beyond same-instrument venue dislocation into certified cross-instrument relationships.
+
+Eligible research pairs/routes include, only when contract equivalence and hedge economics are explicit:
+
+- spot vs perpetual;
+- perpetual vs perpetual across venues;
+- perpetual vs dated future where a supported venue/data path exists;
+- mark vs oracle/index/spot-composite residual;
+- funding-adjusted cross-venue residual;
+- basis/term-structure convergence;
+- delta-neutral funding/basis structures with **real modeled legs**, never a fictional hedge fee.
+
+The module may use rolling stationarity/cointegration/OU-style residual models as challengers, but statistical mean reversion alone never proves executability.
+
+Requirements:
+
+- both/all legs are priced from executable quotes;
+- entry and exit capacity are measured on every leg;
+- funding/borrow/collateral/margin and legging risk are explicit;
+- no naked one-leg "carry arbitrage";
+- funding normalization is tested against raw-spread baselines;
+- route admission requires positive after-cost EV with uncertainty margin;
+- basis trades remain exposed to margin/liquidation risk and cannot be called risk-free.
+
+### Options / Volatility Intelligence Layer
+
+Options information is initially a **shared research/context layer**, not an options trading module.
+
+Where Deribit or another certified options source is available, derive point-in-time features such as:
+
+- ATM implied volatility;
+- 25-delta and 10-delta risk reversal;
+- butterfly;
+- term-structure slope/curvature;
+- IV minus realized volatility;
+- skew shock;
+- call/put wing demand;
+- jump-risk-premium proxies where defensibly measurable.
+
+Use them as candidate conditioning inputs for:
+
+- Forced-Flow;
+- Trend;
+- Lead-Lag;
+- Cross-Venue / Relative Value;
+- execution/risk regime selection.
+
+Rules:
+
+- no options execution is required;
+- no source becomes a hard global dependency;
+- post-2024 signal decay documented in external research is treated as a warning, so every options-derived feature requires recent rolling/OOS validation;
+- feature value is incremental only if it improves a simpler baseline after costs and multiple-testing controls.
+
+### Kill-resurrection firewall
+
+Previously measured failures cannot silently re-enter the candidate pool under a new name.
+
+Unless the new experiment changes the economic mechanism, data resolution, execution regime or horizon enough to create a genuinely new hypothesis, keep the prior verdict for:
+
+- naive short-horizon mean reversion;
+- standalone OFI/microprice/order-book imbalance at the previously measured cadence;
+- killed residual-momentum variants;
+- unhedged funding/carry;
+- naive market making credited only by maker fees;
+- mid-price-only cross-venue dislocation;
+- any copy variant whose signal amplitude remains below realistic follower friction.
+
+A new feature may still be reused as:
+
+- execution timing;
+- regime conditioning;
+- rejection filter;
+- candidate-priority feature;
+
+without pretending the killed standalone strategy became profitable.
+
+### Module portfolio after V6
+
+V6 does **not** instantly activate seven production modules.
+
+The economic architecture becomes:
+
+**Current core modules**
+- Copy-Vault;
+- Lead-Lag;
+- Cross-Venue.
+
+**First-class candidate modules / sleeves**
+- Forced-Flow / Liquidation V2;
+- Scheduled Flow / Native TWAP & Metaorder;
+- Medium-Horizon Trend / Breakout;
+- Cross-Instrument Relative Value.
+
+**Shared intelligence/execution layers**
+- Execution Alpha Core;
+- Options / Volatility Intelligence;
+- Ultra-Scale opportunity scheduler;
+- periodic/clock-time specialist lane.
+
+Each candidate starts at scoped research gates (`G3/G4`, `MEASURE_ONLY` or equivalent) and cannot become a global blocker.
+
+Promotion requires:
+
+1. explicit evidence contract;
+2. certified data coverage;
+3. causal TRAIN/validation;
+4. frozen untouched OOS;
+5. forward/shadow confirmation where required;
+6. positive net after all realistic costs;
+7. sufficient effective independent events;
+8. capacity sufficient to matter toward the +4 USD/day target;
+9. conservative target-gap improvement;
+10. no conflict with safety/paper-only invariants.
+
+### Research basis for Profitability Convergence V6
+
+High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
+
+- **Barone & Lillo, _Trading in the Sunshine or in the Shade: Market Impact and Adverse Selection on Hyperliquid_ (2026 preprint):** reconstructs millions of Hyperliquid metaorders and hundreds of thousands of native TWAPs; visible TWAP programs have distinct impact/execution behavior and observable program/slice structure, motivating a scheduled-flow lane rather than post-fill copy alone.
+- **Hyperliquid official read-only info/WebSocket documentation:** exposes user TWAP slice fills/history and identifies TWAP slices by parent TWAP IDs; these data are research inputs, while trading endpoints remain outside the paper/read-only path.
+- **_Where does the criticality live?_ (2026 preprint) and related liquidation-cascade work:** liquidation precursors are heterogeneous across events, but leverage/open-interest/order-flow/liquidity state carries mechanistic information; V6 therefore models buildup/cascade/absorption states rather than assuming one universal crash predictor.
+- **Studies on leverage/systemic risk in crypto perpetuals (2026):** changes in open interest and liquidation transmission provide a basis for testing forced-flow propagation, not for claiming deterministic crash prediction.
+- **_A Trend Factor for the Cross Section of Cryptocurrency Returns_ (2026):** multi-horizon price/volume trend information remains a candidate source of return predictability including large/liquid coins and motivates a CTREND-style challenger under Alina's stricter cost/OOS rules.
+- **realistic-assumption crypto momentum studies:** time-series momentum appears more robust than many cross-sectional variants after accounting for real-world constraints; this motivates a medium-horizon own-asset trend family, not resurrection of killed residual momentum.
+- **Chi et al., _An empirical investigation on risk factors in cryptocurrency futures_ (2023):** basis is a strong cross-sectional futures factor and motivates basis/relative-value research, while Alina must model current execution/margin/funding costs rather than import historical returns.
+- **Neo, _Bitcoin options risk-reversal predictability_ (2026 dissertation):** option risk-reversal/butterfly information has documented predictive content but weakens after 2024; V6 therefore uses options primarily as a decaying contextual feature requiring recent OOS validation.
+- **Albers et al., _To Make, or to Take, That Is the Question_ and related order-book execution work:** maker fill probability and adverse selection are inseparable, supporting the shared Execution Alpha Core and forbidding fee-only maker optimism.
+- **_The Quarter-Hour Effect: Periodic Algorithmic Trading and Return Predictability in Cryptocurrency Futures_ (2026 preprint):** motivates a tightly scoped periodic-flow lane with placebo testing rather than an assumed universal clock-time edge.
+- **recent matched-market short-horizon mean-reversion evidence:** statistically detectable reversal can remain smaller than round-trip cost, reinforcing V6's rule that small standalone micro-signals should not outrank larger structural mechanisms.
+
+External research creates hypotheses only. It cannot mark an Alina module `PROMOTED`, cannot prove +4 USD/day, and cannot override an Alina `KILL` verdict without a materially new preregistered experiment.
 
 
 ### Research basis for Ultra-Scale V5
@@ -4634,10 +5035,41 @@ The following numbered items form the normative acceptance catalog. Each item is
 273. specialist high-recall promotion lanes may protect rare edge families from a generic coarse ranking score;
 274. every admitted decision can reproduce its raw events, incremental state, feature values, promotion path, exact evaluator inputs and gate outcomes;
 275. compact state snapshots accelerate recovery but cannot become opaque authority over immutable raw evidence;
-276. implementation preserves Manual Phase Orchestrator, autonomous COLLECT, Collector V4, PnL VNext, Edge Research V2, Acceptance V2, Optimization V3, Opportunity V4 and Ultra-Scale V5 as one coherent architecture;
+276. implementation preserves Manual Phase Orchestrator, autonomous COLLECT, Collector V4, PnL VNext, Edge Research V2, Acceptance V2, Optimization V3, Opportunity V4, Ultra-Scale V5 and Profitability Convergence V6 as one coherent architecture;
 277. optimization conflicts are resolved by preserving safety/causality/raw provenance/exact economics before optional breadth or complexity;
 278. no implementation task may remove a previously validated architecture layer merely to simplify local code;
-279. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+279. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass;
+280. Profitability Convergence V6 treats +4 USD net/day as a proof target and research-allocation milestone, never as a guaranteed outcome;
+281. every serious edge sleeve reports conservative net USD/day, effective independent opportunities/day, fill probability, capacity and the dominant economic bottleneck;
+282. research prioritization may use expected target-gap reduction on TRAIN/validation but cannot inspect untouched OOS/forward outcomes to tune that priority;
+283. the shared Execution Alpha Core evaluates taker, maker, maker-timeout, causal-wait, alternate-route, split-route and NO_TRADE policies on the same causal decision state where applicable;
+284. maker execution receives no economic credit from fee savings alone; fill probability and adverse selection are mandatory;
+285. signal alpha and execution alpha/cost are reported separately for every promoted module;
+286. a route whose total observation/decision/fill latency exhausts the estimated alpha half-life is rejected or routed to a faster admissible policy;
+287. standalone OFI/microprice/book-imbalance ideas previously killed at measured cadence cannot be silently promoted as strategy alpha and may be reused only as new preregistered execution/regime features unless they independently re-prove net edge;
+288. Forced-Flow/Liquidation V2 uses a high-leverage/vulnerable-position universe distinct from the smart-wallet discovery universe;
+289. liquidation-threshold density and forced-notional/depth metrics distinguish measured state from inferred state and preserve provenance/confidence;
+290. liquidation research clusters one cascade into effective events and cannot count child liquidations as independent proof;
+291. Forced-Flow tests continuation, absorption, exhaustion/reversal and propagation as separate hypotheses rather than hard-coding one liquidation direction;
+292. Scheduled Flow/TWAP research records parent-program fields only when they are publicly/read-only observable; unavailable parent state remains UNMEASURABLE rather than inferred as fact;
+293. TWAP slice fills are joined by stable TWAP identity and replayed causally with activation/progress/completion state where evidence permits;
+294. visible TWAP flow is not assumed informed or front-runnable; continuation, absorption, execution-avoidance and post-completion decay compete as separate hypotheses;
+295. periodic/clock-time hypotheses require preregistration, boundary-versus-placebo comparison and after-cost OOS proof;
+296. Medium-Horizon Trend/Breakout is a materially different hypothesis family from previously killed residual momentum and must use explicit turnover/friction controls;
+297. dynamic-universe trend research prevents survivorship bias and records the contemporaneous eligible universe;
+298. Cross-Instrument Relative Value uses executable prices and explicit costs/capacity on every leg;
+299. no one-leg unhedged carry can be labeled arbitrage or promoted as relative value;
+300. funding-adjusted/statistical residual models must beat raw-spread/simple baselines OOS and cannot substitute stationarity for executable profitability;
+301. Options/Volatility Intelligence is initially a shared conditioning layer, not a hard dependency and not an automatically tradable module;
+302. options-derived predictors require recent decay monitoring and incremental OOS value because published predictability is documented as regime-dependent;
+303. previously killed naive mean reversion, residual-momentum, unhedged funding, fee-only market making and mid-only cross-venue variants remain behind a kill-resurrection firewall;
+304. a killed idea may return only through a materially different preregistered mechanism/data resolution/execution regime/horizon, with the prior verdict retained in the experiment ledger;
+305. current core modules remain Copy-Vault, Lead-Lag and Cross-Venue until candidate modules independently clear scoped promotion gates;
+306. Forced-Flow, Scheduled Flow, Medium-Horizon Trend and Cross-Instrument Relative Value enter as first-class candidate modules/sleeves without becoming global blockers;
+307. candidate-module promotion requires certified evidence, causal TRAIN/validation, frozen untouched OOS, required forward/shadow confirmation, positive after-cost net edge, sufficient effective sample, meaningful capacity and target-gap improvement;
+308. module comparison optimizes net edge × independent frequency × fill × capacity under drawdown/uncertainty, not win rate or signal count alone;
+309. opportunity research gives preference to mechanisms whose plausible gross amplitude can clear realistic friction, while preserving an explicit exploration floor for new mechanisms;
+310. external papers, third-party APIs and public market studies can generate hypotheses but cannot certify an Alina edge or override paper-only safety.
 
 ## Non-goals
 
@@ -4647,6 +5079,8 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
+- activate candidate V6 modules without scoped evidence gates;
+- resurrect previously killed strategies without a materially new preregistered hypothesis;
 - remove historical campaign evidence;
 - replace existing native venue collectors without a demonstrated need.
 
