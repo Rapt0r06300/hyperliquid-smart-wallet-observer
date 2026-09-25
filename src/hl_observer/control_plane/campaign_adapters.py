@@ -136,6 +136,19 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
 
     if ctx.kind == "copy_vault_collection":
         duration = _bounded_float(ctx.partition.get("duration_s"), 3600.0, 18_000.0)
+        max_vaults = _bounded_int(ctx.partition.get("max_vaults"), 10, 1, 100_000)
+        shard_count = _bounded_int(ctx.partition.get("vault_shard_count"), 1, 1, 10_000)
+        shard_index = _bounded_int(
+            ctx.partition.get("vault_shard_index"),
+            0,
+            0,
+            max(0, shard_count - 1),
+        )
+        users_in_largest_lane = (max_vaults + shard_count - 1) // shard_count
+        if users_in_largest_lane > 10:
+            raise ValueError(
+                "copy-vault partition exceeds Hyperliquid 10 unique users per IP"
+            )
         cmd = [
             py,
             str(ROOT / "tools" / "collect_cloud_copy_vault.py"),
@@ -148,17 +161,25 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             "--collection-run-id",
             run_id,
             "--max-vaults",
-            str(_bounded_int(ctx.partition.get("max_vaults"), 10, 1, 100)),
+            str(max_vaults),
             "--vault-shard-count",
-            str(_bounded_int(ctx.partition.get("vault_shard_count"), 1, 1, 20)),
+            str(shard_count),
             "--vault-shard-index",
-            str(_bounded_int(ctx.partition.get("vault_shard_index"), 0, 0, 19)),
+            str(shard_index),
             "--rotate-mb",
             str(_bounded_int(ctx.partition.get("rotate_mb"), 64, 1, 512)),
         ]
         selection = ctx.partition.get("selection_file")
         if selection:
-            cmd.extend(["--selection-file", str(selection)])
+            selection_path = Path(str(selection))
+            if not selection_path.is_file():
+                raise ValueError("copy-vault frozen selection file is missing")
+            expected_sha = str(ctx.partition.get("selection_sha256") or "").lower()
+            if expected_sha:
+                actual_sha = hashlib.sha256(selection_path.read_bytes()).hexdigest()
+                if actual_sha != expected_sha:
+                    raise ValueError("copy-vault frozen selection digest mismatch")
+            cmd.extend(["--selection-file", str(selection_path)])
         return cmd, out
 
     if ctx.kind == "official_archive_collection":
