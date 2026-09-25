@@ -78,14 +78,18 @@ def test_subprocess_failure_is_honest(tmp_path):
     assert out.payload["failure_category"] == "QUALITY"
 
 
-def test_backtest_requires_materialized_safe_workspace(tmp_path):
+def test_backtest_first_materializes_safe_workspace(tmp_path):
     ctx=context("backtest", workspace_root=str(tmp_path/"missing"))
-    try:
-        build_command(ctx)
-    except ValueError as exc:
-        assert "materialized SAFE Dataset V2 workspace" in str(exc)
-    else:
-        raise AssertionError("backtest accepted an unmaterialized workspace")
+    cmd,_=build_command(ctx)
+    assert "hl_observer.ops.v2_dataset_bridge" in cmd
+    assert "materialize" in cmd
+
+def test_backtest_runs_after_workspace_is_materialized(tmp_path):
+    workspace=tmp_path/"ready"
+    (workspace/"runtime"/"data").mkdir(parents=True)
+    cmd,_=build_command(context("backtest", workspace_root=str(workspace)))
+    assert cmd[1].endswith("tools/run_economic_objective_campaigns.py")
+    assert "--no-start-collection" in cmd
 
 def test_replay_forwards_selection_filters(tmp_path):
     cmd,_=build_command(context("replay", workspace_root=str(tmp_path), families="trades,bbo", venues="hyperliquid"))
