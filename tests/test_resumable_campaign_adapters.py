@@ -76,3 +76,18 @@ def test_subprocess_failure_is_honest(tmp_path):
     )
     assert out.status == "FAILED"
     assert out.payload["failure_category"] == "QUALITY"
+
+
+def test_backtest_requires_materialized_safe_workspace(tmp_path):
+    ctx=context("backtest", workspace_root=str(tmp_path/"missing"))
+    try:
+        build_command(ctx)
+    except ValueError as exc:
+        assert "materialized SAFE Dataset V2 workspace" in str(exc)
+    else:
+        raise AssertionError("backtest accepted an unmaterialized workspace")
+
+def test_replay_forwards_selection_filters(tmp_path):
+    cmd,_=build_command(context("replay", workspace_root=str(tmp_path), families="trades,bbo", venues="hyperliquid"))
+    assert "--families" in cmd and "trades,bbo" in cmd
+    assert "--venues" in cmd and "hyperliquid" in cmd
