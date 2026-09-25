@@ -1115,6 +1115,167 @@ A venue whose quote is stale, desynchronized, or outside certified timing qualit
 
 Raw pairwise spread remains available, but Cross-Venue may not assume that every pairwise deviation is an arbitrage. Stablecoin quote basis, funding expectations, contract specification differences, persistent venue premia and market state must be represented when relevant.
 
+### Additional high-information regime layers
+
+The strategy layer may add the following causal context families as separate hypotheses. They are not assumed profitable merely because external research reports structure.
+
+#### Liquidation / forced-flow regime
+
+Liquidation bursts are treated primarily as a market-state and liquidity-risk signal.
+
+Capture and derive, where available:
+
+- forced buy/sell direction;
+- liquidation notional/intensity;
+- liquidation concentration by coin/venue;
+- concurrent OI change;
+- impact-price / spread expansion;
+- depth withdrawal;
+- cross-asset coupling.
+
+Candidate mechanisms are kept separate:
+
+- continuation during forced-flow acceleration;
+- exhaustion/reversal after forced-flow climax;
+- no-trade during extreme liquidity impairment.
+
+The system must not assume that every liquidation cascade predicts reversal. Promotion requires Alina-specific OOS evidence.
+
+#### Cross-asset spillover graph
+
+Lead-Lag may model causal information flow not only across venues for the same coin, but also across economically related coins.
+
+Examples include:
+
+- BTC -> major alts;
+- ETH -> ecosystem/high-beta alts;
+- market-wide common factor -> idiosyncratic lagger residual.
+
+Cross-asset hypotheses require:
+
+- frozen lead/lag relationship on TRAIN;
+- explicit beta/common-factor neutralization where appropriate;
+- separate transaction-cost/capacity proof for the lagging instrument;
+- no same-event double counting with same-coin venue signals.
+
+#### Clock-phase and scheduled-microstructure context
+
+Time-of-hour, funding boundaries and recurrent market microstructure phases may be used as context features or regime gates when frozen on TRAIN.
+
+They may alter:
+
+- expected volatility;
+- expected spread/depth;
+- execution mode;
+- threshold scaling;
+- maker toxicity expectations.
+
+Clock phase alone is not sufficient to create a trade unless it demonstrates independent held-out economic value.
+
+#### Toxicity and markout layer
+
+All three modules may use signed markout curves as an execution/information-quality diagnostic.
+
+Examples:
+
+- Copy-Vault leader fill markouts;
+- maker-order post-fill markouts;
+- route-specific Cross-Venue hedge markouts;
+- Lead-Lag entry markouts.
+
+Track multiple causal horizons and separate:
+
+- raw markout;
+- market-adjusted markout;
+- venue-residual markout;
+- post-cost markout.
+
+A signal with positive gross prediction but persistently toxic execution may be rejected or routed differently.
+
+### Quote-currency and contract normalization
+
+Cross-Venue and Lead-Lag comparisons must normalize economically different contracts before treating prices as directly comparable.
+
+At minimum account for, where relevant:
+
+- USDT versus USDC/USD quote basis;
+- contract multiplier;
+- inverse versus linear specification;
+- mark/index construction;
+- funding schedule;
+- persistent venue premium;
+- listing/pre-market state.
+
+A raw price difference caused by quote-currency basis or contract specification is not automatically an arbitrage signal.
+
+### Incremental certification instead of all-or-nothing universe gates
+
+A profitable route/coin/leader cohort may be independently certified once its own evidence contract is complete.
+
+The system must not require:
+
+- every predeclared coin to have perfect coverage before Cross-Venue can certify one strong route;
+- every venue pair to be available before Lead-Lag can certify one leader-lagger edge;
+- the entire Copy-Vault universe to have identical freshness before one independently validated leader cohort can be evaluated.
+
+Global coverage remains a collection objective, but economic certification is granular at the smallest defensible unit:
+
+- Copy-Vault: leader/cohort × coin/regime;
+- Lead-Lag: leader venue × lagger venue × coin × regime/horizon;
+- Cross-Venue: execution route × coin × order-type policy.
+
+This reduces time-to-proof without lowering per-unit evidence quality.
+
+### Candidate-subset portfolio
+
+Within each module, multiple independently frozen profitable mechanisms may coexist.
+
+Examples:
+
+- Copy-Vault anticipatory leaders plus continuation leaders;
+- Lead-Lag continuation plus reversal plus cross-asset spillover;
+- Cross-Venue immediate residual reversion plus persistence-confirmed routes.
+
+The module-level PnL is the chronological sum of non-overlapping, capital-feasible admitted trades from its frozen candidate subset.
+
+Overlapping variants triggered by the same event are resolved by the module allocator rather than counted multiple times.
+
+### Analysis wall-clock acceleration
+
+When phase changes to `ANALYZE`, research jobs may fan out across GitHub-hosted runners by independent certified partition:
+
+- module;
+- coin;
+- leader cohort;
+- venue pair;
+- route family;
+- frozen strategy variant.
+
+Parallel analysis reduces elapsed wall-clock time but cannot change chronological evidence or duplicate observations.
+
+Aggregation occurs only after every partition publishes deterministic hashes and terminal quality status.
+
+### Research-derived feature tapes during COLLECT
+
+The `COLLECT` phase may compute lightweight deterministic derived features as part of ingestion, provided it does **not** evaluate strategy PnL or tune strategy parameters.
+
+Examples:
+
+- OFI;
+- microprice;
+- L2 shape summaries;
+- efficient-price residual;
+- liquidation intensity;
+- OI/funding deltas;
+- leader position deltas;
+- capacity/VWAP ladders;
+- markout-ready event indices.
+
+These feature tapes are immutable derived data linked to raw hashes.
+
+They reduce later replay cost and analysis startup time without violating the rule that heavy replay/backtest/PnL work waits for `ANALYZE`.
+
+
 ### Copy-Vault V10+: anticipatory-leader engine
 
 Copy-Vault is upgraded from a simple delayed copier into a causal leader-information engine.
@@ -1796,7 +1957,19 @@ Implementation is accepted only when tests prove all of the following:
 110. scoreboard includes mean, median and lower-confidence-bound daily net plus positive-day fraction;
 111. high-PnL candidates are stress-tested under worse fees, latency, queue position, slippage and capacity before promotion;
 112. research-driven improvements may maximize PnL only while paper/read-only and real-order flags remain disabled;
-113. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+113. liquidation intensity/OI/liquidity state may be evaluated as separate continuation, reversal and no-trade hypotheses;
+114. liquidation data cannot be assumed directional without held-out evidence;
+115. Lead-Lag may evaluate cross-asset spillovers only with explicit common-factor/beta controls;
+116. clock-phase/funding-boundary context can gate or rescale a strategy but cannot create unvalidated PnL by itself;
+117. signed markout curves are available for leader quality and execution-toxicity diagnostics;
+118. quote-currency/contract normalization prevents USDT/USDC/USD or contract-spec differences from being mislabeled as arbitrage;
+119. economic certification is granular and does not require all predeclared coins/routes/leaders to be simultaneously complete;
+120. independently certified profitable subsets can contribute to module PnL without waiting for unrelated missing coverage;
+121. overlapping variants from the same event cannot be double-counted;
+122. ANALYZE may fan out independent frozen partitions across GitHub-hosted runners and deterministically aggregate them;
+123. COLLECT may generate deterministic feature tapes but may not use them to tune PnL or inspect held-out outcomes;
+124. derived feature tapes are hash-linked to immutable raw evidence;
+125. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
