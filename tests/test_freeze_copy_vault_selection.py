@@ -26,6 +26,8 @@ def test_complete_public_universe_is_not_truncated_at_legacy_hundred_cap():
     assert selection["vault_count"] == 137
     assert len(selection["vaults"]) == 137
     assert selection["filters"]["max_vaults"] is None
+    assert selection["filters"]["min_tvl_usd"] == 0.0
+    assert selection["filters"]["min_age_days"] == 0.0
     assert selection["observation_only"] is True
     assert selection["read_only"] is True
     assert selection["real_execution"] is False
