@@ -3790,7 +3790,8 @@ This specification intentionally preserves all previously validated design layer
 - **Module Optimization V3:** edge portfolios, champion/challenger, decay monitoring and compute prioritization;
 - **Opportunity Expansion V4:** massive pre-gate candidate funnel and independent-opportunity accounting;
 - **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis;
-- **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler.
+- **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler;
+- **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -5064,6 +5065,559 @@ For flow provenance also report:
 - incremental PnL/rejection value.
 
 
+
+### Profitability Convergence V6.3 — execution truth, venue state and adversarial validation
+
+The large public-bot/code survey identified a class of failure that can be more dangerous than a bad signal: **an apparently profitable edge produced by unrealistic execution, stale venue rules or hidden backtest leakage**.
+
+V6.3 therefore introduces a strict distinction:
+
+> **economic alpha is not proven until the causal event timeline, queue uncertainty, order lifecycle, venue cost/rule state and data-availability boundary are all explicit.**
+
+The objective is to reduce false-positive PnL while also exposing new execution opportunities such as priority-fee optimization, better hedge policies and state-dependent routing.
+
+All additions remain paper/read-only.
+
+### Canonical causal timeline
+
+Every event used by a latency-sensitive strategy must preserve separate clocks where the source permits:
+
+- `ts_exchange`: exchange/source event timestamp;
+- `ts_received` or `ts_local`: time the collector could first observe the event;
+- `ts_decision`: strategy decision time;
+- `ts_send`: hypothetical paper-order send time;
+- `ts_exchange_arrival`: modeled order arrival at venue;
+- `ts_ack`: modeled/observed acknowledgement time where available;
+- `ts_fill`: fill time;
+- `ts_cancel_send`;
+- `ts_cancel_effective`;
+- `ts_sim`: deterministic total-order simulation timestamp;
+- source sequence / stable tie-break key when timestamps collide.
+
+Rules:
+
+- a decision sees only information with `ts_received <= ts_decision`;
+- order matching uses the venue state at modeled `ts_exchange_arrival`, not the stale book seen at decision time;
+- cancel requests remain exposed until `ts_cancel_effective`;
+- a fill during `PENDING_CANCEL` is valid and must be accounted;
+- equal-timestamp events use a documented deterministic tie-break rule;
+- replay results must be reproducible from code SHA + data manifest + latency model + RNG seed + ordering policy;
+- monetary/accounting state should use fixed-point/integer representation where practical so floating-point tie noise cannot change fills or PnL.
+
+### Order lifecycle state machine
+
+Paper execution supports at least:
+
+`NEW_INTENT -> PENDING_NEW -> OPEN -> PARTIALLY_FILLED -> PENDING_CANCEL/PENDING_REPLACE -> FILLED/CANCELED/REJECTED/EXPIRED`.
+
+Requirements:
+
+- every partial fill immediately updates position, fee, realized/unrealized PnL, inventory, hedge requirement and remaining quantity;
+- a later final fill cannot overwrite or erase earlier fill chunks;
+- replacement is modeled as cancel + new-order semantics unless the venue provides atomic modify semantics and the historical rule is known;
+- pending cancel/replace races are replayed;
+- IOC remainder is canceled rather than silently rested;
+- post-only orders that would cross after latency are rejected/canceled according to venue semantics, not filled optimistically;
+- batch-level rejection semantics are preserved when one invalid action can reject the whole batch.
+
+### Queue / fill uncertainty ensemble
+
+When only L2/market-by-price data exist, Alina must not represent queue position as exact FIFO truth.
+
+Maintain a **queue-belief interval** and multiple challenger fill models, including at minimum:
+
+1. `RISK_AVERSE_QUEUE` — cancellations do not improve our position unless supported by trades / defensible evidence;
+2. `PROBABILISTIC_QUEUE` — cancellations/depth reductions probabilistically occur ahead/behind based on calibrated state;
+3. `PRIORITY_AWARE_QUEUE` — venue-specific priority/ALO rules modify recent-tail ordering where applicable;
+4. `L3_FIFO` only when true order-level data and matching semantics are available.
+
+Optional calibrated models may use:
+
+- queue ahead lower/upper bounds;
+- visible size;
+- order count where available;
+- same-price taker flow;
+- adds/removals;
+- cancellation intensity;
+- iceberg/refill evidence;
+- side-specific toxicity;
+- venue/session state;
+- priority-fee state.
+
+Promotion rules:
+
+- maker/XEMM economics must be reported across the ensemble, not only under the most favorable model;
+- a strategy whose sign changes under modest plausible queue assumptions is `QUEUE_UNCERTAIN`, not proven;
+- exact queue claims require L3/order-level evidence;
+- public L2 cannot be reverse-engineered into false precision.
+
+### Latency uncertainty decomposition
+
+Model latency as components rather than one scalar:
+
+```text
+feed_latency
++ collector_processing
++ strategy_decision
++ paper_order_send
++ network/order_arrival
++ venue_processing/priority
++ hedge_latency
+```
+
+For every component track:
+
+- empirical distribution if measurable;
+- median / p90 / p99;
+- jitter;
+- missingness;
+- source/provenance;
+- version/regime.
+
+Run stress surfaces such as:
+
+- baseline;
+- +25%;
+- +50%;
+- +100%;
+- observed p90/p99;
+- venue-specific outage/degraded regimes.
+
+An edge that disappears before realistic latency uncertainty is included cannot be promoted.
+
+### Hyperliquid Priority-Fee Economics
+
+Hyperliquid priority fees make latency and queue position an explicit economic variable.
+
+The paper engine must support **historically versioned priority semantics**.
+
+For IOC-style priority research, evaluate a candidate schedule of priority rates:
+
+`0 bp -> low bp -> ... -> documented useful cap`
+
+and estimate:
+
+```text
+incremental_value(priority)
+= alpha_preserved_by_faster_arrival
+  + fill_probability_improvement
+  - priority_fee
+  - extra_adverse_selection
+```
+
+For ALO/post-only priority research, model the documented queue-priority effect during the eligible recent-order window rather than treating all same-price maker orders as FIFO forever.
+
+Current official documentation reviewed on 2026-09-25 reports approximately **45 ms reduction in end-to-end IOC latency per 1 bp** in the 0-8 bp priority range and describes an ALO queue-priority window of roughly **400 ms**. These values are **versioned research inputs**, not universal constants.
+
+Requirements:
+
+- store `priorityGas` / equivalent fee evidence where present;
+- do not extrapolate current priority semantics backward before activation;
+- priority cost is part of execution cost, never omitted from net PnL;
+- calculate break-even priority fee for each alpha-half-life bucket;
+- if the edge cannot pay the priority fee required to reach it, choose lower priority or `NO_TRADE`;
+- read/gossip priority and write/order priority are separate concepts;
+- V6.3 remains read-only/paper and never sends priority-fee orders.
+
+### Dynamic Venue Economics Engine
+
+Fixed fee constants are insufficient for proof-quality replay.
+
+Maintain a versioned fee/economic state for every venue/instrument where relevant:
+
+- maker fee;
+- taker fee;
+- maker rebate;
+- rolling-volume fee tier;
+- staking/discount tier;
+- referral discount when legitimately applicable;
+- builder fee;
+- HIP-3 deployer fee scale;
+- growth-mode state;
+- aligned-quote adjustments;
+- priority fee;
+- funding;
+- borrow/custody cost for spot legs;
+- withdrawal/transfer cost when the strategy requires transfers;
+- minimum notional/tick/lot constraints.
+
+For Hyperliquid specifically, fee tier depends on rolling 14-day weighted volume and current rules can include maker rebates and HIP-3-specific scaling.
+
+Proof policy:
+
+- do not credit a fee tier, staking discount, maker rebate or referral benefit that the paper account/evidence contract has not explicitly made achievable;
+- baseline proof should use the conservative achievable cost state;
+- lower-cost hypothetical tiers may be shown as sensitivity/capacity scenarios but cannot prove the +4 USD/day milestone;
+- historical replay uses the rules effective at the historical timestamp whenever rule history is available;
+- rule-history unknowns are `UNMEASURABLE`, not silently replaced by current fees.
+
+### Venue Health & Rule-State Engine
+
+Every venue/instrument carries an explicit health state such as:
+
+`HEALTHY / DEGRADED / STALE / HALTED / RECOVERING / UNKNOWN`.
+
+Inputs may include:
+
+- last event age;
+- timestamp monotonicity;
+- sequence gaps;
+- WS reconnects;
+- REST/WS disagreement;
+- BBO/L2 heartbeat;
+- trade heartbeat;
+- oracle age;
+- market-status endpoint;
+- maintenance/outage state;
+- order-rejection bursts;
+- open-interest cap state;
+- contract/spec revision;
+- trading halt/resume;
+- fee/rule revision.
+
+Rules:
+
+- apparent Cross-Venue dislocations involving `STALE/HALTED/UNKNOWN` references are not admitted as normal arbitrage;
+- recovery requires a bounded reconciliation/catch-up phase;
+- venue health is replayable point-in-time state;
+- no venue is permanently trusted because of historical uptime;
+- data-source health and economic-market health are separate states.
+
+### HIP-3 Oracle / Operator Health
+
+HIP-3 markets require additional state because deployer-operated oracle/reference configuration can change independently of the order book.
+
+Maintain where observable:
+
+- oracle update timestamp/age;
+- mark update timestamp;
+- external reference price;
+- order-book mid;
+- `mark-oracle`, `mid-oracle`, `oracle-external` divergence;
+- update cadence;
+- stale/fallback state;
+- open-interest cap;
+- margin/leverage-table revision;
+- deployer/DEX configuration revision;
+- `haltTrading` / resume state;
+- settlement state;
+- reference market session state.
+
+Candidate specialist hypotheses:
+
+- oracle-update synchronization;
+- stale-oracle/fallback liquidity withdrawal;
+- OI-cap-induced one-sided flow;
+- halt/resume/reopen dislocation;
+- mark/oracle convergence;
+- external-reference reacquisition after off-hours.
+
+These are hypotheses only. A stale oracle is not automatically an exploitable arbitrage.
+
+### Collateral / Quote-Currency Risk Engine
+
+A nominally delta-neutral structure may still contain collateral or quote-currency risk.
+
+Track:
+
+- collateral token;
+- quote token;
+- USD/reference conversion;
+- collateral/reference basis;
+- depeg magnitude and liquidity;
+- haircut/margin treatment where published;
+- cross-venue collateral mismatch;
+- collateral transfer/redemption dependency;
+- stressed collateral value.
+
+Relative Value/XEMM/carry reports must separate:
+
+```text
+underlying_delta
++ basis_delta
++ funding_delta
++ collateral_fx_delta
++ margin/liquidation risk
+```
+
+Rules:
+
+- USDC/USDT/other stable assets are not hard-coded to exactly 1 USD under stress analysis;
+- a hedge using mismatched quote/collateral assets is not labeled fully neutral without proving the residual;
+- depeg/stress scenarios feed capacity and liquidation-risk calculations.
+
+### Forced-Flow Route Classifier
+
+Forced-Flow V2 is refined into distinct execution routes:
+
+`MARKET_LIQUIDATION -> BACKSTOP_ABSORPTION -> ADL`.
+
+Where public evidence permits, classify every forced execution into one of:
+
+- open-book market liquidation;
+- protocol/backstop position absorption;
+- auto-deleveraging;
+- unknown.
+
+Do not collapse all forced executions into one liquidation counter.
+
+Maintain route-specific:
+
+- notional;
+- coin;
+- side;
+- start/end time;
+- execution price/markout;
+- OI clearing;
+- depth/impact state;
+- absorber/backstop evidence where public and non-identifying;
+- transition latency;
+- subsequent ADL wave;
+- recovery.
+
+A **severity ladder** may be derived:
+
+`BOOK_ABSORBS -> BACKSTOP_NEEDED -> ADL_NEEDED`
+
+but must remain an observed/measured state rather than a causal claim.
+
+Candidate sleeves:
+
+- continuation during open-book liquidation;
+- transition-to-backstop detection;
+- backstop absorption/recovery;
+- pre-ADL fragility state;
+- post-ADL liquidity normalization;
+- cross-asset propagation by liquidation route.
+
+### Liquidity Fragility / Slippage-at-Risk surface
+
+Depth at one notional is insufficient.
+
+For each HOT/WARM instrument and important route, maintain a stress surface over notionals:
+
+`Q1 < Q2 < ... < Qn`
+
+with:
+
+- executable VWAP;
+- slippage bps;
+- fraction of visible depth consumed;
+- spread;
+- recovery/resilience;
+- depth concentration by level;
+- provider concentration only when attribution is genuinely public and reliable;
+- stale/cancel-adjusted uncertainty.
+
+Derived research metrics may include:
+
+- slippage quantiles across instruments;
+- expected tail slippage;
+- tail-dollar slippage;
+- depth deterioration trend;
+- stress-notional capacity.
+
+No provider-concentration metric may be invented from anonymous aggregated L2.
+
+Use this surface to:
+
+- size Forced-Flow vulnerability;
+- cap XEMM/Relative-Value notionals;
+- detect fragile new listings/HIP-3 markets;
+- reduce capacity before raw depth collapses.
+
+### Backtest Integrity Firewall
+
+Before any module/challenger can be promoted to OOS-valid, run adversarial integrity tests.
+
+#### Lookahead perturbation test
+
+Create a baseline replay, then rerun with selected future/unrelated slices withheld or signal branches isolated.
+
+Fail if historical indicator/signal values at time `t` change because future data beyond `t` was removed, except for explicitly labeled ex-post analytics.
+
+Common forbidden patterns include:
+
+- negative shifts;
+- whole-frame aggregation used as a live feature;
+- row indexing that reaches future observations;
+- future-complete labels available to the decision path;
+- using final candle high/low/close before candle close;
+- using future-normalized cross-sectional statistics.
+
+#### Recursive / startup-history stability test
+
+Recompute recursive indicators/features with several admissible history lengths.
+
+Track:
+
+- feature variance at the same timestamp;
+- signal flips;
+- admission flips;
+- PnL sensitivity.
+
+A feature with meaningful startup-history dependence must either:
+
+- increase warmup/history requirements;
+- use a stable alternative;
+- remain research-only.
+
+#### Closed-bar / event-finality rule
+
+Bar-derived strategies use only completed bars unless the strategy is explicitly designed and tested as intrabar.
+
+For every aggregate record, store:
+
+- interval start;
+- interval end;
+- finalization timestamp;
+- first timestamp at which the full value was knowable.
+
+#### Dataset-slice invariance
+
+For causal features, computing the same timestamp from:
+
+- the full dataset;
+- a prefix ending shortly after that timestamp;
+- a replay stream
+
+should produce the same value within documented numerical tolerance.
+
+#### Randomness / determinism
+
+Any stochastic queue/latency model records:
+
+- seed;
+- model version;
+- parameters;
+- number of simulations.
+
+Economic proof reports distributional results, not only the lucky seed.
+
+### XEMM Hedge Policy Frontier
+
+XEMM no longer assumes that every maker fill must use one fixed hedge behavior.
+
+Evaluate bounded policies:
+
+1. **IMMEDIATE_HEDGE**;
+2. **DELAYED_HEDGE** with strict maximum delay and signal/risk condition;
+3. **SPLIT_HEDGE** across multiple independently healthy venues;
+4. **SYNTHETIC_HEDGE** only when instrument/FX relationships are explicit and hedge error is measured;
+5. **NO_NEW_QUOTE** when no acceptable hedge path exists.
+
+Every policy reports:
+
+- hedge fill probability;
+- latency;
+- hedge slippage;
+- residual delta path;
+- basis risk;
+- collateral mismatch;
+- margin use;
+- capital-time;
+- tail loss under hedge failure.
+
+Delayed hedge cannot be credited with favorable future price selection. It is an explicit temporary directional exposure and must be measured as such.
+
+Split-hedge routing uses executable depth and venue health, not static percentages unless those are the tested baseline.
+
+### Funding / settlement-state refinement
+
+Funding remains part of Relative Value rather than returning as naive carry.
+
+However, the research layer may test point-in-time forecasts of:
+
+- next funding settlement;
+- premium-index persistence;
+- cross-venue funding dispersion;
+- funding compression/reversal;
+- funding plus executable basis.
+
+Requirements:
+
+- exact funding timestamp/convention is versioned per venue;
+- expected funding is separated from realized funding;
+- the entry decision cannot use the finally realized rate if it was not known;
+- delta-neutral funding sleeves include every hedge leg, margin/collateral and exit cost;
+- funding prediction must improve a simpler executable basis baseline OOS.
+
+### Listing / Delisting / Contract-Change Event Lane
+
+Public bot research shows that some listing announcements can create large immediate moves, but those edges may require sub-second infrastructure and are highly venue/event specific.
+
+Because Alina is GitHub-hosted and paper/read-only, V6.3 does **not** assume it can win a latency race.
+
+Instead, maintain an event ledger for:
+
+- listing announcement;
+- trading-open time;
+- pre-launch market creation;
+- spot/perp conversion;
+- delisting/caution announcement;
+- contract rename/migration;
+- leverage/margin change;
+- market halt/resume;
+- fee/rule change.
+
+Use it for:
+
+- event contamination tagging;
+- Trend/Forced-Flow regime conditioning;
+- Pre-Launch Relative Value;
+- post-announcement continuation/reversal studies;
+- excluding impossible pre-announcement fills from backtests.
+
+The source must be official or provenance-scored, with both publication time and first-observed time stored when measurable.
+
+### Corpus saturation rule
+
+The Public Bot Intelligence Program should continue scanning, but research breadth is bounded by **novel mechanism yield**.
+
+For each search batch, record:
+
+- items reviewed;
+- unique repositories/posts after deduplication;
+- high-signal practitioner/code sources;
+- new mechanisms discovered;
+- duplicate/already-covered mechanisms;
+- rejected marketing/no-evidence items.
+
+A research family is considered **temporarily saturated**, not permanently complete, when several diverse new batches yield only duplicates or low-quality variants and no material new mechanism.
+
+New code/releases/X discussions can reopen the family later.
+
+### V6.3 research priority update
+
+V6.3 refines the current priority stack to:
+
+1. **P0A — Execution Alpha / Queue-Latency Certification**
+2. **P0B — Priority-Fee Economics + Dynamic Cost State**
+3. **P0C — XEMM + Hedge Policy Frontier**
+4. **P1A — Scheduled Flow / TWAP**
+5. **P1B — Forced-Flow with liquidation-route classifier**
+6. **P1C — HIP-3 Session + Oracle/Operator Health**
+7. **P2 — Relative Value / Hyperp / funding-settlement refinements**
+8. **P3 — Medium-Horizon Trend**
+9. **shared certification — Venue Health, Collateral Risk, Backtest Integrity, Options and Flow Provenance**
+
+This is a research-order heuristic, not a predicted profitability ranking.
+
+### V6.3 research basis
+
+The following high-signal public/official sources motivated V6.3. They create hypotheses and engineering requirements only:
+
+- **Hyperliquid official Priority Fees documentation:** current IOC order priority explicitly trades additional bps for lower latency and ALO priority can alter recent queue ordering; priority fee evidence is exposed in recorded fills.
+- **Hyperliquid official Fees documentation:** current fees depend on rolling volume and can include maker rebates, staking/referral discounts and HIP-3/deployer/growth-mode adjustments.
+- **hftbacktest:** queue-aware, latency-aware L2/L3 replay demonstrates why passive fills require queue models rather than touch/cross heuristics.
+- **realistic-mm-backtester / recent Rust-Python tick backtest projects:** separate feed/order/cancel latency, pending races, queue cancellation assumptions and true-book-at-arrival execution are standard requirements for believable maker research.
+- **Freqtrade lookahead-analysis and recursive-analysis:** adversarial re-runs can reveal future leakage and unstable startup-history dependence that ordinary unit tests miss.
+- **BBGO xmaker:** mature cross-exchange market making includes delayed, split and synthetic hedge policies, motivating an explicit hedge-policy frontier rather than one hard-coded hedge rule.
+- **public Hyperliquid forensic liquidation replay projects:** market liquidation, backstop absorption and ADL can be separated from public evidence and should not be collapsed into one forced-flow state.
+- **HIP-3 official/operator documentation:** oracle freshness, OI caps, margin/leverage configuration, halt/resume and external reference state are part of market mechanics and must be point-in-time inputs.
+- **public listing-event bots:** some announcement families show large moves while others do not, reinforcing strict event-specific validation and the decision not to assume a generic listing edge.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -6008,7 +6562,52 @@ The following numbered items form the normative acceptance catalog. Each item is
 363. every candidate reports edge-to-friction sensitivity, including break-even cost and stressed cost scenarios;
 364. V6.2 research ordering adds XEMM and HIP-3/session research while preserving the rule that priority is not a profitability ranking;
 365. V6.2 scoreboard reports XEMM maker fills/hedges/adverse markout, HIP-3 session/reopen metrics, flow-provenance coverage and Hyperp relative-value evidence;
-366. all V6.2 additions remain paper/read-only and cannot introduce private keys, signed trading actions or real-order execution into the Alina research path.
+366. all V6.2 additions remain paper/read-only and cannot introduce private keys, signed trading actions or real-order execution into the Alina research path;
+367. V6.3 preserves separate exchange, received/local, decision, send/arrival, fill/cancel-effective and deterministic simulation timestamps where the source permits;
+368. causal decisions cannot observe events whose first-observable timestamp is after the decision timestamp;
+369. equal-timestamp events use a documented deterministic tie-break/sequence rule;
+370. order lifecycle explicitly models pending-new, open, partial-fill, pending-cancel/replace and terminal states;
+371. every partial fill immediately updates position, fees, inventory and hedge requirement and cannot be overwritten by a later fill chunk;
+372. fills occurring during cancel/replace latency remain valid when consistent with venue semantics;
+373. IOC unfilled remainder, post-only crossing/rejection and batch rejection semantics are modeled rather than optimistically filled;
+374. L2-only replay represents queue position as uncertain and cannot claim exact FIFO position;
+375. maker/XEMM proof reports results across risk-averse, probabilistic and priority-aware queue models, with L3 FIFO used only when order-level evidence exists;
+376. strategies whose PnL sign is unstable under plausible queue models are labeled QUEUE_UNCERTAIN rather than promoted;
+377. feed, processing, decision, order-arrival, venue-processing and hedge latency are measured/modelled separately;
+378. latency sensitivity includes baseline, stressed and tail-latency scenarios;
+379. Hyperliquid priority-fee semantics are historically versioned and priority fees are charged in net PnL when used in paper scenarios;
+380. priority-fee optimization compares alpha preserved and fill improvement against the explicit fee and adverse-selection cost;
+381. current documented IOC ms-per-bp and ALO priority-window behavior are versioned priors, not timeless constants;
+382. read/gossip priority and order/write priority are represented separately;
+383. Dynamic Venue Economics versions maker/taker fees, rebates, fee tiers, discounts, builder/deployer fees, growth mode, funding and priority fees;
+384. proof cannot credit an unavailable hypothetical fee tier/rebate/discount to establish the +4 USD/day milestone;
+385. historical cost-rule unknowns remain UNMEASURABLE rather than silently using current rules;
+386. each venue/instrument has point-in-time HEALTHY/DEGRADED/STALE/HALTED/RECOVERING/UNKNOWN health state;
+387. stale/halted/unknown references cannot generate ordinary Cross-Venue arbitrage admission;
+388. venue recovery requires reconciliation/catch-up before normal admission resumes;
+389. HIP-3 state includes oracle age, mark/oracle/external divergence, update cadence, OI cap, margin/leverage revision and halt/resume state where observable;
+390. HIP-3 stale-oracle, OI-cap, halt/resume and oracle-update hypotheses are separate preregistered lanes rather than assumed arbitrage;
+391. collateral and quote currencies are valued explicitly and stable assets are not hard-coded to exactly 1 USD under stress;
+392. delta-neutral labels include collateral/quote residual risk and cross-venue collateral mismatch;
+393. Forced-Flow classifies market liquidation, backstop absorption, ADL and unknown as distinct routes when public evidence supports classification;
+394. liquidation-route transition timing and route-specific markout/OI/depth/recovery are reported separately;
+395. a BOOK_ABSORBS -> BACKSTOP_NEEDED -> ADL_NEEDED ladder is observational state only and not a universal causal predictor;
+396. liquidity-fragility research uses executable slippage surfaces across notionals and cannot invent provider concentration from anonymous aggregate L2;
+397. capacity/XEMM/Forced-Flow sizing incorporates stressed depth and tail-slippage state;
+398. every OOS-valid strategy passes a lookahead perturbation test designed to reveal future-data dependence;
+399. recursive/startup-history sensitivity is measured for stateful indicators/features and material instability blocks promotion until resolved;
+400. bar-derived features store finalization/first-knowable time and use closed bars unless an intrabar design is explicitly specified and tested;
+401. causal features pass dataset-slice/replay invariance within documented numerical tolerance;
+402. stochastic queue/latency simulation records model version, parameters, seed and distributional outcomes rather than reporting only a favorable seed;
+403. XEMM evaluates immediate, bounded-delayed, split and defensible synthetic hedge policies plus NO_NEW_QUOTE;
+404. delayed hedge is accounted as temporary directional exposure and cannot use favorable future hedge prices with lookahead;
+405. split/synthetic hedge policies include basis, collateral, margin, venue-health and hedge-error costs;
+406. funding research separates expected from finally realized funding and versions settlement timing/convention per venue;
+407. funding/premium forecasts must add OOS value beyond simpler executable basis baselines;
+408. listing/delisting/contract-change events are stored with publication and first-observed timestamps and cannot create impossible pre-announcement fills;
+409. GitHub-hosted Alina does not assume it can win sub-second listing/announcement latency races and uses those events primarily for causal conditioning/research;
+410. Public Bot Intelligence records batch-level reviewed/unique/high-signal/new-mechanism/duplicate/rejected counts and uses declining novel-mechanism yield as a temporary saturation signal;
+411. none of the V6.3 execution models authorize private keys, real probe orders, signed actions or live execution; calibration must remain compatible with the paper/read-only safety boundary.
 
 ## Non-goals
 
@@ -6018,7 +6617,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3 modules without scoped evidence gates;
+- use live minimum-size probe orders to calibrate queue/latency while the project remains paper/read-only;
+- treat current fee, priority, oracle or matching rules as timeless historical constants;
 - treat public bot code, X posts, stars, APR claims or repository popularity as proof of edge;
 - deanonymize public wallets or infer real-world identities from flow-provenance research;
 - resurrect previously killed strategies without a materially new preregistered hypothesis;
