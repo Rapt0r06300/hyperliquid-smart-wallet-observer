@@ -3793,7 +3793,8 @@ This specification intentionally preserves all previously validated design layer
 - **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler;
 - **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification;
 - **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution;
-- **Venue Microstructure V6.5:** venue-class-aware collection/routing across visible CLOB, hidden-liquidity, RFQ and native multi-leg markets with fee-latency/account-tier economics.
+- **Venue Microstructure V6.5:** venue-class-aware collection/routing across visible CLOB, hidden-liquidity, RFQ and native multi-leg markets with fee-latency/account-tier economics;
+- **Selective L4 & Backstop Intelligence V6.6:** event-window order-level truth, L2 queue calibration without live probing, and post-backstop inventory/unwind research.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -6345,6 +6346,243 @@ Otherwise classify as:
 `FEATURE / BASELINE / EXECUTION_POLICY / RISK_CONTROL / DUPLICATE / WATCHLIST / NOISE`.
 
 
+
+### Profitability Convergence V6.6 — selective L4 truth and backstop-inventory intelligence
+
+The final high-signal corpus pass found two Hyperliquid-native information advantages that are materially different from ordinary L2 research:
+
+1. **order-level raw book diffs / L4-style evidence** can improve queue and cancellation truth without violating the paper-only boundary;
+2. **protocol backstop inventory** can create a second-stage forced-flow process after initial liquidation/backstop absorption.
+
+Because complete order-level history is extremely large, V6.6 is explicitly selective and event-windowed.
+
+### Selective L4 Evidence Lane
+
+Hyperliquid official node data schemas expose raw resting-order lifecycle events including fields such as:
+
+- public user address;
+- order id;
+- coin;
+- side;
+- price;
+- new/update/remove state;
+- original/current size where provided.
+
+Official order-book semantics are price-time based, with venue-specific priority behavior that can modify the effective ordering of recent orders.
+
+The L4 lane is **not** a replacement for the normal BBO/L2 collection path.
+
+Use it only for bounded high-value evidence windows such as:
+
+- XEMM maker-fill calibration;
+- maker queue/fill studies;
+- TWAP/metaorder events;
+- forced-flow/liquidation/backstop windows;
+- HIP-3 session/oracle transitions;
+- priority-fee studies;
+- unexplained L2 replenishment/absorption events;
+- representative calm control windows.
+
+#### L4 reconstruction contract
+
+Where the source is complete enough, reconstruct per-order state keyed by at least:
+
+`(coin, oid)`
+
+and maintain:
+
+- side;
+- price;
+- current/original quantity;
+- add/update/remove sequence;
+- deterministic block/sequence position;
+- order age;
+- queue-ahead quantity;
+- order count/queue depth at the level;
+- cancellation/removal;
+- fill linkage;
+- public owner address as market-structure provenance only;
+- priority/reordering metadata only when explicitly present and verified.
+
+Rules:
+
+- raw diffs require a known initial state/snapshot; diffs alone cannot establish the starting book;
+- sequence gaps invalidate exact queue claims until repaired;
+- same-block/timestamp ordering follows canonical source ordering;
+- public owner addresses are never deanonymized;
+- if priority/reordering information is unavailable, queue position remains an interval/uncertain estimate;
+- third-party L4 feeds are certified against official node schemas on sampled windows before being treated as authoritative;
+- the historical simulator never upgrades an L2-only window to exact FIFO merely because another period had L4.
+
+### L4-to-L2 Queue Calibration Bridge
+
+Use certified L4 windows to score each cheaper broad-replay queue model.
+
+Per model measure:
+
+- fill/non-fill accuracy;
+- false-fill rate;
+- missed-fill rate;
+- queue-ahead error;
+- fill-time error;
+- partial-fill error;
+- cancel-race error;
+- post-only rejection error;
+- maker/taker misclassification;
+- PnL optimism/pessimism;
+- adverse-selection bias.
+
+Condition calibration where sample size permits by:
+
+- venue;
+- coin/liquidity bucket;
+- volatility;
+- spread/depth regime;
+- side;
+- session;
+- priority-fee regime.
+
+The objective is:
+
+> **use the cheapest broad model whose bias is measured and sufficiently conservative, while escalating fragile maker claims to L4 evidence.**
+
+Evidence tiers:
+
+- `L2_ONLY`;
+- `L2_CALIBRATED_BY_L4`;
+- `L4_WINDOW_RECONSTRUCTED`;
+- `L4_GAPPED_OR_UNCERTAIN`.
+
+A strategy can be rejected from L2-only evidence. Queue-sensitive promotion should prefer L4-calibrated or stronger evidence where feasible.
+
+### L4 Resource / GitHub-Only Contract
+
+Official node data can be extremely large and is not suitable for blind replication into the project dataset.
+
+Therefore:
+
+- never mirror the full raw-node corpus by default;
+- fetch bounded time/coin/event windows;
+- retain content hashes and source manifests;
+- compress retained evidence;
+- prefer reproducible refetch manifests when permanent raw retention is disproportionate;
+- use GitHub-hosted/cloud-compatible access only;
+- do not introduce a self-hosted node;
+- do not touch or wake the user's PC;
+- paid/proprietary L4 access that is unavailable is reported `UNMEASURABLE`, never replaced by optimistic assumptions.
+
+### Backstop Inventory / Unwind Intelligence
+
+Forced-Flow currently distinguishes:
+
+`MARKET_LIQUIDATION -> BACKSTOP_ABSORPTION -> ADL`.
+
+V6.6 extends the state machine beyond absorption:
+
+```text
+NO_BACKSTOP
+-> BACKSTOP_ABSORPTION
+-> INVENTORY_HELD
+-> INVENTORY_UNWINDING
+-> INVENTORY_CLEARED
+```
+
+with `UNKNOWN` whenever public evidence is incomplete.
+
+For a verified protocol/liquidator vault or equivalent backstop actor, maintain where publicly observable:
+
+- absorbed coin;
+- signed absorbed size/notional;
+- absorption timestamp;
+- protocol/vault identity provenance;
+- remaining inventory;
+- inventory age;
+- subsequent unwind fills;
+- unwind participation;
+- funding carried during inventory;
+- price impact during unwind;
+- inventory half-life;
+- concurrent depth/liquidity;
+- concurrent liquidation activity;
+- subsequent ADL state.
+
+#### Backstop candidate sleeves
+
+Test independently:
+
+- **post-backstop continuation:** remaining inventory creates persistent same-direction pressure;
+- **absorption relief:** transfer to the backstop removes visible forced flow and stabilizes price;
+- **inventory unwind:** backstop exit creates later pressure or reversal;
+- **inventory-overhang filter:** avoid or resize entries while material verified backstop inventory remains;
+- **cross-asset backstop stress:** simultaneous absorbed inventory across many markets indicates systemic fragility;
+- **inventory-cleared transition:** liquidity/markout changes after verified inventory materially clears.
+
+No direction is assumed a priori.
+
+### Backstop provenance
+
+An address is classified as protocol/backstop only when supported by:
+
+- official documentation/state;
+- official vault relationship;
+- or reproducible first-party/on-chain evidence.
+
+Do not classify a profitable wallet as HLP/backstop based on behavior alone.
+
+Report separately:
+
+- open-book liquidation edge;
+- backstop-absorption edge;
+- backstop-inventory/unwind edge;
+- ADL edge.
+
+One parent cascade/backstop episode remains one clustered dependency for effective-sample accounting.
+
+### Versioned Large-Liquidation Mechanics
+
+Hyperliquid liquidation behavior can be size-dependent.
+
+Where applicable and valid for the historical rule version, replay:
+
+- liquidation threshold/rule;
+- large-position threshold;
+- staged fraction sent to the book;
+- cooldown;
+- cross vs isolated semantics;
+- mark-price inputs;
+- backstop threshold;
+- ADL semantics.
+
+Current rules must not be applied blindly to older history.
+
+### Portfolio-Margin / Collateral Forced Flow
+
+As unified/portfolio-margin mechanics expand, classify forced flow by source where public evidence permits:
+
+- ordinary perp liquidation;
+- isolated perp liquidation;
+- cross-margin liquidation;
+- collateral/borrow liquidation;
+- portfolio-margin collateral liquidation;
+- backstop transfer;
+- ADL.
+
+Collateral liquidation may create forced spot/collateral flow even when a perp price did not initiate the stress.
+
+This state may condition Forced-Flow and Relative Value but does not become a separate module without independent evidence.
+
+### V6.6 research basis
+
+High-signal sources supporting V6.6 include:
+
+- **Hyperliquid official L1 data schemas:** raw book diffs expose per-order add/update/remove information with order and public-user identifiers;
+- **Hyperliquid official order-book documentation:** price-time and transaction ordering define the causal matching rules that queue replay must respect;
+- **Hyperliquid official historical-data documentation:** archive families and node-derived data have different availability and storage profiles, motivating bounded event-window acquisition;
+- **public Hyperliquid L4 reconstruction projects/providers:** demonstrate deterministic order-level reconstruction and explicitly distinguish L4 queue truth from aggregated L2;
+- **Hyperliquid official liquidation documentation:** liquidation starts on the book, can escalate to the liquidator vault, and includes size-dependent staged mechanics;
+- **public forensic liquidation work:** separates market liquidation, backstop absorption and ADL, motivating an additional inventory-aftermath state rather than ending analysis at absorption.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -7390,7 +7628,31 @@ The following numbered items form the normative acceptance catalog. Each item is
 464. route reports include committed capital, margin, idle prefunding and capital-time;
 465. independent venues are never treated as cross-margined/netted for liquidation risk unless actual venue semantics support it;
 466. RWA/non-24-7 venue session/market-status fields remain point-in-time economic state;
-467. V6.5 venue expansion remains GitHub-hosted/read-only and cannot add signed trading paths.
+467. V6.5 venue expansion remains GitHub-hosted/read-only and cannot add signed trading paths;
+468. V6.6 uses order-level/L4 evidence selectively for high-value windows rather than requiring full-history L4 collection;
+469. raw book diffs are never treated as a complete book without a known initial state/snapshot and gap reconciliation;
+470. per-order reconstruction keys include coin plus order id and preserve the source's canonical ordering;
+471. L4 queue claims degrade to interval/uncertain state when priority/reordering or sequence evidence is incomplete;
+472. public order-owner addresses from L4 are market-structure provenance only and cannot be deanonymized;
+473. third-party L4 providers are sampled against official schemas before their data can certify execution evidence;
+474. L4 windows calibrate broad L2 queue models using fill, timing, partial-fill, cancel-race and PnL-bias metrics;
+475. broad replay cannot silently use exact FIFO assumptions on windows that contain only L2 evidence;
+476. queue-sensitive maker/XEMM promotion prefers L2_CALIBRATED_BY_L4 or stronger evidence where feasible;
+477. L4 evidence tier is recorded as L2_ONLY, L2_CALIBRATED_BY_L4, L4_WINDOW_RECONSTRUCTED or L4_GAPPED_OR_UNCERTAIN;
+478. full raw-node history is not mirrored by default when bounded event windows provide the needed proof;
+479. V6.6 cannot require a self-hosted node or user-PC collector;
+480. unavailable L4 evidence remains UNMEASURABLE rather than being replaced with optimistic fill assumptions;
+481. Forced-Flow tracks verified backstop inventory after absorption when point-in-time public evidence permits;
+482. backstop state distinguishes absorption, inventory held, inventory unwind and inventory cleared, with UNKNOWN for incomplete evidence;
+483. protocol/backstop actor identity requires official/state/on-chain provenance and cannot be inferred solely from profitable behavior;
+484. post-backstop continuation, absorption relief, unwind/reversal and inventory-cleared transition are competing hypotheses;
+485. liquidation, backstop absorption, inventory unwind and ADL PnL are attributed separately;
+486. backstop/unwind observations from the same parent cascade are dependency-clustered for effective sample counts;
+487. size-dependent liquidation fractions/cooldowns and cross/isolated semantics are versioned replay inputs where applicable;
+488. current liquidation rules are not back-applied to historical periods without rule-version evidence;
+489. portfolio-margin/collateral liquidations are separated from ordinary perp liquidations where public evidence supports the distinction;
+490. V6.6 remains a scoped research/certification layer and does not globally block modules that do not depend on queue-exact execution;
+491. all V6.6 additions remain paper/read-only and cannot authorize real orders, live queue probes, signed actions or private-key use.
 
 ## Non-goals
 
@@ -7400,7 +7662,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6 modules without scoped evidence gates;
+- mirror the full Hyperliquid raw-node/L4 corpus by default when bounded evidence windows suffice;
+- classify a public wallet as a protocol/backstop actor without verified provenance;
 - treat all venue books as equivalent visible CLOB liquidity;
 - treat RFQ indicative quotes or hidden-liquidity absence as executable truth;
 - treat tracked-wallet trigger orders as a complete market-wide stop map;
