@@ -3791,7 +3791,8 @@ This specification intentionally preserves all previously validated design layer
 - **Opportunity Expansion V4:** massive pre-gate candidate funnel and independent-opportunity accounting;
 - **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis;
 - **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler;
-- **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification.
+- **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification;
+- **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -5603,6 +5604,389 @@ V6.3 refines the current priority stack to:
 
 This is a research-order heuristic, not a predicted profitability ranking.
 
+
+### Profitability Convergence V6.4 — portfolio intent netting and latent-flow intelligence
+
+The continued public-bot/code corpus review identified a final class of opportunities that sits **between alpha generation and execution**:
+
+- multiple Alina modules can create offsetting intents in the same instrument;
+- public order/trigger state can reveal **latent future flow** for a tracked subset of wallets;
+- repeated displayed-liquidity replenishment can reveal **absorption strength** even when hidden size is not directly observable;
+- larger future notionals require an execution-policy frontier beyond one-shot maker/taker routing.
+
+V6.4 adds these as shared portfolio/execution intelligence. They do not replace the independent proof obligation of any module.
+
+### Cross-Module Intent Netting Engine
+
+Alina must distinguish:
+
+1. **module research PnL** — what each module would have done independently under its own certified execution model;
+2. **portfolio execution PnL** — what the combined portfolio can save or lose after compatible intents are netted before external execution.
+
+Example:
+
+```text
+Copy-Vault:     +50 USD BTC target delta
+Trend:          -30 USD BTC target delta
+Relative Value: -10 USD BTC target delta
+-----------------------------------------
+gross intents:   90 USD turnover-equivalent
+net external:   +10 USD BTC delta
+```
+
+The portfolio may avoid unnecessary external turnover, but the research ledger must still preserve each module's standalone decision and attributable economics.
+
+Required intent fields:
+
+- module / edge sleeve;
+- instrument;
+- signed target delta;
+- decision timestamp;
+- urgency / alpha half-life;
+- maximum acceptable delay;
+- execution policy constraints;
+- hedge requirement;
+- venue constraints;
+- confidence / evidence state;
+- reason / opportunity id;
+- expected gross edge;
+- expected standalone execution cost.
+
+#### Compatibility rules
+
+Intents may be netted only when compatible on:
+
+- economic instrument/payoff;
+- collateral/margin assumptions where relevant;
+- decision-time window;
+- urgency;
+- order/execution semantics;
+- hedge requirements;
+- evidence/accounting scope.
+
+Do not net merely because ticker text matches.
+
+Examples of non-compatible intents:
+
+- one sleeve needs a spot leg while another needs a perp;
+- one intent expires in 50 ms while another can wait 10 minutes;
+- one intent is an XEMM hedge obligation and must not be canceled by unrelated speculative alpha;
+- one position is isolated-margin constrained while another assumes cross-margin;
+- two same-ticker HIP-3 contracts have different payoff/oracle semantics.
+
+#### Attribution after netting
+
+Maintain two ledgers:
+
+```text
+STANDALONE_RESEARCH_LEDGER
+PORTFOLIO_EXECUTION_LEDGER
+```
+
+The standalone ledger prevents netting from hiding a weak module.
+
+The portfolio ledger records:
+
+- gross intended turnover;
+- external turnover after netting;
+- fees/spread/slippage avoided;
+- opportunity cost created by waiting for netting;
+- residual inventory;
+- execution conflicts;
+- fill allocation;
+- netting savings.
+
+A module cannot claim the portfolio's netting savings as its own signal alpha.
+
+#### Internal-crossing boundary
+
+In paper/replay, compatible opposite intents may be internally crossed at a clearly defined reference only for **portfolio accounting experiments**.
+
+Requirements:
+
+- reference price is causal and explicitly chosen, such as executable mid/arrival benchmark under the experiment;
+- no fictional external fill is created;
+- no maker rebate is credited;
+- no market-impact benefit beyond avoided external turnover is invented;
+- each internal cross preserves both contributing module records;
+- standalone module proof remains based on its own external-execution counterfactual.
+
+**Netting success criterion:** reduce conservative combined execution cost/turnover without degrading module-level evidence integrity or increasing missed-alpha loss beyond the savings.
+
+### Tracked-Wallet Trigger / Latent Flow Map
+
+Hyperliquid read-only order information can expose trigger-order fields for a **queried public wallet**, including trigger price and trigger state.
+
+This enables a scoped latent-flow map for wallets already inside Alina's public research universe.
+
+For every tracked wallet where public data is available, maintain:
+
+- coin;
+- side;
+- trigger price;
+- stop-loss vs take-profit where identifiable;
+- reduce-only state;
+- original size;
+- remaining size;
+- order creation timestamp;
+- triggered/open/canceled/filled state;
+- position relation;
+- wallet cohort / leader score;
+- freshness;
+- provenance.
+
+Aggregate by coin/price bucket into:
+
+- tracked stop-long notional;
+- tracked stop-short notional;
+- tracked take-profit notional;
+- number of independent wallets;
+- concentration by wallet;
+- distance from mark/oracle;
+- overlap with liquidation-threshold density;
+- overlap with visible depth and resilience.
+
+#### Coverage rule
+
+The trigger map must always report:
+
+```text
+tracked_wallets_with_order_visibility
+/ eligible_tracked_wallets
+```
+
+and must be labeled:
+
+`TRACKED_SAMPLE_TRIGGER_MAP`
+
+unless Alina has a proven market-complete order source.
+
+Never label a subset of known-wallet orders as "the market stop map."
+
+#### Candidate uses
+
+- improve Copy-Vault exit/copyability timing;
+- identify likely forced/trigger flow near important levels;
+- separate liquidation pressure from ordinary stop activation;
+- condition Forced-Flow cascade state;
+- identify overlap of stops + vulnerable liquidation notional + thin depth;
+- study whether large tracked TP clusters create absorption/reversal rather than continuation.
+
+Trigger state is not assumed informed.
+
+**Trigger-map success criterion:** incremental OOS value versus the same module without tracked trigger-state features, with explicit coverage and concentration controls.
+
+### Absorption / Replenishment Intelligence
+
+Displayed L2 depth alone cannot distinguish fragile visible liquidity from a price level that repeatedly replenishes after aggressive flow.
+
+Maintain causal level-level or band-level features where feed resolution permits:
+
+- visible size;
+- aggressive volume executed into the level/band;
+- depletion amount;
+- refill amount;
+- refill latency;
+- refill count;
+- cancellation-before-touch rate;
+- persistence duration;
+- price movement despite aggressive volume;
+- cross-venue agreement;
+- post-event markout.
+
+Define **replenishment/absorption evidence**, not "hidden size as fact."
+
+Possible state labels:
+
+- `FRAGILE_DISPLAYED_DEPTH`;
+- `PERSISTENT_REPLENISHMENT`;
+- `ABSORBING_BUY_PRESSURE`;
+- `ABSORBING_SELL_PRESSURE`;
+- `FLEETING_WALL`;
+- `UNKNOWN`.
+
+Rules:
+
+- L2 replenishment is probabilistic evidence only;
+- do not infer exact iceberg quantity from L2;
+- spoof/manipulation labels remain probabilistic research labels;
+- cancellations and trades must be distinguished where the feed permits;
+- synthetic iceberg-model performance cannot certify real-market accuracy;
+- L3/order-level evidence may increase confidence when genuinely available;
+- features must be tested as incremental execution/forced-flow context before any standalone alpha claim.
+
+Use cases:
+
+- Execution Alpha maker-side selection;
+- XEMM quote width/size;
+- Forced-Flow absorption/exhaustion detection;
+- TWAP visible-flow absorption measurement;
+- Liquidity Fragility adjustment;
+- distinguishing a real absorbing wall from fleeting displayed depth.
+
+### Microstructure Cost & Impact Surface
+
+V6.4 extends the execution state with a small set of interpretable microstructure diagnostics where supported:
+
+- realized spread;
+- effective spread;
+- price impact per unit aggressive notional;
+- depth recovery time;
+- order-flow/price-response ratio;
+- participation rate;
+- volume acceleration;
+- quote age;
+- cancel-to-trade ratio;
+- spread/depth elasticity.
+
+Research metrics such as Kyle-style lambda, Amihud-style illiquidity or VPIN-like state may be used only when their exact construction is documented and they improve simpler baselines.
+
+No named microstructure metric becomes strategy alpha by reputation.
+
+### Capacity Execution Frontier
+
+For small notionals, one-shot maker/taker decisions may remain optimal.
+
+As notional approaches a meaningful fraction of available volume/depth, compare paper execution policies:
+
+1. `ONE_SHOT_TAKER`;
+2. `PASSIVE_MAKER`;
+3. `TWAP`;
+4. `VWAP`;
+5. `POV` / participation-of-volume;
+6. `IMPLEMENTATION_SHORTFALL`-style urgency schedule;
+7. adaptive hybrid;
+8. `NO_TRADE / REDUCE_SIZE`.
+
+The objective is not to add execution sophistication where it is unnecessary.
+
+Activate slicing research only when:
+
+```text
+order_notional / executable_depth
+or
+order_notional / rolling_market_volume
+```
+
+is large enough that self-impact/timing risk can matter.
+
+Required accounting:
+
+- arrival-price implementation shortfall;
+- temporary/permanent impact proxy where measurable;
+- spread/fee;
+- participation rate;
+- timing risk;
+- completion probability;
+- alpha decay during execution;
+- residual quantity;
+- opportunity cost;
+- information leakage proxy such as spread/depth deterioration after repeated child orders.
+
+A complex adaptive policy must beat simple TWAP/VWAP/one-shot baselines OOS.
+
+### Funding Forecast Clarification
+
+V6.3 already permits point-in-time funding forecasts.
+
+V6.4 clarifies that funding data can enter three distinct states:
+
+- `PUBLISHED_CURRENT`;
+- `EXCHANGE_PREDICTED/NEXT` where the venue exposes such a value;
+- `ALINA_FORECAST`.
+
+They must never be merged.
+
+For every funding observation store:
+
+- source venue;
+- applicable interval;
+- observation timestamp;
+- settlement timestamp;
+- formula/source revision;
+- current/predicted/realized type;
+- premium/index inputs where available.
+
+An Alina forecast must beat:
+
+- current funding persistence;
+- exchange-provided predicted funding where available;
+- simple cross-venue median/consensus;
+
+on frozen OOS economic value, not merely rate RMSE.
+
+### Parameter-Change Event Ledger
+
+Extend the V6.3 event ledger with point-in-time venue-rule changes:
+
+- fee tier/schedule revision;
+- maker rebate revision;
+- priority-fee rule revision;
+- leverage/margin tier change;
+- open-interest cap change;
+- growth-mode/deployer-fee change;
+- oracle/reference specification revision;
+- halt/resume;
+- settlement/contract conversion;
+- tick/lot/min-notional change;
+- listing/delisting;
+- API/feed semantic change.
+
+Parameter changes may themselves create transient market-structure effects, but their first purpose is preventing invalid historical replay assumptions.
+
+### Updated research order after corpus convergence
+
+After filtering the large public-code/X corpus, the highest-value queue becomes:
+
+1. **P0A — Execution Truth + Queue/Latency/Partial-Fill certification**
+2. **P0B — Dynamic Cost / Priority-Fee Economics**
+3. **P0C — Cross-Module Intent Netting**
+4. **P0D — XEMM + Hedge Policy Frontier**
+5. **P1A — Scheduled Flow / TWAP**
+6. **P1B — Forced-Flow with route classifier + trigger/absorption context**
+7. **P1C — HIP-3 Session / Oracle / Operator state**
+8. **P2 — Relative Value / Hyperp / funding forecast**
+9. **P3 — Trend**
+10. **shared context — Options, Flow Provenance, Latent Trigger Map, Replenishment/Absorption**
+
+This remains a research scheduling order, not a claimed profitability ranking.
+
+### Corpus-convergence rule
+
+The public-bot research program should continue, but the bar for adding a new first-class module rises as coverage converges.
+
+A newly found public idea becomes a new module/layer only if it satisfies at least one:
+
+- introduces a new economic counterparty/mechanism;
+- exposes a new public data family unavailable to existing modules;
+- changes execution economics materially;
+- reduces a known false-positive source in proof;
+- adds a materially independent opportunity class.
+
+Otherwise classify it as:
+
+- feature;
+- baseline;
+- execution policy;
+- risk control;
+- duplicate;
+- watchlist;
+- rejected/noise.
+
+This prevents "research breadth" from becoming uncontrolled architecture growth.
+
+### V6.4 research basis
+
+High-signal findings supporting V6.4 include:
+
+- **RustyBT order aggregation:** demonstrates explicit cross-strategy order netting, commission-savings accounting and fill attribution back to contributing strategies; Alina uses the mechanism only as a research architecture pattern, not its claimed savings.
+- **institutional-style OMS/EMS public architectures:** normalized portfolio intent is translated into the smallest necessary external order after considering existing positions and compatible interests.
+- **Hyperliquid read-only frontend/open-order schemas:** queried public wallets can expose trigger-order state and trigger prices, supporting a tracked-sample stop/TP map while not proving market-wide coverage.
+- **Hyperliquid order-lifecycle public data providers:** order transitions can preserve trigger activation and partial-fill lifecycle; third-party completeness must be independently certified before use as authoritative evidence.
+- **public L2/L3 iceberg/replenishment research implementations:** repeated refill and absorption signatures are observable, but L2 cannot reveal exact hidden size and synthetic classifiers cannot be imported as truth.
+- **adaptive execution research/frameworks:** POV/VWAP/implementation-shortfall policies formalize the impact-versus-timing-risk tradeoff for larger orders; Alina applies them only when capacity makes slicing economically relevant.
+
+
 ### V6.3 research basis
 
 The following high-signal public/official sources motivated V6.3. They create hypotheses and engineering requirements only:
@@ -6607,7 +6991,32 @@ The following numbered items form the normative acceptance catalog. Each item is
 408. listing/delisting/contract-change events are stored with publication and first-observed timestamps and cannot create impossible pre-announcement fills;
 409. GitHub-hosted Alina does not assume it can win sub-second listing/announcement latency races and uses those events primarily for causal conditioning/research;
 410. Public Bot Intelligence records batch-level reviewed/unique/high-signal/new-mechanism/duplicate/rejected counts and uses declining novel-mechanism yield as a temporary saturation signal;
-411. none of the V6.3 execution models authorize private keys, real probe orders, signed actions or live execution; calibration must remain compatible with the paper/read-only safety boundary.
+411. none of the V6.3 execution models authorize private keys, real probe orders, signed actions or live execution; calibration must remain compatible with the paper/read-only safety boundary;
+412. V6.4 preserves separate standalone-module and combined-portfolio execution ledgers so portfolio netting cannot hide weak standalone economics;
+413. compatible cross-module intents may be netted before simulated external execution only when instrument semantics, urgency, execution constraints and hedge obligations are compatible;
+414. hedge obligations and risk-reduction intents cannot be canceled by unrelated speculative intents merely to save fees;
+415. portfolio netting reports gross intended turnover, external turnover, avoided costs, missed-alpha cost and residual inventory;
+416. portfolio netting savings are portfolio execution value and cannot be attributed to one module's signal alpha;
+417. internal paper crossing never invents maker rebates, external fills or self-impact benefits beyond explicitly modeled avoided turnover;
+418. tracked-wallet trigger maps store source-wallet coverage and are labeled as sampled coverage unless market-complete evidence is certified;
+419. public trigger-order fields are used only from point-in-time read-only evidence with provenance and freshness;
+420. trigger clusters distinguish stop-loss, take-profit, reduce-only and unknown semantics where observable and never treat all triggers as forced liquidation;
+421. trigger-map hypotheses require incremental frozen-OOS value over equivalent models without trigger state;
+422. L2 replenishment/absorption features are probabilistic evidence and never claim exact hidden iceberg quantity;
+423. spoofing, iceberg and hidden-liquidity labels remain probabilistic unless direct order-level evidence proves the underlying lifecycle;
+424. absorption intelligence records aggressive flow, depletion, refill, refill latency, persistence, cancellation and price response where feed resolution permits;
+425. microstructure metrics such as realized/effective spread, impact coefficients or VPIN-like state require explicit construction and must beat simpler features before HOT-path retention;
+426. adaptive execution slicing activates only when notional/depth or notional/volume makes self-impact or timing risk economically material;
+427. POV/VWAP/TWAP/implementation-shortfall challengers report arrival-price shortfall, participation, completion, alpha decay and residual quantity;
+428. complex adaptive execution must beat simple one-shot/TWAP/VWAP baselines on frozen OOS economics;
+429. funding records distinguish published-current, exchange-predicted/next and Alina-forecast values;
+430. Alina funding forecasts cannot use finally realized funding before settlement and must beat persistence/exchange-predicted/simple-consensus baselines economically OOS;
+431. venue parameter changes including fees, rebates, priority rules, margin tiers, OI caps, growth/deployer settings, oracle specs and tick/lot rules are versioned events;
+432. historical replay uses the venue-rule state valid at the decision timestamp rather than current settings;
+433. V6.4 research ordering adds cross-module intent netting and latent-flow context without treating priority as a profitability ranking;
+434. the public-bot corpus convergence rule prevents a new first-class module unless it adds a new economic mechanism, new public data family, material execution-economics change, proof-quality improvement or independent opportunity class;
+435. public ideas that fail the V6.4 novelty bar are classified as feature, baseline, execution policy, risk control, duplicate, watchlist or noise rather than expanding architecture;
+436. all V6.4 additions remain paper/read-only and cannot introduce signed trading actions, private keys or live probing.
 
 ## Non-goals
 
@@ -6617,7 +7026,10 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4 modules without scoped evidence gates;
+- treat tracked-wallet trigger orders as a complete market-wide stop map;
+- infer exact hidden iceberg size from aggregated L2 replenishment alone;
+- let portfolio netting erase or rewrite standalone module research results;
 - use live minimum-size probe orders to calibrate queue/latency while the project remains paper/read-only;
 - treat current fee, priority, oracle or matching rules as timeless historical constants;
 - treat public bot code, X posts, stars, APR claims or repository popularity as proof of edge;
