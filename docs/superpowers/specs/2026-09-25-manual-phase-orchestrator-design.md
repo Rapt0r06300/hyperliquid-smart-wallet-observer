@@ -3795,7 +3795,10 @@ This specification intentionally preserves all previously validated design layer
 - **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution;
 - **Venue Microstructure V6.5:** venue-class-aware collection/routing across visible CLOB, hidden-liquidity, RFQ and native multi-leg markets with fee-latency/account-tier economics;
 - **Selective L4 & Backstop Intelligence V6.6:** event-window order-level truth, L2 queue calibration without live probing, and post-backstop inventory/unwind research;
-- **Outcome Relative Value V6.7:** HIP-4 internal parity, cross-venue event equivalence and outcome↔perp/options relative-value research under settlement-semantic certification.
+- **Outcome Relative Value V6.7:** HIP-4 internal parity, cross-venue event equivalence and outcome↔perp/options relative-value research under settlement-semantic certification;
+- **Rule & Coverage Completeness V6.8:** point-in-time venue validity, rejection semantics, history/coverage bounds and observable-state certification;
+- **Protocol Mechanics V6.9:** OI-cap, exact funding, margin/liquidation, TWAP/Chase provenance and protocol-rule edge cases;
+- **Options Volatility Relative Value V6.10:** direct options-volatility sleeves, transaction-cost-aware delta hedging and executable vol-surface research.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -7433,6 +7436,332 @@ Relevant lanes additionally report:
 - TWAP parent-rule coverage.
 
 
+
+### Profitability Convergence V6.10 — options volatility relative value
+
+The final corpus-saturation pass identified one remaining economically independent research family that should not remain only a contextual feature layer: **direct crypto-options volatility relative value**.
+
+The existing Options / Volatility Intelligence layer remains useful as context for perp strategies. V6.10 adds a separate candidate family in which the option structure itself is the economic position.
+
+Initial research should reuse existing Deribit/data-normalization components where possible.
+
+### Point-in-time option instrument contract
+
+For every option instrument used in evidence, retain:
+
+- venue;
+- underlying/index;
+- call/put;
+- strike;
+- expiry;
+- contract size/unit;
+- quote and settlement currency;
+- settlement source/rule;
+- instrument state;
+- best bid/ask and executable size;
+- deeper book when required by candidate notional;
+- mark price;
+- bid IV / ask IV / mark IV where available;
+- point-in-time delta/gamma/theta/vega/rho where available;
+- independently computed reference greeks/model inputs where used;
+- open interest;
+- volume;
+- underlying future/index reference;
+- fee schedule;
+- margin/account model;
+- data timestamp and freshness.
+
+**Mark price and mark IV are state/reconciliation inputs, not executable fills.**
+
+### Options collection tiers
+
+The full options chain can be computationally and bandwidth expensive.
+
+Use V5-style tiers:
+
+- **COLD:** instrument metadata, lifecycle, coarse chain summaries;
+- **WARM:** selected expiries/deltas, top executable quotes, OI/volume, IV/greeks;
+- **HOT:** full required executable depth for candidate legs and hedge instruments.
+
+Promotion into WARM/HOT may use:
+
+- liquidity/spread;
+- OI/volume;
+- time to expiry;
+- surface residual;
+- expected edge-to-friction;
+- relevance to HIP-4/perp regimes.
+
+Do not subscribe to raw full depth for every strike/expiry without measured value.
+
+### Volatility surface evidence contract
+
+Maintain the distinction between:
+
+- executable bid surface;
+- executable ask surface;
+- mark/model surface.
+
+Candidate surface methods can include:
+
+- strike/delta bucket interpolation;
+- SVI/SSVI challengers;
+- local non-parametric baselines.
+
+If a surface is described as arbitrage-free, validate the relevant constraints, including:
+
+- butterfly/convexity consistency;
+- calendar/total-variance consistency where applicable.
+
+Store:
+
+- fit error;
+- stale/missing strike flags;
+- quote width;
+- fit timestamp;
+- calibration universe;
+- parameter/version hash.
+
+A smooth surface is never evidence that an executable arbitrage exists.
+
+### Sleeve A — Volatility Risk Premium / IV versus realized volatility
+
+Test long/short volatility structures conditional on the difference between option-implied volatility and a causal realized-volatility forecast.
+
+Possible structures:
+
+- delta-neutral straddle;
+- delta-neutral strangle;
+- defined-risk spread;
+- long-volatility structure during compressed IV regimes;
+- short-volatility structure only under explicit jump/tail controls.
+
+Economic decomposition:
+
+```text
+expected_net_vol_edge
+= option_repricing_or_decay
+  + gamma_scalping_value
+  - option_bid_ask
+  - option_fees
+  - delta_hedge_spread_slippage
+  - perp/future_funding_or_basis
+  - jump_tail_loss_expectation
+  - margin_and_capital_time
+```
+
+The rule is **not** `IV > RV => SHORT_VOL`.
+
+Required stress:
+
+- discontinuous jumps;
+- volatility clustering;
+- sudden skew change;
+- liquidity withdrawal;
+- funding inversion;
+- near-expiry gamma acceleration.
+
+### Sleeve B — Calendar / term-structure relative value
+
+Test relative implied variance across expiries.
+
+Candidate structures:
+
+- rich near-term versus cheaper longer-term variance;
+- reverse calendars during inversion;
+- event-expiry kinks;
+- term-structure convergence/repricing.
+
+Measure rather than assume:
+
+- net delta;
+- vega mismatch;
+- theta mismatch;
+- gamma mismatch;
+- event exposure;
+- roll/close friction.
+
+### Sleeve C — Skew / risk-reversal / butterfly relative value
+
+Test dislocations in:
+
+- 25-delta risk reversal;
+- 10-delta tail skew where liquid;
+- butterflies;
+- wing-versus-ATM richness;
+- skew term structure.
+
+Every candidate specifies exact executable legs, ratios and residual greeks.
+
+A chart anomaly is not an edge.
+
+### Sleeve D — Transaction-cost-aware gamma / delta hedging
+
+Compare hedge policies:
+
+- fixed-time hedge;
+- fixed absolute-delta threshold;
+- volatility-scaled threshold;
+- transaction-cost-aware no-trade band;
+- regime-adaptive band;
+- close/no-hedge baseline.
+
+Track:
+
+- hedge turnover;
+- spread/slippage;
+- hedge fees;
+- funding/basis;
+- residual delta;
+- gamma capture;
+- timing error.
+
+Near expiry, reject a candidate when theoretical gamma capture is consumed by hedge friction.
+
+### Sleeve E — Executable surface / synthetic consistency
+
+Test only realizable structures such as:
+
+- put/call or synthetic-forward consistency when contract semantics support it;
+- executable butterfly convexity violations;
+- executable calendar total-variance violations;
+- option/future forward inconsistency;
+- option-implied distribution versus HIP-4 outcome probabilities.
+
+A model residual becomes a candidate only after constructing a bounded-risk executable portfolio.
+
+Include:
+
+- every leg's bid/ask;
+- fees;
+- legging risk;
+- margin;
+- settlement/currency basis;
+- hedge cost;
+- capital time.
+
+### Options PnL attribution
+
+Paper reports must decompose:
+
+- option entry/exit premium;
+- option spread/fees;
+- delta-hedge PnL;
+- hedge spread/fees/slippage;
+- funding/basis;
+- gamma contribution;
+- theta;
+- vega/IV move;
+- skew/surface move;
+- residual directional delta;
+- settlement/expiry;
+- margin/capital-time cost.
+
+Reject a claimed volatility edge when most of the result came from unintended directional underlying exposure.
+
+### Options margin/stress
+
+Convex derivatives cannot use a simplistic flat notional margin assumption when that changes capacity or liquidation risk.
+
+Where exact historical account/portfolio-margin rules are available, version them.
+
+Otherwise use conservative scenario stress and label the result `MODELLED_MARGIN/UNCERTAIN`.
+
+Stress dimensions should include where relevant:
+
+- underlying shock;
+- IV shock;
+- skew shock;
+- correlated leg move;
+- expiry compression;
+- hedge dislocation.
+
+### Deribit data efficiency and causality
+
+For Deribit-style option chains:
+
+- seed/refresh instrument universe from official public instrument metadata;
+- use lifecycle/state updates where available rather than wasteful full polling;
+- prefer efficient chain-wide mark/IV summaries for COLD/WARM observation;
+- request deeper books only for HOT candidate legs;
+- preserve exchange timestamps/freshness;
+- reconcile point-in-time chain state after reconnects.
+
+Public greeks and mark IV are acceptable observable features, but any Alina-computed model must record its exact convention and inputs.
+
+### HIP-4 / options / perp bridge
+
+V6.10 directly strengthens V6.7.
+
+For a HIP-4 price-threshold outcome:
+
+- options can provide a market-implied distribution;
+- futures/perps provide forward/basis and delta-hedge references;
+- HIP-4 provides an observed bounded-event probability.
+
+Cross-instrument comparison requires exact alignment of:
+
+- underlying;
+- threshold;
+- expiry;
+- settlement source/rule;
+- time convention.
+
+No options observation after the HIP-4 decision timestamp may enter the probability estimate.
+
+### Chase-order experimental completion
+
+V6.9 already classifies Chase as execution/provenance behavior.
+
+V6.10 adds the missing economic benchmark requirement when replayability permits:
+
+compare the same causal opportunity under:
+
+- static ALO;
+- ALO + timeout/cancel-replace;
+- Chase/CHASE_LIKE;
+- IOC/taker;
+- NO_TRADE.
+
+Measure:
+
+- maker fill probability;
+- completion time;
+- repricing count;
+- queue loss/reset uncertainty;
+- partial-fill path;
+- spread captured;
+- post-fill adverse-selection markout;
+- missed-alpha cost.
+
+If historical repricing/queue semantics are insufficiently observable, Chase remains descriptive/`UNMEASURABLE` for certification.
+
+### Saturation classifications
+
+The final long-tail sweep classifies repeated public-bot ideas as follows unless later evidence demonstrates a materially independent mechanism:
+
+- triangular/graph arbitrage -> existing route graph / Relative Value;
+- stablecoin quote-basis -> Collateral Risk + Relative Value;
+- HLP/vault deposits/withdrawals -> Copy-Vault / Backstop context;
+- native order types such as Chase -> Execution Alpha;
+- generic grid/martingale/DCA -> not a first-class module;
+- generic RSI/MACD/indicator bots -> baselines;
+- generic AI/LLM directional agents -> not a distinct economic edge;
+- sentiment/social data -> contextual challenger only;
+- Kelly -> sizing only after edge proof.
+
+The public-bot research program remains open, but after this corpus pass the **novel high-signal mechanism yield is now low and mostly maps into existing architecture**. New first-class architecture still requires the V6.4 novelty test.
+
+### V6.10 research basis
+
+High-signal support for V6.10 includes:
+
+- **Deribit official public APIs:** public option books/tickers expose executable quotes, IV, greeks, OI and instrument state suitable for read-only point-in-time research;
+- **Deribit official options data-collection guidance:** recommends chain-wide efficient feeds and selective escalation to deeper books rather than brute-force full-depth subscription across the entire chain;
+- **public crypto-options research codebases:** independently converge on IV/RV, calendar, skew/surface and delta-hedging-band research patterns, but their reported performance remains unverified hypothesis input;
+- **Hyperliquid official Chase documentation/announcement:** Chase is a native post-only repricing mechanism and therefore belongs in Execution Alpha benchmarking, not strategy alpha.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -8575,7 +8904,34 @@ The following numbered items form the normative acceptance catalog. Each item is
 561. Chase orders are treated as execution/provenance behavior and never receive standalone alpha status without separately proven economics;
 562. protocol-change ledger includes OI-cap, margin, leverage, growth-mode, deployer-fee, funding, order-cap, PM and order-type revisions;
 563. V6.9 reports constraint occupancy/binding and rule-version coverage alongside PnL so improvements caused only by an unavailable rule regime cannot be claimed;
-564. all V6.9 additions remain paper/read-only and cannot authorize signed actions, live Chase/TWAP orders, private keys or user-PC services.
+564. all V6.9 additions remain paper/read-only and cannot authorize signed actions, live Chase/TWAP orders, private keys or user-PC services;
+565. V6.10 treats direct options-volatility relative value as a distinct candidate family from options-as-context;
+566. every option candidate uses point-in-time instrument metadata, executable quotes, settlement semantics, fee state and margin/account model;
+567. option mark prices and mark IV cannot substitute for executable bid/ask PnL;
+568. options collection uses COLD/WARM/HOT tiers and full depth is reserved for economically relevant candidate legs;
+569. volatility-surface evidence stores fit quality, quote width, freshness and calibration universe;
+570. arbitrage-free surface claims require explicit relevant no-butterfly/calendar checks;
+571. IV-versus-RV candidates cannot assume a persistent positive volatility risk premium guarantees profitable short volatility;
+572. short-vol candidates include explicit jump/tail, liquidity and hedge/funding stress;
+573. calendar/skew/butterfly candidates account for every executable leg and residual greek exposure;
+574. delta-hedging research compares clock-based and transaction-cost-aware hedge-band baselines;
+575. option hedge PnL includes spread, slippage, fees, funding/basis and residual-delta risk;
+576. option PnL attribution separates premium, delta hedge, gamma, theta, vega/surface, fees/funding and directional residual;
+577. a volatility edge is rejected when profitability is primarily unintended directional exposure;
+578. options margin/capacity uses historical venue/account rules when available or conservative scenario margin labeled uncertain;
+579. current portfolio-margin benefits cannot be back-applied to unavailable historical/account states;
+580. option/HIP-4/perp relative value requires exact underlying, threshold, expiry and settlement-rule alignment;
+581. options-implied HIP-4 probabilities use only point-in-time option surfaces available before the decision;
+582. executable surface-arbitrage claims require a realizable multi-leg portfolio after bid/ask, fees, margin, settlement basis and legging risk;
+583. Chase economic research compares static ALO, timeout/cancel-replace, Chase/CHASE_LIKE, IOC/taker and NO_TRADE on equivalent causal opportunities;
+584. Chase benchmark reports fill probability, repricing/queue uncertainty, completion, partial fills, adverse markout and missed-alpha cost;
+585. insufficient historical Chase repricing/queue evidence produces UNMEASURABLE rather than optimistic maker certification;
+586. triangular/graph arbitrage remains inside the route graph/Relative Value architecture unless a new independent economic mechanism is proven;
+587. stablecoin quote-basis remains within Collateral Risk/Relative Value unless independent evidence justifies separation;
+588. HLP/vault-flow observations remain Copy-Vault/Backstop context until they demonstrate incremental OOS predictive value;
+589. public generic AI, sentiment, grid, martingale, indicator and Kelly implementations do not become first-class edge modules merely through prevalence;
+590. V6.10 records corpus saturation as declining novel-mechanism yield rather than claiming exhaustive coverage of all public bots;
+591. all V6.10 additions remain paper/read-only and cannot introduce live option orders, signed Chase actions, private keys or user-PC services.
 
 ## Non-goals
 
@@ -8585,7 +8941,10 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10 modules without scoped evidence gates;
+- treat option mark IV/mark price as executable fills;
+- assume positive IV-RV implies profitable short volatility;
+- credit Chase with exact maker queue economics when historical repricing/queue evidence is unavailable;
 - call API-capped wallet history complete merely because a request returned successfully;
 - apply portfolio-margin capital efficiency to a historical/account mode where it was unavailable;
 - infer full trigger coverage from a wallet subset;
