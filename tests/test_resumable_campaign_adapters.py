@@ -136,4 +136,23 @@ def test_materialization_failure_blocks_economic_run(tmp_path):
     )
     assert out.status == "FAILED"
     assert out.payload["reason"] == "dataset_materialization_failed"
-    assert len(calls) == 1
+    assert len(calls) == 1def test_economic_materialization_and_backtest_run_in_same_unit(tmp_path):
+    calls=[]
+    class Result:
+        returncode=0
+        stdout='ok'
+        stderr=''
+    def runner(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+    workspace=tmp_path/'economic'
+    out=run_one_unit(
+        context('backtest', workspace_root=str(workspace)),
+        runner=runner,
+    )
+    assert out.status=='COMPLETE'
+    assert out.progressed is True
+    assert len(calls)==2
+    assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
+    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert (workspace/'.alina_campaign_materialized').is_file()
