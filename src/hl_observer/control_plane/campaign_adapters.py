@@ -148,7 +148,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             "--collection-run-id",
             run_id,
             "--max-vaults",
-            str(_bounded_int(ctx.partition.get("max_vaults"), 20, 1, 100)),
+            str(_bounded_int(ctx.partition.get("max_vaults"), 10, 1, 100)),
             "--vault-shard-count",
             str(_bounded_int(ctx.partition.get("vault_shard_count"), 1, 1, 20)),
             "--vault-shard-index",
@@ -383,6 +383,17 @@ def run_one_unit(
 
         if returncode != 0:
             payload = _failure_payload(cmd, cp)
+            combined = (stdout + "\n" + stderr).lower()
+            if (
+                ctx.kind in {"replay", "backtest", "module_pnl_proof"}
+                and "no safe shards match the selection" in combined
+            ):
+                payload["status"] = "UNAVAILABLE"
+                payload["reason"] = "no_safe_dataset_v2"
+                payload["failure_category"] = "DATA_AVAILABILITY"
+                payload["phase"] = phase_name
+                payload["phases"] = phases
+                return AdapterResult("UNAVAILABLE", _digest(payload), payload, False)
             if phase_name == "materialize_safe_v2":
                 payload["reason"] = "dataset_materialization_failed"
             payload["phase"] = phase_name
