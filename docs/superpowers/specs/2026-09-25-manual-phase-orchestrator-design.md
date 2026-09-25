@@ -7767,6 +7767,347 @@ High-signal support for V6.10 includes:
 - **Hyperliquid official Chase documentation/announcement:** Chase is a native post-only repricing mechanism and therefore belongs in Execution Alpha benchmarking, not strategy alpha.
 
 
+
+### Profitability Convergence V6.11 — event identity and feed semantics
+
+The corpus red-team found one remaining cross-cutting failure mode capable of corrupting several modules simultaneously: **treating exchange messages as if one row always equals one independent market event and as if similarly named fields have identical semantics across venues**.
+
+V6.11 introduces a source-semantic contract before any normalized event can reach Hawkes/OFI, Lead-Lag, Forced-Flow, execution simulation or PnL accounting.
+
+### Canonical event identity
+
+Every raw/normalized event carries, where available:
+
+- venue;
+- market / canonical instrument id;
+- source channel;
+- source message/event type;
+- source-native unique id;
+- parent/aggregate id;
+- first/last child trade ids where provided;
+- order id / client order id where relevant;
+- source sequence/update id;
+- block/transaction index where relevant;
+- exchange timestamp;
+- local receive monotonic timestamp;
+- ingest session / stream epoch;
+- raw payload hash;
+- live/backfill/archive provenance.
+
+A normalized row never invents an id when the source provides none. It instead uses an explicitly weaker composite identity with collision risk recorded.
+
+### Trade and sweep de-fragmentation
+
+Different trade feeds represent different event grains.
+
+For Binance futures, official aggregate-trade semantics group market trades associated with **one taker order** in the aggregation window and expose:
+
+- aggregate trade id;
+- first raw trade id;
+- last raw trade id;
+- buyer-maker flag.
+
+Therefore:
+
+- an `aggTrade` row is not treated as one arbitrary raw match;
+- `firstTradeId..lastTradeId` is preserved;
+- raw trades and aggTrades for the same venue/time cannot both contribute full notional to the same signal without explicit de-overlap;
+- a market sweep represented by several child fills is clustered before event-count/Hawkes calibration when the source semantics support that reconstruction;
+- sweep fragmentation sensitivity is reported for event-intensity features.
+
+Public crypto Hawkes research shows that sub-millisecond child-fill fragmentation can severely distort goodness-of-fit and apparent self-excitation. Sweep aggregation therefore becomes a mandatory challenger for Hawkes/event-intensity research, not an optional cosmetic cleanup.
+
+### Aggressor / maker-side semantics
+
+Every venue adapter declares the exact meaning of its side fields.
+
+Examples:
+
+- Binance `isBuyerMaker=true` means the buyer supplied liquidity, so the **aggressor is sell**;
+- feeds that expose `side=buy` as taker/aggressor buy are normalized differently;
+- private order-side fields describe the user's order direction and must not automatically be reused as public aggressor side.
+
+Canonical fields:
+
+- `order_side`;
+- `aggressor_side`;
+- `maker_side`;
+- `liquidity_role`;
+- `side_semantics_source`.
+
+If aggressor side cannot be determined, use `UNKNOWN`; never guess from price movement.
+
+### Duplicate and replay idempotency
+
+Retries, reconnect snapshots, archive overlaps and REST gap repair can legitimately deliver the same event more than once.
+
+Every durable event family defines an idempotency key.
+
+Examples:
+
+- venue + symbol + native trade id;
+- venue + symbol + aggregate-trade id;
+- venue + oid + fill/trade id;
+- block + transaction/event index where stable.
+
+Requirements:
+
+- duplicate ingestion is safe;
+- an event is economically accounted once;
+- failed validation before commit does not poison the key for a later valid retry;
+- repaired/backfilled events follow the same canonical normalization path as live events;
+- source provenance distinguishes `LIVE / BACKFILL / ARCHIVE / REPAIR`;
+- eventual-dedup storage cannot be queried as though duplicates are already absent.
+
+### Gap repair without double counting
+
+For streams with monotonic ids/sequence ranges:
+
+1. detect gap;
+2. quarantine affected derived state;
+3. repair only through a compatible source;
+4. mark repaired events as backfill/repair;
+5. deduplicate overlap;
+6. rebuild dependent features from the last certified checkpoint;
+7. return to `LIVE` only after invariants pass.
+
+Large unrecoverable gaps remain explicit evidence gaps rather than being bridged by interpolation.
+
+### Order-book reconstruction state machine
+
+Each venue has a source-specific book synchronizer.
+
+Canonical state:
+
+`EMPTY -> SNAPSHOT_LOADING -> CATCHING_UP -> LIVE -> GAP/CHECKSUM_FAIL/STALE -> RECOVERING -> LIVE`.
+
+Per venue define:
+
+- snapshot source;
+- delta sequence fields;
+- inclusive/exclusive sequence rules;
+- duplicate/repeated-update handling;
+- checksum rule if available;
+- reset/new-stream semantics;
+- maximum buffered age/count while snapshot loads.
+
+Book-dependent signals run only on `LIVE` certified state.
+
+A plausible BBO after a sequence gap does not make the book valid.
+
+### Venue-specific sequence semantics
+
+Do not create one generic sequence rule for all venues.
+
+Adapters preserve native semantics such as:
+
+- Binance futures update ranges/previous-update linkage;
+- Bybit snapshot/delta update identifiers and reset semantics;
+- OKX `seqId/prevSeqId` and checksum where available;
+- Hyperliquid block/source ordering and L2/L4 semantics.
+
+The normalized schema may expose a common continuity state, but native ids remain available for audit.
+
+### Crossed / impossible book invariants
+
+After every applied snapshot/delta where applicable, test:
+
+- best bid < best ask unless the venue explicitly permits locked/crossed transitional state;
+- positive finite price/size;
+- sorted levels;
+- no negative depth;
+- tick/lot validity where source metadata permits;
+- checksum/sequence continuity;
+- timestamp non-regression within documented tolerance.
+
+Violations quarantine the book rather than feeding a strategy.
+
+### Stream epoch / reconnect identity
+
+A reconnect may restart source ids or deliver a new snapshot epoch.
+
+Persist:
+
+- connection id;
+- source session/epoch;
+- reconnect reason;
+- last certified id before disconnect;
+- first id after reconnect;
+- overlap/gap classification.
+
+Never compare sequence ids across epochs unless the venue explicitly guarantees continuity.
+
+### Clock-quality envelope
+
+Cross-venue causality uses timestamp uncertainty, not timestamp values alone.
+
+For each feed/source record:
+
+- exchange timestamp resolution;
+- local monotonic receive timestamp;
+- wall-clock receive timestamp;
+- clock-sync source/status where relevant;
+- observed offset/drift estimate;
+- network/collector jitter estimate.
+
+Lead-Lag/latency claims require:
+
+`measured_lead > combined_timing_uncertainty`.
+
+If not, classify as `TIMING_UNRESOLVED`.
+
+Wall-clock adjustments/NTP steps cannot reorder already captured monotonic receive events.
+
+### Contract/payoff normalization before cross-venue joins
+
+A ticker match is never sufficient.
+
+Canonical instrument mapping includes:
+
+- linear / inverse / quanto;
+- perpetual / dated future / spot / option / outcome;
+- contract multiplier;
+- base/quote/settlement currency;
+- collateral currency;
+- index/oracle;
+- expiry;
+- funding convention;
+- tick/lot;
+- notional conversion;
+- payoff direction.
+
+Cross-Venue/Relative-Value computes comparable USD/base notionals from the actual contract formula.
+
+Inverse or quanto contracts cannot be compared using raw `price × quantity` when that is not their payoff/notional definition.
+
+### Fee and rebate fill accounting
+
+Store fee economics at the **fill** level when available:
+
+- fee amount;
+- fee currency/token;
+- maker/taker role;
+- rebate sign;
+- builder/deployer component where exposed;
+- conversion rate and timestamp when fee currency differs from reporting currency.
+
+Rules:
+
+- negative fee/rebate remains negative cost rather than being absolute-valued;
+- fee-token conversion uses point-in-time conversion, not today's price;
+- cumulative order fee is the exact sum of unique fill fees;
+- funding/borrow/transfer costs remain separate from trade fee attribution.
+
+### Exact decimal/fixed-point boundary
+
+Exchange numeric strings are parsed into exact decimal/fixed-point representation for:
+
+- price;
+- quantity;
+- fee;
+- funding;
+- PnL;
+- collateral/accounting state.
+
+Binary floating point may be used for statistical research after normalization, but it is not authoritative for order validity, fill notional or ledger reconciliation.
+
+### Fill-to-position reconciliation
+
+A fill-derived position and venue/account-state position are separate evidence streams.
+
+At reconciliation checkpoints compare:
+
+- expected position from unique fills;
+- reported clearinghouse/account position;
+- funding/ledger changes;
+- liquidation/ADL/system events;
+- transfers/borrow changes where relevant.
+
+A discrepancy creates `RECONCILIATION_GAP`.
+
+Do not invent a missing fill merely to force equality.
+
+Some venues can aggregate several position changes into one update or change position due to liquidation/ADL without an ordinary user-order update; adapters document these exceptions.
+
+### Archive / correction provenance
+
+Historical exchange datasets can be revised.
+
+For every durable source file/partition store:
+
+- source URL/path;
+- retrieval time;
+- size;
+- checksum;
+- source revision/changelog when available;
+- normalization schema version.
+
+If an upstream archive changes:
+
+- do not silently mutate a previously certified dataset;
+- create a new dataset version/manifest;
+- compare affected partitions;
+- invalidate dependent evidence only where necessary.
+
+### Event-family effective sample count
+
+One parent action can generate:
+
+- many child fills;
+- many trade rows;
+- many L2 deltas;
+- multiple venue echoes.
+
+Effective sample counts use causal/event clusters, not raw message rows.
+
+This applies to:
+
+- Hawkes;
+- forced liquidations;
+- TWAP slices;
+- metaorders;
+- order sweeps;
+- cross-venue propagation.
+
+### Data-semantic regression fixtures
+
+Each native collector/normalizer keeps small golden fixtures covering:
+
+- one valid trade;
+- duplicate trade;
+- gap + repair;
+- snapshot + overlapping deltas;
+- reconnect/new epoch;
+- ambiguous/unknown side;
+- aggregate/sweep event;
+- partial fill;
+- negative maker rebate;
+- fee in non-reporting currency;
+- contract multiplier/inverse notional;
+- malformed/invalid precision;
+- corrected archive row where a real case exists.
+
+A collector upgrade that changes normalized scientific output must explain why and invalidate/rebuild affected evidence.
+
+### V6.11 proof-report fields
+
+Relevant modules additionally report:
+
+- raw rows;
+- unique native events;
+- sweep/parent-event count;
+- duplicate rate;
+- repaired-gap count;
+- unrepaired-gap duration;
+- book LIVE coverage %;
+- checksum/sequence failures;
+- UNKNOWN-side fraction;
+- timing-unresolved fraction;
+- reconciliation-gap count;
+- archive/version hash;
+- effective independent event count.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -8941,7 +9282,35 @@ The following numbered items form the normative acceptance catalog. Each item is
 593. Hawkes/event-intensity, basket-dispersion and on-chain flow findings enter existing feature/relative-value layers unless independent OOS economics prove a new mechanism;
 594. on-chain exchange/bridge-flow features record source-label uncertainty and observation latency before Lead-Lag use;
 595. pre-execution/split-client-block information remains WATCHLIST/UNMEASURABLE while it requires infrastructure incompatible with the GitHub-only/no-user-PC constraint;
-596. future cloud-accessible pre-execution evidence may enter research only as read-only replayable data and must pass causality, latency and cost gates before promotion.
+596. future cloud-accessible pre-execution evidence may enter research only as read-only replayable data and must pass causality, latency and cost gates before promotion;
+597. V6.11 preserves source-native event identity and provenance before normalization;
+598. aggregate trades, raw trades and child fills cannot be double-counted as independent notional/events;
+599. Binance-style aggregate trade first/last raw trade ids and aggregate id are retained where available;
+600. Hawkes/event-intensity research compares sweep-defragmented event streams against raw-row baselines and reports fit sensitivity;
+601. aggressor side, maker side and user order side are distinct canonical fields with venue-specific source semantics;
+602. unknown aggressor side remains UNKNOWN and is never guessed from price direction;
+603. every fill/trade family has a durable idempotency key and duplicate ingestion cannot create duplicate PnL/volume;
+604. backfill/repair/live/archive records share normalization while retaining provenance;
+605. stream gaps quarantine dependent state until compatible repair and invariant checks complete;
+606. each venue uses its documented snapshot/delta/sequence/checksum contract rather than one generic book rule;
+607. book-dependent signals require LIVE certified book state and cannot use a plausible-looking post-gap cache;
+608. reconnect/new-stream epochs are explicit and native sequence ids are not compared across epochs without documented continuity;
+609. impossible/crossed/negative/unsorted/checksum-invalid books are quarantined according to venue semantics;
+610. timing-sensitive cross-venue claims include exchange timestamp resolution, local monotonic receive time and timing uncertainty;
+611. measured lead not exceeding combined timing uncertainty is TIMING_UNRESOLVED;
+612. cross-venue instrument equivalence includes linear/inverse/quanto payoff, multiplier, quote/settlement/collateral and notional conversion;
+613. raw ticker equality cannot establish economic equivalence;
+614. fill-level fee accounting preserves fee currency, maker/taker role and negative rebates;
+615. non-reporting-currency fees use point-in-time conversion for PnL;
+616. exact decimal/fixed-point values are authoritative for order validity, ledger and fill notional;
+617. fill-derived positions are reconciled against account/clearinghouse state without fabricating missing fills;
+618. liquidation/ADL/system ledger events are recognized as possible position changes outside ordinary order-fill streams;
+619. historical archive retrievals carry checksum/revision/schema manifests and upstream corrections create new dataset versions rather than silent mutation;
+620. effective sample counts cluster child fills/deltas/venue echoes into parent economic events where appropriate;
+621. native collector/normalizer golden fixtures include duplicate, gap/repair, reconnect, side semantics, aggregate sweep, partial fill, rebate and contract-normalization edge cases;
+622. collector changes that alter normalized scientific output trigger targeted evidence invalidation/rebuild;
+623. V6.11 reports raw rows versus unique/sweep/independent events, duplicate/gap rates, LIVE-book coverage, unknown-side/timing-unresolved and reconciliation gaps;
+624. all V6.11 additions remain read-only/paper and cannot introduce signed actions, private keys, user-PC services or live calibration orders.
 
 ## Non-goals
 
@@ -8951,7 +9320,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11 modules without scoped evidence gates;
 - treat option mark IV/mark price as executable fills;
 - assume positive IV-RV implies profitable short volatility;
 - credit Chase with exact maker queue economics when historical repricing/queue evidence is unavailable;
