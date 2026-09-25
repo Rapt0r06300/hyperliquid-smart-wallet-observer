@@ -128,7 +128,12 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             "--collection-run-id", run_id,
         ], out
 
-    workspace = Path(str(ctx.partition.get("workspace_root") or out / "workspace"))
+    workspace_configured = ctx.partition.get("workspace_root")
+    workspace = (
+        Path(str(workspace_configured))
+        if workspace_configured
+        else Path.cwd() / "campaign-workspaces" / ctx.campaign_id
+    )
     if ctx.kind == "replay":
         cmd = [
             py, "-m", "hl_observer.ops.v2_dataset_bridge", "materialize",
