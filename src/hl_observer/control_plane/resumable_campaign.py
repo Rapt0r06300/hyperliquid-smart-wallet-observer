@@ -149,13 +149,37 @@ def classify_failure(category: str) -> bool:
     return False
 
 
-def mark_continuation(m: CampaignManifest, reason: str, *, progressed: bool, next_due_at: str | None = None) -> CampaignManifest:
+def mark_continuation(
+    m: CampaignManifest,
+    reason: str,
+    *,
+    progressed: bool,
+    next_due_at: str | None = None,
+    failure: bool = False,
+    now: str | None = None,
+) -> CampaignManifest:
     limits = StopLimits(**m.limits)
-    m.chunk_index += 1; m.attempts += 1
+    current = _parse_ts(now or _now())
+    m.chunk_index += 1
+    m.attempts += 1
     m.no_progress_count = 0 if progressed else m.no_progress_count + 1
-    if m.chunk_index >= limits.max_chunks or m.attempts >= limits.max_attempts or m.no_progress_count >= limits.max_no_progress:
-        return transition(m, "FAILED", "stop_limit_reached")
-    transition(m, "CONTINUATION_REQUIRED", reason); m.next_due_at = next_due_at; m.lease = None; return m
+    m.consecutive_failures = m.consecutive_failures + 1 if failure else 0
+    wall_clock_s = max(0.0, (current - _parse_ts(m.created_at)).total_seconds())
+    stop = (
+        m.chunk_index >= limits.max_chunks
+        or m.attempts >= limits.max_attempts
+        or m.no_progress_count >= limits.max_no_progress
+        or m.consecutive_failures >= limits.max_consecutive_failures
+        or wall_clock_s >= limits.max_wall_clock_s
+        or current >= _parse_ts(m.expires_at)
+    )
+    current_text = current.isoformat().replace("+00:00", "Z")
+    if stop:
+        return transition(m, "FAILED", "stop_limit_reached", now=current_text)
+    transition(m, "CONTINUATION_REQUIRED", reason, now=current_text)
+    m.next_due_at = next_due_at
+    m.lease = None
+    return m
 
 
 def mark_terminal(m: CampaignManifest, status: str, reason: str) -> CampaignManifest:
