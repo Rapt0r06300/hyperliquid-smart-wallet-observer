@@ -1111,7 +1111,7 @@ def main() -> int:
             Path(args.output),
             duration_s=max(1.0, float(args.duration_s)),
             collector_version=str(args.collector_version),
-            max_vaults=max(1, min(int(args.max_vaults), CV.MAX_VAULTS_PUBLICS)),
+            max_vaults=max(1, int(args.max_vaults)),
             vault_shard_count=max(1, int(args.vault_shard_count)),
             vault_shard_index=int(args.vault_shard_index),
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
