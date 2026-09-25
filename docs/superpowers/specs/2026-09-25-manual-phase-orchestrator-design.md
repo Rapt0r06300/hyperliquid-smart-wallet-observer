@@ -7192,6 +7192,247 @@ This layer is grounded primarily in current official Hyperliquid documentation f
 Public bot/framework sources only determined which edge cases deserved inspection; official venue rules control final semantics.
 
 
+
+### Profitability Convergence V6.9 — protocol-mechanics edge cases
+
+V6.9 converts newly verified protocol mechanics into explicit point-in-time state so they cannot silently distort PnL, capacity or forced-flow research.
+
+### Open-interest-cap constraint lane
+
+Hyperliquid exposes a read-only `perpsAtOpenInterestCap` query, scoped by DEX.
+
+Maintain:
+
+- whether the instrument is currently at OI cap;
+- DEX-level and per-asset cap state where documented;
+- cap type: notional / size;
+- current OI;
+- cap value when available;
+- rejection/cancel counts caused by cap;
+- distance/time since entering cap state;
+- time since leaving cap state.
+
+Candidate hypotheses:
+
+- one-sided positioning constraint;
+- basis/funding distortion near cap;
+- asymmetric rejection flow;
+- post-cap-release normalization.
+
+Rules:
+
+- OI cap is a market constraint, not automatically an alpha signal;
+- `positionIncreaseAtOpenInterestCapRejected`, `positionFlipAtOpenInterestCapRejected`, `tooAggressiveAtOpenInterestCapRejected` and `openInterestIncreaseRejected` remain distinct;
+- HIP-3 cap configuration is versioned per deployer/DEX.
+
+### Growth-mode / deployer-fee exactness
+
+HIP-3 fee economics depend on:
+
+- user fee tier;
+- maker/taker rate;
+- referral/staking discount where applicable;
+- deployer fee scale;
+- aligned quote-token treatment;
+- growth-mode state.
+
+Growth mode and deployer fee scale materially alter all-in fees, rebates, volume contribution and user action-limit contribution.
+
+Requirements:
+
+- version `growthMode`, deployer fee scale and change timestamp;
+- do not use a validator-operated-perp fee schedule on HIP-3 without adjustment;
+- do not credit a maker rebate or discount unavailable to the modeled account;
+- growth-mode cooldown/rule changes are treated as venue-rule events.
+
+### Contract-capacity limits
+
+Point-in-time contract specifications may impose maximum order values.
+
+For validator-operated Hyperliquid perps, current documentation links maximum market-order value to max-leverage bucket and sets maximum limit-order value as a multiple of the market-order cap.
+
+The capacity engine therefore takes:
+
+`min(certified_depth_capacity, venue_order_cap, margin_capacity, risk_capacity)`.
+
+If a desired notional exceeds the venue cap:
+
+- split only if allowed by strategy timing/alpha half-life/action limits;
+- otherwise reduce capacity;
+- never assume one impossible giant order.
+
+### Funding mechanics exactness
+
+For standard Hyperliquid perps, current documentation states:
+
+- funding is paid hourly;
+- the 8-hour formula is converted to hourly payment;
+- premium is sampled every 5 seconds and averaged over the hour;
+- funding uses a fixed interest component plus clamped premium component;
+- funding is capped per hour;
+- payment notional uses **oracle price**, not mark price;
+- impact bid/ask prices are derived at a contract-specific impact notional.
+
+Current impact-notional defaults documented for validator-operated perps include larger impact notional for BTC/ETH than other assets.
+
+Store/version:
+
+- funding formula version;
+- sampling cadence;
+- funding cap;
+- interest component;
+- impact notional;
+- oracle source;
+- next settlement time;
+- HIP-3-specific premium formula/multiplier when applicable.
+
+Predicted funding research must reconstruct only from inputs knowable before settlement.
+
+### Quanto / collateral-basis nuance
+
+Validator-operated Hyperliquid perps can reference a USDT-denominated oracle while collateral/PnL accounting is in USDC without applying a live USDC/USDT conversion in the contract itself.
+
+Therefore Relative Value and collateral-risk reports must distinguish:
+
+- underlying price basis;
+- USDT reference;
+- USDC collateral;
+- USDC/USDT market basis;
+- collateral haircut/portfolio-margin effect.
+
+Do not call such structures perfectly fiat-neutral during stablecoin stress.
+
+### Liquidation mechanics exactness
+
+Forced-Flow V2 must version the actual liquidation rules.
+
+Current documented behavior includes:
+
+- maintenance margin depends on maximum leverage/margin tier;
+- positions are first attempted against the book;
+- sufficiently large liquidatable positions may initially send only a fraction of the position to market;
+- after partial liquidation, a cooldown can alter subsequent liquidation sizing;
+- cross and isolated positions use different margin-available definitions;
+- margin tiers alter maintenance leverage at larger notional.
+
+Store:
+
+- liquidation-rule version;
+- cross/isolated/portfolio-margin mode;
+- margin tier;
+- threshold for partial-liquidation treatment;
+- initial liquidation fraction;
+- cooldown duration;
+- actual book liquidation fraction;
+- residual position;
+- backstop/ADL transition.
+
+Current values are versioned inputs, never timeless constants.
+
+### ADL-risk state
+
+Hyperliquid ADL ranks opposite-side profitable traders using profitability/leverage-related state.
+
+Where the required public/account evidence is available, paper risk can estimate:
+
+- whether a position lies in a high-ADL-risk cohort;
+- unrealized PnL;
+- effective leverage;
+- current ADL environment / cascade severity.
+
+Rules:
+
+- ADL probability is not invented when queue/rank inputs are unavailable;
+- forced close due to ADL is a distinct execution/risk event;
+- ADL risk affects capacity/risk, not raw signal alpha.
+
+### Portfolio-margin liquidation mechanics
+
+Portfolio margin is not just a fee/capital-efficiency toggle.
+
+Version where applicable:
+
+- eligible collateral;
+- LTV;
+- liquidation threshold;
+- borrow cap;
+- supply cap;
+- borrow oracle;
+- minimum borrow offset;
+- portfolio maintenance requirement;
+- portfolio liquidation value;
+- portfolio margin ratio.
+
+Current documentation indicates liquidation eligibility is based on a portfolio margin ratio threshold and that liquidation ordering across spot borrows/perps may depend on oracle update ordering.
+
+Therefore:
+
+- do not assume deterministic liquidation order under PM;
+- capital-efficiency simulations include borrow/collateral constraints;
+- PM carry/relative-value reports include collateral price and borrow-cap stress.
+
+### TWAP V2 mechanics
+
+Scheduled Flow research incorporates current native TWAP behavior when applicable:
+
+- running time can span from minutes to multiple days;
+- child interval has a documented lower bound;
+- child size may be randomized;
+- child orders have a bounded slippage tolerance;
+- optional trigger price can activate the parent based on mark price;
+- optional max/min price can terminate the parent;
+- minimum parent notional applies.
+
+For each observed/replayed TWAP state, preserve whichever fields are actually exposed by the source.
+
+Do not infer private/unstored parent constraints when the public read-only source omits them.
+
+### Chase-order provenance
+
+The Hyperliquid frontend now offers Chase orders that repeatedly reprice a post-only order near the touch and are browser-managed.
+
+Treat Chase-like order activity as:
+
+- execution/order-management behavior;
+- possible flow-provenance feature;
+- repeated ALO modify/cancel activity.
+
+Do not create a standalone Chase alpha module.
+
+If order-level data cannot reliably identify Chase provenance, label it `CHASE_LIKE` rather than exact Chase.
+
+### Protocol-change event ledger expansion
+
+Add point-in-time events for:
+
+- OI cap change;
+- margin table change;
+- leverage change;
+- growth-mode change;
+- deployer-fee change;
+- funding formula/multiplier change;
+- order-value cap change;
+- portfolio-margin parameter change;
+- TWAP/order-type feature change.
+
+Every affected replay window references the rule revision.
+
+### V6.9 proof-report fields
+
+Relevant lanes additionally report:
+
+- OI-cap occupancy %;
+- OI-cap rejection counts;
+- fee/growth-mode version coverage;
+- order-cap binding frequency;
+- funding formula/input coverage;
+- oracle-vs-mark funding-notional consistency;
+- partial-liquidation/cooldown events;
+- ADL events/unknown-ADL-risk fraction;
+- PM collateral/LTV/borrow-cap coverage;
+- TWAP parent-rule coverage.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -8311,7 +8552,30 @@ The following numbered items form the normative acceptance catalog. Each item is
 538. venue-rule changes trigger bounded regression fixtures for normalization, TIF, reduce-only, triggers, OI caps, margin tiers, delisting, self-trade, fees and priority behavior;
 539. promoted execution-sensitive lanes report invalid-order rate, normalization loss, unknown status, history truncation, wallet coverage, reconnect repair, predicted-funding coverage, metadata-version coverage and margin mode;
 540. material UNKNOWN/truncated rule or coverage state prevents a lane from being labeled fully measured;
-541. all V6.8 additions remain GitHub-hosted/read-only and cannot require a user-PC node, signed action, private key or live calibration order.
+541. all V6.8 additions remain GitHub-hosted/read-only and cannot require a user-PC node, signed action, private key or live calibration order;
+542. perpsAtOpenInterestCap state is collected point-in-time where relevant and OI-cap constraints are not inferred solely from rejection counts;
+543. OI-cap rejection/cancel subtypes remain distinct and may form a constrained-flow hypothesis only after OOS proof;
+544. HIP-3 notional/size cap and deployer configuration are versioned by DEX/asset;
+545. HIP-3 growth mode, deployer fee scale and aligned-collateral effects are included in fee economics;
+546. venue order-value caps participate in capacity calculations before paper orders are admitted;
+547. oversized candidate orders are split only when timing, action-limit and alpha-half-life constraints permit;
+548. funding replay versions formula, sampling cadence, cap, interest component, impact notional and settlement timing;
+549. funding payments use the correct point-in-time oracle/notional convention rather than mark-price substitution;
+550. standard-perp and HIP-3 funding-premium formulas are not silently interchanged;
+551. USDT-referenced oracle and USDC collateral/PnL basis are treated as residual stablecoin risk where applicable;
+552. liquidation replay versions large-position partial-liquidation thresholds/fractions and cooldown rules;
+553. cross, isolated and portfolio-margin liquidation mechanics are not collapsed into one liquidation-price model;
+554. margin-tier-dependent maintenance requirements are used for large positions where applicable;
+555. ADL is modeled as a distinct forced execution/risk route and not merged with book liquidation/backstop fills;
+556. unavailable ADL-rank inputs remain UNKNOWN rather than assigning synthetic exact queue rank;
+557. portfolio-margin simulations version LTV, liquidation threshold, borrow/supply caps, borrow oracle and margin-ratio mechanics where relevant;
+558. portfolio-margin liquidation order across components is not assumed deterministic when protocol/oracle sequencing makes it path dependent;
+559. current native TWAP duration, child interval, randomization, slippage, trigger and max/min stop mechanics are versioned where observable;
+560. unexposed TWAP parent constraints are not inferred from slice fills alone;
+561. Chase orders are treated as execution/provenance behavior and never receive standalone alpha status without separately proven economics;
+562. protocol-change ledger includes OI-cap, margin, leverage, growth-mode, deployer-fee, funding, order-cap, PM and order-type revisions;
+563. V6.9 reports constraint occupancy/binding and rule-version coverage alongside PnL so improvements caused only by an unavailable rule regime cannot be claimed;
+564. all V6.9 additions remain paper/read-only and cannot authorize signed actions, live Chase/TWAP orders, private keys or user-PC services.
 
 ## Non-goals
 
@@ -8321,7 +8585,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9 modules without scoped evidence gates;
 - call API-capped wallet history complete merely because a request returned successfully;
 - apply portfolio-margin capital efficiency to a historical/account mode where it was unavailable;
 - infer full trigger coverage from a wallet subset;
