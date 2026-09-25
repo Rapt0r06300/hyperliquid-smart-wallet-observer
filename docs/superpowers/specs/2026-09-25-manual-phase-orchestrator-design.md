@@ -2221,6 +2221,550 @@ The research program explicitly incorporates ideas from high-signal teaching/res
 External curriculum never overrides Alina's own OOS/forward results.
 
 
+## Module Optimization Architecture V3 — edge portfolios, challengers, and faster proof
+
+The three active modules are not implemented as single monolithic strategies.
+
+Each module is an **edge portfolio** containing multiple independently testable mechanisms that share certified evidence and execution infrastructure but retain separate attribution, validation, lifecycle, and failure scope.
+
+The objective is to maximize robust after-cost daily paper PnL by increasing:
+
+- true independent opportunity breadth;
+- information quality per opportunity;
+- execution quality;
+- capacity utilization;
+- capital recycling;
+- speed of rejecting weak hypotheses;
+- speed of detecting edge decay.
+
+Optional sophistication defaults to G4 `BLOCK_PROMOTION` or `MEASURE_ONLY`. It must not become G0 merely because it is desirable.
+
+### Shared quantitative services
+
+All three modules should reuse common deterministic services rather than implementing inconsistent private versions.
+
+Shared services include:
+
+1. **certified evidence/feature tape service** — immutable raw-linked OFI, microprice, depth/capacity, residual, liquidation/OI/funding and event indices;
+2. **efficient-price service** — robust causal multi-venue reference and venue residuals;
+3. **cost/TCA service** — fees, spread, delay, market impact, slippage, funding, hedge/legging and missed-opportunity cost;
+4. **execution simulator** — taker, marketable-limit and queue-aware maker fills from certified L2;
+5. **regime/change service** — volatility/liquidity state and causal change-point indicators;
+6. **edge registry/experiment ledger** — hypothesis lineage, trial count, holdout state and promotion status;
+7. **allocation service** — independent-edge correlation, capital/capacity constraints and module-level opportunity selection.
+
+A shared service failure propagates only to strategy paths that actually depend on it.
+
+### Edge lifecycle
+
+Every edge candidate has a durable lifecycle:
+
+`DISCOVERED -> BASELINE -> TRAIN_CANDIDATE -> CHALLENGER -> SHADOW -> OOS_CANDIDATE -> PROMOTED -> DECAYING -> RETIRED`
+
+Rules:
+
+- `DISCOVERED` ideas cannot affect economic proof.
+- `BASELINE` defines the simplest economically interpretable comparator.
+- `TRAIN_CANDIDATE` may be searched/tuned only inside TRAIN/validation.
+- `CHALLENGER` has frozen parameters and competes against the current champion.
+- `SHADOW` generates paper decisions without replacing the champion.
+- `OOS_CANDIDATE` consumes untouched chronological evidence.
+- `PROMOTED` becomes eligible for the module edge portfolio.
+- `DECAYING` remains auditable but receives reduced/no new capital while revalidation occurs.
+- `RETIRED` remains in the ledger and cannot silently return as a fresh hypothesis.
+
+Promotion and demotion are scoped to the edge. A bad challenger cannot disable the module champion.
+
+### Champion/challenger contract
+
+Each module keeps at least one simple champion/baseline whenever one has previously passed its proof contract.
+
+A challenger can replace or join the champion only when it demonstrates incremental value after:
+
+- costs;
+- capacity;
+- latency;
+- OOS/forward validation;
+- multiple-testing adjustment;
+- stress tests;
+- parameter sensitivity;
+- correlation with existing promoted edges.
+
+If a challenger fails, the champion continues unaffected.
+
+If a promoted edge later decays, demotion/rollback is local to that edge and does not invalidate unrelated historical proof.
+
+### Effective breadth, not raw strategy count
+
+The system distinguishes **raw breadth** from **effective independent breadth**.
+
+Ten variants triggered by the same market shock and producing nearly identical PnL are not ten independent edges.
+
+Measure dependence using combinations of:
+
+- signal/event overlap;
+- return/PnL correlation;
+- leader/coin/venue overlap;
+- common market-factor exposure;
+- identical underlying shock cluster;
+- temporal overlap/holding-period overlap.
+
+Maintain an `effective_breadth` estimate and correlation clusters.
+
+The module optimizer seeks more **independent information opportunities**, not merely more parameter combinations.
+
+Grinold/Kahn-style breadth intuition may guide research, but raw asset/variant count must never be substituted for independent breadth.
+
+### Opportunity funnel and bottleneck attribution
+
+Every module publishes a causal opportunity funnel:
+
+`observed events -> evidence-safe candidates -> signal candidates -> net-edge candidates -> capacity-valid -> fill-valid -> admitted paper trades -> profitable trades`
+
+For every rejection record a normalized reason such as:
+
+- missing/unsafe evidence;
+- timing uncertainty;
+- weak signal;
+- structural basis;
+- fees;
+- spread;
+- slippage;
+- market impact;
+- latency decay;
+- insufficient capacity;
+- maker no-fill risk;
+- hedge/legging risk;
+- exposure/correlation limit;
+- regime mismatch;
+- stale edge/champion health.
+
+Research prioritization is driven by the dominant bottleneck.
+
+If 80% of candidates die because of fees, adding more signal features is lower priority than execution/route improvement.
+
+### Research-compute scheduler
+
+Large candidate searches use adaptive compute **inside TRAIN/validation only**.
+
+Permitted approaches include Successive Halving/ASHA/Hyperband-style resource allocation:
+
+1. give every predeclared candidate a small TRAIN/validation budget;
+2. eliminate clearly weak candidates early;
+3. allocate more GitHub compute to survivors;
+4. retain every attempted candidate/trial in the experiment ledger;
+5. freeze survivors before untouched OOS evaluation.
+
+Early elimination may use cheap fidelity levels such as:
+
+- fewer TRAIN days;
+- fewer coins;
+- lower-depth derived feature tapes;
+- fewer parameter combinations;
+- smaller bootstrap budget.
+
+A low-fidelity screen can reject a candidate but cannot prove economic success.
+
+OOS/forward evidence is never used by the resource allocator to tune or resurrect candidates.
+
+### Exploration floor
+
+Adaptive prioritization must not permanently starve discovery.
+
+Maintain a fixed exploration budget for:
+
+- new coins;
+- low-observation vaults;
+- new venue pairs;
+- under-sampled regimes;
+- novel hypothesis families.
+
+This prevents the bot from becoming trapped around yesterday's winners.
+
+Research/collection exploration priority is separate from paper capital allocation.
+
+### Forecast ensemble and shrinkage
+
+When several independently validated signals predict the same economic target, compare:
+
+- best single champion;
+- equal-weight combination;
+- shrinkage-to-equal combination;
+- sparse/regularized combination;
+- regime-conditioned combination.
+
+Complex combination weights must beat simple equal/shrunk baselines OOS.
+
+Signal weights are shrunk when estimation uncertainty is high.
+
+Highly correlated variants are clustered/orthogonalized or receive reduced marginal weight.
+
+An ensemble cannot multiply PnL by counting the same underlying event several times.
+
+### Selective prediction / no-trade as a first-class action
+
+Every model supports `NO_TRADE`.
+
+Admission should depend on a conservative after-cost edge estimate such as a lower confidence bound or equivalent uncertainty-aware score.
+
+A high raw prediction with high uncertainty may be rejected.
+
+The system optimizes:
+
+- PnL;
+- opportunity quality;
+- capital efficiency;
+
+not prediction accuracy alone.
+
+### Anytime-valid monitoring
+
+Where dependence assumptions can be handled defensibly, research may use sequential/anytime-valid confidence sequences or e-value-style monitoring for a **frozen** challenger.
+
+This permits frequent health checks without ordinary repeated-peeking inflation.
+
+Requirements:
+
+- the hypothesis/metric is frozen before monitoring;
+- event dependence/clustering is handled conservatively;
+- optional stopping validity is documented for the chosen method;
+- sequential evidence does not replace causal OOS/forward separation;
+- module minimum economic/readiness requirements remain in force.
+
+If these assumptions cannot be established, use the ordinary frozen-horizon proof.
+
+### Edge-decay and change-point monitoring
+
+Promoted edges are monitored for causal degradation using simple diagnostics first:
+
+- rolling markout/net-edge confidence;
+- opportunity/fill-rate shift;
+- cost/latency shift;
+- parameter sensitivity;
+- regime mix;
+- CUSUM/Page-Hinkley-style alarms;
+- Bayesian online change-point detection as an optional challenger.
+
+A detected break changes only the affected edge state to `DECAYING`/revalidation.
+
+The collection system remains active and unrelated edges continue.
+
+### Implementation-shortfall attribution
+
+Every filled paper decision receives transaction-cost attribution from a common arrival/decision benchmark.
+
+Decompose at least:
+
+- explicit fees;
+- half/full spread paid/captured;
+- delay cost between decision and order;
+- market impact/depth slippage;
+- adverse-selection markout;
+- funding/holding cost;
+- hedge/legging cost;
+- missed-opportunity/no-fill cost for passive policies.
+
+This separates:
+
+- **signal alpha**;
+- **execution alpha/cost**;
+- **sizing/capacity effect**.
+
+A module cannot claim the signal improved when the result actually came only from changed sizing or routing.
+
+### Marginal-notional optimizer
+
+Fixed notional ladders remain diagnostics, but the optimizer may derive a continuous/piecewise `net_pnl(notional)` curve from certified depth and costs.
+
+Choose paper size where marginal expected net value remains positive, subject to:
+
+- approved paper capital;
+- simultaneous entry/exit capacity;
+- concentration;
+- drawdown;
+- hedge risk;
+- uncertainty shrinkage.
+
+This allows a very strong liquid opportunity to use more paper capital while stopping before extra size destroys the edge.
+
+The optimizer cannot extrapolate beyond observed certified depth.
+
+### Risk-constrained growth allocation
+
+At the edge-portfolio level, sizing may compare:
+
+- conservative fixed fractions;
+- volatility/edge-confidence scaling;
+- fractional Kelly;
+- drawdown-constrained growth optimization.
+
+Growth-optimal methods are optional G4 hypotheses.
+
+No optimizer may override paper-capital, capacity, concentration or drawdown limits.
+
+Risk-constrained formulations are preferred over raw full-Kelly sizing.
+
+### Effective sample size and event clustering
+
+Economic proof tracks both raw trade count and **effective independent event count**.
+
+Cluster observations caused by the same:
+
+- metaorder;
+- liquidation cascade;
+- common cross-venue shock;
+- repeated child fills;
+- overlapping holding interval.
+
+Bootstrap/confidence procedures should operate at an appropriate block/event-cluster level.
+
+A cascade producing 40 fills cannot automatically become 40 independent confirmations.
+
+### Hierarchical/partial-pooling models
+
+When sparse per-entity samples are a bottleneck, optional hierarchical models may share statistical strength while preserving entity-specific behavior.
+
+Candidate hierarchies:
+
+- Copy-Vault: wallet -> coin -> direction -> regime;
+- Lead-Lag: venue pair -> coin -> regime -> horizon;
+- Cross-Venue: route -> coin -> order policy -> regime.
+
+Partial pooling must be frozen on TRAIN and prove incremental OOS value.
+
+Pooling cannot erase a known entity-specific failure or create synthetic OOS observations.
+
+### Copy-Vault V11 optimization layer
+
+Additional Copy-Vault edge hypotheses include:
+
+#### Originator-versus-follower network
+
+Build a causal wallet event graph.
+
+Measure which wallets consistently move/position **before**:
+
+- other high-quality wallets;
+- the multi-venue efficient price;
+- subsequent market order flow.
+
+A wallet that merely imitates other public leaders is downweighted.
+
+#### Trade-size surprise / conviction
+
+Normalize leader position/fill change by that wallet's own historical behavior, NAV and instrument liquidity.
+
+Test whether unusually high-conviction changes carry more follower-reproducible markout than routine fills.
+
+#### Metaorder phase classifier
+
+Estimate whether a leader event is:
+
+- initiation;
+- continuation;
+- terminal/cleanup.
+
+Early metaorder phases may have more residual information; terminal fills may have less.
+
+This classification must be causal and compete against simpler first-fill/confirmation baselines.
+
+#### Copyability frontier
+
+For each leader/cohort estimate net copyable edge as a function of:
+
+- observation latency;
+- follower notional;
+- book depth;
+- spread;
+- crowding/impact.
+
+This creates a `max_profitable_delay × max_profitable_size` frontier.
+
+Leaders can be skilled yet uncopyable; those cases are rejected for Copy-Vault.
+
+#### Hybrid follower exit
+
+Compare:
+
+- exact leader exit;
+- proportional leader reduce/close;
+- protective market-state exit;
+- time/decay stop.
+
+A hybrid exit can be promoted only if it improves follower-reproducible OOS PnL without using future leader behavior.
+
+### Lead-Lag V9 optimization layer
+
+Additional Lead-Lag hypotheses include:
+
+#### Microprice lead graph
+
+Build leader/lagger relationships using microprice/residual changes in addition to midpoint/trade returns.
+
+This can detect pressure before a visible mid-price move.
+
+#### Leader-consensus / disagreement state
+
+Measure whether several independent venues agree on direction while one lagger remains behind.
+
+Candidate features:
+
+- weighted leader vote;
+- residual dispersion;
+- consensus confidence;
+- venue disagreement entropy.
+
+High consensus plus one stale/lagging executable quote is a distinct hypothesis from a single-venue shock.
+
+#### Time-to-impact / hazard model
+
+Estimate the conditional distribution of lagger response time after a leader event.
+
+Use it to choose:
+
+- immediate taker;
+- maker attempt;
+- no-trade;
+- maximum holding time.
+
+The horizon becomes an economic decision variable rather than a fixed constant.
+
+#### Signal half-life versus execution latency
+
+Every candidate records expected alpha half-life.
+
+If:
+
+`observation_latency + decision_latency + expected_fill_latency >= alpha_half_life`
+
+the candidate is automatically rejected or routed to a faster execution mode.
+
+### Cross-Venue V8 optimization layer
+
+Additional Cross-Venue hypotheses include:
+
+#### Route auction
+
+For every certified dislocation, all eligible venue/order-type routes compete on the same event.
+
+Each route submits expected:
+
+- entry cost;
+- hedge cost;
+- exit cost;
+- fill probability;
+- non-atomic risk;
+- capacity;
+- residual convergence value.
+
+The paper engine chooses at most one capital-consistent winning route for that opportunity unless explicit split-routing is part of the frozen policy.
+
+#### Marginal route splitting
+
+Use the unified book to allocate notional incrementally to the next venue/price level only while marginal net edge remains positive.
+
+This is superior to treating the full order as one venue/one average price when multiple venues provide economically compatible liquidity.
+
+#### Staleness-versus-information classifier
+
+A venue residual can arise because:
+
+- the quote is stale;
+- local liquidity was swept;
+- the venue incorporated unique information;
+- structural basis changed.
+
+Classify these mechanisms causally using quote age, trade flow, consensus movement and book refill behavior.
+
+Only residual classes with held-out convergence edge are tradable.
+
+#### Resilience-aware entry timing
+
+Estimate spread/depth replenishment after local shocks.
+
+Compare immediate entry versus short causal wait.
+
+Waiting is chosen only when expected improvement in execution exceeds lost residual alpha.
+
+### Three independent resource allocators
+
+Do not conflate three different optimization problems:
+
+1. **collection allocator** — what data deserves high-frequency resources;
+2. **research-compute allocator** — what hypotheses deserve more GitHub analysis budget;
+3. **paper-capital allocator** — what already-promoted edges deserve simulated capital.
+
+A promising TRAIN hypothesis may receive more research compute without receiving any OOS capital.
+
+A profitable edge may receive paper capital without causing the collector to stop exploring alternatives.
+
+### Fast/slow control loops
+
+Use separate causal cadences:
+
+**Fast loop**
+- feed health;
+- BBO/L2 state;
+- signal/execution admission;
+- capacity/latency;
+- paper decision.
+
+**Medium loop**
+- leader/route priority;
+- regime classification;
+- edge health;
+- exploration allocation.
+
+**Slow loop**
+- model/hypothesis promotion;
+- hyperparameter search;
+- multiple-testing review;
+- retirement/rearchitecture.
+
+Slow-loop research must never be able to rewrite fast-loop historical decisions.
+
+### Optimization dashboard
+
+For each module show at least:
+
+- champion and challengers;
+- promoted edge sleeves;
+- effective breadth;
+- edge correlation clusters;
+- opportunity funnel;
+- top rejection reasons;
+- net edge bps by sleeve;
+- net USD/day by sleeve;
+- capital/time efficiency;
+- alpha half-life;
+- copyability/capacity frontier where relevant;
+- change-point/decay state;
+- research compute consumed;
+- trials attempted;
+- holdout status.
+
+The dashboard should answer:
+
+> what exact edge is making money, what is limiting it, and what research action has the highest expected value next?
+
+### Additional research basis for Optimization V3
+
+The optimization architecture incorporates further high-signal findings:
+
+- **Grinold & Kahn / Fundamental Law of Active Management:** genuine independent breadth can increase opportunity quality, while correlated bets do not provide raw-count breadth.
+- **Forecast-combination literature:** simple/equal or shrinkage combinations are difficult baselines to beat because complex estimated weights add error.
+- **Stoikov, Micro-Price:** order-book imbalance-adjusted microprice can improve short-horizon fair-price estimation relative to plain midpoint.
+- **Gould & Bonart:** queue imbalance has measurable short-horizon predictive content, with strength dependent on market microstructure.
+- **Huang, Lehalle & Rosenbaum, Queue-Reactive Model:** current queue state is useful for realistic book simulation, execution probability and transaction-cost analysis.
+- **Adams & MacKay, Bayesian Online Changepoint Detection:** causal run-length/change-point inference provides a principled optional detector for edge/regime breaks.
+- **Jamieson & Talwalkar / Hyperband:** successive resource allocation can reduce compute spent on poor candidates; Alina restricts it to TRAIN/validation.
+- **Anytime-valid confidence-sequence literature (Howard/Ramdas and related work):** frozen sequential hypotheses can sometimes be monitored repeatedly without ordinary optional-stopping inflation when assumptions are satisfied.
+- **Implementation-shortfall / optimal-execution literature:** decision alpha and execution loss must be decomposed rather than reported as one opaque PnL number.
+- **Risk-Constrained Kelly (Stanford/Boyd collaborators):** growth optimization can explicitly incorporate drawdown constraints rather than relying on unrestricted Kelly leverage.
+
+These sources generate architecture and hypotheses. They do not certify an Alina edge.
+
+
 ### Research basis
 
 The VNext design is informed by external research reviewed on 2026-09-25, while repository data remains the authority for promotion decisions.
@@ -2932,7 +3476,38 @@ The following numbered items form the normative acceptance catalog. Each item is
 178. the acceptance dashboard reports exact blocking dependencies by scope instead of only a global pass percentage;
 179. acceptance status supports PASS/FAIL/BLOCKED_DEPENDENCY/DEGRADED/REPAIRING/NOT_APPLICABLE/NOT_EVALUATED;
 180. a raw pass percentage can never override a critical failed dependency or turn an optional failed hypothesis into a global blocker;
-181. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+181. each module is represented as an edge portfolio with separately attributable sleeves rather than one monolithic strategy;
+182. every edge follows the durable DISCOVERED->BASELINE->TRAIN_CANDIDATE->CHALLENGER->SHADOW->OOS_CANDIDATE->PROMOTED->DECAYING->RETIRED lifecycle;
+183. a failed G4 challenger cannot disable an existing healthy champion;
+184. promotion requires incremental after-cost value versus the champion/simple baseline, not only standalone positive PnL;
+185. effective breadth discounts correlated/overlapping variants and reports independent opportunity breadth separately from raw strategy count;
+186. the opportunity funnel records normalized rejection reasons so research can target the dominant bottleneck;
+187. Successive-Halving/ASHA/Hyperband-style early elimination, if used, is confined to TRAIN/validation and cannot inspect untouched OOS;
+188. low-fidelity research screens can reject candidates but cannot certify economic success;
+189. an explicit exploration floor prevents adaptive research/collection priority from permanently starving new coins/leaders/routes/regimes;
+190. forecast ensembles must compete against simple equal/shrunk combinations and cannot double-count correlated events;
+191. NO_TRADE is a first-class model action when uncertainty-adjusted after-cost edge is insufficient;
+192. anytime-valid/sequential monitoring is optional and requires documented validity under the event-dependence structure;
+193. change-point/decay detection demotes only the affected edge and cannot globally stop unrelated promoted edges;
+194. every paper fill has implementation-shortfall attribution separating signal alpha from execution/sizing effects;
+195. adaptive paper sizing may optimize marginal net value only inside certified depth/capacity and risk limits;
+196. growth-optimal/fractional-Kelly variants remain G4 and cannot override capital/drawdown/capacity constraints;
+197. proof reports effective independent event count in addition to raw fill/trade count;
+198. event clustering prevents one metaorder/cascade/common shock from being counted as many independent confirmations;
+199. hierarchical/partial-pooling models remain optional challengers and must prove incremental OOS value over entity-specific/simple baselines;
+200. Copy-Vault can evaluate wallet-originator networks, conviction surprise, metaorder phase and copyability frontiers as separate G4 hypotheses;
+201. Copy-Vault economic admission rejects leaders whose skill is not reproducible after actual follower latency/capacity;
+202. Lead-Lag can evaluate microprice leadership, multi-venue consensus/disagreement and response-time hazard models as separate G4 hypotheses;
+203. Lead-Lag rejects a signal when expected alpha half-life is not longer than observation/decision/fill latency under the frozen policy;
+204. Cross-Venue can run a route auction across eligible venue/order-type routes without double-counting the same dislocation;
+205. Cross-Venue marginal split routing stops adding notional when marginal after-cost edge becomes non-positive;
+206. Cross-Venue distinguishes stale-quote, local-liquidity-shock, unique-information and structural-basis residual classes before promotion;
+207. Cross-Venue resilience-aware waiting competes against immediate entry and explicitly charges lost-alpha waiting cost;
+208. collection, research-compute and paper-capital allocation remain three independent control problems with separate state/evidence;
+209. fast/medium/slow control loops cannot rewrite historical decisions made by faster causal loops;
+210. optimization dashboards expose champion/challenger state, effective breadth, bottlenecks, edge half-life, capital efficiency and next research priority;
+211. new Optimization V3 capabilities default to scoped G3/G4/G5 or MEASURE_ONLY enforcement and cannot silently become G0;
+212. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
