@@ -94,7 +94,7 @@ Collection units remain bounded below the GitHub-hosted job maximum. A session i
 
 Every published bundle keeps the existing Dataset V2 integrity contract: immutable release assets, run manifest, source/code SHA, hashes, timestamps, quality state, and fail-closed publication.
 
-## Collector V3 Replay-Grade
+## Collector V4 Extreme Replay-Grade
 
 The `COLLECT` phase is not a generic data downloader. It is a capture, recovery, certification, and provenance pipeline whose output must be good enough to reconstruct market state without silently inventing missing information.
 
@@ -103,6 +103,222 @@ The primary invariant is:
 > maximize replay-grade evidence, detect every detectable loss, repair every loss that an authoritative public source can repair, and quarantine every interval whose integrity cannot be proven.
 
 The architecture does **not** claim that GitHub-hosted runners can guarantee physical zero-loss networking. GitHub runners are ephemeral and bounded. Instead, the system must guarantee **zero silent gaps**: an unrecoverable gap may exist, but it must be explicitly delimited and forbidden to replay engines that require continuity.
+
+### Module-complete collection contracts
+
+Collector quality is evaluated against the needs of **all three active strategy families**, not against a generic market-data checklist.
+
+The existing minimal dependency declaration (`userFills/allMids/BBO/L2`) is not sufficient for economic proof. Collection V4 therefore defines a richer evidence contract for each family.
+
+#### Copy-Vault collection contract
+
+Copy-Vault must preserve enough evidence to reconstruct the leader decision and a realistic follower execution without confusing deposits, funding, NAV changes, or stale state with trading edge.
+
+Required evidence includes:
+
+- complete qualifying public vault universe and freeze timestamp;
+- vault identity/leader metadata and `vaultDetails` snapshots for priority candidates;
+- account/NAV/portfolio context used for relative sizing;
+- cheap broad `clearinghouseState` sweeps across the frozen universe;
+- open-position snapshots with account value, margin, notional, leverage and liquidation-relevant fields;
+- forward `userFills` for the bounded live-priority set;
+- exact `userFillsByTime` reconciliation for intervals where activity is detected;
+- user funding evidence for live-priority leaders when relevant;
+- non-funding ledger/deposit/withdrawal evidence when required to distinguish capital flows from PnL;
+- pre/post position snapshots and explicit leader exit/reduce detection;
+- allMids/BBO and execution-quality L2 for every coin actually traded by a tracked leader;
+- mark/index/oracle/funding context during copied holding intervals;
+- follower-side entry/exit capacity, spread, slippage and latency evidence;
+- post-fill markout checkpoints (100/250/500 ms, 1 s, 5 s or the current execution model horizons);
+- immutable selection reason, score inputs and causal timestamps.
+
+The broad vault universe must **not** be implemented as thousands of permanent user-specific WebSocket subscriptions.
+
+Instead, use a two-speed design:
+
+1. a rate-budgeted broad REST state sweep over the complete universe;
+2. detect position/account-state changes between snapshots;
+3. enqueue targeted `userFillsByTime` reconciliation only for changed/active vaults;
+4. reserve scarce user-specific WebSocket slots for the highest-priority causally selected leaders;
+5. rotate those priority slots based only on information already known at the rotation time.
+
+This converts Hyperliquid's user-specific WebSocket limit from a universe cap into a low-latency priority layer.
+
+#### Lead-Lag collection contract
+
+Lead-Lag needs evidence capable of distinguishing a genuine market lead from exchange-clock error, network-path asymmetry, stale quotes, or a single runner's routing artifact.
+
+Required evidence includes:
+
+- real-time BBO from every supported venue;
+- public trades with aggressor side/event identity when available;
+- high-frequency L2 for Tier-A candidates;
+- exchange matching-engine/event timestamps;
+- local receive wall-clock and monotonic timestamps;
+- server clock probes with offset, RTT and uncertainty estimates;
+- mark/index/reference price, funding, OI, liquidations and volume context where public;
+- instrument/listing/trading-state changes;
+- shock-triggered causal L2 checkpoints;
+- pre/post-shock microstructure windows;
+- quote age and source freshness;
+- same-host cross-venue receive ordering;
+- independent shadow-runner confirmation for the most important lead/lag candidates when capacity permits.
+
+For latency-sensitive comparisons, a measured lag is not admissible merely because one exchange timestamp is numerically earlier. The observed lag must exceed the recorded timing uncertainty or be corroborated by same-runner receive ordering.
+
+#### Cross-Venue Dislocation collection contract
+
+Cross-Venue must capture all evidence required for a simultaneous two-leg executable decision rather than a midpoint difference.
+
+Required evidence includes:
+
+- synchronized BBO across all supported venue intersections;
+- L2 depth on both candidate legs;
+- complete depth curves sufficient to calculate VWAP at multiple notionals;
+- quote age/freshness on each leg;
+- same-runner receive ordering for compared venues;
+- trades and recent volatility/order-flow context;
+- mark/index/reference price;
+- funding and funding schedule when holding to convergence can cross a funding interval;
+- instrument tick/lot/min-notional/contract-multiplier/listing rules;
+- venue/trading/system status;
+- explicit versioned maker/taker cost assumptions and provenance;
+- entry and exit capacity for both legs;
+- latency/markout evidence after detection;
+- convergence/timeout exit context;
+- dynamic candidate pairs across Hyperliquid, Binance, Bybit, OKX, Gate and Bitget rather than a permanently hard-coded HL/Binance-only data universe.
+
+The collector must generate direct depth/VWAP evidence for the notionals actually tested by the economic engine. A top-level quantity or midpoint cannot stand in for full executable capacity.
+
+### Same-runner cross-venue clock domain
+
+For Lead-Lag and Cross-Venue, primary market shards are organized **by coin group across venues**, not as isolated one-venue jobs whenever runner capacity permits.
+
+A single GitHub-hosted VM should connect to Hyperliquid, Binance, Bybit, OKX, Gate and Bitget for the same Tier-A coin group. This provides a shared local monotonic clock for receive ordering across venues and removes cross-VM wall-clock skew from the primary comparison.
+
+Rules:
+
+- every raw frame is timestamped immediately on receipt before expensive parsing;
+- all per-venue processes on the same runner use the host monotonic clock;
+- exchange timestamps remain separately preserved;
+- the collector records the venue-specific transport/clock uncertainty;
+- shadow runners may repeat the same coin group on an independent network path;
+- a lead/lag effect that appears only on one runner/network path is flagged for investigation rather than treated as proven market causality.
+
+### Autonomous COLLECT relay
+
+Once the phase is `COLLECT`, collection continues automatically without further user commands.
+
+The intended behavior is:
+
+1. a collection generation starts;
+2. it continuously seals/publishes durable checkpoints;
+3. well before its GitHub-hosted job deadline, it dispatches its successor via explicit same-repository `workflow_dispatch`;
+4. the successor starts while the predecessor is still collecting;
+5. the two generations overlap and produce a handoff receipt;
+6. the predecessor seals and exits;
+7. the successor repeats the process indefinitely while the same collection epoch remains active.
+
+The repository `GITHUB_TOKEN` may be used for same-repository `workflow_dispatch`, because explicit `workflow_dispatch`/ `repository_dispatch` events are permitted to create workflow runs.
+
+The relay must never depend on a push event created by `GITHUB_TOKEN` to trigger its successor.
+
+A scheduled controller every few minutes is a **watchdog only**. It checks whether every required active collection shard has a current or queued generation and dispatches a missing successor if the handoff failed.
+
+Each dispatch carries at least:
+
+- phase epoch;
+- generation number;
+- shard/coin-group identity;
+- universe digest;
+- predecessor run ID;
+- requested handoff time.
+
+Every successor independently reloads the current phase before opening market subscriptions. If the phase is no longer `COLLECT`, it exits without starting new capture.
+
+Active collectors also re-check phase at checkpoint boundaries. A transition to `ANALYZE` disables successor dispatch immediately and asks current collectors to seal their current segment and stop cleanly rather than running to the full job deadline.
+
+Cron/schedule timing is never relied on for continuity.
+
+### Handoff timing and overlap target
+
+Because standard GitHub-hosted jobs have a finite execution ceiling, V4 targets a substantially earlier handoff than the hard deadline.
+
+The exact timings are configurable and measured, but the default design target is:
+
+- bounded collection generation substantially below six hours;
+- successor dispatch with tens of minutes of safety margin;
+- minimum healthy overlap long enough to prove all required subscriptions are receiving data;
+- predecessor does not voluntarily exit until successor readiness is observed or a bounded handoff timeout expires.
+
+If successor startup is delayed by GitHub, the predecessor continues collecting until its own safe shutdown margin. Any real uncovered interval remains explicit and is handed to the repair pipeline.
+
+### Tier-A dual-resolution market capture
+
+For the most important markets, one depth stream is not always optimal. V4 may collect a fast shallow/medium book and a slower deep/full book simultaneously when the venue supports it.
+
+Examples of intended use:
+
+- Bybit: very fast BBO/L50 for timing plus full-depth/large snapshot path for capacity;
+- Bitget: SBE real-time BBO + 50-level full snapshots at high frequency + SBE trades;
+- Gate: real-time book ticker plus fast bounded depth and deeper lower-frequency depth;
+- Binance: real-time BBO plus diff-depth and raw/aggregate trades;
+- OKX: BBO plus incremental deep book with current `seqId/prevSeqId` validation;
+- Hyperliquid: BBO plus self-contained L2 snapshots for active/Tier-A coins.
+
+The faster stream proves decision-time executable top-of-book timing; the deeper stream proves capacity/slippage.
+
+### Burst capture around economically interesting events
+
+A continuously collected low/medium-cost layer may promote a market into temporary burst mode when a causal event is observed, for example:
+
+- a Copy-Vault leader fill or position change;
+- a cross-venue dislocation crossing a predeclared collection threshold;
+- a Lead-Lag shock;
+- a liquidation burst;
+- abnormal spread/volume/OI change.
+
+Burst mode can temporarily increase:
+
+- depth;
+- snapshot/checkpoint frequency;
+- contextual feeds;
+- post-event markout capture;
+- shadow coverage.
+
+Burst mode cannot repair missing **pre-event** evidence and must never be used to introduce lookahead. It enriches current/future evidence only.
+
+### Official historical repair matrix
+
+The repair engine keeps a per-venue capability matrix and uses official free archives before rejecting an interval when those archives can deterministically reconstruct it.
+
+Current design assumptions to verify continuously against official documentation:
+
+- OKX: official high-resolution historical L2 downloads are available and can provide a strong repair/verification layer;
+- Gate: official futures market-depth/order-book archives and snapshots are downloadable;
+- Bitget: official futures depth and transaction-history downloads are available;
+- Bybit: official contract order-book historical downloads are available;
+- Binance USD-M: public trades/aggTrades and coarse depth context are useful for repair, but current free public data must not be assumed to reconstruct every missing high-frequency L2 transition;
+- Hyperliquid: live reconnect snapshots restore current state, but the official historical L2 archive is requester-pays and therefore is not a zero-cost continuity dependency.
+
+The zero-cost architecture must therefore invest the strongest live redundancy in evidence families/venues whose exact historical L2 transitions cannot be repaired for free.
+
+A later authoritative archive may upgrade an interval from quarantined to repaired only after deterministic identity/timestamp/sequence checks pass.
+
+### Venue-status evidence
+
+Collection quality reports distinguish collector failure from a documented venue incident whenever a public status signal exists.
+
+Capture or poll, where available:
+
+- exchange/system status and maintenance;
+- contract/instrument trading state;
+- listing/delisting changes;
+- API liveness/server time;
+- explicit reset/service-restart messages.
+
+Documented venue downtime does not make missing market data replay-safe, but it explains the gap and prevents misdiagnosing the collector.
+
 
 ### Raw-first capture: WAL before normalization
 
@@ -697,7 +913,21 @@ Implementation is accepted only when tests prove all of the following:
 37. adaptive sharding reacts to measured queue/processing pressure without silently sacrificing Tier-A evidence;
 38. all collection jobs stay bounded for GitHub-hosted execution and can continue through successor units;
 39. scheduled triggers are recovery mechanisms, not a correctness dependency;
-40. existing relevant campaign, dataset, reconciliation, and collector tests continue to pass.
+40. module-specific evidence contracts exist for Copy-Vault, Lead-Lag and Cross-Venue;
+41. broad Copy-Vault state sweeps can cover the full frozen universe without requiring one user-specific WebSocket per vault;
+42. targeted fill reconciliation is triggered by observed vault activity and remains causal;
+43. Lead-Lag/Cross-Venue primary shards preserve same-runner cross-venue monotonic receive ordering;
+44. timing-sensitive evidence carries an explicit clock/transport uncertainty bound;
+45. Tier-A dual-resolution capture preserves both high-frequency top-of-book timing and deeper capacity where supported;
+46. burst capture is causal and cannot backfill pre-trigger microstructure by assumption;
+47. official archive repair never upgrades an interval without deterministic validation;
+48. zero-cost operation does not depend on requester-pays Hyperliquid historical archives;
+49. a COLLECT generation dispatches a successor automatically before its deadline;
+50. the successor independently refuses to collect after the phase changes away from COLLECT;
+51. the watchdog restores a missing collector generation without requiring user intervention;
+52. a COLLECT -> ANALYZE transition disables further relay and causes active collectors to seal and stop cleanly;
+53. no current normal COLLECT path creates replay/backtest/PnL campaigns in parallel;
+54. existing relevant campaign, dataset, reconciliation, and collector tests continue to pass.
 
 ## Non-goals
 
