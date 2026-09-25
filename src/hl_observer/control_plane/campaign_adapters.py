@@ -308,6 +308,19 @@ def run_one_unit(
                 "economic_campaign",
             ),
         ]
+        if ctx.kind == "module_pnl_proof":
+            commands.append(
+                (
+                    [
+                        sys.executable,
+                        str(ROOT / "tools" / "audit_economic_objectives.py"),
+                        "--root",
+                        str(workspace),
+                    ],
+                    workspace,
+                    "module_pnl_audit",
+                )
+            )
     else:
         try:
             cmd, output_root = build_command(ctx)
