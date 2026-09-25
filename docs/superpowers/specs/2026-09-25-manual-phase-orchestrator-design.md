@@ -94,6 +94,167 @@ Collection units remain bounded below the GitHub-hosted job maximum. A session i
 
 Every published bundle keeps the existing Dataset V2 integrity contract: immutable release assets, run manifest, source/code SHA, hashes, timestamps, quality state, and fail-closed publication.
 
+## Collector completeness and usability contract
+
+The `COLLECT` phase optimizes for the maximum **usable replay-grade evidence**, not raw byte volume. A source or channel that cannot meet minimum provenance and integrity requirements is still allowed to be archived as raw evidence, but it may not silently become SAFE replay input.
+
+### Universe coverage
+
+At the start of each collection epoch, build and persist a fresh public perpetual-market universe from all currently supported native venues.
+
+Requirements:
+
+- do not use one permanently hard-coded coin shortlist as the total collection universe;
+- discover the full public perpetual universe that the existing venue adapters can represent;
+- compute cross-venue intersections and venue-specific markets;
+- shard the universe into bounded GitHub-hosted collection batches;
+- prioritize liquid/cross-venue candidates for highest-frequency microstructure capture while continuing to rotate through the broader eligible universe;
+- preserve the exact universe snapshot, venue symbols, selection timestamp, and code SHA used for each epoch;
+- if a venue discovery call fails, record the failure explicitly instead of silently shrinking the universe.
+
+CCXT or other scouts remain discovery-only and may not replace working native collectors.
+
+### Required market evidence
+
+Collect the richest public evidence that each supported venue exposes and the current project can validate.
+
+The target evidence families are:
+
+- BBO / top of book;
+- L2 order book at the deepest practical public level for the native adapter;
+- public trades and aggregate trades where available;
+- mark, index, last and oracle/reference prices where exposed;
+- funding rate and realized funding settlements where public endpoints permit;
+- open interest;
+- 24h volume / liquidity context where exposed;
+- public liquidations where exposed;
+- replay-critical instrument metadata such as tick size, size precision, leverage/margin rules, contract multiplier and listing/delisting state;
+- authoritative archive/backfill sources when they improve continuity or exact-count verification.
+
+Current native capabilities must be reused. In particular, the design must preserve existing Hyperliquid/Binance clock and depth collectors, Bybit public L2/trade/ticker/liquidation feeds, OKX book/trade/ticker/funding/open-interest/mark/index feeds, and existing Gate/Bitget native adapters. Missing useful public channels in an existing adapter should be added rather than creating a competing collector stack.
+
+A channel is not considered covered merely because a connection exists. The run manifest must report per venue, instrument and channel whether observations were actually received.
+
+### Replay-grade timestamps and provenance
+
+Every admitted market event must preserve, when the source provides them:
+
+- exchange event timestamp;
+- local receive wall-clock timestamp;
+- local monotonic receive timestamp;
+- clock-offset evidence and probe RTT;
+- connection identifier;
+- sequence/update identifier;
+- reconnect/reset counters;
+- source URL/API family;
+- transport type;
+- read-only/authentication state;
+- collector code SHA.
+
+If an exchange does not provide a timestamp or sequence, the collector records that fact explicitly. It must never fabricate an exchange timestamp or sequence.
+
+Clock probes must be refreshed during long collection windows, not only once at startup.
+
+### Book integrity and gap detection
+
+For stateful order books:
+
+- require a valid snapshot before deltas are considered usable;
+- validate sequence/update continuity whenever the venue exposes sequence information;
+- reset and reacquire state after reconnect or desynchronization;
+- reject crossed/invalid BBO state;
+- record reconnects, resets, stale intervals and missing updates;
+- preserve enough raw payload to reconstruct and audit the book transformation.
+
+Queue overflow is never ignored. Existing writer-queue drops must increase the corresponding gap/integrity counters.
+
+Any unexplained gap that can affect execution simulation must remain visible to replay and quality gates.
+
+### Trades and reconciliation
+
+Where an authoritative public REST/archive reference exists, reconcile captured trades against it.
+
+Existing Hyperliquid, Binance, Bybit and OKX reconciliation paths remain mandatory. Equivalent official reconciliation should be added for Gate/Bitget when their public APIs allow a deterministic comparison.
+
+If exact reconciliation is unavailable for a venue/channel, mark the evidence `UNVERIFIED` or the appropriate lower quality state. Do not promote it to exact-count SAFE evidence merely because the WebSocket stayed connected.
+
+Deduplicate events using stable venue identifiers where possible. Reconnect overlap must not create artificial trade volume.
+
+### Runner-boundary continuity
+
+A GitHub collection session consists of multiple bounded jobs, so job boundaries are part of the data-quality model.
+
+Each boundary must:
+
+- checkpoint the last durable timestamps/sequences per stream;
+- start the successor from a persisted epoch/universe definition;
+- use bounded overlap or authoritative backfill when the venue permits it;
+- deduplicate overlap deterministically;
+- record any uncovered interval as a gap;
+- never synthesize missing BBO/L2 events.
+
+The collection controller should start the next bounded window early enough to minimize avoidable dead time, while respecting API and GitHub concurrency limits.
+
+### Copy-Vault completeness
+
+Copy-Vault keeps two distinct evidence layers:
+
+1. **broad public universe evidence** for discovery/scoring across all qualifying open public vaults;
+2. **bounded live evidence** for user-specific WebSocket observation under Hyperliquid per-IP limits.
+
+The broad universe must not be arbitrarily capped before scoring. Live lanes must rotate deterministically across the frozen universe or its causally scored priority set so that runner limits do not permanently starve most candidates.
+
+For every observed vault preserve:
+
+- frozen selection time and selection reason;
+- public position snapshots before/after the live window;
+- forward user fills;
+- REST `userFillsByTime` reconciliation for the exact forward interval;
+- execution-relevant L2 for leader-traded instruments when captured;
+- reconnect/drop/gap evidence.
+
+Pre-selection history may be used only where the existing research protocol explicitly permits TRAIN/history. It may never be mislabeled as forward evidence.
+
+### Quality gates
+
+Every collection epoch produces a machine-readable coverage and integrity report before analysis may advance from `QUALITY`.
+
+At minimum report:
+
+- expected vs observed venues;
+- expected vs observed instruments;
+- expected vs observed channels;
+- event counts and byte counts;
+- first/last exchange and receive timestamps;
+- clock-offset and RTT distributions;
+- reconnect/reset counts;
+- queue drops;
+- detected sequence/time gaps;
+- reconciliation status and mismatch counts;
+- stale-data intervals;
+- instrument-metadata availability;
+- SAFE/PARTIAL/REJECT/UNMEASURABLE counts and reasons.
+
+A bundle may be marked SAFE only when the evidence needed by its intended replay/backtest is present and internally consistent.
+
+The quality gate is fail-closed: missing fees, missing execution-critical book data, unresolved timestamp ambiguity, unbounded queue loss, failed reconciliation, or materially incomplete coverage must prevent that evidence from being used as if it were complete.
+
+### Data-volume policy
+
+The collector should maximize coverage **within public API limits, GitHub-hosted runtime limits, and durable publication capacity**.
+
+When resources are constrained, prioritize in this order:
+
+1. data required to simulate executable price and fills;
+2. data required to prove timing/causality;
+3. data required for funding/carrying-cost and position context;
+4. broader universe discovery and lower-frequency context.
+
+Do not sacrifice BBO/L2/trade integrity merely to increase the number of symbols.
+
+Raw evidence should be compressed and rotated in bounded shards, with immutable hashes and manifests, so increased coverage does not make replay provenance ambiguous.
+
+
 ## Copy-Vault behavior
 
 The current complete public vault universe remains discoverable and auditable, but the phase orchestrator must not attempt to make thousands of user-specific WebSocket subscriptions simultaneously.
