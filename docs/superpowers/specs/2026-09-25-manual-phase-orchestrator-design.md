@@ -29,6 +29,7 @@ Required fields:
   "requested_at_utc": "2026-09-25T00:00:00Z",
   "collection_started_at_utc": null,
   "collection_cutoff_at_utc": null,
+  "source_collection_epoch": null,
   "analysis_stage": null
 }
 ```
@@ -51,8 +52,9 @@ When the user says to start collection:
 2. increment `epoch`;
 3. set `collection_started_at_utc` to the transition time;
 4. clear `collection_cutoff_at_utc`;
-5. clear `analysis_stage`;
-6. trigger the orchestration path through the phase-file push and retain a low-frequency scheduled safety trigger.
+5. clear `source_collection_epoch`;
+6. clear `analysis_stage`;
+7. trigger the orchestration path through the phase-file push and retain a low-frequency scheduled safety trigger.
 
 Only collection campaign kinds from the active epoch may be selected.
 
@@ -62,7 +64,7 @@ When the user says to stop collection and analyze:
 
 1. update the phase file to `ANALYZE`;
 2. increment `epoch`;
-3. record the just-finished collection epoch as the analysis source epoch;
+3. store the just-finished collection epoch in `source_collection_epoch`;
 4. set `collection_cutoff_at_utc` to the transition time;
 5. set `analysis_stage` to `DRAIN`.
 
