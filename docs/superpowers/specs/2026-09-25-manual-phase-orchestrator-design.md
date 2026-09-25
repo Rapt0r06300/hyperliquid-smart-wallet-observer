@@ -8108,6 +8108,215 @@ Relevant modules additionally report:
 - effective independent event count.
 
 
+
+### Profitability Convergence V6.12 — lifecycle, calendar and reference integrity
+
+The final micro-detail pass focuses on events where the **meaning of the instrument or reference clock changes** even though the ticker may look unchanged.
+
+### HIP-3 / RWA corporate-action contract
+
+HIP-3 deployers are responsible for market definition, oracle definition and operation. There is no assumption in this spec that every equity/RWA perp applies one universal stock-split, dividend or corporate-action convention.
+
+For every RWA/equity/index instrument store when available:
+
+- underlying legal/economic reference;
+- price-return vs total-return interpretation;
+- dividend treatment;
+- split/reverse-split treatment;
+- merger/spinoff/tender treatment;
+- symbol change;
+- index reconstitution;
+- oracle adjustment rule;
+- deployer announcement/spec revision;
+- halt/settlement/recycle event.
+
+If the market specification does not define a corporate-action treatment, use `UNMEASURABLE/MARKET_SPECIFIC`.
+
+Do not automatically:
+
+- add cash dividends to perp PnL;
+- back-adjust a perp because the cash equity was back-adjusted;
+- assume a split changes contract size or position quantity;
+- assume the post-action ticker is economically identical.
+
+### Session calendar and DST integrity
+
+Every non-24/7 external reference uses a versioned exchange calendar with:
+
+- timezone;
+- regular open/close;
+- pre/post-market if relevant;
+- holidays;
+- early closes;
+- daylight-saving transitions;
+- exceptional closures;
+- external session source/version.
+
+All event times are stored in UTC plus original timezone context where needed.
+
+Rules:
+
+- never hard-code a fixed UTC equity open across DST transitions;
+- reopen studies use the actual historical session boundary;
+- Friday/weekend windows account for holiday Mondays and early closes;
+- an RWA event cannot be labeled `INTERNAL_SESSION` merely from wall-clock hour without calendar confirmation.
+
+### External-reference source switching
+
+If a HIP-3/RWA deployer changes external oracle/reference source by session or rule revision:
+
+- preserve source identity;
+- preserve switch timestamp;
+- treat switch as a regime/event boundary;
+- do not splice price series without a basis/discontinuity check;
+- calculate pre/post-source residual separately.
+
+If exact source switching is not public, mark it unknown rather than inferring a specific oracle path.
+
+### haltTrading / settlement / recycle semantics
+
+HIP-3 deployers can halt/settle markets under protocol rules and may later recycle/resume assets.
+
+Store:
+
+- halt announced/observed time;
+- final trading-state transition;
+- mark/reference used at settlement where observable;
+- settlement timestamp;
+- position close/settlement event;
+- resume/recycle timestamp;
+- new contract/spec revision.
+
+A halt/settlement is not an ordinary market close.
+
+Historical data before and after a recycled asset cannot be concatenated under one continuous instrument identity without confirming specification continuity.
+
+### Dated-future lifecycle
+
+Where Cross-Instrument Relative Value uses dated futures, each contract stores:
+
+- exact expiry;
+- last trading time;
+- settlement type;
+- settlement reference/index;
+- settlement calculation window;
+- delivery/cash-settlement semantics;
+- contract multiplier;
+- expiry timezone/calendar;
+- roll candidate universe.
+
+Research distinguishes:
+
+- hold-to-settlement convergence;
+- pre-expiry basis;
+- calendar spread;
+- explicit roll.
+
+Continuous/back-adjusted futures series are research features only and cannot be used as executable contract prices.
+
+### Roll logic and liquidity migration
+
+If a continuous future is used for signal generation, store:
+
+- mapping/roll rule;
+- actual front contract;
+- next contract;
+- roll timestamp;
+- liquidity/OI used to choose roll;
+- adjustment method;
+- raw unadjusted prices for execution.
+
+A back-adjustment cannot generate artificial PnL or eliminate real roll cost.
+
+Roll cost includes both closing and opening legs plus spread, fees, slippage and legging risk.
+
+### Funding-boundary exactness
+
+Funding research records separately:
+
+- funding observation time;
+- predicted/current rate time;
+- settlement timestamp;
+- position state immediately before/at settlement if the venue exposes the rule;
+- realized funding ledger timestamp.
+
+If the venue documentation/data does not prove the exact position-snapshot boundary, the simulator uses a conservative documented convention or marks boundary-sensitive trades `FUNDING_BOUNDARY_UNCERTAIN`.
+
+Strategies cannot earn funding solely by assuming an unverified infinitesimal enter-before/exit-after boundary.
+
+### Account / subaccount / vault lineage
+
+Public Hyperliquid data can expose subaccount relationships and vault structures.
+
+Maintain a graph only from explicit public protocol relationships:
+
+- master/account address where public;
+- subaccount address;
+- vault address;
+- depositor/leader role where exposed;
+- DEX/account-abstraction state.
+
+Rules:
+
+- subaccounts remain separate execution/risk identities;
+- portfolio margin does not merge separate subaccounts;
+- Copy-Vault can optionally cluster clearly linked public subaccounts for leader-level statistics, but must preserve address-level fills and execution delays;
+- do not infer that two unrelated wallets belong to one person/entity from behavior alone;
+- vault depositors are not automatically equivalent to the vault strategy/leader.
+
+### Wallet-event pre-positioning watch lane
+
+Deposits, withdrawals, transfers and margin changes may precede trading, but public anecdotal examples are vulnerable to hindsight bias.
+
+Treat account-funding/movement events as a `WATCH/FEATURE` lane for Copy-Vault only.
+
+Required test:
+
+- point-in-time public observation;
+- fixed wallet universe;
+- event-time relative to subsequent OPEN/ADD/REDUCE/CLOSE;
+- matched no-event control;
+- forward markout after actual observation latency;
+- multiple-testing correction.
+
+No "wallet deposited -> will long" rule is assumed.
+
+### Instrument lineage graph
+
+Maintain:
+
+`economic_underlying -> venue product -> contract/version -> symbol aliases`.
+
+Version edges for:
+
+- listing;
+- delisting;
+- redenomination;
+- token migration;
+- contract multiplier change;
+- collateral change;
+- oracle change;
+- deployer recycle;
+- corporate action;
+- expiry/roll.
+
+This prevents data from two economically different contracts sharing the same symbol from being merged.
+
+### V6.12 proof fields
+
+Relevant modules additionally report:
+
+- calendar coverage/version;
+- DST/holiday correctness;
+- corporate-action unknown count;
+- oracle/reference-source change count;
+- halt/settlement/recycle events;
+- dated-contract roll count/cost;
+- funding-boundary uncertainty count;
+- subaccount/vault lineage coverage;
+- instrument-lineage breaks.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -9310,7 +9519,26 @@ The following numbered items form the normative acceptance catalog. Each item is
 621. native collector/normalizer golden fixtures include duplicate, gap/repair, reconnect, side semantics, aggregate sweep, partial fill, rebate and contract-normalization edge cases;
 622. collector changes that alter normalized scientific output trigger targeted evidence invalidation/rebuild;
 623. V6.11 reports raw rows versus unique/sweep/independent events, duplicate/gap rates, LIVE-book coverage, unknown-side/timing-unresolved and reconciliation gaps;
-624. all V6.11 additions remain read-only/paper and cannot introduce signed actions, private keys, user-PC services or live calibration orders.
+624. all V6.11 additions remain read-only/paper and cannot introduce signed actions, private keys, user-PC services or live calibration orders;
+625. V6.12 treats RWA corporate-action handling as market-specific unless the instrument/deployer specification defines it;
+626. dividends, splits, mergers, spinoffs and symbol changes cannot be silently imported from cash-equity conventions into HIP-3 perp PnL;
+627. non-24/7 reference sessions use versioned timezone/holiday/early-close/DST calendars rather than fixed UTC assumptions;
+628. HIP-3 external-reference source switches are point-in-time regime events and unknown source logic remains UNKNOWN;
+629. haltTrading settlement/recycle events create instrument lifecycle boundaries and cannot be modeled as ordinary session closes;
+630. a recycled/redefined HIP-3 asset is not concatenated with prior history without contract-spec continuity proof;
+631. dated-future research stores exact expiry, last trade, settlement reference/window, multiplier and settlement semantics;
+632. continuous/back-adjusted futures prices cannot serve as executable fills;
+633. roll research preserves actual contract mapping and charges both roll legs plus legging risk;
+634. funding-boundary-sensitive strategies require documented position/settlement timing or are labeled FUNDING_BOUNDARY_UNCERTAIN;
+635. funding cannot be credited from an assumed infinitesimal boundary timing unsupported by venue evidence;
+636. subaccount/vault lineage uses explicit public protocol relationships and preserves separate execution/risk identities;
+637. portfolio margin never implicitly merges separate subaccounts in Alina accounting;
+638. Copy-Vault may cluster explicit linked subaccounts statistically while retaining address-level fills and observation latency;
+639. wallet deposit/withdraw/transfer pre-positioning remains a WATCH/FEATURE hypothesis until matched-control OOS evidence exists;
+640. instrument lineage versions listing, delisting, redenomination, migration, multiplier, collateral, oracle, recycle, corporate action and expiry/roll changes;
+641. same/similar ticker across lineage breaks cannot be merged without economic-equivalence proof;
+642. V6.12 proof reports calendar, corporate-action, reference-source, settlement/roll, funding-boundary and account-lineage coverage;
+643. all V6.12 additions remain GitHub-hosted/read-only and cannot introduce signed actions, private keys, user-PC services or live calibration orders.
 
 ## Non-goals
 
@@ -9320,7 +9548,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12 modules without scoped evidence gates;
 - treat option mark IV/mark price as executable fills;
 - assume positive IV-RV implies profitable short volatility;
 - credit Chase with exact maker queue economics when historical repricing/queue evidence is unavailable;
