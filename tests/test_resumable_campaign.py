@@ -16,3 +16,30 @@ def test_lease_is_hashed_and_stale_rejected():
 def test_safe_requires_replay_compatibility():
  m=manifest(); m.outputs=[{"quality_status":"SAFE","evidence_status":"SAFE","replay_compatible":False}]
  with pytest.raises(ValueError): validate_manifest(m)
+
+def test_wall_clock_and_failure_limits_stop_campaign():
+    old=(datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
+    m=manifest()
+    m.created_at=old
+    m.status="RUNNING"
+    m.limits={**m.limits,"max_wall_clock_s":1}
+    out=mark_continuation(m,"chunk",progressed=True)
+    assert out.status=="FAILED"
+    assert out.status_reason=="stop_limit_reached"
+
+def test_consecutive_failure_limit_is_enforced():
+    m=manifest()
+    m.status="RUNNING"
+    m.consecutive_failures=3
+    m.limits={**m.limits,"max_consecutive_failures":4}
+    out=mark_continuation(m,"temporary_failure",progressed=False,failure=True)
+    assert out.status=="FAILED"
+    assert out.consecutive_failures==4
+
+def test_successful_progress_resets_failure_counter():
+    m=manifest()
+    m.status="RUNNING"
+    m.consecutive_failures=2
+    out=mark_continuation(m,"chunk",progressed=True,failure=False)
+    assert out.status=="CONTINUATION_REQUIRED"
+    assert out.consecutive_failures==0
