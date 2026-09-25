@@ -95,3 +95,17 @@ def test_replay_forwards_selection_filters(tmp_path):
     cmd,_=build_command(context("replay", workspace_root=str(tmp_path), families="trades,bbo", venues="hyperliquid"))
     assert "--families" in cmd and "trades,bbo" in cmd
     assert "--venues" in cmd and "hyperliquid" in cmd
+
+def test_economic_materialization_returns_continuation(tmp_path):
+    class Result:
+        returncode=0
+        stdout='ok'
+        stderr=''
+    workspace=tmp_path/'economic'
+    out=run_one_unit(
+        context('backtest', workspace_root=str(workspace)),
+        runner=lambda *args, **kwargs: Result(),
+    )
+    assert out.status=='CONTINUATION_REQUIRED'
+    assert out.progressed is True
+    assert (workspace/'.alina_campaign_materialized').is_file()
