@@ -9,7 +9,7 @@ import secrets
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "alina.resumable_campaign.v1"
-CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})
+CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})\nCAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
 ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED"})
 TERMINAL_STATES = frozenset({"COMPLETE","FAILED","UNAVAILABLE","PARTIAL","REJECT"})
 ALL_STATES = ACTIVE_STATES | TERMINAL_STATES
@@ -188,11 +188,22 @@ def mark_terminal(m: CampaignManifest, status: str, reason: str) -> CampaignMani
 
 
 def select_due_campaigns(items: list[CampaignManifest], *, now: str | None = None) -> list[CampaignManifest]:
-    current = _parse_ts(now or _now()); due=[]
+    current = _parse_ts(now or _now())
+    buckets: dict[str, list[CampaignManifest]] = {kind: [] for kind in CAMPAIGN_KIND_ORDER}
     for m in items:
         if m.status not in ACTIVE_STATES: continue
         if _parse_ts(m.expires_at) <= current: continue
         if m.lease and _parse_ts(m.lease["expires_at"]) > current: continue
         if m.next_due_at and _parse_ts(m.next_due_at) > current: continue
-        due.append(m)
-    return sorted(due, key=lambda x:x.campaign_id)
+        buckets.setdefault(m.kind, []).append(m)
+
+    for rows in buckets.values():
+        rows.sort(key=lambda x: (x.next_due_at or x.created_at, x.created_at, x.campaign_id))
+
+    ordered: list[CampaignManifest] = []
+    while any(buckets.values()):
+        for kind in CAMPAIGN_KIND_ORDER:
+            rows = buckets.get(kind, [])
+            if rows:
+                ordered.append(rows.pop(0))
+    return ordered
