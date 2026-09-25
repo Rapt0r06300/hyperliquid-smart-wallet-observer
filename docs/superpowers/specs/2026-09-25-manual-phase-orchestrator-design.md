@@ -3792,7 +3792,8 @@ This specification intentionally preserves all previously validated design layer
 - **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis;
 - **Profitability Convergence V6:** friction-first module expansion, execution alpha, forced/scheduled flow, slow trend/relative-value research and an explicit economic-distance-to-+4-USD/day scheduler;
 - **Execution Truth V6.3:** queue/latency uncertainty, partial-fill accounting, priority-fee economics, dynamic venue-cost/state, liquidation-route semantics and adversarial backtest-integrity certification;
-- **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution.
+- **Portfolio Intent & Latent Flow V6.4:** cross-module intent netting, trigger-flow coverage, replenishment/absorption intelligence and capacity-aware adaptive execution;
+- **Venue Microstructure V6.5:** venue-class-aware collection/routing across visible CLOB, hidden-liquidity, RFQ and native multi-leg markets with fee-latency/account-tier economics.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -6002,6 +6003,348 @@ The following high-signal public/official sources motivated V6.3. They create hy
 - **public listing-event bots:** some announcement families show large moves while others do not, reinforcing strict event-specific validation and the decision not to assume a generic listing edge.
 
 
+
+### Profitability Convergence V6.5 — venue microstructure expansion
+
+The continued corpus filter identified a new source of both opportunity and model risk: **new perp venues with materially different execution models**.
+
+The V6.5 principle is:
+
+> **a new venue is useful only when it adds a new economic surface, a new public data family or a materially better route — and its microstructure must be modeled before its prices are compared with a conventional CLOB.**
+
+### Venue microstructure taxonomy
+
+Every venue/instrument declares one versioned class:
+
+- `VISIBLE_CLOB`;
+- `PARTIALLY_HIDDEN_CLOB`;
+- `RFQ_DUAL_BOOK`;
+- `NATIVE_MULTI_LEG`;
+- `AMM_OR_ORACLE_EXECUTION`;
+- `UNKNOWN`.
+
+The class determines which concepts are valid.
+
+Examples:
+
+- displayed depth can certify executable depth only on an appropriate executable book;
+- hidden-order venues make public L2 structurally incomplete;
+- RFQ indicative quotes cannot be substituted for the real executable resting book;
+- native multi-leg semantics can change legging risk relative to sequential orders;
+- fee and latency can depend on account class/tier.
+
+### Venue capability contract
+
+For every candidate venue maintain:
+
+- public REST/WS;
+- BBO;
+- L2/L3;
+- trades;
+- funding/current + forecast if available;
+- OI;
+- oracle/index/mark;
+- liquidations;
+- market status/session;
+- snapshot/delta/sequence semantics;
+- archive/history;
+- fee schedule;
+- account/fee tier;
+- latency tier;
+- collateral;
+- microstructure class;
+- hidden-liquidity/privacy state;
+- order-type capabilities;
+- spec/version history;
+- collector state: `DISCOVERY_ONLY / MEASURE_ONLY / REPLAY_GRADE / HOT_ELIGIBLE`.
+
+A new venue is not promoted because it is popular. Promotion requires **distinct economics + replay-grade public evidence + useful symbol overlap**.
+
+### Fee-latency frontier
+
+Some venues directly exchange lower fees for higher latency or vice versa.
+
+Evaluate route/account tier as:
+
+```text
+tier_value
+= edge_preserved_by_latency
+  - maker/taker fee
+  - priority/tier/staking cost
+  - adverse-selection change
+  - capital/opportunity cost
+```
+
+A zero-fee path with slow execution can be inferior to a paid faster path when alpha half-life is short.
+
+A faster paid tier can be inferior when the edge cannot pay the fee.
+
+The tier/account class is part of route identity and is never switched silently in replay.
+
+### Stage-A venue candidates
+
+#### Lighter
+
+Official documentation reviewed in this corpus pass provides:
+
+- public WebSocket order book;
+- snapshot + delta state;
+- nonce/begin-nonce continuity;
+- order-book updates in short batches;
+- account tiers with distinct fee and latency economics;
+- current Standard account economics with zero maker/taker fees and slower processing;
+- faster paid/premium configurations.
+
+Candidate opportunities:
+
+- zero-fee slower taker versus paid faster taker;
+- Lighter as XEMM hedge venue;
+- Lighter as maker venue;
+- Hyperliquid/Binance/edgeX -> Lighter Lead-Lag;
+- funding/basis Relative Value;
+- TWAP/parent-order research only where a public read-only source exposes enough point-in-time evidence.
+
+No proof may credit an account tier that the modeled account cannot achieve.
+
+#### edgeX
+
+Official public API/WS material exposes:
+
+- public depth;
+- funding history;
+- next funding timestamp;
+- market status;
+- oracle/index context;
+- premium index;
+- impact bid/ask;
+- forecast/predicted funding fields.
+
+This creates high-value research lanes:
+
+- venue-provided funding forecast versus realized settlement;
+- forecast-revision velocity;
+- cross-venue funding forecast dispersion;
+- impact-price versus BBO/depth;
+- RWA/session-aware Cross-Venue;
+- XEMM;
+- basis/Relative Value.
+
+A venue-provided `forecastFundingRate` is an input feature, not future truth.
+
+### Stage-B venue candidates
+
+#### Paradex
+
+Paradex exposes public order-book data and different retail/pro fee regimes.
+
+Rules:
+
+- retail/pro/API order classification is explicit;
+- retail zero-fee economics cannot be assigned to incompatible pro/API execution;
+- token/staking discounts are sensitivity scenarios unless the proof contract can achieve them;
+- sequencing/data quality must pass replay certification before HOT use.
+
+#### GRVT
+
+GRVT exposes order-book/RFQ concepts and native multi-leg order semantics.
+
+Candidate opportunities:
+
+- native multi-leg Relative Value;
+- joint/FOK/AON execution versus sequential legging;
+- RFQ versus visible-book pricing;
+- stable-perp/RWA session effects;
+- XEMM/funding basis.
+
+Native multi-leg does not automatically mean atomic risk-free execution; the exact TIF and partial-fill semantics govern proof.
+
+#### Extended
+
+Extended RFQ markets use a materially different model:
+
+- an **indicative book**;
+- a separate **real RFQ book** with actual resting orders/child quotes;
+- role-based fee semantics;
+- quote-walk child orders for market/RFQ execution.
+
+Therefore:
+
+- the standard indicative book is never treated as executable resting depth;
+- RFQ real-book collection is a separate evidence family;
+- maker/taker labels follow venue role semantics, not generic CLOB assumptions.
+
+Candidate sleeves:
+
+- RFQ pickup economics;
+- indicative-real divergence;
+- child-quote acceptance hazard;
+- RFQ liquidity drought;
+- RFQ-CLOB basis;
+- RWA session effects.
+
+### Stage-C / partial-visibility candidates
+
+#### Aster
+
+Aster publicly documents hidden orders and hidden positions.
+
+Therefore public order-book/wallet evidence can be incomplete.
+
+Maintain:
+
+- `displayed_depth`;
+- `hidden_liquidity_possible`;
+- `public_position_visibility`;
+- `depth_completeness_confidence`;
+- `wallet_flow_completeness_confidence`.
+
+Consequences:
+
+- absence from public L2 is not proof of absence;
+- public wallet/smart-money maps cannot claim total participant coverage;
+- slippage uses uncertainty bands;
+- Aster may still be valuable as price/funding/reference venue.
+
+Aster native chase/scaled/hidden order types are execution features only when their semantics are point-in-time documented and replayable.
+
+### Venue-native order type registry
+
+Record support for:
+
+- ALO/post-only;
+- IOC/FOK/AON/GTT;
+- chase/pegged;
+- scaled;
+- native TWAP;
+- parent/child;
+- multi-leg;
+- hidden;
+- STP;
+- cancel-on-disconnect/dead-man switch.
+
+Operational features receive no alpha credit unless they change measurable fill/cost/risk.
+
+### Cross-Venue Route Graph V2
+
+Route nodes now include:
+
+```text
+venue
+instrument
+microstructure_class
+account_fee_tier
+latency_tier
+collateral
+session
+health
+visibility_confidence
+fee_state
+funding_state
+oracle_state
+depth_state
+```
+
+Route edge types include:
+
+- taker-taker;
+- maker-taker XEMM;
+- maker-maker;
+- spot-perp;
+- perp-perp;
+- RFQ-CLOB;
+- native-multileg;
+- synthetic hedge.
+
+Only economically equivalent contracts/routes are compared.
+
+### Funding forecast intelligence
+
+When venues publish point-in-time forecasts, store:
+
+- current funding;
+- venue forecast/predicted funding;
+- premium index;
+- average premium index;
+- impact bid/ask;
+- next funding time;
+- forecast revision;
+- forecast error after settlement.
+
+Rules:
+
+- final settlement cannot backfill the decision-time feature;
+- venue forecasts compete with persistence and Alina simple consensus baselines;
+- retain only if frozen-OOS route/economic value improves.
+
+### Cross-venue capital-efficiency graph
+
+For every route, track:
+
+- collateral posted;
+- margin used;
+- isolated/cross;
+- idle prefunding;
+- unhedged interval;
+- transfer dependency;
+- collateral mismatch;
+- liquidation distance;
+- capital-time.
+
+Report:
+
+```text
+net_usd_day
+net_usd_day / committed_capital
+net_usd_day / margin_used
+net_usd_day / capital_time
+```
+
+Separate venues are not assumed to share margin/netting.
+
+### Collection rollout after V6.5
+
+**Stage A — strongest distinct data/economics**
+- Lighter;
+- edgeX.
+
+**Stage B — distinct execution semantics**
+- GRVT;
+- Extended;
+- Paradex.
+
+**Stage C — structurally incomplete public visibility**
+- Aster;
+- future hidden/private/RFQ venues;
+- Variational or other venues only after public replay-grade access is verified.
+
+This is a collection research order, not a profitability ranking.
+
+Promotion uses:
+
+- overlap with HOT/WARM instruments;
+- data freshness/sequence quality;
+- archive feasibility;
+- new independent opportunities;
+- distinct fee/latency mechanics;
+- funding/OI/oracle richness;
+- GitHub-hosted quota feasibility.
+
+### V6.5 corpus rule
+
+A new venue or bot idea enters architecture only if it adds at least one of:
+
+- new economic mechanism;
+- new executable route class;
+- new public data family;
+- material fee/latency improvement;
+- material proof-quality improvement;
+- independent opportunity class.
+
+Otherwise classify as:
+
+`FEATURE / BASELINE / EXECUTION_POLICY / RISK_CONTROL / DUPLICATE / WATCHLIST / NOISE`.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -7016,7 +7359,38 @@ The following numbered items form the normative acceptance catalog. Each item is
 433. V6.4 research ordering adds cross-module intent netting and latent-flow context without treating priority as a profitability ranking;
 434. the public-bot corpus convergence rule prevents a new first-class module unless it adds a new economic mechanism, new public data family, material execution-economics change, proof-quality improvement or independent opportunity class;
 435. public ideas that fail the V6.4 novelty bar are classified as feature, baseline, execution policy, risk control, duplicate, watchlist or noise rather than expanding architecture;
-436. all V6.4 additions remain paper/read-only and cannot introduce signed trading actions, private keys or live probing.
+436. all V6.4 additions remain paper/read-only and cannot introduce signed trading actions, private keys or live probing;
+437. every venue/instrument declares a versioned microstructure class before its book can support economic proof;
+438. displayed L2 is not assumed to equal total executable liquidity on hidden-order venues;
+439. RFQ indicative and executable real books are distinct evidence families;
+440. venue capability contracts record public data, sequencing, archive, fees, account/latency tiers, collateral, visibility and order-type semantics;
+441. new venues start DISCOVERY_ONLY/MEASURE_ONLY and become REPLAY_GRADE only after quality certification;
+442. fee-free/low-fee routes are evaluated jointly with latency and alpha half-life;
+443. account/fee/latency tier is part of route identity and cannot change silently in replay;
+444. Lighter research models documented fee/latency tier differences and nonce continuity semantics;
+445. Lighter zero-fee assumptions cannot prove economics for another tier/class;
+446. edgeX forecast/predicted funding is timestamped feature state and not realized settlement truth;
+447. edgeX funding research records premium/impact/next-settlement context where available;
+448. Paradex retail/pro fee class is explicit and retail zero-fee economics are not credited to incompatible API/pro flow;
+449. GRVT multi-leg research verifies actual TIF/partial-fill/joint execution semantics before claiming legging-risk reduction;
+450. Extended RFQ research uses the dedicated real RFQ book for executable resting liquidity;
+451. Extended RFQ fee roles are modeled separately from standard CLOB maker/taker semantics;
+452. RFQ child-quote timing/count is historically versioned;
+453. Aster hidden-order/position capability lowers public depth and wallet-flow completeness confidence;
+454. public absence of hidden liquidity/positions is never interpreted as zero hidden liquidity/positions;
+455. venue-native order types receive no alpha credit without replayable measurable execution benefit;
+456. Cross-Venue Route Graph V2 includes microstructure, fee/latency tier, collateral, session, health, visibility, funding and oracle state;
+457. RFQ-CLOB and native-multileg routes are distinct from ordinary taker-taker routes;
+458. Lighter and edgeX enter Stage-A collection research because they add economic/data families absent from the current repository;
+459. GRVT, Extended and Paradex enter Stage-B subject to replay-grade data certification;
+460. Aster and other hidden/private venues enter Stage-C unless public evidence can quantify completeness;
+461. new-venue promotion depends on independent opportunity gain and data quality rather than popularity alone;
+462. venue-provided funding forecasts preserve their historical timestamp and never receive future settled values at decision time;
+463. funding forecast intelligence must beat persistence/current-rate/simple-consensus baselines OOS;
+464. route reports include committed capital, margin, idle prefunding and capital-time;
+465. independent venues are never treated as cross-margined/netted for liquidation risk unless actual venue semantics support it;
+466. RWA/non-24-7 venue session/market-status fields remain point-in-time economic state;
+467. V6.5 venue expansion remains GitHub-hosted/read-only and cannot add signed trading paths.
 
 ## Non-goals
 
@@ -7026,7 +7400,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5 modules without scoped evidence gates;
+- treat all venue books as equivalent visible CLOB liquidity;
+- treat RFQ indicative quotes or hidden-liquidity absence as executable truth;
 - treat tracked-wallet trigger orders as a complete market-wide stop map;
 - infer exact hidden iceberg size from aggregated L2 replenishment alone;
 - let portfolio netting erase or rewrite standalone module research results;
