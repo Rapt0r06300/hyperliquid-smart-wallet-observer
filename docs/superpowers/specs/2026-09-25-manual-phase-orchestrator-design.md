@@ -3141,6 +3141,532 @@ The system must not create "opportunities" by:
 - counting adjacent horizons as independent without clustering;
 - reusing the same capital simultaneously in incompatible paper trades.
 
+## Ultra-Scale Intelligence Architecture V5 — immense universe, bounded compute
+
+Alina must be able to observe an immense universe while preserving low latency and replay-grade evidence on the small subset that currently deserves expensive attention.
+
+The core design principle is:
+
+> **scan broadly, update incrementally, promote selectively, evaluate exactly.**
+
+The system must never apply the most expensive L2/model/execution computation uniformly to the entire universe.
+
+### Hot / Warm / Cold universe
+
+Every entity belongs to a dynamic computational tier independent from the data-quality Tier A/B/C labels.
+
+#### COLD
+
+Purpose: universal cheap awareness.
+
+Applies to:
+
+- newly discovered coins;
+- low-priority venue pairs;
+- low-priority vaults;
+- dormant leaders;
+- under-sampled regimes.
+
+Maintain only low-cost state such as:
+
+- identity/metadata;
+- latest coarse price/context;
+- volume/liquidity/OI/funding summaries;
+- vault/account fingerprint;
+- freshness;
+- lightweight anomaly score;
+- last promotion/demotion time.
+
+COLD must be cheap enough to cover the broad universe continuously or by fair rotation.
+
+#### WARM
+
+Purpose: event and opportunity detection.
+
+Maintain incremental features such as:
+
+- BBO;
+- trades;
+- OFI/microprice summaries;
+- residual versus efficient price;
+- rolling volatility/liquidity;
+- liquidation/OI/funding deltas;
+- vault position changes;
+- leader-quality freshness;
+- route-capacity approximations.
+
+WARM is the default state for entities with measurable activity or opportunity potential.
+
+#### HOT
+
+Purpose: exact execution-grade evaluation.
+
+HOT may enable:
+
+- deep/full L2;
+- dual-resolution books;
+- shadow capture;
+- richer clock probes;
+- queue state;
+- full capacity curves;
+- exact route evaluation;
+- burst capture;
+- expensive model features.
+
+Only a bounded subset may remain HOT simultaneously.
+
+Promotion to HOT is causal and driven by current evidence, not future PnL.
+
+### Coarse-to-fine opportunity cascade
+
+Every large-universe module uses a cascade.
+
+#### Stage 0 — eligibility
+
+Very cheap deterministic filters:
+
+- instrument/trading status;
+- data freshness;
+- minimum liquidity;
+- required venue availability;
+- basic vault qualification;
+- gross feasibility bounds.
+
+No candidate failing a mathematically necessary condition proceeds.
+
+#### Stage 1 — lightweight streaming score
+
+Use O(1)-update features and inexpensive models to rank large candidate sets.
+
+Examples:
+
+- residual magnitude;
+- quote staleness;
+- OFI/microprice displacement;
+- vault state change;
+- liquidation intensity;
+- rough gross spread;
+- leader freshness/skill prior.
+
+Stage 1 optimizes **recall**, not final precision.
+
+#### Stage 2 — event qualification
+
+Run richer causal features only for candidates crossing predeclared event thresholds or top-K priority boundaries.
+
+Examples:
+
+- multi-venue consensus;
+- multi-level L2 imbalance;
+- route-specific context;
+- leader/metaorder classification;
+- regime state;
+- timing uncertainty.
+
+#### Stage 3 — exact execution evaluator
+
+Only a small survivor set receives:
+
+- exact L2/VWAP;
+- all-in fee/slippage;
+- queue/fill simulation;
+- non-atomic hedge risk;
+- capacity;
+- latency-decay;
+- funding/holding effects.
+
+Final trade admission is always exact enough for the path's proof contract.
+
+#### Stage 4 — research/challenger models
+
+Advanced G4 models such as Hawkes, Kalman/VECM variants or nonlinear challengers run only where earlier stages indicate sufficient information value.
+
+An advanced model cannot be required merely to decide that an obviously uneconomic candidate should be rejected.
+
+### Approximation boundary
+
+Approximate/sketch/top-K algorithms may be used only for:
+
+- prioritization;
+- candidate discovery;
+- compute scheduling;
+- anomaly/heavy-hitter detection.
+
+They may never:
+
+- certify PnL;
+- certify exact L2 continuity;
+- replace exact fee/capacity calculation;
+- create final economic evidence.
+
+Any candidate promoted by an approximate structure is re-evaluated from exact certified evidence before admission.
+
+Exploration quotas protect against false negatives from approximate prioritizers.
+
+### Incremental keyed state
+
+The fast path maintains state per logical key, rather than rescanning historical files.
+
+Canonical keys may include:
+
+- `venue × coin`;
+- `coin × venue_pair`;
+- `vault`;
+- `leader × coin`;
+- `edge_id × regime`.
+
+For each incoming event, update only affected state.
+
+Use incremental formulas for:
+
+- rolling means/variances/EWMA;
+- OFI;
+- microprice inputs;
+- residual;
+- volatility/liquidity summaries;
+- event intensity;
+- capacity summary;
+- freshness.
+
+A normal event must not trigger a full-universe recomputation.
+
+### Dirty-set execution
+
+Each event produces a minimal `dirty_set` of keys whose state changed.
+
+Only dirty keys are reconsidered by downstream opportunity stages.
+
+Examples:
+
+- Binance BTC trade updates BTC-related venue relations, not every coin;
+- one vault position change reevaluates that vault and traded coin, not 3,000 vaults;
+- one OKX SOL L2 update refreshes SOL routes involving OKX, not all 15 route families for all markets.
+
+This is a hard scalability invariant.
+
+### Shared feature computation
+
+A raw event is parsed and transformed once whenever possible.
+
+Shared deterministic features are published to consumers rather than recomputed independently by Copy-Vault, Lead-Lag and Cross-Venue.
+
+Examples:
+
+- BBO state;
+- L2 capacity curve;
+- OFI;
+- microprice;
+- efficient-price residual;
+- clock quality;
+- funding/OI delta;
+- liquidation intensity.
+
+Module-specific logic consumes these shared features.
+
+This reduces CPU, memory and inconsistent definitions.
+
+### Same-coin route graph, not full Cartesian explosion
+
+The universe planner must avoid unnecessary quadratic work.
+
+For Cross-Venue and same-coin Lead-Lag:
+
+- build only venue relationships for instruments representing the same normalized underlying;
+- materialize only routes where both venues are data-ready and economically compatible;
+- skip nonexistent/untradeable intersections.
+
+Cross-asset Lead-Lag relationships are a separate sparse graph selected from frozen research hypotheses, not an all-coins × all-coins Cartesian product.
+
+### Streaming top-K priority queues
+
+Maintain bounded top-K sets for expensive resources, for example:
+
+- most active Copy-Vault leaders;
+- largest executable cross-venue residuals;
+- strongest Lead-Lag event scores;
+- highest near-miss opportunity frontier;
+- most stale/high-risk streams needing repair.
+
+Top-K maintenance should be incremental.
+
+Exact heaps are preferred when affordable.
+
+Approximate heavy-hitter/sketch structures are allowed for very large discovery spaces, but only under the approximation boundary above.
+
+### Value-of-information scheduler
+
+Scarce resources are allocated using a transparent expected-value priority.
+
+Candidate priority can combine:
+
+- probability of generating an executable opportunity;
+- estimated economic information gain;
+- staleness/coverage debt;
+- uncertainty reduction;
+- current opportunity frontier distance;
+- data quality;
+- compute/API/network cost.
+
+Conceptually:
+
+`priority ~= expected_information_or_opportunity_value / marginal_resource_cost`
+
+This score schedules:
+
+- HOT promotions;
+- deep-L2 subscriptions;
+- Copy-Vault priority WS slots;
+- archive repair jobs;
+- research compute;
+- shadow feeds.
+
+The score is a scheduler heuristic, not economic proof.
+
+### Promotion hysteresis
+
+Avoid computational thrashing.
+
+Promotion/demotion policies use:
+
+- minimum HOT dwell time;
+- cooldown;
+- separate promote/demote thresholds;
+- emergency demotion for bad data/overload.
+
+A symbol oscillating around one threshold must not repeatedly open/close expensive subscriptions every few seconds.
+
+### Dynamic shard sizing
+
+Each GitHub runner measures:
+
+- messages/sec;
+- bytes/sec;
+- parse time;
+- feature-update time;
+- queue depth;
+- event-loop lag;
+- checkpoint/publish throughput;
+- CPU/memory.
+
+Shard size is adapted from measured headroom.
+
+If a shard approaches latency/backpressure limits:
+
+1. split the shard;
+2. move low-priority WARM/COLD work elsewhere/later;
+3. reduce optional derived work;
+4. protect HOT raw evidence.
+
+Do not wait for queue drops before resizing.
+
+### Backpressure and overload policy
+
+All queues are bounded and observable.
+
+Overload handling priority:
+
+1. never silently lose HOT raw execution-critical data;
+2. preserve WAL/timestamps/continuity evidence;
+3. shed/reduce optional derived computations;
+4. degrade WARM frequency;
+5. defer COLD scans;
+6. split/rebalance the runner.
+
+If execution-critical raw data is lost despite safeguards, the affected interval is quarantined according to G2.
+
+Load shedding may reduce opportunity breadth temporarily; it may never fabricate continuity.
+
+### Fast path versus batch path
+
+Separate two execution modes.
+
+#### Fast path
+
+Event-by-event or very small micro-batches:
+
+- timestamp;
+- WAL;
+- sequence/book update;
+- incremental feature state;
+- event detection;
+- top-K/prioritization.
+
+Optimize for predictable latency.
+
+#### Batch/vector path
+
+Larger immutable batches:
+
+- broad feature scans;
+- cross-sectional ranking;
+- historical summaries;
+- ANALYZE;
+- research matrices;
+- report aggregation.
+
+Optimize for throughput.
+
+Do not force row-by-row Python-style processing on analytical workloads where vectorized columnar execution is materially faster.
+
+### Columnar derived tapes
+
+Raw evidence remains source-of-truth in the existing durable format.
+
+Derived analytical tapes may use Arrow/Parquet-compatible columnar batches when benchmarks show clear benefit.
+
+Desired properties:
+
+- contiguous typed columns;
+- vectorization/SIMD friendliness;
+- predicate/column pruning;
+- efficient compression;
+- zero/low-copy interchange where practical;
+- deterministic schema/versioning.
+
+DuckDB/Arrow/Polars or equivalent tooling may be used for batch analytics only if benchmarked against the current implementation.
+
+No dependency is promoted solely because it is fashionable.
+
+### Micro-batching
+
+High-volume derived writes should use bounded micro-batches instead of one filesystem/network operation per market event.
+
+Batch size is constrained by:
+
+- maximum acceptable durability latency;
+- memory;
+- event-rate;
+- checkpoint cadence.
+
+Raw receive timestamps remain event-level even when persistence is batched.
+
+### Snapshot + delta state persistence
+
+Long-lived keyed feature state is checkpointed as:
+
+- compact state snapshot;
+- last consumed event/sequence identifiers;
+- universe/schema digest;
+- incremental delta/WAL after snapshot.
+
+A successor runner restores the latest valid snapshot then applies remaining deltas.
+
+This avoids rebuilding hours of feature history at every GitHub handoff.
+
+State snapshots are derived artifacts; raw immutable evidence remains the recovery authority.
+
+### Cache hierarchy
+
+Use explicit caches for expensive stable data:
+
+- instrument metadata;
+- symbol normalization;
+- fee/rule version;
+- venue capability matrix;
+- universe intersections;
+- vault static metadata;
+- archive availability.
+
+Caches include source/effective timestamps and invalidate on change.
+
+Do not repeatedly fetch or recompute static data on each event.
+
+### Performance budgets
+
+Every fast-path component has measured latency/throughput budgets.
+
+Track at minimum:
+
+- socket receive -> WAL timestamp;
+- WAL -> normalized event;
+- normalized event -> keyed-state update;
+- state update -> candidate event;
+- candidate -> HOT promotion decision;
+- exact evaluator latency;
+- checkpoint age.
+
+Report p50/p95/p99.
+
+Performance targets begin as `MEASURE_ONLY`; after baseline measurement, scoped thresholds may be promoted where a consumer genuinely depends on them.
+
+### Opportunity recall audit
+
+A cascade can be fast but useless if Stage 1 discards future winners.
+
+Therefore periodically evaluate Stage-1/Stage-2 recall on TRAIN/validation:
+
+- fraction of later high-net candidates that survived cheap filters;
+- false-negative reasons;
+- compute saved;
+- latency saved.
+
+The cheap cascade is optimized for high recall of economically promising candidates, not maximum classification accuracy.
+
+Untouched OOS remains unavailable for cascade tuning.
+
+### Resource-efficiency scoreboard
+
+Per collection epoch report:
+
+- universe size;
+- COLD/WARM/HOT counts;
+- events/sec;
+- raw MB/sec;
+- CPU/event;
+- memory/key;
+- HOT promotions/hour;
+- promotion precision;
+- opportunity recall estimate on eligible TRAIN/validation audits;
+- exact-evaluator calls/day;
+- compute saved by cascade;
+- queue high-water marks;
+- shard splits/rebalances;
+- checkpoint restore time;
+- analysis rows/sec.
+
+This makes scalability measurable rather than anecdotal.
+
+### Ultra-scale module behavior
+
+#### Copy-Vault
+
+- COLD: all qualifying public vault identities/low-cost state fingerprints;
+- WARM: vaults with recent changes, nontrivial positions or rising leader-quality;
+- HOT: scarce priority leaders with live WS + associated traded-coin deep market data.
+
+Only changed vaults enter targeted reconciliation.
+
+#### Lead-Lag
+
+- COLD: all normalized compatible coin/venue metadata;
+- WARM: broad BBO/trade/residual/OFI state;
+- HOT: current shocks, high-score directed edges, consensus/lagger events requiring deeper L2.
+
+Directed-edge state updates only for affected coin/venues.
+
+#### Cross-Venue
+
+- COLD: all same-coin compatible venue intersections;
+- WARM: continuous BBO/residual/coarse capacity;
+- HOT: top executable residuals/near-misses requiring exact multi-leg L2 and route auction.
+
+The exact route evaluator runs only on HOT survivors.
+
+### Research basis for Ultra-Scale V5
+
+This architecture is informed by:
+
+- **Apache Flink stateful-stream principles:** keyed state keeps per-key updates local and checkpointing provides bounded recovery; backpressure must be explicitly managed.
+- **streaming top-K/heavy-hitter research:** huge streams can maintain a small high-priority candidate set with bounded memory; Alina restricts approximation to prioritization.
+- **coarse-to-fine/cascade ranking systems:** inexpensive high-recall stages reduce candidate sets before expensive re-ranking/evaluation.
+- **load-shedding research:** under overload, preserving high-importance events yields better system quality than uncontrolled queue growth; Alina applies this only to lower-priority/derived work, never by silently discarding required execution evidence.
+- **Apache Arrow:** columnar contiguous layouts enable vectorization and zero-copy interchange.
+- **DuckDB/vectorized execution:** batch/vector execution reduces per-row analytical overhead for OLAP-style scans.
+- **adaptive/value-of-information scheduling:** limited measurement/compute resources should concentrate where marginal information/opportunity value is highest, while exploration prevents starvation.
+
+These sources guide compute architecture. Exact economic decisions still use certified Alina evidence.
+
+
 ### Research basis for Opportunity Expansion V4
 
 This architecture is informed by:
@@ -3921,7 +4447,36 @@ The following numbered items form the normative acceptance catalog. Each item is
 233. the optimizer tracks both expected net value per opportunity and effective independent opportunities per day;
 234. breadth expansion cannot count duplicated parameter grids, child fills, correlated wallets or adjacent horizons as independent opportunities without evidence;
 235. collection/research prioritization may target the opportunity frontier where small measurable improvements would unlock many candidates;
-236. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+236. the computational universe is dynamically partitioned into COLD/WARM/HOT tiers so expensive processing is bounded;
+237. COLD coverage is broad/cheap, WARM performs opportunity detection, and HOT is reserved for execution-grade evidence/evaluation;
+238. every large-universe module implements a coarse-to-fine cascade with exact final economic evaluation;
+239. approximate top-K/sketch methods, if used, can prioritize work but cannot certify PnL/data continuity/exact execution;
+240. exploration quotas protect against permanent false-negative starvation caused by approximate prioritization;
+241. fast-path state updates are incremental/keyed and ordinary events do not trigger full-universe rescans;
+242. a dirty-set mechanism limits downstream recomputation to keys actually affected by an event;
+243. deterministic shared features are computed once and reused across modules where definitions are identical;
+244. same-coin venue graphs are materialized only for compatible/data-ready intersections, avoiding unnecessary Cartesian expansion;
+245. cross-asset Lead-Lag graphs remain sparse hypothesis graphs rather than all-coins squared;
+246. HOT promotions and scarce collection resources can be prioritized by transparent value-of-information/resource-cost heuristics;
+247. promotion/demotion uses hysteresis/cooldown to prevent expensive subscription/computation thrashing;
+248. runner shard size adapts before queue loss based on measured throughput, lag, memory and checkpoint headroom;
+249. overload sheds optional derived/Tier-C work before sacrificing HOT raw execution-critical evidence;
+250. any unavoidable execution-critical raw-data loss still quarantines only the affected G2 scope;
+251. fast event processing and batch/vector analytical processing are separate execution paths with separate performance objectives;
+252. columnar/vectorized derived tapes may be adopted only after reproducible benchmarks demonstrate benefit;
+253. event-level receive timestamps/provenance remain intact even when persistence uses micro-batches;
+254. successor runners can restore compact keyed-state snapshots plus deltas without replaying an entire collection epoch;
+255. derived state snapshots never replace immutable raw evidence as recovery authority;
+256. stable metadata/rule/universe caches carry source/effective timestamps and deterministic invalidation;
+257. fast-path latency and throughput are measured at socket->WAL->normalize->state->candidate->exact-evaluator boundaries;
+258. performance thresholds begin MEASURE_ONLY and become scoped blockers only when a consumer dependency justifies them;
+259. cascade Stage-1/Stage-2 recall is audited on TRAIN/validation so compute savings cannot silently eliminate most profitable candidates;
+260. untouched OOS cannot be used to tune cascade recall/promote thresholds;
+261. resource-efficiency scoreboards report universe tiers, CPU/event, memory/key, events/sec, promotions, compute saved, queue headroom and restore speed;
+262. Copy-Vault only targeted-reconciles changed/active vaults while preserving broad cheap awareness of the complete universe;
+263. Lead-Lag updates directed relationships only for affected coin/venue keys and promotes shocks to HOT depth evaluation;
+264. Cross-Venue runs exact route auctions only on HOT residual/near-miss survivors rather than every possible route continuously;
+265. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
