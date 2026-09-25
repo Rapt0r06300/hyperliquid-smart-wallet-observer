@@ -80,6 +80,7 @@ def _selection_args(ctx: AdapterContext) -> list[str]:
     for key, flag in (
         ("start_ts_ms", "--start-ts-ms"),
         ("end_ts_ms", "--end-ts-ms"),
+        ("max_shards", "--max-shards"),
     ):
         value = ctx.partition.get(key)
         if value is not None:
