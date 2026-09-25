@@ -1688,6 +1688,539 @@ Any candidate that appears highly profitable is re-run under adverse but plausib
 
 A candidate whose edge vanishes under tiny perturbations is not treated as "mega PnL" quality.
 
+### Edge Research Program V2 — maximum defensible edge search
+
+Alina must not assume that one legacy mechanism contains enough alpha by itself. The research program deliberately searches for **multiple economically distinct edge families per module**, then combines only those that survive independent causal, execution, and held-out tests.
+
+The goal is not to manufacture a positive backtest. The goal is to maximize the chance of discovering a real, scalable, after-cost edge while preserving a complete audit trail of failed hypotheses.
+
+#### Edge decomposition
+
+For every module, decompose expected daily paper PnL into explicit levers:
+
+`daily_net ~= opportunities_per_day × fill_probability × notional × net_edge_per_dollar`
+
+with:
+
+`net_edge = gross_signal_edge - fees - spread - slippage - market_impact - latency_decay - funding/holding_cost - hedge/legging_risk - adverse_selection`
+
+This decomposition is reported for every candidate.
+
+A module that misses +4 USD/day must therefore identify **which lever is insufficient**:
+
+- too few valid opportunities;
+- weak gross edge;
+- poor fill probability;
+- costs too high;
+- latency destroys the signal;
+- insufficient capacity;
+- over-conservative sizing;
+- excessive correlation/double counting;
+- instability across regimes.
+
+Research work should target the actual bottleneck rather than blindly loosening thresholds.
+
+#### Alpha-family registry
+
+Every strategy family maintains an append-only hypothesis registry with a unique hypothesis ID, economic mechanism, required evidence, TRAIN search space, expected failure mode, and held-out status.
+
+Hypotheses are grouped into:
+
+1. **informational edge** — one observable event predicts future price movement;
+2. **relative-value edge** — a temporary residual from a common/equilibrium price is expected to converge;
+3. **behavioral edge** — a subset of agents/wallets repeatedly carries useful information;
+4. **liquidity edge** — book state, resilience, queue dynamics or forced flow produces predictable execution/reversion behavior;
+5. **execution edge** — route/order type reduces implicit/explicit cost without increasing adverse selection more than the savings;
+6. **selection edge** — choosing the right coin/leader/venue/regime creates a better opportunity set;
+7. **allocation edge** — better confidence/capacity-aware sizing turns the same validated signal into more net dollars without violating paper-risk limits.
+
+A candidate can combine several edge types, but attribution must remain separable.
+
+### Research methodology ladder
+
+Every new edge family begins with the simplest defensible model and earns complexity only through incremental held-out value.
+
+Preferred progression:
+
+1. deterministic/mechanical rule;
+2. normalized threshold or residual;
+3. linear/logistic model;
+4. sparse/ridge/LASSO model;
+5. state-space/VECM/Hawkes model when structurally justified;
+6. shallow nonlinear model;
+7. deeper ML only if it beats the simpler frozen baseline after costs and multiple-testing correction.
+
+Complexity that only improves in-sample fit is rejected.
+
+Stationary/normalized microstructure features are preferred over raw price levels.
+
+### Event time, asynchronous data and causal clocks
+
+Lead-Lag and Cross-Venue research must not rely only on fixed wall-clock resampling.
+
+The research layer may use:
+
+- event time;
+- price-change time;
+- volume/trade-count time;
+- asynchronous covariance/lead-lag estimators;
+- same-runner monotonic receive time;
+- exchange event/matching-engine time.
+
+For asynchronous multi-venue data, candidate estimators include Hayashi–Yoshida-style covariance/lead-lag methods or equivalent methods that avoid stale-grid interpolation artifacts.
+
+Any measured lead shorter than timing uncertainty is treated as unresolved.
+
+### Efficient-price model library
+
+Lead-Lag and Cross-Venue may compare several causally frozen estimators of the common efficient price:
+
+- robust median/trimmed mid;
+- liquidity/depth-weighted reference;
+- VECM/common stochastic trend;
+- Hasbrouck-style information-share weighting;
+- permanent-transitory decomposition;
+- state-space/Kalman common-price model;
+- sparse cross-impact model.
+
+The winner is selected only on TRAIN/validation and frozen before OOS.
+
+Persistent structural basis is represented separately from transient residual.
+
+### Copy-Vault edge library
+
+Copy-Vault research must test a broad set of leader-skill hypotheses instead of ranking primarily by historic PnL.
+
+#### 1. Anticipatory-wallet edge
+
+Measure whether a leader's signed fill precedes positive market-adjusted forward markout after the actual observable delay.
+
+Test across multiple horizons and chronological splits.
+
+A wallet that is profitable but systematically **follows** the efficient price is not automatically copyable.
+
+#### 2. Metaorder / order-splitting edge
+
+Persistent child fills from the same leader may indicate a larger latent metaorder.
+
+Test whether:
+
+- first child fill;
+- early sequence of same-direction fills;
+- position-delta acceleration;
+- Hawkes/self-excitation intensity
+
+predicts continued leader flow or forward price movement after costs.
+
+This can create earlier entries than waiting for the full position to become obvious.
+
+#### 3. Leader specialization edge
+
+A leader may be skilled only in:
+
+- specific coins;
+- long versus short direction;
+- volatility/liquidity regimes;
+- holding horizons;
+- event types.
+
+Estimate skill hierarchically at wallet × coin × direction × regime, with shrinkage toward broader priors when samples are small.
+
+Do not assume one global leader score is optimal.
+
+#### 4. Bayesian/shrinkage skill edge
+
+Small-sample leaderboard winners are highly vulnerable to winner's curse.
+
+Leader ranking should compare:
+
+- raw markout;
+- shrinkage-adjusted markout;
+- posterior/probability-of-positive-edge;
+- lower-confidence-bound markout;
+- persistence across chronological splits.
+
+Selection priority is driven by conservative skill estimates, not raw maximum ROI.
+
+#### 5. Skill-decay / change-point edge
+
+A historically good leader can stop being useful.
+
+Maintain causal skill-decay indicators and change-point/regime-break tests.
+
+A leader whose recent forward markout degrades below the frozen continuation threshold is demoted from scarce live-WS priority even if long-run PnL remains high.
+
+#### 6. Crowding/copyability edge
+
+Publicly popular leaders may become harder to copy because follower flow worsens entry price or shortens residual alpha lifetime.
+
+Measure copyability using:
+
+- leader-fill-to-observable-delay markout decay;
+- post-leader spread/depth deterioration;
+- short-horizon impact after publicly visible leader activity;
+- opportunity capacity relative to likely copied notional;
+- popularity/crowding proxies when causally observable.
+
+Leaderboard rank/popularity cannot be used as a positive skill prior by itself.
+
+#### 7. Execution-skill versus signal-skill separation
+
+A leader may earn PnL because of superior execution rather than superior direction.
+
+Separate:
+
+- decision/information markout;
+- leader execution improvement versus contemporaneous book;
+- follower-reproducible markout after observed delay.
+
+Only the reproducible component counts as Copy-Vault alpha.
+
+#### 8. Multi-leader conditional consensus
+
+Consensus can increase confidence only when leaders are demonstrably independent.
+
+Cluster leaders by behavioral similarity, overlapping fills, shared timing and common position paths.
+
+Highly correlated leaders count as one effective vote for consensus/risk allocation.
+
+#### 9. Exit-skill edge
+
+Measure whether leaders are informative not only at entry but at:
+
+- ADD;
+- REDUCE;
+- CLOSE;
+- direction flip.
+
+Some leaders may have strong entry skill but poor exits or vice versa.
+
+Entry and exit scores may therefore be distinct.
+
+### Lead-Lag edge library
+
+Lead-Lag research must search beyond one-venue price jumps.
+
+#### 1. Multi-level OFI edge
+
+Compute order-flow imbalance across multiple L2 levels.
+
+Compare:
+
+- level-1 OFI;
+- multi-level OFI;
+- PCA/integrated OFI;
+- sparse cross-venue OFI.
+
+Deeper-book order flow is admitted only if it improves held-out net PnL or forecast quality after cost.
+
+#### 2. Microprice / queue-pressure edge
+
+Build causal microprice and queue-depletion features from:
+
+- bid/ask imbalance;
+- depth shape;
+- queue refill/cancel dynamics;
+- spread state.
+
+Use them as state variables and incremental predictors, not standalone guaranteed alpha.
+
+#### 3. Cross-impact edge
+
+Estimate whether order flow on venue/coin A predicts future return on venue/coin B after controlling for:
+
+- common market factor;
+- contemporaneous price movement;
+- own-market OFI;
+- timing uncertainty.
+
+Sparse cross-impact is preferred to dense unrestricted models.
+
+#### 4. Hawkes / event-intensity edge
+
+Model self- and cross-excitation of:
+
+- market orders;
+- limit orders;
+- cancellations;
+- price changes;
+- liquidations.
+
+Candidate Hawkes/intensity features may estimate the probability of continued flow versus exhaustion.
+
+They must compete against simpler OFI/return baselines.
+
+#### 5. Price-discovery regime edge
+
+Estimate which venue is currently leading via frozen rolling/segmented measures such as:
+
+- information share;
+- lead-lag contrast;
+- cross-impact strength;
+- receive-time precedence;
+- residual correction speed.
+
+A venue can switch from leader to follower by coin/regime.
+
+#### 6. Event-time horizon edge
+
+Replace fixed 1s/5s-only thinking with horizons expressed in:
+
+- milliseconds/seconds;
+- average number of price changes;
+- trade-count/event-count units.
+
+The effective forecast horizon may scale with current activity/liquidity.
+
+#### 7. Liquidity-state edge
+
+Segment book state into causal regimes based on spread, depth, imbalance, resiliency and volatility.
+
+A feature is allowed to matter in one regime and be ignored in another.
+
+Pooled weakness does not automatically reject a strong regime-specific effect, but each regime claim must survive its own held-out correction.
+
+#### 8. Continuation/reversal edge
+
+For the same observed shock, explicitly estimate the probability of:
+
+- continuation;
+- reversal;
+- no meaningful move.
+
+Candidate reversal states may include extreme queue depletion, failed continuation, liquidity refill and post-forced-flow exhaustion.
+
+#### 9. Cross-asset leader edge
+
+Test BTC/ETH/common-market flow as predictors for lagging altcoins with explicit factor neutralization.
+
+No cross-asset edge is admitted if it is merely contemporaneous beta exposure.
+
+#### 10. Clock-phase / periodic-flow edge
+
+Funding windows, quarter-hour/hour boundaries and recurring algorithmic activity may alter predictability/execution.
+
+Treat phase as a regime/context feature, not an unconditional trade signal.
+
+### Cross-Venue edge library
+
+Cross-Venue research must search for both **signal edge** and **execution edge**.
+
+#### 1. Common-price residual edge
+
+Trade transient venue residuals relative to an efficient-price model instead of raw midpoint spread alone.
+
+Candidate residual models include robust consensus, VECM, dynamic state-space/Kalman and information-share-weighted reference.
+
+#### 2. Dynamic equilibrium / half-life edge
+
+Estimate residual mean-reversion speed causally.
+
+Entry threshold and maximum hold may adapt to frozen residual half-life/regime.
+
+A residual with a half-life longer than the economic holding/cost window is not an arbitrage candidate.
+
+#### 3. Liquidity-resilience edge
+
+After a sweep/shock, measure how quickly depth replenishes and spread normalizes on each venue.
+
+Test whether temporary dislocations are best exploited:
+
+- immediately;
+- after a short wait for one side to refill;
+- not at all.
+
+This directly connects optimal execution to order-book resilience rather than treating the visible book as static.
+
+#### 4. Transient-impact edge
+
+Separate temporary from persistent impact.
+
+A venue whose price moved mainly because of a short-lived local liquidity shock may be more likely to revert than a venue incorporating permanent information.
+
+Impact-decay parameters are estimated only from TRAIN and frozen.
+
+#### 5. Unified-book smart routing edge
+
+Construct a unified executable book across compatible venues.
+
+For a required paper notional, compare:
+
+- single-venue execution;
+- split execution;
+- venue priority by all-in cost;
+- marketable-limit caps;
+- taker versus queue-proven maker components.
+
+Routing gains are measured relative to the same signal, so signal alpha and execution alpha stay separable.
+
+#### 6. Non-atomic hedge-control edge
+
+Model legging risk explicitly.
+
+Candidate policies include:
+
+- fill more liquid hedge leg first;
+- fill alpha leg first only when expected residual decay justifies it;
+- simultaneous marketable limits;
+- immediate emergency hedge after timeout;
+- cancel if counterpart quote deteriorates.
+
+The best policy is route/regime dependent.
+
+#### 7. Queue-value edge
+
+For passive routing estimate expected value:
+
+`P(fill) × post_fill_net_value - P(no_fill) × opportunity_cost - adverse_selection_cost`
+
+Queue position, queue ahead, cancellations, taker consumption and signal half-life enter the estimate.
+
+Maker is chosen only when this expected value exceeds taker/no-trade.
+
+#### 8. Quote-basis edge
+
+Normalize USDT/USDC/USD and contract-specific persistent basis before residual calculation.
+
+Separately test whether **changes** in quote basis themselves contain predictive information, without confusing them with same-asset arbitrage.
+
+#### 9. Venue-reliability edge
+
+Route preference may include empirical:
+
+- stale-quote rate;
+- disconnect rate;
+- fill/reconciliation reliability;
+- book-resync frequency;
+- timing quality.
+
+A nominally cheaper venue can be economically worse if execution uncertainty is high.
+
+#### 10. Volatility/liquidation dislocation edge
+
+During stress, cross-venue impact and liquidity may diverge dramatically.
+
+Maintain separate policies for:
+
+- normal conditions;
+- forced-flow/cascade;
+- recovery/refill.
+
+Stress-regime edges must include larger uncertainty/slippage reserves, not smaller ones.
+
+### Cross-module structural edges
+
+#### Regime switching
+
+Each module may maintain a small set of frozen regime policies rather than one universal policy.
+
+Regime changes can be detected from market-state features or change-point methods, but a new regime model must improve held-out economics rather than only statistical fit.
+
+#### Opportunity-density optimization
+
+Track rejected candidates and classify the reject reason.
+
+If most candidates fail for the same reason, research targets that bottleneck.
+
+Examples:
+
+- fees -> search maker/route improvement;
+- latency -> prioritize faster leaders/venues;
+- capacity -> increase universe/route splitting;
+- no signal -> add information features;
+- timing uncertainty -> improve same-runner/event-time measurement.
+
+This turns "why are we not at +4/day?" into a measurable optimization loop.
+
+#### Capital-efficiency edge
+
+Compare opportunities by conservative expected net dollars per:
+
+- dollar of capital;
+- second of holding time;
+- unit of drawdown budget;
+- unit of venue concentration.
+
+A smaller but fast-recycling edge can outperform a larger edge that ties capital for too long.
+
+### Anti-overfitting / false-discovery firewall
+
+Because the edge library is intentionally large, multiple-testing control is mandatory.
+
+Research batches must retain enough information to compute or approximate, where appropriate:
+
+- White-style Reality Check or equivalent benchmark-comparison test;
+- Hansen SPA-style superior predictive ability test;
+- Deflated/Probabilistic Sharpe metrics;
+- Probability of Backtest Overfitting (PBO);
+- block/event-cluster bootstrap;
+- trial-count-adjusted family thresholds.
+
+Purging/embargo or equivalent chronological separation is required wherever label/holding-period overlap could leak information between folds.
+
+Every trial — including failed ones — remains in the registry so the effective search count is auditable.
+
+No candidate is promoted solely because it is the best of hundreds of trials.
+
+### Holdout-burn policy
+
+Once a holdout has influenced a design decision, it is considered burned for that hypothesis lineage.
+
+Further tuning requires:
+
+- a new future time window;
+- or a clearly different pre-registered hypothesis family evaluated prospectively.
+
+This prevents iterative hidden overfitting.
+
+### Edge promotion scoreboard
+
+For each edge hypothesis publish:
+
+- hypothesis ID and mechanism;
+- module;
+- signal family;
+- execution family;
+- regime;
+- opportunity count/day;
+- fill rate;
+- gross edge bps;
+- explicit cost bps;
+- latency/adverse-selection bps;
+- net edge bps;
+- average/median net USD per trade;
+- daily net mean/median/LCB;
+- profit factor;
+- drawdown/ES;
+- capacity;
+- edge half-life;
+- parameter sensitivity;
+- positive-day fraction;
+- OOS/forward status;
+- trial-count/multiple-testing status;
+- stress-test survival.
+
+A candidate with spectacular raw PnL but weak lower-confidence-bound, fragile parameters or poor stress survival is not a top-priority production hypothesis.
+
+### Source curriculum incorporated into V2 research
+
+The research program explicitly incorporates ideas from high-signal teaching/research sources, while treating them as hypothesis generators rather than proof:
+
+- **Princeton ORF 445 — High Frequency Markets: Models and Data Analysis (Robert Almgren):** market making, price formation, empirical microstructure and data-driven trading strategies.
+- **University of Oxford — Market Microstructure and Algorithmic Trading:** optimal routing, Almgren–Chriss, predictive signals, transient impact, limit-order execution and market making.
+- **Columbia Business School B9330 — Market Microstructure: How Trading Works:** order/quote mechanics, theoretical microstructure and empirical implications.
+- **MIT-hosted optimal-trading research/lectures:** dynamic supply/demand, LOB resilience and intertemporal execution.
+- **Cartea–Jaimungal–Penalva:** algorithmic/HFT control, alpha signals, order flow, execution and market making.
+- **Hasbrouck / O'Hara / Harris:** empirical/theoretical market microstructure, informed trading, price discovery and practitioner market mechanics.
+- **Almgren–Chriss / Gatheral:** market impact, optimal execution and no-dynamic-arbitrage constraints.
+- **Bacry–Muzy / Hawkes literature:** self/cross-exciting order flow and event-time market-impact dynamics.
+- **Thorp / MacLean / Ziemba:** Kelly/fractional-Kelly growth, drawdown and estimation uncertainty.
+- **Bailey / López de Prado and related multiple-testing literature:** PBO/Deflated Sharpe and selection-bias control.
+- **Jane Street public market-making material:** fair value, bid/ask, size/risk and expected-value intuition; useful for execution reasoning, not treated as a source of proprietary alpha.
+
+External curriculum never overrides Alina's own OOS/forward results.
+
+
 ### Research basis
 
 The VNext design is informed by external research reviewed on 2026-09-25, while repository data remains the authority for promotion decisions.
@@ -1969,7 +2502,42 @@ Implementation is accepted only when tests prove all of the following:
 122. ANALYZE may fan out independent frozen partitions across GitHub-hosted runners and deterministically aggregate them;
 123. COLLECT may generate deterministic feature tapes but may not use them to tune PnL or inspect held-out outcomes;
 124. derived feature tapes are hash-linked to immutable raw evidence;
-125. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+125. every module maintains an append-only alpha-family registry with explicit economic mechanisms;
+126. every candidate reports opportunity density, fill probability, notional and after-cost edge components;
+127. research identifies whether time-to-target is limited by opportunity count, raw edge, costs, latency, capacity or sizing;
+128. new edge families begin with simple baselines and earn added model complexity only through incremental held-out value;
+129. asynchronous lead-lag research can use event-time/Hayashi-Yoshida-style methods without stale-grid interpolation;
+130. efficient-price candidates may include robust consensus, VECM/information-share and state-space/Kalman methods under frozen selection;
+131. Copy-Vault evaluates anticipatory-wallet, metaorder, specialization, shrinkage-skill, skill-decay, crowding/copyability, execution-skill and exit-skill hypotheses separately;
+132. Copy-Vault small-sample leader scores are shrunk and cannot rank purely by raw ROI/PnL;
+133. Copy-Vault can detect leader skill change points and demote stale leaders causally;
+134. leader popularity/leaderboard rank is not a positive skill prior by itself;
+135. Copy-Vault separates follower-reproducible information edge from leader execution edge;
+136. behavioral similarity prevents highly correlated leaders from inflating consensus confidence;
+137. Lead-Lag compares level-1 OFI, multi-level OFI and integrated/PCA OFI under held-out economics;
+138. Lead-Lag can test microprice, queue depletion/refill and multi-level book shape as incremental predictors;
+139. Lead-Lag cross-impact models control for own-market flow and common factors and prefer sparse structures;
+140. Hawkes/event-intensity features may compete with simpler OFI baselines but cannot bypass held-out proof;
+141. Lead-Lag may estimate venue leadership by regime and event-time horizon instead of assuming a permanent leader;
+142. Lead-Lag supports continuation, reversal and no-trade probability models for the same shock family;
+143. Cross-Venue supports common-price residual and dynamic equilibrium/half-life models;
+144. Cross-Venue explicitly models book resilience and transient versus permanent local impact;
+145. Cross-Venue unified-book smart routing keeps signal alpha and execution alpha separately attributable;
+146. Cross-Venue non-atomic hedge policies include first-leg choice, timeout and emergency-hedge cost;
+147. passive route selection uses expected queue value including fill, no-fill opportunity cost and adverse selection;
+148. venue reliability may influence route economics when supported by measured execution-quality evidence;
+149. all modules can use small frozen regime-policy sets only when regime conditioning improves held-out economics;
+150. rejected-opportunity reasons are measured so research targets the real bottleneck to +4 USD/day;
+151. capital-efficiency metrics include net dollars per capital, holding time and risk budget;
+152. the large edge search is protected by multiple-testing controls such as Reality Check/SPA/DSR/PBO where applicable;
+153. overlapping-label folds use purging/embargo or an equivalent leakage-control mechanism;
+154. all failed trials remain in the experiment ledger so the effective search count is auditable;
+155. a holdout that influences design is burned for that hypothesis lineage and cannot be reused as fresh evidence;
+156. edge promotion reports edge half-life, parameter sensitivity and stress-test survival in addition to raw PnL;
+157. spectacular in-sample or raw PnL cannot outrank a lower but robust candidate solely on point estimate;
+158. external university/practitioner research is used only to generate hypotheses, never as proof that an Alina edge exists;
+159. the research curriculum includes microstructure, price discovery, optimal routing, market impact, Hawkes/order flow, Kelly sizing and backtest-overfitting control;
+160. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
