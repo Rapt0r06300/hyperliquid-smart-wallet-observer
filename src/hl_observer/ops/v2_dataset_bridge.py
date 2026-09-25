@@ -28,6 +28,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbols", default="")
     parser.add_argument("--start-ts-ms", type=int)
     parser.add_argument("--end-ts-ms", type=int)
+    parser.add_argument(
+        "--max-shards",
+        type=int,
+        default=0,
+        help="Bound materialization to the newest N matching SAFE shards (0 = all).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -40,6 +46,8 @@ def main(argv: list[str] | None = None) -> int:
             start_ts_ms=args.start_ts_ms,
             end_ts_ms=args.end_ts_ms,
         )
+        if args.max_shards and args.max_shards > 0:
+            shards = shards[-int(args.max_shards):]
         plan = {
             "schema": "alina.dataset_v2_materialization_plan.v1",
             "index_sha256": digest,
