@@ -136,7 +136,10 @@ def test_materialization_failure_blocks_economic_run(tmp_path):
     )
     assert out.status == "FAILED"
     assert out.payload["reason"] == "dataset_materialization_failed"
-    assert len(calls) == 1def test_economic_materialization_and_backtest_run_in_same_unit(tmp_path):
+    assert len(calls) == 1
+
+
+def test_economic_materialization_and_backtest_run_in_same_unit(tmp_path):
     calls=[]
     class Result:
         returncode=0
