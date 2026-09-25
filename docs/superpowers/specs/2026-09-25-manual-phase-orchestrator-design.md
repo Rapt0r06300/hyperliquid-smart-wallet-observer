@@ -3652,6 +3652,153 @@ Directed-edge state updates only for affected coin/venues.
 
 The exact route evaluator runs only on HOT survivors.
 
+### Ultra-scale computational invariants
+
+To keep an immense universe fast on standard GitHub-hosted runners, the fast path obeys explicit complexity budgets.
+
+#### Stage complexity
+
+The normal event path should be dominated by local keyed/incremental operations.
+
+Targets:
+
+- Stage 0 raw ingest/WAL timestamping: O(1) per event aside from bounded serialization;
+- Stage 1 keyed state/features: O(1) or bounded-small work per affected key;
+- Stage 2 candidate ranking: bounded top-K / sparse-neighbor updates, never a full-universe sort per event;
+- Stage 3 exact economic evaluator: expensive work only for HOT survivors;
+- historical/vector analysis: batch/vectorized, never row-by-row Python loops over the whole raw tape when an equivalent vectorized path exists.
+
+These are design targets rather than universal asymptotic proofs. Any deviation must be benchmarked and justified.
+
+#### No accidental Cartesian explosions
+
+The engine precomputes compact compatibility graphs for:
+
+- coin -> available venues;
+- venue pair -> compatible normalized contract;
+- wallet -> currently held/traded coins;
+- coin -> sparse cross-asset hypotheses;
+- module path -> required evidence families.
+
+It must not materialize all-vault × all-coin, all-coin × all-coin, or all-venue × all-symbol products when most edges are invalid.
+
+Cross-asset Lead-Lag remains sparse and hypothesis-driven.
+
+#### Incremental state, TTL and compaction
+
+Per-key derived state has explicit lifetime/compaction policy.
+
+Keep only the minimum rolling state required for live decisions, for example:
+
+- last certified BBO/L2 state;
+- rolling OFI/microprice windows;
+- current residual/volatility/liquidity estimates;
+- current leader/vault fingerprints;
+- small rolling event summaries;
+- current opportunity/frontier state.
+
+Older raw evidence is sealed durably and removed from live memory after checkpoint/verification.
+
+No runner should retain an entire multi-hour raw epoch in RAM to compute a feature that can be maintained incrementally.
+
+#### Shared computation graph
+
+Common transforms are computed once per event/key and fan out to consumers.
+
+Examples:
+
+`raw book -> normalized book -> BBO/depth curve -> microprice/OFI/capacity -> {Lead-Lag, Cross-Venue}`
+
+`vault state -> position delta -> activity event -> {Copy-Vault discovery, priority scheduler}`
+
+A module cannot duplicate the same expensive deterministic L2 reconstruction merely because its strategy code lives in a different package.
+
+#### Fast-path allocation budget
+
+Each HOT/WARM/COLD stage has explicit CPU/memory/API/network budgets.
+
+When measured utilization approaches the configured headroom:
+
+1. stop promoting optional new HOT work;
+2. split or shrink overloaded WARM shards;
+3. defer low-value derived computations;
+4. reduce COLD refresh frequency within freshness policy;
+5. preserve required raw Tier-A/HOT capture and WAL durability.
+
+The scheduler reacts before bounded queues overflow.
+
+#### Promotion recall protection
+
+The cheap cascade is allowed to be approximate only for **prioritization**.
+
+On TRAIN/validation, continuously estimate:
+
+- recall of eventually profitable/executable events at each stage;
+- false-negative reasons;
+- time from raw event to HOT promotion;
+- compute saved per retained profitable candidate.
+
+If a coarse stage saves compute but systematically drops profitable candidate classes, widen that stage or create a separate specialist lane.
+
+#### Specialist lanes
+
+A single universal coarse score is not required.
+
+Maintain small specialist promotion lanes when distinct opportunity families have different signatures, for example:
+
+- Copy-Vault leader activity;
+- same-coin multi-venue dislocation;
+- venue-consensus/lagger shock;
+- liquidation/forced-flow event;
+- cross-asset spillover;
+- stale-quote/resilience event.
+
+Each lane has its own high-recall cheap trigger and feeds the same bounded HOT exact evaluator.
+
+This avoids forcing rare but valuable edge families through a score trained for common events.
+
+#### Deterministic replay of derived state
+
+Every incremental state transition needed by an economic decision must be reproducible from immutable raw evidence plus versioned code/config.
+
+Compact state snapshots accelerate recovery but are never opaque authority.
+
+For any admitted decision, the system can reconstruct:
+
+- raw source events;
+- state before decision;
+- feature values;
+- promotion path;
+- exact evaluator inputs;
+- gate decisions.
+
+Speed cannot come at the cost of auditability.
+
+### Consolidated architecture coverage
+
+This specification intentionally preserves all previously validated design layers. Implementation planning must treat the following as one coherent system, not replace a newer layer by deleting an older one:
+
+- **Manual Phase Orchestrator:** `IDLE / COLLECT / ANALYZE`;
+- **Autonomous COLLECT relay:** automatic successor jobs until the user changes phase;
+- **Collector V4 Extreme Replay-Grade:** raw WAL, handoff overlap, L2 certification, repair/quarantine, module-complete evidence;
+- **Strategy / PnL Acceleration VNext:** +4 USD net/day/module first milestone and scalable after-cost PnL;
+- **Edge Research Program V2:** broad defensible edge library with anti-overfitting controls;
+- **Acceptance Architecture V2:** scoped G0-G5 gates, dependency DAG and graceful degradation;
+- **Module Optimization V3:** edge portfolios, champion/challenger, decay monitoring and compute prioritization;
+- **Opportunity Expansion V4:** massive pre-gate candidate funnel and independent-opportunity accounting;
+- **Ultra-Scale V5:** COLD/WARM/HOT universe, cascade promotion, incremental state, sparse graphs, value-of-information scheduling and vectorized analysis.
+
+No implementation task may simplify one layer by silently violating another.
+
+The preferred resolution to conflict is:
+
+1. preserve paper/safety/causality;
+2. preserve raw data/provenance;
+3. preserve exact final economic evaluation;
+4. reduce optional breadth/complexity before weakening quality;
+5. use narrower scopes/tiers/cascades rather than global blocking.
+
+
 ### Research basis for Ultra-Scale V5
 
 This architecture is informed by:
@@ -4476,7 +4623,21 @@ The following numbered items form the normative acceptance catalog. Each item is
 262. Copy-Vault only targeted-reconciles changed/active vaults while preserving broad cheap awareness of the complete universe;
 263. Lead-Lag updates directed relationships only for affected coin/venue keys and promotes shocks to HOT depth evaluation;
 264. Cross-Venue runs exact route auctions only on HOT residual/near-miss survivors rather than every possible route continuously;
-265. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+265. the fast path avoids full-universe rescans and is built around bounded keyed/incremental work per affected event;
+266. large-universe candidate ranking uses bounded/sparse top-K style prioritization rather than sorting the complete universe on every event;
+267. exact expensive economic evaluation runs only on bounded HOT survivors and remains non-approximate;
+268. compatibility graphs prevent accidental all-vault×all-coin, all-coin×all-coin or invalid venue×symbol Cartesian expansion;
+269. live per-key state has explicit TTL/compaction and does not retain an entire raw epoch in memory when incremental state is sufficient;
+270. deterministic shared transforms are computed once and reused across modules rather than duplicated per strategy implementation;
+271. utilization headroom triggers shard split/promotion throttling/deferred low-priority work before queue overflow;
+272. cascade recall is measured specifically for eventually executable/profitable candidate classes on TRAIN/validation;
+273. specialist high-recall promotion lanes may protect rare edge families from a generic coarse ranking score;
+274. every admitted decision can reproduce its raw events, incremental state, feature values, promotion path, exact evaluator inputs and gate outcomes;
+275. compact state snapshots accelerate recovery but cannot become opaque authority over immutable raw evidence;
+276. implementation preserves Manual Phase Orchestrator, autonomous COLLECT, Collector V4, PnL VNext, Edge Research V2, Acceptance V2, Optimization V3, Opportunity V4 and Ultra-Scale V5 as one coherent architecture;
+277. optimization conflicts are resolved by preserving safety/causality/raw provenance/exact economics before optional breadth or complexity;
+278. no implementation task may remove a previously validated architecture layer merely to simplify local code;
+279. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
