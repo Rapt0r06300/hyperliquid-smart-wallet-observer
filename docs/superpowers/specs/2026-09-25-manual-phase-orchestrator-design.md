@@ -6837,6 +6837,361 @@ High-signal sources supporting V6.7 include:
 - **public HIP-4 codebases:** independently converge on three research mechanisms — outcome market making, cross-venue event relative value and underlying/perp parity — but their profitability claims are not imported into Alina.
 
 
+
+### Profitability Convergence V6.8 — rule, coverage and observability completeness
+
+V6.8 captures low-level venue rules and data-coverage limits that can create false edge, false completeness or avoidable friction even when the higher-level strategy logic is correct.
+
+Core rule:
+
+> **a paper trade is admissible only if it could have been a valid order under the point-in-time venue rules and if the evidence used to justify it was actually observable with the recorded coverage.**
+
+### Hyperliquid precision / validity contract
+
+For each instrument version, store at least:
+
+- `szDecimals`;
+- effective tick / price precision;
+- lot/size increment;
+- minimum notional;
+- max leverage;
+- margin table / margin tier;
+- margin mode;
+- collateral token;
+- delisted flag;
+- growth-mode state;
+- DEX/deployer identity.
+
+Current documented Hyperliquid validity rules include:
+
+- price up to 5 significant figures;
+- perps: no more than `6 - szDecimals` decimal places;
+- spot: no more than `8 - szDecimals` decimal places;
+- integer prices are always allowed even when they exceed five significant figures;
+- size must conform to `szDecimals`.
+
+Paper-order construction must:
+
+1. compute intended economic price/size;
+2. normalize to the venue-valid representation;
+3. record normalization/rounding delta;
+4. recompute expected edge/cost after normalization;
+5. reject if the normalized order no longer clears the gate.
+
+Never credit favorable rounding silently.
+
+### Exact order-status / rejection taxonomy
+
+Preserve venue reason rather than only a generic terminal state.
+
+Hyperliquid states to retain include when observed:
+
+- `open`;
+- `filled`;
+- `canceled`;
+- `triggered`;
+- `rejected`;
+- `marginCanceled`;
+- `vaultWithdrawalCanceled`;
+- `openInterestCapCanceled`;
+- `selfTradeCanceled`;
+- `reduceOnlyCanceled`;
+- `siblingFilledCanceled`;
+- `delistedCanceled`;
+- `liquidatedCanceled`;
+- `scheduledCancel`;
+- `tickRejected`;
+- `minTradeNtlRejected`;
+- `perpMarginRejected`;
+- `reduceOnlyRejected`;
+- `badAloPxRejected`;
+- `iocCancelRejected`;
+- `badTriggerPxRejected`;
+- `marketOrderNoLiquidityRejected`;
+- `positionIncreaseAtOpenInterestCapRejected`;
+- `positionFlipAtOpenInterestCapRejected`;
+- `tooAggressiveAtOpenInterestCapRejected`;
+- `openInterestIncreaseRejected`;
+- `insufficientSpotBalanceRejected`;
+- `oracleRejected`;
+- `perpMaxPositionRejected`;
+- unknown/unmapped future statuses.
+
+Status-frequency features may be researched only after separating mechanical venue constraints from informational market state.
+
+### Self-trade prevention detail
+
+Hyperliquid self-trade prevention cancels the resting order when the same address would trade against itself; no ordinary trade is created and no normal trade fee is charged.
+
+Therefore:
+
+- Portfolio Intent Netting should remove avoidable same-address opposing intents before paper execution;
+- if a same-address cross still occurs under the tested policy, simulate self-trade prevention rather than two fills;
+- `selfTradeCanceled` is excluded from aggressor/trade-flow volume;
+- subaccounts are treated as separate account identities unless an explicit rule proves otherwise.
+
+### Trigger-order observability
+
+For any queried public user, `frontendOpenOrders` can expose point-in-time trigger metadata including:
+
+- `isTrigger`;
+- `triggerPx`;
+- `triggerCondition`;
+- order type;
+- `reduceOnly`;
+- `isPositionTpsl`;
+- current/original size.
+
+Hyperliquid TP/SL documentation states the **mark price** is the trigger reference.
+
+Rules:
+
+- trigger activation and resulting execution are separate events;
+- a visible TP is not liquidation pressure;
+- tracked-wallet trigger maps are lower-bound/sample maps;
+- global completeness requires certified market-wide L4/order evidence;
+- every trigger map stores wallet/source coverage and freshness.
+
+### Wallet-monitoring coverage budget
+
+Official WebSocket limits currently include:
+
+- maximum 10 connections;
+- maximum 30 new connections/minute;
+- maximum 1000 subscriptions;
+- maximum **10 unique users across user-specific WebSocket subscriptions**.
+
+Copy-Vault / trigger-map tracking therefore uses tiers:
+
+- `HOT_WS`;
+- `WARM_REST`;
+- `COLD_DISCOVERY`;
+- `ARCHIVE_OR_REMOTE_ORDER_SOURCE` when approved.
+
+Per wallet store:
+
+- observation method;
+- cadence;
+- staleness;
+- gaps;
+- rate-cost;
+- reason for tier;
+- coverage confidence.
+
+No report may label hundreds of wallets as live user-WS tracked under a 10-user documented limit.
+
+### Historical retention and censoring
+
+Official API limits include:
+
+- `historicalOrders`: at most 2000 most recent historical orders;
+- `userFills`: at most 2000 most recent fills;
+- `userFillsByTime`: at most 2000 fills per response and only the 10,000 most recent fills are accessible through that API family.
+
+Therefore:
+
+- high-activity wallets require ongoing capture before API history rolls off;
+- reaching a cap is a censoring warning, not completeness proof;
+- record `coverage_start`, `coverage_end`, rows, pages, cursor progress and `possibly_truncated`;
+- restore older history only from a certified archive/order source;
+- leader scoring discounts or rejects materially censored windows.
+
+### Snapshot / reconnect contract
+
+For streams that emit bootstrap snapshots:
+
+- persist `isSnapshot` where provided;
+- record connection/session and bootstrap timestamp;
+- deduplicate already-committed snapshot rows;
+- reconcile missed intervals with matching read-only info endpoints where possible;
+- keep source state `RECOVERING` until reconciliation completes;
+- never count snapshot bootstrap as fresh event frequency.
+
+### L2 order-count metadata
+
+Preserve the L2 level `n` field when available.
+
+Possible uses:
+
+- order-count / depth ratio;
+- visible average order size;
+- queue fragmentation;
+- refill/cancel intensity;
+- calibration against selective L4 windows.
+
+It cannot create an exact queue-ahead claim without stronger order-level evidence.
+
+### Predicted funding as first-class causal input
+
+Hyperliquid officially exposes `predictedFundings` for the first perp DEX, returning per coin/venue:
+
+- predicted `fundingRate`;
+- `nextFundingTime`.
+
+Store:
+
+`observed_at, coin, venue_label, predicted_rate, next_funding_time, source_version`.
+
+Research:
+
+- forecast error to realized funding;
+- revision velocity;
+- cross-venue predicted-funding dispersion;
+- basis response before settlement;
+- incremental Relative-Value admission value.
+
+Rules:
+
+- never reconstruct missing predictions from finally realized funding;
+- unsupported HIP-3 DEXs remain missing;
+- compare Alina forecasts against persistence and exchange-predicted baselines.
+
+### Asset-context detail
+
+Where point-in-time asset context exposes:
+
+- `impactPxs`;
+- `premium`;
+- `oraclePx`;
+- `markPx`;
+- `midPx`;
+- `openInterest`;
+- `funding`;
+
+store values plus nullability/freshness.
+
+Use as:
+
+- fast liquidity sanity check;
+- mark/oracle/mid divergence;
+- funding/premium regime;
+- OI state;
+- cross-check against reconstructed depth.
+
+Do not substitute `impactPxs` for certified L2/L4 depth in final capacity proof.
+
+### Open-order / action feasibility
+
+Even in paper mode, quote-heavy strategies must report whether their hypothetical behavior fits venue constraints.
+
+Track:
+
+- simulated open-order count;
+- trigger/reduce-only count;
+- orders/minute;
+- cancels/minute;
+- modifies/minute;
+- quote layers per instrument.
+
+Current Hyperliquid rules include an open-order allowance that scales with volume up to a capped maximum, with special rejection behavior for trigger/reduce-only orders at high counts.
+
+A paper strategy requiring impossible action/open-order throughput is `EXECUTION_INFEASIBLE`.
+
+### Scheduled cancel / dead-man semantics
+
+Schedule-cancel/dead-man behavior is safety, not alpha.
+
+Model only as:
+
+- orphan-quote protection;
+- source of `scheduledCancel`;
+- feasibility/safety state.
+
+### Portfolio-margin / unified-account state
+
+Hyperliquid supports account abstraction states including classic/disabled, unified account and portfolio margin.
+
+This can change:
+
+- collateral efficiency;
+- cross spot/perp PnL offsets;
+- borrowing;
+- liquidation distance;
+- capital fragmentation;
+- spot-perp carry feasibility.
+
+Relative-Value reports therefore store assumed account mode.
+
+Rules:
+
+- do not credit PM efficiency to classic mode;
+- PM scenarios version collateral eligibility, LTV/borrow and margin semantics;
+- report conservative classic-account economics alongside PM economics when both are relevant;
+- account mode changes capital efficiency, not underlying signal alpha.
+
+### Canonical instrument identity
+
+Preserve separately:
+
+- canonical HyperCore/L1 identifier;
+- DEX namespace;
+- spot `@index` where applicable;
+- UI/display symbol;
+- economic-underlying id.
+
+Do not join datasets solely on ticker text because UI remappings can differ from L1 names.
+
+### L4 source-availability state
+
+Selective L4 from V6.6 records:
+
+- `OFFICIAL_NODE_DERIVED`;
+- `CERTIFIED_REMOTE_L4`;
+- `THIRD_PARTY_UNVERIFIED`;
+- `UNAVAILABLE`.
+
+The standard official historical S3 archive does **not** imply complete historical L4.
+
+Any remote L4 source records:
+
+- coverage dates;
+- markets;
+- snapshot availability;
+- diff gaps;
+- retention;
+- schema/version;
+- provider transformations.
+
+### Rule-change regression suite
+
+Whenever venue metadata/rules change, rerun bounded fixtures for:
+
+- price normalization;
+- size normalization;
+- GTC/IOC/ALO;
+- reduce-only;
+- trigger behavior;
+- OI-cap rejection;
+- margin-tier rejection;
+- delisting;
+- self-trade prevention;
+- fee calculation;
+- priority semantics.
+
+### V6.8 proof-report fields
+
+Execution-sensitive lanes additionally report:
+
+- invalid-order rejection rate;
+- normalization-loss bps;
+- unknown/unmapped status count;
+- API/history truncation flags;
+- wallet observation-tier distribution;
+- reconnect repair count;
+- predicted-funding coverage;
+- metadata/rule-version coverage;
+- account abstraction/margin mode;
+- L2/L4 evidence tier.
+
+A material UNKNOWN/truncated field that affects economics prevents the lane from being labeled fully measured.
+
+### V6.8 research basis
+
+This layer is grounded primarily in current official Hyperliquid documentation for tick/lot size, order statuses/errors, self-trade prevention, WebSocket/user limits, history caps, snapshots, predicted funding, perp metadata, portfolio margin and node/L4/historical-data boundaries.
+
+Public bot/framework sources only determined which edge cases deserved inspection; official venue rules control final semantics.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -7927,7 +8282,36 @@ The following numbered items form the normative acceptance catalog. Each item is
 509. HIP-4 research reuses shared Venue Health, Execution Truth, Cost State, Options, Lead-Lag and Intent-Netting infrastructure rather than creating duplicate engines;
 510. HIP-4 starts DISCOVERY_ONLY/MEASURE_ONLY and cannot become a production/core module without scoped G3/G4, frozen OOS and forward evidence;
 511. public HIP-4 bot performance claims remain hypothesis sources only;
-512. all V6.7 work remains paper/read-only and cannot introduce signed outcome actions, private keys or live trading.
+512. all V6.7 work remains paper/read-only and cannot introduce signed outcome actions, private keys or live trading;
+513. V6.8 validates point-in-time Hyperliquid price significant-figure/decimal and size szDecimals rules before fill simulation;
+514. normalization/rounding deltas are recorded and expected edge is recomputed after normalization;
+515. invalid tick/lot/notional/margin orders are rejected rather than rounded into favorable paper fills;
+516. detailed Hyperliquid cancellation/rejection statuses are preserved as distinct causes rather than generic CANCELED;
+517. selfTradeCanceled is excluded from ordinary trade-flow statistics and same-address opposing intents do not become two paper fills;
+518. frontendOpenOrders trigger metadata is used only for the queried point-in-time wallet universe with explicit coverage;
+519. TP/SL trigger simulation uses mark-price semantics for applicable Hyperliquid rule versions;
+520. wallet trigger maps remain lower-bound/sampled maps unless market-complete L4/order evidence is certified;
+521. wallet collection respects the documented 10-unique-user user-specific WS limit and records HOT_WS/WARM_REST/COLD_DISCOVERY coverage mode;
+522. no report may describe more wallets as live WS tracked than the actually subscribed unique-user set;
+523. historicalOrders and user-fill retention limits are treated as possible censoring/truncation rather than complete history;
+524. high-activity wallet backfills record coverage bounds, pagination progress and possibly_truncated state;
+525. subscription bootstrap snapshots are marked/deduplicated and reconnect streams remain RECOVERING until reconciliation completes;
+526. L2 n/order-count metadata may condition queue/replenishment models but cannot imply exact queue-ahead position;
+527. predictedFundings snapshots are stored with observation and next-funding timestamps and remain forecast evidence rather than realized funding;
+528. missing historical predicted-funding state cannot be reconstructed from future realized funding;
+529. impactPxs/premium/oracle/mark/mid/OI/funding context preserves point-in-time nullability and cannot replace certified depth;
+530. quote-heavy feasibility reports include simulated open-order counts and action/cancel/modify rates;
+531. strategies exceeding plausible point-in-time venue order/action limits are labeled EXECUTION_INFEASIBLE even in paper research;
+532. scheduled-cancel/dead-man behavior is treated as safety/feasibility state and never as alpha;
+533. account abstraction/margin mode is explicit for Relative Value and capital-efficiency calculations;
+534. portfolio-margin benefits cannot be credited to classic-account scenarios and require point-in-time collateral/LTV/borrow semantics;
+535. UI ticker text is not a sufficient join key; canonical HyperCore/L1/DEX/economic-underlying mapping is preserved;
+536. selective L4 records source class and coverage/retention/schema so official-node, certified-remote and unverified-third-party evidence are not conflated;
+537. the standard official historical archive is not treated as proof of complete historical L4 availability;
+538. venue-rule changes trigger bounded regression fixtures for normalization, TIF, reduce-only, triggers, OI caps, margin tiers, delisting, self-trade, fees and priority behavior;
+539. promoted execution-sensitive lanes report invalid-order rate, normalization loss, unknown status, history truncation, wallet coverage, reconnect repair, predicted-funding coverage, metadata-version coverage and margin mode;
+540. material UNKNOWN/truncated rule or coverage state prevents a lane from being labeled fully measured;
+541. all V6.8 additions remain GitHub-hosted/read-only and cannot require a user-PC node, signed action, private key or live calibration order.
 
 ## Non-goals
 
@@ -7937,7 +8321,10 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8 modules without scoped evidence gates;
+- call API-capped wallet history complete merely because a request returned successfully;
+- apply portfolio-margin capital efficiency to a historical/account mode where it was unavailable;
+- infer full trigger coverage from a wallet subset;
 - assume two outcome markets are equivalent from names alone;
 - call an outcome parity trade risk-free without exact settlement-state equivalence;
 - mirror the full Hyperliquid raw-node/L4 corpus by default when bounded evidence windows suffice;
