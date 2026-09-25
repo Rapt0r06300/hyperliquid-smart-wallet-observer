@@ -220,11 +220,25 @@ def test_dynamic_router_endpoints_cover_nested_fastapi_paths(tmp_path, monkeypat
             for route in list(routes):
                 endpoint = getattr(route, "endpoint", None)
                 endpoint_name = getattr(endpoint, "__name__", "")
-                if not _safe(endpoint, module_name, endpoint_name):
+                is_async = inspect.iscoroutinefunction(endpoint)
+                if not _safe(endpoint, module_name, endpoint_name, allow_async=is_async):
                     continue
                 for mode in (0, 1, 2):
                     attempts += 1
-                    _controlled_call(endpoint, mode, tmp_path, settings)
+                    if is_async:
+                        try:
+                            asyncio.run(
+                                _await_bounded(
+                                    _async_call(endpoint, mode, tmp_path, settings)
+                                )
+                            )
+                        except BaseExceptionGroup as error:
+                            if not harness._controlled_group(error):
+                                raise
+                        except (Exception, SystemExit):
+                            pass
+                    else:
+                        _controlled_call(endpoint, mode, tmp_path, settings)
     assert attempts >= 3
 
 
