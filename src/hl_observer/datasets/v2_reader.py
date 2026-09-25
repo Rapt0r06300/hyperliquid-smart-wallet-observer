@@ -144,6 +144,8 @@ def iter_safe_manifests(
                 continue
             if raw.get("quality_status") != "SAFE":
                 continue
+            if raw.get("replay_compatible") is not True:
+                continue
             if raw.get("validation_allowed") is not True:
                 continue
             if raw.get("asset_verified") is not True:
@@ -228,6 +230,7 @@ def materialize_safe_shards(
     for manifest in manifests:
         if (
             manifest.get("quality_status") != "SAFE"
+            or manifest.get("replay_compatible") is not True
             or manifest.get("validation_allowed") is not True
             or manifest.get("asset_verified") is not True
         ):
