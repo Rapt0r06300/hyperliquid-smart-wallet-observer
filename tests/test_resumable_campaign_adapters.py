@@ -118,7 +118,7 @@ def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
     assert out.payload["safe_workspace"] == str(tmp_path)
 
 
-def test_materialization_failure_blocks_economic_run(tmp_path):
+def test_no_safe_materialization_is_honestly_unavailable(tmp_path):
     calls = []
 
     class Result:
@@ -134,8 +134,9 @@ def test_materialization_failure_blocks_economic_run(tmp_path):
         context("module_pnl_proof", workspace_root=str(tmp_path)),
         runner=runner,
     )
-    assert out.status == "FAILED"
-    assert out.payload["reason"] == "dataset_materialization_failed"
+    assert out.status == "UNAVAILABLE"
+    assert out.payload["reason"] == "no_safe_dataset_v2"
+    assert out.payload["failure_category"] == "DATA_AVAILABILITY"
     assert len(calls) == 1
 
 
@@ -167,3 +168,11 @@ def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
         "economic_campaign",
         "module_pnl_audit",
     ]
+
+
+def test_copy_vault_default_respects_hyperliquid_user_limit(tmp_path):
+    cmd, _ = build_command(
+        context("copy_vault_collection", output_root=str(tmp_path), duration_s=1)
+    )
+    pos = cmd.index("--max-vaults")
+    assert cmd[pos + 1] == "10"
