@@ -178,6 +178,8 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
 
     if manifest.get("asset_verified") is not True:
         reasons.append("REMOTE_ASSET_NOT_VERIFIED")
+    if manifest.get("replay_compatible") is not True:
+        reasons.append("REPLAY_COMPATIBILITY_NOT_PROVEN")
 
     if severe:
         return "REJECT", sorted(set(severe + reasons))
