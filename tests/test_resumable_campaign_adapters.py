@@ -139,3 +139,31 @@ def test_materialization_failure_blocks_economic_run(tmp_path):
     assert len(calls) == 1
 
 
+
+
+def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path), max_shards=2),
+        runner=runner,
+    )
+    assert out.status == "COMPLETE"
+    assert len(calls) == 3
+    assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
+    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert calls[2][1].endswith("tools/audit_economic_objectives.py")
+    assert [phase["name"] for phase in out.payload["phases"]] == [
+        "materialize_safe_v2",
+        "economic_campaign",
+        "module_pnl_audit",
+    ]
