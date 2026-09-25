@@ -4503,6 +4503,567 @@ The scoreboard is allowed to say `UNMEASURABLE`, `KILL`, `SHADOW` or `PROMOTE`.
 It is not allowed to fill missing data with assumptions just to compute progress toward 4 USD/day.
 
 
+
+### Profitability Convergence V6.2 — public-bot intelligence and market-structure expansion
+
+A third research pass on 2026-09-25 examined public crypto-perpetual bot ecosystems exposed through X/Twitter, GitHub repositories and mature open-source frameworks.
+
+The objective is **not** to copy public bots or trust public performance claims. The objective is to use them as a systematic source of candidate mechanisms, execution patterns and market-structure observations that Alina may have missed.
+
+V6.2 adds four genuinely distinct research families:
+
+1. **Cross-Exchange Hedged Market Making (XEMM)**;
+2. **HIP-3 / RWA Session & Reopen Edge**;
+3. **Builder / Frontend / Participant-Flow Provenance**;
+4. **Hyperp / Pre-Launch Relative Value**;
+
+and strengthens the shared Execution Alpha Core with:
+
+- volume-clock / VPIN-lite style flow state;
+- side-specific toxicity;
+- fill-burst detection;
+- shock-chain detection;
+- wall/depth quality;
+- inventory half-life;
+- API/data-budget value allocation.
+
+These are research additions only. None enable real trading, none override existing kill verdicts, and none become global blockers.
+
+#### Public Bot Intelligence Program
+
+Maintain a structured registry of externally discovered bot/research ideas.
+
+Each registry row records:
+
+- source type: `X / GitHub / paper / official docs / framework`;
+- source URL/repository;
+- observed date;
+- project/repository revision when available;
+- claimed strategy/module;
+- actual code path or documentation supporting the claim;
+- license;
+- maintenance/activity signal;
+- whether the mechanism is already present in Alina;
+- economic mechanism category;
+- required data;
+- required latency;
+- expected turnover;
+- likely dominant friction;
+- falsification test;
+- Alina research lane;
+- disposition: `DUPLICATE / WATCH / PREREGISTER / TEST / KILL / PROMOTE`.
+
+Rules:
+
+- public PnL/APR claims are treated as **unverified claims**;
+- X engagement, star count and marketing language are never evidence of edge;
+- source code is inspected for mechanism, not assumed profitable because it is open source;
+- code may not be copied into Alina without license compatibility and provenance review;
+- prefer independent reimplementation from the economic idea where practical;
+- every imported idea must pass the same causal data, cost, OOS and forward gates as an internally generated idea;
+- external findings cannot override Alina safety, paper-only, causality or kill-resurrection rules;
+- duplicate ideas are linked to the existing Alina experiment rather than creating parallel implementations.
+
+This program is allowed to continuously improve the hypothesis backlog while keeping the HOT execution/replay path independent of social-media availability.
+
+### P0B — Cross-Exchange Hedged Market Making (XEMM)
+
+XEMM is a separate mechanism from both naive market making and taker-taker cross-venue arbitrage.
+
+The core pattern is:
+
+```text
+liquid/reference venue
+    -> executable hedge VWAP / fair-value envelope
+    -> passive maker quote on a second venue
+    -> maker fill
+    -> immediate opposite hedge on reference venue
+```
+
+The economic objective is to **create** an executable spread rather than wait for a naturally occurring taker-taker dislocation.
+
+For a candidate maker buy:
+
+```text
+max_maker_buy_px
+= expected_executable_taker_sell_px
+  - required_profit_buffer
+  - maker_fee_or_rebate_adjustment
+  - expected_hedge_slippage
+  - hedge_latency_risk
+  - adverse_selection_buffer
+  - uncertainty_buffer
+```
+
+For a candidate maker sell, use the symmetric construction.
+
+Required state:
+
+- maker venue BBO/L2;
+- hedge venue executable VWAP for the full candidate size;
+- maker fee/rebate;
+- taker hedge fee;
+- maker queue/fill probability;
+- hedge latency;
+- hedge depth;
+- hedge slippage;
+- maker-side adverse-selection markout;
+- inventory accumulated from partial maker fills;
+- per-venue collateral/balance/margin availability;
+- conversion/oracle rate if maker and hedge instruments are not denominated identically;
+- stale-quote age;
+- current alpha/fair-value half-life.
+
+Research variants:
+
+- Hyperliquid maker -> Binance/OKX/Bybit hedge;
+- secondary perp venue maker -> Hyperliquid hedge;
+- HIP-3 maker -> external reference venue hedge while that venue is open;
+- maker quote conditioned by Lead-Lag price discovery;
+- maker quote conditioned by Scheduled Flow/TWAP or toxicity state;
+- multi-hedge-venue auction selecting the cheapest executable hedge path.
+
+The paper simulator must reproduce the sequence causally:
+
+1. compute hedgeable size and maker quote from information available at time `t`;
+2. place a simulated passive order with queue assumptions recorded;
+3. determine if/when the maker order fills from future tape without lookahead;
+4. only after the simulated maker fill timestamp, price the hedge using the then-observable hedge venue book plus modeled latency;
+5. charge all fees, slippage, partial-fill and residual-inventory costs.
+
+Do **not** credit the quote with the hedge price observed before the maker fill.
+
+XEMM failure modes to measure explicitly:
+
+- maker fill occurs exactly when reference price moves adversely;
+- hedge book disappears between quote and fill;
+- partial maker fill creates awkward hedge size;
+- repeated cancel/requote loses queue priority;
+- stale reference feed;
+- maker/taker collateral fragmentation;
+- cross-venue mark/oracle divergence;
+- hedge venue outage;
+- asymmetric fee/funding regimes;
+- inventory drift after failed hedge.
+
+**XEMM success criterion:** conservative frozen-OOS/forward net USD/day improves materially over both:
+- taker-taker Cross-Venue for the same economic relationship;
+- naive passive market making without external hedge pricing.
+
+If XEMM fails standalone but improves execution for Cross-Venue/Relative Value, retain it as an execution sleeve rather than a production module.
+
+### Execution Alpha additions from public bot architectures
+
+V6.2 adds the following candidate state variables to the shared Execution Alpha Core.
+
+#### Volume-clock / VPIN-lite state
+
+Maintain event/volume buckets in addition to wall-clock windows.
+
+Example:
+
+```text
+signed_volume_bucket
+= aggressive_buy_volume - aggressive_sell_volume
+```
+
+Track:
+
+- normalized signed volume;
+- bucket fill time;
+- volume acceleration;
+- imbalance persistence;
+- toxicity following extreme buckets;
+- divergence between wall-clock and volume-clock state.
+
+The purpose is not to promote VPIN as a standalone strategy. It is to distinguish a quiet 5-second interval from a shock interval containing orders of magnitude more traded notional.
+
+#### Side-specific toxicity
+
+Maintain bid-side and ask-side post-fill markout distributions separately.
+
+Use multi-horizon markouts and decay to estimate:
+
+- maker-buy toxicity;
+- maker-sell toxicity;
+- fill-conditioned adverse selection;
+- toxicity by volatility regime;
+- toxicity by venue;
+- toxicity by flow provenance;
+- toxicity by TWAP/forced-flow/session state.
+
+A symmetric toxicity score is insufficient when one side of the book is being repeatedly informed.
+
+#### Fill-burst and shock-chain state
+
+Detect clusters of rapid fills and sequential market shocks.
+
+Candidate diagnostics:
+
+- fills per rolling short horizon;
+- successive same-side fills;
+- successive depth depletion;
+- repeated cross-venue mid jumps;
+- cascading spread widening;
+- OI/liquidation confirmation;
+- recovery time.
+
+A fill burst may trigger:
+
+- quote widening;
+- size reduction;
+- temporary passive-side suppression;
+- XEMM hedge urgency;
+- promotion of the event to Forced-Flow analysis.
+
+#### Wall/depth quality
+
+A large resting wall is not automatically trusted.
+
+Track:
+
+- persistence;
+- refill behavior;
+- cancellation-before-touch;
+- distance from BBO;
+- side imbalance;
+- venue consistency;
+- execution actually obtained in front of/through the wall.
+
+Wall information may condition execution but cannot be called support/resistance without OOS proof.
+
+#### Inventory half-life
+
+For every passive/XEMM sleeve, estimate:
+
+```text
+inventory_half_life
+= expected time required for the strategy to reduce half of undesired inventory
+```
+
+Inventory control should react to:
+
+- utilization;
+- toxicity;
+- expected liquidation/margin risk;
+- expected hedgeability;
+- regime;
+- capital-time opportunity cost.
+
+#### API/data budget by research value
+
+When venue/API limits bind, allocate optional refresh/query budget by marginal research/execution value rather than uniformly.
+
+Protect in order:
+
+1. raw Tier-A/HOT evidence;
+2. safety/reconciliation;
+3. currently admitted opportunities;
+4. high-value WARM challengers;
+5. COLD discovery.
+
+This extends Ultra-Scale V5 value-of-information scheduling to API/request budgets.
+
+### Candidate Module 8 — HIP-3 / RWA Session & Reopen Edge
+
+HIP-3 builder-deployed perpetuals require an explicit session model because many reference underlyings are not continuously tradable even though Hyperliquid is.
+
+For each HIP-3 instrument, maintain a versioned market/session contract:
+
+- deployer/DEX;
+- underlying/reference asset;
+- collateral token;
+- margin mode;
+- maximum leverage;
+- oracle definition;
+- external reference venue(s);
+- reference market timezone/calendar;
+- regular session;
+- pre/post session where relevant;
+- holiday calendar;
+- `EXTERNAL_REFERENCE_ACTIVE` vs `INTERNAL_PRICE_DISCOVERY`;
+- reopen timestamp;
+- funding configuration;
+- configured price/bounding constraints where known;
+- oracle/mark/external-perp-price provenance;
+- contract/config revision.
+
+The module must distinguish at least:
+
+```text
+EXTERNAL_SESSION
+-> external venue live
+-> cross-venue price-discovery / XEMM / basis hypotheses eligible
+
+CLOSURE_TRANSITION
+-> external venue closes
+-> participant mix and hedgeability change
+
+INTERNAL_SESSION
+-> Hyperliquid remains live
+-> own-market price discovery dominates
+-> external hedge path may disappear
+
+REOPEN_APPROACH
+-> external indicative/reference information may return
+-> convergence hazard rises
+
+REOPEN
+-> external reference becomes executable again
+-> re-anchoring / convergence dynamics measured
+```
+
+External analyses found substantial weekend price discovery in HIP-3/RWA markets, but Alina treats those statistics as hypothesis priors only.
+
+Independent sleeves to test:
+
+- **off-hours information discovery:** whether HIP-3 moves predict subsequent external reopen beyond simple Friday-close and news/regime baselines;
+- **reopen convergence:** residual between HIP-3 internal price and the newly reopened external market;
+- **session-switch Lead-Lag:** which venue becomes price leader before/after external open;
+- **session-switch XEMM:** maker/hedge economics when external hedge venue becomes available;
+- **weekend liquidity premium:** spread/depth/impact compensation during internal sessions;
+- **boundary/band pressure:** behavior when internal prices approach protocol/deployer bounds;
+- **cross-deployer same-underlying relative value:** e.g. multiple HIP-3 contracts referencing similar silver/equity/commodity exposure;
+- **participant-mix-conditioned execution:** execution policy changes when retail/stat-arb/MM composition shifts.
+
+Critical safeguards:
+
+- never assume the weekend price equals fair value;
+- no external reference is considered executable while its market is closed;
+- reopen tests use the exact venue calendar and holiday schedule available at decision time;
+- transaction costs and weekend tail depth are measured from actual books;
+- external session/open times are versioned data, not hard-coded forever;
+- contract/deployer/oracle specification changes invalidate incompatible historical comparisons;
+- RWA-specific news may create genuine jumps and is not treated as mean-reverting noise.
+
+**HIP-3 success criterion:** one session-conditioned sleeve shows incremental after-cost OOS value versus the equivalent strategy without session state, with enough events/capacity to matter toward the daily target.
+
+### Shared Builder / Frontend / Participant-Flow Provenance Layer
+
+Hyperliquid builder codes and order metadata can expose **how** some flow reached the venue.
+
+Official builder-code infrastructure is per-order and public builder fill archives exist for known builder addresses.
+
+Alina may construct a point-in-time flow-provenance layer using only public/replayable market data.
+
+Potential provenance signals include:
+
+- builder address;
+- builder fee;
+- builder category when independently documented;
+- direct API vs known builder route;
+- `FrontendMarket`-style order metadata when available;
+- IOC/post-only/GTC mix;
+- maker/taker ratio;
+- order-to-fill ratio;
+- cancellation ratio;
+- fill frequency;
+- temporal clustering;
+- average size/notional;
+- cross-deployer activity;
+- cross-venue activity where public linkage is defensible.
+
+Behavior classes are probabilistic research labels, e.g.:
+
+- `LIKELY_RETAIL_FLOW`;
+- `LIKELY_MARKET_MAKER`;
+- `LIKELY_STAT_ARB_TAKER`;
+- `LIKELY_ROUTER_OR_TERMINAL`;
+- `UNCLASSIFIED`.
+
+Requirements:
+
+- classification confidence and evidence must be stored;
+- `UNCLASSIFIED` is a valid dominant state;
+- builder identity does not imply trader identity;
+- no deanonymization, real-world identity inference or personal-profile enrichment;
+- wallet-level behavior labels are market-structure features, not claims about a person;
+- a paid builder route is not automatically retail;
+- direct API is not automatically sophisticated/informed;
+- limit-order-only humans may be indistinguishable from bots and must remain uncertain;
+- classifier definitions are frozen before OOS evaluation.
+
+Use cases:
+
+- condition Copy-Vault copyability on leader execution channel;
+- condition Lead-Lag on retail vs algorithmic flow bursts;
+- detect disappearance of stat-arb flow during external-market closures;
+- estimate adverse selection by flow category;
+- identify when a builder/router concentration shift changes execution quality;
+- improve XEMM quote width/size based on toxicity of current incoming flow.
+
+**Flow-provenance success criterion:** the provenance layer adds incremental OOS calibration or after-cost value over simpler wallet/market features; otherwise it remains descriptive analytics.
+
+### Candidate Sleeve — Hyperp / Pre-Launch Relative Value
+
+Hyperliquid-only/pre-launch perpetuals can have a materially different reference-price mechanism from ordinary oracle-anchored perps.
+
+Treat them as a separate instrument class.
+
+Maintain:
+
+- launch/listing event timeline;
+- initial mark/reference;
+- current Hyperp oracle/reference mechanism;
+- external pre-launch perp venues;
+- external venue contract differences;
+- mark/oracle bounds;
+- liquidity/depth;
+- funding;
+- expected conversion/settlement/listing event;
+- time to scheduled/expected catalyst where defensibly known.
+
+Candidate relationships:
+
+- Hyperp vs external pre-launch perp;
+- Hyperp vs prediction/derived listing reference where contract semantics truly match;
+- cross-venue pre-launch consensus;
+- mark/reference divergence;
+- convergence around spot launch or contract conversion;
+- post-listing transition from Hyperp-specific reference logic to ordinary market structure.
+
+Critical rules:
+
+- contract semantic equivalence is mandatory;
+- a same ticker is not proof of same payoff;
+- settlement/listing uncertainty is explicit;
+- event dates from rumors/social media are not treated as facts;
+- mark-price caps/reference formulas are included in replay;
+- no convergence claim can ignore the fact that different venues may encode different listing outcomes or settlement rules;
+- this sleeve remains within Cross-Instrument Relative Value until evidence justifies a standalone module.
+
+### Cross-deployer same-underlying graph
+
+HIP-3 can host multiple contracts linked to the same or similar underlying through different deployers.
+
+Build a compatibility graph:
+
+```text
+economic_underlying
+  -> deployer contract A
+  -> deployer contract B
+  -> deployer contract C
+  -> external benchmark(s)
+```
+
+Each edge stores:
+
+- semantic equivalence confidence;
+- oracle/reference definition;
+- collateral;
+- margin mode;
+- fees;
+- funding;
+- tick/lot;
+- depth;
+- session state;
+- historical basis/residual;
+- hedgeability.
+
+This graph allows Alina to detect whether the best opportunity is:
+
+- direct Cross-Venue;
+- XEMM;
+- Relative Value;
+- same-underlying cross-deployer convergence;
+- or `NO_TRADE`.
+
+Never create a Cartesian all-deployer × all-symbol matrix when compatibility is absent.
+
+### External-bot findings that do NOT become standalone modules
+
+The following public-bot patterns are recorded but not promoted as first-class modules merely because other projects implement them:
+
+- naive grid;
+- martingale/DCA averaging-down;
+- generic RSI/MACD/SuperTrend;
+- unqualified mean reversion;
+- generic AI/LLM trading agent;
+- social-sentiment trading;
+- Kelly sizing without independently proven edge;
+- naive wall-fronting;
+- market making credited only from spread/rebate;
+- high-frequency strategies whose gross edge does not clear friction.
+
+They may generate narrowly preregistered challengers only when they change a mechanism already supported by Alina evidence.
+
+### Turnover/friction prior from public strategy sweeps
+
+Public strategy sweeps on Hyperliquid reinforce a useful **prior**: turnover can destroy otherwise positive zero-fee backtests.
+
+This does not create a fixed `200 trades/year` rule.
+
+Instead, for every candidate report:
+
+- annualized trade count;
+- round-trip cost drag;
+- gross profit per trade;
+- net profit per trade;
+- fraction of gross alpha lost to friction;
+- sensitivity to +25%, +50% and +100% cost stress;
+- break-even fee/slippage level.
+
+Prefer hypotheses with a healthy **edge-to-friction ratio**, not merely low trade count.
+
+A low-turnover strategy with four historical trades is not considered proven merely because fees are small; effective sample size and regime coverage remain mandatory.
+
+### Updated V6 research ordering after public-bot review
+
+V6.2 refines the research queue to:
+
+1. **P0A — Shared Execution Alpha Core**
+2. **P0B — XEMM / Hedged Market Making**
+3. **P1A — Scheduled Flow / Native TWAP & Metaorder**
+4. **P1B — Forced-Flow / Liquidation V2**
+5. **P1C — HIP-3 / RWA Session & Reopen Edge**
+6. **P2 — Cross-Instrument Relative Value, including Hyperp/pre-launch and cross-deployer sleeves**
+7. **P3 — Medium-Horizon Trend / Breakout**
+8. **always-on shared context — Options/Volatility + Builder/Participant Flow Provenance**
+
+This remains a **research priority**, not a profitability ranking.
+
+Reprioritization is allowed when Alina's own evidence shows a materially different target-gap reduction, falsification speed, event frequency, capacity or data-quality profile.
+
+### V6.2 evidence scoreboard extensions
+
+Extend the V6.1 scoreboard with:
+
+| lane | maker fill % | hedge success % | hedge latency | adverse markout | flow toxicity | session | net USD/day LCB | capacity | evidence |
+|---|---:|---:|---:|---:|---:|---|---:|---:|---|
+| XEMM | | | | | | | | | |
+| HIP-3 session | | | | | | | | | |
+| flow provenance incremental | | | | | | | | | |
+| hyperp/pre-launch RV | | | | | | | | | |
+
+For XEMM also report:
+
+- quoted opportunities/day;
+- maker fills/day;
+- hedgeable fraction;
+- failed/partial hedge count;
+- quote-to-fill adverse move;
+- realized maker spread captured;
+- realized hedge slippage;
+- residual inventory capital-time.
+
+For HIP-3 also report:
+
+- external/internal session counts;
+- reopen events;
+- session-specific depth/spread;
+- off-hours prediction error;
+- reopen convergence markout;
+- band/boundary events.
+
+For flow provenance also report:
+
+- classified fraction;
+- unclassified fraction;
+- label stability;
+- incremental calibration value;
+- incremental PnL/rejection value.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -5416,7 +5977,38 @@ The following numbered items form the normative acceptance catalog. Each item is
 332. cross-module ablations attribute incremental value among raw edge, scheduled flow, forced flow, options context, trend/regime and execution policy;
 333. a layer that duplicates another feature family without incremental OOS economics is demoted or removed from the HOT path;
 334. V6.1 maintains a daily-target research scoreboard with independent events/day, gross edge, cost, fill rate, net USD/day lower confidence bound, capacity, capital-time and evidence state for each lane;
-335. missing V6.1 scoreboard inputs remain UNMEASURABLE and are never imputed solely to show progress toward the 4 USD/day milestone.
+335. missing V6.1 scoreboard inputs remain UNMEASURABLE and are never imputed solely to show progress toward the 4 USD/day milestone;
+336. public X/GitHub bot research is a hypothesis-discovery source only and cannot certify profitability;
+337. every externally discovered bot idea records source, revision/provenance, license, mechanism, required data, falsification test and Alina disposition;
+338. external code is not copied into Alina without license/provenance review, and independent mechanism reimplementation is preferred where practical;
+339. XEMM is treated as distinct from both naive market making and taker-taker Cross-Venue because it passively creates a maker opportunity and hedges only after a maker fill;
+340. XEMM paper replay prices the hedge only after the simulated maker fill timestamp plus modeled latency and never credits pre-fill future hedge prices;
+341. XEMM accounting includes maker fill probability, queue assumptions, hedge fee/slippage, hedge failure, residual inventory and collateral fragmentation;
+342. XEMM must beat both taker-taker Cross-Venue and naive passive maker baselines on frozen OOS/forward economics before standalone promotion;
+343. Execution Alpha may use volume-clock/VPIN-lite state, but volume imbalance is not promoted as standalone alpha without independent proof;
+344. Execution Alpha maintains side-specific toxicity and does not assume bid-side and ask-side adverse selection are symmetric;
+345. fill-burst and shock-chain state may widen/reduce/suppress passive exposure or promote an event to Forced-Flow analysis, with every action replayable causally;
+346. wall/depth features require persistence/refill/cancel and realized execution evidence and are never treated as support/resistance by inspection alone;
+347. passive/XEMM sleeves report inventory half-life and capital-time consumed by residual inventory;
+348. optional API/data budget is allocated by marginal value while preserving Tier-A raw evidence, safety and reconciliation before research breadth;
+349. HIP-3/RWA instruments carry a versioned session contract distinguishing external-reference-active, closure transition, internal price discovery, reopen approach and reopen states;
+350. HIP-3 research never treats a closed external reference market as executable;
+351. HIP-3 session calendars, holidays, oracle/deployer specifications and price/bounding constraints are versioned inputs rather than permanent hard-coded assumptions;
+352. HIP-3 off-hours/reopen hypotheses are evaluated against simpler Friday-close/session/placebo baselines and actual executable books;
+353. cross-deployer same-underlying analysis uses an explicit compatibility graph and does not infer economic equivalence from ticker text alone;
+354. builder/front-end/order metadata may create probabilistic participant-flow labels only with confidence/evidence and an explicit UNCLASSIFIED state;
+355. flow-provenance research does not deanonymize wallets or infer real-world personal identity;
+356. builder route, direct API, IOC or FrontendMarket metadata are features, not definitive trader-quality labels;
+357. participant-flow classifiers are frozen before OOS evaluation and must demonstrate incremental calibration or economic value over simpler features;
+358. Hyperp/pre-launch instruments are treated as a distinct instrument class with their reference mechanism, bounds, settlement/listing uncertainty and external contract semantics preserved;
+359. Hyperp/pre-launch relative value requires payoff/contract equivalence and cannot infer convergence from same ticker alone;
+360. rumor-derived listing dates are never treated as known event timestamps in causal replay;
+361. naive grid, martingale/DCA, generic technical indicators, generic AI trading, social sentiment, fee-only market making and unproven Kelly sizing do not become modules merely because public bots implement them;
+362. public strategy-sweep findings are used only as turnover/friction priors; no public APR/PnL figure is imported into Alina evidence;
+363. every candidate reports edge-to-friction sensitivity, including break-even cost and stressed cost scenarios;
+364. V6.2 research ordering adds XEMM and HIP-3/session research while preserving the rule that priority is not a profitability ranking;
+365. V6.2 scoreboard reports XEMM maker fills/hedges/adverse markout, HIP-3 session/reopen metrics, flow-provenance coverage and Hyperp relative-value evidence;
+366. all V6.2 additions remain paper/read-only and cannot introduce private keys, signed trading actions or real-order execution into the Alina research path.
 
 ## Non-goals
 
@@ -5426,7 +6018,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6 modules without scoped evidence gates;
+- activate candidate V6/V6.2 modules without scoped evidence gates;
+- treat public bot code, X posts, stars, APR claims or repository popularity as proof of edge;
+- deanonymize public wallets or infer real-world identities from flow-provenance research;
 - resurrect previously killed strategies without a materially new preregistered hypothesis;
 - remove historical campaign evidence;
 - replace existing native venue collectors without a demonstrated need.
