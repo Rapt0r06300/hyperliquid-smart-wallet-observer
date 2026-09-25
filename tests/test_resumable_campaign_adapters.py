@@ -124,7 +124,7 @@ def test_no_safe_materialization_is_honestly_unavailable(tmp_path):
     class Result:
         returncode = 2
         stdout = ""
-        stderr = "DATASET_V2_NO_GO"
+        stderr = "DATASET_V2_NO_GO: no SAFE shards match the selection"
 
     def runner(cmd, **kwargs):
         calls.append(list(cmd))
