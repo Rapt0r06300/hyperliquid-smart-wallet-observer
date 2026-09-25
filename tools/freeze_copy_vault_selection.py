@@ -23,8 +23,8 @@ def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
     rows=CV.parser_univers_public(
         payload,
         now_ms=selected_at_ms,
-        min_tvl_usd=CV.MIN_TVL_PUBLIC_USD,
-        min_age_days=CV.MIN_AGE_PUBLIC_DAYS,
+        min_tvl_usd=0.0,
+        min_age_days=0.0,
         max_vaults=max(1,raw_count),
     )
     if not rows:
@@ -34,8 +34,8 @@ def build_selection(payload: Any, *, now_ms: int | None=None) -> dict[str,Any]:
         "selected_at_ms":selected_at_ms,
         "source":CV.URL_VAULTS,
         "filters":{
-            "min_tvl_usd":float(CV.MIN_TVL_PUBLIC_USD),
-            "min_age_days":float(CV.MIN_AGE_PUBLIC_DAYS),
+            "min_tvl_usd":0.0,
+            "min_age_days":0.0,
             "relationship":"normal",
             "is_closed":False,
             "max_vaults":None,
