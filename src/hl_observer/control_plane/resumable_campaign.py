@@ -9,7 +9,8 @@ import secrets
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "alina.resumable_campaign.v1"
-CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})\nCAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
+CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})
+CAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
 ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED"})
 TERMINAL_STATES = frozenset({"COMPLETE","FAILED","UNAVAILABLE","PARTIAL","REJECT"})
 ALL_STATES = ACTIVE_STATES | TERMINAL_STATES
