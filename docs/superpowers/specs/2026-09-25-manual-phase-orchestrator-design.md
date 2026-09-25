@@ -3798,7 +3798,10 @@ This specification intentionally preserves all previously validated design layer
 - **Outcome Relative Value V6.7:** HIP-4 internal parity, cross-venue event equivalence and outcome↔perp/options relative-value research under settlement-semantic certification;
 - **Rule & Coverage Completeness V6.8:** point-in-time venue validity, rejection semantics, history/coverage bounds and observable-state certification;
 - **Protocol Mechanics V6.9:** OI-cap, exact funding, margin/liquidation, TWAP/Chase provenance and protocol-rule edge cases;
-- **Options Volatility Relative Value V6.10:** direct options-volatility sleeves, transaction-cost-aware delta hedging and executable vol-surface research.
+- **Options Volatility Relative Value V6.10:** direct options-volatility sleeves, transaction-cost-aware delta hedging and executable vol-surface research;
+- **Event Identity & Feed Semantics V6.11:** source-native event identity, sweep de-fragmentation, idempotency, venue-specific continuity and timing uncertainty;
+- **Lifecycle & Reference Integrity V6.12:** RWA calendar/corporate-action/reference-source, expiry/roll, funding-boundary and account-lineage correctness;
+- **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -8317,6 +8320,378 @@ Relevant modules additionally report:
 - instrument-lineage breaks.
 
 
+
+### Profitability Convergence V6.13 — market-rule edge-case closure
+
+V6.13 closes the remaining low-level Hyperliquid execution details verified against current official documentation and the final public-bot corpus filter.
+
+The governing rule is:
+
+> **an apparent edge is not admissible if it depends on an order lifecycle, trigger, batch action, funding value, queue interaction or throughput assumption that the venue would not actually permit at that timestamp.**
+
+V6.13 does not add a new alpha module. It hardens every existing module whose economics depend on realistic execution.
+
+### Self-trade prevention — exact expire-maker semantics
+
+Current Hyperliquid self-trade prevention uses an **expire-maker** behavior.
+
+When the same address would trade against itself:
+
+- the resting maker order is canceled;
+- no self-trade fill is created;
+- no normal trade fee is charged for that prevented match;
+- the cancellation does not appear as an ordinary trade-feed print;
+- the aggressing order may continue matching against eligible liquidity behind the expired maker order up to its limit.
+
+Replay requirements:
+
+1. run Portfolio Intent Netting first;
+2. if a same-account crossing still occurs, cancel the resting self order;
+3. retain the aggressor's remaining quantity;
+4. continue external matching when the order type/rule permits;
+5. record `selfTradeCanceled` separately from ordinary market cancel/trade statistics.
+
+Do not model STP as two fills, and do not model it as "both orders vanish" unless a different venue/version explicitly specifies that behavior.
+
+### TP/SL trigger and child-order lifecycle
+
+Hyperliquid TP/SL uses **mark price** as the trigger reference.
+
+Replay separates:
+
+`PARENT_STATE -> TRIGGER_ACTIVATION -> CHILD_PLACEMENT -> CHILD_EXECUTION`.
+
+Current documented edge cases include:
+
+- full parent fill activates the associated TP/SL children;
+- a partially filled parent that is manually canceled can cause the associated children to be canceled rather than automatically resized to the filled fraction;
+- a partially filled parent canceled for insufficient margin can have different child-placement behavior under the current rule;
+- paired TP/SL siblings can cancel when the other sibling fills;
+- TP/SL limit orders can trigger yet remain unfilled;
+- TP/SL market orders use the venue's bounded slippage semantics rather than unlimited market consumption.
+
+Current documentation describes a **10% slippage tolerance** for TP/SL market orders. This value is versioned and must not be treated as timeless.
+
+Therefore:
+
+> **triggered not equal filled**.
+
+Trigger maps count only observed trigger state; expected forced notional requires modeling the resulting child order and executable book.
+
+### Native TWAP child and catch-up mechanics
+
+Scheduled-Flow replay must reproduce native TWAP mechanics rather than imposing an ideal uniform schedule.
+
+Current documented behavior includes:
+
+- scheduled child execution;
+- per-child bounded slippage;
+- underfilled children can leave the parent behind target;
+- later children may increase to catch up;
+- catch-up size is capped relative to a normal child;
+- a parent can finish with residual unexecuted quantity;
+- network post-only periods can interrupt child execution.
+
+Current documentation describes child slippage capped at **3%** and catch-up children capped at **3x the normal suborder size**. These values are rule-version inputs, not permanent assumptions.
+
+Record:
+
+- target cumulative size;
+- realized cumulative size;
+- execution lag;
+- normal child size;
+- catch-up child size;
+- child slippage envelope;
+- residual quantity at completion;
+- rule version.
+
+Do not reconstruct a perfectly smooth TWAP when actual native behavior could lag/catch up.
+
+### Action expiry
+
+For actions supporting `expiresAfter`:
+
+- store expiry timestamp;
+- reject modeled arrival after expiry;
+- distinguish stale-expiry rejection from market rejection;
+- include any documented additional action-rate-limit penalty in execution-feasibility analysis.
+
+Current documentation states an action canceled because of a stale `expiresAfter` can consume **5x** the normal address-based rate-limit cost.
+
+No replayed trade may occur after its action deadline.
+
+### Modify / batchModify semantics
+
+Modify semantics are versioned and may not equal atomic in-place editing.
+
+Store:
+
+- target oid/cloid;
+- original order state;
+- replacement order;
+- `always_place` state;
+- cancel result;
+- replacement result;
+- effective queue reset/reordering;
+- TIF transformation;
+- trigger eligibility.
+
+Current documented behavior distinguishes:
+
+- `always_place = true`: replacement can be placed regardless of whether the cancel succeeded;
+- `always_place = false`: replacement is subject to tighter constraints and, in documented cases, a non-executable GTC replacement can be forced to ALO semantics.
+
+Replay cannot choose the more favorable interpretation after observing future fills.
+
+### Whole-batch pre-validation rejection
+
+Hyperliquid batched requests can fail in two different ways:
+
+1. per-item result vector;
+2. a single payload-level pre-validation error rejecting the whole batch.
+
+For multi-order/multi-leg paper execution:
+
+- perform payload-level validation before child matching;
+- if pre-validation rejects the batch, reject every child action;
+- do not allow apparently valid children to reach the book;
+- distinguish `BATCH_PREVALIDATION_REJECT` from per-child rejection.
+
+This is mandatory for multi-leg Relative Value, XEMM hedge batching and any future portfolio order batching.
+
+### Fast cancel semantics
+
+The `fast` cancel flag is versioned explicitly.
+
+Current documentation states:
+
+- fast cancel cannot be used for trigger orders;
+- in the currently documented period, the flag has no other effect;
+- documentation notes a future network upgrade may give it mempool priority.
+
+Therefore:
+
+- do not credit faster cancellation before that priority behavior is actually active;
+- do not back-apply future behavior historically;
+- trigger-order cancel attempts using an invalid fast mode are rejected in feasibility simulation.
+
+### Scheduled cancel / dead-man switch
+
+Schedule-cancel remains safety behavior, never alpha.
+
+Current documented rules include:
+
+- deadline must be at least **5 seconds** in the future;
+- when the deadline is reached, open orders are canceled and the trigger count increases;
+- current maximum scheduled-cancel triggers is **10 per day**, resetting at 00:00 UTC.
+
+Version these values.
+
+A paper market maker that would exhaust the safety trigger allowance is operationally invalid even if its fills look profitable.
+
+### Open-order / action-limit feasibility
+
+Quote-heavy strategies report whether their hypothetical behavior fits point-in-time account limits.
+
+Current documented Hyperliquid behavior includes:
+
+- a default open-order allowance of **1000**;
+- one additional open-order slot per **5M USDC** of volume;
+- a maximum total open-order limit of **5000**;
+- once already at/above 1000 open orders, additional reduce-only or trigger orders can be rejected under the documented rule;
+- address action allowance scales with cumulative traded volume;
+- a new address has a documented initial action buffer;
+- cancels receive an expanded cumulative allowance;
+- batch actions consume IP/address budgets differently.
+
+These are feasibility constraints only; paper Alina still sends no actions.
+
+### Congestion maker-share constraint
+
+Hyperliquid documents an additional write-capacity restriction during high congestion tied to prior-day maker share and asset-volume weighting.
+
+Where the historical congestion state and applicable maker share are measurable, replay stores them.
+
+Where they are not measurable:
+
+- quote-heavy strategies run a conservative congestion stress;
+- report `CONGESTION_LIMIT_UNKNOWN`;
+- do not certify a strategy whose economics require unbounded cancel/requote throughput.
+
+### Market-order / IOC price protection
+
+A paper "market order" is never an unlimited fill through arbitrary depth.
+
+Replay must model the actual order mechanism and applicable protection envelope:
+
+- IOC unfilled remainder cancels;
+- no-liquidity states can reject;
+- Frontend/UI market behavior is distinguished from a raw API IOC when semantics differ;
+- TP/SL-market slippage bounds are applied separately;
+- venue price/oracle rejection rules remain active.
+
+### Mark/oracle event timing
+
+Mark and oracle events are separate from raw trade/BBO events.
+
+Current Hyperliquid documentation states:
+
+- validator oracle prices update approximately every few seconds;
+- mark price is recomputed using robust oracle/venue inputs;
+- mark drives margin, liquidation, TP/SL triggering and unrealized PnL.
+
+Replay therefore records:
+
+- oracle timestamp;
+- mark timestamp;
+- raw trade timestamp;
+- BBO timestamp.
+
+A transient last-trade move that does not update the relevant mark cannot automatically trigger a TP/SL or liquidation.
+
+### Funding known-vs-final state
+
+V6.9 already specifies the funding formula. V6.13 makes **information finality** explicit.
+
+For standard Hyperliquid perps, current documentation states:
+
+- premium is sampled every **5 seconds**;
+- samples are averaged over the hour;
+- the formula uses the 8-hour convention;
+- funding is paid hourly at one eighth of the computed rate;
+- the current standard interest component is **0.01% per 8 hours**;
+- current funding is capped at **4% per hour**;
+- final payment uses `position_size × oracle_price × funding_rate`, not mark-price notional.
+
+Maintain states:
+
+- `PREMIUM_SAMPLE`;
+- `RUNNING_HOURLY_ESTIMATE`;
+- `EXCHANGE_PREDICTED`;
+- `FINAL_SETTLED_RATE`;
+- `REALIZED_PAYMENT`.
+
+A strategy decision cannot consume `FINAL_SETTLED_RATE` before it was actually knowable.
+
+Standard-perp, HIP-3 and Hyperp funding formula families remain separate and versioned.
+
+### Funding impact-notional exactness
+
+Funding premium reconstruction stores the exact impact notional/rule version.
+
+Current validator-operated specifications document different impact notionals for BTC/ETH versus many other assets.
+
+A reconstructed funding edge using the wrong impact notional is invalid for proof.
+
+Store:
+
+- impact notional;
+- premium formula family;
+- interest component;
+- clamp;
+- cap;
+- multiplier;
+- settlement cadence;
+- oracle source.
+
+### Maximum order-value constraints
+
+Capacity uses venue order-value limits in addition to depth and margin.
+
+For every instrument/rule version store, where documented:
+
+- max market-order value;
+- max limit-order value;
+- leverage bucket driving the cap.
+
+If desired size exceeds one-order capacity:
+
+- split only when action budget, timing and alpha half-life permit;
+- charge additional fees/slippage/impact;
+- otherwise reduce capacity.
+
+### Precision and normalization fixtures
+
+V6.8 defines precision rules. V6.13 requires deterministic fixtures for:
+
+- valid 5-significant-figure price;
+- invalid sixth significant figure;
+- integer-price exception;
+- perp `6 - szDecimals` decimal bound;
+- spot `8 - szDecimals` decimal bound;
+- valid/invalid size precision;
+- minimum notional;
+- normalization that flips a trade from positive edge to `NO_TRADE`.
+
+The normalized order is re-evaluated economically before any paper fill.
+
+### Reconnect disappearance is not a fill
+
+After reconnect/snapshot:
+
+- disappearance of an order from the current open-order snapshot does not imply fill;
+- reconcile against order-status/fills/history;
+- classify fill/cancel/reject/liquidation/scheduled-cancel only from compatible evidence;
+- unresolved disappearance remains `ORDER_STATE_UNKNOWN`.
+
+This prevents phantom fill PnL after reconnect.
+
+### V6.13 rule manifest
+
+Every execution-sensitive proof emits a point-in-time rule manifest including, when relevant:
+
+- STP behavior;
+- precision/tick/lot;
+- min/max order size/value;
+- margin/leverage/OI cap;
+- fee/priority state;
+- funding formula/cap/impact notional;
+- TP/SL trigger source and child lifecycle;
+- TWAP child/catch-up mechanics;
+- modify/batch/always-place semantics;
+- action expiry;
+- fast/scheduled cancel;
+- open-order/action/congestion limits;
+- market/IOC slippage/protection;
+- mark/oracle timing.
+
+A missing rule that can change fill validity, cost or forced-flow state is `RULE_UNKNOWN`.
+
+Promotion is prohibited when a favorable assumption about that missing rule is necessary for positive PnL.
+
+### V6.13 proof contribution
+
+V6.13 is valuable even when it finds **no new alpha**.
+
+Success includes:
+
+- invalidating impossible fills;
+- removing phantom self-trades;
+- correcting funding timing;
+- correcting stop/TWAP paths;
+- exposing infeasible quote throughput;
+- reducing queue/rule uncertainty enough to confidently `KILL` or `PROMOTE` a candidate.
+
+This directly improves the credibility of the +4 USD/day milestone.
+
+### V6.13 research basis
+
+V6.13 was verified primarily against current official Hyperliquid documentation for:
+
+- Funding;
+- Robust price indices;
+- Self-trade prevention;
+- TP/SL;
+- Order types;
+- Exchange endpoint;
+- Error responses;
+- Tick/lot size;
+- Rate limits and user/open-order limits;
+- Contract specifications.
+
+Exa and Parallel Search were used to discover/cross-check the relevant details. Official protocol documentation controls when third-party descriptions differ.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -9538,7 +9913,34 @@ The following numbered items form the normative acceptance catalog. Each item is
 640. instrument lineage versions listing, delisting, redenomination, migration, multiplier, collateral, oracle, recycle, corporate action and expiry/roll changes;
 641. same/similar ticker across lineage breaks cannot be merged without economic-equivalence proof;
 642. V6.12 proof reports calendar, corporate-action, reference-source, settlement/roll, funding-boundary and account-lineage coverage;
-643. all V6.12 additions remain GitHub-hosted/read-only and cannot introduce signed actions, private keys, user-PC services or live calibration orders.
+643. all V6.12 additions remain GitHub-hosted/read-only and cannot introduce signed actions, private keys, user-PC services or live calibration orders;
+644. V6.13 models Hyperliquid self-trade prevention as expire-maker, preserving aggressor continuation through eligible external liquidity;
+645. selfTradeCanceled creates no ordinary trade/fee and is excluded from market trade-volume features;
+646. TP/SL replay uses mark-price trigger semantics and distinguishes trigger activation, child placement and child execution;
+647. parent-attached TP/SL replay versions full-fill, manual partial-parent cancellation, insufficient-margin cancellation and sibling-cancel semantics;
+648. current TP/SL market slippage bounds are versioned and not back-applied historically;
+649. native TWAP replay tracks target execution, realized execution, catch-up and residual quantity rather than imposing a uniform path;
+650. current native TWAP child slippage and catch-up-size limits are versioned rule inputs;
+651. expiresAfter deadlines are enforced before paper matching and stale-expiry action-cost effects enter feasibility when applicable;
+652. modify/batchModify preserves always_place, cancel outcome, replacement outcome, TIF transformation and queue consequence;
+653. a payload-level batch pre-validation rejection rejects every child action and cannot be replaced by per-child optimistic execution;
+654. fast-cancel eligibility/effect is versioned and no future priority behavior is back-applied to earlier periods;
+655. schedule-cancel lead time and daily trigger-count limits are modeled as safety/feasibility constraints;
+656. paper quote feasibility includes open-order limits, action budget, cancel allowance, batch counting and congestion-state constraints;
+657. high-congestion maker-share restrictions are measured when available and otherwise produce conservative stress/CONGESTION_LIMIT_UNKNOWN;
+658. paper market orders respect IOC/price-protection/no-liquidity semantics and cannot consume unlimited depth;
+659. mark/oracle timestamps are separated from raw trade/BBO timestamps for TP/SL, liquidation, margin and unrealized-PnL transitions;
+660. funding evidence distinguishes premium samples, running estimates, exchange predictions, final settled rate and realized payment;
+661. no decision can access a final funding rate before it is point-in-time knowable;
+662. standard-perp, HIP-3 and Hyperp funding formulas remain separate versioned families;
+663. funding reconstruction versions impact notional, formula, clamp, cap, interest component, multiplier and settlement cadence;
+664. maximum market/limit order-value caps participate in capacity before paper admission;
+665. order splitting above a venue cap charges extra timing/action/fee/impact cost and is rejected when alpha half-life cannot support it;
+666. precision fixtures cover significant figures, integer exceptions, szDecimals, min notional and edge-flipping normalization;
+667. disappearance from a reconnect/open-order snapshot cannot by itself create a paper fill;
+668. every execution-sensitive proof emits a point-in-time market-rule manifest and missing PnL-critical rules remain RULE_UNKNOWN;
+669. V6.13 can increase proof quality by invalidating false-positive fills even when it creates no new alpha;
+670. all V6.13 additions remain GitHub-hosted/read-only/paper and cannot introduce signed actions, private keys, user-PC services, self-hosted nodes or live calibration orders.
 
 ## Non-goals
 
@@ -9548,7 +9950,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13 modules without scoped evidence gates;
 - treat option mark IV/mark price as executable fills;
 - assume positive IV-RV implies profitable short volatility;
 - credit Chase with exact maker queue economics when historical repricing/queue evidence is unavailable;
