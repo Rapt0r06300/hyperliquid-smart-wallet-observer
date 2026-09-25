@@ -165,6 +165,8 @@ def run_one_unit(
         payload = {"status": "FAILED", "reason": "invalid_partition", "detail": str(exc)}
         return AdapterResult(payload["status"], _digest(payload), payload, False)
 
+    if output_root is not None:
+        output_root.mkdir(parents=True, exist_ok=True)
     timeout = max(1, int(remaining - 5))
     try:
         cp = runner(
