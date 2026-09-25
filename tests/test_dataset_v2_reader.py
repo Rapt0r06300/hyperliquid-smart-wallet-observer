@@ -12,6 +12,7 @@ def _manifest(status: str, *, verified: bool = True, symbol: str = "BTCUSDT"):
         "quality_status": status,
         "validation_allowed": status == "SAFE",
         "asset_verified": verified,
+        "replay_compatible": status == "SAFE",
         "venue": "bybit",
         "family": "l2Book",
         "symbol": symbol,
@@ -55,3 +56,15 @@ def test_materializer_refuses_non_safe_manifest(tmp_path) -> None:
             [_manifest("PARTIAL")],
             tmp_path,
         )
+
+def test_reader_refuses_safe_without_replay_compatibility() -> None:
+    row = _manifest("SAFE")
+    row["replay_compatible"] = False
+    assert list(iter_safe_manifests([{"manifests": [row]}])) == []
+
+
+def test_materializer_refuses_safe_without_replay_compatibility(tmp_path) -> None:
+    row = _manifest("SAFE")
+    row["replay_compatible"] = False
+    with pytest.raises(DatasetBridgeError):
+        materialize_safe_shards([row], tmp_path)
