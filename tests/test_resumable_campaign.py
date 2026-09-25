@@ -43,3 +43,33 @@ def test_successful_progress_resets_failure_counter():
     out=mark_continuation(m,"chunk",progressed=True,failure=False)
     assert out.status=="CONTINUATION_REQUIRED"
     assert out.consecutive_failures==0
+
+
+def test_due_selection_round_robins_campaign_kinds_before_repeating():
+    now=datetime.now(timezone.utc)
+    def make(cid, kind):
+        return CampaignManifest(
+            cid,
+            kind,
+            "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "abc",
+            "Rapt0r06300/alina-smartflow-datasets-v2",
+            "g1",
+            "cfg",
+            "plan",
+            (now+timedelta(days=1)).isoformat(),
+            created_at=now.isoformat(),
+        )
+    items=[make(f"copy-vault-{i:03d}","copy_vault_collection") for i in range(20)]
+    items += [
+        make("market-1","market_collection"),
+        make("event-1","event_intelligence_collection"),
+        make("replay-1","replay"),
+        make("backtest-1","backtest"),
+        make("pnl-1","module_pnl_proof"),
+        make("archive-1","official_archive_collection"),
+    ]
+    selected=select_due_campaigns(items, now=now.isoformat())
+    first_kinds=[m.kind for m in selected[:7]]
+    assert len(first_kinds)==len(set(first_kinds))==7
+    assert set(first_kinds)==CAMPAIGN_KINDS
