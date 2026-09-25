@@ -2374,9 +2374,383 @@ ChatGPT may perform the GitHub phase-file edit when the connected GitHub permiss
 
 No user command should require access to the local PC.
 
+## Acceptance Architecture V2 — scoped gates, not one giant blocker
+
+The acceptance catalog is intentionally large because it documents safety, data quality, module readiness, research promotion, and economic-proof requirements. **It is not a single global AND-condition.**
+
+A criterion must block only the smallest scope whose correctness actually depends on that criterion.
+
+Normative rule:
+
+> fail closed inside the affected scope; degrade gracefully outside it.
+
+A failed OKX/SOL/L2 interval may invalidate that exact stream interval and any strategy path that requires it. It must not automatically stop unrelated Binance/ETH collection, a healthy Copy-Vault leader cohort, or a Cross-Venue route that does not depend on OKX/SOL.
+
+### Gate classes
+
+Every acceptance criterion belongs to exactly one enforcement class.
+
+#### G0 — GLOBAL_FATAL
+
+Use only for invariants whose violation makes **all** relevant execution scientifically or operationally invalid.
+
+Examples:
+
+- real-order/paper-only safety flags are violated;
+- self-hosted/local-PC execution is introduced without explicit authorization;
+- phase-control state is invalid/ambiguous in a way that prevents safe intent resolution;
+- epoch isolation is broken such that stale work can be mistaken for current evidence;
+- the system cannot establish provenance for newly created evidence globally;
+- a control-plane defect can cause work to execute in the wrong phase.
+
+A G0 failure stops new heavy work globally until resolved.
+
+G0 must remain deliberately small. New criteria default to a narrower class unless a written dependency argument proves that global blocking is necessary.
+
+#### G1 — CONTROL_PLANE_BLOCKER
+
+Blocks one orchestration domain or phase, not unrelated stored evidence.
+
+Examples:
+
+- successor relay for the active collection epoch cannot safely determine ownership;
+- current-epoch campaign creation is inconsistent;
+- ANALYZE stage ordering is broken;
+- durable publication authority for new outputs is unavailable.
+
+Previously published immutable evidence remains usable if its own provenance/integrity gates are still valid.
+
+#### G2 — SCOPE_DATA_BLOCKER
+
+Blocks only the smallest affected data scope.
+
+Canonical scope:
+
+`venue × instrument × channel × certified interval × collection epoch`
+
+Examples:
+
+- L2 sequence gap;
+- broken book synchronization;
+- stale clock evidence;
+- queue drop;
+- failed reconciliation;
+- parser corruption;
+- missing instrument metadata required by that channel's consumer.
+
+Result:
+
+- affected stream/interval -> `REJECT` or `PARTIAL`;
+- repair pipeline is triggered when possible;
+- unrelated streams continue;
+- downstream dependencies referencing that stream are marked `BLOCKED_DEPENDENCY`.
+
+No G2 failure is allowed to become a global stop merely for convenience.
+
+#### G3 — MODULE_PATH_READINESS
+
+Blocks one economic evidence path, not the whole module and not other modules.
+
+The smallest defensible proof path is:
+
+- Copy-Vault: `leader/cohort × coin × latency class × entry/exit policy`;
+- Lead-Lag: `leader venue -> lagger venue × coin × regime × horizon × execution mode`;
+- Cross-Venue: `coin × venue pair/route × direction × entry/exit execution policy`.
+
+A module may continue analyzing and certifying other paths while one path is unavailable.
+
+A module is considered **research-ready** when at least one path has a complete evidence dependency closure.
+
+A module is considered **economically certifiable** only for the exact paths whose complete dependency closure is PASS.
+
+#### G4 — HYPOTHESIS_PROMOTION_GATE
+
+Applies to a strategy/research variant.
+
+Examples:
+
+- Hawkes model;
+- Kalman/VECM efficient price;
+- SBE-specific feature;
+- leader-consensus variant;
+- maker queue model;
+- liquidation regime;
+- cross-asset spillover.
+
+Failure means:
+
+- that hypothesis is not promoted;
+- simpler/frozen baselines remain available;
+- collection and unrelated research continue.
+
+A non-implemented or failed optional advanced hypothesis must never block a working simpler baseline.
+
+#### G5 — MODULE_ECONOMIC_PROOF_GATE
+
+Blocks only the claim that a module has achieved a specified economic milestone.
+
+It does **not** block further collection or research.
+
+For the +4 USD net/day milestone, G5 requires the frozen proof contract for that module/path set, including after-cost PnL, causal/OOS/forward validity, capacity, fill realism, and stress survival.
+
+Copy-Vault failing G5 does not prevent Lead-Lag or Cross-Venue from proving their own milestones.
+
+### Criterion metadata registry
+
+The numbered criteria in this specification remain the human-readable normative catalog.
+
+Implementation must additionally create a machine-readable registry, proposed path:
+
+`config/acceptance_criteria.yaml`
+
+Every criterion entry must contain:
+
+```yaml
+id: 28
+title: unresolved queue/sequence loss cannot be replay-safe
+gate_class: G2
+scope_type: stream_interval
+phases: [COLLECT, QUALITY, REPLAY]
+enforcement: BLOCK_SCOPE
+dependencies: []
+evidence:
+  - coverage_ledger
+  - continuity_receipt
+on_fail:
+  state: REJECT
+  action: quarantine_and_repair
+waiver_allowed: false
+```
+
+Required metadata fields:
+
+- stable criterion ID;
+- short title;
+- gate class;
+- scope type;
+- applicable phase(s);
+- enforcement action;
+- dependency IDs/capabilities;
+- evidence artifact(s);
+- failure state;
+- recovery/remediation action;
+- whether a waiver is allowed;
+- optional SLI/SLO binding.
+
+No criterion without explicit scope/enforcement metadata may be used as a blocking gate.
+
+### Enforcement actions
+
+Allowed enforcement values are deliberately limited:
+
+- `BLOCK_GLOBAL`;
+- `BLOCK_PHASE`;
+- `BLOCK_SCOPE`;
+- `BLOCK_PROMOTION`;
+- `BLOCK_ECONOMIC_CLAIM`;
+- `DOWNGRADE_SCOPE`;
+- `WARN_ONLY`;
+- `MEASURE_ONLY`.
+
+There is no generic `FAIL_EVERYTHING` action.
+
+### Status model
+
+Criteria and capabilities are not reduced to one red/green percentage.
+
+Allowed statuses include:
+
+- `PASS`;
+- `FAIL`;
+- `BLOCKED_DEPENDENCY`;
+- `DEGRADED`;
+- `REPAIRING`;
+- `NOT_APPLICABLE`;
+- `NOT_EVALUATED`.
+
+A numerical “158/160 passed” score is informative only as coverage. It can never override a critical failed dependency, and one optional failed research criterion cannot invalidate 159 healthy unrelated capabilities.
+
+### Dependency DAG
+
+The orchestrator builds a dependency graph from required capabilities.
+
+Example:
+
+`CrossVenue:BTC:HL-Binance:taker-taker`
+
+may depend on:
+
+- certified HL BTC BBO/L2 interval;
+- certified Binance BTC BBO/L2 interval;
+- same-clock timing evidence;
+- instrument rules;
+- fee provenance;
+- entry/exit capacity;
+- route execution model.
+
+If Bitget BTC L2 fails, this path is unaffected because Bitget is outside its dependency closure.
+
+Conversely, a `LeadLag:OKX->HL:SOL` path is automatically `BLOCKED_DEPENDENCY` if its required OKX/SOL timing/L2 evidence fails.
+
+Dependency propagation must be deterministic and machine-readable.
+
+### Locality and monotonicity invariants
+
+The gate engine must preserve these properties:
+
+1. **Locality:** failure blocks the smallest safe scope.
+2. **Dependency-only propagation:** a failure can block only downstream consumers that depend on it.
+3. **Monotonic capability:** adding a new venue, coin, optional model or research feature cannot invalidate a previously certified unrelated path.
+4. **Fail-closed evidence:** missing execution-critical evidence cannot be guessed/defaulted inside the affected path.
+5. **Graceful degradation:** lower-priority breadth may degrade before Tier-A integrity is sacrificed.
+6. **Independent certification:** one healthy route/cohort can finish proof without waiting for unrelated universe-wide perfection.
+
+### Replay-safe intervals versus collection SLOs
+
+Do not confuse **service reliability** with **evidence correctness**.
+
+GitHub-hosted collection cannot realistically have a literal 100% availability SLO.
+
+However, an interval labeled `EXECUTION_REPLAY_SAFE` must have **zero unresolved execution-critical gaps by definition**.
+
+Therefore:
+
+- collector availability/coverage may be <100%;
+- gaps may exist globally;
+- certified replay-safe intervals exclude unresolved gaps;
+- within a certified interval, continuity requirements are exact for the evidence family that requires them.
+
+This preserves scientific strictness without making 100% infrastructure availability a prerequisite.
+
+### Small SLO set
+
+Following SRE principles, the system uses a small number of end-to-end operational SLO families rather than turning all 160 criteria into SLOs.
+
+Core collection SLO families:
+
+1. **liveness/freshness** — required streams and checkpoints arrive within policy;
+2. **durability** — sealed segments become durably published within policy;
+3. **coverage/completeness** — expected high-priority evidence is observed/certified;
+4. **correctness/integrity** — reconciliation, sequence/book and parser validity;
+5. **handoff/recovery** — successor overlap/recovery remains within policy.
+
+Tier A receives tighter targets than Tier B/C.
+
+These SLOs guide resource allocation and reliability work. They do not replace per-interval data certification.
+
+### Scoped error budgets
+
+Where an SLO is appropriate, error budgets are scoped to the service/data domain they measure.
+
+Examples:
+
+- Binance BTC Tier-A L2 handoff budget;
+- Copy-Vault broad-sweep freshness budget;
+- Dataset V2 durable-publication latency budget.
+
+Budget exhaustion triggers the narrowest useful response:
+
+- reduce/split the affected shard;
+- promote shadow capture;
+- increase checkpoint cadence;
+- repair/quarantine affected intervals;
+- temporarily reduce Tier-C breadth;
+- prioritize reliability work for that scope.
+
+Only a genuine G0/control-plane safety failure causes a global collection stop.
+
+### Aspirational versus blocking targets
+
+Some V4/VNext improvements are aspirational reliability or research targets.
+
+They can be tracked as `MEASURE_ONLY` until enough baseline data exists to set a defensible threshold.
+
+Examples:
+
+- ideal shadow-feed overlap;
+- aggressive latency percentile target;
+- new experimental SBE path;
+- advanced model incremental-value target.
+
+An aspirational SLO becoming temporarily unmet does not invalidate a simpler safe baseline.
+
+Promotion from aspirational to blocking requires:
+
+1. sufficient measurement history;
+2. a written threshold;
+3. a clear consumer dependency;
+4. a defined remediation path.
+
+### Priority-aware graceful degradation
+
+When GitHub runner capacity or API limits are stressed, degrade in this order:
+
+1. preserve G0 safety/control invariants;
+2. preserve Tier-A raw capture and timing;
+3. preserve evidence required by already-promising module paths;
+4. preserve repair/checkpoint durability;
+5. reduce Tier-B breadth;
+6. reduce Tier-C breadth;
+7. defer optional research features.
+
+The system must not protect an optional advanced model by dropping raw evidence required by a simpler profitable baseline.
+
+### Minimal proof paths
+
+Time-to-proof is optimized by certifying the smallest complete economic unit.
+
+Examples:
+
+- Copy-Vault can prove one strong leader cohort without waiting for every public vault to reach identical freshness;
+- Lead-Lag can prove Binance->HL BTC in one regime without waiting for all 30 venue-direction combinations;
+- Cross-Venue can prove an HL/OKX SOL route without waiting for Gate/Bitget coverage.
+
+Global breadth remains desirable for discovering more edge, but breadth is never a prerequisite for a complete local proof unless the strategy itself mathematically requires that breadth.
+
+### Waiver policy
+
+There are no silent waivers.
+
+- G0 safety criteria: waiver prohibited.
+- G2 execution-critical evidence criteria: waiver prohibited for `EXECUTION_REPLAY_SAFE`.
+- G3/G5 proof-critical dependencies: waiver prohibited for economic certification.
+- optional/advisory criteria may be explicitly marked `NOT_APPLICABLE` or deferred with a recorded reason.
+
+Any allowed temporary waiver must be machine-readable, time-bounded, scoped, and auditable.
+
+### Acceptance dashboard
+
+The dashboard must present gates by scope, not only a giant checklist.
+
+Top-level view:
+
+- global/control health;
+- collector SLO health;
+- number/duration of replay-safe intervals;
+- Copy-Vault ready/provable paths;
+- Lead-Lag ready/provable paths;
+- Cross-Venue ready/provable paths;
+- hypotheses promoted/rejected/pending;
+- economic-proof status by module.
+
+Drill-down reveals the exact blocking dependency and remediation action.
+
+### Research basis for gate organization
+
+This architecture is informed by:
+
+- Google SRE guidance to keep a small set of meaningful SLOs, avoid unrealistic 100% service targets, use error budgets for prioritization, and engineer graceful degradation;
+- Google SRE data-pipeline guidance on freshness/correctness/completeness, priority tiers, checkpointing and end-to-end pipeline readiness;
+- Google SRE cascading-failure guidance to shed lower-priority work and contain failure instead of spreading it;
+- continuous-delivery guidance that deployment/readiness gates should be automated and produce explicit evidence;
+- NASA-style requirements classification/tailoring and verification traceability, which motivates explicit criticality/scope rather than treating every requirement identically.
+
+These sources guide gate architecture. Alina's own data/economic contracts remain the authority for trading-research certification.
+
+
 ## Tests and acceptance criteria
 
-Implementation is accepted only when tests prove all of the following:
+The following numbered items form the normative acceptance catalog. Each item is enforced according to Acceptance Architecture V2. They do **not** form one global AND-condition unless their gate metadata explicitly says so:
 
 1. invalid or missing phase state fails closed;
 2. `IDLE` selects no heavy work;
@@ -2537,7 +2911,28 @@ Implementation is accepted only when tests prove all of the following:
 157. spectacular in-sample or raw PnL cannot outrank a lower but robust candidate solely on point estimate;
 158. external university/practitioner research is used only to generate hypotheses, never as proof that an Alina edge exists;
 159. the research curriculum includes microstructure, price discovery, optimal routing, market impact, Hawkes/order flow, Kelly sizing and backtest-overfitting control;
-160. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
+160. every acceptance criterion has explicit gate class, scope, phase, enforcement action and evidence metadata before it can block execution;
+161. G0 GLOBAL_FATAL remains a deliberately small safety/control set and cannot absorb ordinary venue/data/research failures;
+162. a G2 stream failure blocks only the affected venue/instrument/channel/interval and its actual downstream dependencies;
+163. a G3 module-path failure does not block other proof paths in the same module;
+164. a G4 research-hypothesis failure cannot disable a simpler healthy baseline;
+165. a G5 economic-proof failure blocks only the corresponding module milestone claim and not further collection/research;
+166. the gate engine has no generic FAIL_EVERYTHING action outside explicit G0/control semantics;
+167. dependency propagation is deterministic and based on a machine-readable capability DAG;
+168. adding an optional venue/model/coin cannot invalidate an unrelated previously certified path;
+169. replay-safe intervals contain zero unresolved execution-critical gaps even though overall collector availability may be below 100%;
+170. operational SLOs are limited to a small end-to-end set for liveness, durability, coverage, correctness and handoff/recovery;
+171. SLO/error-budget breaches trigger the narrowest scoped remediation rather than a global stop by default;
+172. Tier-A evidence receives stricter operational targets than lower-priority discovery data;
+173. aspirational targets remain MEASURE_ONLY until threshold, dependency and remediation policy are explicitly established;
+174. resource pressure sheds optional/Tier-C work before execution-critical Tier-A raw evidence;
+175. economic proof can complete for the smallest independent complete leader/route/venue-edge unit without unrelated universe-wide readiness;
+176. G0 safety and execution-critical replay/proof dependencies cannot be silently waived;
+177. any permitted waiver is scoped, time-bounded, machine-readable and auditable;
+178. the acceptance dashboard reports exact blocking dependencies by scope instead of only a global pass percentage;
+179. acceptance status supports PASS/FAIL/BLOCKED_DEPENDENCY/DEGRADED/REPAIRING/NOT_APPLICABLE/NOT_EVALUATED;
+180. a raw pass percentage can never override a critical failed dependency or turn an optional failed hypothesis into a global blocker;
+181. existing relevant campaign, dataset, reconciliation, collector and strategy tests continue to pass.
 
 ## Non-goals
 
