@@ -47,6 +47,8 @@ class SafeShard:
         status = str(row.get("quality_status") or "").upper()
         if status != "SAFE":
             raise DatasetV2Error(f"non-SAFE shard refused: {status or 'MISSING'}")
+        if row.get("replay_compatible") is not True:
+            raise DatasetV2Error("SAFE shard is not explicitly replay compatible")
         required = (
             "dataset_id",
             "family",
@@ -155,6 +157,8 @@ def select_safe_shards(
         if not isinstance(raw, Mapping):
             continue
         if str(raw.get("quality_status") or "").upper() != "SAFE":
+            continue
+        if raw.get("replay_compatible") is not True:
             continue
         shard = SafeShard.from_index_row(raw)
         if family_set and shard.family.lower() not in family_set:
