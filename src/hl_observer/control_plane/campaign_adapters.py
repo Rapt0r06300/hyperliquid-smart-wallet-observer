@@ -136,6 +136,11 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
         ], workspace
 
     if ctx.kind in {"backtest", "module_pnl_proof"}:
+        if not (workspace / "runtime" / "data").is_dir():
+            return [
+                py, "-m", "hl_observer.ops.v2_dataset_bridge", "materialize",
+                "--output", str(workspace),
+            ], workspace
         return [
             py, str(ROOT / "tools" / "run_economic_objective_campaigns.py"),
             "--root", str(workspace),
