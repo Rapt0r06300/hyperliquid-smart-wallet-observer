@@ -12825,7 +12825,25 @@ The following findings extend the verified weakness inventory. They were found b
 89. **Campaign trade hashes are not reconciled against raw proof rows at the final boundary.** `certify_workspace` checks that raw proof-row count equals OOS+forward sample count, but it does not reconstruct the segment/native trade-id sets and compare them with the campaign `trade_ids_sha256` values. A count match is weaker than an identity/content match.
 90. **Large dataset fingerprints are deliberately partial yet can feed a final “complete provenance” decision.** `simulation/economic_campaign_provenance.py::_sha256` hashes only the first 1 MiB, last 1 MiB and file size for files above 128 MiB (`EDGE_SHA256_WITH_SIZE`). This is honestly labeled in the dataset manifest, but `_proof_provenance` later treats a 64-character dataset fingerprint as complete without rejecting partial-fingerprint methods. Interior changes can therefore escape the content digest itself.
 91. **Frozen training provenance is not an immutable content snapshot.** Freeze helpers store dataset provenance containing ordinary file paths, and `merge_sources_with_frozen_provenance` reopens those paths later. `find_oldest_parameter_freeze` / `freeze_or_reuse_parameters` match primarily on family/protocol/parameter identity, not on a revalidated immutable training-data object. If a referenced large/mutable file changes in place, the old freeze does not by itself preserve the exact bytes that selected the parameters.
+92. **Economic-memory admission does not itself require the daily certification contract.** `ops/family_economic_job.py::record_family_economic_memory` calls the base `certify_campaign()`, then checks only `eligible_net_pnl_usd >= 4.0`; `datasets/economic_memory.py` likewise imports the cumulative `TARGET_NET_USD`. Nominal current campaign builders set `daily_target_required=True`, so the normal path inherits the daily check indirectly, but the memory boundary itself accepts any base-certified legacy/alternate campaign whose daily flag is absent/false. A “certified proof memory” must not depend on a caller remembering to opt into the actual project objective.
+93. **MAX DATA can declare proof reached from a derived phase instead of the canonical daily certificate.** `datasets/max_data_policy.py::targets_reached_from_brain` returns true when all three decisions merely have phase `FREEZE_AND_CONFIRM_FORWARD`; `choose_max_data_job` then emits `STOP_PROOF_REACHED` and states that the three economic objectives are reached. The brain derives that phase by trusting stored campaign `objective_status == ATTEINT`, rather than consuming/recomputing the final daily certification receipt. Its target contract is still named `target_net_usd_per_family = 4.0`, not the canonical per-UTC-day proof contract.
 
+
+
+### Canonical daily-proof authority for memory and autonomous stop decisions
+
+Any state that means “economically proven”, “proof cached”, “target reached” or “stop because the objective is reached” is downstream of the same canonical **daily** certificate.
+
+Requirements:
+
+- economic memory accepts a proof only from `certify_daily_campaign` / the canonical equivalent strict daily receipt, not from the cumulative base certificate alone;
+- the memory record carries daily-target schema/version, complete-day count, per-day minimum, coverage receipt hash and the final daily certificate hash;
+- a campaign with `daily_target_required` absent/false is never eligible for the current +4 USD/day proof memory even if cumulative net exceeds 4 USD;
+- cache lookup/reuse revalidates that the current canonical daily-proof policy matches the stored receipt;
+- the research brain may use campaign status for prioritization, but cannot convert a stored `objective_status` string directly into a global “proof reached” fact;
+- `STOP_PROOF_REACHED` requires the canonical final daily workspace certificate (or an immutable equivalent receipt) to prove all three active families;
+- target contracts name the unit explicitly as `USD per complete UTC day per family`;
+- a phase such as `FREEZE_AND_CONFIRM_FORWARD` describes workflow state only and is never itself proof that the economic objective has been reached.
 
 ### Raw-economic reconstruction and immutable dataset-proof contract
 
@@ -14806,6 +14824,15 @@ The following numbered items form the normative acceptance catalog. Each item is
 1221. freeze reuse requires revalidation of the frozen training-data content identity in addition to family/protocol/parameter compatibility;
 1222. file path, size and mtime metadata cannot substitute for immutable content identity, and an in-place interior data mutation with preserved length/timestamps is a mandatory regression fixture that must invalidate certification;
 1223. all blocker-classified weaknesses 88-91 from the 2026-09-26 continuation audit remain implementation blockers until deterministic raw-reconstruction and immutable-provenance tests prove closure.
+1224. economic-memory admission requires a canonical daily-certification receipt for the exact family/evidence set and cannot rely on certify_campaign cumulative eligibility alone;
+1225. a base-certified campaign with cumulative net >=4 USD but no valid daily-target receipt is rejected from certified economic memory;
+1226. economic-memory records bind the daily-proof policy/schema, required complete-day count, per-day result/coverage hashes and final daily certificate hash in addition to code/data/config identity;
+1227. autonomous research may mark an analysis suite technically complete independently of profitability, but technical completion can never be surfaced or consumed as economic-target completion;
+1228. STOP_PROOF_REACHED is emitted only from a canonical all-three-families daily certificate or an immutable equivalent receipt, never from workflow phase names alone;
+1229. FREEZE_AND_CONFIRM_FORWARD and other research phases remain workflow states, not substitutes for certified objective truth;
+1230. MAX DATA target metadata uses explicit USD-per-complete-UTC-day units and the same +4 USD/day policy version as final certification;
+1231. a tampered/stale campaign objective_status=ATTEINT without a valid recomputed daily certificate cannot stop further evidence work or populate certified proof memory;
+1232. all blocker-classified weaknesses 92-93 from the 2026-09-26 continuation audit remain implementation blockers until daily-authority/memory/stop-condition regression tests prove closure.
 
 ## Non-goals
 
