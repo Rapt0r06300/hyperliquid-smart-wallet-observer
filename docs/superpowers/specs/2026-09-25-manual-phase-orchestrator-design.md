@@ -12821,6 +12821,47 @@ The following findings extend the verified weakness inventory. They were found b
 85. **Post-freeze truth still relies too much on metadata flags at the final boundary.** The base final certification checks `forward.post_freeze is True`, but does not independently validate every proof trade's causal timestamps against the freeze. The stricter vNext temporal-window validator helps only when that receipt is present, and finding 83 shows that its absence currently passes.
 86. **Cross-family proof identity is too coarse to be the sole anti-reuse authority.** `simulation/economic_proof_identity.py` hashes only coin, direction and millisecond entry/exit timestamps. This can falsely collide independent same-ms episodes and can miss reuse of the same underlying source episode when two family pipelines normalize timestamps slightly differently. Exact execution identity and underlying opportunity/source lineage need separate canonical identities.
 87. **The certified Cross-Venue proof path remains pair-specific.** `backtesting/cross_venue_certified.py` is structurally built around `HL` and `BIN` fields/books/four-fill plans, while the canonical research universe now includes Hyperliquid, Binance, Bybit, OKX, Gate and Bitget. The current HL/BIN certificate may remain a valid pair-specific proof, but it cannot stand in for a generic all-eligible-pairs certification engine.
+88. **Final economic certification does not independently recompute raw proof PnL.** `ops/final_economic_certification.py` loads raw OOS/forward trades only for cross-family identity/count auditing. The certified net/gross/cost values still come from campaign segment summaries passed through `evaluate_objective`. Current tests can build raw proof trades with timestamps/identity but no economic fields and still obtain a valid family certificate from the summary payload.
+89. **Campaign trade hashes are not reconciled against raw proof rows at the final boundary.** `certify_workspace` checks that raw proof-row count equals OOS+forward sample count, but it does not reconstruct the segment/native trade-id sets and compare them with the campaign `trade_ids_sha256` values. A count match is weaker than an identity/content match.
+90. **Large dataset fingerprints are deliberately partial yet can feed a final “complete provenance” decision.** `simulation/economic_campaign_provenance.py::_sha256` hashes only the first 1 MiB, last 1 MiB and file size for files above 128 MiB (`EDGE_SHA256_WITH_SIZE`). This is honestly labeled in the dataset manifest, but `_proof_provenance` later treats a 64-character dataset fingerprint as complete without rejecting partial-fingerprint methods. Interior changes can therefore escape the content digest itself.
+91. **Frozen training provenance is not an immutable content snapshot.** Freeze helpers store dataset provenance containing ordinary file paths, and `merge_sources_with_frozen_provenance` reopens those paths later. `find_oldest_parameter_freeze` / `freeze_or_reuse_parameters` match primarily on family/protocol/parameter identity, not on a revalidated immutable training-data object. If a referenced large/mutable file changes in place, the old freeze does not by itself preserve the exact bytes that selected the parameters.
+
+
+### Raw-economic reconstruction and immutable dataset-proof contract
+
+A final economic certificate is a reconstruction result, not a trust decision on pre-aggregated JSON.
+
+For every OOS/forward proof episode, final certification must be able to derive or verify from immutable raw/canonical evidence:
+
+- exact economic-event identity;
+- entry/exit fills and causal timestamps;
+- executed/filled quantity and notional;
+- gross PnL;
+- every fee/spread/slippage/latency/funding component applicable to the family;
+- net PnL;
+- segment membership;
+- ledger/event references used for reconciliation.
+
+Requirements:
+
+- OOS and forward aggregates are recomputed from the proof rows or canonical ledger at the final boundary;
+- stored campaign aggregates are compared to recomputed values and any mismatch is `NO_GO`;
+- raw proof rows missing required economics cannot support a certificate merely because a summary contains those economics;
+- segment `trade_ids_count`, duplicate counts and `trade_ids_sha256` are recomputed from the exact raw proof set and must match the campaign receipt;
+- the cross-family identity audit and the economic reconstruction consume the same exact proof-event set;
+- tests mutate only a stored summary while leaving raw evidence fixed, and only raw-consistent economics can certify;
+- tests mutate one raw proof event while preserving row count, and hash/economic reconciliation must fail.
+
+Dataset/freeze provenance is content-addressed:
+
+- every proof-relevant file is identified by a full-content digest or a cryptographically complete chunk/Merkle manifest whose root commits to every byte;
+- edge-only/sampled hashes may remain operational diagnostics but are never sufficient for certifying provenance;
+- file size, mtime and path are metadata, not substitutes for content integrity;
+- a parameter freeze binds the exact immutable TRAIN/calibration dataset manifest that produced the selection;
+- append-only forward growth is represented by a new later evidence manifest while the frozen TRAIN manifest remains reconstructible;
+- reuse of an old freeze requires successful revalidation of the immutable frozen-training manifest, not merely matching parameters/protocol;
+- a mutable path reference alone is insufficient evidence that the bytes seen during selection still exist;
+- final certification re-hashes/revalidates the exact dataset/chunk objects referenced by the freeze and proof manifest before returning CERTIFIED.
 
 ### Mandatory gate wiring and fail-closed admission contract
 
@@ -14754,6 +14795,17 @@ The following numbered items form the normative acceptance catalog. Each item is
 1210. each pair-generic Cross-Venue proof binds point-in-time fees, contract multiplier/tick/lot/min-notional, quote/settle conversion, L2/BBO capacity, clock/skew, venue status and funding exposure where applicable;
 1211. the current HL/BIN certified implementation is treated as one pair-specific adapter/proof and cannot by itself satisfy full-universe Cross-Venue certification;
 1212. all blocker-classified weaknesses 72-87 from the 2026-09-26 continuation audit remain implementation blockers until deterministic regression/differential/fault tests prove closure.
+1213. final family certification reconstructs OOS/forward gross PnL, costs and net PnL from the exact immutable raw/canonical proof-event set rather than trusting campaign summary scalars;
+1214. a raw proof trade missing required economic fields cannot be made certifiable by supplying a complete-looking aggregate summary;
+1215. stored campaign OOS/forward aggregates must exactly reconcile, within explicit numeric tolerance, to independently recomputed proof-event economics;
+1216. segment trade-id counts, duplicate counts and trade_ids_sha256 are recomputed from the raw proof set and must match the campaign receipt; matching only row counts is insufficient;
+1217. the event set used for economic reconstruction is exactly the set used for cross-family reuse/identity auditing, with one immutable set digest bound into the final certificate;
+1218. proof-relevant files larger than the current 128-MiB threshold use full-content or cryptographically complete chunk/Merkle hashing for certification; EDGE_SHA256_WITH_SIZE is diagnostic only;
+1219. final provenance validation rejects any mandatory dataset file whose fingerprint_method is partial/sampled/non-cryptographically-complete for the required proof scope;
+1220. a parameter freeze binds an immutable TRAIN/calibration dataset manifest, and later forward-data growth cannot mutate or replace the bytes committed by that frozen manifest;
+1221. freeze reuse requires revalidation of the frozen training-data content identity in addition to family/protocol/parameter compatibility;
+1222. file path, size and mtime metadata cannot substitute for immutable content identity, and an in-place interior data mutation with preserved length/timestamps is a mandatory regression fixture that must invalidate certification;
+1223. all blocker-classified weaknesses 88-91 from the 2026-09-26 continuation audit remain implementation blockers until deterministic raw-reconstruction and immutable-provenance tests prove closure.
 
 ## Non-goals
 
