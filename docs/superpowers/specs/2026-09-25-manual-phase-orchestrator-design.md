@@ -12740,7 +12740,7 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 15. **The 100% branch-coverage requirement is specified but not yet wired in the development toolchain.** Current `pyproject.toml` includes pytest/ruff but no coverage/pytest-cov dependency or enforced branch threshold. Until the gate is implemented, the repository cannot claim the coverage requirement is satisfied.
 16. **Historical/experimental pipelines can still compute their own economics.** Examples include V9/static-cost paper logic, experimental ledgers and HyperLab simplified fill/equity models. They may remain research fixtures, but they cannot publish authoritative PnL, equity, capacity, risk or promotion state.
 17. **Simulator calibration itself can overfit.** Queue/fill/latency parameters chosen because they maximize strategy PnL create a circular proof. Practitioner evidence favors calibrating execution models against fixed order-action traces and order-level outcomes, then evaluating strategy PnL separately OOS.
-18. **Disabled PC/self-hosted workflows remain in the active workflow directory.** Jobs such as `alina-self-hosted*.yml`, `hypersmart-runner-smoke-final-v1.yml` and `local-readonly-observer.yml` are currently guarded by `if: false` and point at GitHub-hosted runners, so they do not currently touch the user's PC. However they still contain PC-specific paths, local-observer logic and self-hosted semantics. Repository policy must eliminate this dormant capability surface rather than trusting a Boolean that can later be edited.
+18. **Self-hosted workflow assets are intentionally preserved for future explicit use and are not a current blocker.** Their presence in the repository is deliberate. The current requirement is only that today's canonical GitHub-hosted phase/orchestration/certification paths do not invoke, depend on or derive readiness from them. No deletion or modification of those reserved assets is required by this roadmap unless the user explicitly reopens that workstream.
 19. **The current “100% coverage” probe measures line coverage, not branch coverage.** `coverage-parallel-probe.yml` currently runs `coverage run --parallel-mode --source=src` without branch measurement enabled, while `check_coverage_ratchet.py` validates only statement percentage/missing lines. A green 100% status therefore does not currently prove the spec's 100% branch requirement.
 20. **Proof-critical runtime persistence can silently reset or drop state.** `RuntimeState` converts unreadable JSON to an empty mapping and logs write failures without failing the caller. `ForwardFrozen` skips malformed JSONL lines. Corruption must never be reinterpreted as “no prior state”.
 21. **Several persistence helpers are atomic in name/intent but not yet crash-durable proofs.** `capture/atomic_checkpoint.py` returns a logically atomic record but performs no durable write; other JSON state paths use temp-file replace or append without a complete fsync/checksum/torn-tail recovery contract. Process-crash success is not power-loss durability.
@@ -12800,6 +12800,198 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 
 
 
+
+### 2026-09-26 continuation audit — admission, certification and proof-integrity gaps
+
+The following findings extend the verified weakness inventory. They were found by tracing current authoritative or near-authoritative code paths rather than by counting files or treating historical modules as automatically defective.
+
+72. **Copy-Vault leader-quality admission can fail open.** In `src/hl_observer/cli.py::_apply_leader_quality_gate`, an exception returns the original unfiltered leaders, and an empty qualified set also falls back to the original rows. The live user-fills stream adds a second broad exception handler and then continues with the pre-filter rows. A quality gate whose failure restores the rejected population is the inverse of deny-by-default.
+73. **A declared RiskEngine blocker is currently decorative.** `src/hl_observer/risk/risk_engine.py` computes `testnet_locked_by_default` inside the returned gate map, but the decision chain never consumes that gate. More generally, a gate exposed in telemetry must not be mistaken for an enforced gate merely because its Boolean appears in a result object.
+74. **Replay-quality grading can silently improve after parse loss.** The replay-quality CLI catches broad record-construction errors, drops the malformed row with `continue`, and then grades only surviving `HistoricalRecord` objects. The grader therefore cannot distinguish a genuinely clean dataset from a damaged dataset whose inconvenient rows disappeared during parsing.
+75. **Release quality gates mix mechanism self-tests with evidence about the current run.** `release/quality_gates.py` marks `GATE_TESTNET_DISABLED` and `GATE_NO_REAL_EXECUTION` OK by construction, while `GATE_DATA_QUALITY` and `GATE_REALTIME_RECOVERY` are based on synthetic in-memory fixtures. Those checks can prove that a mechanism behaves on a toy case; they do not prove the state, data quality or capability boundary of the run being certified.
+76. **Release aggregation can look non-failed while mandatory evidence is blocked, and closeout prose is partly unconditional.** `QualityGateReport.hard_failed` counts only `FAIL`, not `BLOCKED_WITH_PROOF`; `release/closeout.py` then writes unconditional safety bullets such as no active testnet/no orders rather than deriving every statement from same-run gate receipts. Absence of a hard failure is not evidence of readiness.
+77. **Dependency profiles can execute materially different software under the same repository code.** The default project metadata and `requirements.txt` currently constrain `websockets>=10,<11`, while the Windows portable input deliberately allows `websockets>=16,<18` and the hash-locked portable environment contains 17.0.1. Other test-version ranges also differ across install surfaces. Separate profiles are allowed, but a certifying result cannot be portable across them without an explicit profile identity and behavioral/parity proof.
+78. **Fee truth still has competing repository authorities.** `src/hl_observer/config/frais_venues.py` describes itself as the single source and currently carries a Binance taker default of 5.0 bps, while `config/frais_venues.json` carries 4.5 bps. The Python registry also does not provide the same first-class maker/taker authority for every venue in the active Hyperliquid/Binance/Bybit/OKX/Gate/Bitget universe. A proof cannot depend on which helper or legacy config file happened to be imported.
+79. **The strict +4 USD/day gate can currently be satisfied by one 24-hour average window.** `ops/daily_economic_certification.py` uses a minimum forward duration of 86,400 seconds and evaluates `net / observed_days`. That permits one positive 24-hour window to satisfy the daily-rate condition even though the canonical spec already says one positive day is insufficient.
+80. **Zero-trade complete days can disappear from daily evidence.** `simulation/economic_objective.py::evaluate_daily_net` creates a calendar day only when a trade contributes a row. A complete forward UTC day with zero trades is therefore omitted rather than represented as a zero-PnL day, which can bias a “per day” success test upward.
+81. **An aggregate 99% forward-coverage ratio is not enough to prove replay/economic continuity.** The daily gate accepts a scalar coverage ratio plus a Boolean verification flag. A small but clustered outage around the exact decision/fill window can be economically fatal while leaving the aggregate percentage above threshold.
+82. **Final provenance currently validates hash-shaped strings more strongly than the referenced artifacts.** `ops/final_economic_certification.py::_proof_provenance` treats provenance as complete from 64-character fingerprints, a campaign id, a freeze time and a selection flag. The final gate does not, at that point, prove that the referenced dataset/config artifacts exist and recompute to those hashes.
+83. **A missing vNext promotion receipt is treated as success.** In `ops/final_economic_certification.py`, `vnext_certified` starts as true when `vnext_promotion` is absent. This creates an optional-proof bypass around the otherwise stricter freeze/temporal protocol.
+84. **Final certification and scoreboard promotion are parallel authorities with different gate sets.** `simulation/scoreboard_promotion.py` requires, among other things, independent sample size, days/regimes, concentration, lower confidence bound, placebo, DSR/PBO, measured fill/capacity/latency and ledger trust. `ops/final_economic_certification.py` independently reimplements a different subset. The final certificate must not be able to say CERTIFIED when the canonical robustness/promotion receipt says MORE_DATA or KILL.
+85. **Post-freeze truth still relies too much on metadata flags at the final boundary.** The base final certification checks `forward.post_freeze is True`, but does not independently validate every proof trade's causal timestamps against the freeze. The stricter vNext temporal-window validator helps only when that receipt is present, and finding 83 shows that its absence currently passes.
+86. **Cross-family proof identity is too coarse to be the sole anti-reuse authority.** `simulation/economic_proof_identity.py` hashes only coin, direction and millisecond entry/exit timestamps. This can falsely collide independent same-ms episodes and can miss reuse of the same underlying source episode when two family pipelines normalize timestamps slightly differently. Exact execution identity and underlying opportunity/source lineage need separate canonical identities.
+87. **The certified Cross-Venue proof path remains pair-specific.** `backtesting/cross_venue_certified.py` is structurally built around `HL` and `BIN` fields/books/four-fill plans, while the canonical research universe now includes Hyperliquid, Binance, Bybit, OKX, Gate and Bitget. The current HL/BIN certificate may remain a valid pair-specific proof, but it cannot stand in for a generic all-eligible-pairs certification engine.
+
+### Mandatory gate wiring and fail-closed admission contract
+
+Every gate that can change whether an observation becomes a leader, signal, PaperIntent, economic event, promotion candidate or certificate has an explicit authority class:
+
+- `MANDATORY_BLOCKING`: failure, exception, missing state or UNKNOWN blocks;
+- `DIAGNOSTIC_ONLY`: cannot authorize or block and must never be counted as satisfied safety;
+- `RESEARCH_RANKING_ONLY`: may order research candidates but cannot bypass a blocker.
+
+Requirements:
+
+- the authoritative decision receipt enumerates every mandatory gate and its consumed result;
+- a declared mandatory gate that is absent from the actual decision reduction is a build/test failure;
+- zero qualifying leaders is a valid empty state, never a reason to restore the pre-gate leader list;
+- a leader-quality computation error emits a typed failure such as `LEADER_QUALITY_UNAVAILABLE` and admits no new leader-dependent PaperIntent;
+- current-scope testnet/mainnet capability gates block by architecture; merely reporting their Boolean is insufficient;
+- static plus mutation tests delete/invert one gate at a time and prove that the path can no longer authorize;
+- no broad exception handler may convert a failed mandatory gate into the unfiltered/pre-gate state.
+
+### Replay parse-loss and evidence-conservation contract
+
+A proof-quality transformation is conservative: parsing, normalization or schema validation cannot make evidence look cleaner by deleting bad rows.
+
+Every proof-relevant loader records at least:
+
+- total source rows/frames observed;
+- successfully parsed rows;
+- rejected/quarantined rows;
+- reason counts;
+- byte/line/sequence ranges of rejected material where available;
+- whether rejected material intersects a required time/coin/venue/channel interval;
+- resulting coverage and continuity state.
+
+Rules:
+
+- malformed critical rows are `EVIDENCE_CONTAMINATED` or `GAP_UNRESOLVED`, not invisible;
+- a replay grade cannot increase merely because malformed rows were discarded;
+- GOLD/SILVER or equivalent certifying quality requires an explicit parse-loss receipt;
+- intentionally filtered non-proof rows are distinguishable from parse failures;
+- fixtures prove that strategically corrupting a required row cannot improve the quality verdict.
+
+### Release-gate evidence semantics
+
+Mechanism self-tests and current-run certification are separate namespaces.
+
+A mechanism self-test may answer “does the guard work on this deterministic fixture?”. A current-run gate must answer “is this exact run safe/complete enough to certify?”.
+
+Requirements:
+
+- no mandatory current-run gate is hard-coded `OK`;
+- synthetic fixture success can satisfy only a `SELF_TEST_*` gate;
+- current testnet/no-real-execution claims are derived from resolved configuration, capability/import reachability, authoritative runtime state and safety audit receipts;
+- current data-quality/recovery gates consume actual run/dataset evidence, not fabricated records;
+- top-level `READY`, `CERTIFIED` or equivalent requires every mandatory gate to be `OK`;
+- `BLOCKED`, `UNKNOWN`, `MISSING`, `INSUFFICIENT` and `UNMEASURABLE` are non-success terminal states for certification;
+- generated prose is rendered from machine-verifiable receipt state and may not assert a stronger safety/economic statement than the receipt.
+
+### Dependency-profile identity and parity
+
+Alina may retain different dependency profiles for normal development, CI and a Windows portable release, but they are different executable environments until proven equivalent for the behavior under test.
+
+Each certifying artifact records:
+
+- Python implementation/version/platform;
+- exact direct and transitive package set with hashes;
+- dependency-profile id;
+- install source/lock hash;
+- relevant native-library versions;
+- code/tree SHA.
+
+Rules:
+
+- every profile must be internally solver-consistent with its own declared direct constraints;
+- the canonical profile relationship is explicit; broad ranges in one manifest cannot silently override a resolved lock in another;
+- transport/numerical/library differences that can alter parsing, ordering, timing, Decimal/float behavior, WebSocket semantics or statistics require parity fixtures before an economic proof is portable across profiles;
+- a portable result produced under `websockets 17.x` cannot be silently treated as the same runtime as a default profile constrained to `<11`;
+- final economic certification is bound to one resolved dependency profile unless an explicit cross-profile parity receipt is present.
+
+### Canonical fee and cost-rule registry
+
+One versioned registry owns maker/taker fee truth for every certifying venue/market/account tier.
+
+The registry must provide, per fee observation:
+
+- venue and market type;
+- maker/taker role;
+- value and unit;
+- account/tier/discount assumptions;
+- effective/observed time;
+- source/provenance hash;
+- certification eligibility;
+- expiry/revalidation rule.
+
+Rules:
+
+- legacy JSON/constants may remain fixtures but cannot be competing runtime authorities;
+- two sources that disagree make the affected fee `CONFLICTED_UNMEASURABLE` until resolved;
+- an unsupported active venue fee cannot be guessed in certifying mode;
+- Cross-Venue pays the exact entry/exit leg fees implied by the pair, side, role and point-in-time rule;
+- a fee-registry hash is part of every economic proof receipt.
+
+### Daily-target calendar and continuity proof
+
+The +4 USD/day milestone is a calendar/evidence claim, not merely an annualized or duration-normalized average.
+
+For a certifying forward window:
+
+- the expected set of complete UTC days is derived from the frozen observation start/end;
+- every complete expected day appears exactly once, including a day with zero trades and zero PnL;
+- missing collection coverage is represented as missing/blocked evidence, not as a zero-trade healthy day;
+- at least the canonical minimum number of complete proof days is required;
+- the current project rule is evaluated per complete day; a high-profit day cannot rescue a sub-target complete day unless a future preregistered objective explicitly changes the metric;
+- daily net is reconstructed from canonical closed economic events and reconciles to the same ledger used by the campaign certificate.
+
+Coverage is also interval-aware:
+
+- aggregate coverage ratio is reported but is never sufficient alone;
+- maximum uncovered gap, gap intervals and per-source/per-venue/per-coin/per-channel coverage are recorded;
+- every proof decision/fill has a coverage witness showing that its required causal input interval did not cross an unresolved gap;
+- venue incidents and intentional market inactivity remain typed separately from collector loss;
+- the coverage receipt is hashed and independently recomputed by final certification.
+
+### Final proof-artifact binding and single certification DAG
+
+The final economic certificate does not trust hash-looking metadata or optional receipts.
+
+Requirements:
+
+- every mandatory referenced artifact exists or is retrievable by immutable id;
+- the final gate recomputes content hashes and checks them against the campaign/freeze receipt;
+- code/tree, resolved config, dataset manifest, rule/fee registry, dependency profile, clock model and execution-model hashes are bound into one final proof manifest;
+- the canonical freeze/promotion receipt is mandatory when that protocol applies; absence is `NO_GO`, never implicit success;
+- `post_freeze=true` is descriptive metadata only; every proof episode is independently timestamp-checked against the freeze and segment windows;
+- OOS/forward/placebo windows are disjoint under the canonical temporal protocol and every episode remains wholly inside one admissible fold/window;
+- there is one promotion/certification DAG. Specialized scoreboards may produce inputs, but only one canonical gate composition decides certificate eligibility;
+- final certification consumes a canonical robustness receipt containing all mandatory statistical/sample/capacity/fill/latency/ledger gates or executes a proven strict superset;
+- a differential contract test feeds the same evidence into lower-level promotion and final certification and proves final certification cannot be more permissive.
+
+### Cross-family identity and opportunity-lineage contract
+
+Anti-reuse needs two related identities rather than one timestamp tuple.
+
+1. **Exact economic-event identity** binds native/canonical fill/order/episode lineage, venue, instrument contract, normalized side/quantity and stable causal event ids.
+2. **Underlying opportunity lineage** binds the source observations/leader episode/market shock that generated the candidate so that relabelling the same opportunity across strategy families cannot create fresh proof.
+
+Timestamp/coin/direction remain useful fields but are not the sole authority.
+
+Tests must cover:
+
+- two legitimate independent trades with identical millisecond entry/exit times do not false-collide;
+- the same underlying source episode shifted by harmless timestamp-normalization differences still collides at opportunity-lineage level;
+- venue/instrument differences remain distinct unless an explicit compatibility/equivalence receipt says they are the same economic exposure;
+- one source event reused by two families is detected even when family-native trade ids differ.
+
+### Pair-generic Cross-Venue certification
+
+The existing HL/BIN certified path is treated as one pair adapter, not as the complete Cross-Venue authority.
+
+The generic certificate receives a pair/instrument-compatibility receipt and parameterizes:
+
+- venue A / venue B;
+- exact contracts and payoff equivalence;
+- quote/settle currencies and conversion evidence;
+- contract multipliers/lot/tick/min-notional rules;
+- maker/taker fee rules on all four economic fills;
+- side-specific L2/BBO freshness and capacity;
+- shared-clock/skew evidence;
+- entry/exit VWAP at the tested notional;
+- venue status and funding exposure where holding spans a funding boundary.
+
+Every eligible Hyperliquid/Binance/Bybit/OKX/Gate/Bitget pair can either produce this receipt or return a typed non-certifiable reason. A pair-specific HL/BIN implementation cannot be reported as full-universe certification.
 
 ### Certifying collection provenance contract
 
@@ -12948,22 +13140,22 @@ Requirements:
 
 Until corrected, the current i.i.d. bootstrap helpers and mislabeled StepM routine are **diagnostic/research-only** and cannot satisfy final economic-promotion gates.
 
-### Cloud-only workflow capability contract
+### Current cloud-path isolation and future self-hosted preservation contract
 
-GitHub automation for Alina is cloud-only by construction, not by convention.
+Current autonomous Alina operation through ChatGPT/GitHub remains GitHub-hosted only: it must not wake, commandeer, depend on or route current canonical work through the user's PC.
 
-The active `.github/workflows` directory must contain no workflow capable of reaching, observing, waking or depending on the user's PC and no self-hosted runner path. A dormant `if: false` gate is insufficient long-term protection.
+**Operator scope override — 2026-09-26:** existing self-hosted/PC-oriented workflow assets are deliberately preserved for possible future explicit use. Their presence is **not** a current software defect and this roadmap does **not** require deleting, renaming, disabling further, moving or otherwise modifying them. They are outside the current audit/implementation scope unless the user explicitly reactivates that workstream later.
 
-Requirements:
+The required boundary is therefore capability isolation, not deletion:
 
-- all `runs-on` values are from an explicit GitHub-hosted allowlist;
-- no workflow references user-machine paths, `ALINA_LOCAL_TARGET`, persistent local lab roots or self-hosted runner labels/groups;
-- obsolete PC/self-hosted workflow definitions are removed from the active workflow directory or converted into inert documentation outside executable Actions discovery;
-- repository governance statically scans every workflow for forbidden runner labels, PC paths and local-machine capability markers;
-- future workflow additions that introduce self-hosted/local-machine semantics fail governance before merge/push certification;
-- GitHub-hosted Windows jobs are allowed when needed for deterministic Windows compatibility testing; they are not user-PC execution.
-
-Current disabled PC/self-hosted workflow files therefore remain tracked cleanup debt until removed from the executable workflow surface.
+- the current canonical phase controller, cloud collection relay, analysis pipeline and certification workflows use only an explicit GitHub-hosted runner allowlist;
+- current cloud orchestration never dispatches, calls, depends on, waits for or derives success from the reserved self-hosted workflows;
+- governance classifies workflows/capabilities as `CURRENT_CLOUD_AUTHORITATIVE` versus `RESERVED_FUTURE_SELF_HOSTED`;
+- only the current-cloud authoritative set is required to satisfy the GitHub-hosted runner allowlist;
+- reserved future self-hosted assets may remain in `.github/workflows` unchanged and are excluded from current completion debt;
+- no current-cloud workflow may contain an active dependency on user-machine paths, persistent local lab roots or self-hosted runner labels/groups;
+- a future explicit decision to use self-hosted again must go through its own activation/safety review; it is not implicitly activated by preserving the files;
+- GitHub-hosted Windows jobs remain allowed for deterministic Windows compatibility testing and are distinct from user-PC/self-hosted execution.
 
 ### Executable branch-coverage proof
 
@@ -14452,9 +14644,9 @@ The following numbered items form the normative acceptance catalog. Each item is
 1100. bootstrap lower bounds used for promotion preserve dependence at the relevant episode/time scale and report block/dependence parameters;
 1101. bootstrap Monte Carlo error is quantified and repetition count is sufficient relative to the promotion threshold; small effective samples fail closed;
 1102. current iid SPA/lower-bound helpers and mislabeled stepm routine are research-only until dependence-aware regression tests validate the claimed methods;
-1103. active GitHub workflow files contain no self-hosted runner labels/groups, user-PC target paths, local persistent lab roots or capability to reach/wake the user's PC;
-1104. an if:false guard is not considered permanent removal of PC/self-hosted capability debt; obsolete PC workflows are removed from executable .github/workflows discovery or converted to inert documentation;
-1105. repository governance scans all workflows against an explicit GitHub-hosted runner allowlist and forbidden PC/local capability markers;
+1103. the CURRENT_CLOUD_AUTHORITATIVE workflow set uses only GitHub-hosted runners and has no dependency/call path capable of reaching or waking the user's PC;
+1104. RESERVED_FUTURE_SELF_HOSTED workflows/assets are intentionally preserved in place, are not current completion debt, and are neither deleted nor modified unless the user explicitly reopens that future workstream;
+1105. repository governance distinguishes CURRENT_CLOUD_AUTHORITATIVE from RESERVED_FUTURE_SELF_HOSTED workflows and enforces the GitHub-hosted allowlist/no-PC-dependency rule on the current authoritative cloud set without treating the reserved set as a defect;
 1106. GitHub-hosted Windows runners remain allowed for Windows compatibility tests and are explicitly distinguished from user-PC/self-hosted execution;
 1107. branch coverage is measured with branch instrumentation enabled and a report lacking branch metrics fails certification;
 1108. the coverage aggregate requires zero missing branches as well as zero missing lines and validates branch-count fields rather than line percent alone;
@@ -14466,7 +14658,7 @@ The following numbered items form the normative acceptance catalog. Each item is
 1114. forward-freeze seals fail closed on malformed journal records and use the canonical full resolved-config digest rather than a short truncated proof identifier;
 1115. proof-critical persistence has an explicit writer-concurrency/fencing policy and concurrent writers cannot race or overwrite acknowledged state silently;
 1116. a logical checkpoint helper without durable storage cannot be cited as crash-durability evidence;
-1117. all current 2026-09-26 continuation-audit findings remain implementation blockers until the corresponding deterministic regression/fault/statistical/governance test proves closure.
+1117. all blocker-classified 2026-09-26 continuation-audit findings remain implementation blockers until the corresponding deterministic regression/fault/statistical/governance test proves closure; weakness-list item 18 is an explicit preservation note, not a blocker.
 1118. authoritative risk settings are loaded from the resolved project/environment configuration and a configured risk value cannot be silently ignored in favor of class defaults;
 1119. malformed proof-critical numeric/boolean/environment configuration fails validation instead of falling back to a default value;
 1120. current-scope canonical startup accepts only READ_ONLY/PAPER execution environments and rejects TESTNET/MAINNET or execution-enable flags before runtime initialization;
@@ -14530,6 +14722,38 @@ The following numbered items form the normative acceptance catalog. Each item is
 1178. disabled/research-only strategy modules cannot restart/supervise canonical collectors, write canonical decision/firehose state, or activate adjacent economic modules as direct-call side effects;
 1179. every canonical economic/orchestration write boundary revalidates active strategy scope so direct invocation of historical Carry/funding code cannot bypass quarantine;
 1180. all weaknesses 67-71 from the 2026-09-26 continuation audit remain implementation blockers until deterministic safety/restart/import/scope regression tests prove closure.
+1181. Copy-Vault leader-quality admission is fail-closed: zero qualified leaders yields an empty/NO_TRADE state and never restores the unfiltered leader population;
+1182. any leader-quality computation/import/storage exception yields a typed blocking reason and no new leader-dependent PaperIntent or live-priority watch admission;
+1183. every mandatory gate declared by the canonical risk/admission pipeline is mechanically proven to participate in the authoritative allow/reject reduction, while diagnostic-only gates are explicitly typed as non-authoritative;
+1184. current-scope testnet/mainnet capability gates cannot be decorative telemetry and block before any canonical PaperIntent/execution-capability transition;
+1185. proof-relevant replay ingestion reports source-row count, parsed count, rejected/quarantined count, rejection reasons and affected intervals rather than silently continuing past malformed rows;
+1186. deleting or corrupting a required replay row cannot improve replay quality/grade, and deterministic fixtures prove the grade becomes contaminated/gapped/non-certifiable as appropriate;
+1187. synthetic/self-test fixtures can satisfy only mechanism SELF_TEST gates and cannot satisfy current-run data-quality, recovery, safety, capability or economic-certification gates;
+1188. no mandatory current-run release/certification gate is hard-coded OK; every positive state is derived from evidence for the exact code/config/run being assessed;
+1189. READY/CERTIFIED requires every mandatory gate to be OK; BLOCKED, UNKNOWN, MISSING, INSUFFICIENT and UNMEASURABLE cannot be collapsed into success merely because hard_failed is false;
+1190. generated closeout/report prose is derived from machine-verifiable same-run receipts and never states no-testnet/no-orders/no-real-execution or another safety fact more strongly than the underlying evidence;
+1191. every certifying run records an explicit dependency-profile id and exact direct+transitive package/platform hashes, and results produced under different profiles are not silently pooled;
+1192. default/CI/portable dependency manifests are either constraint-consistent with their declared profile or carry a tested parity boundary; known version divergence such as the current WebSocket-library major-version split is visible in proof manifests;
+1193. one versioned canonical fee registry owns maker/taker economics for every certifying active venue/market/tier, and competing legacy fee constants/config files cannot independently affect proof PnL;
+1194. a missing, conflicted, expired or unsupported fee for an active certifying venue is UNMEASURABLE/NON_CERTIFIABLE rather than guessed;
+1195. +4 USD/day certification requires at least the canonical minimum number of complete post-freeze UTC proof days and cannot pass from one positive 24-hour window alone;
+1196. the daily proof calendar enumerates every complete expected UTC day in the forward window, including a complete zero-trade day with explicit zero PnL;
+1197. under the current per-day objective, every required complete proof day individually satisfies the frozen +4 USD net threshold; an above-target day cannot compensate a below-target complete day;
+1198. a duration-normalized average net/day remains a useful metric but cannot substitute for the complete-day acceptance rule unless a future preregistered objective explicitly changes that rule;
+1199. proof coverage records aggregate ratio plus maximum gap and exact gap intervals with per-source/per-venue/per-coin/per-channel completeness;
+1200. every proof decision/fill has a coverage witness for its required causal interval and an unresolved gap intersecting that interval quarantines the episode;
+1201. final certification independently recomputes and hash-binds the coverage receipt rather than trusting only coverage_verified=true or a scalar ratio;
+1202. final provenance verification resolves mandatory referenced artifacts and recomputes their content hashes; a syntactically valid 64-character fingerprint without matching retrievable evidence cannot certify;
+1203. the canonical vNext/freeze/promotion receipt is mandatory when its protocol applies, and a missing vnext_promotion-equivalent artifact is NO_GO rather than implicit success;
+1204. final certification and scoreboard/promotion logic form one canonical DAG: specialized gates may feed it but no parallel certificate path can omit mandatory robustness gates;
+1205. a deterministic differential test proves final certification can never return CERTIFIED for evidence that the canonical promotion/robustness gate classifies KILL or MORE_DATA;
+1206. post-freeze status is proven per economic episode from causal timestamps and frozen window boundaries; a post_freeze Boolean alone is never sufficient evidence;
+1207. cross-family proof identity uses stable native/canonical event lineage plus venue/instrument/exposure identity, and a separate opportunity-lineage identity detects reuse of the same underlying source episode across families;
+1208. identity regression tests cover both false collision (independent same-ms trades) and false non-collision (same source episode with small timestamp-normalization differences);
+1209. certified Cross-Venue execution is pair-generic across every eligible supported venue intersection and consumes an explicit instrument-compatibility receipt before economics;
+1210. each pair-generic Cross-Venue proof binds point-in-time fees, contract multiplier/tick/lot/min-notional, quote/settle conversion, L2/BBO capacity, clock/skew, venue status and funding exposure where applicable;
+1211. the current HL/BIN certified implementation is treated as one pair-specific adapter/proof and cannot by itself satisfy full-universe Cross-Venue certification;
+1212. all blocker-classified weaknesses 72-87 from the 2026-09-26 continuation audit remain implementation blockers until deterministic regression/differential/fault tests prove closure.
 
 ## Non-goals
 
