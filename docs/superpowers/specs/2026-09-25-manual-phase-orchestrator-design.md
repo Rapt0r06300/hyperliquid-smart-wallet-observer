@@ -12880,11 +12880,46 @@ The following findings extend the verified weakness inventory. They were found b
 144. **The multiple-testing noise gate can be silently skipped or inverted by invalid sigma.** `verdict_robustesse` runs the noise-threshold check only when `sigma_null` is truthy, so 0.0 omits the gate; a negative sigma is accepted by `seuil_bruit_multiple_testing` and produces a negative noise floor. Neither is valid certifying evidence.
 145. **Copy-Vault proof economics are not capital/margin-budget constrained.** The canonical starting paper equity is 100 USD, while `copy_vault_protocol.NOTIONAL_USD` is 150 USD and `MAX_OPEN_POSITIONS` is 6. `replay_metaorders` limits concurrent position count but does not maintain collateral, leverage, margin or aggregate gross-exposure state. The summary then reports ROI against 100 USD. The 150-USD diagnostic notional may remain, but certification must prove that every concurrent portfolio state is financeable under an explicit paper leverage/margin policy instead of assuming up to 900 USD gross exposure is available for free.
 146. **Bybit universe discovery can include contracts that are not yet continuously tradable.** `parse_bybit_linear_instruments` accepts `PendingOpen` alongside `Trading`, while current Bybit order-book documentation notes that pre-launch contracts have no feed until ContinuousTrading. Discovery may therefore schedule a symbol with no executable market-data stream and misclassify the resulting absence as collector failure/coverage debt unless lifecycle state is preserved.
+147. **Several required historical-suite commands still expose only process success, not proof success.** Beyond the already identified Market-Truth and Lead-Lag cases, `ops/pnl_improvement_lab.py::main` returns 0 regardless of its temporal-validation verdict, while CLI commands such as `closed-ledger-replay`, `walk-forward-profit-validation` and `anti-overfit-audit` normally exit successfully after printing diagnostics. Fixing only SKIPPED handling in the parent orchestrator is insufficient: each required stage needs a typed artifact verdict that the suite verifies.
+148. **Canonical non-atomic Cross-Venue snapshots are not structurally bound to the venue of the leg they price.** `CrossVenueLeg` carries a venue, but `CausalMarketSnapshot` / `ExecutionTruth` carry only a free-form `source` string. `_validate_scenario` checks coin and timing, not `leg.venue == snapshot.venue`; canonical execution likewise checks only coin. A same-coin book from the wrong exchange can therefore satisfy the type contract and price the wrong leg.
+149. **Canonical non-atomic Cross-Venue reuses one Hyperliquid-default execution-cost config for every venue leg.** `execute_non_atomic_cross_venue` builds one `ExecModelConfig` and passes it to leg 1, leg 2 and residual unwind across all scenarios. `ExecModelConfig` explicitly defaults to Hyperliquid maker/taker fees, and `simulate_execution` consumes those fields directly. Without a per-leg venue fee/cost binding, a Binance/Bybit/OKX/Gate/Bitget leg can be charged Hyperliquid economics.
+150. **Canonical `ExecutionTruth` treats future market data as fresh.** `ExecutionTruth.age_ms` returns `max(0, decision_ts_ms - received_ts_ms)`; a snapshot whose receive time is after the decision therefore gets age 0 and passes `is_fresh`. The native-store version of this bug is already tracked separately; the canonical paper-execution truth path needs the same explicit future-data rejection.
+151. **The legacy Cross-Venue hedge state machine can declare HEDGED despite causal or conservation violations.** `arbitrage/cross_venue_state_machine.py::simuler_hedge` turns `ts_leg2 < ts_leg1` into `hedge_latency_ms=None` without rejecting the hedge, truncates an over-hedge via `min(fill1, hedge)`, and compares USD notionals rather than matched base/contract quantity. Its tests explicitly accept negative-time latency as merely “non measured”. Until repaired, this helper cannot be a certifying authority.
+152. **The same legacy Cross-Venue unwind closes a dollar amount rather than the exact residual quantity.** `simuler_unwind` asks the exit book to consume the original USD notional, then computes PnL using `qty = original_notional / entry_price`. When price moves, the USD amount buys/sells a different quantity than the one actually open, while exit fees are also based on the original notional rather than the actual exit fill notional. The result can misstate both residual exposure and PnL.
+153. **Copy-Vault frozen evaluation can silently weaken its causal-data contract if the frozen payload is incomplete or altered.** The canonical protocol signature currently declares `causal_observation_required_all_segments=True`, but `evaluate_frozen` derives `causal_all_segments` from a bare caller mapping and does not first prove that mapping matches the frozen protocol signature. Missing/false turns the OOS replay and OOS placebo causal requirement off, while only the `forward` segment is forced causal. An intact current freeze is safe by convention; the evaluation boundary itself is not fail-closed against an incomplete/stale freeze.
+154. **Copy-Vault proof-window boundaries have an implicit wall-clock input when the caller omits `evaluated_at_ms`.** `evaluate_frozen` falls back to `time.time()` to choose completed UTC proof days. That is operationally convenient, but a proof replay is not bit-reproducible unless the resolved evaluation timestamp is persisted, hash-bound and reused on rerun.
 
 
 
 
 
+
+
+### Venue-bound Cross-Venue execution and hedge-conservation contract
+
+Every Cross-Venue fill, hedge and unwind is bound to the exact venue/instrument/cost authority that produced it.
+
+- canonical market truth has typed `venue_id`, instrument id and contract metadata; a free-form source string is telemetry, not venue identity;
+- each Cross-Venue leg rejects a snapshot whose venue/instrument identity does not match that leg, even when coin/symbol text matches;
+- each leg resolves maker/taker fees, rebates, tick/lot/min-notional, funding and other venue-specific execution rules from the point-in-time canonical registry independently;
+- one shared generic `ExecModelConfig` may carry non-economic mechanics, but venue economics are injected/bound per leg and per fill;
+- future receive/event timestamps relative to a decision are causal violations, never age zero;
+- hedge conservation is measured in base/contract-equivalent quantity/delta after multipliers and rounding, not by equal USD notionals;
+- leg-2 quantity above the required hedge is explicit over-hedge exposure and cannot disappear through `min()`;
+- leg-2 event time earlier than leg-1 is a causal rejection, not merely unmeasured latency;
+- residual unwind targets the exact residual quantity, records actual exit notional and charges fees on actual fill economics;
+- legacy hedge helpers that violate these invariants are DIAGNOSTIC_ONLY/quarantined and cannot feed canonical PnL, promotion or certification until differential tests prove parity with the canonical non-atomic executor.
+
+### Frozen-proof payload integrity contract
+
+A frozen strategy-evaluation payload is accepted only as an immutable, schema-complete receipt.
+
+- Copy-Vault evaluation validates protocol/schema/signature/hash before reading individual frozen fields;
+- missing or altered mandatory safety/causality fields fail closed rather than falling back to weaker defaults;
+- `causal_observation_required_all_segments` is part of the signed/hashed frozen protocol contract and cannot be downgraded by omission;
+- every post-freeze OOS/forward/placebo segment uses the same declared causal-observation policy required by the freeze;
+- evaluation wall time is an explicit resolved input stored in the proof manifest; rerunning the same proof receipt uses the same `evaluated_at_ms` rather than a fresh clock read;
+- a “re-evaluate as of now” operation produces a new proof-window receipt/version rather than mutating the identity of the old one.
 
 ### Canonical equity, capital-budget and exposure contract
 
@@ -15116,6 +15151,19 @@ The following numbered items form the normative acceptance catalog. Each item is
 1312. Copy-Vault ROI/daily-PnL proof binds gross exposure, locked margin, free collateral and effective leverage to the same event set used for net PnL;
 1313. Bybit discovery separates Trading/ContinuousTrading instruments from pending/pre-launch lifecycle states and non-open symbols cannot count as expected replay coverage;
 1314. all blocker-classified weaknesses 133-146 from the 2026-09-26 deep reliability continuation audit remain implementation blockers until deterministic accounting/exposure/statistical/venue-state regression tests prove closure.
+1315. every required historical-analysis stage publishes a typed semantic artifact verdict and complete-suite success is computed from those verdicts rather than subprocess exit code alone;
+1316. pnl_improvement_lab, closed-ledger, walk-forward and anti-overfit stages cannot satisfy a required proof stage when their semantic evidence is insufficient/rejected even if the command exited 0;
+1317. canonical Cross-Venue snapshots contain typed venue/instrument identity and deterministic substitution tests prove a same-coin wrong-venue snapshot is rejected;
+1318. each canonical Cross-Venue leg resolves and hash-binds its own venue-specific fee/cost rule; Hyperliquid defaults cannot price another venue by inheritance;
+1319. canonical ExecutionTruth rejects received_ts_ms/exchange_ts_ms that are causally after the decision boundary rather than clamping age to zero;
+1320. legacy cross_venue_state_machine cannot certify until negative leg ordering, over-fill/over-hedge and quantity-conservation invariants fail closed;
+1321. Cross-Venue hedge matching is base/contract-equivalent quantity aware and any over-hedge becomes explicit opposite residual exposure;
+1322. residual unwind closes the exact residual quantity and reconciles actual exit notional, fill price, fee basis and realized PnL;
+1323. Copy-Vault evaluate_frozen verifies the immutable protocol/freeze signature before accepting causal-observation, horizon, proof-policy or walk-forward fields;
+1324. missing/false causal_observation_required_all_segments in a current canonical Copy-Vault freeze is FREEZE_CONTRACT_INVALID rather than an instruction to weaken OOS causality;
+1325. Copy-Vault OOS placebo and proof segments consume the same frozen causal-evidence policy as the candidate segment they compare;
+1326. evaluated_at_ms is persisted/hash-bound for proof-window construction and an omitted wall-clock value cannot make a previous certification replay non-deterministic;
+1327. all blocker-classified weaknesses 147-154 from the 2026-09-26 execution/freeze continuation audit remain implementation blockers until deterministic venue-substitution, quantity-conservation, semantic-status and frozen-payload tests prove closure.
 
 ## Non-goals
 
