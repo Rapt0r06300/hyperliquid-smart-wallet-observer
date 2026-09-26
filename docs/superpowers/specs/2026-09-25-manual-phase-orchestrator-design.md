@@ -13087,6 +13087,14 @@ The following findings extend the verified weakness inventory. They were found b
 335. **Same-direction intent aggregation is non-conservative on malformed input.** `same_direction_intent_aggregation.agreger` silently drops rows with missing venue/coin/non-numeric amount and accepts float NaN/Infinity because it performs no finiteness check. The output has no conservation receipt proving every input intent was either included or explicitly rejected.
 336. **Capital-priority allocation does not validate the envelope or strict demand domain.** `capital_priority.allouer_avec_priorite_strict` permits negative/NaN/Infinity strict demand or envelope. A negative strict demand produces a negative strict allocation and increases exploratory remainder above the configured envelope; non-finite values can contaminate proportional allocations.
 337. **The global warmup barrier accepts invalid requirements/counters.** `BarriereWarmup.exiger` accepts zero/negative minima, making a declared requirement immediately satisfied, while `observer(..., n<0)` can move counters backward. Warmup authority needs strict non-negative monotone counters and positive minima.
+338. **The 100-USD envelope checker can be bypassed by negative/non-finite budgets.** `execution_core/enveloppe_capital_unique.verifier_enveloppe` simply sums `float(v)`. Negative cohort budgets can offset positive exposure, and NaN makes `total > master` false so `respecte=True` can be returned with an invalid total. The master/envelope itself is not domain-validated either.
+339. **Canonical OrderCandidate numeric validation is bool/NaN/Infinity-permissive.** `execution_core/canonical_order_candidate.creer_candidat` uses `isinstance(x,(int,float))` and sign comparisons. Python booleans therefore pass as numbers, while NaN/Infinity can evade `<=0` and budget comparisons, yielding `valide=True` or non-finite notional.
+340. **Cross-module self-trade prevention is detection-only and loses malformed intents.** `cross_module_self_trade_prevention.detecter` silently skips missing/non-numeric venue/coin/amount rows and accepts non-finite numeric amounts. Despite the module contract saying intents are detected and netted before send, it returns only conflicts/delta metadata and no canonical blocked/netted intent set. Treating `self_trade=False` as enforcement can therefore be a false assurance.
+341. **Cross-Venue fast-path pairing is not episode-scoped.** `FastPathJambes` stores only a `frozenset(jambe_a,jambe_b)`; it carries no spread/episode/run identity. Reusing the same leg labels in a later independent episode automatically inherits fast-path authorization, and pairing a leg with itself produces a one-element set that is also considered paired.
+342. **Fast-path latency parameters accept invalid negative/non-finite values.** Constructor values are plain `float()` and are returned as timing evidence without finiteness/non-negativity checks. A negative/NaN latency can therefore enter coordination diagnostics/assumptions as if measured.
+343. **The per-module loss-burst lock fails open on invalid time/config domains.** `VerrouPertes` accepts zero/negative thresholds/windows/lock durations and non-finite timestamps. In particular, `verrouille(..., now_ms=NaN)` makes the ordinary `now_ms < fin` comparison false and reports the lock inactive; future-dated losses are also retained as if inside the current window.
+344. **The generic safe-read retry scheduler accepts invalid retry/backoff domains.** `delais_backoff` and `peut_retry` do not validate non-negative retry counts/attempt index, positive finite base/cap delays, or a bounded finite jitter fraction. They can produce negative/non-finite delays or authorize a retry from an invalid negative attempt counter, weakening deterministic operational behavior.
+
 
 
 
@@ -13452,6 +13460,21 @@ Requirements:
 - intent aggregation conserves input cardinality with typed included/rejected reasons and rejects non-finite signed notionals;
 - capital allocation requires finite non-negative demands and positive finite envelope, with `0 <= sum(allocation) <= envelope` and no lane receiving negative capital;
 - warmup minima are positive integers and observed counts are monotone non-negative; malformed counters/requirements cannot make a strategy ready.
+
+### Execution-helper domain, conservation and episode-isolation contract
+
+Any execution helper that can influence canonical ordering, capital, self-trade prevention, leg coordination, lock state or retry behavior must be domain-valid and conservation-auditable before use.
+
+Requirements:
+
+- master capital envelope and every cohort/lane demand are finite and non-negative; negative demand can never offset positive exposure;
+- allocation/envelope arithmetic rejects booleans, NaN and Infinity and proves total allocated/engaged capital is bounded by the canonical 100-USD master;
+- OrderCandidate numeric fields are strict finite real values, not booleans, with positive quantity/price, finite non-negative budget and finite notional before acceptance;
+- self-trade prevention accounts for every source intent and emits an authoritative blocked/netted set or is explicitly diagnostic-only; malformed/non-finite intents cannot disappear and make `self_trade=false`;
+- cross-venue leg fast-path authority binds episode/run/spread identity plus distinct leg ids; pair authorization never leaks across episodes;
+- fast-path/bus latency assumptions are finite and non-negative;
+- loss-burst thresholds/windows/durations/timestamps are finite/domain-valid, use a causal clock, and invalid time cannot deactivate a lock;
+- retry/backoff helpers reject invalid attempts/counts and require finite non-negative/positive timing domains before scheduling.
 
 ### Canonical daily-proof authority for memory and autonomous stop decisions
 
@@ -15921,6 +15944,16 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1581. capital-priority allocation enforces finite non-negative demands, finite positive envelope and allocation conservation so exploratory remainder never exceeds the envelope after malformed strict demand;
 1582. warmup requirements require positive integer minima and counters can only advance monotonically by non-negative increments;
 1583. all blocker-classified weaknesses 329-337 remain implementation blockers, or are explicitly quarantined diagnostic-only helpers where noted, until strict intent-identity, fill-authority, numeric-domain, allocation-conservation and warmup tests prove closure.
+1584. the canonical 100-USD envelope rejects negative/NaN/±Infinity master or cohort budgets and cannot report respecte=true when total engagement is invalid;
+1585. envelope regression fixtures prove a negative cohort cannot offset positive exposure and sum(positive authoritative allocations) never exceeds the finite 100-USD master;
+1586. canonical OrderCandidate rejects booleans, NaN/±Infinity, non-positive price/quantity, negative/non-finite budget and non-finite notional before valide=true;
+1587. cross-module self-trade prevention conserves every input intent with included/rejected reason and either emits the canonical netted/blocked intent set or is marked diagnostic-only;
+1588. self-trade detection rejects non-finite signed amounts and cannot return self_trade=false merely because malformed opposing intent rows were skipped;
+1589. Cross-Venue fast-path pairing binds an immutable episode/run/spread id and two distinct leg ids, with deterministic tests proving pair authorization does not leak to a later episode reusing the same labels;
+1590. fast-path/bus latency parameters reject negative/NaN/±Infinity and cannot appear as measured timing evidence outside their valid domain;
+1591. loss-burst lock configuration requires positive integer threshold, finite positive window/duration and finite causal timestamps; NaN/future-invalid time cannot disable an active lock;
+1592. safe-read retry/backoff rejects negative attempt/retry counts, non-finite/non-positive timing bases/caps and invalid jitter domains before emitting a retry schedule;
+1593. all blocker-classified weaknesses 338-344 remain implementation blockers, or explicitly quarantined diagnostic-only debt where noted, until envelope, candidate-domain, STP-conservation, episode-isolation, lock-time and retry-domain tests prove closure.
 
 ## Non-goals
 
