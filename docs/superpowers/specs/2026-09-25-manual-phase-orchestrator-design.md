@@ -12789,6 +12789,12 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 64. **Coverage instrumentation alters concurrency semantics.** The coverage plugin replaces thread/process executors with inline deterministic executors and blocks network/process actions. This protects CI and improves determinism but cannot prove real queueing, race, locking, shutdown or cross-task ordering behavior.
 65. **A green coverage number can therefore overstate assurance.** Even genuine 100% branch coverage does not prove that wrong signs, wrong fees, incorrect rejection reasons, bad state transitions or broken exactly-once behavior would be detected.
 66. **Critical behavior currently lacks a repository-wide semantic-strength gate.** Property/invariant, differential, metamorphic and mutation-based tests exist in places but there is no unified requirement that economically/safety-critical logic demonstrate fault-detection strength in addition to branch execution.
+67. **Missing session-risk state currently fails open.** `risk/session_gate.py::evaluer_session(None)` returns `bloque=False` with reason `ETAT_SESSION_NON_FOURNI`. The documentation says missing state is not healthy, but the returned boolean still permits continuation unless another caller adds a separate check.
+68. **Critical risk/halt state is process-local and can reset on restart.** `risk_gate_runtime._STATE`, `session_gate._ETAT_COURANT` and the simple `KillSwitch(active=False)` default live in memory. A process restart can therefore erase loss-streak/drawdown/halt context unless the canonical ledger reconstructs it before any new intent.
+69. **The canonical CLI eagerly imports non-current capability surfaces.** `hl_observer.cli` imports legacy `hyper_smart_observer` modules plus testnet builders/executors/commands at module import time. Current testnet Hyperliquid submission is locked, but the default CLI dependency/capability graph is broader than the current paper/read-only scope.
+70. **The testnet architecture is already execution-shaped.** `TestnetExecutor` calls an adapter `place_testnet_order()` after guard approval and `build_testnet_runtime_settings()` can enable testnet flags in-memory. The current HyperliquidTestnetAdapter rejects all external submissions and no signer transport was found, but plugging a signer-capable adapter into the existing interface must not be enough to make external execution reachable.
+71. **Disabled Carry code can still create operational side effects when directly invoked.** Although `strategies.active_scope` correctly marks funding carry DISABLED, `funding/carry_paper_runtime.py` can write decision/mark firehoses, maintain separate paper positions behind flags, invoke collector supervision/restart logic, and run adjacent paper-arbitrage logic. A disabled strategy must be quarantined from canonical economic and orchestration side effects at the write/action boundary, not only at the normal PaperIntent boundary.
+
 
 
 
@@ -13134,6 +13140,10 @@ Rules:
 - risk timing uses injected event/replay time and the actual measurement cadence;
 - a setting named correlation/VaR/CVaR/drawdown/etc. cannot be considered active unless its implemented statistic and input evidence match that claim;
 - risk behavior is parity-tested across replay and forward paper from identical canonical account/event state.
+- missing canonical risk/session state is a hard `RISK_STATE_UNAVAILABLE` block for new exposure; no function may return an economically permissive verdict while merely attaching a warning reason;
+- canonical halt/kill state is reconstructed from durable ledger/checkpoint evidence before any post-restart intent is evaluated;
+- a halt remains latched across restart until an explicit, audited reset condition is satisfied; process initialization cannot clear it implicitly;
+- process-local risk globals may cache derived state for performance but are never recovery authority.
 
 ### Disabled-strategy quarantine
 
@@ -13146,6 +13156,22 @@ For Carry and any other disabled strategy:
 - existing modules may remain as historical/research fixtures and may be executed only in explicitly labeled non-certifying research contexts;
 - historical constants, dated APRs, benchmark rates or prior verdicts are never treated as current market state;
 - any future resurrection requires the kill-resurrection/preregistration protocol already defined in this spec and a deliberate scope update.
+- disabled/research-only strategy modules cannot restart/supervise canonical collectors, write to canonical decision/firehose streams, mutate canonical runtime state, or activate adjacent economic modules as a side effect of direct invocation;
+- every canonical write/action boundary re-checks strategy scope so calling a historical module directly cannot bypass quarantine.
+
+### Current-scope CLI capability firewall
+
+The default `hl-observer` import/command graph for the current project scope contains only read-only collection, analysis, replay and paper-simulation capabilities.
+
+Legacy economic runtimes and testnet execution-shaped commands are not eagerly imported or registered by the authoritative CLI. Historical/test-only modules may remain behind an explicit non-authoritative boundary, but importing/starting the canonical CLI must not make an external order adapter reachable.
+
+Requirements:
+
+- canonical CLI startup/import performs no signer/private-key/seed/execution-credential loading;
+- no testnet/mainnet order builder, executor or mutating exchange adapter is registered in the current command graph;
+- current locked testnet adapters remain fixtures/history and cannot be selected by configuration from the authoritative CLI;
+- an adapter implementing real/testnet order submission is insufficient by itself to create capability: a future user-authorized scope change must modify the explicit capability allowlist, safety contract and tests;
+- static dependency/call-graph tests fail if canonical current-scope commands import or resolve a forbidden legacy/testnet execution capability.
 
 ### CCXT discovery and instrument-compatibility contract
 
@@ -14493,6 +14519,17 @@ The following numbered items form the normative acceptance catalog. Each item is
 1167. targeted mutation/fault-seeding is required for the highest-risk economic/safety modules and surviving non-equivalent property-relevant mutants block certification;
 1168. mutation tests explicitly catch wrong fee signs, allow/reject inversions, UNKNOWN-to-zero fallbacks, dedupe removal, stale/lookahead bypass, reconciliation bypass and approved-size bypass;
 1169. coverage, semantic fault-detection strength, venue parity, data provenance and economic OOS/forward proof are independent gates and none may be used as a substitute for another.
+1170. missing canonical session/risk state blocks new economic exposure and cannot return an economically permissive verdict with only a warning reason;
+1171. regression tests prove `evaluer_session(None)`-equivalent missing-state paths fail closed before any canonical PaperIntent can materialize;
+1172. risk/kill/halt state is durably reconstructible from canonical ledger/checkpoint evidence before post-restart actions are admitted;
+1173. a latched halt survives process restart and can clear only through an explicit audited reset rule, never through default object/global initialization;
+1174. process-local risk globals/caches are non-authoritative and divergence from reconstructed canonical risk state blocks action;
+1175. the canonical hl-observer CLI does not eagerly import/register legacy economic runtimes or testnet order-builder/executor command surfaces in current paper/read-only scope;
+1176. canonical CLI import/startup cannot load execution credentials or make any external order-submission adapter reachable through configuration alone;
+1177. the current locked Hyperliquid testnet adapter remains non-authoritative fixture/history and adding a signer-capable adapter cannot bypass the explicit current-scope capability allowlist;
+1178. disabled/research-only strategy modules cannot restart/supervise canonical collectors, write canonical decision/firehose state, or activate adjacent economic modules as direct-call side effects;
+1179. every canonical economic/orchestration write boundary revalidates active strategy scope so direct invocation of historical Carry/funding code cannot bypass quarantine;
+1180. all weaknesses 67-71 from the 2026-09-26 continuation audit remain implementation blockers until deterministic safety/restart/import/scope regression tests prove closure.
 
 ## Non-goals
 
