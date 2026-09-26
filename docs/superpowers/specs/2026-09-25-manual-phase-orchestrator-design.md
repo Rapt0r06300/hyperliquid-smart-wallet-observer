@@ -13109,6 +13109,13 @@ The following findings extend the verified weakness inventory. They were found b
 357. **Copy-Vault causal selection does not reject non-finite sizing/audit numerics at ingestion.** `backtesting/copy_vault_causal_selection.py` validates timestamp/direction/coin/vault but converts `taille_usd` and `move_frac` with bare `float(...)` and later uses `max(0.0, value)`. NaN can be silently neutralized while Infinity can propagate into leader-notional/audit features instead of invalidating the event.
 358. **Copy-Vault cost measurement accepts invalid experiment domains before measuring evidence.** `simulation/copy_cost_adapter.py::measure_copy_cost_components` validates observed depth values but does not validate the configured `notional_usd`, `copy_delay_ms`, `horizon_ms`, `threshold` or `freshness_ms` domains. Negative/NaN/Infinity parameters can alter event selection, temporal targets or capacity checks instead of producing typed invalid evidence.
 359. **Copy-Vault executable fee evidence still embeds a local fixed 9-bps round-trip constant.** `simulation/copy_cost_adapter.py` owns `COPY_ROUNDTRIP_TAKER_FEES_BPS = 9.0` rather than consuming the canonical point-in-time fee registry. Even if 9 bps happens to match one current tier, the proof path can become stale or disagree with account/venue fee truth without changing the adapter code.
+360. **Lead-Lag source alignment can fabricate coverage end-time from filesystem mtime.** `backtesting/lead_lag_source_alignment.py` uses file `st_mtime` as the end of coverage for current/untimestamped BBO sources. Copying, touching or restoring an old file can therefore make its apparent coverage overlap a later Hyperliquid market window even when no event exists near that end time.
+361. **The certified Lead-Lag loader still manufactures missing BBO sides from the midpoint.** `backtesting/lead_lag_certified_backtest.py::load_certified_tape` accepts a valid mid and substitutes `bid=mid` or `ask=mid` when that side is absent/invalid. A supposedly certified execution path can therefore create a zero half-spread executable side from incomplete quote evidence.
+362. **The certified Lead-Lag loader claims complete sources despite rejected/uncertifiable rows.** Its metadata sets `complete_sources=True` unconditionally even when `invalid_rows`, `uncertifiable_clock_rows`, duplicates or unsupported rows are non-zero; it also inherits a line iterator that can stop on file read failure. “Certified” source completeness must be derived from conservation evidence, not hard-coded.
+363. **Certified Lead-Lag PROMETTEUR ignores several controls it computes.** The path calculates control-coin results, DSR and PBO, but `winners` only requires positive/stable net and beating the placebo. Control-coin failure, bad/missing DSR or bad/missing PBO do not block `statut=PROMETTEUR`. Worse, missing placebo for an horizon is replaced with `0.0`, so absence of placebo evidence can be treated as if a zero-PnL placebo had been measured.
+364. **Aligned Binance Lead-Lag tape maps every non-BUY side to SELL.** `lead_lag_source_alignment.load_aligned_binance_trade_tape` computes direction with `1.0 if side == "BUY" else -1.0` and does not reject missing/unknown/malformed sides first. Corrupt side evidence can therefore become a bearish shock.
+365. **Lead-Lag aligned-source decoding is not byte-conservative.** `lead_lag_source_alignment._lines` opens text with `errors="ignore"` and silently returns on `OSError`. Invalid bytes or unreadable tails can disappear before JSON/error accounting, so alignment/coverage statistics are based on successfully decoded material rather than the full stored source.
+
 
 
 
@@ -16009,6 +16016,15 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1611. Copy-Vault cost-adapter configuration requires finite positive notional, finite non-negative delay/horizon/freshness domains and a finite threshold with an explicitly declared valid range;
 1612. Copy-Vault fee evidence is resolved from the canonical point-in-time fee registry/account tier and binds its fee-registry hash; the local 9-bps constant cannot certify economics;
 1613. all blocker-classified weaknesses 355-359 remain implementation blockers until cost-coverage, vNext-drift, Copy-Vault numeric-domain and fee-authority regression tests prove closure.
+1614. Lead-Lag source-window bounds are derived from first/last valid event timestamps (or immutable manifest bounds) and never from mutable filesystem mtime for certification;
+1615. touching/copying a BBO file without changing its event content cannot change its certified overlap window;
+1616. certified Lead-Lag quotes require finite positive bid and ask with bid<=ask; a missing side cannot be substituted by mid in proof-facing execution;
+1617. certified Lead-Lag source completeness is false/contaminated when read failure, undecodable bytes, invalid required rows or uncertifiable clock rows intersect the proof scope;
+1618. Lead-Lag PROMETTEUR/PROMOTE requires explicit passing receipts for control cohort, placebo, DSR and PBO under the canonical statistical policy; missing evidence is non-success;
+1619. a missing placebo horizon cannot default to zero PnL and must remain MISSING/UNMEASURABLE;
+1620. aligned Binance trade ingestion accepts only explicit valid BUY/SELL side tokens and rejects/quarantines unknown values before shock construction;
+1621. Lead-Lag aligned-source readers preserve byte/line conservation and surface decode/read failures with affected intervals instead of errors="ignore" or silent source termination;
+1622. all blocker-classified weaknesses 360-365 remain implementation blockers until source-boundary, BBO-completeness, statistical-gate and aligned-tape corruption tests prove closure.
 
 ## Non-goals
 
