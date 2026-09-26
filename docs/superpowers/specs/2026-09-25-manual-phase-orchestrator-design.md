@@ -12214,6 +12214,29 @@ Conversation-level rules:
 - conversational persistence must not increase model quota by spawning additional agents: the single-controller and quota-minimal policies still apply.
 
 
+## Test coverage — 100% branch coverage
+
+The implementation target is **100% branch coverage**, not merely 100% line/statement coverage.
+
+This requirement applies to first-party executable Alina code whose behavior can affect collection, normalization, state transitions, replay, backtest, execution simulation, economic accounting, scoring, orchestration, dataset integrity, safety, or promotion/certification decisions.
+
+Rules:
+
+- branch measurement must be explicitly enabled in the coverage tool (for Python, equivalent to `coverage.py --branch` / `pytest-cov --cov-branch`);
+- the enforced threshold is 100% for the covered first-party scope; a 99.x% result is a failure rather than rounded to 100%;
+- line coverage alone can never satisfy this gate;
+- every reachable decision outcome must be exercised, including true/false paths, exception/error paths, fail-closed paths, boundary conditions, empty/null/missing-data paths, retry/reconnect paths, and state-transition branches;
+- decision-heavy code that affects PnL, admissibility, no-lookahead, costs, fills, timing, liquidation/margin, dataset integrity, or paper/read-only safety has no coverage exemption;
+- `# pragma: no cover`, omit lists, broad exclusions, generated wrappers, defensive `except` blocks, or dead-code declarations may not be used to game the metric;
+- an exclusion is allowed only for genuinely non-executable/declarative/generated/third-party/platform glue that cannot affect Alina decisions, and every exclusion must be narrow, documented, reviewable, and absent from economic/safety-critical logic;
+- unreachable first-party branches should normally be deleted or refactored rather than excluded;
+- branch coverage is measured on the exact candidate tree/commit being validated;
+- tests must assert behavior, not merely execute lines to satisfy the counter;
+- deterministic local execution is preferred when the user explicitly runs Codex locally; cloud CI may re-run the final coverage gate when an independent integration/release gate is useful;
+- a release, certification, or claim that implementation of this specification is complete is blocked while required branch coverage is below 100%.
+
+Coverage is a structural verification gate, not proof of economic correctness. The existing replay, OOS/forward, cost, data-integrity, no-lookahead, and fail-closed acceptance gates remain independently mandatory.
+
 ## Tests and acceptance criteria
 
 The following numbered items form the normative acceptance catalog. Each item is enforced according to Acceptance Architecture V2. They do **not** form one global AND-condition unless their gate metadata explicitly says so:
@@ -13176,6 +13199,11 @@ The following numbered items form the normative acceptance catalog. Each item is
 953. interactive completion maintains a compact completed/in-progress/blocked/remaining ledger and advances to the next feasible unfinished item without requiring redundant confirmation;
 954. repeated conversational/tool failures change method after two materially identical failures and become an explicit checkpointed blocker after a third equivalent failure while independent work continues;
 955. a real interruption leaves a durable continuation checkpoint with verified repository state, completed work, exact remaining work, and next safe action, without claiming unscheduled background execution or spawning extra agents.
+956. required first-party Alina executable code is measured with branch coverage enabled and the enforced threshold is exactly 100%, with no rounding of sub-100 results;
+957. line/statement coverage alone cannot satisfy the coverage gate and every reachable decision outcome, error/fail-closed path, boundary condition and state-transition branch in scope is exercised;
+958. economic-, data-integrity-, timing-, replay-, orchestration-, and paper/read-only-safety-critical branches cannot be excluded from coverage, and coverage exclusions cannot be used to game the metric;
+959. any permitted coverage exclusion is narrow, documented, reviewable, limited to genuinely non-decision first-party/generated/third-party/platform glue, and unreachable first-party logic is preferentially removed or refactored;
+960. completion, release, or certification of implementation against this spec is blocked while required branch coverage is below 100%, while 100% coverage remains separate from economic/OOS/data-quality correctness gates.
 
 ## Non-goals
 
