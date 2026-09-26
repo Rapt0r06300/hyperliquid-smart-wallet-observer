@@ -23,6 +23,25 @@ from publish_data_vault_snapshot import (
     api_json,
 )
 
+REPLAY_UNSAFE_PREFIXES: tuple[str, ...] = (
+    ".git/",
+    "runtime/data/market_ticks/",
+    "runtime/data/hypersmart_simulation_session.sqlite3.corrupted-",
+)
+
+REPLAY_UNSAFE_CONTAINS: tuple[str, ...] = (
+    "/__pycache__/",
+    "/_stale_locks/",
+    "/_stale2/",
+    "tmp_obj_",
+)
+
+REPLAY_UNSAFE_SUFFIXES: tuple[str, ...] = (
+    ".lock",
+    "-wal",
+    "-shm",
+)
+
 PRESETS: dict[str, tuple[str, ...]] = {
     "economic-core": (
         "bbo_",
@@ -80,6 +99,18 @@ PRESETS: dict[str, tuple[str, ...]] = {
 
 class RestoreError(RuntimeError):
     pass
+
+
+def is_replay_unsafe_path(path: str) -> bool:
+    relative = str(path).replace("\\", "/").strip()
+    lowered = relative.casefold()
+    if any(lowered.startswith(prefix.casefold()) for prefix in REPLAY_UNSAFE_PREFIXES):
+        return True
+    if any(token.casefold() in lowered for token in REPLAY_UNSAFE_CONTAINS):
+        return True
+    if any(lowered.endswith(suffix.casefold()) for suffix in REPLAY_UNSAFE_SUFFIXES):
+        return True
+    return False
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -202,6 +233,8 @@ def select_records(
             continue
         relative = str(path).replace("\\", "/")
         lowered = relative.casefold()
+        if is_replay_unsafe_path(relative):
+            continue
         if preset == "all" and not needles and not prefix_values:
             selected[relative] = dict(raw)
             continue
