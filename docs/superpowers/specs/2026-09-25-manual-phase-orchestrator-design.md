@@ -12982,6 +12982,18 @@ The following findings extend the verified weakness inventory. They were found b
 238. **Lead-Lag maker queue consumption is not internally exactly-once.** The queue replay sums every matching public-trade row by price/side/time ordering but does not deduplicate on stable native trade/event identity before accumulating quantity. Duplicate delivery of one public trade can therefore consume the same queue volume twice and fill a paper maker order too early.
 239. **Lead-Lag executable summaries can stay LIQUIDATABLE after detecting duplicate economic episodes.** `summarize_executable_episodes` computes `duplicate_trade_ids` but still sums all duplicate rows into gross/net/fees and defines `LIQUIDATABLE_NET` from only `bool(rows) and reconciliation_ok`. Duplicate proof rows can inflate PnL while arithmetic reconciliation remains true.
 240. **Lead-Lag frozen-maker temporal proof flags are hard-coded rather than receipt-derived.** `evaluate_frozen_maker` writes OOS `no_lookahead=True`, `purged=True` and forward `causal_live_only=True` directly into `temporal_evidence`. Those properties need to be proven from exact segment/purge/event-time receipts; they cannot become true merely because the adapter constructs the field.
+241. **PublicFetch cache hits rewrite evidence time to the lookup time.** `collection/public_fetcher.py::MemoryFetchCache.get` returns a cached body with `fetched_at_ms=now_ms` instead of preserving the original fetch/observation timestamp. A stale cached response can therefore appear freshly fetched to downstream freshness/provenance consumers.
+242. **PublicFetch cache identity is URL-only and can cross-contaminate logical sources/contexts.** `MemoryFetchCache` indexes entries only by URL. A later request using the same URL but a different `source_id`, `RunContext` or provenance contract can receive the first source's cached `source_id`/warnings/body without a new fetch or correctly attributed provenance record.
+243. **The generic backoff can violate a server's Retry-After instruction.** `compute_backoff_delay` applies `min(retry_after_seconds, policy.max_seconds)` with a default 30-second cap. If an upstream returns `Retry-After: 60/120/...`, Alina declares `retry_after_respected=True` while scheduling an earlier retry than requested.
+244. **REST/WS position reconciliation fails open on non-finite sizes.** `normalization/reconcile.py` computes `diff = abs(float(rest.signed_size) - float(ws.signed_size))` without finiteness checks. With NaN, `diff > max_abs_size_diff` is false and `max_diff` can remain benign, allowing `RECONCILIATION_OK` for invalid position state.
+245. **Hyperliquid funding history is marked replay-ready without proving full-window coverage.** `collection/hyperliquid_funding_history.py` issues one `fundingHistory` request for an arbitrary requested window, silently drops invalid rows, then marks every surviving envelope `authoritative_history=True` and `data_gate_ready=True`. It emits no pagination/coverage/truncation/rejected-row receipt proving that the requested interval is complete.
+246. **Bybit funding history truncates at one 200-row page.** The official endpoint caps `limit` at 200. `fetch_bybit_funding_settlements` makes exactly one request with `limit=200`, does not walk older pages, and still returns replay-ready envelopes for arbitrary `start_ms/end_ms` windows.
+247. **OKX funding history relies on an unenforced one-page assumption.** `fetch_okx_funding_settlements` makes one request with `limit=400` and comments that the run window is 'far below' the public page limit, but the function accepts arbitrary windows and never asserts that bound or paginate via `before/after`. A longer caller window can be silently incomplete.
+248. **Funding-history duplicate conflicts are silently last-wins by timestamp.** Hyperliquid, Binance, Bybit and OKX funding collectors build `by_time`/`rows_by_time` dictionaries keyed only by settlement timestamp. If duplicate rows for the same instrument/time disagree in rate/premium/realized-rate/source content, one silently overwrites another instead of producing a provenance conflict.
+249. **Funding-history data-gate readiness is a row-parser assertion, not a coverage receipt.** The current funding collectors can set `data_gate_ready=True` on individually valid rows even when page limits, parse rejections, API gaps or incomplete requested-window coverage remain unresolved. Row validity and interval completeness need separate authorities.
+250. **The legacy Hyperliquid funding parser accepts non-finite economics.** `collection/funding_backfill.py::parser_funding` converts `fundingRate`/`premium` with plain `float()` and has no `isfinite`/domain check. NaN/Infinity can enter `PointFunding`; `funding_cumule_bps` can then become non-finite while still returning a numeric field.
+251. **Candle backfill validates prices incompletely and does not validate volume finiteness/sign.** `collection/candle_backfill.py::parser_bougies` rejects non-positive OHLC and `high < low`, but accepts negative/NaN/Infinity volume and does not require `low <= open/close <= high`. Structurally impossible candles can survive into liquidity/return research.
+252. **Candle deduplication hides conflicting evidence at the same timestamp.** `candle_backfill.dedupliquer` stores one `Bougie` per `(coin,t_ms)` with unconditional last-write-wins. Two source windows returning different OHLCV for the same candle do not emit a conflict/revision receipt, so input iteration order can choose research truth.
 
 
 
@@ -13292,6 +13304,24 @@ Requirements:
 - pair-sync receipts bind canonical instrument, ordered venue pair, run id, exact component dataset ids/hashes and overlap window; a receipt from another pair/run/window is rejected;
 - exact instrument mapping is a hash-bound receipt over point-in-time contract metadata, not a caller-supplied Boolean;
 - statistical helpers use method names that match their mathematics; “purged”, “White Reality Check”, “Romano-Wolf”, CPCV and related labels cannot certify unless the implemented procedure satisfies the named method's required dependency/multiple-testing semantics.
+
+### Fetch-cache, rate-limit and historical-series completeness contract
+
+Cached/public historical inputs are evidence only when identity, observation time and requested coverage remain explicit.
+
+Requirements:
+
+- a cache hit preserves the original observation/fetch timestamp and separately records cache-access time; cache access never refreshes evidence age;
+- public-fetch cache keys bind source id, URL/request identity, run context and any representation-affecting headers/parameters required by the source contract;
+- provenance on a cache hit identifies both the original fetch receipt and the current consumer; one logical source cannot inherit another source's identity merely because URLs match;
+- Retry-After is a minimum server-requested delay, never a value to clamp downward; local maximum-backoff policy may extend but not shorten it;
+- REST/WS position reconciliation rejects all non-finite sizes/differences before tolerance comparison;
+- every funding-history fetcher proves requested-window completeness with venue-correct pagination, page-limit/frontier evidence and rejected-row accounting before any proof-facing readiness;
+- per-row `data_gate_ready` cannot substitute for a complete interval/window receipt;
+- same-instrument/same-settlement-time duplicates with different economic fields are `SOURCE_CONFLICT`, not last-write-wins;
+- funding and candle parsers reject NaN/±Infinity and invalid economic domains before persistence or aggregation;
+- OHLC candles satisfy low <= min(open,close) <= max(open,close) <= high and non-negative finite volume under the venue's schema;
+- conflicting revisions of the same candle timestamp remain explicit and hash-bound; a deterministic revision policy, if allowed, records which source/revision won and why.
 
 ### Collector continuity, shard-rotation and checkpoint durability contract
 
@@ -15527,6 +15557,20 @@ The following numbered items form the normative acceptance catalog. Each item is
 1437. Lead-Lag certifying summaries reject/quarantine duplicate economic trade ids before aggregation and LIQUIDATABLE_NET requires duplicate_trade_ids==0;
 1438. Lead-Lag frozen-maker no_lookahead/purged/causal_live_only fields are recomputed from hash-bound temporal receipts rather than assigned constants;
 1439. all blocker-classified weaknesses 236-240 remain implementation blockers until entry-latency, queue-deduplication, event-time and temporal-receipt mutation tests prove closure.
+1440. PublicFetch cache hits preserve the original fetched_at_ms/evidence age and expose cache-access time separately;
+1441. PublicFetch cache identity includes source/provenance context so same-URL requests from distinct logical sources cannot cross-contaminate receipts;
+1442. Retry-After values are never shortened by local backoff caps and tests cover server delays greater than the configured max_seconds;
+1443. position reconciliation rejects NaN/±Infinity source sizes and cannot return RECONCILIATION_OK from a non-finite diff;
+1444. Hyperliquid funding history has an explicit venue-correct completeness/pagination receipt for the requested interval before certifying use;
+1445. Bybit funding history walks all required 200-row pages or returns an explicit incomplete frontier; one page cannot certify an arbitrary window;
+1446. OKX funding history paginates beyond 400 rows or enforces/proves a caller window guaranteed to fit one page;
+1447. funding collection reports parsed/rejected rows, page/frontier counts and expected/observed settlement continuity separately from row validity;
+1448. conflicting duplicate funding rows at the same instrument/time are surfaced and cannot be silently overwritten;
+1449. `data_gate_ready` for funding proof is derived from a complete hash-bound interval receipt rather than assigned true by the row adapter;
+1450. legacy funding parsers and aggregators reject non-finite funding/premium values and cannot emit non-finite cumulative economics;
+1451. candle parsing requires finite, structurally valid OHLC and finite non-negative volume;
+1452. duplicate candle timestamps with differing OHLCV produce an explicit conflict/revision state and deterministic source/revision identity;
+1453. all blocker-classified weaknesses 241-252 remain implementation blockers until deterministic cache-age, retry-after, non-finite reconciliation, funding-pagination and candle-conflict tests prove closure.
 
 ## Non-goals
 
