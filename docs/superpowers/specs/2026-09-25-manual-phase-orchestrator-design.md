@@ -12732,7 +12732,7 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 7. **Missing marks can be hidden.** `PaperEngine.mark_to_market()` falls back to position entry price when a mark is absent; `PaperLedger.mark_to_market()` falls back to the last stored mark. These fallbacks can convert unknown/stale valuation into an apparently valid zero/unchanged unrealized PnL.
 8. **Sizing can be silently increased.** The current `safe_scale = min(1, max(0.1, float(margin_scale or 1)))` means a requested scale of zero becomes 1.0 and any positive scale below 0.1 is increased to 0.1. A risk/sizing layer must never enlarge an upstream requested exposure silently.
 9. **Margin and exposure names are ambiguous.** `max_total_exposure_usdt` is documented in code as historically capping margin rather than gross notional. Margin, collateral, gross notional, net exposure and buying power require distinct types/invariants.
-10. **Capital defaults conflict.** Current paper paths use different implicit starting-capital/budget values (notably 100 versus the project's canonical 1,000-USDC paper baseline). A result is meaningless if ROI, risk and capacity are computed against different unseen starting capital.
+10. **Capital baseline must remain explicit and singular.** The current project baseline is **100 USD initial paper equity**, and `simulation/economic_objective.py::STARTING_CAPITAL_USD` correctly reflects 100.0. Any legacy/default path that silently uses another starting-equity denominator must be quarantined or made explicit; ROI, risk and capacity cannot mix denominators.
 11. **Currency naming is inconsistent.** Proof-critical current modules mix `*_usdt`, `*_usdc` and generic `*_usd` names while Hyperliquid's current standard perp collateral/accounting basis is USDC. Unit aliases can silently turn accounting equality into convention rather than proof.
 12. **Proof-critical arithmetic remains predominantly binary float.** Prices, sizes, notionals, fees and hashes often flow through `float`, `round` and `repr(float)`, while Hyperliquid validates exact price significant figures and asset-specific `szDecimals`. Binary floating-point representation must not decide order validity, fill identity or cent-level accounting.
 13. **Restart restoration can lose economic history if used alone.** `PaperEngine.restore_position()` recreates an opening ledger position with `fee_bps=0`. This is correct only if a previously reconciled cash/fee/funding/accounting baseline is restored independently; a position-only restart must never stand in for full ledger recovery.
@@ -12827,6 +12827,25 @@ The following findings extend the verified weakness inventory. They were found b
 91. **Frozen training provenance is not an immutable content snapshot.** Freeze helpers store dataset provenance containing ordinary file paths, and `merge_sources_with_frozen_provenance` reopens those paths later. `find_oldest_parameter_freeze` / `freeze_or_reuse_parameters` match primarily on family/protocol/parameter identity, not on a revalidated immutable training-data object. If a referenced large/mutable file changes in place, the old freeze does not by itself preserve the exact bytes that selected the parameters.
 92. **Economic-memory admission does not itself require the daily certification contract.** `ops/family_economic_job.py::record_family_economic_memory` calls the base `certify_campaign()`, then checks only `eligible_net_pnl_usd >= 4.0`; `datasets/economic_memory.py` likewise imports the cumulative `TARGET_NET_USD`. Nominal current campaign builders set `daily_target_required=True`, so the normal path inherits the daily check indirectly, but the memory boundary itself accepts any base-certified legacy/alternate campaign whose daily flag is absent/false. A “certified proof memory” must not depend on a caller remembering to opt into the actual project objective.
 93. **MAX DATA can declare proof reached from a derived phase instead of the canonical daily certificate.** `datasets/max_data_policy.py::targets_reached_from_brain` returns true when all three decisions merely have phase `FREEZE_AND_CONFIRM_FORWARD`; `choose_max_data_job` then emits `STOP_PROOF_REACHED` and states that the three economic objectives are reached. The brain derives that phase by trusting stored campaign `objective_status == ATTEINT`, rather than consuming/recomputing the final daily certification receipt. Its target contract is still named `target_net_usd_per_family = 4.0`, not the canonical per-UTC-day proof contract.
+94. **The unified lookahead gate fails open, and the official A/B replay invokes it with no events.** `backtesting/validation_gates.py::lookahead_gate` returns `passed=True, skipped=True` when events are absent or lookahead analysis raises. `run_validation_gates` then removes skipped gates from the critical set. `backtesting/ab_flag_replay.py` calls `run_validation_gates(a.trades)` / `run_validation_gates(b.trades)` without events, so its anti-lookahead gate is structurally skipped while `DEPLOY_CANDIDATE` remains reachable.
+95. **The A/B “regime robustness” gate does not test market regimes on its normal path.** The A/B replay passes a list of float PnLs, so `regime_robustness_gate` cannot see regime labels and falls back to temporal chunks. The fallback is visible in metadata but can still pass as the mandatory regime gate; therefore a candidate can be labelled deployable with no actual regime-labelled evidence.
+96. **The unified A/B OOS gate is a naive 70/30 split, not purged walk-forward.** `validation_gates.out_of_sample_gate` imports `backtest.walk_forward.split_walk_forward`, which slices the already-produced PnL list without purge, embargo, episode-horizon containment or multiple forward folds. This is distinct from the optimizer weakness already documented above: the current A/B validation gate itself does not enforce causal walk-forward semantics.
+97. **The official stage named “Replay A/B exact” is not execution-exact.** `backtesting/ab_flag_replay.py` enters at candidate `current_mid`, exits on future mid marks and applies a flat cost parameter. It does not consume the canonical L2 executable-price chain, visible-depth capacity, partial-fill/queue state or measured latency for those trades. It is useful as a diagnostic flag comparison, but its current name and downstream recommendation are stronger than its execution evidence.
+98. **The A/B replay silently drops corrupt input.** `load_jsonl` ignores malformed JSON lines and `marks_by_coin` skips malformed mark rows without carrying a corruption count into the report. A damaged replay can therefore appear cleaner merely because unusable rows disappeared.
+99. **The A/B cache does not bind the full software state.** Its key hashes candidate/mark files and some parameters but uses only `ab_flag_replay.py` mtime for code identity. Changes in imported SL/TP logic, vetoes, volatility logic or dependencies can leave the cache key unchanged. The cached report itself is also accepted solely by matching `cache_key`, without a bound report digest/evidence manifest.
+100. **The one-entry marks index cache can return stale data.** `_MARKS_INDEX_CACHE` keys only on Python object `id` and list length. In-place mutation with unchanged length is invisible, and object-id reuse after the prior list is freed can collide with a new same-length list. Research caches must key immutable content identity, not process memory identity.
+101. **The official historical-analysis suite can succeed with mandatory stages skipped.** Missing required data returns stage status `SKIPPED`; final exit status checks only whether at least one stage passed and whether any stage failed. A run with one passing stage and several required `SKIPPED` stages can therefore exit 0 and look operationally successful while evidence is incomplete.
+102. **The market-truth probe reports NO_DATA/NO_INTENT with process success.** `ops/market_truth_replay.py::main` always returns 0 even when the report status is `NO_DATA` or `NO_INTENT`. Because the historical suite classifies subprocess exit code 0 as `PASSED`, “no executable evidence” can be surfaced as a passed stage.
+103. **Market-truth input corruption is under-counted.** `iter_tick_records` silently skips unreadable files and malformed JSON before `load_ticks` increments its inventory counter, despite the module documentation saying unreadable lines are counted by the caller. The resulting inventory cannot distinguish a clean source from parse loss occurring in the iterator.
+104. **Maker fill time/provenance in the generic executable replay is anchored to the initial book, not the consuming trade.** `_replay_maker` aggregates matching public-trade quantity but does not retain the trade that crosses the queue. `_build_fill` consequently emits `executed_at_ms` and `source_event_id` from the starting L2 snapshot. Holding-period, latency, markout and causal evidence can therefore be timestamped earlier than the modeled maker fill.
+105. **The generic market-truth latency-cost sign is reversed.** In `_with_diagnostics`, a long whose mid rises before the delayed fill (adverse for a buyer) produces a positive signed move and therefore zero latency cost via `max(0, -move)`; a favorable decline is charged instead. The same inversion applies symmetrically to shorts.
+106. **The standalone FIFO queue helper has an equality off-by-one fill.** `backtesting/queue_model.py::avancer` marks `rempli=True` when traded quantity is exactly equal to the quantity ahead. At exact equality, the queue ahead has only just been consumed; no volume remains to execute the modeled order. Fill requires trade-through beyond queue-ahead (and, for quantity-aware fills, enough subsequent volume for the modeled order).
+107. **Replay-grade strategy data contracts still omit active venues.** `datasets/strategy_data_contracts.py` defines `CORE_VENUES` and Cross-Venue/Lead-Lag required-family maps only for Hyperliquid, Binance, Bybit and OKX. Gate and Bitget are part of the current collection universe, but a requested unknown venue is simply absent from `for_venues`, so its evidence requirements can disappear rather than fail closed.
+108. **`require_reconciliation` is declared but not enforced by the strategy-window gate.** The contract carries `require_reconciliation=True` for all three active families, yet `apply_strategy_data_contract` only copies that Boolean into output metadata. It does not require or verify a reconciliation receipt before `validation_allowed` can remain true.
+109. **Pair-synchronization evidence is not bound to the pair/run it is authorizing.** `build_pair_sync_report` reports skew/match statistics but does not bind canonical coin, left/right venue identities, collection-run id, component dataset ids or overlap-window identity. `build_cross_venue_window_manifest` consumes those statistics without independently proving they came from the same requested pair/run/window.
+110. **Exact instrument mapping is currently a caller assertion at the strategy-window boundary.** `apply_strategy_data_contract` accepts an `instrument_mapping_exact: bool` and uses it as the evidence for the mapping gate. A Boolean assertion is not an immutable mapping receipt containing venue symbols, contract type, quote/settle, multiplier, tick/lot rules and the point-in-time metadata hashes already required elsewhere in this specification.
+111. **Two statistical helper names overstate the implemented methods.** `backtesting/cross_validation.py::combinatorial_purged_splits` enumerates group combinations but performs no purge/embargo itself, while `whites_reality_check` bootstraps the already-selected best strategy against one benchmark rather than implementing White's data-snooping-adjusted Reality Check across the searched model universe. These helpers may remain diagnostics only if renamed/scoped; they cannot satisfy certification gates under their current names.
+
 
 
 
@@ -12844,6 +12863,30 @@ Requirements:
 - `STOP_PROOF_REACHED` requires the canonical final daily workspace certificate (or an immutable equivalent receipt) to prove all three active families;
 - target contracts name the unit explicitly as `USD per complete UTC day per family`;
 - a phase such as `FREEZE_AND_CONFIRM_FORWARD` describes workflow state only and is never itself proof that the economic objective has been reached.
+
+### Replay/backtest truth and validation-gate contract
+
+Research tooling may be lightweight, but anything that emits `DEPLOY_CANDIDATE`, `PASSED`, OOS/walk-forward claims or proof-facing economics must fail closed on missing evidence.
+
+Requirements:
+
+- the canonical project starting-equity baseline is **100 USD** everywhere proof-facing; any different denominator is an explicitly separate preregistered scenario;
+- mandatory anti-lookahead evidence cannot be `skipped` and then removed from the critical-gate set;
+- regime robustness requires causal regime labels when the gate is named/used as regime evidence; chronological chunks are a separate diagnostic gate, not a substitute;
+- OOS/walk-forward gates use chronological event time, purge/embargo tied to maximum label/trade horizon, episode containment and multiple forward folds where the claimed method requires them;
+- midpoint/flat-cost A/B studies are labelled diagnostic and cannot be called execution-exact or feed certified PnL without reconciliation to the canonical executable-price/L2 chain;
+- malformed JSON, invalid numeric rows and skipped marks are counted and surfaced; proof-facing analysis is NON_CERTIFIABLE when corruption exceeds zero unless exact quarantined-line policy/evidence proves irrelevance;
+- analysis caches bind immutable data hashes, full relevant code/dependency/config identity and a digest of the cached result; process object id/mtime alone is never proof identity;
+- every non-optional stage required for a declared suite profile must finish with evidence-bearing success; `SKIPPED`, `NO_DATA`, `NO_INTENT`, `UNKNOWN` or `UNMEASURABLE` makes that suite incomplete/non-certifiable and cannot produce a success exit/status for the complete profile;
+- maker fills bind the exact public-trade/event that consumes queue-ahead and reaches the modeled order, with fill timestamp at the actual modeled execution event;
+- latency-cost sign/direction is regression-tested for long/short favorable and adverse moves;
+- exact queue-ahead equality does not count as an executed maker fill;
+- strategy data contracts fail closed on every requested venue not covered by an explicit required-family contract;
+- Gate and Bitget receive explicit replay-grade family requirements before their data can participate in certifying Cross-Venue/Lead-Lag windows;
+- a declared `require_reconciliation` gate consumes and verifies an actual reconciliation receipt rather than echoing a Boolean contract field;
+- pair-sync receipts bind canonical instrument, ordered venue pair, run id, exact component dataset ids/hashes and overlap window; a receipt from another pair/run/window is rejected;
+- exact instrument mapping is a hash-bound receipt over point-in-time contract metadata, not a caller-supplied Boolean;
+- statistical helpers use method names that match their mathematics; “purged”, “White Reality Check”, “Romano-Wolf”, CPCV and related labels cannot certify unless the implemented procedure satisfies the named method's required dependency/multiple-testing semantics.
 
 ### Raw-economic reconstruction and immutable dataset-proof contract
 
@@ -13292,7 +13335,7 @@ Requirements:
 
 ### Single capital and sizing truth
 
-Canonical certification baseline uses **1,000 USDC initial paper equity** unless a preregistered scenario explicitly declares another value. Scenario overrides are distinct experiments and cannot be mixed with baseline results.
+Canonical certification baseline uses **100 USD initial paper equity**. A preregistered scenario may declare another value only as a distinct experiment; scenario overrides cannot be mixed with the 100-USD baseline or reused as baseline proof.
 
 The resolved run manifest contains starting equity, collateral currency, leverage/margin mode, per-position cap, total margin cap, gross-notional cap and any strategy allocation.
 
@@ -14833,6 +14876,32 @@ The following numbered items form the normative acceptance catalog. Each item is
 1230. MAX DATA target metadata uses explicit USD-per-complete-UTC-day units and the same +4 USD/day policy version as final certification;
 1231. a tampered/stale campaign objective_status=ATTEINT without a valid recomputed daily certificate cannot stop further evidence work or populate certified proof memory;
 1232. all blocker-classified weaknesses 92-93 from the 2026-09-26 continuation audit remain implementation blockers until daily-authority/memory/stop-condition regression tests prove closure.
+1233. the canonical certification baseline is 100 USD initial paper equity, and no proof-facing default/documentation path silently substitutes the obsolete 1,000-USD baseline;
+1234. A/B validation cannot emit DEPLOY_CANDIDATE when lookahead evidence is absent, skipped, errored or otherwise unverified;
+1235. the official A/B path passes concrete causal events into anti-lookahead validation and regression tests prove future-dated events force rejection;
+1236. regime-labelled robustness and time-slice robustness are separate gates; missing regime labels cannot satisfy the former;
+1237. OOS/walk-forward validation is chronological and uses purge/embargo/episode containment tied to the maximum economic horizon rather than a bare list slice;
+1238. every command/report labelled walk-forward demonstrates multiple forward folds or is renamed to the weaker method it actually implements;
+1239. the historical A/B midpoint/flat-cost engine is explicitly diagnostic and cannot publish certified execution-exact PnL, fills, capacity or promotion state;
+1240. malformed candidate/mark JSON and invalid mark rows are counted, surfaced and prevent proof-facing success unless quarantined by a deterministic evidence policy;
+1241. A/B cache invalidation changes when any economically relevant imported code, dependency, resolved config or input content changes;
+1242. a cached A/B result carries and verifies its own digest/evidence manifest before reuse;
+1243. marks-index caching cannot reuse an index after same-length in-place mutation or Python object-id reuse;
+1244. a required historical-analysis stage that is SKIPPED makes the complete suite incomplete and produces a non-success complete-suite status;
+1245. market_truth_replay NO_DATA/NO_INTENT cannot be classified PASSED by the official suite;
+1246. market-truth inventory counts unreadable files, malformed JSON and canonicalization rejects separately so parse loss cannot disappear before quality accounting;
+1247. generic maker replay records the exact consuming public-trade/event identity and actual modeled fill timestamp rather than the initial book timestamp;
+1248. deterministic long/short latency tests prove adverse pre-fill movement produces positive latency cost and favorable movement does not;
+1249. exact queue-ahead consumption without trade-through does not mark the modeled maker order filled;
+1250. requested replay-grade venues outside the data-contract map are rejected as CONTRACT_UNDEFINED rather than silently omitted;
+1251. Gate and Bitget have explicit Cross-Venue/Lead-Lag replay-family contracts before their windows can become validation_allowed;
+1252. require_reconciliation=true is enforced by verifying a same-window reconciliation receipt and cannot remain metadata-only;
+1253. pair-sync receipts bind canonical coin/instrument, ordered venues, collection run, exact component ids/hashes and overlap bounds;
+1254. a valid sync receipt from another coin, venue pair, collection run or time window is rejected by deterministic substitution tests;
+1255. instrument_mapping_exact is derived from a hash-bound compatibility receipt and cannot be satisfied by a bare caller Boolean;
+1256. combinatorial_purged_splits either performs/consumes explicit purge+embargo semantics or is renamed so it cannot satisfy a purged-CV requirement;
+1257. whites_reality_check either implements the searched-universe/data-snooping-adjusted White Reality Check with dependence-aware resampling or is diagnostic-only under a non-certifying name;
+1258. all blocker-classified weaknesses 94-111 from the 2026-09-26 continuation audit remain implementation blockers until deterministic replay/gate/cache/synchronization regression tests prove closure.
 
 ## Non-goals
 
