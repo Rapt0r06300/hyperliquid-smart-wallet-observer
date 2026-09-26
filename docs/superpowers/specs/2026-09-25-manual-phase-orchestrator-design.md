@@ -12785,6 +12785,11 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 60. **The read-only URL guard validates only the path suffix.** An arbitrary host ending in `/info` passes the current guard. That cannot sign an order, but it can poison authoritative data/provenance or leak public wallet query patterns to an unintended endpoint.
 61. **The simple Hyperliquid read-only connector can fabricate zero-valued fills.** `HyperliquidReadonlyConnector.normalize_fill()` substitutes `0.0` price/size and timestamp `0` when fields are missing. Canonical normalization correctly rejects such rows elsewhere, so the connector contract is inconsistent.
 62. **Some raw/projection identities use Python representation rather than canonical bytes.** Examples include `raw!r` in raw-fill references and float-containing fallback identity material. Representation/order/float normalization must not determine proof identity.
+63. **Coverage fuzzers can execute code without proving semantics.** The generic coverage harness synthesizes arguments, calls broad function surfaces and intentionally treats many exceptions as controlled outcomes. This is useful structural exploration but can mark a branch executed without asserting the economically/safety-correct result.
+64. **Coverage instrumentation alters concurrency semantics.** The coverage plugin replaces thread/process executors with inline deterministic executors and blocks network/process actions. This protects CI and improves determinism but cannot prove real queueing, race, locking, shutdown or cross-task ordering behavior.
+65. **A green coverage number can therefore overstate assurance.** Even genuine 100% branch coverage does not prove that wrong signs, wrong fees, incorrect rejection reasons, bad state transitions or broken exactly-once behavior would be detected.
+66. **Critical behavior currently lacks a repository-wide semantic-strength gate.** Property/invariant, differential, metamorphic and mutation-based tests exist in places but there is no unified requirement that economically/safety-critical logic demonstrate fault-detection strength in addition to branch execution.
+
 
 
 
@@ -13210,6 +13215,84 @@ If a future separately authorized phase ever produces order traces, calibration 
 Calibration metrics include fill/no-fill precision/recall, terminal order status, partial-fill quantity, first-fill timing, VWAP, cancel-race outcome and queue/time-to-fill distributions. Calibration data and economic OOS data remain disjoint.
 
 A simulator parameter set cannot be selected because it makes the strategy profitable. Any parameter tuning against PnL invalidates that evidence for certification until refrozen and retested on untouched execution/parity and economic datasets.
+
+## Semantic test adequacy — coverage is necessary, not sufficient
+
+100% branch coverage is a structural floor. It does **not** certify economic or safety correctness by itself.
+
+For proof-critical code, every material branch must be tied to at least one **semantic oracle**: an assertion/invariant/property that would fail if the branch produced the wrong economic/safety outcome.
+
+Required test layers include, where applicable:
+
+- example-based exact tests for venue rules and known edge cases;
+- property-based tests for broad input spaces and invariants;
+- metamorphic tests where a known input transformation implies a known output relationship;
+- differential/model-based tests against an independent reference implementation or reconstruction;
+- fault-injection tests for persistence/restart/network/state corruption;
+- real concurrency tests for shared-state/queue/locking behavior;
+- targeted mutation testing or equivalent fault-seeding on critical economic/safety modules.
+
+Critical invariants include at minimum:
+
+- adding a required fee cannot improve net PnL;
+- removing required evidence cannot improve certifiability;
+- duplicate economic events cannot change final state/PnL;
+- replaying the same immutable event stream yields identical canonical state;
+- reducing requested size cannot result in a larger approved size;
+- a rejected/unfilled order cannot create realized PnL;
+- swapping LONG/SHORT sign under symmetric fixtures mirrors gross PnL as expected;
+- future data cannot make an earlier decision admissible;
+- corrupt state cannot become an empty healthy state;
+- missing/stale marks cannot create current verified equity;
+- a less favorable executable book cannot improve a taker fill;
+- additional latency cannot access an earlier market state;
+- changing only diagnostic/derived PnL fields cannot create a new economic event identity.
+
+### Coverage-fuzzer role
+
+Generic coverage fuzzers/harnesses are **coverage assistants only**.
+
+They may help discover unexecuted code paths, but:
+
+- catching/ignoring an exception cannot itself count as a semantic correctness assertion;
+- a branch covered solely by synthetic generic invocation is not considered semantically certified;
+- monkeypatched inline executors do not certify concurrency behavior;
+- blocked network/subprocess paths do not certify actual protocol integration;
+- critical modules require dedicated named tests whose assertions correspond to this spec's behavior.
+
+### Mutation/fault-detection gate
+
+Mutation testing is applied selectively to the highest-risk modules rather than indiscriminately across the entire repository.
+
+Initial mandatory mutation/fault domains are:
+
+- canonical execution/fill/order-lifecycle rules;
+- canonical ledger/PnL/accounting;
+- risk approval/sizing;
+- no-lookahead/causal-time checks;
+- dedupe/exactly-once/reconciliation;
+- promotion/OOS gates;
+- configuration fail-closed parsing;
+- read-only/execution-capability guards.
+
+The goal is not a vanity mutation percentage. Surviving non-equivalent mutants that can change a required economic/safety property are test defects and block certification until killed by a meaningful property/assertion or formally justified as irrelevant/equivalent.
+
+Examples of mandatory mutants/faults that tests must catch:
+
+- flip a fee sign;
+- replace reject with allow;
+- change `>` to `>=` at a venue/risk boundary;
+- remove a dedupe check;
+- convert UNKNOWN to zero;
+- remove a stale/future-data gate;
+- skip a ledger reconciliation;
+- bypass approved-notional reduction;
+- treat missing ledger as healthy;
+- turn a corruption exception into empty/default state;
+- change pagination boundary from inclusive-safe to `+1`;
+- bypass an official-host allowlist.
+
+Coverage, mutation/property strength, parity and economic proof remain separate gates; none substitutes for another.
 
 ## Test coverage — 100% branch coverage
 
@@ -14402,6 +14485,14 @@ The following numbered items form the normative acceptance catalog. Each item is
 1159. all authoritative connectors share one strict canonical fill-validation contract before data can affect positions/PnL;
 1160. proof identity/raw references use deterministic canonical byte/field serialization and cannot depend on repr(dict), insertion order or binary-float string representation;
 1161. pagination boundary, retention-truncation, rate-budget and provenance-recorder failure cases are mandatory deterministic regression fixtures in the certifying data path.
+1162. 100% branch coverage is necessary but cannot by itself certify critical behavior; every material critical branch has a semantic assertion/invariant oracle;
+1163. generic coverage fuzzers are coverage assistants only and a branch reached solely by synthetic invocation/controlled exception is not semantically certified;
+1164. dedicated critical-path tests assert exact economic/safety outcomes rather than merely successful execution;
+1165. property/metamorphic/differential tests cover canonical accounting, execution, risk, causal-time, dedupe and promotion invariants where applicable;
+1166. concurrency-sensitive code has dedicated real concurrency/race/shutdown tests because inline executor monkeypatches cannot certify concurrent semantics;
+1167. targeted mutation/fault-seeding is required for the highest-risk economic/safety modules and surviving non-equivalent property-relevant mutants block certification;
+1168. mutation tests explicitly catch wrong fee signs, allow/reject inversions, UNKNOWN-to-zero fallbacks, dedupe removal, stale/lookahead bypass, reconciliation bypass and approved-size bypass;
+1169. coverage, semantic fault-detection strength, venue parity, data provenance and economic OOS/forward proof are independent gates and none may be used as a substitute for another.
 
 ## Non-goals
 
