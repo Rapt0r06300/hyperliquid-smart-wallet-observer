@@ -8,7 +8,7 @@ Replace the current mixed continuous campaign behavior with one explicit, versio
 - `COLLECT`: only data-collection work is created and scheduled.
 - `ANALYZE`: collection drains, then quality checks, replay, backtests, module PnL proof, and scoreboard run without starting new collection windows.
 
-The user controls phase changes manually through ChatGPT/GitHub. GitHub-hosted runners remain the only compute target. No self-hosted runner and no user PC may be used.
+The user controls phase changes manually through ChatGPT/GitHub. Autonomous runtime, collection, orchestration, and cloud analysis use GitHub-hosted runners only: no self-hosted runner and no workflow may wake, commandeer, or depend on the user's PC. Separately, when the user explicitly launches Codex or another coding agent inside a local checkout, deterministic development tests, replays, backtests, linting, static analysis, and other CPU-heavy verification should run locally as much as practical to minimize model quota and unnecessary GitHub Actions usage.
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
@@ -12133,6 +12133,68 @@ This architecture is informed by:
 These sources guide gate architecture. Alina's own data/economic contracts remain the authority for trading-research certification.
 
 
+## Agent Skills and quota-minimal execution
+
+Alina uses **one LLM controller by default**. Agent Skills are reusable procedures for that controller; they are not additional agents, do not create a swarm, and do not authorize hidden delegation. No LLM subagent, nested agent, second coding agent, debate team, or multi-agent fan-out is started unless the user explicitly changes this policy in a future request.
+
+Repository-scoped skills live under `.agents/skills/<skill-name>/SKILL.md`. They follow progressive disclosure: keep the skill description short and specific, load the full workflow only when the task matches, and load supporting references/scripts only when required. Skills must point back to this canonical spec for project truth rather than cloning large chunks of it.
+
+### Initial Alina skill library
+
+The intended initial library is deliberately small and specialized:
+
+- `alina-quant-research`: quantitative discovery, falsification, OOS/forward research, and challenger logic;
+- `alina-completion-discipline`: finish multi-step work without premature stopping, looping, or false completion;
+- `alina-github-safety`: safe GitHub writes, real-diff verification, commit/tree validation, and main-branch discipline;
+- `alina-quota-minimal`: one-controller, minimal-model-turn, deterministic-compute-first execution policy;
+- `alina-data-quality`: replay-grade data integrity, timing, gaps, provenance, and quarantine;
+- `alina-copy-vault`: Copy-Vault-specific evidence and lifecycle checks;
+- `alina-lead-lag`: Lead-Lag timing, causality, clock-domain, and anti-lookahead checks;
+- `alina-cross-venue`: executable Cross-Venue spread, depth, cost, freshness, and capacity checks;
+- `alina-replay-validation`: deterministic replay construction and certification;
+- `alina-economic-proof`: final net-PnL, cost, OOS/forward, capacity, and fail-closed proof;
+- `alina-spec-maintenance`: update this canonical spec in place without spawning duplicate version files or research tranches.
+
+Do not install or create a large skill collection merely because it exists. A new skill requires a distinct recurring job, non-overlapping trigger conditions, and a measurable reduction in repeated instructions or execution errors. Merge or remove overlapping skills instead of letting descriptions compete.
+
+### Quota-minimal operating policy
+
+Model turns are scarce; deterministic compute is not model quota. Prefer:
+
+`1 model decision -> largest safe deterministic batch -> compact machine-readable summary -> next model decision`.
+
+Rules:
+
+- never spawn another LLM agent merely to save time;
+- avoid repeated whole-repository scans, giant logs, or re-reading unchanged context;
+- inspect deltas, manifests, compact summaries, and exact files relevant to the active task;
+- when the user has explicitly started a local Codex/agent session, run the broadest practical deterministic tests, replays, backtests, linting, static analysis, profiling, and numerical checks locally;
+- local execution must remain user-initiated; ChatGPT/GitHub automation may never wake or remotely consume the user's PC and may never introduce a self-hosted runner;
+- GitHub Actions should be reserved for collection/orchestration that genuinely belongs in the cloud, essential integration/compatibility checks, release gates, or checks that cannot be established from the active local checkout;
+- do not burn GitHub-hosted minutes or model turns on duplicated validation that has already been deterministically established for the exact same tree unless an independent gate is materially useful;
+- prefer scripts and fixtures for deterministic behavior; use model reasoning for decomposition, diagnosis, synthesis, and genuinely ambiguous decisions.
+
+### Completion discipline
+
+Long tasks must use an explicit bounded completion loop.
+
+Before implementation, derive a compact done-contract and unfinished-work ledger from the user's request and the canonical spec. Then repeatedly select the highest-priority unfinished item, execute it, verify it, record the result, and continue without asking for confirmation merely because an intermediate milestone completed.
+
+The controller must not:
+
+- stop after planning when implementation was requested;
+- stop after one successful subtask while independent requested work remains;
+- repeat the same failing command/action indefinitely;
+- create empty commits as progress markers;
+- announce completion before the requested artifacts and verification exist;
+- promise background work or future completion that is not actually scheduled.
+
+Failure handling is bounded. After two materially identical failures, change method or reduce scope to isolate the fault. After a third materially equivalent failure, record the exact blocker, preserve all valid work, continue any independent remaining work, and report the blocker rather than looping.
+
+For GitHub-changing work, a completion claim requires checking the final branch HEAD and, when a content change was expected, verifying that the final commit has a real diff and a tree different from its parent. If no content change is legitimately required, say so instead of manufacturing an empty commit.
+
+This discipline improves persistence but cannot override platform termination, unavailable credentials, hard tool limits, safety constraints, or external service outages. In those cases the durable checkpoint and exact remaining work are the continuation contract.
+
 ## Tests and acceptance criteria
 
 The following numbered items form the normative acceptance catalog. Each item is enforced according to Acceptance Architecture V2. They do **not** form one global AND-condition unless their gate metadata explicitly says so:
@@ -13078,13 +13140,26 @@ The following numbered items form the normative acceptance catalog. Each item is
 936. paid additional action capacity is charged as cost rather than free throughput when evaluating hypothetical high-frequency feasibility;
 937. exchangeStatus, spot clearinghouse state and active-asset state are control-plane/account evidence, not alpha by default;
 938. latest-source conflicts, sparse-schema changes and account-mode changes propagate scoped uncertainty instead of spawning another spec version.
+939. one LLM controller is the default and Agent Skills do not spawn, imply, or authorize additional LLM agents;
+940. no subagent, second coding agent, debate team, or multi-agent fan-out is used unless the user explicitly changes the single-controller policy;
+941. Alina skills use narrow trigger descriptions and progressive disclosure rather than loading their full instructions into every task;
+942. skill content references the canonical spec for project truth and does not fork a second competing specification;
+943. overlapping or contradictory skills are merged, narrowed, disabled, or removed instead of accumulating indefinitely;
+944. quota-minimal execution prefers one model decision followed by the largest safe deterministic batch and a compact result summary;
+945. when the user explicitly launches a local Codex/agent checkout, deterministic development tests, replay, backtest, lint, static analysis and CPU-heavy validation run locally as much as practical;
+946. no autonomous workflow, ChatGPT action, or GitHub Action may wake, commandeer, depend on, or configure the user's PC as a self-hosted runner;
+947. GitHub Actions are reserved for cloud-native collection/orchestration, essential integration/release gates, or checks not adequately established on the active local tree;
+948. completion discipline maintains a bounded unfinished-work ledger and continues through independent requested work after intermediate milestones;
+949. repeated failures change method after two materially identical attempts and become an explicit blocker after a third equivalent failure rather than an unbounded loop;
+950. GitHub-changing work cannot be called complete until final HEAD is checked and any expected content change is verified to have a real diff and a different tree from its parent;
+951. completion discipline cannot manufacture empty commits, claim background execution, or override platform, credential, safety, or external-service hard limits.
 
 ## Non-goals
 
 This change does not:
 
 - create an Oracle/VPS collector;
-- run anything on the user's PC;
+- autonomously wake, commandeer, or depend on the user's PC; user-started local Codex/agent sessions may run deterministic development checks locally;
 - enable real trading;
 - guarantee a 4 USD profit;
 - activate candidate research modules or historical research-tranche ideas without scoped evidence gates;
