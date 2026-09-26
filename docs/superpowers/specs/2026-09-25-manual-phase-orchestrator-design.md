@@ -12717,6 +12717,157 @@ The current first-party Hyperliquid documentation establishes that:
 
 All numeric constants from these documents remain versioned point-in-time rules rather than permanent assumptions.
 
+## System-wide critical weakness closure contract
+
+A 2026-09-26 code audit found material weaknesses outside the already-documented simulation-parity gaps. These weaknesses are **implementation blockers for economic certification and any future live-readiness claim**. They do not imply that Alina currently sends real orders; the current Hyperliquid info client, mainnet guard and legacy testnet scaffolds remain execution-disabled.
+
+### Current verified weaknesses
+
+1. **Parallel economic engines still exist.** The repository contains multiple modules that describe themselves as canonical/unique paper engines or maintain independent paper positions/PnL, including `paper_trading/paper_engine.py`, `ops/paper_canonique.py`, `hyperlab/moteur_paper_unique.py`, `copying/v9_paper_pipeline.py`, experimental paper paths and historical `hyper_smart_observer` simulation code. Multiple economic truths are unacceptable for certification.
+2. **Legacy package surface remains installed.** The current tree still contains roughly 299 `hyper_smart_observer/*` files, and `pyproject.toml` still includes `hyper_smart_observer*` plus a legacy dYdX CLI in package discovery/entry points. The current legacy testnet executor/client are hard-disabled and contain no order submission implementation, so this is not an active live-trading hole; however, keeping historical execution/simulation code in the default runtime surface creates import, test, maintenance and accidental-authority risk.
+3. **Future data can be made to look fresh.** `ExecutionTruth.age_ms()` currently applies `max(0, decision_ts - received_ts)`; a snapshot received after the decision therefore obtains age zero instead of a causality failure. `PaperEngine` similarly clamps negative leader signal age to zero. This is a direct look-ahead risk.
+4. **Proof-critical code still reads wall time.** `PaperEngine.mark_to_market()` timestamps ledger updates with `time.time()`, and `PaperEvent.create()` falls back to wall time when no timestamp is passed. Experimental paper code also contains wall-clock fallbacks. Replay/economic truth must never depend on the machine clock.
+5. **Random identifiers remain in economic paths.** `PaperLedger` creates a random UUID-backed session id by default and historical/experimental position builders use UUIDs. Random metadata is acceptable only when explicitly excluded from economic identity/replay hashes; proof-critical event/position identity must be deterministic from causal inputs.
+6. **PaperEngine and PaperLedger duplicate account state.** `PaperEngine` owns `cash_usdt`, `realized_pnl_usdt`, `_positions` and high-water state while also mutating a separate `PaperLedger` with its own cash, realized PnL, positions, equity and drawdown. This permits state divergence even when each component is locally consistent.
+7. **Missing marks can be hidden.** `PaperEngine.mark_to_market()` falls back to position entry price when a mark is absent; `PaperLedger.mark_to_market()` falls back to the last stored mark. These fallbacks can convert unknown/stale valuation into an apparently valid zero/unchanged unrealized PnL.
+8. **Sizing can be silently increased.** The current `safe_scale = min(1, max(0.1, float(margin_scale or 1)))` means a requested scale of zero becomes 1.0 and any positive scale below 0.1 is increased to 0.1. A risk/sizing layer must never enlarge an upstream requested exposure silently.
+9. **Margin and exposure names are ambiguous.** `max_total_exposure_usdt` is documented in code as historically capping margin rather than gross notional. Margin, collateral, gross notional, net exposure and buying power require distinct types/invariants.
+10. **Capital defaults conflict.** Current paper paths use different implicit starting-capital/budget values (notably 100 versus the project's canonical 1,000-USDC paper baseline). A result is meaningless if ROI, risk and capacity are computed against different unseen starting capital.
+11. **Currency naming is inconsistent.** Proof-critical current modules mix `*_usdt`, `*_usdc` and generic `*_usd` names while Hyperliquid's current standard perp collateral/accounting basis is USDC. Unit aliases can silently turn accounting equality into convention rather than proof.
+12. **Proof-critical arithmetic remains predominantly binary float.** Prices, sizes, notionals, fees and hashes often flow through `float`, `round` and `repr(float)`, while Hyperliquid validates exact price significant figures and asset-specific `szDecimals`. Binary floating-point representation must not decide order validity, fill identity or cent-level accounting.
+13. **Restart restoration can lose economic history if used alone.** `PaperEngine.restore_position()` recreates an opening ledger position with `fee_bps=0`. This is correct only if a previously reconciled cash/fee/funding/accounting baseline is restored independently; a position-only restart must never stand in for full ledger recovery.
+14. **Configuration contains shadowed defaults.** Current settings contain repeated risk-field definitions whose later class assignment overrides earlier values. Even if Python/Pydantic resolves them deterministically, the source presents multiple apparent truths for the same risk control.
+15. **The 100% branch-coverage requirement is specified but not yet wired in the development toolchain.** Current `pyproject.toml` includes pytest/ruff but no coverage/pytest-cov dependency or enforced branch threshold. Until the gate is implemented, the repository cannot claim the coverage requirement is satisfied.
+16. **Historical/experimental pipelines can still compute their own economics.** Examples include V9/static-cost paper logic, experimental ledgers and HyperLab simplified fill/equity models. They may remain research fixtures, but they cannot publish authoritative PnL, equity, capacity, risk or promotion state.
+17. **Simulator calibration itself can overfit.** Queue/fill/latency parameters chosen because they maximize strategy PnL create a circular proof. Practitioner evidence favors calibrating execution models against fixed order-action traces and order-level outcomes, then evaluating strategy PnL separately OOS.
+
+### Canonical economic runtime boundary
+
+After remediation there is exactly one authoritative economic path:
+
+`strategy intent -> canonical venue-rule validation -> canonical execution/order lifecycle -> canonical PaperLedger/account state -> canonical PnL/equity -> scoreboard/UI/certification`.
+
+For the current architecture, `hl_observer.paper_trading.canonical_execution`, the repaired `paper_trading.paper_engine` orchestration layer, and `hl_observer.simulation.paper_ledger` are the target canonical execution/accounting path. Existing helper modules may become pure adapters into that path, test fixtures, or be removed/quarantined. They may not retain independent fill, position, cash, equity or PnL authority.
+
+A static/runtime authority gate must enumerate every authoritative CLI, workflow, dashboard and report entry point and prove that no legacy/experimental economic engine can feed canonical outputs.
+
+Every authoritative result carries at least:
+
+- canonical engine id and schema version;
+- code/tree SHA;
+- resolved configuration hash;
+- venue-rule/fee-rule hash;
+- data manifest hash;
+- clock/latency model hash;
+- simulation/accounting mode;
+- initial-equity/currency identity.
+
+### Strict causal-time contract
+
+Proof-critical economic code uses an injected event/replay clock. Direct reads of `time.time()`, `datetime.now()`, monotonic machine time or other wall-clock sources are forbidden inside deterministic replay/accounting decisions except in explicitly non-economic telemetry.
+
+Causal invariants:
+
+- market evidence with `received_ts > decision_ts` is `FUTURE_DATA_CAUSALITY_VIOLATION`, never age zero;
+- leader/source evidence materially in the future relative to observation time is rejected or quarantined under the measured clock-uncertainty model, never clamped to zero age;
+- exchange timestamps and local receive timestamps remain separate clock domains; clock-offset uncertainty is modeled rather than assuming equality;
+- a proof-critical event requires an explicit timestamp supplied by the causal event loop;
+- same input manifest + same engine/config/rule/clock hashes yields the same economic event sequence and accounting state.
+
+Random run/session ids may be attached as metadata only if they cannot change economic ordering, event identity, state hashes or PnL.
+
+### Exact numeric and unit contract
+
+At ingestion boundaries, native venue price/size strings remain exact. The certifying path converts them to deterministic decimal/fixed-point or integer tick/lot representation before validity, matching, hashing and accounting.
+
+Requirements:
+
+- Hyperliquid price precision and asset `szDecimals` rules are represented point-in-time from metadata;
+- binary float may be used for non-authoritative analytics/features but cannot be the sole representation deciding order validity or canonical monetary identity;
+- hashes use canonical normalized numeric serialization, never implementation-dependent `repr(float)`;
+- rounding direction is explicit and venue-consistent for price, size and notional;
+- overflow, non-finite numbers and non-representable values fail closed;
+- canonical Hyperliquid perp cash/accounting currency is explicitly USDC for current standard-perp scope;
+- any USDT/USD/other-currency value requires a typed currency and, when converted, a timestamped conversion rate/source;
+- `USDT` and `USDC` field names cannot be treated as interchangeable aliases in canonical accounting.
+
+### Single capital and sizing truth
+
+Canonical certification baseline uses **1,000 USDC initial paper equity** unless a preregistered scenario explicitly declares another value. Scenario overrides are distinct experiments and cannot be mixed with baseline results.
+
+The resolved run manifest contains starting equity, collateral currency, leverage/margin mode, per-position cap, total margin cap, gross-notional cap and any strategy allocation.
+
+Sizing invariants:
+
+- downstream risk/execution may reduce or reject requested exposure but may never silently increase it;
+- `scale <= 0` means no trade/rejection, never full-size fallback;
+- `0 < scale < 1` preserves that exact reduction subject only to venue quantization;
+- if venue minimum size/notional conflicts with a requested reduced size, the result is reject/no-trade unless the strategy explicitly issues a new larger intent;
+- margin, gross notional, net directional exposure, collateral and buying power are different quantities and cannot share one ambiguous cap variable.
+
+### One account/position state authority
+
+Canonical positions, cash, fees, funding, realized PnL, unrealized PnL, margin, equity, high-water mark and drawdown live in one authoritative ledger/account state.
+
+During migration, any temporary shadow representation must reconcile event-by-event to the canonical ledger. A mismatch immediately yields `STATE_AUTHORITY_DIVERGENCE`, suppresses numeric PnL and blocks further certification for the affected scope.
+
+Missing or stale marks produce `UNMEASURABLE_MARK` / stale state. Entry price or last-known mark may be exposed diagnostically but cannot silently substitute for current mark/liquidation truth.
+
+### Restart and durability contract
+
+Restart recovery is ledger-first, not position-only.
+
+A valid restart restores a hashed checkpoint containing cash/equity, positions, accumulated fees, funding, realized PnL, open-order state, margin/collateral state and last exactly-once event identity, then deterministically replays the immutable event tail.
+
+If only an open position is available but its prior accounting baseline is not proven, the position is quarantined as `RECOVERY_ACCOUNTING_INCOMPLETE`; it is not reconstructed with zero historical fees/funding and treated as economically valid.
+
+Checkpoint + tail replay must reproduce the pre-restart state hash exactly before new affected economic actions are accepted.
+
+### Legacy and experimental isolation
+
+The current `hyper_smart_observer` package is historical compatibility code, not canonical Alina runtime.
+
+For the current paper/read-only product:
+
+- remove it from the default install/runtime package surface or isolate it in a clearly non-authoritative optional legacy profile;
+- remove legacy economic CLIs from ordinary Alina entry points;
+- authoritative tests cannot establish current parity by exercising only legacy engines;
+- legacy/experimental modules cannot write canonical ledger files, scoreboard state, promotion state or UI PnL;
+- default Alina distribution must contain no usable signer, private-key loader or order-submission transport;
+- disabled testnet scaffolds remain non-authoritative and should not become executable without a separate explicit future scope change and safety review;
+- static import/capability tests fail if an authoritative runtime path imports a forbidden legacy economic engine or exchange execution capability.
+
+### Configuration truth
+
+Each proof-critical setting has one schema declaration and one resolved value.
+
+Duplicate field declarations, shadowed defaults and ambiguous environment fallbacks are removed. Unknown proof-critical configuration keys fail closed rather than being silently ignored.
+
+Every run writes a canonical resolved-config artifact containing effective values, override provenance and a hash. Dashboard/report wording shows the effective configuration, not comments or superseded defaults from source code.
+
+### Coverage implementation closure
+
+The existing 100% branch-coverage specification becomes executable:
+
+- add and pin an appropriate branch-capable coverage tool in the development/test environment;
+- enable branch measurement explicitly;
+- enforce exact 100% on required first-party scope locally when Codex is user-started;
+- keep the independent cloud gate only where useful;
+- publish the exact measured file set and exclusions;
+- a missing coverage report is failure, not zero-information success.
+
+### Execution-model calibration firewall
+
+Fill/queue/latency models are calibrated against execution truth, never against strategy profit.
+
+Where own live/testnet order traces do not exist because Alina is read-only, use first-party/public ground truth where available, conservative bounds and explicit uncertainty; do not invent an exact maker model.
+
+If a future separately authorized phase ever produces order traces, calibration uses a **closed-action replay**: hold submitted/cancelled order actions fixed and compare simulated versus observed order outcomes.
+
+Calibration metrics include fill/no-fill precision/recall, terminal order status, partial-fill quantity, first-fill timing, VWAP, cancel-race outcome and queue/time-to-fill distributions. Calibration data and economic OOS data remain disjoint.
+
+A simulator parameter set cannot be selected because it makes the strategy profitable. Any parameter tuning against PnL invalidates that evidence for certification until refrozen and retested on untouched execution/parity and economic datasets.
+
 ## Test coverage — 100% branch coverage
 
 The implementation target is **100% branch coverage**, not merely 100% line/statement coverage.
@@ -13792,6 +13943,42 @@ The following numbered items form the normative acceptance catalog. Each item is
 1043. a simulator change that improves PnL while reducing venue-parity evidence, rejection realism, cost timing or failure realism is rejected even if backtest metrics improve;
 1044. parity scorecards expose at least rejection-match rate, state-transition match, fill/partial-fill match, quantity/VWAP error, fee/funding reconciliation, latency-evidence quality and account-state reconciliation;
 1045. final economic proof can count a simulated trade only if every execution/accounting capability that materially affected that trade is certified for the evidence resolution and venue-rule version used.
+1046. exactly one authoritative economic runtime path feeds canonical positions, cash, equity, PnL, scoreboard and certification; parallel paper/replay engines are adapters, fixtures or quarantined and cannot retain economic authority;
+1047. authoritative Alina entry points are statically/runtime-audited so no legacy/experimental engine can feed canonical economic outputs;
+1048. the historical hyper_smart_observer package and legacy economic CLIs are excluded from the default authoritative Alina runtime/install surface or isolated in an explicitly non-authoritative optional legacy profile;
+1049. current disabled legacy testnet scaffolds remain incapable of order submission and cannot become executable without a separate explicit scope change and safety review;
+1050. market evidence received after its decision visibility time raises FUTURE_DATA_CAUSALITY_VIOLATION or scoped clock uncertainty and can never become fresh by clamping negative age to zero;
+1051. leader/source event timestamps materially in the future relative to observation time are rejected/quarantined under measured clock uncertainty rather than assigned zero signal age;
+1052. proof-critical replay/accounting decisions use an injected causal clock and contain no implicit wall-clock fallback;
+1053. random/UUID session or position identifiers cannot affect economic event identity, ordering, hashes or PnL; deterministic replay identity derives from causal inputs and versioned manifests;
+1054. canonical account state has one authority for positions, cash, fees, funding, realized/unrealized PnL, margin, equity, high-water mark and drawdown;
+1055. any temporary shadow account/position representation reconciles event-by-event and STATE_AUTHORITY_DIVERGENCE blocks numeric PnL/certification immediately;
+1056. missing current mark/liquidation evidence yields UNMEASURABLE_MARK/stale status and canonical valuation cannot fall back silently to entry price or last-known mark;
+1057. downstream sizing may reduce/reject but never silently enlarge requested exposure; scale <= 0 is no-trade and a positive scale below an internal floor cannot be rounded upward except venue quantization that does not exceed the request;
+1058. margin, collateral, gross notional, net exposure and buying power have distinct typed fields and independent invariants rather than an ambiguously named exposure cap;
+1059. canonical baseline runs use explicit 1,000-USDC starting paper equity and any alternate starting-equity scenario is preregistered, separately labeled and never mixed into baseline certification;
+1060. every authoritative run records starting equity, collateral currency, leverage/margin mode and all exposure/capital caps in the resolved manifest;
+1061. canonical Hyperliquid standard-perp accounting distinguishes USDC, USDT and generic USD and never treats their field names as interchangeable aliases;
+1062. any currency conversion entering proof-critical economics carries currency pair, point-in-time rate, timestamp and provenance;
+1063. proof-critical price/size/order-validity/accounting uses deterministic decimal/fixed-point or integer tick/lot representation consistent with point-in-time Hyperliquid precision metadata;
+1064. canonical numeric hashes use normalized deterministic serialization rather than repr(float), and non-finite/non-representable values fail closed;
+1065. restart recovery restores a complete reconciled accounting checkpoint plus immutable event tail; position-only restoration cannot substitute zero historical fees/funding for missing economic history;
+1066. checkpoint-plus-tail replay must reproduce the pre-restart canonical state hash before affected new economic actions or PnL are trusted;
+1067. proof-critical configuration fields are declared once, duplicate/shadowed defaults are removed, and unknown proof-critical keys fail closed;
+1068. every run persists a resolved effective-config artifact with override provenance and hash, and reports/UI display effective rather than superseded source defaults;
+1069. legacy/experimental paper modules cannot write canonical ledger, scoreboard, promotion or authoritative UI PnL state;
+1070. the default paper/read-only distribution contains no usable signer, private-key loader or order-submission transport, and capability/import tests enforce this boundary;
+1071. branch-capable coverage tooling is installed/pinned, branch measurement is explicitly enabled, and absence of a required coverage report is a failing gate;
+1072. the 100% branch gate reports the exact measured first-party file set and any allowed exclusions and runs locally by default when the user explicitly launches Codex;
+1073. execution-model parameters are calibrated against order/fill/state trace similarity rather than strategy PnL;
+1074. any future order-trace calibration uses closed-action replay with fixed submitted/cancelled actions and compares fill status, partial quantity, first-fill timing, VWAP and cancel-race outcome;
+1075. execution-model calibration data and economic OOS/forward proof data remain disjoint, and selecting simulator parameters because they improve strategy PnL invalidates that evidence;
+1076. maker/queue certification strength cannot exceed available data resolution; without own/order-level truth Alina uses conservative bounds and explicit uncertainty rather than fitted certainty;
+1077. every authoritative result carries engine/schema id, code/tree SHA, resolved-config hash, venue-rule/fee-rule hash, data-manifest hash and clock/latency-model hash;
+1078. current contradictory or simplified starting-capital, fee, fill, PnL and leverage defaults in historical paper paths are migration debt and cannot be used as certifying defaults;
+1079. static/current risk configuration cannot contain multiple effective definitions for the same control under one schema version;
+1080. simulator economic truth cannot depend on machine-local time, random seeds not recorded in the run manifest, local path ordering or process restart timing;
+1081. a current-code weakness explicitly listed in the 2026-09-26 system-wide audit remains a tracked implementation blocker until a deterministic regression test proves closure on the canonical path.
 
 ## Non-goals
 
