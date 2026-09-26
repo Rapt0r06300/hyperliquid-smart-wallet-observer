@@ -13012,6 +13012,8 @@ The following findings extend the verified weakness inventory. They were found b
 266. **The frozen holdout veto accepts truthy non-boolean values as successful evidence.** `backtesting/robustness_protocol.py::apply_holdout_veto` computes `bool(oos_passed and forward_passed)` without requiring strict booleans. Strings such as `"false"` are truthy in Python and can therefore produce `accepted=True` / `CONFIRMED` if an adapter serializes Boolean state incorrectly.
 267. **PBO/CSCV silently truncates and position-aligns unequal configuration histories.** `robustesse_selection._matrice_propre` sets the common block count to the shortest row, truncates every configuration to that prefix and carries no block/timestamp identity. A short configuration can therefore erase later evidence for all others, and columns are assumed to represent the same temporal block without proof that their periods actually align.
 268. **Robust-selection ranking helpers admit non-finite scores.** `backtesting/robust_selection.py::coin_breakdown` sums PnLs without finiteness checks and `overfit_selection.selection_par_plateau` / maximum ranking accept arbitrary float-convertible scores/vectors. NaN/Infinity can enter minimax/plateau ordering, yielding unstable or implementation-order-dependent candidate selection rather than typed invalid evidence.
+269. **Proof counters accept fractional and boolean values as valid counts.** `simulation/economic_objective.py::_segment_economics` parses `sample_count` and `trade_ids_count` through a generic float parser, checks equality, then truncates with `int()`. Values such as `20.5/20.5` can satisfy completeness and become 20; Python booleans also parse as 1.0/0.0. `ops/final_economic_certification._sample_count` repeats the float-to-int truncation. Evidence cardinality must be exact integer state, not a numeric approximation.
+270. **Freeze timestamp provenance accepts type-invalid “positive numbers”.** `ops/final_economic_certification::_proof_provenance` uses the same generic numeric parser for `frozen_at_ms`; `True` becomes 1.0 and a positive fractional timestamp also passes the current `> 0` completeness check before being truncated with `int()`. Freeze time must be a strict integer timestamp in the canonical clock domain and must be causally consistent with selection/proof windows.
 
 
 
@@ -15631,6 +15633,12 @@ The following numbered items form the normative acceptance catalog. Each item is
 1480. minimax/plateau/maximum robust-selection helpers reject NaN/Infinity in PnL, scores and feature vectors before ranking;
 1481. non-finite robust-selection input produces typed INVALID_STATISTICAL_INPUT and can never choose candidates by Python's NaN sort/min behavior;
 1482. all blocker-classified weaknesses 266-268 remain implementation blockers until strict-boolean, block-alignment and non-finite-ranking regression tests prove closure.
+1483. proof-facing cardinalities such as sample_count, trade_ids_count, duplicate counts and collision counts are strict non-negative integers; booleans, fractional numbers and numeric strings outside the canonical schema are rejected;
+1484. segment completeness cannot truncate fractional counts with int() or treat True/False as 1/0 observations;
+1485. final-certification expected-proof-row counts are derived only from strict integer segment counts and malformed count fields make the family proof NO_GO;
+1486. frozen_at_ms and other proof-critical timestamps are strict integer values in the declared clock/unit domain and reject booleans, fractional values and non-finite numerics;
+1487. freeze timestamps are range/causality checked against selection time and OOS/forward windows rather than merely required to be >0;
+1488. all blocker-classified weaknesses 269-270 remain implementation blockers until strict-schema count/timestamp mutation tests prove closure.
 
 
 ### Episode-containment, native-clock and proof-audit closure contract
