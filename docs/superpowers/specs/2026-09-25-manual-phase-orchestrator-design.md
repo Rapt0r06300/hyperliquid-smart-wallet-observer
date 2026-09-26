@@ -13024,6 +13024,12 @@ The following findings extend the verified weakness inventory. They were found b
 276. **Latency-truth selection accepts negative execution delay and can choose pre-decision books.** `paper_trading/latency_truth.py::selectionner_carnet_causal` validates finiteness but not `delay_ms >= 0`; a negative delay moves the causal target before the decision time and may select a book that was already observable before the modeled order decision.
 277. **Runtime heartbeat/source-health guards can treat invalid/future time as healthy.** `backtesting/runtime_guards.py::heartbeat_stale` uses raw floating subtraction/comparison; NaN makes the stale comparison false, and a future `last_ts` produces negative age that is also not stale. `source_health` similarly reports a future last-seen timestamp as `OK`.
 278. **The canonical causal-time parser repeats float-based integer precision loss.** `core/causal_time.py::_optional_int` uses `int(float(value))` for exchange/wall/monotonic timestamps and sequence. Large decimal-string sequences above 2^53 can be rounded and fractional timestamp/sequence values are silently truncated, weakening the same identity/order guarantees already required of native collectors.
+279. **Durable deduplication forgets compacted event ids for future duplicate checks.** `realtime/durable_dedup.py::compact` archives the oldest rows and deletes them from `seen_events`, while `check_and_mark` and `contains` query only the live SQLite table. After compaction, a redelivered/backfilled event whose id exists only in an archive is accepted as new and can be applied twice.
+280. **Dedup archives are durable files but not part of a verifiable membership authority.** Archive JSONL is fsynced, but there is no archive index/Merkle/hash-chain membership check used by duplicate decisions and no startup validation that archived ids remain queryable. The implementation therefore cannot claim restart/lifetime exactly-once semantics beyond the bounded live window.
+281. **RawSpool is not crash-durable at the point it claims a raw frame is written.** `realtime/raw_spool.py::RawSpool.ecrire` writes through a buffered text handle, flushes only every configured batch and never fsyncs the file/directory. A process/power crash can lose recent frames after the socket handler considered them spooled, violating “raw before parse” durability.
+282. **RawSpool replay silently drops corrupt evidence.** `RawSpool.relire` catches every exception for an unreadable line and simply continues without a rejection counter, byte/line position or contamination status. A damaged raw spool can therefore replay as a shorter apparently clean stream.
+283. **Stable market-event identity excludes only a narrow set of local-time field names.** `realtime/event_identity.py::_VOLATILE_FIELDS` removes `received_at_ms/recv_ts_ms/write_ts_ms` and transport coordinates, but equivalent local provenance aliases such as `recv_wall_ts_ms`, `received_ts_ms`, `written_ts_ms`, `recu_ms` or local monotonic fields remain in the canonical payload if supplied there. The same venue event can then hash differently after redelivery/normalization solely because local receipt metadata changed.
+284. **The bounded latency journal evicts old traces without exposing eviction count/coverage.** `runtime/latency_journal.JournalLatence` uses `deque(maxlen=...)`; once full, appends silently discard the oldest trace. The resulting p50/p95 summary does not state how many observations were evicted or the retained time window, so consumers can mistake a rolling tail for full-run latency evidence.
 
 279. **Objective-loop resume state is not bound to the evidence/software identity.** `backtesting/boucle_objectif_replay.py::cle_config` hashes only the candidate config, while the persisted state path is reused independently of dataset, code/tree SHA, resolved costs, evaluator/gate implementation or execution model. Previously stored `PROMU` trials are loaded into `essais`, skipped on replay and can become the final winner again after the surrounding evidence/software has changed. A resume checkpoint can therefore preserve stale promotion authority across materially different experiments.
 280. **Objective-loop promotion accepts generic truthiness instead of a strict gate receipt.** The loop evaluates `promu = bool(porte(rapport))`. A malformed adapter returning `"false"`, `1`, a non-empty mapping or another truthy non-Boolean value is interpreted as promotion. A certifying gate must return/validate a typed receipt, not rely on Python truthiness.
@@ -13040,6 +13046,20 @@ The following findings extend the verified weakness inventory. They were found b
 
 
 
+
+### Dedup, raw-spool and bounded-observability contract
+
+Exactly-once and raw-evidence guarantees survive compaction, restart and bounded-memory retention.
+
+- compacting the live dedup table does not make archived ids eligible again; membership lookup covers the complete retained proof horizon or uses a cryptographic archive index with deterministic membership checks;
+- dedup archive publication, live-row deletion and archive-index update are one crash-recoverable transaction;
+- startup validates every archive/index needed for the active dedup horizon and corruption blocks exactly-once claims;
+- a raw frame is considered durably spooled only after the configured durability boundary (flush/fsync or equivalent atomic durable journal) has succeeded;
+- raw-spool receipt counters distinguish received, buffered, flushed and fsynced/durable frames;
+- unreadable raw-spool lines are counted with location/reason and contaminate the affected proof interval rather than disappearing;
+- stable event identity is defined from venue/native semantic fields and explicitly excludes every local receive/write/monotonic/transport alias, including aliases introduced by normalization layers;
+- identity tests redeliver the same native event with different local timestamps/connection/frame coordinates and require the same stable id;
+- bounded diagnostic journals expose total-seen, retained, evicted and retained time-range counters; a rolling window cannot be presented as full-run evidence.
 
 ### Temporal primitive strict-domain contract
 
@@ -15683,6 +15703,15 @@ The following numbered items form the normative acceptance catalog. Each item is
 1497. canonical causal timestamp/sequence parsing is lossless for integer-string values above 2^53 and rejects fractional/boolean identity fields;
 1498. temporal primitive outputs preserve explicit unit/clock-domain metadata so ms/ns/wall/monotonic values cannot be compared by numeric coincidence;
 1499. all blocker-classified weaknesses 271-278 remain implementation blockers until strict temporal-domain, same-ms ordering and fail-closed clock/latency tests prove closure.
+1500. DurableEventDedup duplicate decisions remain correct after compaction; ids present only in immutable archives are still recognized as previously seen for the applicable proof horizon;
+1501. dedup compaction archive publication, membership-index publication and live-row deletion are crash-idempotent and startup-validatable;
+1502. corruption/removal/substitution of a required dedup archive/index yields DEDUP_EVIDENCE_CORRUPT and blocks exactly-once certification;
+1503. RawSpool distinguishes buffered write from durable spool commit and crash-injection proves every acknowledged durable raw frame survives restart;
+1504. RawSpool replay reports malformed/unreadable lines with exact counts/locations and cannot silently shorten proof evidence;
+1505. stable_item_id is invariant to all local receipt/write/monotonic/connection/frame metadata aliases and depends only on canonical native event semantics plus source/channel identity;
+1506. canonical identity regression fixtures mutate local timestamps and transport coordinates without changing the stable id, while mutating native economic identity changes it;
+1507. bounded latency-journal summaries report total observations, retained observations, evictions and retained time coverage before they may support run-level latency claims;
+1508. all blocker-classified weaknesses 279-284 remain implementation blockers until compaction-redelivery, crash-durability, corrupt-spool and identity-alias regression tests prove closure.
 
 1500. objective-loop resume/checkpoint identity binds code/tree SHA, dependency profile, resolved config/cost/rule/execution-model hashes, immutable input dataset manifest and evaluator/gate policy in addition to candidate config;
 1501. a previously PROMU candidate is revalidated or invalidated whenever any bound experiment identity changes and cannot survive solely because its config hash matches;
