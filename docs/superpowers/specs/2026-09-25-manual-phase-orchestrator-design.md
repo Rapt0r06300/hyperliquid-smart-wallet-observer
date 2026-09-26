@@ -12967,12 +12967,34 @@ The following findings extend the verified weakness inventory. They were found b
 224. **The graded-halt loss window neutralizes missing close PnL and does not validate finiteness.** `realized_window_pnl_usd` adds `float(ev.get("estimated_net_pnl_usdc") or 0.0)`; a CLOSE with missing economics becomes zero loss, while NaN can contaminate the sum so RED/AMBER comparisons become false. A loss halt must be stricter than the PnL evidence it is protecting.
 225. **`funding_settlement.net_funding_settled` is still inferred from a prorated accrual rather than reconstructed from settlement events.** `decouper` counts crossed hourly boundaries but allocates the pre-existing continuous `funding_accrued_usdt` uniformly across elapsed time. When hourly funding rates or position notionals vary, the resulting “settled” amount need not equal the actual sum at settlement instants. This value may remain a migration estimate, but cannot be canonical settled cash flow.
 
+226. **Lead-Lag executable episodes do not bound the actual entry-observation delay.** `lead_lag_shadow_economics.episodes_par_horizon` takes the first Hyperliquid quote at-or-after the lead shock and only requires that this quote arrive before the tested exit horizon. The configured/reference freshness caps are applied to the pre-signal reference and exit quote, not to `entry_ts - signal_ts`. A 1,000-ms horizon can therefore accept an entry hundreds of milliseconds late as `liquidatable_net=True`, materially changing the strategy being measured.
+227. **Lead-Lag maker queue consumption accepts public trades with missing exchange time.** `lead_lag_queue_replay._matching_public_trades` explicitly permits a matching trade when `exchange_ts_ms is None` even if the entry book has an exchange timestamp. That trade can consume queue-ahead and complete a modeled maker fill without exchange-time causality proof.
+228. **Lead-Lag maker queue consumption is not internally exactly-once.** The queue replay sums every matching public-trade row by price/side/time ordering but does not deduplicate on stable native trade/event identity before accumulating quantity. Duplicate delivery of one public trade can therefore consume the same queue volume twice and fill a paper maker order too early.
+229. **Lead-Lag executable summaries can stay LIQUIDATABLE after detecting duplicate economic episodes.** `summarize_executable_episodes` computes `duplicate_trade_ids` but still sums all duplicate rows into gross/net/fees and defines `LIQUIDATABLE_NET` from only `bool(rows) and reconciliation_ok`. Duplicate proof rows can inflate PnL while arithmetic reconciliation remains true.
+230. **Lead-Lag frozen-maker temporal proof flags are hard-coded rather than receipt-derived.** `evaluate_frozen_maker` writes OOS `no_lookahead=True`, `purged=True` and forward `causal_live_only=True` directly into `temporal_evidence`. Those properties need to be proven from exact segment/purge/event-time receipts; they cannot become true merely because the adapter constructs the field.
 
 
 
 
 
 
+
+
+
+### Lead-Lag entry-latency, queue-conservation and temporal-proof contract
+
+Lead-Lag proof must preserve the exact causal delay and exactly-once public order-flow evidence used to model entry.
+
+- every executable episode records signal time, intended decision time, observed entry-book time and actual maker fill time as distinct fields;
+- a frozen maximum entry-observation/decision delay is mandatory and a quote arriving later than that bound cannot produce certifying `liquidatable_net` evidence even if it still lies before the alpha horizon;
+- changing the tested alpha horizon cannot implicitly relax the maximum executable-entry latency;
+- every public trade used to advance FIFO queue position carries stable native/canonical identity, receive time and exchange/event time required by the active clock contract;
+- missing/invalid exchange time cannot be silently accepted as equivalent causal queue evidence when exchange-time ordering is required;
+- queue-consumption volume is exactly-once: duplicate delivery/replay of the same public trade cannot move queue position twice;
+- economic episode ids are unique inside a certifying set and duplicate ids contaminate/quarantine the set before aggregate PnL is computed;
+- `LIQUIDATABLE_NET` requires zero duplicate proof ids and one-to-one conserved underlying queue events;
+- OOS `no_lookahead`, `purged` and forward `causal_live_only` are derived from immutable temporal/purge receipts and are never presentation defaults;
+- mutation tests duplicate one public trade, remove its exchange timestamp, widen the horizon without widening entry-latency policy, and duplicate one economic episode; each mutation must block or alter certification exactly as expected.
 
 ### Protective-exit and paper-connector execution-truth contract
 
@@ -15457,6 +15479,14 @@ The following numbered items form the normative acceptance catalog. Each item is
 1417. SL/TP realized proof uses exact funding settlement evidence; average-rate × fractional-hour funding remains an explicitly non-certifying estimate;
 1418. funding_settlement cannot label a prorated continuous accrual as canonical settled funding unless it exactly reconciles to immutable per-settlement events;
 1419. all blocker-classified weaknesses 216-225 remain implementation blockers until deterministic partial-fill, price-semantic, protective-exit, halt-retry and funding-settlement tests prove closure.
+1420. Lead-Lag certifying episodes enforce a frozen maximum entry-observation/decision delay independent of the tested alpha horizon;
+1421. an entry quote arriving after the frozen executable-entry latency bound cannot set liquidatable_net=true even when it arrives before the nominal exit horizon;
+1422. every public trade that advances maker queue position has stable exactly-once native/canonical identity and required causal exchange/event timestamp evidence;
+1423. duplicate redelivery of one public trade leaves Lead-Lag queue position, fill status and PnL unchanged;
+1424. missing exchange/event time on a queue-consuming public trade blocks certifying FIFO evidence whenever the clock contract requires that domain;
+1425. Lead-Lag certifying summaries reject/quarantine duplicate economic trade ids before aggregation and LIQUIDATABLE_NET requires duplicate_trade_ids==0;
+1426. Lead-Lag frozen-maker no_lookahead/purged/causal_live_only fields are recomputed from hash-bound temporal receipts rather than assigned constants;
+1427. all blocker-classified weaknesses 226-230 remain implementation blockers until entry-latency, queue-deduplication, event-time and temporal-receipt mutation tests prove closure.
 
 ## Non-goals
 
