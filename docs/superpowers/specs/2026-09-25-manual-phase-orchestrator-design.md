@@ -13020,6 +13020,14 @@ The following findings extend the verified weakness inventory. They were found b
 273. **The supposedly immutable backtest baseline is not a complete proof identity.** `backtest_live_parity.empreinte` hashes only caller-supplied data/config, truncates SHA-256 to 16 hexadecimal characters and uses `default=str`; it excludes code/tree SHA, dependency profile, fee/rule registry and execution-model identity. The same baseline can remain “valid” after economically relevant implementation changes, and its short/non-canonical fingerprint is weaker than the full-content proof identities required elsewhere.
 269. **Proof counters accept fractional and boolean values as valid counts.** `simulation/economic_objective.py::_segment_economics` parses `sample_count` and `trade_ids_count` through a generic float parser, checks equality, then truncates with `int()`. Values such as `20.5/20.5` can satisfy completeness and become 20; Python booleans also parse as 1.0/0.0. `ops/final_economic_certification._sample_count` repeats the float-to-int truncation. Evidence cardinality must be exact integer state, not a numeric approximation.
 270. **Freeze timestamp provenance accepts type-invalid “positive numbers”.** `ops/final_economic_certification::_proof_provenance` uses the same generic numeric parser for `frozen_at_ms`; `True` becomes 1.0 and a positive fractional timestamp also passes the current `> 0` completeness check before being truncated with `int()`. Freeze time must be a strict integer timestamp in the canonical clock domain and must be causally consistent with selection/proof windows.
+271. **Purged temporal splitting accepts invalid horizon/embargo domains.** `backtesting/purged_split.py::purged_temporal_split` does not require finite positive `horizon_min`, non-negative `embargo_min` or a valid `train_frac` domain. A negative horizon makes the train purge easier to pass and a negative embargo moves the test eligibility boundary backward, re-admitting boundary-adjacent observations that the method is supposed to exclude.
+272. **The standalone clock-skew guard fails open on NaN.** `ops/clock_integrity.py::skew_excessif` catches parse errors but not non-finite values. With NaN, `abs(local-server) > max_skew` is false, so corrupt clock evidence is reported as “not excessive”. The threshold itself is likewise not validated as finite/positive.
+273. **The simple monotone-order guard overstates ordering proof.** `ops/clock_integrity.GardeMonotone` coerces arbitrary values with `int()` (including booleans) and only rejects strictly decreasing timestamps. Equal-millisecond events are accepted in arrival order with no sequence/event identity proof, so it cannot by itself guarantee deterministic causal ordering for same-timestamp microstructure events.
+274. **Latency decomposition labels invalid components as measurable.** `simulation/latency_components.py::decomposer_latence` treats every non-`None` value as present, converts with `float()` and sets `mesurable=True` without finiteness or non-negativity checks. NaN can therefore produce `total_ms=NaN` while the receipt says measurable, and negative feed/order/inter-leg latency is accepted as ordinary evidence.
+275. **The cost/latency taxonomy can mark negative ages/delays as measured assumptions.** `simulation/cost_latency_contract.py::taxonomie_latence` marks a directly supplied finite `signal_age_ms` as `MEASURED` even when negative, bypassing the safer timestamp-difference path. `assumed_external_execution_ms` likewise accepts finite negative values as `ASSUMED`.
+276. **Latency-truth selection accepts negative execution delay and can choose pre-decision books.** `paper_trading/latency_truth.py::selectionner_carnet_causal` validates finiteness but not `delay_ms >= 0`; a negative delay moves the causal target before the decision time and may select a book that was already observable before the modeled order decision.
+277. **Runtime heartbeat/source-health guards can treat invalid/future time as healthy.** `backtesting/runtime_guards.py::heartbeat_stale` uses raw floating subtraction/comparison; NaN makes the stale comparison false, and a future `last_ts` produces negative age that is also not stale. `source_health` similarly reports a future last-seen timestamp as `OK`.
+278. **The canonical causal-time parser repeats float-based integer precision loss.** `core/causal_time.py::_optional_int` uses `int(float(value))` for exchange/wall/monotonic timestamps and sequence. Large decimal-string sequences above 2^53 can be rounded and fractional timestamp/sequence values are silently truncated, weakening the same identity/order guarantees already required of native collectors.
 
 
 
@@ -13029,6 +13037,20 @@ The following findings extend the verified weakness inventory. They were found b
 
 
 
+
+### Temporal primitive strict-domain contract
+
+Every low-level time/latency helper used by replay, risk, freshness or proof has the same fail-closed domain semantics.
+
+- timestamps/sequences are strict integers in their declared unit/domain and never parsed through binary float when exact integer identity matters;
+- durations, signal ages, delays and measured latency components are finite and non-negative unless a field is explicitly a signed markout rather than elapsed time;
+- purge horizon is finite and strictly positive, embargo is finite and non-negative, and train fractions lie inside the preregistered open interval;
+- a future source/heartbeat timestamp is clock uncertainty/corruption, never healthy freshness;
+- clock-skew checks reject non-finite clocks/thresholds before subtraction/comparison;
+- same-timestamp events require an authoritative tie-breaker/sequence where ordering affects economics; a non-decreasing millisecond guard alone is not causal proof;
+- a negative modeled execution delay cannot move an execution target before the decision boundary;
+- every latency receipt's `mesurable/MEASURED` state is derived from domain-valid components, not merely from non-None presence;
+- tests inject NaN/±Infinity, booleans, >2^53 integer strings, fractional sequence ids, future heartbeats and negative horizon/embargo/delay values and prove fail-closed behavior.
 
 ### Non-finite portfolio-risk and sizing contract
 
@@ -15654,6 +15676,17 @@ The following numbered items form the normative acceptance catalog. Each item is
 1486. frozen_at_ms and other proof-critical timestamps are strict integer values in the declared clock/unit domain and reject booleans, fractional values and non-finite numerics;
 1487. freeze timestamps are range/causality checked against selection time and OOS/forward windows rather than merely required to be >0;
 1488. all blocker-classified weaknesses 269-270 remain implementation blockers until strict-schema count/timestamp mutation tests prove closure.
+1489. purged_temporal_split rejects non-finite/non-positive horizon, negative/non-finite embargo and invalid train_frac before constructing a split;
+1490. deterministic negative-horizon/negative-embargo fixtures cannot reduce leakage protection or yield a certifying valid split;
+1491. clock-integrity skew checks reject NaN/±Infinity and invalid thresholds and can never report corrupt numeric clocks as acceptable;
+1492. same-millisecond causal ordering requires sequence/native tie-break evidence when event order can affect fills/signals/PnL; GardeMonotone alone cannot certify such order;
+1493. decomposer_latence rejects non-finite/negative elapsed components and cannot set mesurable=true with NaN/Infinity or negative elapsed time;
+1494. direct signal_age_ms and assumed execution delay inputs are finite and non-negative before they may be labelled MEASURED/ASSUMED;
+1495. latency-truth causal-book selection rejects delay_ms < 0 and cannot choose a book whose observation boundary precedes the decision target;
+1496. runtime heartbeat/source-health checks treat non-finite or future last-seen timestamps as invalid/stale/clock-uncertain, never healthy;
+1497. canonical causal timestamp/sequence parsing is lossless for integer-string values above 2^53 and rejects fractional/boolean identity fields;
+1498. temporal primitive outputs preserve explicit unit/clock-domain metadata so ms/ns/wall/monotonic values cannot be compared by numeric coincidence;
+1499. all blocker-classified weaknesses 271-278 remain implementation blockers until strict temporal-domain, same-ms ordering and fail-closed clock/latency tests prove closure.
 
 
 ### Episode-containment, native-clock and proof-audit closure contract
