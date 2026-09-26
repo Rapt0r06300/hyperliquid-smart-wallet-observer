@@ -3804,13 +3804,13 @@ This specification intentionally preserves all previously validated design layer
 - **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality;
 - **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
-- **Priority / Transport Exactness V6.19:** exact IOC/ALO/gossip priority economics, GitHub-hosted latency boundary, SDK market-order protection and transport-feasibility semantics;
-- **Fill / WebSocket / Reconciliation Exactness V6.20:** raw fill granularity, fee-component reconciliation, snapshot/reconnect idempotency, CLOID/OID state repair and stream-feasibility exactness;
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 - **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
 - **AMM-Oracle & Formula-Index Relative Value V6.19:** Uniswap-oracle perp basis, delta-neutral LP hedging and formula/index-perp reconstruction under executable AMM costs.
-- **Frontend Analytics Non-Authority V6.20:** portfolio-graph sampling and UI drawdown are reconciliation views only, never proof-ledger truth.
+- **Priority / Transport Exactness V6.20:** exact IOC/ALO/gossip priority economics, GitHub-hosted latency boundary, SDK market-order protection and transport-feasibility semantics;
+- **Frontend Analytics Non-Authority V6.21:** portfolio-graph sampling and UI drawdown are reconciliation views only, never proof-ledger truth.
+- **Fill / WebSocket / Reconciliation Exactness V6.22:** raw fill granularity, fee-component reconciliation, snapshot/reconnect idempotency, CLOID/OID state repair and stream-feasibility exactness;
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -10243,15 +10243,15 @@ High-signal sources reviewed on 2026-09-26 include:
 Public bot profitability claims are not imported as Alina evidence.
 
 
-### Profitability Convergence V6.19 — priority, transport and client-semantics exactness
+### Profitability Convergence V6.20 — priority, transport and client-semantics exactness
 
-V6.19 resolves the final current discrepancies found while cross-checking V6.13-V6.18 against the latest official Hyperliquid Markdown documentation, official Python SDK behavior and the continuing X/GitHub corpus review.
+V6.20 resolves the final current discrepancies found while cross-checking V6.13-V6.18 against the latest official Hyperliquid Markdown documentation, official Python SDK behavior and the continuing X/GitHub corpus review.
 
 The governing rule is:
 
 > **priority, transport and client-wrapper behavior must be modeled as separate layers; a paper edge may not inherit latency, queue position, fill protection or fee treatment from an infrastructure path Alina does not actually possess.**
 
-V6.19 adds no new alpha module. It tightens the executability proof for Execution Alpha, XEMM, Lead-Lag, Cross-Venue, Scheduled Flow and any queue-sensitive sleeve.
+V6.20 adds no new alpha module. It tightens the executability proof for Execution Alpha, XEMM, Lead-Lag, Cross-Venue, Scheduled Flow and any queue-sensitive sleeve.
 
 ### Priority-fee capability contract
 
@@ -10462,7 +10462,7 @@ No module may assume unlimited-depth market fills.
 
 ### Action-transport feasibility without live signing
 
-V6.19 records transport constraints for **paper feasibility only**.
+V6.20 records transport constraints for **paper feasibility only**.
 
 Official nonce documentation currently states:
 
@@ -10540,7 +10540,7 @@ This is especially important for:
 
 If competitive priority cost absorbs the edge, that is a valid `KILL` reason.
 
-### V6.19 source reconciliation rule
+### V6.20 source reconciliation rule
 
 When two official renderings/snippets appear inconsistent:
 
@@ -10552,7 +10552,7 @@ When two official renderings/snippets appear inconsistent:
 
 In this pass, the current Markdown priority page resolves the apparent HTML/snippet discrepancy and explicitly documents both IOC and ALO priority families.
 
-### V6.19 official-source basis
+### V6.20 official-source basis
 
 Verified on 2026-09-26 against:
 
@@ -10566,9 +10566,9 @@ Verified on 2026-09-26 against:
 All values remain versioned and may not be back-applied to earlier periods without rule evidence.
 
 
-### Profitability Convergence V6.20 — frontend analytics non-authority
+### Profitability Convergence V6.21 — frontend analytics non-authority
 
-V6.20 closes the final two pages in the current official Hyperliquid Trading documentation index that had not yet been represented explicitly in Alina: Portfolio graphs and Miscellaneous UI.
+V6.21 closes the final two pages in the current official Hyperliquid Trading documentation index that had not yet been represented explicitly in Alina: Portfolio graphs and Miscellaneous UI.
 
 The governing rule is:
 
@@ -10637,16 +10637,16 @@ For all performance claims, precedence is:
 
 A lower-precedence source cannot overwrite a higher-precedence source merely because it is easier to query.
 
-### V6.20 official-source basis
+### V6.21 official-source basis
 
 Verified against the current official Hyperliquid Portfolio graphs and Miscellaneous UI documentation on 2026-09-26.
 
 These rules close documentation coverage; they do not create a new alpha hypothesis.
 
 
-### Profitability Convergence V6.20 — fill, websocket and reconciliation exactness
+### Profitability Convergence V6.22 — fill, websocket and reconciliation exactness
 
-V6.20 closes the remaining data-plane details that can silently alter fill count, fee attribution, queue evidence or collector continuity.
+V6.22 closes the remaining data-plane details that can silently alter fill count, fee attribution, queue evidence or collector continuity.
 
 The rule is:
 
@@ -10865,7 +10865,7 @@ A broad Copy-Vault/trigger-map design that exceeds these public-interface limits
 
 It cannot silently assume unlimited per-wallet streaming.
 
-### V6.20 source basis
+### V6.22 source basis
 
 Verified on 2026-09-26 against current official Hyperliquid:
 
@@ -12253,57 +12253,6 @@ The following numbered items form the normative acceptance catalog. Each item is
 788. flat accounts are not assigned socialized-loss/ADL cash flows when the protocol invariant excludes them;
 789. ADL observations are dependency-clustered with their parent insolvency/backstop episode for effective-sample accounting;
 790. all V6.18 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies;
-791. V6.19 records IOC write priority, ALO queue priority and gossip/read priority as distinct mechanisms with separate charging and ordering semantics;
-792. current write-priority grouping requires non-outcome assets and a homogeneous all-IOC or all-non-reduce-only-ALO batch;
-793. a mixed or otherwise ineligible priority batch is rejected in feasibility simulation rather than partially credited with priority;
-794. current priority rate encoding p/100000000 and the applicable rule version are preserved point-in-time;
-795. current IOC priority cost is based on filled notional while current ALO priority cost is based on resting notional at placement;
-796. current order-priority payment source, HYPE spot-mark conversion and burn semantics are modeled separately from ordinary trading fees;
-797. IOC ordinary temporal-priority benefit is versioned as saturating around 8 bps under the current documented rule, while the parameter range and higher-priority tie-breaking remain distinct concepts;
-798. current same-proposer-bucket higher-priority IOC ordering is not converted into additional continuous latency reduction above the saturation region;
-799. ALO priority is modeled as a continuous roughly-400-ms same-level queue-tail reorder, not as faster mempool arrival;
-800. ALO priority placement cost is charged even for orders that never fill under the current documented rule;
-801. older locked queue position cannot be freely overtaken by a later ALO merely because it pays more priority;
-802. current cancel/ALO versus IOC/GTC action-class ordering is modeled as venue/version sequencing behavior and not generic CEX packet-arrival FIFO;
-803. an IOC priority fee cannot be credited with overtaking a cancel when the applicable venue rule prioritizes cancels first;
-804. gossip/read priority is economically distinct from write priority and its auction fee/state cannot be substituted for order priorityGas;
-805. current gossip-priority auction count, cadence, minimum bid, IP/path dependence and approximate slot latency effect are versioned inputs;
-806. node/split-client-block/gossip advantages unavailable to GitHub-hosted Alina are treated as competitor latency frontier or UNEXECUTABLE_CURRENT_ARCHITECTURE, never silently credited to Alina;
-807. absolute end-to-end latency and relative transaction-sequencing latency are separate state variables;
-808. SDK-style market helpers are modeled as protected aggressive IOC limits rather than infinite-depth native market orders;
-809. the official Python SDK current 5% market-helper slippage default is labeled CLIENT_DEFAULT and cannot be back-applied as a protocol constant or UI default;
-810. allMids fallback provenance remains active when an SDK-style protected IOC reference price is reconstructed;
-811. hypothetical action batching preserves order-class purity where priority/ordering semantics depend on ALO versus IOC/GTC versus cancel classes;
-812. nonce/API-wallet transport rules are retained only for hypothetical feasibility and cannot introduce signing/private-key code into the research path;
-813. paper feasibility may reject an action policy that requires incompatible batch composition, impossible throughput or unavailable low-latency transport even if signal PnL is positive;
-814. IOC priority evidence prefers node/user-fill priorityGas while ALO placement-cost evidence requires action/resting-notional provenance;
-815. missing ALO placement evidence is PRIORITY_PLACEMENT_UNMEASURABLE rather than zero cost;
-816. priority-sensitive sleeves report break-even priority rate and fraction of gross alpha consumed by priority cost;
-817. a priority-sensitive edge may be killed when competitive priority economics absorb its post-cost advantage;
-818. conflicting official snippets are reconciled against current Markdown plus first-party implementation/version evidence before a protocol rule is frozen;
-819. V6.19 keeps all numeric latency/priority observations versioned and does not treat empirical current-mainnet effects as deterministic guarantees;
-820. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, API-wallet operation, private keys, live probing, self-hosted nodes or user-PC dependencies;
-821. canonical execution evidence preserves unaggregated fills when available and does not use aggregateByTime-compressed fills for queue/partial-fill proof;
-822. periods with only aggregated fill evidence are labeled AGGREGATED_FILL_EVIDENCE and receive weaker execution-certification status;
-823. source-native trade id tid is the preferred fill dedup identity where available and timestamp-price-size alone is insufficient;
-824. builderFee is treated as a component already included in the reported total fee under the current Hyperliquid fill schema;
-825. feeToken and fee sign are preserved so rebates and non-default fee currencies cannot be mis-accounted;
-826. venue-native crossed is preferred for maker/taker attribution and reconstructed aggressiveness remains a cross-check;
-827. reconnect/bootstrap snapshots are deduplicated against previously committed fill/order identities and are never counted as fresh duplicate events;
-828. current 60-second server-idle WebSocket timeout is versioned and quiet streams use heartbeat/pong health handling;
-829. heartbeat/pong traffic is excluded from market-event and opportunity counts;
-830. reconnect recovery requires snapshot/backfill reconciliation and continuity checks before feed health returns to HEALTHY;
-831. both oid and optional 128-bit cloid are retained for order reconciliation without conflating either with trade identity;
-832. unknownOid does not prove nonexistence when account/DEX scope or data continuity is uncertain;
-833. multi-DEX open-order queries preserve explicit DEX scope and do not infer no-order state from the first-DEX default;
-834. openOrders/frontendOpenOrders, orderUpdates, fills and historical status sources have distinct bootstrap/lifecycle/execution/reconciliation roles;
-835. frontend labels remain provenance/semantic hints and cannot invent matching-engine behavior absent a protocol rule;
-836. Scale is modeled as child limit-order decomposition/controller until stronger point-in-time server-native parent semantics are proven;
-837. Scale/adaptive ladders charge child-level queue, latency, fee and partial-fill economics rather than atomic-parent fills;
-838. user-specific streaming coverage respects current connection/subscription/unique-user/message constraints and reports constrained coverage when limits bind;
-839. data-plane sharding/rotation cannot silently convert partial wallet coverage into complete-market trigger/copy evidence;
-840. all V6.20 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
-
 791. every relevant perp records oracle-source class so AMM, formula-index, Hyperp, HIP-3 and ordinary spot-oracle contracts are not normalized as identical;
 792. AMM-perp relative-value research uses executable AMM quotes for candidate notional rather than raw pool marginal price alone;
 793. AMM-side economics include pool/route fee, price impact, gas, state staleness and timing uncertainty;
@@ -12322,15 +12271,63 @@ The following numbered items form the normative acceptance catalog. Each item is
 806. AMM/index cross-source comparisons preserve block/source timestamps and synchronization uncertainty;
 807. V6.19 sleeves begin DISCOVERY_ONLY/MEASURE_ONLY and do not globally block existing modules;
 808. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed swaps/orders, private keys, self-hosted nodes or user-PC dependencies.
-
-809. Hyperliquid portfolio-graph samples are treated as coarse reconciliation evidence rather than precise accounting truth;
-810. 15-minute/deposit-withdrawal graph sampling cannot certify intraperiod PnL extrema or drawdown without stronger event evidence;
-811. venue frontend graph PnL definitions are preserved as reported and differences from Alina's ledger become explicit reconciliation exceptions;
-812. Hyperliquid UI max drawdown remains a frontend-only reconciliation metric and does not replace Alina's certified equity-curve drawdown;
-813. sampled frontend histories cannot prove absence of deeper intraperiod drawdown;
-814. proof-source precedence is event ledger > reconciled account state > venue-derived analytics > frontend graph/UI;
-815. all V6.20 work remains GitHub-hosted, paper/read-only and introduces no signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
-
+809. V6.20 records IOC write priority, ALO queue priority and gossip/read priority as distinct mechanisms with separate charging and ordering semantics;
+810. current write-priority grouping requires non-outcome assets and a homogeneous all-IOC or all-non-reduce-only-ALO batch;
+811. a mixed or otherwise ineligible priority batch is rejected in feasibility simulation rather than partially credited with priority;
+812. current priority rate encoding p/100000000 and the applicable rule version are preserved point-in-time;
+813. current IOC priority cost is based on filled notional while current ALO priority cost is based on resting notional at placement;
+814. current order-priority payment source, HYPE spot-mark conversion and burn semantics are modeled separately from ordinary trading fees;
+815. IOC ordinary temporal-priority benefit is versioned as saturating around 8 bps under the current documented rule, while the parameter range and higher-priority tie-breaking remain distinct concepts;
+816. current same-proposer-bucket higher-priority IOC ordering is not converted into additional continuous latency reduction above the saturation region;
+817. ALO priority is modeled as a continuous roughly-400-ms same-level queue-tail reorder, not as faster mempool arrival;
+818. ALO priority placement cost is charged even for orders that never fill under the current documented rule;
+819. older locked queue position cannot be freely overtaken by a later ALO merely because it pays more priority;
+820. current cancel/ALO versus IOC/GTC action-class ordering is modeled as venue/version sequencing behavior and not generic CEX packet-arrival FIFO;
+821. an IOC priority fee cannot be credited with overtaking a cancel when the applicable venue rule prioritizes cancels first;
+822. gossip/read priority is economically distinct from write priority and its auction fee/state cannot be substituted for order priorityGas;
+823. current gossip-priority auction count, cadence, minimum bid, IP/path dependence and approximate slot latency effect are versioned inputs;
+824. node/split-client-block/gossip advantages unavailable to GitHub-hosted Alina are treated as competitor latency frontier or UNEXECUTABLE_CURRENT_ARCHITECTURE, never silently credited to Alina;
+825. absolute end-to-end latency and relative transaction-sequencing latency are separate state variables;
+826. SDK-style market helpers are modeled as protected aggressive IOC limits rather than infinite-depth native market orders;
+827. the official Python SDK current 5% market-helper slippage default is labeled CLIENT_DEFAULT and cannot be back-applied as a protocol constant or UI default;
+828. allMids fallback provenance remains active when an SDK-style protected IOC reference price is reconstructed;
+829. hypothetical action batching preserves order-class purity where priority/ordering semantics depend on ALO versus IOC/GTC versus cancel classes;
+830. nonce/API-wallet transport rules are retained only for hypothetical feasibility and cannot introduce signing/private-key code into the research path;
+831. paper feasibility may reject an action policy that requires incompatible batch composition, impossible throughput or unavailable low-latency transport even if signal PnL is positive;
+832. IOC priority evidence prefers node/user-fill priorityGas while ALO placement-cost evidence requires action/resting-notional provenance;
+833. missing ALO placement evidence is PRIORITY_PLACEMENT_UNMEASURABLE rather than zero cost;
+834. priority-sensitive sleeves report break-even priority rate and fraction of gross alpha consumed by priority cost;
+835. a priority-sensitive edge may be killed when competitive priority economics absorb its post-cost advantage;
+836. conflicting official snippets are reconciled against current Markdown plus first-party implementation/version evidence before a protocol rule is frozen;
+837. V6.20 keeps all numeric latency/priority observations versioned and does not treat empirical current-mainnet effects as deterministic guarantees;
+838. all V6.20 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, API-wallet operation, private keys, live probing, self-hosted nodes or user-PC dependencies;
+839. Hyperliquid portfolio-graph samples are treated as coarse reconciliation evidence rather than precise accounting truth;
+840. 15-minute/deposit-withdrawal graph sampling cannot certify intraperiod PnL extrema or drawdown without stronger event evidence;
+841. venue frontend graph PnL definitions are preserved as reported and differences from Alina's ledger become explicit reconciliation exceptions;
+842. Hyperliquid UI max drawdown remains a frontend-only reconciliation metric and does not replace Alina's certified equity-curve drawdown;
+843. sampled frontend histories cannot prove absence of deeper intraperiod drawdown;
+844. proof-source precedence is event ledger > reconciled account state > venue-derived analytics > frontend graph/UI;
+845. all V6.21 work remains GitHub-hosted, paper/read-only and introduces no signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
+846. canonical execution evidence preserves unaggregated fills when available and does not use aggregateByTime-compressed fills for queue/partial-fill proof;
+847. periods with only aggregated fill evidence are labeled AGGREGATED_FILL_EVIDENCE and receive weaker execution-certification status;
+848. source-native trade id tid is the preferred fill dedup identity where available and timestamp-price-size alone is insufficient;
+849. builderFee is treated as a component already included in the reported total fee under the current Hyperliquid fill schema;
+850. feeToken and fee sign are preserved so rebates and non-default fee currencies cannot be mis-accounted;
+851. venue-native crossed is preferred for maker/taker attribution and reconstructed aggressiveness remains a cross-check;
+852. reconnect/bootstrap snapshots are deduplicated against previously committed fill/order identities and are never counted as fresh duplicate events;
+853. current 60-second server-idle WebSocket timeout is versioned and quiet streams use heartbeat/pong health handling;
+854. heartbeat/pong traffic is excluded from market-event and opportunity counts;
+855. reconnect recovery requires snapshot/backfill reconciliation and continuity checks before feed health returns to HEALTHY;
+856. both oid and optional 128-bit cloid are retained for order reconciliation without conflating either with trade identity;
+857. unknownOid does not prove nonexistence when account/DEX scope or data continuity is uncertain;
+858. multi-DEX open-order queries preserve explicit DEX scope and do not infer no-order state from the first-DEX default;
+859. openOrders/frontendOpenOrders, orderUpdates, fills and historical status sources have distinct bootstrap/lifecycle/execution/reconciliation roles;
+860. frontend labels remain provenance/semantic hints and cannot invent matching-engine behavior absent a protocol rule;
+861. Scale is modeled as child limit-order decomposition/controller until stronger point-in-time server-native parent semantics are proven;
+862. Scale/adaptive ladders charge child-level queue, latency, fee and partial-fill economics rather than atomic-parent fills;
+863. user-specific streaming coverage respects current connection/subscription/unique-user/message constraints and reports constrained coverage when limits bind;
+864. data-plane sharding/rotation cannot silently convert partial wallet coverage into complete-market trigger/copy evidence;
+865. all V6.22 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
 ## Non-goals
 
 This change does not:
@@ -12339,7 +12336,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20/V6.21/V6.22 modules without scoped evidence gates;
 - use frontend portfolio charts or UI max drawdown as the primary proof ledger for strategy PnL/DD;
 - call raw AMM spot or slot0 an executable cross-protocol hedge price without fee/impact/gas modeling;
 - call a formula-index residual arbitrage when no executable replicating hedge exists;
