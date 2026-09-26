@@ -12999,6 +12999,18 @@ The following findings extend the verified weakness inventory. They were found b
 251. **Candle backfill validates prices incompletely and does not validate volume finiteness/sign.** `collection/candle_backfill.py::parser_bougies` rejects non-positive OHLC and `high < low`, but accepts negative/NaN/Infinity volume and does not require `low <= open/close <= high`. Structurally impossible candles can survive into liquidity/return research.
 252. **Candle deduplication hides conflicting evidence at the same timestamp.** `candle_backfill.dedupliquer` stores one `Bougie` per `(coin,t_ms)` with unconditional last-write-wins. Two source windows returning different OHLCV for the same candle do not emit a conflict/revision receipt, so input iteration order can choose research truth.
 
+253. **Copy-Vault frozen segment membership binds only the signal timestamp, not the complete economic episode.** `copy_vault_executable.replay_metaorders` applies `start_ms/end_ms` only to `signal_ts_ms`; after admission it can use an exit book beyond the segment end. A signal near the OOS boundary can therefore close in forward, and a late forward signal can consume evidence beyond the completed proof window while still being attributed to the earlier segment.
+254. **Copy-Vault causal-book ingestion can silently delete invalid UTF-8 bytes before JSON validation.** `copy_vault_book_loader.py` opens the causal JSONL with `errors="ignore"`. Invalid byte sequences can disappear before the parser sees them, so the corruption is not necessarily counted as an invalid row and the decoded evidence is no longer byte-faithful to the stored source.
+255. **Binance clock-sync evidence has no freshness expiry and no quality bound on RTT.** `BinanceClockSyncProbe.evidence/health` continues to expose the last successful sample indefinitely and reports `OK` whenever one sample exists. Subsequent probe failures do not invalidate that old offset, and unlike the Hyperliquid probe there is no maximum sample age or high-RTT rejection.
+256. **Native market identity parsing can lose integer precision through float coercion.** `collection/native_market_tape.py::_int` converts values with `int(float(value))`. Large exchange sequence/update/trade identifiers supplied as decimal strings can exceed IEEE-754 exact-integer precision and be rounded before becoming canonical ids, creating false duplicates, false gaps or wrong ordering.
+257. **Gate and Bitget point-in-time instrument metadata are absent from the native replay-tape authority.** `NativeVenueCoordinator._persist_discovered_instrument_metadata` explicitly persists metadata only for Bybit and OKX, and `native_instrument_metadata_envelope` supports only those two venues. Gate/Bitget market frames can therefore be collected without the same immutable tick/lot/min-size/contract-rule evidence needed to replay their economics point-in-time.
+258. **Gate and Bitget are outside the native clock-offset sampling path.** `NativeVenueCoordinator.refresh_clock_sync` measures only Bybit and OKX and `run_all` starts the clock-sync loop based only on those venues. Gate/Bitget observations can participate in the native universe without equivalent offset/RTT evidence from this coordinator, weakening corrected exchange-time comparisons.
+259. **The line-level economic proof audit does not independently prove signal-before-entry causality.** `economic_proof_audit.audit_family` extracts signal, entry and exit times but rejects only missing entry/exit or `entry > exit`. It does not require a signal timestamp or `signal <= entry`; for OOS it then checks the published `no_lookahead` Boolean instead of reconstructing that property from raw episode times.
+260. **Raw proof safety identity is fail-open when paper/read-only fields are missing.** The same audit requires the campaign to have `paper_read_only is True` and `real_execution is False`, but its raw guard rejects only explicit `paper_read_only is False` or `real_execution is True`. Missing/unknown raw safety fields therefore pass instead of making the raw proof non-certifiable.
+261. **The global economic audit can report all objectives met while its ledgers are invalid.** `audit_reports` computes `all_ledgers_valid` from missing-family, independent-audit and per-family ledger status, but computes `all_objectives_met` separately from only the three `objective_status == ATTEINT` strings. The artifact can therefore contain `all_objectives_met=True` alongside `all_ledgers_valid=False`, creating a contradictory positive authority.
+262. **Economic maturity transitions bind arbitrary text references, not immutable evidence artifacts.** `build_maturity_transition` requires only non-empty strings in `evidence_refs`, and `audit_maturity_chain` verifies only non-empty lists plus the transition hash chain. A syntactically valid chain can advance maturity using references that are neither cryptographic ids nor resolved/validated artifacts.
+
+
 
 
 
@@ -15593,6 +15605,40 @@ The following numbered items form the normative acceptance catalog. Each item is
 1451. candle parsing requires finite, structurally valid OHLC and finite non-negative volume;
 1452. duplicate candle timestamps with differing OHLCV produce an explicit conflict/revision state and deterministic source/revision identity;
 1453. all blocker-classified weaknesses 241-252 remain implementation blockers until deterministic cache-age, retry-after, non-finite reconciliation, funding-pagination and candle-conflict tests prove closure.
+1454. every Copy-Vault proof episode is wholly contained inside exactly one frozen train/validation/OOS/forward interval; signal-only membership is insufficient;
+1455. a Copy-Vault trade whose entry or exit crosses the OOS/forward/completed-proof boundary is rejected or handled by an explicit preregistered carry policy and cannot be credited to the earlier segment;
+1456. proof-critical JSONL readers use strict decoding and expose byte/line decode failures; invalid UTF-8 cannot disappear through errors=ignore before conservation accounting;
+1457. Binance clock evidence has an explicit maximum sample age and maximum acceptable RTT, and failed refreshes cannot leave an expired sample health=OK;
+1458. stale/high-RTT clock samples are excluded from corrected exchange-time synchronization and their unavailability is visible in the run receipt;
+1459. canonical exchange sequence/update/trade identifiers are parsed losslessly without int(float(...)); regression tests include integers above 2^53 and decimal-string ids;
+1460. Gate and Bitget have point-in-time instrument-metadata envelopes/receipts covering contract type, tick/lot/min-size/notional and relevant multiplier/settlement rules before certifying replay use;
+1461. Gate and Bitget have explicit clock-offset/RTT evidence or their corrected exchange-clock comparisons remain NON_CERTIFIABLE rather than inheriting Bybit/OKX coverage;
+1462. economic proof audit requires finite causal timestamps with signal <= entry <= exit and independently reconstructs no-lookahead rather than trusting a published Boolean;
+1463. proof-audit segment/freeze checks verify the full episode interval, not only trade-id membership or the signal timestamp;
+1464. raw proof requires paper_read_only=true and real_execution=false explicitly; missing/null/unknown safety identity blocks certification;
+1465. global all_objectives_met implies all_ledgers_valid plus every mandatory independent economic control ready for the same evidence set;
+1466. contradictory global states such as all_objectives_met=true with all_ledgers_valid=false are impossible by construction and covered by regression tests;
+1467. maturity-transition evidence_refs are immutable content-addressed artifact/receipt identities, not arbitrary non-empty strings;
+1468. audit_maturity_chain resolves and validates each referenced evidence object/hash and refuses missing, substituted or content-mismatched evidence;
+1469. mutation tests cover Copy-Vault boundary-crossing exits, invalid UTF-8, expired/high-RTT Binance clock samples, >2^53 sequence ids, missing Gate/Bitget metadata/clock, entry-before-signal raw trades and forged maturity references;
+1470. all blocker-classified weaknesses 253-262 remain implementation blockers until deterministic segment-containment, byte-conservation, clock-quality, lossless-id, proof-causality and evidence-resolution tests prove closure.
+
+
+### Episode-containment, native-clock and proof-audit closure contract
+
+Proof-facing temporal segmentation and cross-venue timing are properties of immutable evidence, not caller labels.
+
+- every Copy-Vault episode attributed to train/validation/OOS/forward is wholly contained in that segment: signal, entry, fills and exit all satisfy the same frozen bounds;
+- an episode crossing a segment/proof-window boundary is excluded or assigned under an explicit preregistered carry policy; it is never silently credited to the segment containing only its signal;
+- proof JSONL is decoded strictly; byte-decoding errors are counted/quarantined with byte/range identity and cannot be erased by permissive decoder settings;
+- every clock-offset sample used in replay/cross-venue/lead-lag has venue, sample time, age, RTT, acceptance thresholds and immutable provenance; stale/high-RTT evidence is unavailable rather than reused;
+- every active certifying native venue, including Gate and Bitget, has point-in-time instrument metadata and clock-quality evidence sufficient for its intended timing/economic claims;
+- exchange sequence/update/trade identifiers are parsed losslessly as integer/opaque identifiers without a floating-point round trip;
+- final economic proof reconstructs `signal <= decision/entry <= exit` and all applicable segment/freeze boundaries directly from the exact raw proof rows;
+- missing raw paper/read-only/capability identity is UNKNOWN and blocks certification;
+- a global “all objectives met” state is possible only when the same evidence also passes ledger validity and all mandatory independent proof controls;
+- maturity evidence references resolve to immutable content-addressed artifacts/receipts, and every transition validates those referenced objects before advancing stage.
+
 
 ## Non-goals
 
