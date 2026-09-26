@@ -11402,11 +11402,11 @@ The specification-completeness matrix covers at minimum:
 
 A missing matrix row propagates a scoped UNMEASURABLE/UNCERTAIN state to consumers rather than being filled with a default.
 
-### V6.24 source basis
+### Canonical provenance source basis
 
-V6.24 consolidates the first-party Hyperliquid rule families already rechecked through V6.14-V6.22 and the Exa/Parallel cross-checks performed on 2026-09-26.
+This canonical provenance layer consolidates the first-party Hyperliquid rule families already rechecked through the historical research tranches and the Exa/Parallel cross-checks performed on 2026-09-26.
 
-V6.24 does not add new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
+This provenance layer adds no new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
 
 ## Latest research integrated into the canonical spec — 2026-09-26
 
