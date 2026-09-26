@@ -3801,7 +3801,8 @@ This specification intentionally preserves all previously validated design layer
 - **Options Volatility Relative Value V6.10:** direct options-volatility sleeves, transaction-cost-aware delta hedging and executable vol-surface research;
 - **Event Identity & Feed Semantics V6.11:** source-native event identity, sweep de-fragmentation, idempotency, venue-specific continuity and timing uncertainty;
 - **Lifecycle & Reference Integrity V6.12:** RWA calendar/corporate-action/reference-source, expiry/roll, funding-boundary and account-lineage correctness;
-- **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality.
+- **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality;
+- **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -8692,6 +8693,450 @@ V6.13 was verified primarily against current official Hyperliquid documentation 
 Exa and Parallel Search were used to discover/cross-check the relevant details. Official protocol documentation controls when third-party descriptions differ.
 
 
+
+### Profitability Convergence V6.14 — exact fee, priority and reference-price semantics
+
+V6.14 closes the remaining protocol details that can change after-cost PnL by only a few basis points but are material relative to the +4 USD/day proof target.
+
+The governing rule is:
+
+> **a paper edge cannot use a cheaper fee, better queue position, cleaner mid, lower funding notional or more favorable trigger/reference price than the protocol would have provided at that timestamp.**
+
+### Hyperliquid priority-fee exactness
+
+Priority state is versioned separately for:
+
+- IOC/write priority;
+- ALO queue priority;
+- gossip/read priority.
+
+Do not merge these mechanisms.
+
+#### IOC/write priority
+
+For rule versions that support IOC priority:
+
+- priority rate belongs to the order action/grouping;
+- eligible orders must satisfy the then-current asset/order-type restrictions;
+- priority cost is converted/charged according to the then-current protocol rule;
+- recorded `priorityGas` is reconciled where available;
+- temporal benefit is evaluated separately from fee cost.
+
+Current documentation reviewed in this pass describes:
+
+- a 0-8 bps region that affects temporal prioritization;
+- priority above 8 bps providing no further ordinary time-preference benefit, while higher rates can still determine ordering among similarly timed orders in the high-priority bucket;
+- a current empirical mainnet effect around 45 ms lower end-to-end latency per 1 bp in the useful 0-8 bps range.
+
+These are **current/versioned observations**, not historical constants.
+
+#### ALO queue priority
+
+For rule versions that support ALO priority:
+
+- priority does not simply make the transaction "arrive faster";
+- it changes queue ordering among sufficiently recent same-level ALO orders;
+- the relevant recent-order window is versioned;
+- current documentation describes a roughly **400 ms** rolling eligibility window.
+
+Critical economic detail:
+
+> **ALO priority cost is charged when the order is placed, regardless of whether that order later fills.**
+
+Therefore maker/XEMM replay must include:
+
+```text
+expected_alo_priority_cost
+= placement_rate
+  * resting_notional
+  * number_of_priority_placements
+```
+
+subject to the exact historical protocol formula.
+
+Consequences:
+
+- canceled/unfilled priority ALO orders still consume cost when the rule version charges at placement;
+- repeated repricing/cancel-replace can destroy an apparently profitable maker edge even with zero fills;
+- queue improvement is measured against placement cost, adverse selection and queue aging;
+- priority-fee PnL is not conditioned only on fills;
+- a strategy cannot estimate ALO priority cost from fill records alone if placement-level evidence is missing.
+
+When historical placement-level priority evidence is unavailable, result is `PRIORITY_COST_UNMEASURABLE`, not zero.
+
+#### Eligibility/version drift
+
+Official priority documentation has changed over time.
+
+Therefore the rule manifest stores:
+
+- supported asset class;
+- allowed TIF/order family;
+- reduce-only eligibility;
+- max/useful priority range;
+- charging basis;
+- queue window;
+- mempool/time-priority behavior;
+- fee currency/conversion;
+- activation/revision timestamp.
+
+Never apply current ALO capability or current high-priority ordering rules to a historical period without rule evidence.
+
+### Point-in-time fee-tier engine V2
+
+Hyperliquid fee proof must use the actual/account-achievable fee state, not a repo-wide constant.
+
+Current official fee mechanics reviewed in this pass include:
+
+- rolling **14-day weighted volume**;
+- perp and spot volume jointly contributing to tier qualification;
+- spot volume counting with a different weight under the current schedule;
+- master/sub-account aggregation behavior;
+- vault volume treatment distinct from ordinary master/sub-account aggregation;
+- VIP taker/maker tiers;
+- market-maker rebate tiers;
+- referral discounts with eligibility limits;
+- staking discounts;
+- HIP-3 deployer fee scaling;
+- growth-mode scaling;
+- aligned-quote adjustments where applicable;
+- builder fees;
+- priority fees.
+
+For every paper account state store when measurable:
+
+- `userCrossRate`;
+- `userAddRate`;
+- spot cross/add rates;
+- active referral discount;
+- active staking discount;
+- rolling weighted volume;
+- maker-fraction/rebate tier;
+- vault-vs-user account class;
+- deployer/growth-mode fee state;
+- builder fee;
+- fee-rule timestamp.
+
+The official `userFees` endpoint is a preferred point-in-time source when collected causally.
+
+Rules:
+
+- do not infer future VIP/MM tier from volume accumulated later in the backtest;
+- a sub-account cannot be assigned a fee state inconsistent with current master-account aggregation rules;
+- vault fee economics are modeled under vault rules, not automatically inherited from the master account;
+- referral/staking discounts cannot prove +4 USD/day unless the paper proof contract explicitly allows and can sustain them;
+- fee rebates remain negative cost and are reconciled fill-by-fill;
+- current fee rules are never back-applied across known rule changes.
+
+### allMids / midpoint provenance
+
+A field named "mid" is not automatically executable midpoint truth.
+
+Current Hyperliquid `allMids` documentation states that when the order book is empty, the **last trade price can be used as fallback**.
+
+Therefore every normalized midpoint carries:
+
+- `mid_source = BBO_MID / LAST_TRADE_FALLBACK / OTHER / UNKNOWN`;
+- book age;
+- last-trade age;
+- bid/ask availability;
+- executable-depth confidence.
+
+Rules:
+
+- Cross-Venue and Lead-Lag cannot use `LAST_TRADE_FALLBACK` as if it were a two-sided executable BBO;
+- a fallback midpoint may be used as context/reference only with explicit lower confidence;
+- an apparent dislocation caused by an empty book plus stale last trade is rejected from executable-arbitrage admission;
+- fallback-state frequency becomes a market-liquidity/data-quality metric.
+
+### Funding cash-flow exactness
+
+Funding prediction and funding settlement remain separate.
+
+For standard Hyperliquid perps under the current documented formula:
+
+```text
+premium
+= [max(impact_bid_px - oracle_px, 0)
+   - max(oracle_px - impact_ask_px, 0)]
+  / oracle_px
+
+funding_rate_8h
+= average_premium
+  + clamp(interest_rate - average_premium, lower, upper)
+
+hourly_payment_rate
+= rule-specific hourly fraction of the computed rate
+```
+
+Current documentation states:
+
+- premium samples are taken every **5 seconds** and averaged over the hour;
+- the standard interest component is currently **0.01% per 8h**;
+- funding is paid every hour;
+- standard funding is currently capped at **4% per hour**;
+- standard impact notional is currently **20,000 USDC for BTC/ETH** and **6,000 USDC for other ordinary assets**, subject to contract/rule version.
+
+Most importantly, the realized funding cash flow uses:
+
+```text
+funding_payment
+= position_size * oracle_price * funding_rate
+```
+
+under the documented standard rule.
+
+Do **not** substitute mark price for oracle price in funding cash-flow notional.
+
+HIP-3 and Hyperp use separate formula families and remain independently versioned.
+
+### Funding evidence ladder
+
+For every funding interval distinguish:
+
+1. raw point-in-time premium/index inputs;
+2. running premium average;
+3. current/published funding state;
+4. venue-predicted/next funding;
+5. Alina forecast;
+6. final settled funding rate;
+7. realized account funding payment.
+
+A decision at time `t` can access only states 1-5 that were actually observable by `t`.
+
+State 6/7 cannot leak backward.
+
+For `predictedFundings` specifically:
+
+- record observation timestamp;
+- venue label;
+- predicted rate;
+- `nextFundingTime`;
+- supported DEX scope;
+- missing venues.
+
+Current official docs state the endpoint is supported for the **first perp DEX**; do not silently extend its coverage to other HIP-3 DEXs.
+
+### Robust mark/oracle reference contract
+
+Mark, oracle, BBO/mid and last trade are distinct data products.
+
+Current official documentation states:
+
+- validators publish oracle state approximately every few seconds;
+- mark uses robust combinations of oracle, Hyperliquid market state and external-perp references;
+- mark drives margining, liquidations, TP/SL triggering and unrealized PnL;
+- oracle participates in funding calculation.
+
+Replay stores:
+
+- raw oracle value/timestamp;
+- raw mark value/timestamp;
+- BBO/mid value/timestamp;
+- last trade value/timestamp;
+- source/fallback state.
+
+No module may trigger a liquidation/TP/SL solely from a last trade if the required mark state did not cross.
+
+### Quanto / quote-currency accounting
+
+Some standard Hyperliquid perp contracts can have an oracle/reference denominated in USDT while collateral/accounting is in USDC.
+
+Current contract documentation notes that no automatic USDC/USDT conversion is applied for such contracts, making the economic exposure technically quanto-like.
+
+Therefore instrument normalization stores:
+
+- oracle denomination;
+- collateral denomination;
+- settlement/accounting denomination;
+- whether a conversion is applied by protocol;
+- residual quote/collateral basis exposure.
+
+Cross-Venue/Relative-Value cannot assume USDC and USDT exposures cancel perfectly.
+
+Stress:
+
+- USDC/USDT basis;
+- collateral depeg;
+- reference-market quote divergence.
+
+### Exact TP/SL child behavior
+
+V6.13 already separates trigger activation, child placement and fill.
+
+V6.14 locks additional current documented details:
+
+- TP/SL uses mark-price triggering;
+- TP/SL market orders currently use bounded slippage rather than infinite market depth;
+- parent-attached children are not necessarily resized to the actually filled parent quantity after manual partial-parent cancellation;
+- a partially filled parent canceled for insufficient margin can have a different child-placement outcome;
+- sibling TP/SL cancellation semantics are versioned.
+
+No generic OCO model may replace these rules.
+
+### Native TWAP exact child behavior
+
+For the currently documented native TWAP rule family, record:
+
+- target cumulative schedule;
+- actual cumulative execution;
+- normal child size;
+- child slippage bound;
+- underfill;
+- catch-up size;
+- catch-up cap;
+- residual unfilled parent size;
+- post-only/network interruption state;
+- randomization/config fields when exposed.
+
+Current documentation reviewed in this pass describes:
+
+- **3% maximum child slippage**;
+- catch-up children up to **3x normal child size** when prior slices underfill.
+
+These values are versioned rule inputs.
+
+A Scheduled-Flow model must not assume a perfectly uniform execution path.
+
+### Self-trade expire-maker exactness
+
+Hyperliquid current STP behavior is explicitly **expire maker**:
+
+- same-address attempted self-trade cancels the resting maker order;
+- no ordinary fill is created for that prevented match;
+- no normal fee is charged on that prevented match;
+- the cancel does not appear as an ordinary trade-feed print;
+- the aggressing order can continue matching eligible liquidity behind the expired maker up to its limit.
+
+Therefore paper simulation must not:
+
+- create two fills;
+- cancel both orders;
+- stop the aggressor prematurely;
+- count the prevented match in market trade flow.
+
+### Action expiry / modify exactness
+
+Current action semantics reviewed in this pass include:
+
+- `expiresAfter` rejection for stale actions;
+- stale `expiresAfter` can carry a higher action-rate cost under current rules;
+- fast cancel has trigger-order restrictions;
+- scheduled cancel has minimum lead-time / daily trigger-count semantics;
+- `modify` / `batchModify` have `always_place` behavior;
+- when `always_place=false`, allowed replacement order types/TIF behavior are restricted and can transform a non-executable GTC into ALO behavior;
+- payload-level pre-validation can reject an entire batch with one error rather than independent child outcomes.
+
+Replay stores action-level and batch-level outcome separately.
+
+Do not distribute a payload-level batch rejection into optimistic per-child successes.
+
+### Open-order / throughput feasibility exactness
+
+Current Hyperliquid documentation reviewed in this pass includes:
+
+- base open-order allowance;
+- volume-linked additional slots;
+- capped total allowance;
+- special trigger/reduce-only behavior at high open-order counts;
+- address-level action budget linked to traded volume;
+- larger cancel allowance;
+- distinct batch accounting under IP versus address limits;
+- high-congestion write constraints tied to prior-day maker-share state.
+
+For quote-heavy research:
+
+- simulate maximum concurrent open orders;
+- actions/minute;
+- cancels/minute;
+- modifies/minute;
+- batch composition;
+- congestion stress;
+- action-budget headroom.
+
+A strategy requiring infeasible throughput is `EXECUTION_INFEASIBLE` even if its theoretical fill model is profitable.
+
+### Maximum order-value contract
+
+Current standard contract documentation exposes maximum market-order value by leverage bucket and a larger maximum limit-order value.
+
+These limits are versioned metadata and participate in capacity.
+
+If desired notional exceeds the current venue cap:
+
+- split into admissible child orders;
+- add extra latency/action/impact;
+- re-evaluate alpha half-life;
+- reject if slicing destroys net edge.
+
+### Frontend/UI market provenance
+
+A UI/frontend market order must not be normalized blindly to an abstract infinite market order.
+
+When `FrontendMarket` or equivalent provenance is visible:
+
+- retain the original TIF/order-type marker;
+- preserve the then-current price/slippage protection semantics;
+- distinguish UI-generated market behavior from raw API IOC behavior when they differ.
+
+This matters especially for Copy-Vault reconstruction and order-status interpretation.
+
+### Entry-price / PnL accounting contract
+
+Hyperliquid documentation describes entry price and displayed unrealized/closed PnL as convenience/frontend-derived accounting, while fundamental account truth is margin/balance plus trades/ledger.
+
+Therefore Alina keeps:
+
+- exact fill ledger;
+- fee ledger;
+- funding ledger;
+- collateral/account ledger;
+- derived entry price;
+- derived unrealized PnL;
+- venue-reported account state.
+
+The derived entry-price/PnL fields are reconciled but never used to invent missing trades.
+
+For position accounting:
+
+- opening fills update weighted-average entry;
+- closing fills retain entry price for remaining position under the documented model;
+- unrealized PnL uses mark price;
+- closed PnL/fee sign conventions are validated with fixtures rather than assumed from display formatting.
+
+### Source-conflict rule
+
+When two official pages appear to reflect different generations of a protocol rule:
+
+1. do not average/merge the rules;
+2. identify the latest applicable rule where publication/version evidence exists;
+3. retain older behavior as a separate historical rule version;
+4. mark periods without activation-boundary evidence `RULE_VERSION_UNCERTAIN`;
+5. run conservative sensitivity if the rule changes PnL.
+
+This is especially important for priority-fee eligibility and charging semantics, which have evolved.
+
+### V6.14 research basis
+
+V6.14 was cross-checked with Exa and Parallel Search, with current official Hyperliquid documentation treated as the controlling source for:
+
+- Priority fees;
+- Fees / userFees;
+- Funding;
+- Predicted fundings;
+- Oracle / robust price indices;
+- Contract specifications;
+- Self-trade prevention;
+- TP/SL;
+- Order types / native TWAP;
+- Exchange endpoint;
+- Error responses;
+- Rate limits and user limits;
+- Entry price and PnL.
+
+Public wrappers and practitioner code were used only to identify edge cases; they do not override official protocol semantics.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -9940,7 +10385,37 @@ The following numbered items form the normative acceptance catalog. Each item is
 667. disappearance from a reconnect/open-order snapshot cannot by itself create a paper fill;
 668. every execution-sensitive proof emits a point-in-time market-rule manifest and missing PnL-critical rules remain RULE_UNKNOWN;
 669. V6.13 can increase proof quality by invalidating false-positive fills even when it creates no new alpha;
-670. all V6.13 additions remain GitHub-hosted/read-only/paper and cannot introduce signed actions, private keys, user-PC services, self-hosted nodes or live calibration orders.
+670. all V6.13 additions remain GitHub-hosted/read-only/paper and cannot introduce signed actions, private keys, user-PC services, self-hosted nodes or live calibration orders;
+671. V6.14 versions IOC/write priority, ALO queue priority and gossip/read priority as distinct mechanisms;
+672. ALO priority cost is charged according to the historical placement rule even when the order never fills, rather than only on fills;
+673. repeated ALO cancel/reprice cycles include cumulative priority-placement cost and cannot appear free when unfilled;
+674. priority-fee eligibility, max/useful range, charge basis and recent-order queue window are versioned rather than treated as timeless;
+675. priority-cost-unavailable historical periods are PRIORITY_COST_UNMEASURABLE rather than zero-cost;
+676. paper fee state uses point-in-time achievable user/account economics rather than a repository-wide constant whenever evidence exists;
+677. rolling weighted volume, master/sub-account aggregation, vault separation, VIP/MM tiers, rebates, referral/staking discounts, builder/deployer/growth-mode fees are individually attributable when relevant;
+678. future-earned fee tiers or discounts cannot leak backward into historical proof;
+679. all normalized midpoint values carry provenance distinguishing executable BBO midpoint from last-trade/other fallback;
+680. an allMids last-trade fallback caused by an empty book cannot certify executable Cross-Venue or Lead-Lag dislocation;
+681. standard-perp funding reconstruction uses the point-in-time formula family, premium sample cadence, impact notional, clamp/cap, interest component and hourly settlement rule;
+682. realized standard funding cash flow uses the documented oracle-price notional rather than substituting mark price;
+683. funding evidence distinguishes raw premium inputs, running estimate, exchange prediction, Alina forecast, final rate and realized payment;
+684. predictedFundings coverage remains limited to the DEX/venues actually returned at that timestamp and cannot be extrapolated to unsupported HIP-3 DEXs;
+685. mark, oracle, BBO/mid and last-trade timestamps are separate evidence streams and cannot be interchanged for trigger/liquidation/funding semantics;
+686. quanto/quote-currency normalization records oracle/reference denomination, collateral denomination and residual stablecoin basis exposure;
+687. TP/SL replay preserves mark-trigger, bounded-slippage, parent-child, partial-parent and sibling-cancel rule versions;
+688. native TWAP replay versions child slippage, catch-up multiplier, underfill/residual state and exposed randomization/configuration;
+689. self-trade prevention is modeled as expire-maker with aggressor continuation, no prevented-match fill and no ordinary trade-volume print;
+690. expiresAfter, fast-cancel, scheduled-cancel, always_place and batch pre-validation rules are represented at action/batch level;
+691. payload-level batch rejection cannot be transformed into per-child fills;
+692. quote-heavy feasibility includes open-order count, action/cancel/modify budgets and congestion maker-share constraints where applicable;
+693. maximum market/limit order-value caps constrain capacity before execution admission;
+694. capacity splitting above venue order caps adds child-order latency, impact and action cost before edge is re-evaluated;
+695. FrontendMarket/UI-origin order provenance is retained when available and cannot be normalized blindly to infinite-depth market execution;
+696. exact fill/fee/funding/account ledgers remain authoritative over convenience-derived entry-price or displayed PnL fields;
+697. opening/closing/mark-price PnL accounting is covered by golden fixtures against official rule examples;
+698. conflicting official rule generations create separate versioned semantics or RULE_VERSION_UNCERTAIN rather than a blended rule;
+699. V6.14 can invalidate a candidate solely because exact costs/reference semantics remove its net edge, which is considered successful proof-quality improvement;
+700. all V6.14 additions remain GitHub-hosted, read-only and paper-only, with no signed actions, private keys, user-PC execution, self-hosted node or live calibration order.
 
 ## Non-goals
 
@@ -9950,7 +10425,10 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14 modules without scoped evidence gates;
+- treat an allMids last-trade fallback as executable two-sided midpoint;
+- assume ALO priority cost occurs only when filled;
+- substitute mark price for oracle price in standard funding cash-flow notional when the rule requires oracle;
 - treat option mark IV/mark price as executable fills;
 - assume positive IV-RV implies profitable short volatility;
 - credit Chase with exact maker queue economics when historical repricing/queue evidence is unavailable;
