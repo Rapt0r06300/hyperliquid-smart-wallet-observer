@@ -12916,6 +12916,12 @@ The following findings extend the verified weakness inventory. They were found b
 179. **Market-Truth evidence quality is checked by truthiness instead of a validated domain/receipt.** The same validator tests `not bool(feed_quality_score)`. Negative, NaN or infinite scores are truthy and can avoid the quality-violation counter when the status string is not blocked. A proof boundary must validate a finite bounded score plus the exact data-gate receipt, not presence/truthiness.
 180. **Forward PnL extraction in the Market-Truth validator silently loses bad rows and accepts non-finite numbers.** `_pnls` skips conversion failures and appends plain `float(value)` without finiteness checks. The forward sample can shrink after parse loss or carry NaN/Infinity into PF/net/drawdown helpers instead of becoming contaminated/non-certifiable.
 
+181. **Canonical market-event identity is transport-time dependent rather than native-event stable.** `normalization/market_events.py::canonicalize_tick_record` builds `source_tick_ref` from raw hash plus local receive time, then hashes receive/write timestamps into `event_id`. The same venue event redelivered/recovered later with identical native trade/order/sequence identity but different local transport timestamps can therefore receive a different canonical id and evade exactly-once deduplication.
+182. **Same-millisecond canonical ordering falls back to an arbitrary event hash instead of causal sequence evidence.** `MarketTruthPipeline.run` sorts by `observable_at_ms`, `received_ts_ms`, then `event_id`, despite `CanonicalMarketEvent` carrying `connection_id`, `sequence` and `recv_mono_ns`. Two causally ordered L2/trade events received within the same millisecond can be reordered by hash, changing queue/book state and modeled fills.
+183. **PaperLedger turns duplicate event ids into new events instead of enforcing idempotence.** `PaperLedger._append` detects an existing `event_id`, derives a collision-specific replacement id from session/id/next index, and appends it. A repeated economic action can therefore become a second valid hash-chain event instead of a typed duplicate/replay rejection; upstream state may already have mutated before this collision handling runs.
+184. **The durable ledger reader conflates an absent ledger with a healthy empty ledger.** `simulation/ledger_integrity.py::read_chain` returns `LEDGER_OK, events=()` when the path does not exist. This weakens callers that rely on the reader's status and conflicts with the canonical requirement that ABSENT, intentionally EMPTY and CORRUPT are distinct proof states.
+185. **Market-event data-gate typing is fail-open for truthy non-booleans and non-finite scores.** `_quality_from_summary` converts `data_gate_ready` with Python `bool()`, so values such as the string `"false"` become true, while `_to_optional_float` accepts NaN/±Infinity. Canonicalization can therefore mark malformed quality metadata as signal-eligible unless upstream schema discipline happens to prevent it.
+
 
 
 
@@ -12930,10 +12936,13 @@ A proof-facing replay distinguishes recorded-event playback from recomputation u
 - semantic replay reconstructs the immutable market, leader, config, risk and causal-clock inputs visible at each decision boundary and re-executes the current canonical decision stack;
 - semantic parity compares recomputed decision, reason, approved size, gate receipt and PaperIntent against the historical receipt and surfaces any drift;
 - canonical market events are deduplicated by stable event/native identity before both persistence and TruthChain/execution consumption;
+- stable native identity is venue-semantic (trade id/hash, order/update identity or authoritative source+connection+sequence as applicable) and does not change solely because local receive/write time changes;
+- within one connection/clock epoch, same-millisecond events use authoritative sequence/monotonic ordering when available; an event hash/string is never an economic causal tie-breaker;
 - duplicate public-trade batches cannot advance maker matched volume or queue state twice;
 - canonical-event dedupe identity survives restart and replay of the same event set yields the same event count, fill outcome and evidence hash;
 - a positive Market-Truth candidate state requires non-empty, one-to-one bound execution/reconciliation evidence for every counted proof episode;
 - empty evidence is `EVIDENCE_MISSING`, not zero violations;
+- data-gate booleans are strict booleans and quality scores are finite, schema-valid and range-checked before `signal_eligible=true`;
 - feed-quality evidence is finite, bounded and linked to the exact data-gate receipt for the fill;
 - malformed/unparseable/non-finite forward PnL rows are counted and contaminate/quarantine the proof set rather than disappearing.
 
@@ -12947,6 +12956,7 @@ Canonical paper state changes are validated first and committed atomically.
 - negative free cash/margin deficit is an explicit rejection or separately preregistered leverage state, never an accidental successful ledger snapshot;
 - PaperEngine state, PaperLedger state, liquidity reservation and event-chain append form one transaction or deterministic rollback unit;
 - any validation/sealing/capital error leaves all pre-call state unchanged and emits typed failure evidence;
+- duplicate/idempotency identity returns the already-applied outcome or a typed duplicate rejection; collision handling never manufactures a new economic event id for the same action;
 - PnL reconciliation rejects all NaN/Infinity/non-finite inputs before arithmetic; non-finite differences can never produce `ok=true`;
 - every mark is finite, positive and causally attributable; invalid/missing marks remain typed missing/stale and never mutate last mark/equity;
 - average-margin ROI names the exact averaging method; proof-facing `average capital at risk` is time-weighted by causal holding intervals (or uses another preregistered denominator with a distinct name);
@@ -15288,6 +15298,12 @@ The following numbered items form the normative acceptance catalog. Each item is
 1363. feed_quality_score is finite and constrained to its canonical domain, and positive Market-Truth validation consumes the exact hash-bound data-gate receipt rather than Python truthiness;
 1364. Market-Truth forward PnL parsing accounts for every input row and rejects/quarantines parse failures and NaN/±Infinity instead of dropping them from the sample;
 1365. all blocker-classified weaknesses 175-180 from the 2026-09-26 semantic-replay/Market-Truth audit remain implementation blockers until deterministic duplicate/restart/parity/evidence-binding tests prove closure.
+1366. canonical market-event identity is derived from stable native/source identity and remains unchanged when the same venue event is redelivered with different local receive/write timestamps;
+1367. same-millisecond market events use authoritative venue sequence or connection-scoped monotonic ordering where available and never lexical/hash order as a causal fallback;
+1368. PaperLedger duplicate/idempotency identity cannot be converted into a fresh event id; replaying the same economic action has exactly-once state, PnL and fee effect;
+1369. ledger read state distinguishes ABSENT from valid intentionally EMPTY and CORRUPT, and only an explicitly initialized empty ledger may be healthy with zero events;
+1370. Market-Truth canonicalization accepts data_gate_ready only as a strict boolean and feed_quality_score only as a finite value inside the canonical allowed domain;
+1371. all blocker-classified weaknesses 181-185 from the 2026-09-26 identity/idempotence audit remain implementation blockers until native-redelivery, same-ms-order, duplicate-action, missing-ledger and malformed-quality regression tests prove closure.
 
 ## Non-goals
 
