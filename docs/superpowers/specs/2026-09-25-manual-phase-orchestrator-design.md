@@ -12759,12 +12759,23 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 34. **Risk configuration is not actually loaded from the project config.** `config/loader.py` currently constructs `risk=RiskSettings()` directly and does not populate it from a `risk` YAML mapping. A user can believe a risk threshold was configured while the runtime silently uses defaults.
 35. **Malformed numeric configuration silently falls back.** `_as_float()` and `_as_int()` return default values on parse errors. Proof-critical risk/execution settings must reject malformed input instead of continuing under an unintended value.
 36. **The current config schema still exposes TESTNET/MAINNET environments and execution toggles despite the paper/read-only project contract.** Guards currently prevent mainnet execution and no active order transport was found, but the canonical current-scope loader should not allow an environment variable alone to move the runtime into a non-paper execution mode.
-37. **A legacy requirements surface still installs CCXT by default.** `requirements.txt` contains `ccxt>=4,<5`, while `pyproject.toml` correctly treats CCXT as discovery-only optional capability because CCXT exposes order APIs. The safer packaging boundary is therefore not yet universal.
+37. **CCXT capability boundaries are inconsistent across dependency surfaces.** `requirements.txt` installs `ccxt>=4,<5` while `pyproject.toml` places it in a discovery extra. CCXT is intentionally useful to Alina for broad public market discovery and may remain installed/available; the weakness is not CCXT itself but the lack of one universal capability contract proving that only public discovery methods are reachable and that credentials/order-routing methods can never enter an authoritative execution path.
 38. **Raw evidence can be disabled by an environment flag.** `HYPERSMART_DISABLE_RAW_STORAGE=1` turns off several raw stores. That may be useful operationally, but any such run must be explicitly non-certifiable because immutable raw evidence is required for forensic replay/economic proof.
 39. **Promotion vocabulary still contains an automatic paper→testnet state.** `backtesting/promotion_gate.py` can return `PROMOUVOIR_TESTNET`. It does not itself place an order, but this semantic output is outside the current strict paper/read-only scope and could later become an unsafe automation hook.
 40. **Missing canonical ledger currently does not block promotion.** `runtime.protections.scanner_ledger()` returns `promotion_autorisee=True` for an absent ledger, and `controler_avant_promotion()` therefore does not reject that condition. Economic promotion without the ledger of truth must be impossible.
 41. **Incident-ledger parse errors do not currently block promotion.** Malformed incident rows are counted as `PARSE_ERROR`, but `PARSE_ERROR` is not in the blocking incident set. A corrupted safety/incident record cannot be treated as harmless.
 42. **Bounded dedupe can forget old economic identities.** `DedupDurable` intentionally retains/compacts only a bounded recent ID window. This is appropriate for some telemetry, but not sufficient as the sole exactly-once authority if older fills/events can reappear through replay, archive overlap or backfill.
+43. **Risk authority is fragmented across multiple engines with incompatible defaults.** Current modules include `risk_engine.py`, `risk_engine_v3.py`, `advanced_risk_manager.py`, `risk_gate.py`, `risk_gate_runtime.py` and additional sizing/halt gates. They use different thresholds, currencies and state models; some are composed only when an environment flag is enabled. Safety cannot depend on which helper a caller happened to invoke.
+44. **A critical risk gate is opt-in.** `risk_gate_runtime.py` returns success when `HYPERSMART_RISK_GATE_ENABLED` is absent/false. Mandatory risk controls must be active by canonical architecture, not enabled by an optional environment flag.
+45. **AdvancedRiskManager's per-position cap can be semantically lost.** The function locally reduces `proposed_notional_usdt` to a maximum position, but `RiskAssessment` does not return an explicit approved notional reflecting that cap. A caller can therefore retain the original requested notional while seeing an allowed verdict.
+46. **Several risk calculations use wall-clock and implicit sampling assumptions.** Daily reset, alpha-decay and volatility timestamps use `time.time()`; volatility annualization assumes a hard-coded periods-per-year value without carrying the actual sampling interval. Replay-equivalent risk decisions require event time and explicit observation cadence.
+47. **“Correlation” protection is not actual correlation.** The advanced risk path reduces size when the same coin appears multiple times, but does not estimate cross-asset correlation despite exposing a `max_correlation` setting. Named risk guarantees must correspond to implemented evidence or be relabeled diagnostic.
+48. **Carry remains executable as paper research code despite being excluded from the canonical strategy scope.** The `funding/` tree contains paper runtimes, allocators and cross-venue carry logic; `experimental/runner.py` still imports/marks funding-carry positions. Disabled-by-scope strategies must not share canonical ledger/promotion authority or become active through a simple environment switch.
+49. **Historical hard-coded economic state exists in runtime-like helpers.** `funding/allocation_moteurs.py` embeds dated engine performance assumptions and a fixed HLP benchmark in `etats_courants()`. Historical observations may be fixtures/research notes but cannot act as current runtime truth.
+50. **CCXT multi-venue eligibility currently aggregates by canonical base coin before proving contract equivalence.** `CCXTUniverseScout` and `UniversalMarketRegistry` can mark a base as multi-venue/hot-path eligible from venue counts even when quote/settle, linear/inverse structure, multiplier, contract size or exact payoff compatibility differ.
+51. **CCXT/discovery snapshot corruption can masquerade as an empty universe.** `_load_snapshot()`, `_snapshot_markets()` and `load_native_collection_candidates()` can return empty state or skip invalid rows on malformed persisted discovery data. “No candidates” must be distinguishable from “discovery state unreadable”.
+52. **Simple symbol normalization is lossy.** The generic normalizer strips USD/USDT/PERP suffixes and returns a base-like token; this is useful for discovery but insufficient evidence of economic equivalence for Cross-Venue matching.
+
 
 
 
@@ -12989,7 +13000,7 @@ While Alina is paper/read-only, canonical configuration resolves only to `READ_O
 - testnet/mainnet enum values may remain only as quarantined compatibility/schema history until a separately authorized future scope change;
 - promotion outputs in the current scope are research states such as `PAPER_CERTIFIED`, `FORWARD_REQUIRED` or `NO_PROMOTION`; they never emit an actionable `PROMOTE_TESTNET`/live transition;
 - no workflow, controller or CLI may translate a research verdict into an external execution mode;
-- discovery-only CCXT is installed only in an isolated optional profile with no credential-loading/order-routing path, and legacy `requirements.txt` cannot reintroduce CCXT into the default authoritative runtime.
+- CCXT remains available for public universe discovery/scouting and may be installed in the normal development/runtime environment when operationally useful; authoritative Alina code accesses it only through a discovery-only wrapper with no credentials, no private endpoints and no order-routing authority;
 
 Runs performed with raw evidence disabled are tagged `RAW_EVIDENCE_DISABLED_NON_CERTIFIABLE`; they may test plumbing/operations but cannot produce economic proof.
 
@@ -13010,6 +13021,82 @@ A promotion gate requires the explicit presence and validation of every mandator
 Telemetry dedupe windows may be bounded, but canonical economic exactly-once semantics cannot forget an identity while that identity can legally reappear.
 
 Economic fills/funding/transfers/order-state events use durable native/canonical unique keys enforced by an immutable ledger index/database uniqueness constraint or an epoch/sequence scheme with equivalent proof. Replay/archive overlap from arbitrarily old retained evidence cannot create a second economic effect merely because an in-memory/recent-ID window was compacted.
+
+### Single canonical risk authority
+
+Risk is a mandatory canonical state machine, not a library of optional independent gates.
+
+The canonical risk decision consumes the exact canonical account state and returns one immutable decision object containing:
+
+- `allowed`;
+- every mandatory gate result and evidence timestamp;
+- requested notional;
+- **approved notional** after all caps/scalers/venue quantization;
+- reason codes;
+- risk-config/version hash;
+- account-state hash.
+
+Rules:
+
+- every paper intent passes the same mandatory canonical risk pipeline;
+- mandatory gates are deny-by-default and cannot be disabled by an environment flag;
+- legacy/experimental risk engines may be pure feature/advisory producers but cannot independently authorize an intent;
+- if a mandatory risk subsystem is unavailable, stale, malformed or contradictory, the intent is rejected/blocked;
+- downstream execution must use `approved_notional` from the canonical risk result and cannot reuse the upstream requested notional;
+- any cap/scaler can only reduce/reject exposure and must be observable in the decision artifact;
+- risk timing uses injected event/replay time and the actual measurement cadence;
+- a setting named correlation/VaR/CVaR/drawdown/etc. cannot be considered active unless its implemented statistic and input evidence match that claim;
+- risk behavior is parity-tested across replay and forward paper from identical canonical account/event state.
+
+### Disabled-strategy quarantine
+
+A strategy excluded from the current canonical scope is not merely “default off”.
+
+For Carry and any other disabled strategy:
+
+- it cannot register a canonical strategy lane, write canonical PnL/equity, influence canonical capital allocation, or satisfy promotion gates;
+- it cannot be activated by a single environment flag or incidental import from an authoritative runtime;
+- existing modules may remain as historical/research fixtures and may be executed only in explicitly labeled non-certifying research contexts;
+- historical constants, dated APRs, benchmark rates or prior verdicts are never treated as current market state;
+- any future resurrection requires the kill-resurrection/preregistration protocol already defined in this spec and a deliberate scope update.
+
+### CCXT discovery and instrument-compatibility contract
+
+CCXT is **kept** as a useful broad public universe scout.
+
+Its allowed authority is:
+
+`public market metadata discovery -> candidate suggestion -> native/specialized verification`.
+
+CCXT may be installed in normal Alina environments. The security boundary is behavioral/capability-based:
+
+- no API keys/secrets are provided to the scout;
+- no private-account endpoint is called;
+- no `createOrder`/order/cancel/withdraw/transfer or equivalent mutating CCXT capability is reachable from authoritative Alina call paths;
+- CCXT prices/order books do not silently replace native collectors when a native collector is required by the evidence contract;
+- static/runtime capability tests verify the discovery wrapper's allowed method set and absence of credentials.
+
+Discovery grouping by base symbol is **only a breadth heuristic**. A candidate becomes Cross-Venue/hot-path compatible only after an explicit instrument-compatibility record proves the required dimensions, including:
+
+- underlying/payoff identity;
+- market type;
+- quote and settlement currency;
+- linear/inverse semantics;
+- contract multiplier/contract size;
+- size/price unit normalization;
+- expiry/settlement where relevant;
+- venue-specific symbol mapping;
+- trading-session/oracle/reference semantics where relevant.
+
+A same-base result such as `BTC` on two venues is therefore not, by itself, proof that the two instruments are hedge-equivalent or arbitrage-comparable.
+
+Discovery persistence is fail-visible:
+
+- corrupt/unreadable snapshot => `DISCOVERY_STATE_CORRUPT`, not empty universe;
+- malformed rows are counted/quarantined and surfaced;
+- failed venues preserve last-known discovery only with explicit stale/error status;
+- zero discovered candidates and failed discovery are distinct;
+- discovery timestamp/provenance is metadata only and never substitutes for proof-critical market timestamps.
 
 ### Configuration truth
 
@@ -14193,7 +14280,7 @@ The following numbered items form the normative acceptance catalog. Each item is
 1119. malformed proof-critical numeric/boolean/environment configuration fails validation instead of falling back to a default value;
 1120. current-scope canonical startup accepts only READ_ONLY/PAPER execution environments and rejects TESTNET/MAINNET or execution-enable flags before runtime initialization;
 1121. current-scope promotion verdicts cannot emit an actionable PROMOTE_TESTNET/live transition and remain research/paper states only;
-1122. CCXT remains discovery-only optional capability and is absent from the default authoritative runtime dependency surface, credential loading and order-routing path;
+1122. CCXT remains available for discovery/scouting but authoritative Alina usage is credential-free, public-read-only and discovery-only; no CCXT order/private-account method can enter canonical execution, accounting or promotion call paths;
 1123. any run with raw-evidence storage disabled is explicitly NON_CERTIFIABLE and cannot contribute to replay/economic proof;
 1124. an absent canonical ledger blocks promotion and cannot be interpreted as a healthy empty ledger;
 1125. parse/corruption errors in canonical safety, incident, freeze or economic journals are promotion-blocking until reconciled;
@@ -14202,6 +14289,22 @@ The following numbered items form the normative acceptance catalog. Each item is
 1128. old event replay after dedupe compaction is a mandatory regression test and must produce no second economic effect;
 1129. file absence, valid intentionally-empty state and corrupt/unreadable state are distinct typed states throughout promotion logic;
 1130. current execution guards being safe does not waive removal/quarantine of configuration/package surfaces that could later re-enable external execution by a one-line setting change.
+1131. one canonical mandatory risk pipeline is the sole authority allowed to approve a paper intent and all mandatory risk gates are deny-by-default rather than environment-opt-in;
+1132. the canonical risk result carries requested_notional and approved_notional, and execution uses only approved_notional after all caps/scalers/quantization;
+1133. any risk cap/scaler can only reduce/reject requested exposure and deterministic tests prove the downstream intent cannot retain a larger pre-cap notional;
+1134. risk daily/session/alpha-decay/volatility timing uses causal injected event time and explicit measurement cadence rather than wall-clock or hidden sampling assumptions;
+1135. risk controls advertised as correlation/VaR/CVaR or equivalent are either backed by the corresponding implemented statistic/evidence or relabeled/non-authoritative;
+1136. legacy/parallel risk engines cannot independently authorize canonical intents and disagreement/unavailability in a mandatory risk component blocks the action;
+1137. Carry and other disabled-by-scope strategies cannot write canonical ledger/PnL, influence canonical capital allocation, promote, or become active through a single environment switch;
+1138. dated/hard-coded strategy economics and benchmark constants remain historical fixtures only and cannot act as current runtime market truth;
+1139. CCXT is retained for public universe scouting and may remain installed, while canonical use supplies no credentials and exposes no private/order/cancel/withdraw/transfer capability;
+1140. static/runtime tests prove authoritative Alina call paths cannot reach CCXT mutating/private methods even when the ccxt package is installed;
+1141. CCXT/native universe discovery by base coin alone cannot establish Cross-Venue compatibility or hot-path eligibility;
+1142. Cross-Venue eligibility requires an explicit instrument-compatibility record covering payoff, market type, quote/settle currency, linear/inverse semantics, multiplier/contract size and unit normalization;
+1143. simple symbol stripping/normalization is discovery metadata only and cannot certify two venue contracts as economically equivalent;
+1144. corrupt or unreadable CCXT/universe snapshots produce DISCOVERY_STATE_CORRUPT or equivalent fail-visible state rather than an empty healthy universe;
+1145. malformed discovery rows and venue failures are surfaced/quarantined with stale provenance and cannot silently shrink the certifying universe;
+1146. discovery failure, zero genuine candidates and intentionally disabled discovery are distinct typed states in reports and run manifests.
 
 ## Non-goals
 
