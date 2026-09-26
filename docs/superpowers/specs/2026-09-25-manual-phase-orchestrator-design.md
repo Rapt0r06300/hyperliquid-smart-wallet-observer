@@ -12397,6 +12397,25 @@ The implementation must include deterministic regression/metamorphic tests that 
 - independent PnL reconstruction must derive from raw/typed events and lifecycle state and must not reuse the published/final aggregate PnL field as an input;
 - deleting any proof-critical fee, funding, fill or cash-flow event from a controlled fixture must make the result fail/UNMEASURABLE rather than improve certifiable PnL.
 
+### Simulation PnL display contract
+
+The simulation UI is a consumer of canonical accounting truth, never an independent PnL calculator.
+
+A numeric PnL may be displayed only when the exact displayed scope has a valid accounting status. If the required ledger/lifecycle/cost/funding/fill/mark reconciliation is missing, stale, contradictory, incomplete, or invalid, the UI must display the explicit status (`UNMEASURABLE_PNL`, `INVALID_PNL`, `PNL_RECONCILIATION_MISMATCH`, or the scoped equivalent) instead of a numeric PnL.
+
+Display rules:
+
+- no fallback to `0`, last-known PnL, cached PnL, estimated PnL, gross PnL, midpoint markout, or another strategy/module's PnL when canonical net PnL is unavailable;
+- an invalid/unmeasurable numeric value must be removed from cards, charts, totals, ROI, profit factor, daily target progress, leaderboards, badges, colors, alerts and API/UI summaries that could make it look economically valid;
+- realized, unrealized, estimated and diagnostic values must be visually and structurally distinct and can never share a label that implies interchangeable PnL truth;
+- stale unrealized state must be labeled stale and must not continue moving or appearing as current verified PnL;
+- dashboards and APIs must carry the PnL validity/status field together with the value so a frontend cannot discard the qualification;
+- aggregation is deny-by-default: if a material child component is invalid/unmeasurable, the parent total cannot silently sum only the known favorable children and display a partial PnL as complete;
+- after restart, reconnect, replay resume, dataset repair or ledger rebuild, the UI must not restore a previously cached numeric PnL until canonical reconciliation has completed again;
+- a disagreement between two UI/report surfaces is itself a reconciliation failure and numeric PnL display is suppressed for the affected scope until resolved.
+
+The user-facing rule is absolute: **Alina must never show a number as simulation PnL unless that number is currently supported by the canonical accounting evidence for that exact scope. Better no number than a false number.**
+
 ### First-party source basis
 
 The current Hyperliquid documentation establishes the source semantics used by this gate:
@@ -13430,6 +13449,11 @@ The following numbered items form the normative acceptance catalog. Each item is
 986. malformed or truncated proof-critical accounting records quarantine/fail the affected certification scope and cannot be silently skipped when their omission could change PnL, costs, exposure or trade count;
 987. independent certifying PnL reconstruction is derived from raw/typed accounting events and lifecycle state and cannot consume the published/final aggregate PnL field as an input;
 988. removing a proof-critical fill, fee, funding or cash-flow event from a controlled accounting fixture must cause FAIL/UNMEASURABLE rather than improve certifiable PnL.
+989. the simulation UI/API displays a numeric PnL only when the exact displayed scope has valid canonical accounting status; otherwise it displays an explicit invalid/unmeasurable/reconciliation-failed status and no numeric PnL;
+990. no UI/report fallback may substitute zero, cached/last-known PnL, estimated/gross PnL, midpoint markout or another scope's PnL for unavailable canonical net PnL;
+991. realized, unrealized, estimated and diagnostic values are structurally and visually distinct, and stale unrealized state cannot appear as current verified PnL;
+992. parent/module/portfolio PnL aggregation is deny-by-default when a material child component is invalid or unmeasurable and cannot silently omit unknown unfavorable components;
+993. restart, reconnect, replay resume, dataset repair or ledger rebuild suppresses cached numeric PnL until canonical reconciliation completes again, and conflicting UI/report surfaces suppress numeric display for the affected scope.
 
 ## Non-goals
 
