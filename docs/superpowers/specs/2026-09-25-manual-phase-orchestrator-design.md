@@ -12195,6 +12195,25 @@ For GitHub-changing work, a completion claim requires checking the final branch 
 
 This discipline improves persistence but cannot override platform termination, unavailable credentials, hard tool limits, safety constraints, or external service outages. In those cases the durable checkpoint and exact remaining work are the continuation contract.
 
+### ChatGPT and Codex conversational continuation
+
+These completion rules also apply to interactive Alina work performed inside ChatGPT, Codex, or another coding-agent conversation.
+
+When the user gives a long-running instruction such as `continue`, `finish everything`, `implement the remaining work`, or an equivalent directive, the controller must continue through all currently feasible requested work in the same active turn/session rather than treating planning, one tool call, one file edit, one test, one commit, or one successful subtask as a natural stopping point.
+
+Conversation-level rules:
+
+- maintain a compact internal ledger of completed, in-progress, blocked, and remaining requested work;
+- after each intermediate success, immediately select and execute the next feasible unfinished item;
+- do not ask for confirmation merely to continue work already authorized by the user;
+- do not stop because a partial result is present if additional requested work is still feasible with available tools and context;
+- if the same action fails twice materially unchanged, alter the method instead of retrying blindly;
+- if a materially equivalent failure occurs a third time, checkpoint the exact blocker and continue any independent work that remains;
+- do not claim that work will continue in the background unless an actual scheduled automation has been created;
+- if a real platform interruption, context/tool limit, credential problem, safety constraint, or external outage prevents completion, leave a concise durable checkpoint containing the last verified repository HEAD/state, completed work, exact remaining work, and the next safe action;
+- conversational persistence must not increase model quota by spawning additional agents: the single-controller and quota-minimal policies still apply.
+
+
 ## Tests and acceptance criteria
 
 The following numbered items form the normative acceptance catalog. Each item is enforced according to Acceptance Architecture V2. They do **not** form one global AND-condition unless their gate metadata explicitly says so:
@@ -13153,6 +13172,10 @@ The following numbered items form the normative acceptance catalog. Each item is
 949. repeated failures change method after two materially identical attempts and become an explicit blocker after a third equivalent failure rather than an unbounded loop;
 950. GitHub-changing work cannot be called complete until final HEAD is checked and any expected content change is verified to have a real diff and a different tree from its parent;
 951. completion discipline cannot manufacture empty commits, claim background execution, or override platform, credential, safety, or external-service hard limits.
+952. ChatGPT/Codex long-running Alina work continues through feasible requested items in the same active turn/session instead of stopping at planning, one tool call, one file edit, one test, one commit, or one intermediate success;
+953. interactive completion maintains a compact completed/in-progress/blocked/remaining ledger and advances to the next feasible unfinished item without requiring redundant confirmation;
+954. repeated conversational/tool failures change method after two materially identical failures and become an explicit checkpointed blocker after a third equivalent failure while independent work continues;
+955. a real interruption leaves a durable continuation checkpoint with verified repository state, completed work, exact remaining work, and next safe action, without claiming unscheduled background execution or spawning extra agents.
 
 ## Non-goals
 
