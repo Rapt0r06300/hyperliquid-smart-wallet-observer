@@ -13037,6 +13037,16 @@ The following findings extend the verified weakness inventory. They were found b
 288. **Stable market-event identity excludes only a narrow set of local-time field names.** `realtime/event_identity.py::_VOLATILE_FIELDS` removes `received_at_ms/recv_ts_ms/write_ts_ms` and transport coordinates, but equivalent local provenance aliases such as `recv_wall_ts_ms`, `received_ts_ms`, `written_ts_ms`, `recu_ms` or local monotonic fields remain in the canonical payload if supplied there. The same venue event can then hash differently after redelivery/normalization solely because local receipt metadata changed.
 289. **The bounded latency journal evicts old traces without exposing eviction count/coverage.** `runtime/latency_journal.JournalLatence` uses `deque(maxlen=...)`; once full, appends silently discard the oldest trace. The resulting p50/p95 summary does not state how many observations were evicted or the retained time window, so consumers can mistake a rolling tail for full-run latency evidence.
 
+290. **The canonical +4 USD/day requirement is still opt-in inside the central economic evaluator.** `simulation/economic_objective.py::evaluate_objective` sets `daily_target_required = evidence.get("daily_target_required") is True` and executes the daily proof checks only in that branch. A legacy/alternate campaign that omits the flag can therefore be evaluated against cumulative +4 USD proof economics only. `economic_family_gate.evaluate_all_families` inherits that result, so the global three-family gate can also accept a caller that never opted into the actual current daily objective.
+291. **The independent economic proof audit treats missing raw safety identity as acceptable.** `simulation/economic_proof_audit.py::audit_family` rejects raw evidence only when `paper_read_only is False` or `real_execution is True`. Missing/null/unknown fields pass the raw guard even though the campaign object is required to prove the exact safe values. Proof safety identity must be explicit on both summary and raw evidence.
+292. **A corrupt earliest economic freeze can disappear and move the effective forward boundary.** `simulation/economic_freeze_registry.list_freezes` silently skips unreadable JSON, structurally invalid freezes and parameter-hash mismatches. `first_compatible_freeze` then selects the earliest surviving file, or a new freeze can be created. Corruption of the original freeze must contaminate the lineage; it must never make a later boundary become authoritative by omission.
+293. **The scoreboard feeder can erase the expected strategy set on an active-scope import failure.** `simulation/scoreboard_feeder._familles_actives` catches every exception and returns `()`. If callers do not explicitly pass `strategies_attendues`, an authority/import failure can therefore remove the expected Copy-Vault/Lead-Lag/Cross-Venue rows and their MORE_DATA/UNMEASURABLE visibility instead of failing closed.
+294. **The research helper named Model Confidence Set is not a statistical MCS procedure.** `research/validation_stats.py::model_confidence_set` repeatedly removes the worst mean-loss model until a heuristic range is below `alpha * abs(mean)`; it performs no MCS bootstrap/test statistic or confidence-set coverage procedure. It may remain a descriptive pruning heuristic, but it cannot satisfy a Model Confidence Set gate under that name.
+295. **The research purged-CV helper purges row indices rather than causal label intervals.** `research/purged_cv.py::splits_purged` interprets `horizon` and `embargo` as integer row distances around a fold. On irregular event-time data or variable holding/label horizons, row distance is not equivalent to temporal overlap. It also lacks strict positive/non-negative domain checks. This helper cannot certify leakage-free financial validation without timestamp/episode interval evidence.
+296. **The research DSR implementation can manufacture extreme confidence from invalid moments.** `research/deflated_sharpe.py::deflated_sharpe` validates only counts/variance sign, not finiteness or valid moment domains for observed Sharpe, skew and kurtosis. An invalid denominator expression is silently floored to `1e-12`, which can turn malformed inputs into an enormous z-score and DSR near 1. `sharpe_depuis_votes` likewise does not explicitly reject NaN/Infinity observations.
+297. **The stationary-bootstrap helper lacks certifying input-domain checks.** `research/validation_stats.py::stationary_bootstrap` accepts non-finite samples, `p <= 0`, `p > 1`, zero/negative resample counts and other invalid domains without a typed failure. Those cases can produce degenerate/empty/non-statistical output that still looks like a bootstrap result.
+298. **SPA/StepM research routines do not bind candidate series to the same temporal observations.** `research/validation_promotion.py::spa_test` and `stepm_romano_wolf` index candidates by the benchmark length without immutable block/time ids or explicit equal-length validation; a shorter series can error, a longer series is effectively truncated, and equal-length but shifted histories are indistinguishable. Statistical comparison must prove observation alignment before inference.
+299. **The independent daily audit trusts the campaign's own evaluation cutoff.** `economic_proof_audit.audit_family` recomputes daily evidence using `published_daily_evidence.evaluated_at_ms` instead of an independently bound proof-window/audit cutoff. A stale or strategically early cutoff can exclude later calendar days/trades from the daily requirement even when those days are complete at final audit time. The final daily proof boundary must be immutable and independently derived from the campaign/freeze window, not caller-selected presentation metadata.
 
 
 
@@ -13046,6 +13056,21 @@ The following findings extend the verified weakness inventory. They were found b
 
 
 
+
+
+### Daily-objective authority, freeze-lineage and statistical-helper closure contract
+
+The current economic objective is **+4 USD net per complete UTC day per active family**. That condition is mandatory at the central authority boundary, not an optional campaign feature flag.
+
+- `evaluate_objective` and every all-family/global wrapper require the canonical daily-proof schema for current certification; an absent/false `daily_target_required` is legacy/non-certifying state;
+- the final daily cutoff is derived from an immutable proof-window/audit receipt and cannot be moved backward by a campaign-supplied `evaluated_at_ms`;
+- raw proof objects explicitly carry `paper_read_only=true` and `real_execution=false`; missing/unknown safety identity is INVALID_EVIDENCE;
+- the earliest applicable parameter freeze is an immutable lineage object; missing, unreadable, hash-mismatched or structurally corrupt prior freeze evidence blocks/requires repair and cannot be skipped in favor of a later boundary;
+- scoreboard expected-family discovery is authoritative and fail-closed; an active-scope import/parse failure cannot collapse the expected family set to empty;
+- statistical helper names match their actual mathematics. Heuristic pruning cannot be called Model Confidence Set, row-index gaps cannot certify purged event-time CV, and simplified descriptive routines cannot borrow DSR/SPA/StepM guarantees;
+- certifying DSR/bootstrap/CV inputs are finite and domain-valid, with explicit sample/block/episode identities;
+- SPA/StepM/MCS/PBO/DSR comparisons bind every compared strategy to the exact same ordered observation blocks or reject the comparison;
+- research-only approximations remain available only under diagnostic/non-certifying labels until strict regression fixtures prove the published method.
 
 ### Dedup, raw-spool and bounded-observability contract
 
@@ -15739,6 +15764,19 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 - a global “all objectives met” state is possible only when the same evidence also passes ledger validity and all mandatory independent proof controls;
 - maturity evidence references resolve to immutable content-addressed artifacts/receipts, and every transition validates those referenced objects before advancing stage.
 
+1518. the current canonical economic evaluator requires a valid daily-target receipt; absent/false daily_target_required cannot produce ATTEINT for the current +4-USD/day objective;
+1519. evaluate_all_families/all-objectives gates require all three active families to carry valid canonical daily receipts before reporting the objective reached;
+1520. raw economic proof requires explicit paper_read_only=true and real_execution=false; missing/null/unknown safety fields make the family proof invalid;
+1521. final daily certification derives evaluated_at/cutoff from an immutable proof-window/audit receipt and rejects a campaign-supplied earlier cutoff that would exclude completed proof days;
+1522. corrupt/unreadable/hash-mismatched earliest applicable economic freezes are lineage failures and cannot be skipped in favor of a later compatible freeze;
+1523. scoreboard expected-family discovery fails closed on active-scope import/parse errors and cannot silently return an empty expected set;
+1524. model_confidence_set is either replaced by a statistically valid MCS procedure with dependence-aware inference or renamed/quarantined as a descriptive heuristic;
+1525. research purged-CV certification uses event/label time intervals plus strict positive horizon/non-negative embargo domains rather than row-index distance alone;
+1526. DSR/Sharpe helpers reject NaN/Infinity and invalid skew/kurtosis/variance domains before denominator construction; malformed moments can never produce high-confidence DSR;
+1527. stationary bootstrap validates finite samples, 0<p<=1 and positive resample count and emits typed invalid-input state for degenerate domains;
+1528. SPA/StepM/MCS comparisons bind benchmark/candidate series to identical immutable observation-block ids/time bounds and reject length/coverage/ordering mismatches;
+1529. research-only approximations cannot satisfy final promotion/certification gates merely because their function names match academic methods;
+1530. all blocker-classified weaknesses 290-299 remain implementation blockers, or explicitly quarantined non-certifying research debt where noted, until deterministic daily-authority, freeze-lineage, scope-failure and statistical-domain/alignment tests prove closure.
 
 ## Non-goals
 
