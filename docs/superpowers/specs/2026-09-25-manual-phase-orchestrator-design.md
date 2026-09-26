@@ -12845,9 +12845,110 @@ The following findings extend the verified weakness inventory. They were found b
 109. **Pair-synchronization evidence is not bound to the pair/run it is authorizing.** `build_pair_sync_report` reports skew/match statistics but does not bind canonical coin, left/right venue identities, collection-run id, component dataset ids or overlap-window identity. `build_cross_venue_window_manifest` consumes those statistics without independently proving they came from the same requested pair/run/window.
 110. **Exact instrument mapping is currently a caller assertion at the strategy-window boundary.** `apply_strategy_data_contract` accepts an `instrument_mapping_exact: bool` and uses it as the evidence for the mapping gate. A Boolean assertion is not an immutable mapping receipt containing venue symbols, contract type, quote/settle, multiplier, tick/lot rules and the point-in-time metadata hashes already required elsewhere in this specification.
 111. **Two statistical helper names overstate the implemented methods.** `backtesting/cross_validation.py::combinatorial_purged_splits` enumerates group combinations but performs no purge/embargo itself, while `whites_reality_check` bootstraps the already-selected best strategy against one benchmark rather than implementing White's data-snooping-adjusted Reality Check across the searched model universe. These helpers may remain diagnostics only if renamed/scoped; they cannot satisfy certification gates under their current names.
+112. **The official Lead-Lag evidence command reports process success regardless of proof status.** `ops/lead_lag_evidence.py::main` always returns process code 0 after writing its artifact. `NEED_MORE_DATA`, `PAS_D_EDGE`, rejected/non-promoted evidence and a genuinely promoted proof are therefore indistinguishable to an orchestrator that judges the stage by exit code. This reproduces the semantic-success problem already seen in market-truth through a separate active family path.
+113. **Lead-Lag can invent a zero-spread executable quote when one BBO side is missing.** `backtesting/lead_lag_shadow.py::charger_tape` stores Hyperliquid rows as `bid = parsed_bid or mid` and `ask = parsed_ask or mid`. A missing/invalid bid or ask can therefore become the mid, manufacturing an executable side and shrinking the observed spread instead of making the episode non-certifiable.
+114. **Lead-Lag source completeness can be asserted after silent read loss.** `_iter_lines` returns silently on `OSError`, while `charger_tape` later publishes `complete_sources=True` unconditionally. Invalid rows are partially counted, but an unreadable shard/source can disappear without making completeness false.
+115. **Lead-Lag merges a process-local monotonic clock across files/restarts.** `_event_time_ns` falls back to `recu_ns` when wall timestamps are absent, even though the module itself notes that this clock is process-local and cannot be compared across restarts. The loader then merges and sorts multiple sources on the resulting values. This can reorder evidence, create negative/meaningless inter-message intervals and alter which horizons look observable.
+116. **Invalid Binance trade sides become SELL shocks in Lead-Lag.** A trade is encoded as +1 only when `side == "BUY"`; every other value, including missing/unknown/malformed case, becomes -1. Input-schema failure therefore becomes a directional signal rather than quarantined evidence.
+117. **Lead-Lag numeric parsing admits non-finite values.** Its generic `_flt` accepts `NaN` and infinities. Such values can enter price, interval, capacity or economic calculations because downstream positivity/comparison checks are not a complete finiteness barrier.
+118. **Copy-Vault temporal proof flags are partly hard-coded by a presentation helper.** `backtesting/copy_vault_evidence.py::temporal_evidence` emits OOS `no_lookahead=True` and `purged=True` unconditionally. Those are proof properties, not formatting defaults, and must be derived from the exact fold/purge/causality receipt.
+119. **Another economic-campaign adapter hard-codes anti-lookahead truth.** A path in `simulation/economic_campaigns.py` emits an OOS object with `no_lookahead=True` from simulation summary fields without independently carrying/revalidating an anti-lookahead receipt. Final campaign evidence must not gain proof strength during presentation/adaptation.
+120. **A proof-facing campaign report still states the obsolete 1,000-USD capital baseline.** `simulation/economic_campaigns.py::render_campaign_report` prints “Capital paper consolide: 1 000 USD” while the current canonical baseline is 100 USD. This can make a correct 100-USD run appear to have a different ROI/capital denominator in human evidence.
+121. **Non-finite numbers can still become zero, bypass gates or mutate authoritative paper state.** Concrete examples include `simulation/fee_model.py::compute_fee_usdc` using `max(0.0, float(x))`, paper-ledger close/funding paths without the same finiteness checks used at open, `risk_engine_v3` threshold comparisons on potentially non-finite metrics, the entry-cost guard accepting `edge_net_bps=NaN` because the comparison is false, Copy-Vault book rows whose `bid/ask/capacity` are validated only by ordinary comparisons, and Cross-Venue helpers that reject NaN incompletely or fail to reject infinities. The generic numeric contract is therefore not yet enforced at all mutation/admission boundaries.
+122. **The portfolio anomaly/risk helpers fail open on malformed numeric and side state.** `risk/portfolio_risk.py::data_anomaly` returns false when the previous price is non-positive and comparisons with NaN also fail to trigger; `gross_net_exposure` treats every side other than literal `long` as short. Corrupt price/side data can become “no anomaly” or a fabricated short exposure instead of typed invalid state.
+123. **Snapshot-only PnL can be labelled TRUSTED with zero ledger events.** `simulation/pnl_ledger_audit.py::audit_paper_ledger` returns `TRUSTED`, `pnl_valid=True`, `events_checked=0` when an empty event list is accompanied by an internally self-consistent snapshot. That contradicts the repository's own ledger-integrity principle that the snapshot is a cache and the durable canonical event chain is the evidence.
+124. **The closed-ledger replay can coerce missing/ambiguous economics into usable trades.** `optimization/closed_ledger_replay.py` uses truthiness chains such as `estimated_net_pnl_usdc or event_net_pnl_usdc or net_pnl`, so a legitimate numeric zero can fall through to another field. Missing fees default to 0, missing gross PnL is reconstructed as `net + fee`, rows with missing PnL are dropped, and missing timestamps sort as zero. This can change both economics and temporal ordering instead of marking the evidence unmeasurable.
+125. **The closed-ledger replay's anti-overfit split is another naive index split.** After sorting what it can parse, it assigns 60/20/20 buckets by row index with no purge, embargo or episode-horizon containment. Its `anti_lookahead_policy` label is therefore stronger than the actual temporal isolation.
+126. **The fixed-point helper does not always return UNMEASURABLE for non-finite input.** `accounting/fixed_point_core.py::vers_unites` catches errors while creating/quantizing the Decimal, but `int(d)` is outside that try block. `Decimal('NaN')` can survive quantization and then raise `ValueError`, violating the helper's documented invalid-value contract.
+127. **One append-only trial registry can forget prior trials on process restart.** `backtesting/robustesse_selection.py::GlobalTrialRegistry` initializes its in-memory records empty even when a path is supplied and does not load/validate the existing file. If used as a multiple-testing authority, `n_trials` and historical Sharpe values can reset, weakening the data-snooping penalty. The newer hypothesis ledger is stricter, so this legacy helper must not independently authorize proof.
+128. **The Lead-Lag global-trial ledger silently ignores malformed historical rows.** `_register_clock_boundary_trials` reads JSONL with replacement/ignore semantics, skips malformed lines and counts only valid rows before appending. Corruption can therefore reduce the apparent number of prior trials instead of blocking a multiple-testing claim.
+129. **Future receive timestamps are clamped to age zero in the native multi-venue store.** `NativeMarketSnapshot.build` and `freshness_ms` use `max(0, now - receive_ts_ms)`. Evidence received “in the future” relative to the decision clock can therefore be classified fresh/EXPLOITABLE instead of `FUTURE_DATA_CAUSALITY_VIOLATION`.
+130. **The Gate order-book collector does not implement Gate's documented U/u/full reconstruction protocol.** The official futures depth stream supplies a first/last update-id range (`U`, `u`) and requires a base/full snapshot plus continuity checks. `GateMarketState.apply_book` reads only `u`, treats `u > last_u + 1` as a gap, ignores `U`, and does not replace the local book on a later full snapshot. Because `u` is the last id of a range, it may legitimately advance by more than one; conversely stale price levels can survive a full refresh. Both false desync and false book state are possible.
+131. **The Bitget full-depth state machine does not implement Bitget's documented snapshot/update semantics.** For the `books` channel, Bitget documents a full `snapshot` followed by incremental `update` messages, zero quantity as deletion, and `pseq` for packet-loss detection. `BitgetMarketState.apply` does not branch on `action`, does not clear the book on snapshot, stores zero-size levels instead of deleting them, and ignores `pseq`. Stale/zero levels can therefore remain in the local L2 and packet loss can go undetected.
+132. **Gate/Bitget public numeric adapters still accept NaN/Infinity.** Their local `_f` helpers are plain `float()` conversions without `math.isfinite`. Non-finite prices/sizes can enter internal depth maps or secondary market fields before later validation, and deeper non-finite levels may survive even when top-of-book happens to look valid.
 
 
 
+
+
+### Proof-status, finite-number and evidence-authority contract
+
+Process execution success and scientific/economic proof success are distinct states.
+
+Requirements:
+
+- every required analysis stage returns a machine-readable semantic status and the orchestrator maps `NO_DATA`, `NO_INTENT`, `NEED_MORE_DATA`, `PAS_D_EDGE`, `REJECTED`, `UNKNOWN`, `UNMEASURABLE` and non-promoted outcomes to incomplete/non-certifying even when the process itself executed normally;
+- exit code 0 means “the command ran correctly”, not “the hypothesis/economic proof passed”; a complete-suite receipt must consume the semantic artifact state;
+- proof booleans such as `no_lookahead`, `purged`, `post_freeze`, `reconciled`, `complete_sources`, `coverage_verified` and equivalent fields are derived from hash-bound evidence, never filled with unconditional literals by presentation/adaptation helpers;
+- a proof-facing report may not state a capital denominator different from the resolved manifest; the current baseline is **100 USD**.
+
+All proof-critical numeric boundaries enforce finiteness before comparison, rounding, clamping, hashing, sizing or mutation.
+
+- `NaN`, `+/-Infinity`, overflow and non-representable values become typed invalid/UNMEASURABLE evidence;
+- `max(0, x)`, `min`, truthiness and comparison operators are not accepted substitutes for an explicit finiteness check;
+- invalid fee/cost values cannot become zero cost;
+- invalid risk values cannot become “gate not triggered”;
+- invalid fill/quantity/price/funding values cannot mutate canonical paper state;
+- invalid BBO/depth values cannot become executable capacity;
+- invalid directional/side tokens are rejected rather than mapped to a default long/short/buy/sell;
+- deterministic mutation/fault tests inject NaN/Infinity into every canonical cost, risk, ledger, L2 and cross-venue boundary and prove fail-closed behavior.
+
+### Lead-Lag source and clock-integrity contract
+
+Certifying Lead-Lag evidence requires exact source/accounting rather than permissive fallbacks.
+
+- a missing bid or ask remains missing and makes executable economics non-certifiable; mid may be retained only as explicitly non-executable diagnostic context;
+- every selected source has a read-status receipt with file/object id, hash, bytes/rows attempted, valid rows, invalid rows and read failures;
+- `complete_sources=true` is derived only when every mandatory selected source is successfully accounted for;
+- process-local monotonic timestamps are comparable only inside the process/connection epoch that created them; they are never merged across restarts as a shared event clock;
+- cross-file Lead-Lag ordering requires comparable wall/exchange/receive clock evidence plus uncertainty/skew receipt;
+- Binance trade side accepts only the venue's canonical buy/sell values; missing or unknown side is invalid evidence;
+- horizon-observability statistics reject non-positive, non-monotonic and non-finite inter-arrival intervals;
+- the official Lead-Lag stage communicates proof status to orchestration independently of process exit success.
+
+### Canonical ledger and closed-ledger replay contract
+
+A snapshot can corroborate the canonical ledger but cannot replace it for proof.
+
+- zero canonical events plus a snapshot is `UNMEASURABLE_NO_LEDGER_EVENTS`, never `TRUSTED` proof;
+- snapshot equations are reconciliation evidence only after the underlying hash-chained event set is present and verified;
+- proof-facing replay uses explicit null-aware field selection: numeric zero is a valid value and never causes fallback to an alternate field;
+- missing fee, gross/net PnL, timestamp, side or identity remains missing/invalid rather than being defaulted to zero or reconstructed without an explicit accounting receipt;
+- rejected/missing rows are counted in a conservation receipt rather than silently disappearing;
+- closed-ledger train/validation/holdout claims use causal time with purge/embargo/episode containment or are renamed as a weaker diagnostic split.
+
+### Durable multiple-testing history contract
+
+The data-snooping penalty is based on all relevant historical attempts, including attempts before the current process started.
+
+- any registry used for DSR/PBO/White/SPA/other multiple-testing authority loads and validates its complete durable history before reporting `n_trials`;
+- an in-memory registry that starts empty is diagnostic-only unless it is explicitly seeded from the canonical durable ledger;
+- malformed, duplicate or unreadable historical trial rows make the relevant multiple-testing count `UNMEASURABLE/CONTAMINATED`, never silently reduce it;
+- trial timestamps used for proof are injected/recorded causal evidence; wall time may remain append telemetry but cannot change trial identity/counting;
+- the canonical hypothesis ledger and global trial ledger have explicit authority roles so parallel counters cannot disagree unnoticed.
+
+### Native venue L2 reconstruction contract
+
+Venue adapters implement the venue's point-in-time public book protocol exactly enough to make replayable L2 claims.
+
+For Gate futures:
+
+- preserve and validate both `U` (first update id) and `u` (last update id);
+- seed from an authoritative base snapshot or a documented full-depth push;
+- validate continuity according to the documented interval/range rule, not `u == previous_u + 1`;
+- a documented `full=true` message replaces the local depth rather than incrementally patching stale levels;
+- a continuity failure transitions to DESYNC and requires deterministic resynchronization before EXPLOITABLE.
+
+For Bitget `books`:
+
+- `action=snapshot` replaces the full local book;
+- `action=update` applies deltas only after a valid snapshot;
+- zero quantity deletes the level;
+- `seq/pseq` are validated according to the channel semantics to detect out-of-order/lost packets;
+- maintenance/reset transitions require a fresh snapshot before the stream is reusable;
+- non-finite price/size/metadata values are rejected before entering the book.
+
+All venue adapters carry reconstruction protocol/version into dataset provenance so a backtest can prove which state machine produced its L2.
 
 ### Canonical daily-proof authority for memory and autonomous stop decisions
 
@@ -14702,7 +14803,7 @@ The following numbered items form the normative acceptance catalog. Each item is
 1056. missing current mark/liquidation evidence yields UNMEASURABLE_MARK/stale status and canonical valuation cannot fall back silently to entry price or last-known mark;
 1057. downstream sizing may reduce/reject but never silently enlarge requested exposure; scale <= 0 is no-trade and a positive scale below an internal floor cannot be rounded upward except venue quantization that does not exceed the request;
 1058. margin, collateral, gross notional, net exposure and buying power have distinct typed fields and independent invariants rather than an ambiguously named exposure cap;
-1059. canonical baseline runs use explicit 1,000-USDC starting paper equity and any alternate starting-equity scenario is preregistered, separately labeled and never mixed into baseline certification;
+1059. canonical baseline runs use explicit 100-USD starting paper equity and any alternate starting-equity scenario is preregistered, separately labeled and never mixed into baseline certification;
 1060. every authoritative run records starting equity, collateral currency, leverage/margin mode and all exposure/capital caps in the resolved manifest;
 1061. canonical Hyperliquid standard-perp accounting distinguishes USDC, USDT and generic USD and never treats their field names as interchangeable aliases;
 1062. any currency conversion entering proof-critical economics carries currency pair, point-in-time rate, timestamp and provenance;
@@ -14902,6 +15003,44 @@ The following numbered items form the normative acceptance catalog. Each item is
 1256. combinatorial_purged_splits either performs/consumes explicit purge+embargo semantics or is renamed so it cannot satisfy a purged-CV requirement;
 1257. whites_reality_check either implements the searched-universe/data-snooping-adjusted White Reality Check with dependence-aware resampling or is diagnostic-only under a non-certifying name;
 1258. all blocker-classified weaknesses 94-111 from the 2026-09-26 continuation audit remain implementation blockers until deterministic replay/gate/cache/synchronization regression tests prove closure.
+1259. the official Lead-Lag stage exposes a typed semantic evidence result and cannot be counted PASSED/CERTIFIED solely because its process returned code 0;
+1260. Lead-Lag NEED_MORE_DATA, PAS_D_EDGE, rejected, unknown or non-promoted evidence makes a required complete-suite proof incomplete even when artifact generation succeeded;
+1261. Lead-Lag never substitutes mid for a missing executable bid or ask in proof-facing economics; missing side evidence is non-certifiable;
+1262. every Lead-Lag source/shard has a read/conservation receipt and complete_sources can be true only when all mandatory selected inputs were successfully read and accounted for;
+1263. a process-local recu_ns/monotonic clock is never compared or globally sorted across distinct process/connection epochs without a proven clock-domain bridge;
+1264. invalid/missing Binance trade side is quarantined and cannot become an implicit SELL shock;
+1265. Lead-Lag rejects NaN/Infinity in timestamps, prices, sizes, costs and derived interval/horizon evidence;
+1266. Copy-Vault no_lookahead/purged flags are derived from a concrete hash-bound fold/purge receipt and cannot be unconditional presentation literals;
+1267. every campaign adapter that emits no_lookahead, purged, post_freeze, reconciliation or completeness state carries/verifies the underlying receipt rather than hard-coding proof truth;
+1268. all proof-facing reports/manifests use the resolved 100-USD canonical starting-equity denominator unless an explicitly separate preregistered scenario is named;
+1269. fee-model NaN/Infinity cannot be clamped/defaulted to zero and instead makes the affected economics unmeasurable/non-certifiable;
+1270. PaperLedger rejects non-finite close quantity/price, fee and funding values before any cash/PnL/position/event mutation;
+1271. V19/session/drawdown/entry-cost risk gates fail closed on non-finite metrics and include a typed RISK_INPUT_INVALID blocker;
+1272. edge_net_bps=NaN/Infinity cannot pass the entry-cost guard;
+1273. portfolio data_anomaly treats non-finite/non-positive reference/current prices as invalid evidence requiring quarantine/pause, not “no anomaly”;
+1274. portfolio exposure rejects unknown side tokens rather than treating every non-long token as short;
+1275. Copy-Vault book ingestion rejects non-finite bid/ask/capacity and L2 levels before they can participate in capacity or execution;
+1276. Cross-Venue direction, quote freshness, skew, book levels, costs and threshold inputs all reject non-finite values before comparison or candidate selection;
+1277. fixed_point_core.vers_unites returns UNMEASURABLE rather than raising for NaN/Infinity/non-representable input, with deterministic regression fixtures;
+1278. an empty canonical event ledger cannot receive TRUSTED/pnl_valid proof from a snapshot alone;
+1279. snapshot reconciliation becomes proof-eligible only after hash-chain verification of the exact canonical event set it summarizes;
+1280. closed-ledger replay uses explicit null-aware field precedence so numeric zero never falls through to stale alternate PnL/fee/timestamp fields;
+1281. closed-ledger replay never defaults missing fees to zero or fabricates gross PnL from incomplete fields for proof-facing economics;
+1282. closed-ledger parse/missing-PnL/missing-timestamp rows are counted and block or quarantine evidence rather than silently disappearing;
+1283. closed-ledger train/validation/holdout promotion uses causal purge/embargo/episode containment; its current naive index split cannot satisfy anti-overfit certification;
+1284. any multiple-testing registry used for a certifying gate reloads and validates the complete durable trial history after restart before computing n_trials or trial statistics;
+1285. malformed rows in a global trial ledger cannot reduce the apparent historical trial count; corruption is typed and blocks the affected robustness claim;
+1286. legacy GlobalTrialRegistry is diagnostic-only until it is durably initialized from the canonical trial history and reconciles to the canonical hypothesis ledger;
+1287. native multi-venue freshness rejects receive_ts_ms > decision/now_ms as FUTURE_DATA_CAUSALITY_VIOLATION and never clamps that case to age zero;
+1288. Gate futures L2 reconstruction persists U/u/full semantics and seeds/resynchronizes from an authoritative snapshot/full push before EXPLOITABLE;
+1289. Gate continuity tests use the documented update range relation and prove legitimate multi-id batches are not falsely classified as gaps;
+1290. a Gate full-depth refresh replaces stale local levels, and substitution/gap fixtures prove stale depth cannot survive resynchronization;
+1291. Bitget books action=snapshot replaces local depth and action=update cannot apply before a valid snapshot;
+1292. Bitget zero-size depth rows delete levels rather than remaining as zero-liquidity best prices;
+1293. Bitget seq/pseq continuity and maintenance/reset semantics are enforced before the book can remain/re-enter EXPLOITABLE;
+1294. Gate and Bitget reject every non-finite public price/size/timestamp/metric before storage in replay-grade market state;
+1295. venue reconstruction protocol/version plus exact adapter code/tree identity is bound into replay/dataset provenance;
+1296. all blocker-classified weaknesses 112-132 from the 2026-09-26 deep reliability audit remain implementation blockers until deterministic fault/replay/restart/venue-protocol regression tests prove closure.
 
 ## Non-goals
 
