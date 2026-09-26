@@ -3806,6 +3806,7 @@ This specification intentionally preserves all previously validated design layer
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
+- **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -9933,6 +9934,65 @@ Verified against current official Hyperliquid documentation on 2026-09-26:
 
 Current constants and eligibility rules are versioned and are never back-applied automatically.
 
+### Profitability Convergence V6.18 — exact ADL queue semantics
+
+V6.18 closes the final currently identified gap in the forced-flow state machine: exact Hyperliquid auto-deleveraging behavior.
+
+Current official documentation states that ADL is a solvency safeguard triggered when a user's account value, or an isolated position value, becomes negative.
+
+### ADL counterparty ranking
+
+Users on the opposite side are ranked by unrealized PnL and leverage used.
+
+The current documented sorting index for profitable counterparties is:
+
+(mark_price / entry_price) * (notional_position / account_value)
+
+Replay must use the historical rule version and point-in-time inputs rather than a generic 'highest leverage first' approximation.
+
+### ADL execution price
+
+Current documentation states that selected profitable counterparties are closed against the underwater user at the **previous mark price**.
+
+Therefore:
+
+- ADL fills are not priced from contemporaneous BBO/VWAP as ordinary market orders;
+- ADL mark reference must be the protocol-defined previous mark for that rule version;
+- current BBO depth cannot be charged as ordinary slippage for an ADL transfer unless another rule explicitly requires it;
+- ADL PnL remains separate from public-book liquidation and backstop-unwind PnL.
+
+### Backstop and ADL queue interaction
+
+Current documentation states that backstop-liquidated positions receive **no special treatment** in ADL queue logic.
+
+Therefore a position acquired through backstop cannot be given privileged or protected ADL ranking solely because of its provenance.
+
+### Solvency/account boundary
+
+The official invariant states that a user with no open positions does not socialize platform losses.
+
+Alina therefore:
+
+- does not allocate ADL/socialized-loss cash flows to flat accounts;
+- clusters ADL events with their parent insolvency episode for effective-sample accounting;
+- preserves the identity of the underwater side and selected opposite-side ADL counterparties only as public market-structure evidence, never for deanonymization.
+
+### Forced-Flow route closure
+
+The full modeled route family is now:
+
+PUBLIC_BOOK_LIQUIDATION -> PARTIAL_BOOK_LIQUIDATION -> BACKSTOP_TRANSFER -> BACKSTOP_INVENTORY/UNWIND -> ADL
+
+with Portfolio Margin direct-backstop routes kept separate under V6.17.
+
+Each transition remains UNKNOWN whenever public evidence is insufficient.
+
+### V6.18 official-source basis
+
+Verified against the current official Hyperliquid Auto-deleveraging documentation on 2026-09-26.
+
+All ADL constants/formulas are versioned and are not back-applied to historical periods without rule evidence.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -11297,6 +11357,15 @@ The following numbered items form the normative acceptance catalog. Each item is
 781. spot displayed cost basis from transfers/legacy balances cannot substitute for actual strategy acquisition cost when attribution is ambiguous;
 782. all V6.17 rules remain GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
 
+783. ADL is modeled as a distinct solvency route rather than an ordinary market liquidation;
+784. current ADL eligibility starts from negative account value or negative isolated-position value under the documented rule;
+785. profitable opposite-side counterparties are ranked using the versioned documented ADL index rather than a generic leverage-only heuristic;
+786. ADL execution uses the protocol-defined previous mark price for the applicable rule version rather than ordinary BBO/VWAP pricing;
+787. backstop-acquired positions receive no special ADL queue treatment unless a future rule version explicitly introduces one;
+788. flat accounts are not assigned socialized-loss/ADL cash flows when the protocol invariant excludes them;
+789. ADL observations are dependency-clustered with their parent insolvency/backstop episode for effective-sample accounting;
+790. all V6.18 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
@@ -11305,7 +11374,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18 modules without scoped evidence gates;
+- price ADL like an ordinary market order when the protocol rule requires previous-mark execution;
+- give backstop-acquired positions privileged ADL treatment absent an explicit protocol rule;
 - assume Portfolio Margin eligibility, borrowing headroom or cross-DEX capital efficiency without point-in-time account/cap state;
 - treat delisting settlement as an ordinary market exit or permit post-settlement fills;
 - collapse public-book liquidation, backstop transfer and ADL into one interchangeable forced-flow event;
