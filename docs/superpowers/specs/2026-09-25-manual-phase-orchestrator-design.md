@@ -3809,6 +3809,7 @@ This specification intentionally preserves all previously validated design layer
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 - **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
 - **AMM-Oracle & Formula-Index Relative Value V6.19:** Uniswap-oracle perp basis, delta-neutral LP hedging and formula/index-perp reconstruction under executable AMM costs.
+- **Frontend Analytics Non-Authority V6.20:** portfolio-graph sampling and UI drawdown are reconciliation views only, never proof-ledger truth.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -10564,6 +10565,83 @@ Verified on 2026-09-26 against:
 All values remain versioned and may not be back-applied to earlier periods without rule evidence.
 
 
+### Profitability Convergence V6.20 — frontend analytics non-authority
+
+V6.20 closes the final two pages in the current official Hyperliquid Trading documentation index that had not yet been represented explicitly in Alina: Portfolio graphs and Miscellaneous UI.
+
+The governing rule is:
+
+> **frontend analytics are useful reconciliation views, but they cannot replace event-level ledger truth for proving net PnL, drawdown, capacity or the +4 USD/day milestone.**
+
+### Portfolio-graph sampling contract
+
+Current official Hyperliquid documentation states that portfolio account-value/PnL graphs are sampled:
+
+- on deposits and withdrawals; and
+- approximately every 15 minutes.
+
+The documentation explicitly warns that these samples are not recommended for precise accounting because interpolation between samples may fail to reflect actual unrealized-PnL changes.
+
+Therefore:
+
+- graph samples are stored only as coarse reconciliation/checkpoint evidence;
+- they are never used as the primary fill/funding/fee/collateral ledger;
+- intraperiod extrema cannot be reconstructed from 15-minute graph samples unless stronger event data exists;
+- a strategy drawdown, peak equity or daily net PnL cannot be certified from graph interpolation alone;
+- missing event-level evidence is not repaired by visually smooth interpolation.
+
+### Portfolio graph PnL provenance
+
+Current official documentation describes the portfolio graph PnL field using its frontend account-value/deposit/withdrawal relationship.
+
+Alina stores the exact venue-reported graph field and its documented definition as a display/reconciliation measure, while the strategy proof ledger remains constructed from:
+
+- fills/trades;
+- trading fees and rebates;
+- funding transfers;
+- collateral/borrow interest;
+- deposits/withdrawals/transfers;
+- liquidation/backstop/ADL effects;
+- settlement/delisting effects;
+- point-in-time mark state for unrealized PnL.
+
+Do not silently redefine the venue graph field to make it agree with Alina accounting. Any difference is a reconciliation exception to explain.
+
+### UI maximum-drawdown non-authority
+
+Current official documentation states the portfolio-page max drawdown is a frontend convenience value and does not affect Hyperliquid margining or protocol computations.
+
+The current documented UI formula is the maximum over end > start of:
+
+(pnl(end) - pnl(start)) / account_value(start)
+
+using the account value associated with each candidate start point.
+
+Consequences:
+
+- UI max drawdown is not treated as the canonical risk metric for Alina;
+- Alina computes its own drawdown from the certified equity/event ledger at the resolution required by the strategy;
+- UI drawdown may be retained as a reconciliation metric;
+- a mismatch between UI and Alina DD is investigated rather than averaged;
+- sampled UI history cannot prove the absence of a deeper intraperiod drawdown.
+
+### Proof-ledger precedence
+
+For all performance claims, precedence is:
+
+1. certified raw/reconstructed event ledger;
+2. reconciled account/collateral/funding state;
+3. venue-provided derived analytics;
+4. frontend chart/UI samples.
+
+A lower-precedence source cannot overwrite a higher-precedence source merely because it is easier to query.
+
+### V6.20 official-source basis
+
+Verified against the current official Hyperliquid Portfolio graphs and Miscellaneous UI documentation on 2026-09-26.
+
+These rules close documentation coverage; they do not create a new alpha hypothesis.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -11986,6 +12064,14 @@ The following numbered items form the normative acceptance catalog. Each item is
 807. V6.19 sleeves begin DISCOVERY_ONLY/MEASURE_ONLY and do not globally block existing modules;
 808. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed swaps/orders, private keys, self-hosted nodes or user-PC dependencies.
 
+809. Hyperliquid portfolio-graph samples are treated as coarse reconciliation evidence rather than precise accounting truth;
+810. 15-minute/deposit-withdrawal graph sampling cannot certify intraperiod PnL extrema or drawdown without stronger event evidence;
+811. venue frontend graph PnL definitions are preserved as reported and differences from Alina's ledger become explicit reconciliation exceptions;
+812. Hyperliquid UI max drawdown remains a frontend-only reconciliation metric and does not replace Alina's certified equity-curve drawdown;
+813. sampled frontend histories cannot prove absence of deeper intraperiod drawdown;
+814. proof-source precedence is event ledger > reconciled account state > venue-derived analytics > frontend graph/UI;
+815. all V6.20 work remains GitHub-hosted, paper/read-only and introduces no signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
@@ -11994,7 +12080,8 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20 modules without scoped evidence gates;
+- use frontend portfolio charts or UI max drawdown as the primary proof ledger for strategy PnL/DD;
 - call raw AMM spot or slot0 an executable cross-protocol hedge price without fee/impact/gas modeling;
 - call a formula-index residual arbitrage when no executable replicating hedge exists;
 - price ADL like an ordinary market order when the protocol rule requires previous-mark execution;
