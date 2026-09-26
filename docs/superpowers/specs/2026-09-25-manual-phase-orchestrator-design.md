@@ -13067,6 +13067,11 @@ The following findings extend the verified weakness inventory. They were found b
 315. **Proof-critical YAML booleans can invert semantic false into true.** `config/loader.py` uses Python `bool(exec_raw.get(...))` for several execution flags and as defaults passed into `_as_bool`. A quoted YAML value such as `"false"` is a non-empty string and therefore truthy, so a human-readable false can become true for execution/safety configuration instead of being schema-rejected or strictly parsed.
 316. **The legacy pessimistic-fill helper treats unknown direction as SELL and accepts invalid cost domains.** `paper/pessimistic_fill_model.py::pessimistic_fill_price` sends every side other than buy/long down the sell branch, does not require finite/non-negative spread/slippage, and can accept negative “costs” that improve execution or produce a non-positive multiplier. It must remain non-certifying until strict side/numeric domains are enforced.
 317. **Legacy partial/missed-fill helpers can turn invalid inputs into apparently valid fill state.** `backtesting/partial_fill_model.py` coerces a zero/negative requested notional upward to `1e-9` instead of rejecting it, while `missed_fill_model.py` accepts negative ages/max ages and does not constrain `partial_ratio` to a finite [0,1] domain. NaN comparisons can therefore classify invalid fill evidence as “not missed”.
+318. **The generic Market-Truth executable replay does not validate the numeric domain of its intent/config inputs.** `market_truth/executable_replay.py::_validate_intent` checks signs for some fields but not finiteness, while downstream code clamps negative latency/timeout/queue values with `max(0,...)` and clamps negative `fee_bps` to zero. NaN/Infinity or invalid negative values can therefore be silently transformed or propagated instead of producing `INVALID_INTENT/UNMEASURABLE`.
+319. **Market-Truth L2 parsing rejects NaN but still admits Infinity and trusts source level ordering.** `_to_float` rejects only NaN, while `_levels` accepts any positive converted value and does not sort or enforce monotone bid/ask ordering or duplicate-price conservation. `_Book.best_bid/best_ask` then trust element zero. A non-finite or unsorted raw book can therefore create a false executable best price/depth.
+320. **The generic maker queue omits better-priced visible liquidity that has price priority.** `_replay_maker` initializes queue-ahead from only the quantity exactly at `limit_price`. For a BUY maker, higher bid levels have execution priority; for a SELL maker, lower ask levels do. Those levels are not included in queue-ahead, while matching-flow logic also excludes trades executed at those better prices, so the model can reach/fill the paper order too early.
+321. **Maker queue consumption trusts subsequent public-trade batches without rechecking their proof quality.** The initial L2 snapshot must pass `data_gate_ready` and a quality score, but the later `PUBLIC_TRADE_BATCH` events used to consume queue-ahead are accepted solely by type/instrument/time/price/size/side. Their own quality, provenance, source continuity, timestamp validity and contamination state are not required before they can create a modeled fill.
+
 
 
 
@@ -13445,6 +13450,11 @@ Requirements:
 - maker fills bind the exact public-trade/event that consumes queue-ahead and reaches the modeled order, with fill timestamp at the actual modeled execution event;
 - latency-cost sign/direction is regression-tested for long/short favorable and adverse moves;
 - exact queue-ahead equality does not count as an executed maker fill;
+- Market-Truth intent/config numeric fields are finite and domain-valid before arithmetic; invalid negative latency/timeout/queue/cost parameters are rejected rather than clamped into a different experiment;
+- L2 executable books are normalized to canonical price ordering, finite positive price/size, duplicate-price conservation and crossed-book rejection before any best-price/depth read;
+- maker queue-ahead includes all visible price-priority liquidity ahead of the modeled order, not only the exact-price level;
+- every public trade/order-flow event allowed to consume maker queue-ahead independently satisfies the same-run causal-time, source, integrity and data-quality contract as the initiating book;
+
 - strategy data contracts fail closed on every requested venue not covered by an explicit required-family contract;
 - Gate and Bitget receive explicit replay-grade family requirements before their data can participate in certifying Cross-Venue/Lead-Lag windows;
 - a declared `require_reconciliation` gate consumes and verifies an actual reconciliation receipt rather than echoing a Boolean contract field;
@@ -15841,6 +15851,13 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1554. partial-fill helpers reject non-finite/non-positive requested notional and non-finite/negative available depth instead of coercing them into a valid ratio;
 1555. missed-fill helpers require finite non-negative age/max-age and a finite partial ratio in [0,1]; invalid/NaN inputs are typed invalid evidence, never “not missed”;
 1556. all blocker-classified weaknesses 307-317 remain implementation blockers, or explicitly quarantined non-certifying legacy debt where noted, until fill-threshold, restart-liquidity, snapshot-identity, materialization-containment, provenance and strict-config tests prove closure.
+1557. Market-Truth executable intents reject NaN/±Infinity and domain-invalid notional/quantity/limit-price/fee/latency/timeout/queue/quality parameters before book selection or cost arithmetic;
+1558. Market-Truth L2 normalization rejects NaN/±Infinity, invalid/crossed/unsorted books and duplicate-price inconsistencies, and derives best bid/ask from canonical ordering rather than source list position;
+1559. maker queue-ahead includes every visible better-priced level with execution priority plus the same-price FIFO quantity ahead of the paper order;
+1560. deterministic fixtures prove better-priced visible liquidity prevents an early maker fill until that priority liquidity is causally depleted/cancelled under the chosen conservative model;
+1561. every public-trade batch used to deplete maker queue-ahead is bound to the same instrument/run/window and must pass finite numeric, timestamp, continuity, provenance and data-quality gates;
+1562. corrupt/low-quality/unbound public trade flow cannot create or accelerate a certifying maker fill;
+1563. all blocker-classified weaknesses 318-321 remain implementation blockers until strict numeric-domain, canonical-book, price-priority queue and trade-quality regression tests prove closure.
 
 ## Non-goals
 
