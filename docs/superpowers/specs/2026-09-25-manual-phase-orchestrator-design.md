@@ -12431,6 +12431,292 @@ The current Hyperliquid documentation establishes the source semantics used by t
 
 The canonical implementation should prefer these first-party records and immutable raw evidence over derived frontend/account snapshots whenever the two differ.
 
+## Simulation-to-live behavioral parity contract
+
+The simulation target is **behavioral parity with the future real execution path**, not merely similar aggregate PnL.
+
+Because some live matching-engine state can be unobservable from public L2/API evidence, "exact" means:
+
+1. reproduce exactly every venue behavior for which point-in-time evidence and rules are observable;
+2. preserve explicit uncertainty for hidden state;
+3. use conservative bounded outcomes where exact state cannot be reconstructed;
+4. never convert hidden state into a favorable synthetic fill;
+5. block economic certification and any future live-readiness claim when a material execution behavior is unsupported or unvalidated.
+
+Current Alina remains strictly paper/read-only. This section defines the simulation and future-readiness contract; it does not authorize signing, API wallets, private keys, testnet trading, mainnet trading, or real orders.
+
+### 2026-09-26 current-code audit findings
+
+The repository contains many strong realism components, but the audit found several gaps between those components and a venue-faithful canonical simulation:
+
+- `src/hl_observer/audit/simulation_realism_audit.py` currently checks ledger fields, numeric types and PnL reconciliation, but does not prove order-lifecycle, latency, queue, rejection, margin, funding, liquidation or venue-state parity;
+- `tests/test_runtime_replay_paper_parity.py` proves deterministic equality for a legacy `hyper_smart_observer` path and only compares entry price, size and entry fee; it is not a complete parity test for the canonical `src/hl_observer` execution path;
+- `ExecModelConfig(latency_mode="CAUSAL")` suppresses the scalar latency surcharge when an `ExecutionTruth` exists, but `execute_paper_intent()` itself consumes one supplied book and does not prove that this book is the first causal executable state at `decision_time + actual_order_arrival_delay`; this wiring must be proven end-to-end;
+- the canonical execution model currently creates an "all-in" effective fill price by folding fee and, in some branches, latency/adverse-selection adjustments into price, while `PaperEngine` records zero separate ledger fee for those fills; this can preserve some round-trip arithmetic while still differing from real venue cash, entry-price, margin and liquidation timing;
+- adverse selection is currently allowed to modify a simulated maker fill price; in live trading adverse selection is a post-fill market outcome/markout, not a fee that changes the venue execution price;
+- `src/hl_observer/paper_trading/order_types.py` exposes only MARKET/LIMIT/POST_ONLY abstractions, while Hyperliquid live semantics distinguish GTC/IOC/ALO, reduce-only, trigger orders, TP/SL, parent-child grouping, Scale, TWAP, Chase and venue-specific cancellation/modify behavior;
+- the canonical one-shot execution API does not by itself model the full persistent lifecycle of a resting GTC/ALO order, partial fills across blocks, cancel/modify races, trigger activation, or eventual residual cancellation;
+- maker fills may consume externally supplied queue-ahead/depletion evidence, but public aggregate L2 alone cannot prove exact price-time queue position;
+- the default `max_execution_book_age_ms=5000` is a compatibility bound, not a universal proof-quality freshness threshold for short-horizon strategies;
+- `PaperEngine` still has simple paper margin/exposure caps that are not themselves the full point-in-time Hyperliquid clearinghouse, margin-tier, account-mode and match-time margin state machine;
+- legacy/simple funding helpers exist that multiply rate × notional × interval; certified simulation funding must instead use actual settlement events or exact point-in-time hourly settlement reconstruction;
+- several older helper/test surfaces remain useful diagnostics but are not sufficient evidence that the canonical simulator would have received the same acceptance, fill, fee, order-state and account-state outcome as a real Hyperliquid action.
+
+These are implementation gaps, not permission to add a live executor. Until closed, the corresponding capability remains simulation-only and non-live-eligible.
+
+### Event-native execution accounting
+
+A real venue does not charge a trading fee by changing the trade's execution price. Therefore the canonical simulator must preserve the same event categories as the venue:
+
+- `raw_fill_price`: volume-weighted actual simulated match price from executable book/order evidence;
+- `filled_quantity` and `filled_notional`: only actually matched quantity;
+- `spread/slippage`: emerges from the difference between decision/reference price and raw executable match prices;
+- `trading_fee` / maker rebate / builder or deployer fee / priority fee: separate signed cash-flow events;
+- `funding`, borrow interest and liquidation economics: separate signed ledger events;
+- `latency`: changes which future market/order-book state the order reaches; it is not an arbitrary additive price surcharge in the certifying path;
+- `adverse_selection`: post-fill markout/outcome measured after execution; it is never folded into the raw fill price.
+
+Effective/all-in prices may exist for diagnostics, but canonical entry price, position cost, margin, equity, liquidation and reconciliation use raw venue-equivalent fill events plus separately typed costs.
+
+### Causal end-to-end latency
+
+Every simulated action carries a causal latency trace:
+
+`source_event -> local receive -> normalization -> signal -> decision -> risk -> order-intent creation -> serialization/signing-equivalent budget -> outbound network -> API/mempool/consensus -> execution eligibility -> execution result receive`.
+
+In the current read-only architecture, unavailable future signed-write components are measured where possible and otherwise explicitly versioned assumptions/stress ranges. They are never silently set to zero for proof.
+
+For a taker/IOC-style paper action, the execution book must be the first admissible causal market state at or after the simulated matching-engine arrival time. A book observed at the decision time cannot be reused as the execution book merely because it is fresh.
+
+For a resting order, order insertion time determines initial queue state. Subsequent fills/cancels/modifies are driven by later causal market/order events.
+
+Hyperliquid's current first-party documentation states that end-to-end write latency includes API transit, mempool inclusion and commit, and that transaction ordering distinguishes cancels/ALO from IOC/GTC. Current empirical latency figures are versioned observations, never timeless constants.
+
+### Venue-native order state machine
+
+Every paper order intended to represent an actionable future live order carries the same material fields as the target Hyperliquid action: instrument identity, side, raw size, raw/rounded limit price, reduce-only, TIF, trigger configuration, grouping/parent-child relationship, optional client identity, and rule-version provenance.
+
+The simulator models at least these states where applicable:
+
+`CREATED -> PREVALIDATED -> SUBMITTED_SIM -> ACCEPTED -> RESTING/PARTIALLY_FILLED/TRIGGER_PENDING -> FILLED/CANCELED/REJECTED/EXPIRED`.
+
+Modify and cancel are state transitions with races, not instantaneous rewrites of history.
+
+TIF semantics are exact:
+
+- ALO that would immediately match is canceled/rejected rather than becoming taker;
+- IOC matches only immediately available eligible liquidity and cancels the residual;
+- GTC residual quantity rests until later fill/cancel/expiry;
+- reduce-only cannot increase or flip exposure;
+- trigger orders remain inactive until the applicable mark-price trigger condition is met;
+- TP/SL activation and parent-child behavior follow the point-in-time documented rule;
+- unsupported order types or undocumented lifecycle state return `UNSUPPORTED_SIMULATION_SEMANTICS` and cannot be economically certified.
+
+Market helpers are modeled as protected aggressive IOC/limit behavior when that is what the client/API actually sends; no infinite-liquidity "market" primitive is invented.
+
+### Exact pre-validation and venue rejection parity
+
+Before a simulated action can reach matching, the simulator applies the point-in-time venue rule set. Deterministic rejections include, where applicable:
+
+- invalid tick/price precision;
+- invalid lot/size precision;
+- minimum notional;
+- insufficient margin;
+- reduce-only violation;
+- ALO price that would immediately match;
+- IOC with no immediately matchable liquidity;
+- invalid trigger price/type;
+- no market liquidity;
+- open-interest cap / too-aggressive-at-cap / position-flip-at-cap;
+- oracle/reference-price bounds;
+- maximum position/margin-tier limit;
+- batch-level pre-validation failure;
+- open-order/action/rate-limit constraints;
+- stale `expiresAfter` and other applicable request validity rules.
+
+A simulation that would have been rejected live records a rejection with the corresponding rule/version and creates no fill/PnL.
+
+### Taker / aggressive execution
+
+Aggressive fills walk the side-correct executable book at **arrival time**, level by level, after all applicable tick/lot/price-protection rules.
+
+The simulator must:
+
+- consume shared liquidity exactly once across simultaneous paper intents;
+- preserve every level fill;
+- stop when price protection or available depth ends;
+- distinguish full fill, partial fill and no fill;
+- cancel residual quantity for IOC;
+- preserve residual quantity only for order types that would actually rest;
+- never fill beyond observed/reconstructed executable liquidity;
+- never use midpoint as an executable price;
+- compute fees from actual filled notional under the point-in-time account/asset fee rule.
+
+### Maker / passive execution and queue uncertainty
+
+Hyperliquid matches orders in price-time priority, with additional L1 action-ordering semantics documented for cancels/ALO versus GTC/IOC. Exact maker fill simulation therefore requires evidence sufficient to reconstruct the order's place in the relevant queue and the subsequent executable events.
+
+Aggregate L2 snapshots alone do not identify the exact orders ahead. When exact queue state is unavailable:
+
+- the simulator reports `QUEUE_STATE_UNOBSERVABLE`;
+- maker fill results are bounded/conservative scenarios rather than "exact" fills;
+- favorable queue assumptions cannot enter certified PnL;
+- a fill may be certified only when order-level/raw-diff evidence or another validated causal mechanism establishes that sufficient executable volume reached/passed the simulated order after insertion;
+- cancellations ahead may improve queue position only under a validated queue-depletion model; they are not automatically credited favorably;
+- priority-fee/ALO queue semantics are versioned and applied only when their required evidence exists.
+
+### Freshness and event ordering
+
+No universal five-second book age is sufficient for all strategies.
+
+Each strategy/action defines a maximum admissible evidence age from measured horizon, alpha half-life and execution latency. Proof-critical events preserve exchange/block time, local receive time, monotonic ordering evidence and source sequence/identity.
+
+Replay has one deterministic total order that preserves the venue's observable sequencing and local receive causality. Ties use explicit deterministic rules rather than input-file accident.
+
+No order may execute against an event that became observable only after its simulated decision/arrival state unless that event is the causal future execution event itself.
+
+### Fees and rebates
+
+Simulation fee truth is point-in-time and account-specific.
+
+The current Hyperliquid fee schedule depends on rolling weighted volume and can also depend on staking/referral state, maker share/rebate tier, aligned quote-asset treatment, HIP-3 growth mode and deployer configuration. Static 4.5/1.5 bps values remain compatibility assumptions only when the exact scenario explicitly targets that tier.
+
+For certification:
+
+- the fee rule/version and account fee state are inputs;
+- maker rebates are signed cash flows, not negative slippage;
+- builder/deployer/priority fees remain separate components;
+- unknown fee tier or applicable multiplier makes exact net PnL unmeasurable unless a preregistered conservative bound is used and labeled as such;
+- fee timing follows the fill event so cash/equity/margin evolution matches venue economics.
+
+### Funding and settlement
+
+Certified perp funding follows the point-in-time Hyperliquid rule and account position at each settlement boundary.
+
+For current standard perps, the first-party rule basis is hourly settlement, with payment based on position size × oracle price × applicable funding rate. Forecast, accrued or linearly prorated funding is not settled funding.
+
+Partial position changes around a funding boundary use the actual point-in-time size. Reconnect/backfill duplicate funding events are exactly-once.
+
+### Margin, buying power and liquidation parity
+
+Simulation risk caps are not substitutes for venue margin accounting.
+
+The canonical paper account tracks the selected point-in-time account mode, collateral, cross/isolated state, margin tier, open-order reservations, unrealized PnL, funding/fees, maintenance requirement, withdrawable/available balance and match-time margin checks.
+
+Margin must be re-evaluated when the venue would re-evaluate it, including for the resting side at matching.
+
+Liquidation uses mark-price/account-equity semantics and the applicable rule version. The simulator models book liquidation, partial liquidation rules/cooldowns where applicable, residual position/account state, and backstop/ADL behavior to the extent required by the tested account mode. Missing liquidation-rule evidence blocks liquidation-sensitive PnL certification.
+
+### TP/SL, triggers and advanced order behavior
+
+Trigger conditions use the venue's documented trigger price source, not last trade/BBO by convenience.
+
+Market TP/SL and limit TP/SL preserve their actual price-protection/fill semantics. Trigger activation does not guarantee execution.
+
+Parent-linked TP/SL, OCO-style lifecycle, Scale, TWAP and Chase are modeled only when the strategy actually uses them and enough evidence exists. Otherwise they are explicitly unsupported rather than approximated as simple market fills.
+
+### Rate limits, congestion and action feasibility
+
+A strategy that is profitable only when it can submit an impossible number of actions is not live-feasible.
+
+Simulation maintains point-in-time feasibility for:
+
+- address action budget;
+- IP/API request budget;
+- open-order limits;
+- websocket/user/subscription constraints relevant to the data path;
+- batch semantics;
+- congestion/maker-share constraints where applicable;
+- cancel/modify/trigger restrictions;
+- priority-fee requirements for any latency assumption that depends on them.
+
+When the modeled future live action could not legally/operationally be submitted in time, the paper action is delayed/rejected accordingly.
+
+### Reconnect, restart and state recovery
+
+Disconnect/restart is part of execution realism.
+
+On restart/reconnect the simulator rebuilds from durable canonical state, reconciles open positions/orders/fills/funding, deduplicates snapshot acknowledgements/backfills, and cannot assume that a disappeared local order was filled or canceled.
+
+Until order/account state is reconciled, affected actions and numeric PnL remain blocked or explicitly uncertain.
+
+### Cross-venue and multi-leg coordination
+
+Multi-leg strategies preserve independent venue latency, rules, fill states and failure modes for every leg.
+
+No atomicity is assumed unless the real mechanism provides it. The simulation must represent:
+
+- one-filled/one-rejected;
+- one-filled/other-delayed;
+- unequal partial fills;
+- residual inventory;
+- hedge chase/cancel logic;
+- capital/margin fragmentation;
+- venue-specific fees/funding;
+- emergency flattening policy and its executable cost.
+
+A paired strategy cannot book the intended spread as PnL before the actual simulated leg states justify it.
+
+### Parity validation and calibration
+
+"Simulation passed tests" is insufficient. The simulator needs an explicit **parity scorecard** against real venue ground truth wherever such ground truth is available.
+
+Deterministic parity fixtures/replays compare at least:
+
+- order acceptance/rejection and exact reason class;
+- resting versus immediate-fill outcome;
+- order-state transition sequence;
+- fill count and partial-fill structure;
+- filled quantity and VWAP;
+- cancel/modify race outcome;
+- fee/rebate/funding cash flows;
+- position/equity/margin state after every economic event;
+- TP/SL trigger and execution state;
+- liquidation transition/state where applicable;
+- reconnect/recovery idempotency;
+- action feasibility under limits;
+- final reconciled PnL.
+
+The same canonical execution/accounting engine is used by replay, forward paper and future live-intent planning; strategy-specific code may not maintain a more favorable private simulator.
+
+Where public/archival Hyperliquid order/fill/book data provides ground truth, replay must match it within exact discrete-state equality and narrowly defined numeric rounding tolerances. Aggregate PnL agreement alone is never sufficient.
+
+### Future real-money readiness gate
+
+Current Alina is not live-enabled. A future user-authorized transition to any signed/testnet/mainnet executor requires a separate explicit change of scope.
+
+Before any future real-money permission can be considered, all of the following must be true:
+
+- every order type the strategy can emit has certified simulation semantics;
+- all proof-critical venue rules are current/versioned;
+- no approximate/legacy execution path can feed promoted PnL;
+- execution/accounting branch coverage satisfies the 100% branch gate;
+- parity scorecards pass on representative regimes, volatility, liquidity and failure cases;
+- paper/forward behavior remains economically positive under conservative uncertainty bounds;
+- restart/reconnect/rate-limit/liquidation/failure drills pass;
+- no unresolved `UNMEASURABLE`, `UNSUPPORTED_SIMULATION_SEMANTICS`, queue ambiguity, reconciliation mismatch or material rule conflict remains for the live scope;
+- the user separately and explicitly authorizes changing Alina's read-only safety model.
+
+Until then, `LIVE_ELIGIBLE = false`.
+
+### First-party rule basis for this contract
+
+The current first-party Hyperliquid documentation establishes that:
+
+- the order book uses price-time priority;
+- ALO/IOC/GTC have distinct matching/resting behavior;
+- venue errors include tick, minimum-notional, margin, reduce-only, ALO-cross, IOC-no-fill, trigger, no-liquidity, open-interest/oracle/max-position failures;
+- TP/SL are mark-triggered and trigger activation does not guarantee a fill;
+- WebSocket clients must tolerate disconnects and reconcile missed data from reconnect snapshots/info queries;
+- funding settles hourly and standard-perp payment uses oracle-price notional;
+- margin is checked when opening an order and again for resting-side matching;
+- liquidation is mark/equity/maintenance-margin driven and may first use book execution before backstop;
+- fees are account/volume/tier dependent rather than one universal constant;
+- action, open-order, websocket and request-rate limits can constrain a live strategy;
+- write latency includes API transit, mempool inclusion and consensus/commit, and current sequencing treats cancel/ALO behavior differently from IOC/GTC.
+
+All numeric constants from these documents remain versioned point-in-time rules rather than permanent assumptions.
+
 ## Test coverage — 100% branch coverage
 
 The implementation target is **100% branch coverage**, not merely 100% line/statement coverage.
@@ -13454,6 +13740,58 @@ The following numbered items form the normative acceptance catalog. Each item is
 991. realized, unrealized, estimated and diagnostic values are structurally and visually distinct, and stale unrealized state cannot appear as current verified PnL;
 992. parent/module/portfolio PnL aggregation is deny-by-default when a material child component is invalid or unmeasurable and cannot silently omit unknown unfavorable components;
 993. restart, reconnect, replay resume, dataset repair or ledger rebuild suppresses cached numeric PnL until canonical reconciliation completes again, and conflicting UI/report surfaces suppress numeric display for the affected scope.
+994. simulation certification targets venue-behavioral/event parity rather than aggregate-PnL similarity, and any material hidden state remains explicit uncertainty instead of a favorable synthetic fill;
+995. the existing snapshot-level simulation realism audit is not sufficient for live-readiness and canonical parity additionally covers execution, order lifecycle, latency, queue, rejection, margin, funding, liquidation, restart and action-feasibility semantics;
+996. runtime/replay parity is proven on the canonical src/hl_observer execution/accounting path and cannot rely solely on deterministic equality of a legacy simulator;
+997. canonical fill price is the raw simulated venue match/VWAP; trading fees, rebates, builder/deployer/priority fees and funding remain separate signed cash-flow events;
+998. certifying execution cannot fold trading fees into entry/exit price because doing so changes venue-equivalent entry price, cash timing, margin and liquidation state;
+999. adverse selection is post-fill markout/economic outcome and cannot be added to the raw maker fill price;
+1000. causal latency changes the market/order state reached by the action and the canonical path proves use of the first admissible execution state at/after simulated arrival time rather than merely zeroing a scalar latency surcharge;
+1001. a decision-time book cannot also serve as the latency-adjusted execution book unless the modeled arrival delay is zero and provenance proves the state is valid at that arrival instant;
+1002. every actionable paper intent carries venue-native order semantics including TIF/reduce-only/limit/trigger/grouping fields required by the target future Hyperliquid action;
+1003. ALO, IOC and GTC residual behavior is simulated distinctly and unsupported venue-native order semantics fail with UNSUPPORTED_SIMULATION_SEMANTICS rather than a generic fill approximation;
+1004. resting-order simulation preserves persistent state and causal partial-fill/cancel/modify/trigger transitions across later events rather than resolving every intent in one call;
+1005. point-in-time venue pre-validation reproduces relevant tick, lot, minimum-notional, margin, reduce-only, ALO-cross, IOC-no-liquidity, trigger, OI-cap, oracle, max-position, batch and request-validity rejection classes;
+1006. an action that would be rejected under the applicable venue rule produces no fill, position mutation or PnL in simulation;
+1007. aggressive execution walks side-correct depth at simulated arrival time, preserves level fills, price protection and actual filled quantity, and never uses midpoint as an executable price;
+1008. shared displayed/reconstructed liquidity is consumed exactly once across competing paper intents so parallel strategies cannot each receive the same book quantity;
+1009. IOC residual quantity is canceled while GTC residual quantity may rest only when the corresponding live order semantics permit it;
+1010. maker fills require sufficient causal queue/order-flow evidence and aggregate L2 alone cannot be treated as exact queue position;
+1011. unavailable exact maker queue state is QUEUE_STATE_UNOBSERVABLE/bounded uncertainty and favorable assumed queue placement cannot support certified PnL;
+1012. cancellations ahead improve simulated queue only under a validated queue-depletion model and are not automatically credited to the paper order;
+1013. evidence freshness is strategy/action specific and a compatibility default such as five seconds cannot certify short-horizon execution without a justified consumer threshold;
+1014. proof-critical replay preserves exchange/block time, local receive time, monotonic ordering and source identity/sequence and applies deterministic tie-breaking;
+1015. point-in-time account/asset fee state drives fees and static 4.5/1.5-bps defaults are compatibility assumptions rather than universal certified truth;
+1016. maker rebates and builder/deployer/priority charges remain distinct signed accounting components and cannot be hidden inside slippage or fill price;
+1017. unknown material fee tier/multiplier makes exact net PnL unmeasurable unless a preregistered conservative bound is used and explicitly labeled;
+1018. certified funding uses actual settlement evidence or exact hourly boundary reconstruction with point-in-time size, oracle price and rule/rate, never continuous prorating as settled truth;
+1019. canonical simulation tracks the applicable account mode, collateral, margin tier, cross/isolated state, open-order reservation, maintenance requirement and match-time margin checks rather than substituting local risk caps for venue margin;
+1020. liquidation-sensitive simulation uses mark/equity/maintenance-margin state and applicable partial/book/backstop/ADL rules; missing material liquidation semantics block certification;
+1021. TP/SL and trigger simulation uses point-in-time mark trigger semantics and preserves market/limit execution uncertainty after activation;
+1022. parent-linked TP/SL, Scale, TWAP, Chase and other advanced order behavior are modeled only when used and evidenced; otherwise that live scope is unsupported rather than approximated favorably;
+1023. paper action feasibility enforces point-in-time address/IP/action/open-order/batch/congestion constraints when they could change whether or when a future live action is accepted;
+1024. a strategy cannot be certified live-feasible if its required action rate, subscription coverage or order count exceeds the target architecture's venue limits;
+1025. restart/reconnect restores and reconciles durable order/position/fill/funding state before new affected actions or numeric PnL are trusted;
+1026. disappeared local order state is never interpreted as fill/cancel without reconciliation evidence;
+1027. multi-leg simulation preserves independent latency, fill, rejection, cost and residual inventory state per leg and never assumes atomicity absent a real mechanism;
+1028. one-filled/one-rejected, unequal partial fills and delayed hedge states have explicit emergency/residual economics and cannot be collapsed into intended paired-spread PnL;
+1029. parity validation compares discrete order/rejection/state/fill outcomes plus fees, funding, account state and reconciled PnL; aggregate PnL similarity alone does not pass;
+1030. real/archival venue ground-truth fixtures are used wherever available to validate order-state and fill behavior under narrowly defined rounding tolerances;
+1031. replay, forward paper and future live-intent planning share one canonical execution/accounting engine and strategy modules cannot maintain a more favorable private fill/PnL simulator;
+1032. simulation realism status is fail-closed per capability: a missing unsupported feature blocks only scopes that depend on it but those scopes cannot claim live parity;
+1033. latency parity tracks signal/data age separately from local processing, outbound/write, mempool/consensus and result-return components and unavailable components remain measured assumptions rather than zero;
+1034. current observed Hyperliquid write-latency/order-sequencing figures are versioned empirical inputs and never guaranteed constants;
+1035. raw venue-equivalent entry price remains distinct from all-in/effective economic price so dashboard, position state, margin and accounting can reconcile to future venue records;
+1036. simulated fee cash flow occurs at the fill event so equity/buying-power evolution reflects venue timing rather than deferring cost until position close;
+1037. mark-to-market required for certification cannot fall back to entry price, stale last mark or another convenience price when a current admissible mark/liquidatable price is missing;
+1038. maker fill calibration explicitly reports the data resolution used (L2, raw order diffs/order-level, trades) and certification strength cannot exceed that evidence resolution;
+1039. deterministic failure drills cover disconnect during open order, partial fill then cancel, modify/fill race, stale book at arrival, rate-limit rejection, margin rejection, funding boundary, trigger gap and liquidation transition;
+1040. future real-money readiness remains false while any material execution capability used by the strategy is approximate, unmeasurable, unsupported, unreconciled or not parity-validated;
+1041. no signed testnet/mainnet action, API wallet, key or live executor is introduced by this simulation-realism contract; any future scope change requires separate explicit user authorization;
+1042. simulation parity tests are included in the 100% branch-coverage scope and may not be excluded as integration-only convenience paths;
+1043. a simulator change that improves PnL while reducing venue-parity evidence, rejection realism, cost timing or failure realism is rejected even if backtest metrics improve;
+1044. parity scorecards expose at least rejection-match rate, state-transition match, fill/partial-fill match, quantity/VWAP error, fee/funding reconciliation, latency-evidence quality and account-state reconciliation;
+1045. final economic proof can count a simulated trade only if every execution/accounting capability that materially affected that trade is certified for the evidence resolution and venue-rule version used.
 
 ## Non-goals
 
