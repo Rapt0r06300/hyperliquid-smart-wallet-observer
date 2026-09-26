@@ -3804,6 +3804,7 @@ This specification intentionally preserves all previously validated design layer
 - **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality;
 - **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
+- **Priority / Transport Exactness V6.19:** exact IOC/ALO/gossip priority economics, GitHub-hosted latency boundary, SDK market-order protection and transport-feasibility semantics;
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 - **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
@@ -10239,6 +10240,330 @@ High-signal sources reviewed on 2026-09-26 include:
 
 Public bot profitability claims are not imported as Alina evidence.
 
+
+### Profitability Convergence V6.19 — priority, transport and client-semantics exactness
+
+V6.19 resolves the final current discrepancies found while cross-checking V6.13-V6.18 against the latest official Hyperliquid Markdown documentation, official Python SDK behavior and the continuing X/GitHub corpus review.
+
+The governing rule is:
+
+> **priority, transport and client-wrapper behavior must be modeled as separate layers; a paper edge may not inherit latency, queue position, fill protection or fee treatment from an infrastructure path Alina does not actually possess.**
+
+V6.19 adds no new alpha module. It tightens the executability proof for Execution Alpha, XEMM, Lead-Lag, Cross-Venue, Scheduled Flow and any queue-sensitive sleeve.
+
+### Priority-fee capability contract
+
+For every priority-capable action, record point-in-time:
+
+- priority mechanism: `NONE / GOSSIP_READ / IOC_WRITE / ALO_QUEUE`;
+- raw priority parameter;
+- interpreted rate;
+- eligible asset class;
+- eligible TIF/order family;
+- reduce-only eligibility;
+- batch homogeneity requirement;
+- charging basis;
+- charging time;
+- charging balance/currency;
+- conversion reference;
+- burn/destination rule;
+- queue/mempool effect;
+- source rule revision.
+
+Current official documentation reviewed on 2026-09-26 states that write-priority grouping is accepted only when:
+
+1. every order is on a **non-outcome** asset; and
+2. the action is homogeneous: either every order is IOC, or every order is a **non-reduce-only ALO**.
+
+A mixed IOC/ALO priority batch is therefore invalid under the current rule.
+
+A priority-enabled paper policy must fail closed if its batch composition is invalid.
+
+### Priority-fee unit and payment exactness
+
+Current official write-priority rate uses:
+
+```text
+priority_rate = p / 100_000_000
+```
+
+with examples such as `p = 10000` representing 1 basis point.
+
+Current official charging basis differs by order family:
+
+- IOC: priority charge is based on **filled notional**;
+- ALO: priority charge is based on **resting notional** and is charged at placement.
+
+Current official payment semantics state that order-priority cost is charged from **undelegated staking balance**, converted to HYPE using the **spot mark price**, and burned.
+
+Therefore paper accounting distinguishes:
+
+- ordinary trading fee;
+- builder/deployer fee;
+- IOC priority gas;
+- ALO placement priority gas;
+- gossip/read-priority auction cost.
+
+Do not charge all priority mechanisms to the same balance or at the same lifecycle event.
+
+### IOC priority — exact current ordering semantics
+
+Current official IOC priority behavior includes:
+
+- temporal prioritization responds approximately linearly in the **0-8 bps** region;
+- current empirical mainnet effect is approximately **45 ms lower end-to-end latency per 1 bp** in that useful region;
+- priority above 8 bps does not buy additional ordinary temporal preference;
+- the maximum priority rate itself can extend to **100%** under the current rule;
+- sufficiently high-priority IOC orders that fall into the same proposer time bucket can still be ranked by priority rate;
+- current documentation describes proposer buckets on the order of **70 ms** for this tie-breaking behavior;
+- all cancels remain ahead of immediately executable orders under the documented ordering class.
+
+Replay requirements:
+
+- do not clamp the *parameter* to 8 bps merely because temporal benefit saturates there;
+- do cap ordinary time-shift benefit at the documented saturation rule;
+- if testing >8 bps, account only for the documented same-time/same-bucket ranking effect plus the full fee;
+- `priorityGas` from node/user-fill evidence is reconciled where available;
+- the current 45 ms/bp figure is an empirical/versioned prior, not a guaranteed deterministic latency reduction.
+
+### ALO priority — continuous 400 ms queue-tail semantics
+
+Current official ALO priority is a queue-position mechanism, not a mempool-latency mechanism.
+
+At each price level:
+
+- the queue tail consisting of orders placed within the previous **400 ms** is priority-sortable;
+- the window is **continuous**, not bucketed;
+- a newly placed ALO compares against orders still inside that rolling tail;
+- once older queue structure has effectively locked, a later high-priority ALO cannot leapfrog arbitrarily old resting orders;
+- ALO priority does not accelerate transaction arrival in the mempool;
+- ALO actions remain processed under their ordinary transaction ordering class;
+- the priority mechanism changes same-level queue position after application to the L1;
+- ALO priority cost is charged at placement whether or not the order ever fills.
+
+Replay must therefore distinguish:
+
+```text
+transaction_arrival_order
+!=
+same_price_queue_order_after_ALO_priority
+```
+
+The simulator must not model ALO priority as a generic latency subtraction.
+
+For current rule reconstruction, ALO priority cost in USDC-equivalent terms may be derived from the documented resting notional and priority rate when the required source fields are present.
+
+An unfilled priority ALO can have negative realized value purely from placement cost.
+
+### Cancel / ALO / IOC ordering class
+
+Official latency documentation states that Hyperliquid intentionally protects makers by sequencing cancels and ALO actions ahead of IOC/GTC taker-style actions submitted at similar times.
+
+It also states that this behavior can span multiple blocks and that within a consensus bundle ALO/cancel actions are processed before the other action class.
+
+Important precision:
+
+- documentation uses language equivalent to **"almost always"**, not an absolute mathematical guarantee across every network path;
+- paper replay therefore models this as a venue/version ordering rule with uncertainty where exact block/action ordering is absent;
+- an IOC priority fee cannot be credited with overtaking a cancel when the documented class ordering places cancels first;
+- a CEX-style "first packet received wins" assumption is invalid for Hyperliquid.
+
+### Gossip/read priority — separate economic surface
+
+Read priority is distinct from write/order priority.
+
+Current official documentation describes:
+
+- **2 independent Dutch auctions**;
+- synchronized on a **3-minute** schedule;
+- each auction affects the following auction interval;
+- lower slot indices are strictly prioritized over higher slot indices for nodes that opt into the scheme;
+- multiple slots are not additive for the same IP; the lowest/best slot governs that ordering;
+- the onchain IP must match the peer-visible IP for the priority to matter;
+- individual network hops may or may not respect the priority ordering;
+- current minimum auction price is **0.1 HYPE**;
+- gossip-priority bid gas is denominated in HYPE from spot balance and burned under the current rule;
+- current empirical mainnet effect is approximately **25 ms latency reduction per auction slot**;
+- current auction state is queryable through the documented `gossipPriorityAuctionStatus` info request.
+
+These numbers are versioned.
+
+### GitHub-hosted latency boundary
+
+Alina's current architecture must **not** pretend to possess node/gossip infrastructure that it does not run.
+
+Official latency documentation states that:
+
+- `split_client_blocks` on a node can expose pending transaction inputs before client-block inclusion;
+- current documentation estimates roughly **70-150 ms** read-latency improvement from that path;
+- those early inputs do **not** yet include final execution results;
+- running a local/non-validating node can provide more granular/faster state than the public API.
+
+Under Alina's explicit GitHub-hosted-only rule:
+
+- no self-hosted Hyperliquid node is introduced;
+- no user-PC node is introduced;
+- node/gossip priority is not credited to Alina's executable latency unless an actually available remote/cloud source with certified timing exists;
+- node-class latency is treated as a **competitor/infrastructure latency frontier** and stress scenario;
+- an edge that requires split-client-block or privileged peer timing unavailable to GitHub-hosted Alina is labeled `UNEXECUTABLE_CURRENT_ARCHITECTURE`, even if a professional colocated/node strategy could exploit it.
+
+This prevents public HFT bots from making Alina's paper results look achievable merely because their infrastructure is faster.
+
+### End-to-end latency versus sequencing latency
+
+Hyperliquid's documented latency model is not identical to a centralized exchange.
+
+Current official material notes:
+
+- end-to-end write latency includes API-server travel, mempool inclusion and consensus commit;
+- commit commonly spans roughly two pipelined HyperBFT blocks under the current architecture;
+- cancel/ALO end-to-end time can be hundreds of milliseconds while transaction ordering can remain much more predictable;
+- current documentation gives an example around **380 ms** end-to-end for cancel/ALO while controlled relative send timing can exhibit much lower ordering variance.
+
+Therefore Alina must store separately:
+
+- absolute end-to-end latency;
+- relative sequencing/ordering latency;
+- queue insertion time;
+- data-observation latency;
+- consensus/application timestamp.
+
+A large absolute latency does not imply equally noisy relative ordering.
+
+### Market-order client-wrapper semantics
+
+The official Hyperliquid Python SDK does not submit a protocol-level "infinite market order."
+
+Current SDK behavior reviewed on 2026-09-26 implements `market_open` / `market_close` as an **aggressive IOC limit order**.
+
+The current SDK default helper behavior:
+
+- obtains a reference from `allMids` when no explicit price is supplied;
+- applies a default **5% slippage envelope** in the SDK helper;
+- normalizes the resulting limit price to protocol precision;
+- submits an IOC limit;
+- uses reduce-only for the close helper.
+
+Critical distinctions:
+
+- the SDK's 5% default is a **client-library default**, not a universal protocol constant;
+- frontend/UI slippage settings can differ;
+- TP/SL-market uses its own documented current slippage semantics;
+- `allMids` may itself use fallback provenance already handled by V6.14;
+- actual fill still requires executable book liquidity and can partially fill/cancel.
+
+Therefore paper "market" execution always records:
+
+`MARKET_INTENT -> CLIENT_PROTECTION_LIMIT -> IOC_MATCHING -> PARTIAL/FULL/NONE`.
+
+No module may assume unlimited-depth market fills.
+
+### Action-transport feasibility without live signing
+
+V6.19 records transport constraints for **paper feasibility only**.
+
+Official nonce documentation currently states:
+
+- Hyperliquid stores a bounded set of recent nonces per signer rather than requiring strict sequential Ethereum-style nonces;
+- the current implementation stores the **100 highest nonces** per signer;
+- a new nonce must exceed the lowest retained nonce and must not have been used;
+- current accepted nonce time window is approximately `T - 2 days` to `T + 1 day`;
+- different subaccounts using the same API/agent signer share that signer nonce state;
+- official guidance recommends batching automated order/cancel requests and separating ALO-only batches from IOC/GTC batches because ALO-only batches receive their own prioritization behavior.
+
+Alina does **not** create or use API wallets/private keys.
+
+These rules enter only a hypothetical feasibility ledger:
+
+- can the claimed action rate be represented by a realistic batching policy?
+- would batch composition destroy priority eligibility?
+- would a shared-signer architecture create a throughput/nonce collision bottleneck?
+- is the paper strategy dependent on transport engineering that the current project explicitly does not operate?
+
+No nonce/signature code belongs in the research hot path.
+
+### Batch-class purity
+
+Because execution ordering and priority eligibility differ by action class, paper batching must preserve class composition.
+
+When replaying a hypothetical batching policy:
+
+- ALO-only;
+- IOC-only;
+- GTC/taker-style;
+- cancels;
+- modify/cancel-replace;
+
+remain separately attributable unless the historical venue rule explicitly allows mixed semantics.
+
+Do not merge incompatible actions into one synthetic batch to reduce modeled latency or API cost.
+
+### Priority evidence sources
+
+Prefer source-native evidence:
+
+- IOC priority gas: node/user-fill `priorityGas` where available;
+- ALO priority: order action/grouping + resting notional + raw-book/ordering evidence where available;
+- gossip auction: auction-status and replica/node evidence where available;
+- priority rule: official versioned documentation.
+
+If only ordinary fills exist:
+
+- IOC priority cost may be partially observable;
+- ALO placement costs and same-level queue reordering can remain incomplete;
+- missing placement evidence becomes `PRIORITY_PLACEMENT_UNMEASURABLE`, never zero.
+
+### Priority competition as a target-gap diagnostic
+
+Priority fees can consume a large fraction of tiny latency-sensitive alpha.
+
+For every priority-sensitive sleeve report:
+
+- gross edge before priority;
+- priority rate;
+- priority cost;
+- estimated latency/queue benefit;
+- post-priority edge;
+- break-even priority rate;
+- fraction of gross edge transferred to priority cost;
+- whether a no-priority slower route dominates.
+
+This is especially important for:
+
+- Lead-Lag;
+- taker Cross-Venue;
+- XEMM hedge urgency;
+- HIP-3 short-horizon dislocations;
+- queue-sensitive maker alpha.
+
+If competitive priority cost absorbs the edge, that is a valid `KILL` reason.
+
+### V6.19 source reconciliation rule
+
+When two official renderings/snippets appear inconsistent:
+
+1. fetch the current Markdown page where possible;
+2. preserve publication/revision timing;
+3. compare first-party SDK/examples if relevant;
+4. distinguish current rule from historical rule;
+5. use `RULE_VERSION_UNCERTAIN` when the applicable historical semantics cannot be pinned.
+
+In this pass, the current Markdown priority page resolves the apparent HTML/snippet discrepancy and explicitly documents both IOC and ALO priority families.
+
+### V6.19 official-source basis
+
+Verified on 2026-09-26 against:
+
+- Hyperliquid official Priority Fees Markdown;
+- Hyperliquid official Optimizing Latency documentation;
+- Hyperliquid official Nonces and API Wallets documentation;
+- Hyperliquid official Self-Trade Prevention / Exchange endpoint / Rate-limit documentation;
+- the official Hyperliquid Python SDK market-order helper implementation;
+- Parallel Search cross-check of the current official Markdown priority section.
+
+All values remain versioned and may not be back-applied to earlier periods without rule evidence.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -11610,7 +11935,37 @@ The following numbered items form the normative acceptance catalog. Each item is
 787. backstop-acquired positions receive no special ADL queue treatment unless a future rule version explicitly introduces one;
 788. flat accounts are not assigned socialized-loss/ADL cash flows when the protocol invariant excludes them;
 789. ADL observations are dependency-clustered with their parent insolvency/backstop episode for effective-sample accounting;
-790. all V6.18 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
+790. all V6.18 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies;
+791. V6.19 records IOC write priority, ALO queue priority and gossip/read priority as distinct mechanisms with separate charging and ordering semantics;
+792. current write-priority grouping requires non-outcome assets and a homogeneous all-IOC or all-non-reduce-only-ALO batch;
+793. a mixed or otherwise ineligible priority batch is rejected in feasibility simulation rather than partially credited with priority;
+794. current priority rate encoding p/100000000 and the applicable rule version are preserved point-in-time;
+795. current IOC priority cost is based on filled notional while current ALO priority cost is based on resting notional at placement;
+796. current order-priority payment source, HYPE spot-mark conversion and burn semantics are modeled separately from ordinary trading fees;
+797. IOC ordinary temporal-priority benefit is versioned as saturating around 8 bps under the current documented rule, while the parameter range and higher-priority tie-breaking remain distinct concepts;
+798. current same-proposer-bucket higher-priority IOC ordering is not converted into additional continuous latency reduction above the saturation region;
+799. ALO priority is modeled as a continuous roughly-400-ms same-level queue-tail reorder, not as faster mempool arrival;
+800. ALO priority placement cost is charged even for orders that never fill under the current documented rule;
+801. older locked queue position cannot be freely overtaken by a later ALO merely because it pays more priority;
+802. current cancel/ALO versus IOC/GTC action-class ordering is modeled as venue/version sequencing behavior and not generic CEX packet-arrival FIFO;
+803. an IOC priority fee cannot be credited with overtaking a cancel when the applicable venue rule prioritizes cancels first;
+804. gossip/read priority is economically distinct from write priority and its auction fee/state cannot be substituted for order priorityGas;
+805. current gossip-priority auction count, cadence, minimum bid, IP/path dependence and approximate slot latency effect are versioned inputs;
+806. node/split-client-block/gossip advantages unavailable to GitHub-hosted Alina are treated as competitor latency frontier or UNEXECUTABLE_CURRENT_ARCHITECTURE, never silently credited to Alina;
+807. absolute end-to-end latency and relative transaction-sequencing latency are separate state variables;
+808. SDK-style market helpers are modeled as protected aggressive IOC limits rather than infinite-depth native market orders;
+809. the official Python SDK current 5% market-helper slippage default is labeled CLIENT_DEFAULT and cannot be back-applied as a protocol constant or UI default;
+810. allMids fallback provenance remains active when an SDK-style protected IOC reference price is reconstructed;
+811. hypothetical action batching preserves order-class purity where priority/ordering semantics depend on ALO versus IOC/GTC versus cancel classes;
+812. nonce/API-wallet transport rules are retained only for hypothetical feasibility and cannot introduce signing/private-key code into the research path;
+813. paper feasibility may reject an action policy that requires incompatible batch composition, impossible throughput or unavailable low-latency transport even if signal PnL is positive;
+814. IOC priority evidence prefers node/user-fill priorityGas while ALO placement-cost evidence requires action/resting-notional provenance;
+815. missing ALO placement evidence is PRIORITY_PLACEMENT_UNMEASURABLE rather than zero cost;
+816. priority-sensitive sleeves report break-even priority rate and fraction of gross alpha consumed by priority cost;
+817. a priority-sensitive edge may be killed when competitive priority economics absorb its post-cost advantage;
+818. conflicting official snippets are reconciled against current Markdown plus first-party implementation/version evidence before a protocol rule is frozen;
+819. V6.19 keeps all numeric latency/priority observations versioned and does not treat empirical current-mainnet effects as deterministic guarantees;
+820. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, API-wallet operation, private keys, live probing, self-hosted nodes or user-PC dependencies.
 
 791. every relevant perp records oracle-source class so AMM, formula-index, Hyperp, HIP-3 and ordinary spot-oracle contracts are not normalized as identical;
 792. AMM-perp relative-value research uses executable AMM quotes for candidate notional rather than raw pool marginal price alone;
