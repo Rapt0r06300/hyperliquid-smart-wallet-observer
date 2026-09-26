@@ -13009,6 +13009,9 @@ The following findings extend the verified weakness inventory. They were found b
 263. **The portfolio drawdown kill switch can fail open on non-finite equity.** `risk/portfolio_drawdown_kill_switch.py::evaluate_drawdown_kill_switch` does not validate finiteness. In Python, `max(0.0, NaN)` evaluates to `0.0`; a non-finite current/peak equity can therefore produce a zero drawdown and `triggered=False` instead of a fail-closed risk halt. Invalid/non-positive peak and invalid threshold values are likewise normalized/compared rather than rejected as corrupt risk state.
 264. **Volatility-target sizing can turn invalid volatility into the maximum allowed size.** `risk/portfolio_risk.py::vol_target_size_pct` does not reject NaN/Infinity or invalid target/base/cap values. With `asset_vol_bps=NaN`, the initial `<= 0` guard is bypassed and Python `min(cap, NaN)` returns the first finite cap, so unknown volatility can yield maximum position sizing.
 265. **Risk-per-trade notional accepts malformed risk inputs.** `risk/portfolio_risk.py::risk_per_trade_notional` validates only `stop_distance_bps <= 0` and `equity <= 0`; NaN/Infinity can propagate to a non-finite notional, while a negative `risk_pct` creates a negative notional and an unbounded/oversized risk percentage is not rejected at this authority boundary. Proof/risk sizing must reject invalid domains before arithmetic rather than relying on downstream caps.
+266. **The frozen holdout veto accepts truthy non-boolean values as successful evidence.** `backtesting/robustness_protocol.py::apply_holdout_veto` computes `bool(oos_passed and forward_passed)` without requiring strict booleans. Strings such as `"false"` are truthy in Python and can therefore produce `accepted=True` / `CONFIRMED` if an adapter serializes Boolean state incorrectly.
+267. **PBO/CSCV silently truncates and position-aligns unequal configuration histories.** `robustesse_selection._matrice_propre` sets the common block count to the shortest row, truncates every configuration to that prefix and carries no block/timestamp identity. A short configuration can therefore erase later evidence for all others, and columns are assumed to represent the same temporal block without proof that their periods actually align.
+268. **Robust-selection ranking helpers admit non-finite scores.** `backtesting/robust_selection.py::coin_breakdown` sums PnLs without finiteness checks and `overfit_selection.selection_par_plateau` / maximum ranking accept arbitrary float-convertible scores/vectors. NaN/Infinity can enter minimax/plateau ordering, yielding unstable or implementation-order-dependent candidate selection rather than typed invalid evidence.
 
 
 
@@ -15622,6 +15625,12 @@ The following numbered items form the normative acceptance catalog. Each item is
 1474. risk-per-trade sizing rejects non-finite equity/risk/stop inputs, negative risk percent and out-of-policy risk percentages before producing a notional;
 1475. all risk helper outputs consumed by authoritative sizing are finite, non-negative and policy-bounded, with typed invalid/no-trade states instead of NaN/Infinity propagation;
 1476. all blocker-classified weaknesses 263-265 remain implementation blockers until non-finite/domain/fail-closed risk-helper regression tests prove closure.
+1477. apply_holdout_veto requires oos_passed and forward_passed to be literal booleans from verified receipts; truthy strings/integers/objects are INVALID_EVIDENCE and cannot confirm a candidate;
+1478. PBO/CSCV input rows carry the same explicit ordered block identities/time bounds across every configuration; unequal or shifted coverage is rejected or aligned by immutable block id rather than positional truncation;
+1479. PBO/CSCV cannot silently discard trailing periods because one configuration has shorter history; the missing-coverage policy is explicit, symmetric and recorded in the statistical receipt;
+1480. minimax/plateau/maximum robust-selection helpers reject NaN/Infinity in PnL, scores and feature vectors before ranking;
+1481. non-finite robust-selection input produces typed INVALID_STATISTICAL_INPUT and can never choose candidates by Python's NaN sort/min behavior;
+1482. all blocker-classified weaknesses 266-268 remain implementation blockers until strict-boolean, block-alignment and non-finite-ranking regression tests prove closure.
 
 
 ### Episode-containment, native-clock and proof-audit closure contract
