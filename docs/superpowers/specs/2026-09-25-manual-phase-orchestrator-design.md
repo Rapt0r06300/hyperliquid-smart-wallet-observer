@@ -13094,6 +13094,17 @@ The following findings extend the verified weakness inventory. They were found b
 342. **Fast-path latency parameters accept invalid negative/non-finite values.** Constructor values are plain `float()` and are returned as timing evidence without finiteness/non-negativity checks. A negative/NaN latency can therefore enter coordination diagnostics/assumptions as if measured.
 343. **The per-module loss-burst lock fails open on invalid time/config domains.** `VerrouPertes` accepts zero/negative thresholds/windows/lock durations and non-finite timestamps. In particular, `verrouille(..., now_ms=NaN)` makes the ordinary `now_ms < fin` comparison false and reports the lock inactive; future-dated losses are also retained as if inside the current window.
 344. **The generic safe-read retry scheduler accepts invalid retry/backoff domains.** `delais_backoff` and `peut_retry` do not validate non-negative retry counts/attempt index, positive finite base/cap delays, or a bounded finite jitter fraction. They can produce negative/non-finite delays or authorize a retry from an invalid negative attempt counter, weakening deterministic operational behavior.
+345. **The GitHub JSON transport can send GitHub bearer credentials to an arbitrary HTTPS host.** `datasets/github_api_transport._api_url` returns any input beginning with `https://` unchanged, while `get_json` always attaches `_headers()` including Authorization when a token is present. A mistaken/external URL passed to this helper can therefore exfiltrate the runtime GitHub token outside `api.github.com`.
+346. **The alternate Dataset Release gateway bypasses the canonical V2 source allowlist.** `datasets/release_gateway.py` calls `get_json` directly and never invokes `github_release_bridge._validated_source`, so it does not itself reject the legacy dataset repository, an unapproved repository, or a missing/invalid explicit V2 release id. This creates a second source-authority path with weaker provenance rules.
+347. **Release-asset filenames are joined into cache/metadata paths without a containment check.** `release_gateway._download_asset`, `github_release_bridge.download_asset` and `progress_downloader` derive destinations from `destination_dir / asset.name` (or cache dir equivalent). Proof transport should not trust a remote catalog filename as filesystem authority even if GitHub normally constrains names.
+348. **Release pagination can terminate early after silently filtering malformed asset rows.** `release_gateway.parse_asset_page` skips non-mapping/missing-name rows, and `list_all_release_assets` decides end-of-pagination from the filtered `len(rows) < per_page`. A full API page containing one malformed entry can therefore look like a short final page and hide later assets.
+349. **Duplicate Release asset identity is under-validated.** The paginated gateway only rejects same-name rows when their asset ids differ; same name/same id with conflicting size/digest is last-write-wins. `github_release_bridge.release_assets` is even looser and overwrites duplicate names unconditionally. Conflicting catalog metadata must be contamination, not replacement.
+350. **A hash-invalid downloaded asset is published at its final path before verification.** Both Release download paths can `replace(destination)` and then call `verify_asset`. On hash/size failure they raise, but the invalid final file remains present until a later path happens to re-verify/remove it. Final cache paths should contain only verified artifacts.
+351. **Bounded collector “verified/ACTIVE” status proves process survival, not collection health.** Startup records a collector in `demarres_et_verifies` when its wrapper merely remains alive through `startup_wait_s`; inspection returns `ACTIVE` from PID ownership + lease validity even if no fresh heartbeat/protocol/event evidence exists. Process liveness cannot be consumed as data freshness/completeness.
+352. **Collector-runner state corruption resets failure history.** `collector_runner._lire_etat` maps unreadable/malformed state to `{}`, resetting total/consecutive failure context and therefore backoff/health history instead of surfacing `STATE_CONTAMINATED`.
+353. **A malformed max-pass bound becomes unlimited execution.** `COLLECTOR_RUNNER_MAX_PASSES` parse failure sets `max_passes=0`, and zero means unbounded looping. A typo in a safety/bounding control therefore fails open into an effectively unlimited collector runner.
+354. **Bounded collector startup tolerates unknown/missing requested collectors as a partial result.** `start_bounded_collectors` records `unknown/manquants` and returns state rather than making the requested campaign itself non-successful. Downstream callers can mistake a partially started campaign for the requested collection set unless they independently inspect those fields.
+
 
 
 
@@ -13475,6 +13486,24 @@ Requirements:
 - fast-path/bus latency assumptions are finite and non-negative;
 - loss-burst thresholds/windows/durations/timestamps are finite/domain-valid, use a causal clock, and invalid time cannot deactivate a lock;
 - retry/backoff helpers reject invalid attempts/counts and require finite non-negative/positive timing domains before scheduling.
+
+### Dataset transport and collector-health authority contract
+
+Dataset transport and collection orchestration fail closed at trust boundaries.
+
+Requirements:
+
+- authenticated GitHub API helpers send credentials only to an explicit allowlist of GitHub API/download hosts; arbitrary absolute URLs are rejected before Authorization headers are built;
+- every Dataset V2 entry point enforces the same approved repository + explicit release-id policy; no alternate gateway can bypass source validation;
+- remote asset names/paths are normalized and containment-checked under the intended cache/metadata root before unlink/write/replace;
+- Release API pages conserve raw item count and malformed entries are typed failures/quarantine; pagination termination is based on raw page semantics, not post-filter count;
+- duplicate Release asset names/ids with conflicting size/digest are identity conflicts and abort the affected release;
+- only fully size+SHA-verified artifacts are atomically published to final cache paths; failed verification never leaves a final-path artifact that can be mistaken for verified cache;
+- collector process liveness, lease validity, heartbeat freshness, protocol identity and market-event freshness are separate typed health dimensions;
+- `ACTIVE/HEALTHY` collection status requires the canonical set of fresh heartbeats/protocols/events required by the campaign, not PID survival alone;
+- corrupt collector-runner state is visible and cannot reset failure/backoff history to healthy defaults;
+- malformed explicit bounding controls such as max passes fail validation rather than becoming unlimited;
+- a bounded-collection request is successful only if every requested registered collector is present/healthy; unknown/missing names produce a non-success campaign state.
 
 ### Canonical daily-proof authority for memory and autonomous stop decisions
 
@@ -15954,6 +15983,17 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1591. loss-burst lock configuration requires positive integer threshold, finite positive window/duration and finite causal timestamps; NaN/future-invalid time cannot disable an active lock;
 1592. safe-read retry/backoff rejects negative attempt/retry counts, non-finite/non-positive timing bases/caps and invalid jitter domains before emitting a retry schedule;
 1593. all blocker-classified weaknesses 338-344 remain implementation blockers, or explicitly quarantined diagnostic-only debt where noted, until envelope, candidate-domain, STP-conservation, episode-isolation, lock-time and retry-domain tests prove closure.
+1594. authenticated GitHub transport rejects absolute URLs outside the explicit GitHub host allowlist before attaching Authorization, with a regression fixture proving an external HTTPS URL receives no token;
+1595. release_gateway and every alternate Dataset V2 loader invoke the same canonical repository/release validator and reject legacy/unapproved/missing-release sources identically;
+1596. all Release asset destinations are resolved and containment-checked under the configured cache/metadata root before any unlink/write/replace;
+1597. paginated Release enumeration uses raw page cardinality/link semantics, reports malformed entries and cannot stop early because parsing filtered one row;
+1598. duplicate asset name/id metadata with conflicting size/digest is a release-integrity failure rather than last-write-wins;
+1599. final asset paths are published only after complete size+SHA verification and crash/failure tests prove invalid partials cannot appear as verified final cache;
+1600. bounded collector health distinguishes wrapper_alive, lease_valid, heartbeat_fresh, protocol_verified and event_fresh; only the required conjunction may be called ACTIVE/HEALTHY for evidence use;
+1601. collector-runner state corruption is surfaced and preserves/reconstructs failure history rather than resetting counters/backoff to zero;
+1602. malformed COLLECTOR_RUNNER_MAX_PASSES or equivalent explicit bounds fail startup/config validation and cannot become unlimited execution;
+1603. bounded-collection campaign success requires every requested collector to be known, attached/started, lease-bound and health-verified; unknown/missing requested names produce typed non-success;
+1604. all blocker-classified weaknesses 345-354 remain implementation blockers until credential-host, source-allowlist, path-containment, pagination, asset-integrity and collector-health regression tests prove closure.
 
 ## Non-goals
 
