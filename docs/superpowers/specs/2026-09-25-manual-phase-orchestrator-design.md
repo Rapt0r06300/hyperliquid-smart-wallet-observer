@@ -13131,6 +13131,10 @@ The following findings extend the verified weakness inventory. They were found b
 379. **Economic identity stamping silently preserves conflicting lineage.** `economic_identity.stamp_refs` only fills empty keys; when an existing non-empty ref disagrees with the supplied canonical identity, it keeps the old value without raising or recording a conflict. A corrupted strategy/session/position/source lineage can survive a “stamp” operation looking successful.
 380. **Deterministic episode-id material is not canonically encoded and is truncated.** `nouvel_episode_id` joins raw `str(...)` fields with an unescaped `|` delimiter and truncates SHA-256 to 20 hex characters. Delimiter-containing values and stringified null-like values can create ambiguous pre-hash material, while truncation weakens collision resistance unnecessarily for an authoritative lineage id.
 381. **Legacy Lead-Lag paper-cost helpers sanitize invalid/assumed costs into usable numerics.** `strategies/lead_lag_paper.cout_components_bps` applies local defaults and `max(0,...)` to fee/spread/slippage/latency inputs. Missing/negative/NaN-like configuration can therefore become a non-negative cost vector; the result carries `costs_measured=False`, but its numeric PnL remains easy for legacy adapters/reports to consume unless every downstream proof gate preserves that distinction.
+382. **Copy-Vault VWAP walkers do not validate target domains.** `backtesting/copy_vault_execution_math._walk_quote_notional` and `_walk_base_quantity` validate book levels but not the requested target itself. NaN/Infinity/non-positive targets can enter arithmetic; in particular NaN comparisons can fall through exhaustion guards and return NaN VWAP/quantity instead of a typed invalid result.
+383. **Held-out-vault generalization defines “unseen” from economically admissible parsed rows, not from all prior vault exposure.** `copy_vault_generalization.derive_heldout_vault_generalization` builds `pre_oos_vaults` only after filtering rows for valid timestamp/net/notional, `liquidatable_net=True` and hash-shaped trade id. A vault observed during TRAIN/research but lacking one of those economic fields can disappear from the pre-OOS identity set and later be labelled held-out, overstating entity generalization.
+384. **Copy-Vault daily risk-budget admission does not fail closed on missing identity/time.** `copy_vault_v6_balanced_train.apply_causal_daily_risk_budget` maps missing/invalid entry time to day 0 and missing vault/coin to the literal `UNKNOWN`, then can admit those rows under the same counters as valid evidence. Identity/time validity is assumed from callers rather than enforced at the admission authority itself.
+
 
 
 
@@ -16070,6 +16074,12 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1646. episode ids use unambiguous canonical serialization with typed fields and full-strength content identity appropriate to authoritative lineage; delimiter/stringification collisions are regression-tested;
 1647. legacy Lead-Lag assumed/default cost vectors remain diagnostic-only and cannot feed liquidatable/certifying PnL unless every required component is measured and bound to the canonical economic contract;
 1648. all blocker-classified weaknesses 374-381 remain implementation blockers until collection-authority, Lead-Lag adapter and economic-identity conflict/collision tests prove closure.
+1649. Copy-Vault VWAP/depth walkers require finite strictly positive requested quote/base targets before arithmetic and return typed invalid evidence for NaN/Infinity/non-positive targets;
+1650. held-out-vault membership is defined from the immutable identity universe seen before the OOS boundary, independent of whether earlier rows had complete economics/liquidatable status;
+1651. a vault observed anywhere in TRAIN/selection inputs can never later count as a held-out entity merely because its earlier economic row was rejected or incomplete;
+1652. Copy-Vault daily admission rejects missing/non-positive/non-finite entry timestamps and missing/placeholder vault or coin identity before budget counters mutate;
+1653. day 0, UNKNOWN vault and UNKNOWN coin are invalid proof identities rather than admissible risk-budget buckets;
+1654. all blocker-classified weaknesses 382-384 remain implementation blockers until VWAP-domain, heldout-universe and daily-budget identity tests prove closure.
 
 ## Non-goals
 
