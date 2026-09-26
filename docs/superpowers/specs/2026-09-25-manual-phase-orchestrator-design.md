@@ -13115,6 +13115,10 @@ The following findings extend the verified weakness inventory. They were found b
 363. **Certified Lead-Lag PROMETTEUR ignores several controls it computes.** The path calculates control-coin results, DSR and PBO, but `winners` only requires positive/stable net and beating the placebo. Control-coin failure, bad/missing DSR or bad/missing PBO do not block `statut=PROMETTEUR`. Worse, missing placebo for an horizon is replaced with `0.0`, so absence of placebo evidence can be treated as if a zero-PnL placebo had been measured.
 364. **Aligned Binance Lead-Lag tape maps every non-BUY side to SELL.** `lead_lag_source_alignment.load_aligned_binance_trade_tape` computes direction with `1.0 if side == "BUY" else -1.0` and does not reject missing/unknown/malformed sides first. Corrupt side evidence can therefore become a bearish shock.
 365. **Lead-Lag aligned-source decoding is not byte-conservative.** `lead_lag_source_alignment._lines` opens text with `errors="ignore"` and silently returns on `OSError`. Invalid bytes or unreadable tails can disappear before JSON/error accounting, so alignment/coverage statistics are based on successfully decoded material rather than the full stored source.
+366. **Cross-Venue depth evidence accepts invalid experiment domains.** `simulation/cross_venue_depth_adapter.enrich_trades_with_depth` converts `notional_usd` directly with `float()` and passes `freshness_ms` into age comparisons without finite/domain validation. Negative notional can trivially satisfy top-capacity checks; NaN/Infinity freshness can defeat stale-data comparisons instead of producing invalid evidence.
+367. **Cross-Venue depth loading silently loses corrupt source material.** `cross_venue_depth_adapter.load_depth_snapshots` opens JSONL with `errors="ignore"`, skips malformed/non-mapping/ineligible rows without a conservation receipt, and returns an empty map on open failure. A damaged depth tape can therefore appear as ordinary missing/partial depth rather than evidence contamination tied to exact source intervals.
+368. **Cross-Venue V6 TRAIN “USD/day” divides by active trade days, not complete calendar days.** `backtesting/cross_venue_v6_coverage_union_train.py` computes `daily_mean = net / distinct_days`, where `distinct_days` comes from trade timestamps. Complete TRAIN days with zero trades are absent from the denominator, so the 4-USD/day selection condition can be inflated before the candidate is frozen.
+
 
 
 
@@ -16025,6 +16029,12 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1620. aligned Binance trade ingestion accepts only explicit valid BUY/SELL side tokens and rejects/quarantines unknown values before shock construction;
 1621. Lead-Lag aligned-source readers preserve byte/line conservation and surface decode/read failures with affected intervals instead of errors="ignore" or silent source termination;
 1622. all blocker-classified weaknesses 360-365 remain implementation blockers until source-boundary, BBO-completeness, statistical-gate and aligned-tape corruption tests prove closure.
+1623. Cross-Venue depth adapters reject non-finite/non-positive notional and non-finite/negative freshness before snapshot lookup or capacity arithmetic;
+1624. Cross-Venue depth-source readers conserve file/line/byte accounting, surface open/decode/schema failures and bind rejected material to affected proof intervals;
+1625. an unreadable/corrupt Cross-Venue depth source cannot be downgraded to ordinary DEPTH_MISSING when it intersects the candidate proof window;
+1626. Cross-Venue TRAIN daily-target selection derives the complete expected UTC-day calendar from frozen TRAIN bounds and includes explicit zero-trade days in the denominator;
+1627. a TRAIN variant cannot satisfy a +4-USD/day pre-freeze selection rule from net divided only by days containing trades;
+1628. all blocker-classified weaknesses 366-368 remain implementation blockers until Cross-Venue parameter-domain, depth-conservation and complete-calendar daily-selection tests prove closure.
 
 ## Non-goals
 
