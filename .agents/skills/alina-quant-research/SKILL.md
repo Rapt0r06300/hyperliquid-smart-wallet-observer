@@ -18,8 +18,6 @@ One LLM controller; no LLM subagents inside an economic Discovery campaign. The 
 
 Preferred cadence: `1 model decision -> large local batch -> compact summary -> 1 model decision`.
 
-`Local` means the user has explicitly started the coding agent in a local checkout. Never wake the PC remotely, never create a self-hosted runner, and never make autonomous cloud operation depend on the PC.
-
 ## DISCOVERY
 
 Enter on a fresh family cycle, `needs-rediscovery`, PIVOT, or champion-challenger event. Read `references/discovery-v32.md` only then.
