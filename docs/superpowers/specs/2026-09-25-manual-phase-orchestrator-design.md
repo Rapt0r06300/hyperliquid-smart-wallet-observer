@@ -12214,6 +12214,201 @@ Conversation-level rules:
 - conversational persistence must not increase model quota by spawning additional agents: the single-controller and quota-minimal policies still apply.
 
 
+## Canonical PnL truth — Anti-False-PnL gate
+
+A positive number is **not** proof of profit merely because a strategy report, dashboard, replay, helper, or model labels it `pnl`. Alina may certify PnL only when the complete economic result is reconstructible from causal, immutable, deduplicated accounting evidence.
+
+The anti-false-PnL invariant is:
+
+> if any material component needed to explain the change in paper equity is missing, ambiguous, stale, duplicated, inferred from a favorable fallback, or classified incorrectly, the result is `UNMEASURABLE_PNL` / `INVALID_PNL`, never zero-cost and never certified profit.
+
+### Current repository audit findings
+
+The 2026-09-26 audit of the current repository confirms that the modern final economic-certification path contains strong reconciliation, trade-identity, cost-completeness, OOS/forward and fail-closed controls. However, alternate/legacy helpers still exist whose semantics are too permissive to become proof authorities until they are corrected or explicitly isolated as diagnostic-only.
+
+Confirmed examples:
+
+- `src/hl_observer/control_plane/module_pnl_proof.py` currently reads missing `gross_pnl`, `fees`, `slippage`, or `funding_financing` with zero defaults. Missing economic evidence must never become zero in a certifying path.
+- `src/hl_observer/backtest/pnl_from_logs.py` can use a non-zero `estimated_net_pnl_usdc` value as a fallback hint that a trade is closed. A non-zero estimate is not lifecycle proof.
+- `src/hl_observer/paper_trading/funding_settlement.py` can derive a “settled” portion from a prorated accrued estimate. This can remain diagnostic/migration evidence, but certified funding must come from actual settlement events or an exact point-in-time settlement reconstruction.
+- `PaperLedger.mark_to_market()` can retain the last known mark when a fresh mark is missing. That is acceptable for continuity diagnostics, but stale carried-forward marks cannot certify current unrealized or liquidation-equivalent PnL.
+- `PaperLedger.apply_funding()` accepts an amount without an explicit settlement identity/idempotency key at that API boundary. Certified accounting requires exactly-once funding identity so replay/reconnect cannot credit or debit the same settlement twice.
+- `PaperLedger.open_position()` accepts both requested notional and optional quantity without itself proving `filled_notional == abs(quantity * fill_price)` within tolerance. Certified fees and position economics must be based on actual filled quantity/notional, not inconsistent requested values.
+- historical project audits already recorded snapshot/ledger divergence, diagnostics incorrectly resembling accepted trades, missing entry costs, missing funding, and the risk of double-counting spread/slippage. Those failure classes are permanent regression targets.
+
+These findings do not mean every listed helper currently feeds final certification. They mean **no alternate helper may become, directly or indirectly, a proof source unless it satisfies the canonical accounting contract below**.
+
+### One accounting authority
+
+For each certifiable paper campaign there is one canonical append-only accounting ledger and one canonical economic equation. Dashboards, scoreboards, reports, strategy modules, and research helpers consume that authority; they do not maintain independent PnL counters.
+
+Every economic event has a typed cause and a stable identity. At minimum, the ledger distinguishes:
+
+- fills that OPEN / ADD / REDUCE / CLOSE exposure;
+- trading fee / maker rebate / builder or deployer fee attribution;
+- funding settlement;
+- borrow interest / financing / repayment where applicable;
+- liquidation or forced-close economics;
+- deposits, withdrawals, transfers, vault flows, rewards and other external/non-trading cash flows;
+- mark/unrealized updates, which are state observations rather than realized trading profit;
+- corrections/adjustments, which require explicit provenance and cannot masquerade as fills.
+
+A diagnostic metric may aggregate these classes, but certified strategy PnL may not silently reclassify one class as another.
+
+### Canonical equations
+
+For a paper account with no external cash flow during the proof interval:
+
+`equity = starting_capital + realized_price_pnl - trading_costs + rebates + settled_funding - financing_costs + unrealized_pnl`
+
+where every term is derived from the same canonical ledger and sign convention.
+
+For any interval that includes external cash flows, strategy PnL must be normalized for them explicitly:
+
+`strategy_pnl = ending_equity - starting_equity - net_external_contributions`
+
+with deposits, withdrawals, transfers, vault flows, rewards, account-class transfers and similar non-strategy flows separately reconciled. External contributions can change equity but cannot create strategy profit.
+
+Final economic proof must not rely on open unrealized profit. At the proof cutoff, every strategy position is either fully closed with executable exit economics or valued under an explicitly certified liquidation-equivalent close model including depth, fees, slippage, latency, funding/financing and all leg costs. The ordinary canonical target remains fully closed positions.
+
+### Realized PnL requires lifecycle proof
+
+A row is not a realized trade merely because:
+
+- a PnL field is non-zero;
+- its label contains `EXIT`, `CLOSE`, `REDUCE`, or `PAPER_ORDER_ACCEPTED`;
+- a dashboard/report says “trade”;
+- a position snapshot disappeared;
+- an estimate changed sign.
+
+Realized PnL requires a valid position identity and a causally consistent OPEN/ADD/REDUCE/CLOSE chain. Reductions cannot exceed open quantity, duplicate fills cannot increase realized PnL, and over-close cannot be silently clipped into a plausible result for certification.
+
+Every fill used in proof must preserve actual filled quantity, actual fill price, actual filled notional and execution identity. For linear contracts, filled notional and `abs(quantity * fill_price)` must reconcile within the contract's documented unit/rounding tolerance. Fee computation uses the economically applicable filled amount, not requested notional.
+
+### Exactly-once economic events
+
+Trade fills, funding settlements, fee/rebate events, liquidation events and non-funding ledger updates require stable deduplication identities across:
+
+- REST snapshots;
+- WebSocket snapshots;
+- streaming updates;
+- reconnect overlap;
+- historical backfill;
+- archive repair;
+- replay restarts.
+
+Snapshot replay is not new economic activity. The same source event may be observed many times but affects canonical PnL exactly once.
+
+For Hyperliquid, preserve source-native identities/provenance such as trade identity, event/block time, instrument identity and ledger-update hash where available. A funding settlement must have enough identity/provenance to prove that the same hourly payment cannot be applied twice.
+
+### Funding truth
+
+Hyperliquid official semantics are hourly settlements. Certified funding uses either:
+
+1. the actual `userFunding` / `userFundings` settlement record; or
+2. an exact historical reconstruction at each settlement boundary using the point-in-time position size, oracle price and applicable funding rate/rule.
+
+The documented standard-perp payment uses position size × **oracle price** × funding rate. Mark price is not substituted for oracle price.
+
+A continuously prorated funding accrual, forecast, predicted next funding, or proportionally split historical estimate is **not settled funding** and cannot enter certified realized/net PnL. It may be shown separately as an estimate.
+
+### Non-funding ledger truth
+
+Hyperliquid `userNonFundingLedgerUpdates` / `WsUserNonFundingLedgerUpdates` include non-trading balance changes such as deposits, withdrawals, transfers and liquidations. Those events are accounting evidence, not alpha.
+
+Account-value changes must be reconcilable against these flows. A deposit, transfer, rewards claim, vault distribution/withdrawal or account-class movement cannot be credited as strategy PnL. A withdrawal fee, liquidation closing cost, borrow interest or other real economic debit cannot disappear because it is outside the fill stream.
+
+Account-abstraction mode remains part of the reconciliation contract: Standard, Unified and Portfolio Margin use the correct point-in-time balance authority already specified elsewhere in this document.
+
+### Mark and unrealized truth
+
+Mark/unrealized PnL is distinct from realized PnL.
+
+- every mark used for a proof-critical equity point stores source timestamp, receive timestamp, price type and freshness;
+- carrying forward a previous mark is allowed only as explicitly stale diagnostic state;
+- a stale/unknown mark cannot become a fresh proof point;
+- mark price, oracle price, midpoint, last trade and executable liquidation/exit price are distinct semantics;
+- a dashboard/frontend PnL graph is reconciliation context only, never the primary accounting ledger;
+- Hyperliquid's own portfolio-graph documentation warns that sampled/interpolated graph data is not appropriate for precise accounting.
+
+### Cost truth and double-count firewall
+
+Every cost/rebate component has exactly one accounting location.
+
+If spread/slippage/latency is embedded into the simulated fill price, it is not subtracted a second time as a separate cash cost. If it is represented as a separate explicit cost, the fill price must not already include the same component. The same rule applies to fees, builder/deployer fees, rebates, priority costs and funding.
+
+Missing cost evidence is `UNKNOWN`, not `0`. Zero is valid only when the applicable venue/rule/account evidence explicitly proves zero.
+
+A constant-price round trip with non-zero costs must lose exactly those costs within tolerance. It may never show profit. A zero-cost constant-price round trip must produce zero PnL.
+
+### Cross-venue and multi-leg truth
+
+A multi-leg strategy cannot certify the favorable leg while ignoring a rejected, partial, stale or delayed hedge leg.
+
+Certified multi-leg PnL requires:
+
+- each leg's actual simulated fill quantity and price;
+- fill-ratio/partial-fill state;
+- fees and slippage per leg;
+- funding/financing/collateral cost where applicable;
+- residual inventory after unequal fills;
+- entry and exit economics for every leg;
+- explicit handling of one-filled/one-rejected and cancel/fill races.
+
+Internal netting may reduce external costs only when the portfolio-netting rules permit it, and the saving is portfolio execution value rather than invented strategy alpha.
+
+### Independent reconciliation views
+
+Before PnL can support promotion/certification, the same interval must reconcile across independent views within a strict documented tolerance:
+
+1. canonical event-ledger sum;
+2. position-lifecycle reconstruction;
+3. cash/equity equation;
+4. campaign/raw-trade aggregate;
+5. published scoreboard/report.
+
+A mismatch is not averaged or “best effort”. It yields `PNL_RECONCILIATION_MISMATCH` and blocks certification until explained by typed events.
+
+The tolerance exists only for deterministic numerical representation/rounding; it cannot absorb a missing fee, missing funding event, duplicated fill, stale mark, cash flow, or lifecycle mismatch.
+
+### Anti-false-PnL regression suite
+
+The implementation must include deterministic regression/metamorphic tests that prove at least:
+
+- missing fee/slippage/funding/financing evidence cannot default to zero in a certifying path;
+- a non-zero estimated PnL without a valid close lifecycle cannot become realized PnL;
+- duplicate fill/reconnect/backfill events do not change PnL;
+- duplicate funding settlement does not change PnL after the first application;
+- deposits/transfers increase account equity but not strategy PnL;
+- withdrawals/transfer fees do not masquerade as trading loss or disappear from reconciliation;
+- stale marks cannot certify unrealized/equity proof;
+- partial close allocates quantity and costs exactly once;
+- over-close/overfill fails closed instead of silently clipping certified economics;
+- requested notional differing from actual filled quantity × price cannot alter fees/PnL favorably;
+- LONG/SHORT sign symmetry holds under mirrored prices;
+- constant-price round trip equals exactly negative all-in costs;
+- zero-cost constant-price round trip equals zero;
+- embedded spread/slippage plus separate spread/slippage is detected as double counting;
+- actual Hyperliquid hourly funding records and exact settlement reconstruction agree on controlled fixtures;
+- prorated/forecast funding cannot enter settled PnL;
+- all positions required by a proof interval are closed or explicitly non-certifiable;
+- any disagreement among ledger, lifecycle, equity, raw aggregate and scoreboard blocks certification.
+
+### First-party source basis
+
+The current Hyperliquid documentation establishes the source semantics used by this gate:
+
+- `userFills` / `WsUserFills` provide fills, fee fields, execution identity and closed-PnL/frontend context;
+- `userFundings` provides hourly funding-payment events;
+- `userNonFundingLedgerUpdates` provides deposits, withdrawals, transfers, liquidations and other non-funding ledger changes;
+- `clearinghouseState` provides account/position state and unrealized-PnL context;
+- under Unified/Portfolio Margin, spot clearinghouse state is the documented balance source of truth;
+- the official “Entry price and pnl” page states that entry price, unrealized PnL and closed PnL are frontend convenience components while fundamental accounting is based on margin/balance and trades;
+- the official portfolio-graph page explicitly warns that its sampled/interpolated graph is not suitable for precise accounting;
+- standard Hyperliquid funding is settled hourly and uses oracle price in the payment notional.
+
+The canonical implementation should prefer these first-party records and immutable raw evidence over derived frontend/account snapshots whenever the two differ.
+
 ## Test coverage — 100% branch coverage
 
 The implementation target is **100% branch coverage**, not merely 100% line/statement coverage.
@@ -13204,6 +13399,31 @@ The following numbered items form the normative acceptance catalog. Each item is
 958. economic-, data-integrity-, timing-, replay-, orchestration-, and paper/read-only-safety-critical branches cannot be excluded from coverage, and coverage exclusions cannot be used to game the metric;
 959. any permitted coverage exclusion is narrow, documented, reviewable, limited to genuinely non-decision first-party/generated/third-party/platform glue, and unreachable first-party logic is preferentially removed or refactored;
 960. completion, release, or certification of implementation against this spec is blocked while required branch coverage is below 100%, while 100% coverage remains separate from economic/OOS/data-quality correctness gates.
+961. certified PnL is reconstructible from one canonical append-only accounting ledger and no dashboard, strategy helper, legacy module or report may maintain an independent proof-authority PnL counter;
+962. any material missing or ambiguous PnL component propagates UNMEASURABLE_PNL/INVALID_PNL and cannot default to zero;
+963. alternate/legacy PnL helpers with permissive defaults or heuristic close detection remain diagnostic-only until they satisfy the canonical accounting contract;
+964. realized PnL requires a valid OPEN/ADD/REDUCE/CLOSE lifecycle and cannot be inferred solely from a non-zero PnL field, action label, disappearing snapshot or dashboard classification;
+965. actual filled quantity, fill price and filled notional reconcile within documented contract tolerance and fees are charged from economically applicable filled amount rather than inconsistent requested notional;
+966. reductions/closures cannot exceed open quantity in certified accounting and over-close/overfill mismatches fail closed instead of silently clipping proof economics;
+967. fills, funding settlements, fee/rebate events, liquidations and non-funding ledger updates have stable exactly-once identities across REST/WS snapshots, reconnect overlap, backfill, archive repair and replay restart;
+968. snapshot or bootstrap re-observation of an already-accounted source event cannot change canonical PnL;
+969. Hyperliquid settled funding proof uses actual userFunding/userFundings events or exact point-in-time hourly settlement reconstruction with position size, oracle price and applicable funding rule;
+970. prorated funding accrual, predicted/forecast funding and proportionally split historical estimates remain diagnostic estimates and cannot enter certified settled/net PnL;
+971. Hyperliquid standard-perp funding notional uses oracle price where the applicable rule requires it and cannot substitute mark price;
+972. deposits, withdrawals, transfers, vault flows, rewards, account-class transfers and similar external/non-trading ledger changes are reconciled separately and cannot create strategy alpha/PnL;
+973. borrow interest, financing, liquidation closing cost, withdrawal/transfer fees and other real economic debits cannot disappear merely because they are outside ordinary trade fills;
+974. proof-critical mark/unrealized state carries price type, source/event time, receive time and freshness; stale carried-forward marks are diagnostic-only and cannot certify current equity/PnL;
+975. mark price, oracle price, midpoint, last trade and executable liquidation/exit price remain distinct accounting/execution semantics and cannot be interchanged for favorable PnL;
+976. each cost/rebate component has exactly one accounting location so fill-price-embedded spread/slippage/latency or fees cannot also be subtracted/credited a second time;
+977. zero cost is admissible only when point-in-time venue/account/rule evidence proves zero; unknown cost is never represented as zero;
+978. final proof cannot rely on open unrealized profit: required positions are fully closed or the result is non-certifiable unless an explicitly certified liquidation-equivalent close model is applied;
+979. multi-leg/cross-venue PnL requires all leg fills, partial-fill state, residual inventory, costs and exits; one-filled/one-rejected or asymmetric legs cannot be collapsed into favorable paired PnL;
+980. canonical PnL reconciles independently across event ledger, position lifecycle, cash/equity equation, raw/campaign aggregate and published scoreboard within strict deterministic numerical tolerance;
+981. any unexplained reconciliation mismatch blocks promotion/certification and cannot be averaged, ignored or absorbed into a broad tolerance;
+982. a constant-price round trip with non-zero costs produces exactly negative all-in costs within tolerance, while a zero-cost constant-price round trip produces zero PnL;
+983. anti-false-PnL tests cover duplicate fills, duplicate funding, non-trading cash flows, stale marks, partial closes, over-close, requested-vs-filled notional mismatch, sign symmetry, double-counted costs and funding-estimate contamination;
+984. final economic certification prefers first-party Hyperliquid fills/funding/non-funding-ledger records and immutable raw evidence over sampled frontend portfolio graphs or convenience PnL fields when they disagree;
+985. a positive reported PnL that cannot satisfy the complete anti-false-PnL gate is labeled unverified/invalid and cannot count toward the +4 USD/day target, promotion, scoreboard success or economic proof.
 
 ## Non-goals
 
