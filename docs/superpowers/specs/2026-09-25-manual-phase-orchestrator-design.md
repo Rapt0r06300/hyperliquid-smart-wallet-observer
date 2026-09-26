@@ -11171,9 +11171,9 @@ Verified on 2026-09-26 against current official Hyperliquid documentation coveri
 Parallel Search was used as a cross-check; official Hyperliquid documentation remains authoritative for protocol semantics.
 
 
-### Profitability Convergence V6.23 — canonical rule provenance and serialization closure
+### Profitability Convergence V6.24 — canonical rule provenance and serialization closure
 
-V6.23 closes the remaining specification-level ambiguity after V6.14-V6.22.
+V6.24 closes the remaining specification-level ambiguity after V6.14-V6.22.
 
 It adds no new strategy family. Its job is to make protocol semantics, identifiers, units, signs, serialization and acceptance IDs machine-auditable so that a few basis points cannot be created by representation drift.
 
@@ -11388,11 +11388,11 @@ The specification-completeness matrix covers at minimum:
 
 A missing matrix row propagates a scoped UNMEASURABLE/UNCERTAIN state to consumers rather than being filled with a default.
 
-### V6.23 source basis
+### V6.24 source basis
 
-V6.23 consolidates the first-party Hyperliquid rule families already rechecked through V6.14-V6.22 and the Exa/Parallel cross-checks performed on 2026-09-26.
+V6.24 consolidates the first-party Hyperliquid rule families already rechecked through V6.14-V6.22 and the Exa/Parallel cross-checks performed on 2026-09-26.
 
-V6.23 does not add new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
+V6.24 does not add new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
 
 ### Research basis for Profitability Convergence V6
 
@@ -12868,31 +12868,31 @@ The following numbered items form the normative acceptance catalog. Each item is
 890. every numerical V6.23 protocol rule is tagged to a verified rule interval and historical unknowns remain UNMEASURABLE_RULE_VERSION;
 891. executable net-PnL proof must fail closed when a material V6.23 validity, trigger, funding, lifecycle or throughput input is missing;
 892. V6.23 adds no signed/live action path and preserves GitHub-hosted paper/read-only operation.
-866. the canonical acceptance catalog rejects duplicate numeric IDs and future criteria allocate IDs strictly above the current maximum;
-867. acceptance-ID renumbering requires an explicit migration map and cannot silently reuse an existing ID;
-868. every PnL/admissibility-critical venue rule has a provenance manifest with source, collection time, effective interval/confidence, parser version and normalized unit where available;
-869. current official rules are never silently back-applied to historical periods without applicability evidence;
-870. conflicting first-party rule sources are retained and resolved by version rather than averaged;
-871. canonical instrument identity includes venue/DEX scope, instrument class, native identifier where available, collateral/reference semantics and metadata version rather than symbol text alone;
-872. point-in-time asset/index mappings are versioned and identifier reuse cannot silently merge economically different contracts;
-873. timestamp fields declare semantic meaning and unit, normalize wall time to UTC and preserve source ordering evidence;
-874. second/millisecond/microsecond conversions have boundary fixtures so unit mistakes cannot create false lead-lag or fill timing;
-875. economically relevant numeric fields carry explicit unit/scale and bps/decimal/percentage conversions are centralized;
-876. deterministic Decimal/fixed-point or equivalent arithmetic is used where floating representation could alter tick validity, notional, fee or accounting state;
-877. fee/rebate/funding and other ledger signs are preserved under one documented account-value sign convention;
-878. builder/deployer/priority attribution remains distinct from total cash-flow amount so components are not double-counted;
-879. optional protocol fields whose valid serialization requires omission rather than explicit false/null are modeled with exact omission semantics in feasibility fixtures;
-880. serialization feasibility cannot introduce private keys, signing code or live actions;
-881. unknown future order/status/rejection enum values are preserved raw and never defaulted to a favorable terminal state;
-882. schema drift tracks field set, enum set, nullability, representation, timestamp units, pagination and snapshot/incremental semantics;
-883. semantic schema changes create a new version and cannot silently reuse an older parser assumption;
-884. additive unknown fields do not unnecessarily stop unrelated collection paths when core semantics remain certified;
-885. the completeness matrix explicitly covers identity, precision, books, queue, latency, lifecycle, fees, funding, reference prices, margin, liquidation, venue state, portfolio attribution and rule provenance;
-886. any missing proof-critical completeness row propagates scoped UNMEASURABLE/UNCERTAIN state rather than a default guess;
-887. same-ticker instruments across DEXs/deployers/reference families remain distinct until semantic compatibility is certified;
-888. rule/source hashes or immutable revision identifiers are retained when available so later documentation drift is detectable;
-889. V6.23 introduces no new profitability claim or alpha module; it is a proof-quality and representation-integrity layer;
-890. all V6.23 requirements remain GitHub-hosted, paper/read-only and cannot create self-hosted-node or user-PC dependencies.
+893. the canonical acceptance catalog rejects duplicate numeric IDs and future criteria allocate IDs strictly above the current maximum;
+894. acceptance-ID renumbering requires an explicit migration map and cannot silently reuse an existing ID;
+895. every PnL/admissibility-critical venue rule has a provenance manifest with source, collection time, effective interval/confidence, parser version and normalized unit where available;
+896. current official rules are never silently back-applied to historical periods without applicability evidence;
+897. conflicting first-party rule sources are retained and resolved by version rather than averaged;
+898. canonical instrument identity includes venue/DEX scope, instrument class, native identifier where available, collateral/reference semantics and metadata version rather than symbol text alone;
+899. point-in-time asset/index mappings are versioned and identifier reuse cannot silently merge economically different contracts;
+900. timestamp fields declare semantic meaning and unit, normalize wall time to UTC and preserve source ordering evidence;
+901. second/millisecond/microsecond conversions have boundary fixtures so unit mistakes cannot create false lead-lag or fill timing;
+902. economically relevant numeric fields carry explicit unit/scale and bps/decimal/percentage conversions are centralized;
+903. deterministic Decimal/fixed-point or equivalent arithmetic is used where floating representation could alter tick validity, notional, fee or accounting state;
+904. fee/rebate/funding and other ledger signs are preserved under one documented account-value sign convention;
+905. builder/deployer/priority attribution remains distinct from total cash-flow amount so components are not double-counted;
+906. optional protocol fields whose valid serialization requires omission rather than explicit false/null are modeled with exact omission semantics in feasibility fixtures;
+907. serialization feasibility cannot introduce private keys, signing code or live actions;
+908. unknown future order/status/rejection enum values are preserved raw and never defaulted to a favorable terminal state;
+909. schema drift tracks field set, enum set, nullability, representation, timestamp units, pagination and snapshot/incremental semantics;
+910. semantic schema changes create a new version and cannot silently reuse an older parser assumption;
+911. additive unknown fields do not unnecessarily stop unrelated collection paths when core semantics remain certified;
+912. the completeness matrix explicitly covers identity, precision, books, queue, latency, lifecycle, fees, funding, reference prices, margin, liquidation, venue state, portfolio attribution and rule provenance;
+913. any missing proof-critical completeness row propagates scoped UNMEASURABLE/UNCERTAIN state rather than a default guess;
+914. same-ticker instruments across DEXs/deployers/reference families remain distinct until semantic compatibility is certified;
+915. rule/source hashes or immutable revision identifiers are retained when available so later documentation drift is detectable;
+916. V6.24 introduces no new profitability claim or alpha module; it is a proof-quality and representation-integrity layer;
+917. all V6.24 requirements remain GitHub-hosted, paper/read-only and cannot create self-hosted-node or user-PC dependencies.
 
 ## Non-goals
 
@@ -12902,7 +12902,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20/V6.21/V6.22/V6.23 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20/V6.21/V6.22/V6.23/V6.24 modules without scoped evidence gates;
 - paper-fill invalid tick/precision/min-notional orders or silently normalize them to a more favorable price;
 - trigger TP/SL from BBO/last trade when the applicable rule uses mark price;
 - treat self-trade prevention as executed volume or charge a self-trade fee;
