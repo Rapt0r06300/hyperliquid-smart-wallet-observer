@@ -12432,6 +12432,114 @@ Rules:
 
 Coverage is a structural verification gate, not proof of economic correctness. The existing replay, OOS/forward, cost, data-integrity, no-lookahead, and fail-closed acceptance gates remain independently mandatory.
 
+## Anti-false-PnL accounting contract
+
+No Alina report, replay, backtest, scoreboard, dashboard, optimizer, promotion gate, or certification may publish or consume a positive/negative PnL value unless its accounting provenance is reconstructible and internally reconciled.
+
+The canonical rule is:
+
+> if a PnL component cannot be traced to a unique causal event, exact position lifecycle, exact cost/funding rule, and reconciled ledger state, it is UNKNOWN/UNMEASURABLE rather than zero, estimated realized PnL, or certified profit.
+
+### Canonical accounting identity
+
+For every certified scope and interval, the accounting layer must reconcile:
+
+`ending_equity - starting_equity - external_net_flows = realized_trading_pnl + settled_funding + other_explicitly_typed_accounting_components + unrealized_mark_to_market`
+
+where every term is separately typed and provenance-bearing.
+
+Deposits, withdrawals, transfers, borrow/supply flows, collateral movements, rebates, funding, liquidation charges, builder/deployer/priority fees, and manual/account adjustments are never allowed to masquerade as strategy trading PnL.
+
+A second reconciliation must hold at closed-position level:
+
+`net_realized_pnl = gross_price_pnl - entry_costs - exit_costs - explicitly_applicable_other_costs + explicitly_signed_settled_funding`
+
+No component may be embedded in price and also charged separately. No missing component may silently default to zero when it can materially affect the result.
+
+### Realized versus unrealized
+
+- only actual closed/reduced quantity may create realized trading PnL;
+- an OPEN/ADD, diagnostic evaluation, candidate, signal, intent, rejected order, missed fill, synthetic markout, or engine decision can never create realized PnL;
+- unrealized PnL is always labeled unrealized and cannot satisfy realized-profit targets;
+- unrealized PnL used for equity requires a point-in-time mark with freshness/provenance; stale/missing marks make that component stale/unknown rather than current truth;
+- final strategy certification uses closed/reconciled net PnL; open-position mark-to-market may be reported separately but cannot be silently rolled into certified realized profit.
+
+### Exact lifecycle and deduplication
+
+Every accounting-relevant position must be reconstructible by stable position identity from OPEN/ADD through every REDUCE/CLOSE.
+
+Rules:
+
+- cumulative reductions/closures can never exceed opened quantity;
+- duplicate fills/events cannot be counted twice across REST, WebSocket, reconnect, archive, or replay sources;
+- timestamp/price/size alone is insufficient for deduplication when stronger native event/fill identities exist;
+- a repeated snapshot or reconnect bootstrap never creates a new economic event;
+- diagnostics and strategy-evaluation buses are physically/logically separate from the canonical accounting ledger;
+- a nonzero PnL field by itself is never sufficient evidence that an event is a realized close.
+
+### Malformed, missing, or contradictory evidence
+
+Certification is fail-closed.
+
+- malformed/truncated accounting records are not silently skipped if their omission could change PnL, trade count, fees, funding, exposure, or lifecycle;
+- a ledger/snapshot/report disagreement makes the affected scope `PNL_RECONCILIATION_FAILED` until resolved;
+- missing fee, slippage, spread, latency, funding, liquidation, borrow-interest, or other material cost evidence is UNKNOWN, not zero;
+- historical sessions with unresolved OPEN/REDUCE/CLOSE imbalance or duplicate ambiguity cannot calibrate sizing, thresholds, or promotion;
+- reports may expose partial diagnostic estimates, but they must be clearly non-certifying and cannot feed promotion gates as certified PnL.
+
+### Funding truth
+
+Settled funding and estimated/accrued funding are distinct accounting classes.
+
+For certified PnL, funding must come from one of:
+
+1. observed venue settlement/ledger events; or
+2. a deterministic replay using the point-in-time position held at each settlement boundary and the applicable point-in-time funding rule/rate.
+
+A continuously accrued or proportionally allocated estimate cannot be relabeled as settled funding merely because a settlement boundary occurred. Estimated funding remains non-certifying until reconciled to an admissible settlement reconstruction.
+
+### Fill and execution truth
+
+PnL can use only fills admitted by the canonical paper execution model.
+
+- no fill at midpoint merely because a signal exists;
+- no fill beyond measured executable depth;
+- partial fills realize only the actually filled quantity;
+- missed/rejected/unexecutable legs realize zero trading PnL and remain explicit failures/misses;
+- two-leg strategies cannot book a complete arbitrage PnL if one leg was not filled/reconciled;
+- paper fills preserve causal decision time, execution evidence, price, quantity, fees/costs, and unique identity.
+
+### Price and unit integrity
+
+- contract multiplier, quote/base orientation, inverse/linear contract semantics, token decimals, fee currency, collateral currency, and USD conversion are explicit;
+- signed quantities and signed cash flows use one canonical convention;
+- bps/percent/decimal conversions are centralized and unit-tested;
+- no current rule, fee tier, multiplier, funding rule, mark definition, or asset mapping is silently back-applied to historical periods;
+- non-finite values, missing decimals, missing conversion prices, or ambiguous instrument identity block the affected PnL.
+
+### Independent reconstruction and invariants
+
+Every candidate for economic certification must support an independent deterministic reconstruction from immutable raw/normalized evidence that does not reuse the final aggregate PnL field as an input.
+
+At minimum, invariants must verify:
+
+- event-level sum == position-level sum == strategy/module-level sum;
+- ledger-derived ending equity == independently reconstructed ending equity within an explicitly tiny deterministic tolerance;
+- cash/equity changes unexplained by typed events are zero; otherwise reconciliation fails;
+- same inputs + same code/config/rule hashes produce byte-for-byte or numerically deterministic accounting outputs;
+- zero-price-move round trips lose exactly the modeled all-in costs and never produce positive PnL;
+- reversing LONG/SHORT sign conventions in symmetric fixtures produces the expected mirrored gross PnL before asymmetric costs;
+- duplicate-event injection does not change PnL;
+- deleting any proof-critical fee/funding/fill event causes FAIL/UNMEASURABLE rather than a better PnL;
+- malformed/truncated ledger injection causes quarantine/failure for certification rather than silently improving results;
+- open positions cannot be converted into realized winners by session end, report generation, or process restart.
+
+### Promotion rule
+
+Any unresolved accounting discrepancy, unknown material cost, lifecycle inconsistency, duplicate ambiguity, stale mark used as current equity, or mismatch between independent PnL reconstructions blocks economic promotion/certification.
+
+A suspiciously positive PnL is never "accepted pending review". It remains non-certifying until the exact accounting identity is proven.
+
 ## Tests and acceptance criteria
 
 The following numbered items form the normative acceptance catalog. Each item is enforced according to Acceptance Architecture V2. They do **not** form one global AND-condition unless their gate metadata explicitly says so:
@@ -13399,6 +13507,26 @@ The following numbered items form the normative acceptance catalog. Each item is
 958. economic-, data-integrity-, timing-, replay-, orchestration-, and paper/read-only-safety-critical branches cannot be excluded from coverage, and coverage exclusions cannot be used to game the metric;
 959. any permitted coverage exclusion is narrow, documented, reviewable, limited to genuinely non-decision first-party/generated/third-party/platform glue, and unreachable first-party logic is preferentially removed or refactored;
 960. completion, release, or certification of implementation against this spec is blocked while required branch coverage is below 100%, while 100% coverage remains separate from economic/OOS/data-quality correctness gates.
+961. no reported or certified PnL is accepted unless it is reconstructible from typed causal accounting events with stable position/fill identities and immutable provenance;
+962. deposits, withdrawals, transfers, collateral movements, borrowing/lending flows, manual adjustments, funding and fees remain separately typed and cannot masquerade as strategy trading PnL;
+963. certified accounting reconciles ending-equity change net of external flows against realized trading PnL, settled funding, other typed components and separately labeled unrealized mark-to-market;
+964. net realized PnL reconciles gross price PnL, entry costs, exit costs, other applicable costs and signed settled funding without missing-cost zero defaults or double charging embedded costs;
+965. only actually reduced/closed filled quantity can create realized trading PnL; diagnostics, signals, intents, rejected/missed fills, OPEN/ADD events and markouts cannot;
+966. unrealized PnL never satisfies realized-profit targets and requires fresh point-in-time mark provenance when included in equity;
+967. a nonzero PnL field alone is never sufficient evidence that an event is a realized close;
+968. duplicate/replayed/reconnected fills and snapshots are deduplicated by the strongest available native identities and cannot change PnL;
+969. malformed or truncated proof-critical accounting records cannot be silently skipped for certification and instead quarantine/fail the affected scope;
+970. any ledger/snapshot/report/equity disagreement produces PNL_RECONCILIATION_FAILED until exact cause and reconstruction are resolved;
+971. missing material fee, spread, slippage, latency, funding, liquidation, borrow-interest or other cost evidence is UNKNOWN/UNMEASURABLE rather than zero;
+972. settled funding used in certified PnL comes from observed settlement events or deterministic boundary replay from point-in-time positions and rates; proportional/continuous accrual estimates cannot be relabeled settled by convenience;
+973. two-leg or multi-leg strategy PnL is not booked as complete when any required leg is unfilled, unreconciled or lacks executable evidence;
+974. contract multiplier, instrument identity, linear/inverse semantics, quote/base orientation, decimals, fee currency and conversion rates are explicit proof inputs and ambiguity blocks PnL;
+975. current fee/funding/mark/multiplier/asset-mapping rules are not silently back-applied historically;
+976. every certifiable economic result supports an independent deterministic PnL reconstruction that does not consume the final aggregate PnL field as an input;
+977. event-level, position-level, module-level and equity-level accounting sums reconcile within a declared deterministic tolerance, with unexplained cash/equity deltas forbidden;
+978. deterministic anti-false-PnL fixtures include zero-move round trips, LONG/SHORT sign symmetry, duplicate-event injection, proof-critical event deletion, malformed-ledger injection and open-position/session-end cases;
+979. deleting a required cost/fill/funding event can never improve a certifiable PnL; it must make the affected result fail or become UNMEASURABLE;
+980. unresolved accounting discrepancy, duplicate ambiguity, stale mark misuse, lifecycle imbalance or unknown material cost is a hard economic-promotion blocker even when the reported PnL is positive.
 961. certified PnL is reconstructible from one canonical append-only accounting ledger and no dashboard, strategy helper, legacy module or report may maintain an independent proof-authority PnL counter;
 962. any material missing or ambiguous PnL component propagates UNMEASURABLE_PNL/INVALID_PNL and cannot default to zero;
 963. alternate/legacy PnL helpers with permissive defaults or heuristic close detection remain diagnostic-only until they satisfy the canonical accounting contract;
