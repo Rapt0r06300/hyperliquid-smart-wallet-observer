@@ -12866,10 +12866,67 @@ The following findings extend the verified weakness inventory. They were found b
 130. **The Gate order-book collector does not implement Gate's documented U/u/full reconstruction protocol.** The official futures depth stream supplies a first/last update-id range (`U`, `u`) and requires a base/full snapshot plus continuity checks. `GateMarketState.apply_book` reads only `u`, treats `u > last_u + 1` as a gap, ignores `U`, and does not replace the local book on a later full snapshot. Because `u` is the last id of a range, it may legitimately advance by more than one; conversely stale price levels can survive a full refresh. Both false desync and false book state are possible.
 131. **The Bitget full-depth state machine does not implement Bitget's documented snapshot/update semantics.** For the `books` channel, Bitget documents a full `snapshot` followed by incremental `update` messages, zero quantity as deletion, and `pseq` for packet-loss detection. `BitgetMarketState.apply` does not branch on `action`, does not clear the book on snapshot, stores zero-size levels instead of deleting them, and ignores `pseq`. Stale/zero levels can therefore remain in the local L2 and packet loss can go undetected.
 132. **Gate/Bitget public numeric adapters still accept NaN/Infinity.** Their local `_f` helpers are plain `float()` conversions without `math.isfinite`. Non-finite prices/sizes can enter internal depth maps or secondary market fields before later validation, and deeper non-finite levels may survive even when top-of-book happens to look valid.
+133. **Canonical equity still accepts infinity and uses truthiness to choose fee authority.** `ops/equity_canonique.py::_num` rejects NaN via `x != x` but accepts ±Infinity. `depuis_ledger_lignes` reads fees with `frais_usd or fee_usd`, so a legitimate measured 0.0 can fall through to a stale/alternate field. Both can alter the authoritative equity curve.
+134. **Canonical equity can look complete when an expected cost component was omitted entirely.** `EquityCanonique.couts_deduits` marks partial only for a `Cout` object that exists with `montant_usd=None`; it does not verify that the strategy's required cost-component set was instantiated. `liquidatable_equity` also emits a numeric equity when status is `PARTIELLE`, making accidental downstream consumption possible if status is ignored.
+135. **The certified four-fill Cross-Venue primitive double-counts a canonical round-trip fee.** `economics/families.py` defines `cross_venue.round_trip_fee_bps` as `2×HL + 2×Binance`, already covering all four fills. `backtesting/cross_venue_certified.py::build_four_fill_cycle` then computes `fees_usd = 2 * notional * fees_bps_total / 10_000`. When passed the canonical round-trip value, it charges it twice. The V3 TRAIN path uses only `notional * round_trip_fee_bps / 10_000`, so the two Cross-Venue primitives disagree.
+136. **Cross-Venue does not prove matched underlying/contract exposure across the two legs.** Both `build_four_fill_cycle` and V3 `_executable_cycle` allocate the same USD notional independently to HL and Binance. Different executable prices imply different base quantities unless an explicit hedge ratio/contract multiplier is applied, leaving residual directional exposure while the result is treated as a two-leg convergence trade.
+137. **Cross-Venue union normalization is asserted rather than derived.** `load_certified_atomic_union_series` hard-codes `contract_multipliers_normalized=True`, `quote_currencies_normalized=True` and `sizes_normalized_to_usd_notional=True`. Downstream `_normalization_proof_ok` can also accept a recognized `capacity_definition` string as an alternative to those booleans. Neither is an immutable transformation receipt proving the actual input contracts/units.
+138. **The “preferred” Cross-Venue loader can silently discard certified L2 coverage.** `load_preferred_certified_atomic_series` returns the BBO dataset as soon as it contains any certified snapshot and does not merge certified L2-only coins or intervals. V5 refresh calls this helper even though a union loader exists, so the presence of a small BBO sample can shrink the TRAIN evidence universe.
+139. **Bybit and OKX public adapters still admit non-finite numeric values before canonicalization.** Their local `_float` helpers are plain `float()` conversions without `math.isfinite`. NaN/Infinity can therefore enter ticker/funding/clock fields and, for mutable depth maps, intermediate book state before later top-level normalization happens to filter some values.
+140. **Replay-grade native venue state can remain acceptable with no exchange timestamp.** `FeedIntegrityState.observe` counts `MISSING_EXCHANGE_TIMESTAMP` but does not include it in the fatal set. Bybit/OKX can consequently continue to an EXPLOITABLE BBO using receive time only even when exchange event time is absent, weakening causal replay/synchronization evidence.
+141. **`BinanceDepthBook.exploitable()` does not require a valid two-sided non-crossed book.** It returns true whenever a snapshot exists and DESYNC is clear, even if all bid/ask levels were malformed and silently discarded, one side is empty, or best ask is at/below best bid. The snapshot parser also drops invalid levels without a conservation/error count.
+142. **The PnL-improvement lab can label an anomalous lifecycle history `STRICT_RECONCILED`.** `extract_historical_trades` counts duplicate events, non-monotonic events, orphan closes and still-open positions, but `strict_history_status` does not downgrade for all of those counters. “Strict reconciled” can therefore coexist with unresolved ordering/lifecycle anomalies.
+143. **PBO robustness admits non-finite matrices and disagrees with its own 0.5 boundary policy.** `robustesse_selection._matrice_propre` converts rows with `float()` but never checks finiteness. The module documentation states `PBO >= 0.5` is overfit, while `pbo_cscv` uses `pbo > 0.5` and `verdict_robustesse` treats `pbo <= 0.5` as robust. Exactly 0.5 is therefore classified contrary to the stated rule.
+144. **The multiple-testing noise gate can be silently skipped or inverted by invalid sigma.** `verdict_robustesse` runs the noise-threshold check only when `sigma_null` is truthy, so 0.0 omits the gate; a negative sigma is accepted by `seuil_bruit_multiple_testing` and produces a negative noise floor. Neither is valid certifying evidence.
+145. **Copy-Vault proof economics are not capital/margin-budget constrained.** The canonical starting paper equity is 100 USD, while `copy_vault_protocol.NOTIONAL_USD` is 150 USD and `MAX_OPEN_POSITIONS` is 6. `replay_metaorders` limits concurrent position count but does not maintain collateral, leverage, margin or aggregate gross-exposure state. The summary then reports ROI against 100 USD. The 150-USD diagnostic notional may remain, but certification must prove that every concurrent portfolio state is financeable under an explicit paper leverage/margin policy instead of assuming up to 900 USD gross exposure is available for free.
+146. **Bybit universe discovery can include contracts that are not yet continuously tradable.** `parse_bybit_linear_instruments` accepts `PendingOpen` alongside `Trading`, while current Bybit order-book documentation notes that pre-launch contracts have no feed until ContinuousTrading. Discovery may therefore schedule a symbol with no executable market-data stream and misclassify the resulting absence as collector failure/coverage debt unless lifecycle state is preserved.
 
 
 
 
+
+
+### Canonical equity, capital-budget and exposure contract
+
+Proof-facing equity and ROI are valid only when the capital state that financed the simulated positions is explicit and complete.
+
+- every strategy/reality model declares its required cost-component set; an omitted required component is MISSING/UNMEASURABLE, never implicit zero;
+- all equity/cost values are finite and explicit null-aware precedence preserves measured 0.0 values;
+- a PARTIAL equity cannot expose a numeric value that downstream certification may consume as authoritative net equity/ROI without a typed non-certifiable wrapper;
+- every open/close event updates a capital ledger containing free collateral, locked margin, gross/net exposure and effective leverage;
+- simultaneous paper positions must fit the 100-USD baseline under an explicit leverage/margin policy; exceeding available capital/margin rejects or separately labels the scenario;
+- fixed research notionals such as Copy-Vault 150 USD are allowed only when the resulting leverage/margin/capital usage is modeled and bound into the proof receipt;
+- ROI denominators and capital occupancy reconcile to the same event/capital ledger as PnL.
+
+### Cross-Venue matched-exposure and cost-unit contract
+
+A two-leg Cross-Venue proof must represent one matched economic exposure, not two unrelated equal-dollar bets.
+
+- canonical fee fields declare whether they are per-fill, per-venue-round-trip or full-four-fill round-trip; unit/type mismatches are rejected;
+- a full-four-fill `round_trip_fee_bps` is applied exactly once to the appropriate actual fill notionals;
+- all Cross-Venue implementations reconcile to one deterministic fee equation and differential tests catch ×2/÷2 fee errors;
+- entry hedge construction solves for matched underlying/base/contract-equivalent quantity after contract multipliers and executable prices;
+- residual delta/exposure is measured after rounding to each venue's lot size and must remain below a preregistered tolerance or the episode is non-certifiable;
+- exit closes the exact quantities opened, subject to explicit partial-fill/reconciliation rules;
+- each normalization claim (contract multiplier, quote/settle conversion, USD notional size) is derived from hash-bound instrument metadata and transformation receipts, never a hard-coded Boolean or descriptive string;
+- coverage-source preference cannot discard non-overlapping certified observations merely because another source contains at least one row; source union/selection is deterministic, coin/window aware and evidence-preserving.
+
+### Native venue finite/time/book-validity contract
+
+- every native adapter rejects NaN/±Infinity before mutable state, ticker state, funding state or book state is updated;
+- replay-grade EXPLOITABLE state requires a valid exchange/event timestamp in addition to receive time unless the venue contract explicitly proves an equivalent timestamp authority;
+- missing exchange timestamp is a typed blocking feed-integrity condition for replay/cross-venue/lead-lag certification;
+- local book `exploitable` requires non-empty bid and ask sides, finite positive levels and strictly `best_bid < best_ask`;
+- snapshot/delta parsers account for rejected malformed levels/rows and cannot become “healthy” after silently dropping all evidence;
+- discovery distinguishes currently continuously tradable instruments from pending/pre-launch instruments and preserves lifecycle state so “not open yet” is not confused with collector failure.
+
+### Selection-statistics boundary contract
+
+- every PBO/CSCV matrix element is finite; one non-finite required cell makes the candidate/statistical receipt invalid unless a preregistered missing-data policy applies;
+- the PBO cutoff comparator is defined once and shared by prose, code and tests; under the current policy `PBO >= 0.5` is non-robust;
+- `sigma_null` for the multiple-testing noise floor is finite and strictly positive;
+- zero/negative/non-finite sigma produces `INVALID_STATISTICAL_INPUT/INSUFFICIENT`, never a skipped gate or favorable threshold;
+- exact-boundary fixtures cover PBO=0.5, zero sigma and negative sigma.
 
 ### Proof-status, finite-number and evidence-authority contract
 
@@ -15041,6 +15098,24 @@ The following numbered items form the normative acceptance catalog. Each item is
 1294. Gate and Bitget reject every non-finite public price/size/timestamp/metric before storage in replay-grade market state;
 1295. venue reconstruction protocol/version plus exact adapter code/tree identity is bound into replay/dataset provenance;
 1296. all blocker-classified weaknesses 112-132 from the 2026-09-26 deep reliability audit remain implementation blockers until deterministic fault/replay/restart/venue-protocol regression tests prove closure.
+1297. canonical equity rejects NaN and ±Infinity in capital/PnL/cost inputs and preserves a legitimate measured 0.0 without truthiness fallback to another field;
+1298. each strategy/reality model supplies a required cost-component schema and omitted required components make equity partial/non-certifiable rather than implicitly zero;
+1299. PARTIAL canonical equity cannot be consumed as authoritative liquidatable equity/ROI by certification without an explicit complete-status gate;
+1300. all four-fill Cross-Venue fee units are typed, and the canonical 2×HL+2×venue round-trip fee is charged exactly once with differential tests against the family economic registry;
+1301. Cross-Venue entry/exit uses matched base/contract-equivalent quantities after multipliers/lot rounding, measures residual delta and rejects exposure beyond the preregistered tolerance;
+1302. Cross-Venue normalization booleans are derived from immutable instrument/transformation receipts and a capacity-definition string alone cannot prove multiplier/quote/size normalization;
+1303. preferred/union Cross-Venue source selection preserves certified L2-only coins and non-overlapping intervals when BBO evidence is only partially available;
+1304. Bybit and OKX reject non-finite price/size/ticker/funding/clock values before mutable replay-grade state;
+1305. replay-grade native snapshots require exchange/event timestamp evidence; missing exchange timestamp cannot remain EXPLOITABLE merely because receive time exists;
+1306. BinanceDepthBook.exploitable requires finite positive non-empty two-sided depth with best_bid < best_ask;
+1307. Binance snapshot/delta parsing records rejected malformed levels and cannot report an exploitable book after required evidence was silently discarded;
+1308. PnL-improvement STRICT_RECONCILED status is downgraded by duplicate/non-monotonic/orphan/unresolved-open lifecycle anomalies unless an explicit deterministic irrelevance proof exists;
+1309. PBO/CSCV rejects NaN/±Infinity cells and the exact PBO=0.5 boundary is non-robust under the current stated policy;
+1310. multiple-testing sigma_null must be finite and strictly positive; zero/negative/non-finite sigma is INVALID_STATISTICAL_INPUT and cannot skip or invert the noise gate;
+1311. Copy-Vault certification maintains a 100-USD capital/margin ledger and proves every concurrent 150-USD-notional portfolio state is financeable under the frozen leverage/margin policy;
+1312. Copy-Vault ROI/daily-PnL proof binds gross exposure, locked margin, free collateral and effective leverage to the same event set used for net PnL;
+1313. Bybit discovery separates Trading/ContinuousTrading instruments from pending/pre-launch lifecycle states and non-open symbols cannot count as expected replay coverage;
+1314. all blocker-classified weaknesses 133-146 from the 2026-09-26 deep reliability continuation audit remain implementation blockers until deterministic accounting/exposure/statistical/venue-state regression tests prove closure.
 
 ## Non-goals
 
