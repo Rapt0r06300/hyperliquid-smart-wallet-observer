@@ -12937,6 +12937,11 @@ The following findings extend the verified weakness inventory. They were found b
 184. **The durable ledger reader conflates an absent ledger with a healthy empty ledger.** `simulation/ledger_integrity.py::read_chain` returns `LEDGER_OK, events=()` when the path does not exist. This weakens callers that rely on the reader's status and conflicts with the canonical requirement that ABSENT, intentionally EMPTY and CORRUPT are distinct proof states.
 185. **Market-event data-gate typing is fail-open for truthy non-booleans and non-finite scores.** `_quality_from_summary` converts `data_gate_ready` with Python `bool()`, so values such as the string `"false"` become true, while `_to_optional_float` accepts NaN/±Infinity. Canonicalization can therefore mark malformed quality metadata as signal-eligible unless upstream schema discipline happens to prevent it.
 
+186. **TruthChain chain identity does not commit to the complete market-event set that determined a fill.** `TruthChain._result` hashes only signal id, one `fill.source_event_id`, paper-event ids and outcome. Maker fills, diagnostics and markouts can depend on multiple L2/trade events; changing an intermediate causal input without changing the single stored source id/paper outputs can leave `chain_id` unchanged. Proof identity therefore does not yet prove the exact input event set.
+187. **Market-Truth EvidenceWriter is durable append-only I/O but not a verifiable evidence ledger.** It writes plain JSONL with fsync, but has no sequence, previous-hash chain, content checksum, duplicate identity guard or restart reconstruction. A duplicated, removed, reordered or edited evidence row cannot be detected from the file itself the way canonical PaperLedger corruption is detected.
+188. **PaperLedger funding mutation is not position-bound or settlement-idempotent.** `apply_funding` directly changes `funding_net_usdc` and cash for any coin/side/amount, without proving a matching open position, settlement timestamp/rate/notional provenance or a native funding-event id. Replaying the same funding payment can credit/debit it twice, and an orphan funding payment can alter canonical paper equity.
+189. **The generic funding-payment helper neutralizes invalid inputs instead of failing closed.** `compute_funding_payment_usdc` clamps negative notional/intervals to zero, returns 0.0 for an unknown side, and does not reject NaN/±Infinity before arithmetic. In a proof path, malformed funding inputs can become a harmless-looking zero or non-finite cash flow rather than typed invalid evidence.
+
 
 
 
@@ -12955,6 +12960,8 @@ A proof-facing replay distinguishes recorded-event playback from recomputation u
 - within one connection/clock epoch, same-millisecond events use authoritative sequence/monotonic ordering when available; an event hash/string is never an economic causal tie-breaker;
 - duplicate public-trade batches cannot advance maker matched volume or queue state twice;
 - canonical-event dedupe identity survives restart and replay of the same event set yields the same event count, fill outcome and evidence hash;
+- every TruthChain/economic evidence id commits to the complete ordered causal market-event set, execution-model/config identities and reconciliation receipt that determined the outcome;
+- Market-Truth evidence persistence is sequenced, integrity-protected and duplicate-safe across restart; plain mutable JSONL is not a certification authority by itself;
 - a positive Market-Truth candidate state requires non-empty, one-to-one bound execution/reconciliation evidence for every counted proof episode;
 - empty evidence is `EVIDENCE_MISSING`, not zero violations;
 - data-gate booleans are strict booleans and quality scores are finite, schema-valid and range-checked before `signal_eligible=true`;
@@ -12977,6 +12984,8 @@ Canonical paper state changes are validated first and committed atomically.
 - average-margin ROI names the exact averaging method; proof-facing `average capital at risk` is time-weighted by causal holding intervals (or uses another preregistered denominator with a distinct name);
 - maker queue/trade-through evidence is consumable evidence: one public trade/quantity unit cannot fill multiple simultaneous paper orders unless the observed quantity is sufficient for all of them;
 - maker reservations bind consuming event ids/timestamps, queue-ahead quantity and per-order filled quantity, and shared consumption is deterministic across strategies.
+- funding changes canonical paper equity only from a finite, schema-valid, native/immutable settlement receipt bound to an actually open exposure for the applicable settlement instant;
+- funding settlement identity is exactly-once across retry/restart and invalid side/notional/rate/interval inputs fail closed rather than becoming zero cash flow.
 ### Venue-bound Cross-Venue execution and hedge-conservation contract
 
 Every Cross-Venue fill, hedge and unwind is bound to the exact venue/instrument/cost authority that produced it.
@@ -15353,6 +15362,13 @@ The following numbered items form the normative acceptance catalog. Each item is
 1369. ledger read state distinguishes ABSENT from valid intentionally EMPTY and CORRUPT, and only an explicitly initialized empty ledger may be healthy with zero events;
 1370. Market-Truth canonicalization accepts data_gate_ready only as a strict boolean and feed_quality_score only as a finite value inside the canonical allowed domain;
 1371. all blocker-classified weaknesses 181-185 from the 2026-09-26 identity/idempotence audit remain implementation blockers until native-redelivery, same-ms-order, duplicate-action, missing-ledger and malformed-quality regression tests prove closure.
+1372. TruthChain/economic chain identity binds a cryptographic digest of the complete ordered canonical market-event set plus execution-model/config/reconciliation identities used to determine the result;
+1373. mutating, inserting, deleting or reordering any causally consumed market event changes the proof identity or deterministically invalidates the receipt;
+1374. Market-Truth EvidenceWriter provides restart-durable sequence/integrity/duplicate detection equivalent to proof-critical journals, and edited/reordered/truncated evidence is detected;
+1375. PaperLedger funding requires a matching open-position exposure and an immutable native/canonical settlement receipt containing coin, side, settlement time, rate/notional basis and unique event identity;
+1376. replay/retry of an already-applied funding settlement is exactly-once and cannot alter cash or funding PnL a second time;
+1377. funding helpers reject unknown side, non-finite values and invalid negative notional/interval domains with typed invalid evidence rather than returning a neutral zero;
+1378. all blocker-classified weaknesses 186-189 from the 2026-09-26 proof-chain/funding audit remain implementation blockers until event-set-hash, journal-corruption, orphan-funding and duplicate-settlement regression tests prove closure.
 
 ## Non-goals
 
