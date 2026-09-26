@@ -3807,6 +3807,7 @@ This specification intentionally preserves all previously validated design layer
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 - **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
+- **AMM-Oracle & Formula-Index Relative Value V6.19:** Uniswap-oracle perp basis, delta-neutral LP hedging and formula/index-perp reconstruction under executable AMM costs.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -9993,6 +9994,251 @@ Verified against the current official Hyperliquid Auto-deleveraging documentatio
 
 All ADL constants/formulas are versioned and are not back-applied to historical periods without rule evidence.
 
+### Profitability Convergence V6.19 — AMM-oracle and formula-index relative value
+
+The continued official-doc and public-code filter identified two Hyperliquid instrument classes not explicitly represented in Alina:
+
+1. perps whose underlying oracle comes from a Uniswap V2/V3 AMM;
+2. formula/index perpetuals whose underlying is a published index formula rather than ordinary spot.
+
+V6.19 adds them as scoped Relative-Value / execution research sleeves, not core modules.
+
+### Oracle-source instrument taxonomy
+
+Every perp carries a versioned oracle-source class where applicable:
+
+- CEX_SPOT_MEDIAN;
+- HYPERLIQUID_SPOT;
+- UNISWAP_V2_AMM;
+- UNISWAP_V3_AMM;
+- FORMULA_INDEX;
+- HYPERP_EMA_REFERENCE;
+- HIP3_DEPLOYER_ORACLE;
+- OTHER / UNKNOWN.
+
+Oracle-source class is part of instrument identity because it changes:
+
+- fair-value reconstruction;
+- latency/update cadence;
+- manipulation/fragility model;
+- external hedge path;
+- funding reference;
+- data requirements.
+
+### Candidate Sleeve — AMM Spot ↔ Hyperliquid Perp Relative Value
+
+For an AMM-oracle perp, independently reconstruct the executable AMM-side price and compare it with Hyperliquid perp state.
+
+Candidate states:
+
+- AMM executable buy quote;
+- AMM executable sell quote;
+- pool fee tier;
+- gas/transaction cost estimate;
+- price impact by notional;
+- current liquidity/range state;
+- Hyperliquid BBO/L2;
+- mark/oracle/funding;
+- basis after all costs;
+- hedge latency and settlement/collateral state.
+
+Critical rule:
+
+> raw pool spot, slot0, sqrtPrice or a theoretical AMM marginal price is not an executable hedge price.
+
+Use executable quote/swap simulation for the candidate notional, including:
+
+- AMM pool fee;
+- route fee;
+- price impact;
+- gas;
+- slippage tolerance;
+- stale-state risk;
+- chain/RPC observation delay;
+- bridge/transfer cost only if the proposed route actually requires transfer.
+
+Cross-protocol opportunity is admitted only when both legs are economically realizable from already-positioned collateral or the required capital movement is explicitly modeled.
+
+### Hyperliquid Uniswap-perp contract state
+
+Current official Hyperliquid documentation states some perps use Uniswap V2/V3 AMM price as the underlying spot asset.
+
+Current documented semantics include:
+
+- these contracts are isolated-only;
+- cross margin is unavailable;
+- margin cannot be manually removed while the position remains open;
+- isolated margin is returned only as the position is partially or fully closed;
+- Uniswap pool prices are converted to USDT using robust CEX oracle prices.
+
+Store point-in-time:
+
+- pool protocol/version;
+- chain;
+- pool address;
+- token0/token1;
+- fee tier;
+- decimals;
+- oracle-conversion path;
+- isolated-only rule;
+- contract/rule revision.
+
+Pool addresses are versioned metadata, not timeless constants.
+
+### Candidate Sleeve — Delta-Neutral Concentrated-Liquidity + Perp Hedge
+
+Public implementations and academic work independently support a research architecture where a Uniswap V3 concentrated-liquidity position is dynamically hedged with derivatives.
+
+Alina may test this as a paper-only experimental sleeve.
+
+The economic decomposition is:
+
+LP fees
+- loss-versus-rebalancing / impermanent-loss component
+- gas and LP rebalance cost
+- hedge trading fees/slippage
+- hedge funding
+- hedge basis drift
+- residual delta/gamma exposure
+- collateral/margin opportunity cost
+= net hedged LP economics
+
+Required state:
+
+- LP range bounds;
+- liquidity;
+- token inventory implied by current price;
+- unclaimed fees;
+- current pool tick/liquidity distribution where available;
+- LP delta;
+- optional higher-order exposure estimate;
+- perp hedge size;
+- funding;
+- hedge markout/execution cost;
+- rebalance threshold;
+- out-of-range state;
+- capital locked in LP and hedge.
+
+Rules:
+
+- do not call a simple 1:1 short-perp hedge fully delta-neutral if LP delta changes with price;
+- do not credit LP fees without LVR/IL and hedge costs;
+- use a no-hedge LP, static hedge and dynamic hedge as separate baselines;
+- rehedging frequency is optimized only on TRAIN and penalized for turnover;
+- options-based IL hedges may be challengers where liquid, but are not required for the first sleeve;
+- small LP positions for which gas/hedge minimums dominate remain UNEXECUTABLE.
+
+### LP hedge success criterion
+
+Promotion requires frozen-OOS evidence that the hedged LP sleeve improves conservative net return on capital/time versus:
+
+- unhedged LP;
+- passive spot/hold baseline where economically relevant;
+- simple static perp hedge;
+- no-trade.
+
+Fee income alone is not evidence of alpha.
+
+### Candidate Sleeve — Formula / Index Perpetual Relative Value
+
+Official Hyperliquid documentation states that index perpetuals track a formula instead of an ordinary spot asset price.
+
+Validators periodically publish the index-formula value to Hyperliquid L1, and the median of submitted values replaces the normal spot-oracle input for funding mechanics.
+
+For each formula/index perp store:
+
+- machine-readable formula/version where available;
+- component universe;
+- component weights;
+- conversion/FX rules;
+- rebalance schedule;
+- announcement timestamp;
+- effective timestamp;
+- validator publication cadence;
+- published index value;
+- independently reconstructed index value;
+- mark/perp price;
+- funding;
+- formula/oracle revision history.
+
+Candidate hypotheses:
+
+- index reconstruction residual;
+- validator-publication lag versus independently reconstructable components;
+- scheduled rebalance/reconstitution flow;
+- perp basis to a replicating basket;
+- component-to-index Lead-Lag;
+- index-perp funding distortion.
+
+### Index-rebalance causality firewall
+
+Historical constituent/rebalance information must be point-in-time.
+
+Do not use:
+
+- future constituent membership;
+- final rebalance weights before announcement;
+- post-event corrected index values;
+- later formula revisions
+
+in earlier decisions.
+
+Announcements and effective times are separate timestamps.
+
+### Formula-index execution boundary
+
+An index residual is not directly executable unless a hedge basket or another equivalent instrument exists.
+
+For a replicating basket, include:
+
+- every component leg;
+- component spread/slippage;
+- basket execution timing;
+- residual tracking error;
+- rebalance cost;
+- FX/quote conversion;
+- partial-fill/legging risk;
+- capital requirement.
+
+If only the index perp itself is executable and the formula basket cannot be hedged economically, use the reconstructed index only as a reference/forecast feature rather than claiming arbitrage.
+
+### AMM/index data collection contract
+
+GitHub-hosted collection may use public read-only RPC/API/archive sources without requiring a user PC or self-hosted node.
+
+Store:
+
+- block number / chain timestamp for AMM state;
+- RPC provider/source;
+- quote/simulation timestamp;
+- pool state hash or sufficient reproducibility metadata;
+- Hyperliquid receive timestamp;
+- index-component source timestamps.
+
+Do not compare an onchain AMM state from one block with a later Hyperliquid state as if synchronous without timing uncertainty.
+
+### V6.19 research priority
+
+V6.19 is initially lower priority than Execution Alpha, XEMM, TWAP and Forced-Flow because AMM/LP strategies add gas, chain-state and inventory complexity.
+
+Promote priority only if discovery shows:
+
+- frequent executable after-cost AMM-perp residuals;
+- meaningful independent daily opportunity contribution;
+- or a hedged-LP sleeve with robust fee-minus-LVR economics.
+
+### V6.19 research basis
+
+High-signal sources reviewed on 2026-09-26 include:
+
+- Hyperliquid official Uniswap perpetuals documentation;
+- Hyperliquid official Index perpetual contracts documentation;
+- Uniswap oracle/executable-quote documentation;
+- public AMM↔CEX/perp arbitrage implementations that account for pool fees, gas and price impact;
+- academic work on delta hedging and market-neutral concentrated-liquidity positions, including impermanent-loss/LVR and capital-cost limitations.
+
+Public bot profitability claims are not imported as Alina evidence.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -11366,6 +11612,25 @@ The following numbered items form the normative acceptance catalog. Each item is
 789. ADL observations are dependency-clustered with their parent insolvency/backstop episode for effective-sample accounting;
 790. all V6.18 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
 
+791. every relevant perp records oracle-source class so AMM, formula-index, Hyperp, HIP-3 and ordinary spot-oracle contracts are not normalized as identical;
+792. AMM-perp relative-value research uses executable AMM quotes for candidate notional rather than raw pool marginal price alone;
+793. AMM-side economics include pool/route fee, price impact, gas, state staleness and timing uncertainty;
+794. cross-protocol arbitrage cannot assume instantaneous free capital transfer between AMM and perp venues;
+795. Hyperliquid Uniswap-oracle perps preserve isolated-only and margin-removal restrictions for the applicable contract version;
+796. Uniswap pool-to-USDT oracle conversion path is recorded and versioned rather than inferred from ticker alone;
+797. delta-neutral LP research accounts for dynamic LP inventory/delta rather than using a permanent 1:1 hedge assumption;
+798. LP fee income is reported net of LVR/impermanent-loss, gas/rebalance, hedge execution, funding, basis drift and capital-time cost;
+799. unhedged LP, static hedge and dynamic hedge are separate frozen baselines;
+800. LP hedge rebalance thresholds/frequency are tuned only on TRAIN and turnover cost is explicit;
+801. formula/index perps store point-in-time formula, constituent, weight, FX/conversion, announcement/effective and revision state where available;
+802. index-rebalance research cannot use future constituents or final weights before their first-observable announcement;
+803. independently reconstructed index value and validator-published index value remain separate evidence fields;
+804. index-perp residual is not called arbitrage unless an economically executable replicating/hedge route exists;
+805. basket replication includes component-level spread/slippage, tracking error, legging risk and capital cost;
+806. AMM/index cross-source comparisons preserve block/source timestamps and synchronization uncertainty;
+807. V6.19 sleeves begin DISCOVERY_ONLY/MEASURE_ONLY and do not globally block existing modules;
+808. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed swaps/orders, private keys, self-hosted nodes or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
@@ -11374,7 +11639,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19 modules without scoped evidence gates;
+- call raw AMM spot or slot0 an executable cross-protocol hedge price without fee/impact/gas modeling;
+- call a formula-index residual arbitrage when no executable replicating hedge exists;
 - price ADL like an ordinary market order when the protocol rule requires previous-mark execution;
 - give backstop-acquired positions privileged ADL treatment absent an explicit protocol rule;
 - assume Portfolio Margin eligibility, borrowing headroom or cross-DEX capital efficiency without point-in-time account/cap state;
