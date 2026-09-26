@@ -13078,6 +13078,16 @@ The following findings extend the verified weakness inventory. They were found b
 326. **TruthChain mutation/evidence publication is not atomic around reconciliation.** `TruthChain.execute` mutates `PaperLedger` first, computes reconciliation afterward, and merely labels the result `RECONCILIATION_FAILED` when it is bad; there is no rollback. In addition, an `EvidenceWriter.append` failure occurs after ledger mutation. Either path can leave subsequent decisions operating on state that was never successfully reconciled/published as one complete truth-chain transaction.
 327. **TruthChain preprocesses CLOSE quantities before canonical intent validation.** `_prepare_intent` runs before `replay_executable_fill::_validate_intent`; for CLOSE, an explicit non-positive or non-finite requested quantity can fail the `>0` branch and be replaced with the entire open-position quantity. Invalid caller input can therefore be normalized into a full close instead of being rejected as an invalid intent.
 328. **Partial canonicalization loss does not automatically contaminate MarketTruthPipeline execution.** The pipeline records `rejected_tick_reasons`, but if at least one tick canonicalizes it still executes `TruthChain` on survivors. There is no required proof that rejected ticks lie outside the causal interval needed by the fill; an `APPLIED` result can therefore coexist with silently missing required upstream market evidence.
+329. **The canonical PaperIntent validates scope/side but not its economic/time identity.** `ops/paper_canonique.py::PaperIntent.__post_init__` does not require a non-empty coin/venue, finite positive notional, positive causal timestamp or non-empty unique intent id. Negative/zero/NaN/Infinity notionals and malformed time/identity can therefore enter the supposedly canonical intent layer.
+330. **The auxiliary “canonical” intent→order→fill chain has collision-prone identities.** `canonical_paper_intent_chain.intent_canonique` derives a truncated 20-hex intent id from coarse fields; `intent_vers_ordre_paper` then derives order id without `intent_id`, venue or cohort. Distinct signals/venues/cohorts sharing strategy/coin/side/notional/timestamp can collapse onto one paper order/fill/position identity.
+331. **The same auxiliary chain can fabricate a paper fill directly from a caller-supplied price.** `ordre_vers_fill_ledger(..., prix=...)` and `fill_vers_position_ledger_open` create fill/position/OPEN records without any executable-book, fee, slippage, latency, capacity, fill-ratio, quality or provenance gate. A module presented as canonical must be diagnostic/test-only until routed through the real execution-truth chain.
+332. **The canonical-paper helper fill primitives do not validate finite/physical domains.** `remplir_partiellement`, `fill_maker` and `LiquidityConsumptionLedger` accept non-finite prices/depth/size/queue values; `fill_maker` also allows a negative queue-ahead, which increases `volume_traversant - file_devant_nous` and can create an optimistically large fill.
+333. **The paper-canonical book guard accepts future/non-finite freshness evidence.** `carnet_fiable` rejects only `age_ms > age_max_ms` and `abs(skew_ms) > skew_max_ms`. Negative/future age and NaN comparisons can pass as reliable; invalid/negative limits are not schema-rejected.
+334. **Runtime-truth liveness uses generic truthiness and accepts future event time.** `runtime_truth` applies `bool()` to `producer_alive`, `signal_path_alive`, `execution_engine_alive` and `ledger_writable`, so strings such as `"false"` are true. A future `last_event_ms` yields negative age and can also make a producer look recent/alive.
+335. **Same-direction intent aggregation is non-conservative on malformed input.** `same_direction_intent_aggregation.agreger` silently drops rows with missing venue/coin/non-numeric amount and accepts float NaN/Infinity because it performs no finiteness check. The output has no conservation receipt proving every input intent was either included or explicitly rejected.
+336. **Capital-priority allocation does not validate the envelope or strict demand domain.** `capital_priority.allouer_avec_priorite_strict` permits negative/NaN/Infinity strict demand or envelope. A negative strict demand produces a negative strict allocation and increases exploratory remainder above the configured envelope; non-finite values can contaminate proportional allocations.
+337. **The global warmup barrier accepts invalid requirements/counters.** `BarriereWarmup.exiger` accepts zero/negative minima, making a declared requirement immediately satisfied, while `observer(..., n<0)` can move counters backward. Warmup authority needs strict non-negative monotone counters and positive minima.
+
 
 
 
@@ -13425,6 +13435,23 @@ Requirements:
 - invariant suites declare mandatory inputs per certification profile; missing required invariant inputs yield INCOMPLETE/NO_GO rather than vacuous success;
 - child attribution and global netting conserve exact finite source amounts, surface every rejected source intent and become UNMEASURABLE on non-finite/ambiguous input;
 - future leader events are `FUTURE_SIGNAL_CAUSALITY_VIOLATION`, never age zero.
+
+### Canonical PaperIntent, allocation and warmup domain contract
+
+The canonical paper boundary rejects malformed intent/economic/liveness state before any identity, allocation or fill is derived.
+
+Requirements:
+
+- PaperIntent requires active strategy, non-empty canonical instrument/venue, strict side, finite positive notional, positive causal signal time and a unique/native-or-derived intent identity bound to the source opportunity;
+- derived order/fill/position ids bind the canonical intent id, venue, instrument contract, cohort/lane and action semantics; distinct source intents cannot collide because coarse fields happen to match;
+- helper/demo converters cannot emit authoritative fills/OPEN ledger events from a caller-provided price; authoritative paper fills come only from the canonical executable-price/fill path;
+- fill/depth/queue helpers reject NaN/Infinity and invalid negative domains rather than clamp/coerce them into another experiment;
+- queue-ahead is finite/non-negative and visible-depth/snapshot identity is immutable/content-bound;
+- freshness guards require finite non-negative age/skew limits and reject materially future timestamps;
+- runtime liveness booleans are strict booleans and future/invalid timestamps are unhealthy, never recent;
+- intent aggregation conserves input cardinality with typed included/rejected reasons and rejects non-finite signed notionals;
+- capital allocation requires finite non-negative demands and positive finite envelope, with `0 <= sum(allocation) <= envelope` and no lane receiving negative capital;
+- warmup minima are positive integers and observed counts are monotone non-negative; malformed counters/requirements cannot make a strategy ready.
 
 ### Canonical daily-proof authority for memory and autonomous stop decisions
 
@@ -15883,6 +15910,17 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1570. ReplayIntent numeric/domain validation precedes _prepare_intent normalization, and malformed/NaN/Infinity/non-positive explicit CLOSE quantity cannot be transformed into an implicit full close;
 1571. MarketTruthPipeline binds every rejected tick to its source/time interval and cannot return proof-eligible APPLIED when rejected/corrupt evidence intersects the causal book/trade interval used by the fill;
 1572. all blocker-classified weaknesses 322-328 remain implementation blockers until canonical-payload, identity, durable-writer, transactional-truth-chain and partial-canonicalization regression tests prove closure.
+1573. canonical PaperIntent construction rejects empty instrument/venue/id, invalid side, NaN/±Infinity/non-positive notional and missing/non-positive causal signal time before any derived identity is produced;
+1574. paper order/fill/position identities bind full canonical intent identity plus venue/instrument/cohort/action semantics and deterministic collision tests prove independent same-ms signals remain distinct;
+1575. canonical_paper_intent_chain or any retained equivalent is explicitly diagnostic/test-only unless its fill stage delegates to the canonical executable-price/cost/quality/capacity engine;
+1576. no authoritative ledger OPEN can be created from an arbitrary caller price without an immutable executable-fill receipt;
+1577. paper-canonical depth/partial/maker/liquidity helpers reject non-finite price/depth/size/queue values and negative queue-ahead cannot increase fill probability;
+1578. carnet_fiable rejects negative/non-finite age, future-event freshness, invalid skew and invalid age/skew thresholds;
+1579. runtime_truth uses strict booleans and rejects future/non-finite last-event timestamps; string "false" cannot make a producer/signal/engine/ledger healthy;
+1580. same-direction aggregation accounts for every input intent with included/rejected reason and rejects NaN/±Infinity signed amounts instead of silently dropping or aggregating them;
+1581. capital-priority allocation enforces finite non-negative demands, finite positive envelope and allocation conservation so exploratory remainder never exceeds the envelope after malformed strict demand;
+1582. warmup requirements require positive integer minima and counters can only advance monotonically by non-negative increments;
+1583. all blocker-classified weaknesses 329-337 remain implementation blockers, or are explicitly quarantined diagnostic-only helpers where noted, until strict intent-identity, fill-authority, numeric-domain, allocation-conservation and warmup tests prove closure.
 
 ## Non-goals
 
