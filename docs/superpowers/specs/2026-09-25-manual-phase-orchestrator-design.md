@@ -12,6 +12,20 @@ The user controls phase changes manually through ChatGPT/GitHub. GitHub-hosted r
 
 The design must preserve strict paper/read-only behavior and must never enable real orders.
 
+## Canonical-spec governance
+
+This file is the **single canonical specification** for the current Alina Smart Flow design.
+
+Rules:
+
+- research updates this file in place; it does not create a new specification file merely because new evidence was found;
+- historical labels such as `V6.x` inside older sections are retained only as research-tranche/change-history markers and **must not be interpreted as separate specs**;
+- do not create `V6.25`, `V6.26`, etc. sections as a default research workflow;
+- new verified evidence is integrated into the relevant functional section and the canonical acceptance catalog below;
+- create a genuinely new spec only if the user explicitly requests a separate design or the architecture changes incompatibly enough to require one;
+- duplicated requirements are merged instead of appended under another version label;
+- where first-party sources conflict, preserve the conflict and fail closed rather than spawning another spec version to paper over it.
+
 ## Source of truth
 
 Dataset V2 owns the phase state because it already owns campaign manifests and durable collection metadata.
@@ -11171,9 +11185,9 @@ Verified on 2026-09-26 against current official Hyperliquid documentation coveri
 Parallel Search was used as a cross-check; official Hyperliquid documentation remains authoritative for protocol semantics.
 
 
-### Profitability Convergence V6.24 — canonical rule provenance and serialization closure
+### Canonical rule provenance and serialization closure
 
-V6.24 closes the remaining specification-level ambiguity after V6.14-V6.22.
+This section closes remaining specification-level ambiguity left by the historical research tranches.
 
 It adds no new strategy family. Its job is to make protocol semantics, identifiers, units, signs, serialization and acceptance IDs machine-auditable so that a few basis points cannot be created by representation drift.
 
@@ -11393,6 +11407,156 @@ A missing matrix row propagates a scoped UNMEASURABLE/UNCERTAIN state to consume
 V6.24 consolidates the first-party Hyperliquid rule families already rechecked through V6.14-V6.22 and the Exa/Parallel cross-checks performed on 2026-09-26.
 
 V6.24 does not add new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
+
+## Latest research integrated into the canonical spec — 2026-09-26
+
+This section integrates the final current-source findings **without creating another spec version**. It is normative and belongs to this canonical design.
+
+### Account-abstraction mode is proof state
+
+Account mode is part of point-in-time account state, not a UI preference.
+
+The current first-party account-abstraction documentation distinguishes:
+
+- `Manual / Standard`: separate spot/perp and per-DEX balances;
+- `Unified account`: one balance per asset shared across supported spot/perp uses;
+- `Portfolio margin`: one eligible cross-asset portfolio;
+- discontinued legacy DEX abstraction, which may still matter to historical state.
+
+Requirements:
+
+- every account-sensitive replay stores the mode known at that timestamp;
+- under Unified/Portfolio Margin, balances and holds used for proof come from the spot clearinghouse/account representation documented for those modes; individual perp-DEX user states are not treated as standalone balance truth;
+- Standard mode remains per-DEX/per-balance scoped;
+- switching modes is never inferred from a later snapshot;
+- mode-unknown intervals are `ACCOUNT_MODE_UNMEASURABLE` for margin/capital-efficiency claims;
+- the currently documented 50k user-actions/day restriction for Unified and Portfolio Margin is a feasibility input only and is versioned;
+- builder-fee accrual eligibility that depends on Standard mode is modeled only when builder economics are relevant.
+
+### Borrow/lend state must not masquerade as trading alpha
+
+Manual borrow and Portfolio Margin auto-borrow can change account equity, available balance, interest and liquidation risk independently of trade edge.
+
+Requirements:
+
+- manual borrow, automatic borrow, supply interest, borrow interest, repayment and borrow-liquidation cash flows are separate ledger classes;
+- Copy-Vault/account analytics must not attribute borrow/supply flows or interest accrual to trading PnL;
+- Manual/Unified borrowing and Portfolio Margin automatic borrowing are distinct state machines;
+- borrow caps, supply caps, utilization and interest state are point-in-time inputs when they affect capacity or liquidation;
+- Portfolio Margin liquidation ordering between perp and collateral legs is not assumed deterministic when official rules make it dependent on oracle-update ordering;
+- a displayed/estimated borrow or liquidation price is not substituted for the protocol accounting state.
+
+Current first-party pages conflict on some Portfolio Margin constants (for example the account-value ceiling and HYPE LTV shown in different current documentation surfaces). Therefore:
+
+- those disputed values are stored as separate source assertions;
+- they are `RULE_SOURCE_CONFLICT` until a controlling current runtime/API rule or an authoritative documentation update resolves them;
+- no replay may select the more profitable value.
+
+### Current multi-DEX/user WebSocket state
+
+The current first-party subscription surface includes additional state streams that must be recognized by collection/schema-drift logic, including:
+
+- `webData3`;
+- `twapStates` scoped by user and DEX;
+- `clearinghouseState` scoped by user and DEX;
+- `activeAssetData` for perps;
+- `spotState` with Portfolio Margin context;
+- `allDexsClearinghouseState`;
+- `allDexsAssetCtxs`;
+- `outcomeMetaUpdates`;
+- `fastAssetCtxs`.
+
+Requirements:
+
+- DEX scope is explicit wherever the feed exposes it;
+- all-DEX state cannot be reconstructed by silently reading only the first/default perp DEX;
+- `activeAssetData` may inform point-in-time max-trade/available-to-trade feasibility but never creates alpha by itself;
+- `twapStates` is lifecycle evidence for native TWAP state and does not replace slice-fill evidence;
+- `outcomeMetaUpdates` is metadata/state evidence for outcome markets, not a price/fill feed;
+- undocumented fields in `webData3` are not proof-critical dependencies because first-party docs explicitly warn they may be removed;
+- `fastAssetCtxs` is decoded as base64 + raw-DEFLATE + UTF-8 JSON according to the documented wire contract;
+- the first `fastAssetCtxs` message is a snapshot and later messages are sparse updates; omitted coins/fields are not zeroed or deleted unless the protocol says so;
+- sparse-update merging is deterministic and tested.
+
+### Trade identity and deduplication exactness
+
+Current WebSocket documentation states that `tid` is a 50-bit hash of buyer/seller order IDs and identifies the globally unique trade using the tuple:
+
+`(block_time, coin, tid)`
+
+Therefore:
+
+- `tid` alone is not treated as globally unique across all time/assets;
+- canonical trade identity preserves block/event time, instrument identity and `tid`;
+- order IDs remain order-lifecycle identifiers and are not substituted for trade identity;
+- reconnect snapshots and REST reconciliation deduplicate against the canonical composite identity.
+
+### BBO/book/event sparsity semantics
+
+Current WebSocket semantics distinguish snapshots, event-triggered updates and sparse deltas.
+
+Requirements:
+
+- BBO messages that arrive only when BBO changes are not interpreted as proof that the quote was freshly re-observed on every block with no message;
+- quote age advances while no new BBO event is received;
+- snapshot feeds remain snapshots, not incremental books, unless the specific feed contract says otherwise;
+- sparse asset-context updates carry forward only previously certified fields and never fill omitted values with zero;
+- source freshness is calculated from the relevant feed's actual update semantics.
+
+### Trailing-stop observation semantics
+
+Current first-party support documentation describes trailing stops in terms of mark-price activation, a running watermark and a fixed-distance or percentage retracement that ultimately submits a market order.
+
+For observation/replay:
+
+- activation, watermark, retracement and trigger time are distinct states;
+- the reference is mark price when the documented feature uses mark price;
+- a later fill must not be backdated to the first time BBO/last trade touched the eventual trigger;
+- if the public protocol/API evidence does not expose the complete hidden trailing-stop lifecycle historically, reconstruct only what is observable and label the hidden pre-trigger state `TRAILING_STOP_STATE_UNOBSERVABLE`;
+- do not invent a server-native order lifecycle from frontend/support wording alone;
+- Copy-Vault leader-exit analysis may use a trailing-stop classification only when causal evidence supports it.
+
+### Action-budget and in-flight-cancel feasibility
+
+Current first-party exchange documentation exposes signed mechanisms such as reserving additional address action weight and a nonce-invalidating no-op that can affect in-flight action handling.
+
+Alina remains paper/read-only and **must not implement or invoke these signed actions**.
+
+For hypothetical execution feasibility only:
+
+- extra action weight has an explicit monetary cost and cannot be treated as free throughput;
+- current documented reserve-request cost is versioned rather than timeless;
+- nonce invalidation/no-op semantics may affect modeled cancellation races only when the applicable rule version is known;
+- feasibility modeling of these mechanisms must never introduce signing, private keys, API-wallet operation or `/exchange` calls.
+
+### Venue/account status as evidence
+
+Where available, lightweight status/state endpoints such as `exchangeStatus`, spot clearinghouse state and active-asset data are collected as control-plane evidence.
+
+They are used to distinguish:
+
+- venue unavailable;
+- account unavailable;
+- instrument unavailable;
+- capacity/margin constrained;
+- collector failure.
+
+They are not alpha signals by default.
+
+### Latest-source basis
+
+Cross-checked on 2026-09-26 with first-party Hyperliquid documentation for:
+
+- Account abstraction modes;
+- Portfolio margin;
+- Manual borrows;
+- Trailing stops;
+- WebSocket subscriptions;
+- Perpetual info/account endpoints;
+- Exchange endpoint;
+- Rate limits and user limits.
+
+Exa and Parallel Search were used for retrieval/cross-checking; first-party Hyperliquid documentation remains authoritative.
 
 ### Research basis for Profitability Convergence V6
 
@@ -12891,8 +13055,29 @@ The following numbered items form the normative acceptance catalog. Each item is
 913. any missing proof-critical completeness row propagates scoped UNMEASURABLE/UNCERTAIN state rather than a default guess;
 914. same-ticker instruments across DEXs/deployers/reference families remain distinct until semantic compatibility is certified;
 915. rule/source hashes or immutable revision identifiers are retained when available so later documentation drift is detectable;
-916. V6.24 introduces no new profitability claim or alpha module; it is a proof-quality and representation-integrity layer;
-917. all V6.24 requirements remain GitHub-hosted, paper/read-only and cannot create self-hosted-node or user-PC dependencies.
+916. the canonical provenance/serialization closure introduces no new profitability claim or alpha module; it is a proof-quality and representation-integrity layer;
+917. all canonical provenance/serialization requirements remain GitHub-hosted, paper/read-only and cannot create self-hosted-node or user-PC dependencies;
+918. the repository treats this file as the single canonical current spec and does not create a new versioned spec/tranche for routine research updates;
+919. historical V6.x labels are change-history markers only and future verified evidence is merged into functional sections plus this acceptance catalog;
+920. point-in-time account-abstraction mode is stored and Standard, Unified and Portfolio Margin balance semantics are not conflated;
+921. Unified/Portfolio Margin proof uses the documented shared/spot-clearinghouse balance representation and does not treat individual perp-DEX user states as standalone balance truth;
+922. current Unified/Portfolio Margin user-action limits are modeled as versioned feasibility constraints where relevant;
+923. manual borrow, auto-borrow, supply interest, borrow interest, repayment and borrow liquidation are separate ledger classes and cannot be misclassified as trading PnL;
+924. conflicting first-party Portfolio Margin constants remain RULE_SOURCE_CONFLICT until a controlling rule is established and the engine cannot choose the favorable value;
+925. non-deterministic Portfolio Margin liquidation ordering caused by oracle-update ordering is preserved as uncertainty rather than forced into a deterministic sequence;
+926. current multi-DEX WebSocket coverage recognizes DEX-scoped clearinghouse/TWAP state plus all-DEX clearinghouse and asset-context streams;
+927. activeAssetData is capacity/account-state evidence and cannot create alpha by itself;
+928. undocumented webData3 fields cannot become proof-critical dependencies;
+929. fastAssetCtxs decoding follows the documented base64/raw-DEFLATE/UTF-8 JSON wire contract and sparse deltas are merged without zero-filling omitted fields;
+930. outcomeMetaUpdates is metadata/state evidence and not substituted for executable price or fill evidence;
+931. canonical Hyperliquid trade identity uses block/event time plus instrument identity plus tid; tid alone is not assumed globally unique;
+932. BBO event sparsity advances quote age when no new BBO change message arrives and absence of a message is not treated as a fresh quote;
+933. trailing-stop replay separates mark-price activation, watermark, retracement, trigger and execution and labels hidden historical state unobservable when it cannot be proven;
+934. frontend/support trailing-stop wording cannot create a fictional server-native lifecycle absent protocol/API evidence;
+935. reserve-request weight and nonce-invalidating no-op are modeled only as signed-action feasibility semantics, with no signing or live action path in Alina;
+936. paid additional action capacity is charged as cost rather than free throughput when evaluating hypothetical high-frequency feasibility;
+937. exchangeStatus, spot clearinghouse state and active-asset state are control-plane/account evidence, not alpha by default;
+938. latest-source conflicts, sparse-schema changes and account-mode changes propagate scoped uncertainty instead of spawning another spec version.
 
 ## Non-goals
 
@@ -12902,7 +13087,7 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17/V6.18/V6.19/V6.20/V6.21/V6.22/V6.23/V6.24 modules without scoped evidence gates;
+- activate candidate research modules or historical research-tranche ideas without scoped evidence gates;
 - paper-fill invalid tick/precision/min-notional orders or silently normalize them to a more favorable price;
 - trigger TP/SL from BBO/last trade when the applicable rule uses mark price;
 - treat self-trade prevention as executed volume or charge a self-trade fee;
