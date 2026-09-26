@@ -12902,11 +12902,33 @@ The following findings extend the verified weakness inventory. They were found b
 166. **Copy-Vault frozen evaluation can silently weaken its causal-data contract if the frozen payload is incomplete or altered.** The canonical protocol signature currently declares `causal_observation_required_all_segments=True`, but `evaluate_frozen` derives `causal_all_segments` from a bare caller mapping and does not first prove that mapping matches the frozen protocol signature. Missing/false turns the OOS replay and OOS placebo causal requirement off, while only the `forward` segment is forced causal. An intact current freeze is safe by convention; the evaluation boundary itself is not fail-closed against an incomplete/stale freeze.
 167. **Copy-Vault proof-window boundaries have an implicit wall-clock input when the caller omits `evaluated_at_ms`.** `evaluate_frozen` falls back to `time.time()` to choose completed UTC proof days. That is operationally convenient, but a proof replay is not bit-reproducible unless the resolved evaluation timestamp is persisted, hash-bound and reused on rerun.
 
+168. **Realtime replay is currently event reserialization, not semantic decision replay.** `realtime/replay.py::replay_events_from_logs` loads already-produced `DecisionEvent` rows and writes them back with a fresh `replayed_at_ms`; it does not re-run the strategy/risk/decision code from immutable market+leader inputs. This is useful for transport/inspection, but it cannot prove deterministic decision parity or that current code would make the same decision on the same historical inputs.
+169. **MarketTruthPipeline does not deduplicate canonical events before execution replay.** `MarketTruthPipeline.run` canonicalizes and sorts accepted events, optionally asks `CanonicalEventWriter` to dedupe what is persisted, but passes the original accepted list unchanged to `TruthChain.execute`. Duplicate `PUBLIC_TRADE_BATCH` events can therefore be counted twice by maker `matching_flow` even when the side writer refuses the duplicate.
+170. **CanonicalEventWriter deduplication is process-local and resets on restart.** `CanonicalEventWriter.__init__` starts with an empty `_seen` set and does not reconstruct prior event ids from the existing append-only file. The same canonical market event can therefore be appended again after process restart, weakening exactly-once Market-Truth provenance even though within-process duplicates are suppressed.
+171. **The Market-Truth research validator can emit `PEPITE` with no execution/reconciliation evidence at all.** `market_truth/validation.py::evaluate_research_candidate` defaults `evidence=()`; an empty set produces zero quality and reconciliation violations. If the backtest/forward PnL gates pass, `PEPITE` remains reachable without any truth-chain fill/reconciliation receipt binding those PnLs to executable evidence.
+172. **Market-Truth evidence quality is checked by truthiness instead of a validated domain/receipt.** The same validator tests `not bool(feed_quality_score)`. Negative, NaN or infinite scores are truthy and can avoid the quality-violation counter when the status string is not blocked. A proof boundary must validate a finite bounded score plus the exact data-gate receipt, not presence/truthiness.
+173. **Forward PnL extraction in the Market-Truth validator silently loses bad rows and accepts non-finite numbers.** `_pnls` skips conversion failures and appends plain `float(value)` without finiteness checks. The forward sample can shrink after parse loss or carry NaN/Infinity into PF/net/drawdown helpers instead of becoming contaminated/non-certifiable.
 
 
 
 
 
+
+
+### Semantic replay and Market-Truth exactly-once contract
+
+A proof-facing replay distinguishes recorded-event playback from recomputation under current code.
+
+- an event replay that copies historical decision rows is labelled `EVENT_REPLAY_ONLY`/diagnostic and cannot claim strategy, risk or decision parity;
+- semantic replay reconstructs the immutable market, leader, config, risk and causal-clock inputs visible at each decision boundary and re-executes the current canonical decision stack;
+- semantic parity compares recomputed decision, reason, approved size, gate receipt and PaperIntent against the historical receipt and surfaces any drift;
+- canonical market events are deduplicated by stable event/native identity before both persistence and TruthChain/execution consumption;
+- duplicate public-trade batches cannot advance maker matched volume or queue state twice;
+- canonical-event dedupe identity survives restart and replay of the same event set yields the same event count, fill outcome and evidence hash;
+- a positive Market-Truth candidate state requires non-empty, one-to-one bound execution/reconciliation evidence for every counted proof episode;
+- empty evidence is `EVIDENCE_MISSING`, not zero violations;
+- feed-quality evidence is finite, bounded and linked to the exact data-gate receipt for the fill;
+- malformed/unparseable/non-finite forward PnL rows are counted and contaminate/quarantine the proof set rather than disappearing.
 
 ### Venue-bound Cross-Venue execution and hedge-conservation contract
 
@@ -15224,6 +15246,15 @@ The following numbered items form the normative acceptance catalog. Each item is
 1343. Copy-Vault OOS placebo and proof segments consume the same frozen causal-evidence policy as the candidate segment they compare;
 1344. evaluated_at_ms is persisted/hash-bound for proof-window construction and an omitted wall-clock value cannot make a previous certification replay non-deterministic;
 1345. all blocker-classified weaknesses 160-167 from the 2026-09-26 execution/freeze continuation audit remain implementation blockers until deterministic venue-substitution, quantity-conservation, semantic-status and frozen-payload tests prove closure.
+1346. realtime replay is explicitly EVENT_REPLAY_ONLY unless it re-executes the canonical strategy/risk/decision stack from immutable historical inputs;
+1347. semantic replay binds exact visible market/leader/config/risk/clock inputs and compares recomputed decision, reason, approved size and PaperIntent against the historical receipt;
+1348. MarketTruthPipeline deduplicates canonical events before both persistence and TruthChain consumption, and duplicate PUBLIC_TRADE_BATCH fixtures cannot change maker matched volume/fill state;
+1349. CanonicalEventWriter exactly-once identity survives process restart by reloading/checkpointing durable event ids or an equivalent complete dedupe index;
+1350. replaying the same canonical Market-Truth event set before/after restart yields identical event count, fill result and proof/evidence hash;
+1351. market_truth evaluate_research_candidate cannot emit PEPITE/positive proof when execution/reconciliation evidence is empty, incomplete or not one-to-one bound to counted backtest/forward episodes;
+1352. feed_quality_score is finite and constrained to its canonical domain, and positive Market-Truth validation consumes the exact hash-bound data-gate receipt rather than Python truthiness;
+1353. Market-Truth forward PnL parsing accounts for every input row and rejects/quarantines parse failures and NaN/±Infinity instead of dropping them from the sample;
+1354. all blocker-classified weaknesses 168-173 from the 2026-09-26 semantic-replay/Market-Truth audit remain implementation blockers until deterministic duplicate/restart/parity/evidence-binding tests prove closure.
 
 ## Non-goals
 
