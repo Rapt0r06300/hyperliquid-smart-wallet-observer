@@ -13118,6 +13118,12 @@ The following findings extend the verified weakness inventory. They were found b
 366. **Cross-Venue depth evidence accepts invalid experiment domains.** `simulation/cross_venue_depth_adapter.enrich_trades_with_depth` converts `notional_usd` directly with `float()` and passes `freshness_ms` into age comparisons without finite/domain validation. Negative notional can trivially satisfy top-capacity checks; NaN/Infinity freshness can defeat stale-data comparisons instead of producing invalid evidence.
 367. **Cross-Venue depth loading silently loses corrupt source material.** `cross_venue_depth_adapter.load_depth_snapshots` opens JSONL with `errors="ignore"`, skips malformed/non-mapping/ineligible rows without a conservation receipt, and returns an empty map on open failure. A damaged depth tape can therefore appear as ordinary missing/partial depth rather than evidence contamination tied to exact source intervals.
 368. **Cross-Venue V6 TRAIN “USD/day” divides by active trade days, not complete calendar days.** `backtesting/cross_venue_v6_coverage_union_train.py` computes `daily_mean = net / distinct_days`, where `distinct_days` comes from trade timestamps. Complete TRAIN days with zero trades are absent from the denominator, so the 4-USD/day selection condition can be inflated before the candidate is frozen.
+369. **The shared TRAIN statistics helper omits zero-trade days and rejected-row accounting.** `backtesting/train_statistics.py::summarize_train_rows` builds its daily series only from timestamps present in cleaned trade rows; complete calendar days with no trade are absent. Invalid value/timestamp rows are silently skipped and the returned `sample_count` describes only survivors, so both daily LCB and data-quality visibility can become optimistic across every family using this helper.
+370. **TRAIN multiple-testing parameters fail soft instead of fail closed.** The same helper converts `trial_count<=0` into one trial via `max(1,...)` and clamps `family_alpha` into a numeric range. A missing/corrupt trial count can therefore weaken the Bonferroni penalty rather than invalidating selection evidence.
+371. **Economic revalidation defaults invalid/missing side to LONG.** `ops/economic_revalidation.normaliser_episodes` maps an unrecognized `sens` to 0 and later uses `sens or 1` for lot identity and episode direction. Malformed direction evidence can therefore create/close a synthetic long position instead of being rejected.
+372. **Economic revalidation can relabel unmeasured fees as measured after envelope transformation.** Base episodes carry `frais_mesures=False` when ledger fees are absent, but `enveloppes.decale` rebuilds `Episode` objects without propagating that flag, restoring the dataclass default `True`. Adverse/optimistic envelopes can consequently report `FEES_MESURES` even though the source episode explicitly lacked fee evidence. The base metric also publishes a numeric `net_pnl_usd` computed with missing fees treated as zero while only a note says the net is actually before real fees.
+373. **Economic revalidation can silently truncate/corrupt the ledger and still report MESURE/process success.** `_lire_jsonl` skips malformed rows, returns an empty list on read failure and stops after 200,000 lines without a conservation receipt. `revalider` can still label surviving episodes `MESURE`, and the CLI returns code 0 regardless of LEDGER_ABSENT/AUCUN_EPISODE or truncation state.
+
 
 
 
@@ -16035,6 +16041,15 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1626. Cross-Venue TRAIN daily-target selection derives the complete expected UTC-day calendar from frozen TRAIN bounds and includes explicit zero-trade days in the denominator;
 1627. a TRAIN variant cannot satisfy a +4-USD/day pre-freeze selection rule from net divided only by days containing trades;
 1628. all blocker-classified weaknesses 366-368 remain implementation blockers until Cross-Venue parameter-domain, depth-conservation and complete-calendar daily-selection tests prove closure.
+1629. shared TRAIN statistics derive an explicit complete UTC-day calendar from frozen TRAIN bounds, include zero-trade complete days and publish input/accepted/rejected row counts with reasons;
+1630. invalid/non-finite TRAIN rows cannot disappear before sample-size/daily-LCB accounting;
+1631. trial_count must be a positive authoritative durable count and family_alpha must be finite/in-domain; invalid values fail selection instead of being clamped to a weaker multiple-testing penalty;
+1632. economic revalidation rejects missing/unknown direction before lot mutation; no implicit LONG default exists;
+1633. fee-measurement state is conserved through every adverse/optimistic envelope transformation and cannot flip from unmeasured to measured;
+1634. any episode with missing mandatory fees cannot publish a proof-facing numeric net PnL/ROI/PF as fully measured; the economic state remains UNMEASURABLE until costs resolve;
+1635. economic-revalidation JSONL reading publishes total/parsed/rejected/truncated counts, exact truncation policy and read/decode failures, and proof-facing MESURE is impossible when required evidence was silently dropped;
+1636. economic-revalidation CLI/process success is distinct from semantic proof success; missing/unmeasurable/contaminated required ledgers yield a typed non-success status to orchestrators;
+1637. all blocker-classified weaknesses 369-373 remain implementation blockers until calendar-statistics, multiple-testing-domain, side-integrity, fee-conservation and ledger-reader tests prove closure.
 
 ## Non-goals
 
