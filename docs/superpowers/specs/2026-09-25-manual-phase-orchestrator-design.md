@@ -13056,6 +13056,17 @@ The following findings extend the verified weakness inventory. They were found b
 305. **The userFills ingestion path loses parse/conservation evidence.** WebSocket bytes are decoded with `errors="replace"`; malformed/non-dict fills are filtered out; `parser_message_userfills` silently continues on invalid required fields. The resulting counters do not preserve original frame item count, decode failures, rejected fill count/reasons and native identities, so corruption can shorten Copy-Vault evidence without an explicit contamination receipt.
 306. **Stored fill and order-book numerics use a second NaN/Infinity-permissive converter.** `storage/repositories.py::_safe_float` is plain `float()`; it feeds persisted fill price/size/startPosition/closedPnl/fee and order-book statistics. Even if a producer later hardens its parser, direct repository callers can still persist non-finite proof-critical numerics unless this boundary validates them independently.
 
+307. **PaperEngine can apply a fill that the canonical execution core marks as missed.** `exec_model.simulate_depth_execution` sets `missed=True` whenever the observed fill ratio is below the configured minimum, and `CanonicalExecutionResult.accepted` correctly requires `not execution.missed`. But `PaperEngine._execution_refusal_reasons` never checks `result.missed` or the canonical `accepted` property. A positive partial fill below `min_execution_fill_ratio` can therefore open/add/reduce a position despite explicitly failing the configured fill threshold.
+308. **The canonical position mutation independently ignores the minimum-fill verdict.** `canonical_execution.execute_paper_intent` emits `PositionMutation(status="APPLY")` whenever `filled_notional_usdc > 0`, even when the same `ExecResult` is `missed=True`. This creates two conflicting authorities in one result: `accepted=False` while the mutation says APPLY.
+309. **Shared visible-liquidity consumption is process-local and is forgotten on restart.** `LiquidityConsumptionLedger` stores `_consumed` and `_outcomes` only in memory. Restarting/reconstructing a PaperEngine resets those maps, allowing the same recorded snapshot/depth to become available again to later replayed or retried paper intents unless an external layer happens to prevent reuse.
+310. **Execution snapshot identity is caller-overridable rather than cryptographically content-bound.** `ExecutionTruth.from_levels` accepts a caller-supplied `snapshot_id` and uses it verbatim instead of validating it against coin/source/timestamps/bids/asks. Because execution-plan identity and liquidity-consumption keys trust that id, identical books can be made distinct with different ids, while changed books can reuse one id and inherit unrelated consumption/idempotency state.
+311. **Dataset V2 shard materialization does not confine `dataset_id` to the shard-cache directory.** `datasets/v2_reader.py::materialize_safe_shards` builds `root / f"{dataset_id}.jsonl.gz"` without the containment validation already present in the older bridge. A corrupt/malicious manifest containing path separators or parent traversal can write outside the intended shard directory.
+312. **The alternate Dataset V2 repository materializer also trusts path-bearing index fields.** `datasets/v2_repository.py::materialize_safe_shards` joins unvalidated `venue/family/symbol/release_asset` fields below `runtime/data/market_ticks` without a final resolved-path containment assertion. Proof materialization must treat catalog/index path fields as untrusted data, not filesystem authority.
+313. **Dataset V2 duplicate dataset identities can overwrite one another during materialization.** The reader uses `dataset_id` both as destination filename and as the result-dictionary key but does not reject duplicate ids with conflicting SHA/release identity. Two selected manifests sharing one id can replace/collapse evidence instead of producing an identity-conflict failure.
+314. **Dataset V2 selection provenance is too coarse to reproduce the exact evidence set.** `v2_repository.materialize_safe_shards` records counts, total bytes/events, index hash and created paths, but not the complete selected-shard tuple of dataset id, content hash, bounds, venue/family/symbol, release tag/asset and selection filters/window. Independent certification cannot reconstruct the exact chosen subset from this receipt alone.
+315. **Proof-critical YAML booleans can invert semantic false into true.** `config/loader.py` uses Python `bool(exec_raw.get(...))` for several execution flags and as defaults passed into `_as_bool`. A quoted YAML value such as `"false"` is a non-empty string and therefore truthy, so a human-readable false can become true for execution/safety configuration instead of being schema-rejected or strictly parsed.
+316. **The legacy pessimistic-fill helper treats unknown direction as SELL and accepts invalid cost domains.** `paper/pessimistic_fill_model.py::pessimistic_fill_price` sends every side other than buy/long down the sell branch, does not require finite/non-negative spread/slippage, and can accept negative “costs” that improve execution or produce a non-positive multiplier. It must remain non-certifying until strict side/numeric domains are enforced.
+317. **Legacy partial/missed-fill helpers can turn invalid inputs into apparently valid fill state.** `backtesting/partial_fill_model.py` coerces a zero/negative requested notional upward to `1e-9` instead of rejecting it, while `missed_fill_model.py` accepts negative ages/max ages and does not constrain `partial_ratio` to a finite [0,1] domain. NaN comparisons can therefore classify invalid fill evidence as “not missed”.
 
 
 
@@ -13065,6 +13076,25 @@ The following findings extend the verified weakness inventory. They were found b
 
 
 
+
+
+
+### Fill-threshold, liquidity-identity and Dataset V2 materialization closure contract
+
+Canonical paper execution has one acceptance authority. A fill below the configured minimum fill ratio is a rejected/missed execution for position mutation, accounting and promotion, even if some positive quantity was observable.
+
+- `CanonicalExecutionResult.accepted` or an exactly equivalent strict predicate is the sole mutation gate consumed by PaperEngine and ledger adapters;
+- `execution.missed=true` implies `PositionMutation.status=NO_MUTATION` for the requested intent policy unless an explicitly separate partial-fill policy preregisters and accounts the accepted remainder;
+- minimum fill-ratio policy, requested quantity/notional, filled quantity/notional and residual are bound into the execution receipt;
+- shared visible-liquidity reservations are restart-durable for the applicable replay/proof horizon, or the entire evidence scope is explicitly declared non-restartable/non-certifying;
+- restarting a process cannot make previously reserved units of the same immutable market snapshot available again;
+- canonical snapshot identity is derived from normalized source/venue, instrument, native/exchange identity, exchange/receive timestamps and normalized book content. A vendor/native id may be stored as provenance but cannot override the content identity unchecked;
+- a same-content snapshot under a different external id cannot multiply capacity, and reuse of an external id for changed content is an identity conflict;
+- Dataset V2 manifest/index strings are untrusted path components. Every resolved materialization destination must remain under its declared root after normalization;
+- duplicate `dataset_id` values are legal only when every immutable identity field is identical; otherwise selection/materialization fails with a typed conflict;
+- Dataset V2 selection receipts enumerate every selected shard with dataset id, SHA-256, byte/event counts, time bounds, venue/family/symbol, release repository/tag/asset and the exact filter/window policy used;
+- proof-critical booleans are strict booleans or canonical accepted tokens; Python truthiness of arbitrary strings is forbidden at configuration boundaries;
+- legacy/diagnostic fill helpers reject unknown sides, non-finite numbers, negative cost/age/depth domains and ratios outside [0,1] before returning a usable execution state.
 
 ### Daily-objective authority, freeze-lineage and statistical-helper closure contract
 
@@ -15795,6 +15825,22 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1538. repository persistence independently rejects non-finite proof-critical fill/order-book numerics even when upstream normalization is bypassed;
 1539. deterministic fixtures cover NaN/Infinity fill price/size/startPosition, missing price/time, future exchange time, same native fill with representation drift, conflicting same-identity fills and invalid UTF-8/non-dict frame items;
 1540. all blocker-classified weaknesses 300-306 remain implementation blockers until strict userFills identity, finiteness, freshness, conservation and repository-boundary tests prove closure.
+1541. PaperEngine cannot mutate/open/add/reduce a position when the canonical execution result is missed/rejected under the configured minimum fill-ratio policy;
+1542. CanonicalExecutionResult.accepted, PositionMutation.status and every downstream PaperEngine/ledger acceptance decision are logically consistent for full fill, accepted partial fill, below-threshold partial fill and zero fill;
+1543. a deterministic fixture with positive filled quantity but fill_ratio below min_execution_fill_ratio yields NO_MUTATION and no economic event/PnL credit;
+1544. shared visible-liquidity reservations are durably reconstructible across process restart for every snapshot/evidence horizon used in certifying replay;
+1545. a restart/replay fixture proves the same immutable snapshot depth cannot be consumed twice solely because the in-memory LiquidityConsumptionLedger was recreated;
+1546. canonical execution snapshot identity cryptographically binds normalized source/instrument/timestamps/book content, while any external/native snapshot id is separately retained and cross-checked;
+1547. same-content/different-external-id and same-external-id/different-content mutation tests cannot multiply capacity or inherit unrelated consumption state;
+1548. every Dataset V2 materialization destination is resolved and containment-checked under the configured cache/data root; absolute paths, parent traversal and separator-bearing unsafe components are rejected;
+1549. duplicate dataset_id values with differing hash, release identity, bounds or semantic identity fail closed before download/materialization/result-map insertion;
+1550. Dataset V2 selection provenance enumerates the exact selected shard identities/hashes/bounds/release assets and exact selection filters/window in addition to aggregate counts and index hash;
+1551. final replay/backtest certification can independently reconstruct and hash the exact Dataset V2 selection set from the selection receipt;
+1552. proof-critical YAML/environment booleans use strict schema parsing; quoted "false"/"0"/"off" can never become true through bool(string) coercion and ambiguous tokens fail validation;
+1553. legacy pessimistic_fill_price rejects unknown side, non-finite/non-positive price, non-finite/negative spread and non-finite/negative slippage before arithmetic;
+1554. partial-fill helpers reject non-finite/non-positive requested notional and non-finite/negative available depth instead of coercing them into a valid ratio;
+1555. missed-fill helpers require finite non-negative age/max-age and a finite partial ratio in [0,1]; invalid/NaN inputs are typed invalid evidence, never “not missed”;
+1556. all blocker-classified weaknesses 307-317 remain implementation blockers, or explicitly quarantined non-certifying legacy debt where noted, until fill-threshold, restart-liquidity, snapshot-identity, materialization-containment, provenance and strict-config tests prove closure.
 
 ## Non-goals
 
