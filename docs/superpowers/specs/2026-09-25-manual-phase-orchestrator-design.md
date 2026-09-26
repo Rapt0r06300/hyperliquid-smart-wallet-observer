@@ -3804,6 +3804,7 @@ This specification intentionally preserves all previously validated design layer
 - **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality;
 - **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
+- **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -9520,6 +9521,194 @@ High-signal official sources verified on 2026-09-26 include:
 External summaries were used only for discovery/cross-checking; official documentation governs the spec constants.
 
 
+### Profitability Convergence V6.16 — liquidation, margin and trigger exactness
+
+V6.16 closes the remaining low-level Hyperliquid rules that were still represented too loosely after the V6.13-V6.15 hardening passes.
+
+The governing rule is:
+
+> **when official venue semantics are explicit, replay must reproduce them exactly enough that a few basis points, a liquidation route, a TP/SL child or a margin transition cannot be created or removed by approximation.**
+
+This layer does not add a new alpha module.
+
+### Liquidation state machine — exact current standard semantics
+
+For the current documented Hyperliquid standard liquidation flow:
+
+1. an account becomes liquidatable when account equity falls below the applicable maintenance-margin requirement;
+2. positions are first attempted against the public order book through market liquidation orders;
+3. those book liquidations may fully or partially close the position;
+4. if enough risk is removed for maintenance requirements to be restored, remaining collateral remains with the trader;
+5. if account equity falls below **2/3 of maintenance margin** without successful liquidation through the book, a backstop liquidation can transfer risk to the liquidator vault;
+6. ADL remains a distinct later route/state where applicable.
+
+This state machine is combined with the already-versioned large-position rule:
+
+- current documented threshold above 100,000 USDC;
+- current initial partial book liquidation fraction of 20%;
+- current 30-second cooldown semantics.
+
+Do not collapse PUBLIC_BOOK_LIQUIDATION, PARTIAL_BOOK_LIQUIDATION, BACKSTOP_TRANSFER and ADL into one liquidation print.
+
+### Backstop transfer accounting
+
+For a cross-margin backstop under the current documented rule:
+
+- the user's cross positions are transferred to the liquidator;
+- the user's cross margin is transferred with those positions;
+- isolated positions remain outside that transfer;
+- if the user has no isolated positions, the documented result can leave the account with zero equity after the cross backstop.
+
+For an isolated-position backstop:
+
+- only that isolated position and its isolated margin are transferred;
+- cross margin and unrelated cross positions remain untouched.
+
+Current documentation also states that the maintenance-margin buffer is not returned to the liquidated user during backstop liquidation because the liquidator vault requires a loss buffer.
+
+Replay/accounting therefore distinguishes:
+
+- user residual collateral after successful public-book liquidation;
+- collateral/margin transferred on backstop;
+- liquidator-vault acquired inventory;
+- later liquidator-vault unwind;
+- ADL transfer if any.
+
+The backstop margin buffer is not modeled as an ordinary exchange trading fee.
+
+### Liquidation-price dependency contract
+
+For cross margin:
+
+- account value includes unrealized PnL from the relevant cross portfolio;
+- funding payments can move liquidation state;
+- changes in other cross positions can move liquidation state;
+- the actual liquidation price is not simply a fixed function of the leverage selector once the cross position is open.
+
+For isolated margin:
+
+- isolated margin and the isolated position drive liquidation state;
+- selected leverage affects initial isolated margin allocation and therefore liquidation economics.
+
+Where margin tiers apply:
+
+- maintenance leverage/rate is taken from the tier applicable to the position value under the point-in-time rule;
+- tier transitions are recomputed rather than approximated from one max-leverage number.
+
+A displayed or estimated liquidation price is a derived estimate, not authoritative event truth, unless reconstructed from matching point-in-time account and rule state.
+
+### Margin-mode exactness
+
+Every position/instrument record carries its point-in-time margin mode. Distinguish:
+
+- CROSS;
+- ISOLATED;
+- STRICT_ISOLATED;
+- NO_CROSS;
+- unified/portfolio-margin semantics where enabled;
+- unknown/legacy state.
+
+Current official semantics include:
+
+- cross margin as the ordinary shared-collateral mode;
+- isolated margin with position-specific collateral;
+- strictIsolated, where margin cannot be manually removed and is released proportionally as the position closes;
+- HIP-3 no-cross mode, which permits isolated-style margin handling but no cross margin;
+- unified/portfolio-margin modes where cross positions across DEXs sharing the same collateral can share margin;
+- standard account abstraction where cross margin remains scoped to the same DEX.
+
+Consequences:
+
+- two positions on different DEXs are never assumed to share margin unless account abstraction and collateral rules explicitly permit it;
+- Relative Value cannot claim capital efficiency from cross-margining unavailable to the modeled account;
+- Forced-Flow distinguishes account-wide cross liquidation from isolated-position liquidation.
+
+### TP/SL child lifecycle — exact current rule
+
+Hyperliquid TP/SL parent-child behavior is versioned exactly.
+
+Current documented semantics include:
+
+- position-associated TP/SL defaults to full position size;
+- if an explicit size is configured, that TP/SL is fixed-size and does not automatically resize with later position changes;
+- order-associated TP/SL children have a fixed size tied to the parent order;
+- if the parent is fully filled at placement, children are placed immediately;
+- if the parent is not fully filled, children remain untriggered/not-yet-placed;
+- canceling an unfilled parent cancels its children;
+- manually canceling a partially filled parent cancels child TP/SL orders rather than automatically resizing them to the already-filled amount;
+- if a parent is partially filled and then canceled for insufficient margin, current documentation states the children are placed as if the parent were fully filled;
+- paired sibling TP/SL orders preserve their one-cancels-other lifecycle where applicable.
+
+The insufficient-margin exception is explicit because it differs from ordinary manual cancellation.
+
+### Trigger validity and trigger reference
+
+For TP/SL under the applicable current rule:
+
+- trigger activation uses mark price;
+- a last trade or BBO move alone cannot trigger the order if mark has not crossed;
+- triggered is distinct from filled;
+- limit TP/SL may trigger and then remain resting/unfilled;
+- market TP/SL follows the venue's bounded-slippage behavior.
+
+Current official documentation describes 10% slippage tolerance for TP/SL market orders. This is a versioned rule input.
+
+When creating hypothetical stop/take orders, validate the point-in-time allowed trigger direction rather than accepting an impossible trigger configuration.
+
+### Funding transfer accounting
+
+For standard current Hyperliquid perpetual funding:
+
+- funding is a peer-to-peer transfer between long and short sides;
+- the protocol does not collect a separate fee from the funding payment itself under the documented standard rule;
+- positive funding means longs pay shorts;
+- negative funding reverses the direction;
+- hourly settlement remains governed by the exact funding formulas and constants already frozen in V6.14/V6.15.
+
+Accounting separates TRADING_FEES, BUILDER_DEPLOYER_PRIORITY_FEES, FUNDING_TRANSFER and LIQUIDATION_BACKSTOP_MARGIN_EFFECT.
+
+Funding is never double-counted as both a trading fee and a holding transfer.
+
+### Native TWAP completion cross-check
+
+V6.15 already freezes native TWAP numeric constants. V6.16 adds a strict completion check:
+
+- target schedule and actually executed schedule remain distinct;
+- catch-up attempts do not guarantee parent completion;
+- terminal residual remains unexecuted;
+- child non-fill from wide spread/low liquidity is not retroactively filled;
+- documented network post-only periods can interrupt child execution;
+- trigger and max/min parent conditions use applicable mark-price state.
+
+Scheduled-Flow studies compare reconstructable child execution with the idealized schedule and never treat schedule target as executed quantity.
+
+### Order-state versus trade-feed reconciliation
+
+Some order-state transitions intentionally do not appear in the normal trade feed.
+
+Current self-trade prevention is an example: the resting same-address maker is canceled without a self-trade fill or trade-feed print, while the aggressing order may continue through eligible external liquidity.
+
+Therefore reconciliation combines order-status lifecycle, fills/trades, account/order state, and L4/order-level evidence where available.
+
+Absence from the trade feed is not proof that no order-state transition occurred.
+
+### V6.16 official-source basis
+
+Verified against current official Hyperliquid documentation on 2026-09-26:
+
+- Liquidations;
+- Margining;
+- Funding;
+- Self-trade prevention;
+- Take profit and stop loss orders;
+- Order types;
+- Exchange endpoint;
+- Tick and lot size;
+- Rate limits and user limits;
+- WebSocket behavior.
+
+All rules remain versioned; current behavior cannot be back-applied historically without rule evidence.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -10835,6 +11024,30 @@ The following numbered items form the normative acceptance catalog. Each item is
 734. tests reject direct hard-coded current constants in historical decision paths when a versioned manifest field exists;
 735. all V6.15 work remains GitHub-hosted, read-only and paper-only, with no signed actions, private keys, self-hosted node, user-PC dependency or live calibration order.
 
+736. V6.16 treats public-book liquidation, partial book liquidation, backstop transfer and ADL as distinct lifecycle routes;
+737. current-standard backstop eligibility below 2/3 of maintenance margin is versioned and not back-applied without historical rule evidence;
+738. successful public-book liquidation may preserve residual trader collateral and replay does not automatically zero the account;
+739. cross backstop transfer moves cross positions plus cross margin while preserving unrelated isolated positions under the documented rule;
+740. isolated backstop transfer is scoped to the isolated position and isolated margin;
+741. the backstop maintenance-margin buffer retained by the liquidator mechanism is accounted separately from ordinary trading fees;
+742. liquidation state incorporates funding and other cross-position PnL where those affect account equity;
+743. displayed or estimated liquidation price is not authoritative event truth without matching point-in-time account and rule reconstruction;
+744. margin mode distinguishes CROSS, ISOLATED, STRICT_ISOLATED, NO_CROSS and applicable unified/portfolio-margin state;
+745. strict-isolated margin-removal restrictions and no-cross semantics are preserved in capital and liquidation simulation;
+746. cross-DEX margin sharing is credited only when modeled account abstraction and common-collateral rules explicitly allow it;
+747. position-associated fixed-size TP/SL does not silently resize after later position changes;
+748. order-associated TP/SL children remain unplaced while the parent is not sufficiently activated under the applicable rule;
+749. manual cancellation of a partially filled parent cancels its child TP/SL rather than automatically resizing children to the filled quantity;
+750. a partially filled parent canceled for insufficient margin follows the current documented exception that places children as if the parent were fully filled;
+751. TP/SL trigger activation uses point-in-time mark price and triggered state remains distinct from filled state;
+752. current TP/SL-market 10% slippage tolerance is a versioned rule input, not a timeless constant;
+753. funding transfer is accounted separately from trading, builder, deployer and priority fees and is not double-counted as a protocol trading fee;
+754. positive and negative funding direction is preserved explicitly in long/short cash-flow accounting;
+755. native TWAP target schedule is never substituted for realized executed quantity and terminal residual remains unexecuted;
+756. self-trade prevention and other order-state transitions that do not print as trades require order-state/fill reconciliation rather than trade-feed-only inference;
+757. V6.16 source rules are pinned to the documented protocol version/date and current semantics are not silently back-applied;
+758. all V6.16 semantics remain GitHub-hosted, paper/read-only and cannot enable signed actions, private keys, live order placement, self-hosted nodes or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
@@ -10843,7 +11056,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16 modules without scoped evidence gates;
+- collapse public-book liquidation, backstop transfer and ADL into one interchangeable forced-flow event;
+- assume cross-DEX margin sharing without account-abstraction and collateral semantics that actually enable it;
 - back-apply today's impact notionals, order caps, funding constants, liquidation thresholds, action limits, Chase/TWAP limits or mark/oracle source weights to historical periods without rule evidence;
 - treat an allMids last-trade fallback as executable two-sided midpoint;
 - assume ALO priority cost occurs only when filled;
