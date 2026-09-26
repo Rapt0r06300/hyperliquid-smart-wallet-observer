@@ -12966,6 +12966,16 @@ The following findings extend the verified weakness inventory. They were found b
 223. **A RED forced-exit episode can be marked complete when positions remain open.** After `force_exit_all_positions`, the V26 pipeline calls `DEFAULT_GRADED_HALT.mark_forced_exit_done()` unconditionally. The force-exit helper deliberately leaves positions with missing/invalid marks open, and can return an empty/partial `forced` list. The RED state can therefore remember “forced exit done” and stop retrying during the same RED episode although exposure remains.
 224. **The graded-halt loss window neutralizes missing close PnL and does not validate finiteness.** `realized_window_pnl_usd` adds `float(ev.get("estimated_net_pnl_usdc") or 0.0)`; a CLOSE with missing economics becomes zero loss, while NaN can contaminate the sum so RED/AMBER comparisons become false. A loss halt must be stricter than the PnL evidence it is protecting.
 225. **`funding_settlement.net_funding_settled` is still inferred from a prorated accrual rather than reconstructed from settlement events.** `decouper` counts crossed hourly boundaries but allocates the pre-existing continuous `funding_accrued_usdt` uniformly across elapsed time. When hourly funding rates or position notionals vary, the resulting “settled” amount need not equal the actual sum at settlement instants. This value may remain a migration estimate, but cannot be canonical settled cash flow.
+226. **Bybit order-book continuity does not enforce the documented consecutive `u` contract.** Bybit documents `u` as the per-symbol update id that normally increments by exactly one and requires resynchronization on a gap. `BybitMarketState.apply_orderbook` feeds `u` into `FeedIntegrityState`, but that state uses `strict_consecutive_sequence=False` by default and receives no previous-id field. Forward jumps in `u` are therefore accepted instead of forcing DESYNC.
+227. **The Bybit V2 tape persists the wrong sequence authority for gap detection.** `native_market_tape._bybit_identity` stores the non-consecutive cross-sequence `seq` as `TickEnvelope.sequence` while leaving the consecutive `u` only in `parsed_summary.update_id`. V2 manifest continuity logic therefore cannot prove that no Bybit order-book delta was lost even after the runtime state is repaired.
+228. **TickDatasetWriter does not recover an existing current shard after process restart.** Construction resets `_current_records`, first/last receive bounds and aggregate counters to zero without scanning `*.current.jsonl`. If that file already contains durable pre-restart rows, a later rotation compresses old+new bytes but writes `event_count` and temporal bounds describing only the post-restart portion (or zero rows if rotated before another append).
+229. **TickDatasetWriter rotation is not crash-transactional.** Rotation publishes the final gzip and sidecar before truncating `*.current.jsonl`. A crash after those publishes but before truncation leaves the same durable rows in current; a restart can later package them into another immutable shard. There is no durable rotation transaction/idempotency marker binding shard publication to current-file consumption.
+230. **Hyperliquid trade reconciliation proves only reference-window endpoints, not continuous interior coverage.** `HyperliquidTradeReferenceSampler.reconcile` treats accumulated reference timestamps reaching the requested start/end plus exact-id equality as sufficient. Poll errors are reported but do not prevent `MATCHED`, and no maximum successful-poll gap/retention-overlap invariant proves that `recentTrades` could not have lost an interior interval. A simultaneous or correlated WS+REST data hole can therefore escape set comparison.
+231. **Trade reconciliation silently loses unparsable live evidence before set comparison.** `live_trade_ids` skips non-object rows, invalid raw JSON, unsupported payload shapes and rows without a trade id without rejection counters. The reconciliation report compares only surviving ids, so `MATCHED` does not itself prove that every live shard row was parsed and identity-bearing.
+232. **Copy-Vault checkpoint tail can skip a rotated input-file prefix.** When `vault_fills_live.jsonl` becomes smaller than the saved byte offset, `_read_appended_lines` sets the new offset to the file's current size and returns. Any fills already written into the replacement/truncated file before that poll are permanently skipped.
+233. **Copy-Vault pending-checkpoint capacity is lossy without an overflow proof state.** New work is repeatedly reduced with `pending[-MAX_PENDING:]`. When more than 5,000 checkpoints are pending, older required REFERENCE/ENTRY/EXIT checkpoints disappear without a per-id drop receipt or an automatic NON_CERTIFIABLE state for affected metaorders.
+234. **Copy-Vault checkpoint output and state commit are not atomic together.** `_capture_due` appends a captured checkpoint to `copy_vault_l2_tape.jsonl`, then later `poll_once` persists `captured_checkpoint_ids`, pending state and input offset. A crash between those operations can replay the same fill/checkpoint and append duplicate evidence after restart.
+235. **Loss or corruption of Copy-Vault checkpoint state silently starts a new tail at EOF.** If the state JSON is missing, unreadable or schema-invalid, initialization sets `input_offset` to the current input file size and creates a fresh state. After a prior run this can discard pending checkpoints and unprocessed fills without a typed `STATE_LOST/NEW_PROOF_EPOCH` reason that blocks continuity claims.
 
 226. **Lead-Lag executable episodes do not bound the actual entry-observation delay.** `lead_lag_shadow_economics.episodes_par_horizon` takes the first Hyperliquid quote at-or-after the lead shock and only requires that this quote arrive before the tested exit horizon. The configured/reference freshness caps are applied to the pre-signal reference and exit quote, not to `entry_ts - signal_ts`. A 1,000-ms horizon can therefore accept an entry hundreds of milliseconds late as `liquidatable_net=True`, materially changing the strategy being measured.
 227. **Lead-Lag maker queue consumption accepts public trades with missing exchange time.** `lead_lag_queue_replay._matching_public_trades` explicitly permits a matching trade when `exchange_ts_ms is None` even if the entry book has an exchange timestamp. That trade can consume queue-ahead and complete a modeled maker fill without exchange-time causality proof.
@@ -13282,6 +13292,24 @@ Requirements:
 - pair-sync receipts bind canonical instrument, ordered venue pair, run id, exact component dataset ids/hashes and overlap window; a receipt from another pair/run/window is rejected;
 - exact instrument mapping is a hash-bound receipt over point-in-time contract metadata, not a caller-supplied Boolean;
 - statistical helpers use method names that match their mathematics; “purged”, “White Reality Check”, “Romano-Wolf”, CPCV and related labels cannot certify unless the implemented procedure satisfies the named method's required dependency/multiple-testing semantics.
+
+### Collector continuity, shard-rotation and checkpoint durability contract
+
+Collection proof must survive packet loss, process restart and crash boundaries without silently changing event identity, counts or coverage.
+
+Requirements:
+
+- venue-specific continuity uses the venue's documented authoritative counter semantics; for Bybit order books, `u` continuity is checked as consecutive except explicit reset/snapshot cases, while `seq` remains cross-stream ordering evidence;
+- the same authoritative continuity field is persisted into replay evidence, and V2 quality recomputes packet-loss status from it;
+- a tick writer opening an existing `current` file reconstructs/verifies its row count, bounds and content identity before appending or rotating;
+- immutable-shard publication and consumption/truncation of current data form a crash-recoverable idempotent transaction;
+- restart fixtures crash at every rotation boundary and prove no lost/duplicated rows and correct shard manifests;
+- trade reconciliation has a parse-loss receipt and cannot return MATCHED when required live rows were rejected/unidentified;
+- rolling-reference reconciliation proves continuous coverage, including maximum successful-poll gaps relative to endpoint retention/depth, not merely first/last timestamps;
+- Copy-Vault tail input rotation uses file identity/generation plus a safe restart offset and never skips an already-written prefix of the replacement file;
+- bounded pending/checkpoint/id-dedupe structures surface overflow and affected ids; proof-critical work is never silently evicted;
+- append of a captured checkpoint and durable advancement of its state/idempotency marker are crash-recoverable exactly-once operations;
+- missing/corrupt checkpoint state after a prior proof epoch is a visible epoch break; it cannot masquerade as seamless continuity or silently discard pending proof work.
 
 ### Archive/V2 evidence-conservation and binding contract
 
@@ -15479,6 +15507,18 @@ The following numbered items form the normative acceptance catalog. Each item is
 1417. SL/TP realized proof uses exact funding settlement evidence; average-rate × fractional-hour funding remains an explicitly non-certifying estimate;
 1418. funding_settlement cannot label a prorated continuous accrual as canonical settled funding unless it exactly reconciles to immutable per-settlement events;
 1419. all blocker-classified weaknesses 216-225 remain implementation blockers until deterministic partial-fill, price-semantic, protective-exit, halt-retry and funding-settlement tests prove closure.
+1420. Bybit order-book runtime detects every non-reset u discontinuity and transitions fail-closed to DESYNC/resnapshot before applying later deltas;
+1421. Bybit replay envelopes/manifests persist and validate consecutive update-id u separately from cross-sequence seq;
+1422. reopening a non-empty TickDatasetWriter current file reconstructs exact row count and first/last timestamps before any subsequent append/rotation;
+1423. crash-point tests around gzip publish, sidecar publish, current consumption and manifest publish prove shard rotation is idempotent with zero loss/duplication;
+1424. every immutable shard sidecar event_count and temporal range are recomputed/verified against the actual shard bytes after restart;
+1425. Hyperliquid recentTrades reconciliation requires a continuous-reference coverage receipt whose maximum poll gap is compatible with reference retention/depth; unresolved poll gaps make reconciliation PARTIAL;
+1426. live_trade_ids reports total rows, parsed rows, rejected rows/reasons and identity-missing rows, and MATCHED requires zero unresolved proof-relevant parse loss;
+1427. Copy-Vault tail rotation/truncation never advances to EOF of a replacement input before consuming its existing complete lines;
+1428. Copy-Vault pending capacity overflow is explicit, identifies dropped/blocked metaorders and makes affected proof NON_CERTIFIABLE rather than silently slicing the list;
+1429. checkpoint JSONL append plus captured-id/pending/input-offset advancement are restart-idempotent under crash injection at every boundary;
+1430. missing/corrupt prior Copy-Vault tail state starts an explicitly new proof epoch with STATE_LOST evidence and cannot inherit continuity from the prior epoch;
+1431. all blocker-classified weaknesses 226-235 remain implementation blockers until deterministic sequence-gap, writer-restart, rotation-crash, reconciliation-gap and Copy-Vault crash/overflow tests prove closure.
 1420. Lead-Lag certifying episodes enforce a frozen maximum entry-observation/decision delay independent of the tested alpha horizon;
 1421. an entry quote arriving after the frozen executable-entry latency bound cannot set liquidatable_net=true even when it arrives before the nominal exit horizon;
 1422. every public trade that advances maker queue position has stable exactly-once native/canonical identity and required causal exchange/event timestamp evidence;
