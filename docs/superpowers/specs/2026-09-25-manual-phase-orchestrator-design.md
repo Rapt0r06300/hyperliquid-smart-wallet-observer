@@ -3802,7 +3802,8 @@ This specification intentionally preserves all previously validated design layer
 - **Event Identity & Feed Semantics V6.11:** source-native event identity, sweep de-fragmentation, idempotency, venue-specific continuity and timing uncertainty;
 - **Lifecycle & Reference Integrity V6.12:** RWA calendar/corporate-action/reference-source, expiry/roll, funding-boundary and account-lineage correctness;
 - **Market-Rule Edge-Case Closure V6.13:** self-trade expire-maker, TP/SL child lifecycle, native-TWAP catch-up, batch/modify/cancel semantics, throughput limits and funding/mark finality;
-- **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure.
+- **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
+- **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -9137,6 +9138,388 @@ V6.14 was cross-checked with Exa and Parallel Search, with current official Hype
 Public wrappers and practitioner code were used only to identify edge cases; they do not override official protocol semantics.
 
 
+
+### Profitability Convergence V6.15 — exact protocol constants and accounting closure
+
+This layer records the remaining current protocol constants and accounting rules verified against official Hyperliquid documentation on 2026-09-26.
+
+The rule is:
+
+> **current numeric values are versioned protocol inputs, not timeless truths. A historical replay uses the rule valid at that timestamp or reports the field UNMEASURABLE.**
+
+V6.15 does not add a new alpha module. It prevents small specification mismatches from manufacturing or destroying a few basis points of apparent edge.
+
+### Standard-perp contract constants
+
+For validator-operated standard perps, the current documented contract specification includes:
+
+- funding impact notional: **20,000 USDC for BTC and ETH**;
+- funding impact notional: **6,000 USDC for all other standard assets**;
+- maximum market-order value:
+  - **30,000,000 USD** when max leverage is at least 25x;
+  - **5,000,000 USD** when max leverage is in [20x, 25x);
+  - **2,000,000 USD** when max leverage is in [10x, 20x);
+  - **500,000 USD** otherwise;
+- maximum limit-order value: **10x the maximum market-order value**.
+
+These constants feed:
+
+- funding reconstruction;
+- capacity;
+- adaptive slicing;
+- XEMM hedge feasibility;
+- Forced-Flow stress size;
+- Relative Value route sizing.
+
+Never infer capacity only from visible depth when a venue order cap is tighter.
+
+### Funding numeric closure
+
+For standard Hyperliquid perps under the current documented rule:
+
+- the interest component is **0.01% per 8 hours**;
+- the hourly equivalent is **0.00125%**;
+- premium is sampled every **5 seconds** and averaged over the hour;
+- the premium formula uses impact bid/ask versus oracle;
+- the clamp band in the current standard formula is **±0.0005** around the interest-minus-premium term;
+- funding is paid hourly at one eighth of the 8-hour formula;
+- the current documented funding cap is **4% per hour**;
+- funding cash flow uses **position size × oracle price × funding rate**, not mark-price notional.
+
+Store separately:
+
+- raw premium samples where available;
+- hourly average premium;
+- impact notional;
+- oracle price;
+- computed candidate rate;
+- published/current rate;
+- realized funding ledger entry.
+
+A published or predicted funding rate is not substituted for the realized funding payment without reconciliation.
+
+### Oracle source construction
+
+For standard validator-operated spot-oracle assets, current Hyperliquid documentation describes validator oracle construction from a weighted median of spot mids including:
+
+- Binance weight 3;
+- OKX weight 2;
+- Bybit weight 2;
+- Kraken weight 1;
+- KuCoin weight 1;
+- Gate.io weight 1;
+- MEXC weight 1;
+- Hyperliquid spot weight 1 where the asset's primary-liquidity rules allow it.
+
+The final clearinghouse oracle is the stake-weighted median of validator submissions.
+
+Rules:
+
+- source membership is instrument/rule dependent;
+- do not force Hyperliquid spot into the oracle for assets whose primary spot liquidity is external;
+- do not force external sources into the oracle where the documented instrument rule excludes them;
+- store source set, weights and rule revision.
+
+### Mark-price construction
+
+For ordinary perps, current documentation defines mark as the median of candidate reference prices including:
+
+1. oracle price plus a **150-second EMA** of Hyperliquid mid minus oracle;
+2. the median of Hyperliquid best bid, best ask and last trade;
+3. a weighted median of perp mids from Binance, OKX, Bybit, Gate.io and MEXC with current weights **3, 2, 2, 1, 1**.
+
+When exactly two of the main candidate inputs exist, current documentation adds a **30-second EMA** of the Hyperliquid bid/ask/last-trade median as an additional candidate.
+
+Current documentation states oracle and mark are updated approximately every **3 seconds**.
+
+Because mark drives:
+
+- margin;
+- liquidation;
+- TP/SL trigger activation;
+- unrealized PnL;
+
+the replay must not substitute last trade or raw mid for mark in these mechanics.
+
+Every mark/oracle sample carries:
+
+- event timestamp;
+- received timestamp;
+- source-rule version;
+- missing-input state;
+- fallback state.
+
+### Margin-tier arithmetic
+
+When tiered leverage applies, maintenance margin is reconstructed from the point-in-time margin table.
+
+Current documented structure:
+
+```text
+maintenance_margin
+= notional_position_value * maintenance_margin_rate
+  - maintenance_deduction
+```
+
+with:
+
+```text
+maintenance_margin_rate(tier n)
+= initial_margin_rate_at_max_leverage(tier n) / 2
+```
+
+and maintenance deduction recursively chosen so maintenance margin remains continuous across tier boundaries.
+
+Requirements:
+
+- do not approximate a tiered market using only one max-leverage number;
+- use the tier corresponding to position notional under the applicable rule;
+- store margin-table id and table revision;
+- capacity/liquidation stress must cross tier boundaries explicitly.
+
+### Current large-liquidation constants
+
+For the current documented standard liquidation rule:
+
+- liquidatable positions above **100,000 USDC** may initially send only **20%** of the position to the book;
+- after a block with partial liquidation, the current documented cooldown is **30 seconds**;
+- during that cooldown, subsequent market liquidation orders for the user can use the full position under the documented rule.
+
+These are versioned constants.
+
+Forced-Flow must therefore distinguish:
+
+- ordinary full-book liquidation;
+- large-position initial partial liquidation;
+- cooldown-period liquidation;
+- residual/backstop transition.
+
+Do not back-apply the 100k/20%/30s rule to periods lacking historical rule evidence.
+
+### Exact action-budget constants
+
+Current documented address-level action limits include:
+
+- **1 request per 1 USDC of cumulative traded volume** since address inception;
+- initial buffer of **10,000 requests**;
+- after address-level rate limiting, allowance of **1 request every 10 seconds**;
+- cancel cumulative allowance:
+  `min(default_limit + 100000, default_limit * 2)`.
+
+Current open-order capacity:
+
+- default **1000 open orders**;
+- +1 slot per **5M USDC** of volume;
+- capped at **5000 open orders**;
+- at/above 1000 existing open orders, additional reduce-only or trigger orders may be rejected under the current rule.
+
+Current batch accounting:
+
+- a batch of `n` orders/cancels counts as **one** request for IP rate limiting;
+- it counts as **n** requests for address-based rate limiting.
+
+Paper Alina does not consume these quotas, but quote-heavy strategies must demonstrate that the hypothetical policy is operationally feasible.
+
+### Congestion block-space constraint
+
+During current documented high-congestion handling:
+
+- an address can be limited to approximately **2x its previous-day maker-share percentage of block space**;
+- maker share is scaled by the same asset-volume weighting used for fee-tier contribution;
+- the maker share is computed once per UTC date.
+
+If historical congestion/maker-share state is unavailable:
+
+- mark `CONGESTION_LIMIT_UNKNOWN`;
+- stress cancel/requote throughput;
+- do not certify a strategy that requires effectively unlimited writes.
+
+### Native Chase exactness
+
+Current Chase behavior is frontend/browser-side, not treated as a generic persistent server-side order primitive.
+
+Current documentation states:
+
+- Chase is an ALO/post-only limit order;
+- for a buy, it tracks one tick above best bid;
+- for a sell, it tracks one tick below best ask;
+- when spread is one tick, it rests at the current best bid/ask;
+- it continually reprices until filled or terminated;
+- it runs in the browser tab where created;
+- up to **5 Chase orders** can be active at once.
+
+Consequences:
+
+- Chase is modeled as an execution-policy controller that emits cancel/replace behavior;
+- historical Chase queue state is not inferred without actual repricing/order evidence;
+- browser/frontend availability is not treated as a server guarantee;
+- the policy must pay queue-loss/repricing/action-cost consequences;
+- GitHub-hosted paper research may simulate Chase logic but does not imply a live browser dependency.
+
+### Native TWAP numeric contract
+
+Current documented native TWAP behavior includes:
+
+- running time from **5 minutes to 7 days**;
+- minimum child interval of **30 seconds**;
+- minimum total TWAP order size of **100 USD**;
+- maximum child slippage of **3%**;
+- optional child-size randomization currently documented as up to **±20%**;
+- optional trigger price using **mark price**;
+- optional max/min price that terminates the parent when the mark reaches the stop;
+- catch-up child size capped at **3x the normal child size**;
+- residual quantity may remain unexecuted at the end;
+- child execution can pause during documented network post-only periods.
+
+Store:
+
+- requested duration;
+- effective interval;
+- expected child count;
+- randomization setting;
+- target cumulative schedule;
+- realized cumulative execution;
+- catch-up state;
+- trigger/termination conditions;
+- residual;
+- rule version.
+
+Do not assume a mathematically perfect constant-size TWAP.
+
+### Entry-price / PnL accounting closure
+
+Official Hyperliquid documentation states that displayed entry price, unrealized PnL and closed PnL are frontend convenience fields; fundamental accounting is based on margin/balance and trades.
+
+For paper reconciliation:
+
+- opening trades update entry price using size-weighted average entry;
+- closing trades leave the remaining position entry price unchanged;
+- current documented unrealized PnL convention is:
+  `side * (mark_price - entry_price) * position_size`;
+- opening-trade closed-PnL display includes only fee under the documented frontend convention;
+- closing-trade closed PnL combines fee plus realized price PnL under the documented convention.
+
+Rules:
+
+- preserve the source's fee sign convention explicitly;
+- do not use frontend PnL as the authoritative cash ledger;
+- reconcile fills, fees, funding and ledger/account changes separately;
+- distinguish position PnL from funding and fee cash flows;
+- use mark price for unrealized PnL where the protocol does.
+
+### Margin-use closure
+
+Current ordinary margin documentation includes:
+
+```text
+initial_margin_required
+= position_size * mark_price / leverage
+```
+
+and for margin-removing transfers:
+
+```text
+transfer_margin_required
+= max(initial_margin_required,
+      0.1 * total_position_value)
+```
+
+under the current documented rule.
+
+Use these only where applicable to the account/margin mode and historical version.
+
+Cross and isolated positions maintain distinct margin pools/availability semantics.
+
+### Hyperp exact reference/cap contract
+
+Hyperps are not ordinary external-oracle perps.
+
+Current documentation describes:
+
+- the external spot/index oracle replaced by an **8-hour exponentially weighted moving average** derived from the prior day's minutely mark-price history;
+- external pre-launch CEX perp prices can enter the Hyperp mark calculation;
+- current Hyperp mark capped at **3x the 8-hour mark-price EMA**;
+- when external pre-launch perp listings are present, mark can also be capped at **1.5x the median external perp-price component**;
+- current oracle additionally capped at **4x the one-month average mark price**.
+
+Therefore Hyperp Relative Value must store:
+
+- Hyperp reference/oracle formula version;
+- EMA history sufficiency;
+- external-prelaunch source set;
+- cap state;
+- which cap is binding;
+- mark/reference residual before and after cap.
+
+A capped mark/oracle residual is not interpreted as free convergence alpha.
+
+### Instrument-class reference firewall
+
+Different Hyperliquid instrument families may use materially different reference mechanisms.
+
+At minimum distinguish:
+
+- standard spot-oracle perp;
+- HIP-3 deployer-defined perp;
+- Hyperp/pre-launch perp;
+- index perp;
+- Uniswap/AMM-referenced perp;
+- HIP-4/outcome instrument.
+
+A symbol-level normalization cannot erase instrument-class reference semantics.
+
+For Uniswap-referenced perps, preserve the isolated-only/reference-price semantics from the applicable specification.
+
+For index perps, preserve the published index formula/source and revision rather than forcing the standard CEX-spot oracle model.
+
+### Constants manifest
+
+Create a versioned `PROTOCOL_CONSTANTS_MANIFEST` whose entries include:
+
+- venue;
+- instrument class;
+- field;
+- value;
+- units;
+- effective-from;
+- effective-until if known;
+- official source;
+- collected-at;
+- confidence;
+- whether the value is current-only or historically certified.
+
+Candidate fields include:
+
+- impact notional;
+- funding interest/clamp/cap;
+- max order values;
+- tick/lot/precision rules;
+- margin/liquidation thresholds;
+- TWAP/Chase constraints;
+- action/open-order limits;
+- priority parameters;
+- oracle/mark source weights;
+- update cadence.
+
+Tests fail if a hard-coded current constant bypasses this manifest in a historical replay path.
+
+### V6.15 research basis
+
+High-signal official sources verified on 2026-09-26 include:
+
+- Hyperliquid Contract Specifications;
+- Funding;
+- Robust Price Indices / HyperCore Oracle;
+- Rate Limits and User Limits;
+- Order Types;
+- Entry Price and PnL;
+- Margining / Margin Tiers;
+- Liquidations;
+- Hyperps.
+
+External summaries were used only for discovery/cross-checking; official documentation governs the spec constants.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -10415,7 +10798,42 @@ The following numbered items form the normative acceptance catalog. Each item is
 697. opening/closing/mark-price PnL accounting is covered by golden fixtures against official rule examples;
 698. conflicting official rule generations create separate versioned semantics or RULE_VERSION_UNCERTAIN rather than a blended rule;
 699. V6.14 can invalidate a candidate solely because exact costs/reference semantics remove its net edge, which is considered successful proof-quality improvement;
-700. all V6.14 additions remain GitHub-hosted, read-only and paper-only, with no signed actions, private keys, user-PC execution, self-hosted node or live calibration order.
+700. all V6.14 additions remain GitHub-hosted, read-only and paper-only, with no signed actions, private keys, user-PC execution, self-hosted node or live calibration order;
+701. V6.15 stores current numeric protocol constants in a versioned manifest and never treats them as timeless historical truth;
+702. standard-perp funding impact notional is currently represented as 20,000 USDC for BTC/ETH and 6,000 USDC for other standard assets, subject to rule version;
+703. standard-perp current maximum market-order notional follows the documented leverage buckets and maximum limit-order notional is 10x the applicable market-order cap;
+704. funding replay versions the current 0.01%/8h interest component, 5-second premium sampling, clamp parameters, hourly conversion and current 4%/hour cap;
+705. standard funding cash flow uses position size times oracle price times funding rate under the current documented rule rather than mark-price notional;
+706. ordinary-perp oracle replay preserves the documented spot-source set/weights and validator stake-weighted aggregation where the historical rule is known;
+707. ordinary-perp mark replay preserves the documented three-component median, 150-second EMA term and conditional 30-second EMA fallback where historically applicable;
+708. mark/oracle update cadence is treated as event state and current roughly-3-second cadence is not back-applied without rule evidence;
+709. TP/SL, liquidation, margin and unrealized-PnL mechanics use mark rather than last trade or raw mid when the protocol rule requires mark;
+710. margin-tier replay applies the maintenance-deduction continuity formula and cannot reduce tiered margining to one leverage scalar;
+711. current large-liquidation 100k-USDC threshold, initial 20% book fraction and 30-second cooldown are versioned rather than timeless;
+712. current address-level action feasibility models one request per cumulative USDC traded, 10,000-request initial buffer and one-request-per-10-second behavior after rate limiting;
+713. current cancel action allowance uses the documented min(limit + 100000, limit * 2) rule where historically applicable;
+714. current open-order capacity models 1000 base slots, +1 per 5M USDC volume, 5000 cap and special trigger/reduce-only rejection behavior at the documented threshold;
+715. batched execution feasibility counts one IP request but n address-level requests for n batched actions under the current rule;
+716. current high-congestion feasibility models the documented 2x prior-day maker-share block-space constraint when the required state is measurable;
+717. Chase is represented as a browser/frontend execution controller rather than assumed persistent server-native order state;
+718. current Chase replay uses post-only repricing one tick inside the spread where possible and respects the current maximum of five active Chase orders;
+719. native TWAP replay versions current 5-minute-to-7-day duration, 30-second minimum interval and 100-USD minimum total size;
+720. native TWAP replay versions current 3% child slippage, optional ±20% randomization, mark trigger, max/min termination and 3x catch-up child cap;
+721. native TWAP can end with residual unexecuted quantity and cannot be reconstructed as guaranteed full completion;
+722. displayed entry price and PnL are treated as derived frontend/accounting views and are reconciled against fills/fees/funding/ledger state;
+723. opening trades update entry price by size-weighted average and closing trades preserve remaining-position entry price under the current documented convention;
+724. unrealized PnL uses mark price under the current documented convention and fee/funding cash flows remain separately attributable;
+725. margin-use replay versions current position-size × mark / leverage initial-margin arithmetic where applicable;
+726. margin-removal feasibility includes the current max(initial margin, 10% total position value) transfer-margin requirement where applicable;
+727. Hyperp replay uses a separate reference formula and does not reuse the ordinary spot-oracle-perp model;
+728. current Hyperp research versions the 8-hour mark-history EMA reference, 3x EMA mark cap, optional 1.5x external-prelaunch median cap and 4x one-month-average oracle cap;
+729. Hyperp mark/oracle cap binding state is stored so a cap-induced residual is not mistaken for free convergence alpha;
+730. index, Uniswap/AMM, HIP-3, standard, Hyperp and HIP-4 instruments remain distinct reference classes;
+731. instrument normalization cannot merge two products whose oracle/reference/collateral/payoff semantics differ even if ticker text matches;
+732. PROTOCOL_CONSTANTS_MANIFEST entries include units, effective interval, official source, collected-at timestamp and historical-certification confidence;
+733. historical replay fails closed or marks UNMEASURABLE when a required numeric rule cannot be established for that period;
+734. tests reject direct hard-coded current constants in historical decision paths when a versioned manifest field exists;
+735. all V6.15 work remains GitHub-hosted, read-only and paper-only, with no signed actions, private keys, self-hosted node, user-PC dependency or live calibration order.
 
 ## Non-goals
 
@@ -10425,7 +10843,8 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15 modules without scoped evidence gates;
+- back-apply today's impact notionals, order caps, funding constants, liquidation thresholds, action limits, Chase/TWAP limits or mark/oracle source weights to historical periods without rule evidence;
 - treat an allMids last-trade fallback as executable two-sided midpoint;
 - assume ALO priority cost occurs only when filled;
 - substitute mark price for oracle price in standard funding cash-flow notional when the rule requires oracle;
