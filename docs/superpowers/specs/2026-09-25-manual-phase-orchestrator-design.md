@@ -12931,6 +12931,20 @@ The following findings extend the verified weakness inventory. They were found b
 179. **Market-Truth evidence quality is checked by truthiness instead of a validated domain/receipt.** The same validator tests `not bool(feed_quality_score)`. Negative, NaN or infinite scores are truthy and can avoid the quality-violation counter when the status string is not blocked. A proof boundary must validate a finite bounded score plus the exact data-gate receipt, not presence/truthiness.
 180. **Forward PnL extraction in the Market-Truth validator silently loses bad rows and accepts non-finite numbers.** `_pnls` skips conversion failures and appends plain `float(value)` without finiteness checks. The forward sample can shrink after parse loss or carry NaN/Infinity into PF/net/drawdown helpers instead of becoming contaminated/non-certifiable.
 
+181. **Official archive parsers silently lose malformed rows.** `data_sources/official_archive_backfill.py` catches conversion errors for individual Binance/Bybit archive rows and continues without carrying rejected-row counts, source line numbers or affected time intervals into `ArchiveStream`/`ArchiveDay`. A damaged official archive can therefore become a smaller apparently clean event stream.
+182. **Official archive price/size validation accepts NaN and Infinity.** The Binance and Bybit archive readers validate price/quantity using plain `float(...)` conversion but never `math.isfinite`; non-finite price/size strings can survive into `TickEnvelope.raw_payload` and downstream normalization.
+183. **Official archive backfill can truncate a day without declaring truncation.** `_limit(..., max_events)` simply stops yielding after the configured event limit. `ArchiveDay`/`ArchiveStream` do not expose `truncated`, total-source-row count or a continuation cursor, so a high-volume day can be mistaken for a complete day.
+184. **Single-suite archive planning ignores the requested suite filter.** `datasets/archive_library.py::build_selection_plan` resolves the requested suite but calls `_update_state` for every input record instead of checking `record_matches_suite`. Its digest, matched-file count and required-assets list can therefore describe the entire archive while being labelled as one targeted suite.
+185. **Merged economic-input cache identity is size/mtime based, not content based.** `datasets/economic_multi_source.py::_source_signature` records only path, size and `mtime_ns`; `_merge_jsonl` reuses an existing merged input when that signature matches. A same-size mutation with preserved/restored mtime leaves stale merged evidence reusable.
+186. **Economic multi-source merging can silently lose unreadable sources.** `_source_signature` skips paths whose stat fails and `_merge_jsonl` skips sources that cannot be opened. The merge then writes a normal manifest over the surviving inputs rather than emitting a required-source/read-loss failure.
+187. **Dataset V2 discovery has an implicit history ceiling with no truncation state.** `discover_safe_manifests` considers at most `max_releases=500` releases after `list_run_releases`. When the repository contains more relevant runs, older requested evidence can be invisible without an explicit `SCAN_TRUNCATED`/coverage frontier.
+188. **Dataset V2 discovery silently suppresses malformed/incomplete releases.** `discover_safe_manifests` catches `DatasetBridgeError` from `load_run_manifest` and continues. The bad release is not promoted, but callers cannot distinguish “no data” from “data existed but its run manifest/asset was invalid or inaccessible”.
+189. **V2 reconciliation status is not bound to the shard it upgrades.** `v2_pipeline.attach_reconciliation` copies counts/status from any supplied report and re-runs quality classification, but does not verify dataset id, venue, family, symbol, collection run, time window or source digest. A `MATCHED` report for different evidence can therefore satisfy the wrong manifest.
+190. **V2 synchronization statistics accept non-finite measurements.** `v2_export._float` and `_stats` accept NaN/±Infinity for transport RTT and clock-offset observations. Downstream gates that compare these values with ordinary inequalities can let NaN evade “too high” checks rather than marking clock evidence invalid.
+191. **V2 trade counts fabricate one trade for an explicitly empty batch.** `build_manifest_from_tick_shard` uses `trade_count += max(1, int(count or 1))`; a parsed batch carrying `event_count=0` / `fill_count=0` is recorded as one trade. Any sample-size/coverage consumer of `trade_count` can therefore be overstated.
+192. **V2 shard inspection does not conserve non-object rows.** Valid JSON rows that decode to a non-dict are silently skipped before `event_count` and integrity accounting. The manifest has no rejected-nonobject counter, so malformed schema rows can disappear from a proof-quality shard.
+
+
 181. **Canonical market-event identity is transport-time dependent rather than native-event stable.** `normalization/market_events.py::canonicalize_tick_record` builds `source_tick_ref` from raw hash plus local receive time, then hashes receive/write timestamps into `event_id`. The same venue event redelivered/recovered later with identical native trade/order/sequence identity but different local transport timestamps can therefore receive a different canonical id and evade exactly-once deduplication.
 182. **Same-millisecond canonical ordering falls back to an arbitrary event hash instead of causal sequence evidence.** `MarketTruthPipeline.run` sorts by `observable_at_ms`, `received_ts_ms`, then `event_id`, despite `CanonicalMarketEvent` carrying `connection_id`, `sequence` and `recv_mono_ns`. Two causally ordered L2/trade events received within the same millisecond can be reordered by hash, changing queue/book state and modeled fills.
 183. **PaperLedger turns duplicate event ids into new events instead of enforcing idempotence.** `PaperLedger._append` detects an existing `event_id`, derives a collision-specific replacement id from session/id/next index, and appends it. A repeated economic action can therefore become a second valid hash-chain event instead of a typed duplicate/replay rejection; upstream state may already have mutated before this collision handling runs.
@@ -13218,6 +13232,27 @@ Requirements:
 - pair-sync receipts bind canonical instrument, ordered venue pair, run id, exact component dataset ids/hashes and overlap window; a receipt from another pair/run/window is rejected;
 - exact instrument mapping is a hash-bound receipt over point-in-time contract metadata, not a caller-supplied Boolean;
 - statistical helpers use method names that match their mathematics; “purged”, “White Reality Check”, “Romano-Wolf”, CPCV and related labels cannot certify unless the implemented procedure satisfies the named method's required dependency/multiple-testing semantics.
+
+### Archive/V2 evidence-conservation and binding contract
+
+Archive import and Dataset V2 consumption are proof-preserving transformations, not best-effort filters.
+
+Requirements:
+
+- every source row/frame is accounted for as accepted, rejected/quarantined or deliberately excluded with a typed reason;
+- NaN/±Infinity are invalid for price, size, timestamp, RTT, clock offset, capacity and all other proof-critical numerics;
+- bounded archive readers expose explicit truncation, original-row/event count where knowable, continuation state and the exact retained range;
+- a truncated archive day/run is never represented as complete evidence;
+- suite planning applies the exact requested suite predicate before digest/count/asset planning and regression tests compare single-suite vs all-suite selection;
+- cached merged economic inputs bind full content hashes (or a complete immutable source-manifest root), not only size/mtime/path;
+- a required source stat/open/read failure makes the merge incomplete/non-certifiable rather than silently shrinking the source set;
+- V2 release discovery reports how many releases were listed, inspected, skipped as invalid and omitted by configured scan caps;
+- an exhausted scan frontier is explicit; historical absence cannot be concluded beyond an unscanned release frontier;
+- malformed/inaccessible V2 releases remain visible as typed discovery errors so “no data” and “data corrupt/unavailable” remain distinct;
+- reconciliation receipts are hash-bound to exact dataset id, venue, family, symbol/instrument, collection run, interval and content digest before they can upgrade shard quality;
+- V2 synchronization statistics require finite values and include invalid-measurement counts;
+- batch event/trade/fill counts preserve explicit zero and never coerce an empty batch to one observation;
+- non-object or schema-invalid rows contribute to rejected-row counters and can prevent SAFE/certifying status under the canonical contamination policy.
 
 ### Raw-economic reconstruction and immutable dataset-proof contract
 
@@ -15356,6 +15391,19 @@ The following numbered items form the normative acceptance catalog. Each item is
 1363. feed_quality_score is finite and constrained to its canonical domain, and positive Market-Truth validation consumes the exact hash-bound data-gate receipt rather than Python truthiness;
 1364. Market-Truth forward PnL parsing accounts for every input row and rejects/quarantines parse failures and NaN/±Infinity instead of dropping them from the sample;
 1365. all blocker-classified weaknesses 175-180 from the 2026-09-26 semantic-replay/Market-Truth audit remain implementation blockers until deterministic duplicate/restart/parity/evidence-binding tests prove closure.
+1366. official archive import exposes accepted/rejected row counts and malformed required rows cannot disappear from proof evidence;
+1367. official archive price/size/timestamp fields reject NaN/±Infinity before TickEnvelope creation;
+1368. archive max-events bounds produce an explicit TRUNCATED/non-certifiable state with retained/source range evidence instead of a silently shortened day;
+1369. build_selection_plan filters records through the requested DatasetSuite and its digest/assets/counts match the suite predicate exactly;
+1370. merged economic-input reuse requires immutable content identity for every source; same-size/same-mtime mutation invalidates the cache;
+1371. stat/open/read failure of a required economic source is represented in the merge manifest and blocks complete/certifying source status;
+1372. V2 discovery exposes inspected/skipped/truncated release counts and never interprets an unscanned history frontier as confirmed absence;
+1373. malformed or inaccessible V2 run releases produce typed visible discovery errors while remaining excluded from SAFE inputs;
+1374. attach_reconciliation verifies an immutable same-shard/same-run/same-window receipt before MATCHED can alter quality status;
+1375. V2 RTT/clock/skew statistics reject non-finite observations and threshold checks cannot be bypassed by NaN;
+1376. an explicit zero-event/zero-fill batch contributes zero to trade_count and regression fixtures prevent minimum-sample inflation;
+1377. V2 manifest construction counts non-object/schema-invalid JSON rows and SAFE cannot be achieved by silently dropping them;
+1378. all blocker-classified weaknesses 181-192 remain implementation blockers until deterministic archive-truncation, content-cache, release-frontier, reconciliation-substitution and V2 conservation tests prove closure.
 1366. canonical market-event identity is derived from stable native/source identity and remains unchanged when the same venue event is redelivered with different local receive/write timestamps;
 1367. same-millisecond market events use authoritative venue sequence or connection-scoped monotonic ordering where available and never lexical/hash order as a causal fallback;
 1368. PaperLedger duplicate/idempotency identity cannot be converted into a fresh event id; replaying the same economic action has exactly-once state, PnL and fee effect;
