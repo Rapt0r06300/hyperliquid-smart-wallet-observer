@@ -3805,6 +3805,7 @@ This specification intentionally preserves all previously validated design layer
 - **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
+- **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 
 No implementation task may simplify one layer by silently violating another.
 
@@ -9709,6 +9710,229 @@ Verified against current official Hyperliquid documentation on 2026-09-26:
 
 All rules remain versioned; current behavior cannot be back-applied historically without rule evidence.
 
+### Profitability Convergence V6.17 — portfolio-margin, delisting and accounting exactness
+
+V6.17 closes the remaining account-mode, portfolio-margin and delisting details verified against current official Hyperliquid documentation on 2026-09-26.
+
+The governing rule is:
+
+> **capital efficiency, liquidation path and displayed PnL depend on account abstraction and contract lifecycle; replay must use the exact mode and rule state that existed at the decision timestamp.**
+
+### Account-abstraction mode contract
+
+Every paper account state declares one point-in-time abstraction mode:
+
+- UNIFIED;
+- PORTFOLIO_MARGIN;
+- STANDARD / MANUAL;
+- legacy DEX_ABSTRACTION where historical evidence requires it;
+- UNKNOWN.
+
+Current documented semantics:
+
+- Unified uses a single balance per asset and unifies eligible spot balance with cross-margin perp collateral using that asset;
+- Portfolio Margin combines eligible spot and perp exposures into one portfolio risk system;
+- Standard/Manual keeps spot and perp balances separate and keeps DEX balances separate; cross margin is scoped per DEX;
+- the discontinued DEX-abstraction mode remains historical-only and must not be silently mapped to current semantics.
+
+Data-source rule:
+
+- for Unified and Portfolio Margin API users, current documentation states balances and holds are represented through spot clearinghouse state;
+- individual perp-DEX user states are not treated as authoritative account-balance truth for those modes;
+- Standard mode uses the separate account/DEX states appropriate to that mode.
+
+### Account-mode action and builder constraints
+
+Current official documentation states:
+
+- Unified and Portfolio Margin are limited to 50,000 user actions per day;
+- Standard mode does not have that same documented 50k daily action restriction;
+- builder-code addresses must be in Standard mode to accrue builder fees.
+
+Consequences:
+
+- a quote-heavy paper strategy cannot claim Unified/Portfolio-Margin capital efficiency while assuming unlimited write throughput;
+- builder-fee attribution must be compatible with the builder account mode;
+- action-mode feasibility is part of the route/account identity.
+
+### Portfolio Margin eligibility and cap state
+
+Portfolio Margin is not assumed universally available.
+
+Current documented entry constraints include:
+
+- master account weighted volume above 5M USD OR account value above 10k USD;
+- account value below 25M USD;
+- point-in-time global and per-user supply/borrow caps by eligible asset.
+
+Current documented caps include:
+
+- USDT: 50M global supply, 10M global borrow, 5M user supply, 1M user borrow;
+- USDC: 1B global supply, 500M global borrow, 250M user supply, 50M user borrow;
+- HYPE: 10M global supply and 1M user supply;
+- BTC: 2,000 BTC global supply and 200 BTC user supply.
+
+All values are versioned protocol constants, not timeless limits.
+
+If a cap is hit, replay must follow the documented fallback/non-Portfolio-Margin behavior rather than continuing to grant unavailable borrowing/capital efficiency.
+
+### Portfolio Margin LTV / borrowing / interest
+
+Eligible collateral uses point-in-time LTV.
+
+Current documentation states HYPE and BTC have LTV 0.5 under the current rule.
+
+When insufficient balance is available for eligible spot/perp actions, Portfolio Margin may automatically borrow against eligible collateral subject to balance, oracle, LTV and cap constraints.
+
+Borrowed assets accrue interest continuously and are indexed hourly under the documented model.
+
+For current stablecoin borrowing, official documentation gives the rate formula:
+
+borrow APY = 0.05 + 4.75 * max(0, utilization - 0.8)
+
+with utilization = total borrowed value / total supplied value.
+
+Current documentation also states:
+
+- suppliers earn interest from the same borrowing system;
+- the protocol retains 10% of borrowed interest as a liquidation buffer.
+
+Replay stores:
+
+- supplied amount;
+- borrowed amount;
+- utilization;
+- applicable LTV;
+- borrow oracle;
+- interest accrual;
+- cap headroom;
+- protocol interest retention;
+- rule version.
+
+### Portfolio Margin liquidation exactness
+
+Portfolio Margin is a generalization of cross margin and must not reuse the ordinary perp liquidation state machine unchanged.
+
+Current documentation defines a portfolio margin ratio and states the account becomes liquidatable when that ratio exceeds 0.95.
+
+Current rule components include:
+
+- portfolio maintenance requirement across DEX cross-maintenance plus borrowing requirement;
+- portfolio liquidation value based on portfolio balances, borrow caps, supply caps, borrow-oracle values and liquidation thresholds;
+- liquidation_threshold(token) = 0.5 + 0.5 * LTV(token);
+- a current minimum borrow offset of 20 USDC;
+- conversion of relevant values to USDC through documented borrow-oracle logic.
+
+Important route distinction:
+
+- Portfolio Margin liquidation goes directly to the backstop liquidator under the current documented mechanism;
+- there is no ordinary public-market liquidation phase for the spot-borrow component described by the current Portfolio Margin rule.
+
+### Portfolio Margin partial/full takeover
+
+Under current documented semantics:
+
+- sufficiently unhealthy accounts can have positive-LTV supplied assets and borrowed assets fully taken over by the backstop liquidator;
+- accounts between partial and full liquidation thresholds can be taken over in 20% intervals until no longer liquidatable.
+
+Where the protocol uses asset-specific takeover/slippage widths, record those values point-in-time.
+
+Current documentation names example width values of:
+
+- 3M USDC for HYPE;
+- 300k USDC for BTC.
+
+These are versioned constants.
+
+### Portfolio Margin collateral unwind
+
+Current documentation states the backstop liquidator converts collateral assets to debt assets for repayment using a TWAP with a half-life of 10 minutes.
+
+This creates a distinct observable process:
+
+PORTFOLIO_BACKSTOP_TAKEOVER -> COLLATERAL_UNWIND -> DEBT_REPAYMENT.
+
+Forced-Flow and backstop-inventory research may study this unwind separately from perp liquidation, but no direction is assumed a priori.
+
+### Portfolio Margin liquidation ordering uncertainty
+
+Current documentation states that, depending on oracle-update ordering, perp positions or spot borrows may be liquidated first.
+
+Therefore:
+
+- do not impose one deterministic liquidation sequence when the source rule does not guarantee it;
+- record the observed route where reconstructable;
+- otherwise branch/sensitivity-test admissible ordering or mark LIQUIDATION_ORDER_UNCERTAIN.
+
+### Delisting settlement contract
+
+Validator-operated perp delisting is an explicit lifecycle event, not an ordinary close.
+
+Current official documentation states:
+
+- validators vote on delisting validator-operated perps;
+- if delisted, the perp settles to the 1-hour time-weighted spot oracle price before the scheduled delisting voting time;
+- all positions are settled;
+- all open orders are canceled;
+- after settlement no new orders are accepted.
+
+Replay requirements:
+
+- preserve announcement/vote/scheduled-settlement timestamps where observable;
+- use the documented 1-hour TW spot-oracle settlement rule for the applicable version;
+- cancel open orders at delisting settlement;
+- do not create post-settlement fills;
+- classify delisting PnL separately from ordinary discretionary exit.
+
+### Entry-price / PnL display versus accounting truth
+
+Current official documentation states entry price, unrealized PnL and closed PnL are frontend/convenience calculations; fundamental accounting is based on trades and margin/balance.
+
+For perps under the documented display model:
+
+- position-increasing trades update entry price as a size-weighted average;
+- position-reducing trades keep the entry price of the remaining position unchanged;
+- unrealized PnL uses mark price;
+- displayed closed-PnL behavior includes fee effects.
+
+Alina therefore treats:
+
+- fill ledger;
+- fee ledger;
+- funding ledger;
+- collateral/margin ledger;
+- transfer/borrow ledger
+
+as accounting authority.
+
+Displayed entry/PnL fields are reconciliation views and cannot invent missing fills or cash flows.
+
+### Spot-leg accounting provenance
+
+For Relative Value strategies that use spot legs, do not assume the displayed spot entry price is economic acquisition cost.
+
+Official documentation uses frontend-specific rules for spot buys/sells and some transfer/legacy balances.
+
+Therefore:
+
+- strategy accounting uses actual fills/transfers and causal mark/oracle data;
+- venue-displayed spot entry price is a reconciliation field;
+- imported/legacy balances with ambiguous acquisition history are marked COST_BASIS_UNCERTAIN for strategy-PnL attribution.
+
+### V6.17 official-source basis
+
+Verified against current official Hyperliquid documentation on 2026-09-26:
+
+- Account abstraction modes;
+- Portfolio margin;
+- Delisting;
+- Entry price and PnL;
+- Margining;
+- Liquidations;
+- Fees and account/user-limit documentation.
+
+Current constants and eligibility rules are versioned and are never back-applied automatically.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -11048,6 +11272,31 @@ The following numbered items form the normative acceptance catalog. Each item is
 757. V6.16 source rules are pinned to the documented protocol version/date and current semantics are not silently back-applied;
 758. all V6.16 semantics remain GitHub-hosted, paper/read-only and cannot enable signed actions, private keys, live order placement, self-hosted nodes or user-PC dependencies.
 
+759. every paper account declares point-in-time account abstraction mode rather than assuming one universal margin/balance model;
+760. Unified, Portfolio Margin and Standard modes use their documented balance/cross-margin scopes and data-source semantics;
+761. current Unified/Portfolio Margin 50k-user-actions-per-day constraint is versioned and included in hypothetical execution feasibility;
+762. Standard-mode builder-fee accrual constraints are preserved when builder-flow economics are modeled;
+763. Portfolio Margin eligibility is not assumed unless point-in-time account value/volume and protocol rules permit it;
+764. current Portfolio Margin global/user supply and borrow caps are versioned per asset and cap exhaustion removes unavailable capital efficiency;
+765. current HYPE/BTC LTV values are versioned and cannot be generalized to every collateral asset;
+766. Portfolio Margin borrowing records borrow oracle, utilization, LTV, caps, accrued interest and rule version;
+767. current stablecoin borrow-interest formula and 10% protocol interest retention are treated as versioned accounting inputs;
+768. Portfolio Margin liquidation uses the portfolio-specific health/ratio model and cannot reuse ordinary perp liquidation semantics blindly;
+769. current portfolio-margin liquidatable threshold above 0.95 is versioned rather than treated as timeless;
+770. current portfolio-margin direct-backstop route is distinguished from ordinary public-book perp liquidation;
+771. partial Portfolio Margin takeover in 20% intervals and full takeover are separate states under the applicable rule;
+772. asset-specific takeover/slippage width constants are versioned and cannot be generalized across collateral assets;
+773. backstop collateral-to-debt conversion TWAP with current 10-minute half-life is modeled as a distinct unwind process where applicable;
+774. Portfolio Margin liquidation ordering between perps and spot borrows remains uncertain unless reconstructed from actual oracle/event ordering;
+775. validator-operated perp delisting is represented as a dedicated settlement event rather than an ordinary discretionary close;
+776. current delisting settlement uses the documented 1-hour time-weighted spot-oracle rule for the applicable version;
+777. delisting cancels open orders and forbids post-settlement paper fills;
+778. delisting PnL is attributed separately from normal strategy exit PnL;
+779. fill, fee, funding, collateral/margin and transfer/borrow ledgers remain accounting authority over frontend-derived PnL displays;
+780. perp entry-price display follows weighted-average increase and unchanged remaining-entry behavior only as a reconciliation model;
+781. spot displayed cost basis from transfers/legacy balances cannot substitute for actual strategy acquisition cost when attribution is ambiguous;
+782. all V6.17 rules remain GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
@@ -11056,7 +11305,9 @@ This change does not:
 - run anything on the user's PC;
 - enable real trading;
 - guarantee a 4 USD profit;
-- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16 modules without scoped evidence gates;
+- activate candidate V6/V6.2/V6.3/V6.4/V6.5/V6.6/V6.7/V6.8/V6.9/V6.10/V6.11/V6.12/V6.13/V6.14/V6.15/V6.16/V6.17 modules without scoped evidence gates;
+- assume Portfolio Margin eligibility, borrowing headroom or cross-DEX capital efficiency without point-in-time account/cap state;
+- treat delisting settlement as an ordinary market exit or permit post-settlement fills;
 - collapse public-book liquidation, backstop transfer and ADL into one interchangeable forced-flow event;
 - assume cross-DEX margin sharing without account-abstraction and collateral semantics that actually enable it;
 - back-apply today's impact notionals, order caps, funding constants, liquidation thresholds, action limits, Chase/TWAP limits or mark/oracle source weights to historical periods without rule evidence;
