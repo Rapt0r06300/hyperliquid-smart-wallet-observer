@@ -12756,6 +12756,16 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 31. **A valid purge/embargo implementation exists but is not structurally required by the optimizer path.** `backtesting/purged_split.py` correctly documents historical leakage, yet current profit optimization does not prove that every selection path uses it. A dead guard is not a guard.
 32. **Forward-freeze durability can be weakened by malformed-line skipping and short config hashes.** `ForwardFrozen` skips malformed records and uses a truncated SHA-1-derived config id. A corrupted seal must fail closed, and proof-critical config identity must use the canonical full resolved-config digest.
 33. **Certification environments are not fully locked transitively.** Direct research/tool versions are mostly pinned, but `pyproject.toml` runtime dependencies are ranges and CI installs the editable project against live dependency resolution. Economic/replay proof must bind to a fully resolved dependency/environment manifest so the same code SHA cannot silently mean different software.
+34. **Risk configuration is not actually loaded from the project config.** `config/loader.py` currently constructs `risk=RiskSettings()` directly and does not populate it from a `risk` YAML mapping. A user can believe a risk threshold was configured while the runtime silently uses defaults.
+35. **Malformed numeric configuration silently falls back.** `_as_float()` and `_as_int()` return default values on parse errors. Proof-critical risk/execution settings must reject malformed input instead of continuing under an unintended value.
+36. **The current config schema still exposes TESTNET/MAINNET environments and execution toggles despite the paper/read-only project contract.** Guards currently prevent mainnet execution and no active order transport was found, but the canonical current-scope loader should not allow an environment variable alone to move the runtime into a non-paper execution mode.
+37. **A legacy requirements surface still installs CCXT by default.** `requirements.txt` contains `ccxt>=4,<5`, while `pyproject.toml` correctly treats CCXT as discovery-only optional capability because CCXT exposes order APIs. The safer packaging boundary is therefore not yet universal.
+38. **Raw evidence can be disabled by an environment flag.** `HYPERSMART_DISABLE_RAW_STORAGE=1` turns off several raw stores. That may be useful operationally, but any such run must be explicitly non-certifiable because immutable raw evidence is required for forensic replay/economic proof.
+39. **Promotion vocabulary still contains an automatic paper→testnet state.** `backtesting/promotion_gate.py` can return `PROMOUVOIR_TESTNET`. It does not itself place an order, but this semantic output is outside the current strict paper/read-only scope and could later become an unsafe automation hook.
+40. **Missing canonical ledger currently does not block promotion.** `runtime.protections.scanner_ledger()` returns `promotion_autorisee=True` for an absent ledger, and `controler_avant_promotion()` therefore does not reject that condition. Economic promotion without the ledger of truth must be impossible.
+41. **Incident-ledger parse errors do not currently block promotion.** Malformed incident rows are counted as `PARSE_ERROR`, but `PARSE_ERROR` is not in the blocking incident set. A corrupted safety/incident record cannot be treated as harmless.
+42. **Bounded dedupe can forget old economic identities.** `DedupDurable` intentionally retains/compacts only a bounded recent ID window. This is appropriate for some telemetry, but not sufficient as the sole exactly-once authority if older fills/events can reappear through replay, archive overlap or backfill.
+
 
 
 ### Durable persistence and corruption contract
@@ -12970,6 +12980,36 @@ For the current paper/read-only product:
 - default Alina distribution must contain no usable signer, private-key loader or order-submission transport;
 - disabled testnet scaffolds remain non-authoritative and should not become executable without a separate explicit future scope change and safety review;
 - static import/capability tests fail if an authoritative runtime path imports a forbidden legacy economic engine or exchange execution capability.
+
+### Current-scope execution-capability lock
+
+While Alina is paper/read-only, canonical configuration resolves only to `READ_ONLY` or `PAPER`.
+
+- `HL_ENV=testnet/mainnet`, execution-enable flags and order-capable adapters are rejected by the authoritative current-scope startup path, not merely ignored later;
+- testnet/mainnet enum values may remain only as quarantined compatibility/schema history until a separately authorized future scope change;
+- promotion outputs in the current scope are research states such as `PAPER_CERTIFIED`, `FORWARD_REQUIRED` or `NO_PROMOTION`; they never emit an actionable `PROMOTE_TESTNET`/live transition;
+- no workflow, controller or CLI may translate a research verdict into an external execution mode;
+- discovery-only CCXT is installed only in an isolated optional profile with no credential-loading/order-routing path, and legacy `requirements.txt` cannot reintroduce CCXT into the default authoritative runtime.
+
+Runs performed with raw evidence disabled are tagged `RAW_EVIDENCE_DISABLED_NON_CERTIFIABLE`; they may test plumbing/operations but cannot produce economic proof.
+
+### Promotion-proof presence contract
+
+Economic promotion is **proof-required**, not “no error observed”.
+
+A promotion gate requires the explicit presence and validation of every mandatory artifact, including canonical ledger, run manifest, data manifest, config/environment digest, PnL reconciliation and required OOS/forward evidence.
+
+- missing canonical ledger => `PROMOTION_BLOCKED_LEDGER_ABSENT`;
+- corrupt/unparseable ledger or incident journal => promotion blocked;
+- absent manifest/hash/provenance => promotion blocked;
+- a parser error in a safety/proof journal is blocking until reconciled;
+- “file absent” and “empty valid ledger by design” are distinct typed states and only the latter can be admissible for a scope that truly produced no economic events.
+
+### Exactly-once identity retention
+
+Telemetry dedupe windows may be bounded, but canonical economic exactly-once semantics cannot forget an identity while that identity can legally reappear.
+
+Economic fills/funding/transfers/order-state events use durable native/canonical unique keys enforced by an immutable ledger index/database uniqueness constraint or an epoch/sequence scheme with equivalent proof. Replay/archive overlap from arbitrarily old retained evidence cannot create a second economic effect merely because an in-memory/recent-ID window was compacted.
 
 ### Configuration truth
 
@@ -14149,6 +14189,19 @@ The following numbered items form the normative acceptance catalog. Each item is
 1115. proof-critical persistence has an explicit writer-concurrency/fencing policy and concurrent writers cannot race or overwrite acknowledged state silently;
 1116. a logical checkpoint helper without durable storage cannot be cited as crash-durability evidence;
 1117. all current 2026-09-26 continuation-audit findings remain implementation blockers until the corresponding deterministic regression/fault/statistical/governance test proves closure.
+1118. authoritative risk settings are loaded from the resolved project/environment configuration and a configured risk value cannot be silently ignored in favor of class defaults;
+1119. malformed proof-critical numeric/boolean/environment configuration fails validation instead of falling back to a default value;
+1120. current-scope canonical startup accepts only READ_ONLY/PAPER execution environments and rejects TESTNET/MAINNET or execution-enable flags before runtime initialization;
+1121. current-scope promotion verdicts cannot emit an actionable PROMOTE_TESTNET/live transition and remain research/paper states only;
+1122. CCXT remains discovery-only optional capability and is absent from the default authoritative runtime dependency surface, credential loading and order-routing path;
+1123. any run with raw-evidence storage disabled is explicitly NON_CERTIFIABLE and cannot contribute to replay/economic proof;
+1124. an absent canonical ledger blocks promotion and cannot be interpreted as a healthy empty ledger;
+1125. parse/corruption errors in canonical safety, incident, freeze or economic journals are promotion-blocking until reconciled;
+1126. promotion requires explicit presence+validation of every mandatory proof artifact rather than treating absence of a detected error as success;
+1127. canonical economic dedupe retains exactly-once identity for the full period in which archived/replayed/backfilled events can reappear and cannot rely solely on a bounded recent-ID window;
+1128. old event replay after dedupe compaction is a mandatory regression test and must produce no second economic effect;
+1129. file absence, valid intentionally-empty state and corrupt/unreadable state are distinct typed states throughout promotion logic;
+1130. current execution guards being safe does not waive removal/quarantine of configuration/package surfaces that could later re-enable external execution by a one-line setting change.
 
 ## Non-goals
 
