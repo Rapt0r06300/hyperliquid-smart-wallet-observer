@@ -11171,6 +11171,229 @@ Verified on 2026-09-26 against current official Hyperliquid documentation coveri
 Parallel Search was used as a cross-check; official Hyperliquid documentation remains authoritative for protocol semantics.
 
 
+### Profitability Convergence V6.23 — canonical rule provenance and serialization closure
+
+V6.23 closes the remaining specification-level ambiguity after V6.14-V6.22.
+
+It adds no new strategy family. Its job is to make protocol semantics, identifiers, units, signs, serialization and acceptance IDs machine-auditable so that a few basis points cannot be created by representation drift.
+
+> **Every market rule used in proof must be attributable to an exact source/version, every value must have explicit units/sign/time semantics, and every acceptance criterion must have one unique canonical ID.**
+
+### Canonical acceptance-ID contract
+
+The acceptance catalog is a machine-addressable interface.
+
+Requirements:
+
+- every canonical acceptance criterion has one unique integer ID;
+- IDs are strictly increasing for newly appended criteria;
+- a spec validation test rejects duplicate IDs;
+- renumbering requires an explicit migration map rather than silent reuse;
+- implementation tests may reference the stable acceptance ID plus a short semantic slug;
+- headings/list numbering elsewhere in the document are not interpreted as acceptance IDs unless they are inside the canonical acceptance section.
+
+### Protocol rule provenance manifest
+
+Every venue rule that can affect PnL, admissibility, fill state, margin, liquidation, funding, queue priority, fees or capacity is represented by a versioned manifest row with, where available:
+
+- venue;
+- DEX/deployer scope;
+- instrument class;
+- rule family;
+- official source URL/path;
+- source publication/revision date;
+- collection timestamp;
+- source-content hash or immutable revision identifier;
+- effective-from timestamp;
+- effective-until timestamp;
+- confidence in historical applicability;
+- parser/extractor version;
+- normalized value plus unit;
+- raw source excerpt/reference retained outside hot-path decision state.
+
+Rule applicability states include:
+
+- CERTIFIED_CURRENT;
+- CERTIFIED_HISTORICAL;
+- BOUNDED_BY_KNOWN_CHANGE;
+- RULE_VERSION_UNCERTAIN;
+- UNMEASURABLE.
+
+Current documentation is never silently treated as historical truth.
+
+### Official-source conflict resolution
+
+When official docs, SDK behavior, API schema or first-party examples disagree:
+
+1. preserve each conflicting source;
+2. prefer the most recent controlling protocol documentation/runtime evidence for current semantics;
+3. do not average contradictory rules;
+4. create separate historical rule versions when activation boundaries are known;
+5. use conservative sensitivity or UNMEASURABLE when the historical boundary cannot be certified.
+
+A public third-party wrapper cannot override first-party protocol semantics merely because it is easier to query.
+
+### Canonical instrument identity
+
+A symbol string alone is never sufficient instrument identity.
+
+Every normalized instrument key includes enough point-in-time namespace information to distinguish:
+
+- venue;
+- DEX/deployer;
+- asset/instrument type;
+- venue-native asset identifier/index when available;
+- canonical coin/symbol label;
+- collateral/quote token;
+- oracle/reference family;
+- contract/payoff version;
+- metadata revision/effective interval.
+
+Rules:
+
+- same ticker across different DEXs/deployers is not automatically the same instrument;
+- spot, standard perp, HIP-3, Hyperp, formula/index perp, AMM-oracle perp and HIP-4 outcome remain distinct identity classes;
+- asset-index mappings are resolved from point-in-time metadata rather than hard-coded forever;
+- identifier reuse after delisting/migration cannot silently join two economically different histories.
+
+### Canonical time contract
+
+Every timestamp field carries an explicit semantic and unit.
+
+At minimum distinguish:
+
+- exchange event time;
+- block/sequence time where applicable;
+- collector receive time;
+- local monotonic ordering time where available;
+- decision time;
+- modeled send/arrival/ack/fill/cancel-effective time;
+- publication time;
+- first-observed time;
+- settlement/effective time.
+
+Requirements:
+
+- epoch unit is explicit, normally milliseconds where the source uses milliseconds;
+- all wall-clock values normalize to UTC without losing the raw source representation;
+- timezone/session calendars remain versioned for HIP-3/RWA/event research;
+- equal timestamps use stable sequence/tie-break evidence rather than arbitrary dataframe row order;
+- conversion between seconds/milliseconds/microseconds is tested with boundary fixtures.
+
+### Canonical numeric/unit contract
+
+Every economically relevant numeric field carries an explicit unit and scale.
+
+Examples include:
+
+- price currency;
+- size in base units/contracts;
+- notional in quote/reference currency;
+- fee/funding rates in decimal versus bps;
+- priority rate encoding versus economic bps;
+- percentage versus fraction;
+- leverage multiplier;
+- latency unit;
+- volume/notional bucket unit;
+- oracle/mark conversion currency.
+
+Rules:
+
+- internal math uses Decimal/fixed-point or equivalent deterministic representation where precision affects order validity/accounting;
+- binary float formatting cannot change tick validity, minimum notional, fee amount or fill eligibility;
+- bps-to-decimal conversions are centralized and tested;
+- negative fee/rebate/funding signs are preserved rather than absolute-valued.
+
+### Canonical cash-flow sign contract
+
+Every ledger entry is normalized to one account-value sign convention.
+
+Store separately:
+
+- trade cash flow;
+- realized PnL;
+- unrealized PnL;
+- trading fee;
+- rebate;
+- builder/deployer/priority attribution;
+- funding payment/receipt;
+- borrow interest;
+- collateral FX change;
+- liquidation/backstop/ADL transfer;
+- settlement/delisting cash flow;
+- deposit/withdrawal/transfer.
+
+Do not infer sign from UI color, string formatting or field name alone. Reconciliation fixtures must include both positive and negative examples.
+
+### Exact optional-field serialization semantics
+
+Paper Alina never signs actions, but feasibility fixtures preserve protocol serialization rules that can determine whether a hypothetical payload would be accepted.
+
+Where current protocol encoding requires an optional boolean/field to be omitted rather than encoded as explicit false/null, fixtures model the omission semantics exactly.
+
+This includes versioned handling for fields such as fast-cancel and always-place where applicable.
+
+Serialization feasibility is never permission to generate keys, signatures or live actions.
+
+### Order/status enum forward-compatibility
+
+Known order/status/rejection values are mapped explicitly, but the parser must preserve unknown future enum values losslessly.
+
+Unknown statuses:
+
+- are stored raw;
+- do not default to filled/canceled/rejected;
+- block only dependent exactness paths;
+- trigger schema-drift alert/review;
+- remain replayable after the parser is upgraded.
+
+### Schema-drift and metadata-drift detection
+
+For every critical API/WS/archive schema track:
+
+- field set;
+- nullable/non-nullable behavior;
+- enum set;
+- numeric/string representation;
+- timestamp units;
+- pagination/cursor behavior;
+- snapshot/incremental semantics;
+- DEX/account scope.
+
+A compatible additive field does not break collection, while a semantic change to an existing field creates a new schema/rule version.
+
+### Completeness matrix as release gate
+
+The specification-completeness matrix covers at minimum:
+
+- instrument identity and metadata;
+- tick/lot/precision/min-notional;
+- source tier BBO/L2/L3/L4;
+- sequence/gap/reconnect/snapshot semantics;
+- queue/fill/partial-fill lifecycle;
+- latency decomposition;
+- cancel/modify/batch/STP;
+- trigger/TP-SL/TWAP/Chase/Scale;
+- fees/rebates/priority/builder/deployer;
+- funding/predicted funding;
+- oracle/mark/reference state;
+- margin/account abstraction/collateral;
+- liquidation/backstop/ADL;
+- OI caps/halts/delisting/settlement;
+- venue health/congestion/action feasibility;
+- portfolio netting and attribution;
+- UI-derived analytics precedence;
+- historical rule provenance;
+- safety/read-only/GitHub-hosted constraints.
+
+A missing matrix row propagates a scoped UNMEASURABLE/UNCERTAIN state to consumers rather than being filled with a default.
+
+### V6.23 source basis
+
+V6.23 consolidates the first-party Hyperliquid rule families already rechecked through V6.14-V6.22 and the Exa/Parallel cross-checks performed on 2026-09-26.
+
+V6.23 does not add new numeric constants; it makes the already verified semantics uniquely identifiable, versionable and testable.
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -12645,6 +12868,32 @@ The following numbered items form the normative acceptance catalog. Each item is
 890. every numerical V6.23 protocol rule is tagged to a verified rule interval and historical unknowns remain UNMEASURABLE_RULE_VERSION;
 891. executable net-PnL proof must fail closed when a material V6.23 validity, trigger, funding, lifecycle or throughput input is missing;
 892. V6.23 adds no signed/live action path and preserves GitHub-hosted paper/read-only operation.
+866. the canonical acceptance catalog rejects duplicate numeric IDs and future criteria allocate IDs strictly above the current maximum;
+867. acceptance-ID renumbering requires an explicit migration map and cannot silently reuse an existing ID;
+868. every PnL/admissibility-critical venue rule has a provenance manifest with source, collection time, effective interval/confidence, parser version and normalized unit where available;
+869. current official rules are never silently back-applied to historical periods without applicability evidence;
+870. conflicting first-party rule sources are retained and resolved by version rather than averaged;
+871. canonical instrument identity includes venue/DEX scope, instrument class, native identifier where available, collateral/reference semantics and metadata version rather than symbol text alone;
+872. point-in-time asset/index mappings are versioned and identifier reuse cannot silently merge economically different contracts;
+873. timestamp fields declare semantic meaning and unit, normalize wall time to UTC and preserve source ordering evidence;
+874. second/millisecond/microsecond conversions have boundary fixtures so unit mistakes cannot create false lead-lag or fill timing;
+875. economically relevant numeric fields carry explicit unit/scale and bps/decimal/percentage conversions are centralized;
+876. deterministic Decimal/fixed-point or equivalent arithmetic is used where floating representation could alter tick validity, notional, fee or accounting state;
+877. fee/rebate/funding and other ledger signs are preserved under one documented account-value sign convention;
+878. builder/deployer/priority attribution remains distinct from total cash-flow amount so components are not double-counted;
+879. optional protocol fields whose valid serialization requires omission rather than explicit false/null are modeled with exact omission semantics in feasibility fixtures;
+880. serialization feasibility cannot introduce private keys, signing code or live actions;
+881. unknown future order/status/rejection enum values are preserved raw and never defaulted to a favorable terminal state;
+882. schema drift tracks field set, enum set, nullability, representation, timestamp units, pagination and snapshot/incremental semantics;
+883. semantic schema changes create a new version and cannot silently reuse an older parser assumption;
+884. additive unknown fields do not unnecessarily stop unrelated collection paths when core semantics remain certified;
+885. the completeness matrix explicitly covers identity, precision, books, queue, latency, lifecycle, fees, funding, reference prices, margin, liquidation, venue state, portfolio attribution and rule provenance;
+886. any missing proof-critical completeness row propagates scoped UNMEASURABLE/UNCERTAIN state rather than a default guess;
+887. same-ticker instruments across DEXs/deployers/reference families remain distinct until semantic compatibility is certified;
+888. rule/source hashes or immutable revision identifiers are retained when available so later documentation drift is detectable;
+889. V6.23 introduces no new profitability claim or alpha module; it is a proof-quality and representation-integrity layer;
+890. all V6.23 requirements remain GitHub-hosted, paper/read-only and cannot create self-hosted-node or user-PC dependencies.
+
 ## Non-goals
 
 This change does not:
