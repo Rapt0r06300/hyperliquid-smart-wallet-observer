@@ -13104,6 +13104,12 @@ The following findings extend the verified weakness inventory. They were found b
 352. **Collector-runner state corruption resets failure history.** `collector_runner._lire_etat` maps unreadable/malformed state to `{}`, resetting total/consecutive failure context and therefore backoff/health history instead of surfacing `STATE_CONTAMINATED`.
 353. **A malformed max-pass bound becomes unlimited execution.** `COLLECTOR_RUNNER_MAX_PASSES` parse failure sets `max_passes=0`, and zero means unbounded looping. A typo in a safety/bounding control therefore fails open into an effectively unlimited collector runner.
 354. **Bounded collector startup tolerates unknown/missing requested collectors as a partial result.** `start_bounded_collectors` records `unknown/manquants` and returns state rather than making the requested campaign itself non-successful. Downstream callers can mistake a partially started campaign for the requested collection set unless they independently inspect those fields.
+355. **Scoreboard runtime cost completeness is measured per component, not per fill.** `simulation/scoreboard_runtime_metrics.py::_cout_moyen` drops missing values independently for each cost component and averages only the surviving fills. If only a minority of fills carry `slippage_bps` or another component, a numeric average is still emitted instead of marking that component incomplete for the run. `scoreboard_promotion` then sees a measured cost field, so partial measurement coverage can masquerade as complete cost evidence.
+356. **vNext certification can skip dataset/config drift verification by omitting both observed hashes.** `simulation/vnext_promotion_protocol.py::validate_certification_entry` checks `observed_dataset_sha256` and `observed_config_sha256` only when either field is present. When both are absent, the candidate can continue using the freeze manifest without proving that the currently consumed dataset/config still match the frozen identities.
+357. **Copy-Vault causal selection does not reject non-finite sizing/audit numerics at ingestion.** `backtesting/copy_vault_causal_selection.py` validates timestamp/direction/coin/vault but converts `taille_usd` and `move_frac` with bare `float(...)` and later uses `max(0.0, value)`. NaN can be silently neutralized while Infinity can propagate into leader-notional/audit features instead of invalidating the event.
+358. **Copy-Vault cost measurement accepts invalid experiment domains before measuring evidence.** `simulation/copy_cost_adapter.py::measure_copy_cost_components` validates observed depth values but does not validate the configured `notional_usd`, `copy_delay_ms`, `horizon_ms`, `threshold` or `freshness_ms` domains. Negative/NaN/Infinity parameters can alter event selection, temporal targets or capacity checks instead of producing typed invalid evidence.
+359. **Copy-Vault executable fee evidence still embeds a local fixed 9-bps round-trip constant.** `simulation/copy_cost_adapter.py` owns `COPY_ROUNDTRIP_TAKER_FEES_BPS = 9.0` rather than consuming the canonical point-in-time fee registry. Even if 9 bps happens to match one current tier, the proof path can become stale or disagree with account/venue fee truth without changing the adapter code.
+
 
 
 
@@ -15994,6 +16000,15 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1602. malformed COLLECTOR_RUNNER_MAX_PASSES or equivalent explicit bounds fail startup/config validation and cannot become unlimited execution;
 1603. bounded-collection campaign success requires every requested collector to be known, attached/started, lease-bound and health-verified; unknown/missing requested names produce typed non-success;
 1604. all blocker-classified weaknesses 345-354 remain implementation blockers until credential-host, source-allowlist, path-containment, pagination, asset-integrity and collector-health regression tests prove closure.
+1605. scoreboard runtime cost evidence records per-component observed-fill count and requires complete or explicitly policy-approved coverage across the same immutable fill set before a cost component is considered measured;
+1606. a scoreboard/promotion fixture with 100 fills but slippage measured on only a subset cannot satisfy costs_measured merely because a subset average exists;
+1607. vNext certification requires both observed_dataset_sha256 and observed_config_sha256 for the exact certification run and compares them unconditionally to the freeze manifest;
+1608. omitting current dataset/config hashes is a typed certification failure, not an optional bypass;
+1609. Copy-Vault causal-selection ingestion rejects non-finite/negative sizing and audit numerics before event identity, clustering or continuation features are constructed;
+1610. Copy-Vault observed/signal timestamps and sizing evidence are finite, domain-valid and bounded by the canonical clock-uncertainty policy before becoming causal-forward eligible;
+1611. Copy-Vault cost-adapter configuration requires finite positive notional, finite non-negative delay/horizon/freshness domains and a finite threshold with an explicitly declared valid range;
+1612. Copy-Vault fee evidence is resolved from the canonical point-in-time fee registry/account tier and binds its fee-registry hash; the local 9-bps constant cannot certify economics;
+1613. all blocker-classified weaknesses 355-359 remain implementation blockers until cost-coverage, vNext-drift, Copy-Vault numeric-domain and fee-authority regression tests prove closure.
 
 ## Non-goals
 
