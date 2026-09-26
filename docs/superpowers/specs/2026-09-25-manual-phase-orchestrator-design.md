@@ -12775,9 +12775,91 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 50. **CCXT multi-venue eligibility currently aggregates by canonical base coin before proving contract equivalence.** `CCXTUniverseScout` and `UniversalMarketRegistry` can mark a base as multi-venue/hot-path eligible from venue counts even when quote/settle, linear/inverse structure, multiplier, contract size or exact payoff compatibility differ.
 51. **CCXT/discovery snapshot corruption can masquerade as an empty universe.** `_load_snapshot()`, `_snapshot_markets()` and `load_native_collection_candidates()` can return empty state or skip invalid rows on malformed persisted discovery data. “No candidates” must be distinguishable from “discovery state unreadable”.
 52. **Simple symbol normalization is lossy.** The generic normalizer strips USD/USDT/PERP suffixes and returns a base-like token; this is useful for discovery but insufficient evidence of economic equivalence for Cross-Venue matching.
+53. **Proof provenance is still best-effort in the transport.** `CollectionRecorder` explicitly never raises; the Hyperliquid client swallows recorder failures and collection can continue with no durable provenance recorder. A run may therefore possess market data but lack the evidence needed to certify where/when it came from.
+54. **The default shared recorder is process-memory state with optional hashes.** Its default `RawStore` is in-memory and `config_hash/code_hash/git_head` may be absent. This is useful telemetry, not sufficient durable proof identity.
+55. **Per-page request provenance for `userFillsByTime` is inaccurate in the collector.** The iterator changes `cursor/request_end`, but `_collect_plan()` stores the original broad `start_ms/end_ms` request payload for each yielded page rather than the actual page request bounds.
+56. **Current fill pagination contradicts the documented inclusive-pagination rule.** Hyperliquid documents `startTime` and `endTime` as inclusive and says larger time ranges should continue from the last returned timestamp. Current helpers advance to `max(fill.time)+1`, which can skip additional fills sharing the terminal timestamp.
+57. **The 10,000-recent-fill retention ceiling can make history silently incomplete.** Hyperliquid currently documents that `userFillsByTime` exposes at most the 10,000 most recent fills. A wallet backfill outside that retained set cannot be certified complete from this endpoint alone.
+58. **Known weighted API limits are not enforced by the canonical REST transport.** `rate_weights.py` models current Hyperliquid endpoint weights, but `HyperliquidInfoClient` uses only a fixed 50-ms spacing limiter. Heavy endpoints can therefore exceed the 1,200-weight/minute budget despite respecting the simple request interval.
+59. **Rate-limit retries are generic rather than weight/response aware.** The transport does not currently reconcile returned-item surcharge, Retry-After/rate-limit response semantics or coordinated process-wide budget before retrying.
+60. **The read-only URL guard validates only the path suffix.** An arbitrary host ending in `/info` passes the current guard. That cannot sign an order, but it can poison authoritative data/provenance or leak public wallet query patterns to an unintended endpoint.
+61. **The simple Hyperliquid read-only connector can fabricate zero-valued fills.** `HyperliquidReadonlyConnector.normalize_fill()` substitutes `0.0` price/size and timestamp `0` when fields are missing. Canonical normalization correctly rejects such rows elsewhere, so the connector contract is inconsistent.
+62. **Some raw/projection identities use Python representation rather than canonical bytes.** Examples include `raw!r` in raw-fill references and float-containing fallback identity material. Representation/order/float normalization must not determine proof identity.
 
 
 
+
+
+### Certifying collection provenance contract
+
+A fetch may succeed operationally while failing certification provenance. These are distinct states.
+
+Certifying collection requires a mandatory durable recorder. For every proof-relevant REST/WS/archive fetch it records:
+
+- exact source/host/channel;
+- exact request payload including the **actual page cursor/bounds**;
+- request start/send and receive/write timestamps where available;
+- response byte/content hash and parse status;
+- item count;
+- run/session id;
+- code/tree SHA;
+- resolved config/environment hash;
+- source/rule schema version;
+- success/error/retry/rate-limit state.
+
+Recorder/storage failure does not necessarily have to stop non-certifying collection, but it immediately marks the affected data/run `PROVENANCE_INCOMPLETE_NON_CERTIFIABLE`. No economic proof may consume it as complete evidence.
+
+In-memory process-shared recorders are telemetry caches only; durable evidence survives restart and is linked to the dataset manifest.
+
+### Hyperliquid inclusive pagination completeness contract
+
+For time-ranged Hyperliquid endpoints, pagination follows the point-in-time first-party contract rather than convenience arithmetic.
+
+For current `userFillsByTime` semantics:
+
+- `startTime` and `endTime` are inclusive;
+- a saturated response never advances blindly to `last_timestamp + 1`;
+- pagination resumes from the documented last timestamp and deduplicates with stable fill identity (prefer native fill/hash/tid identity);
+- all fills at a boundary timestamp are retained exactly once;
+- repeated identical saturated pages or an inability to make progress becomes `PAGINATION_AMBIGUOUS`, not silent completion;
+- the exact page request bounds are stored with each response;
+- page/result caps and the current 10,000-most-recent retention ceiling are modeled explicitly.
+
+A requested history earlier than the observable API-retention frontier is `HISTORY_INCOMPLETE_API_RETENTION` unless repaired from an authoritative archive/source. It cannot be described as a complete wallet history merely because pagination terminated without an HTTP error.
+
+Regression fixtures include >page-limit fills, multiple fills sharing the terminal millisecond, inclusive-boundary duplicates, retention truncation and reconnect/backfill overlap.
+
+### Weighted API-budget contract
+
+The canonical Hyperliquid REST transport enforces the documented **weight** budget, not merely a minimum interval between HTTP calls.
+
+Requirements:
+
+- request admission reserves the endpoint's base weight conservatively before send;
+- returned-item surcharge is charged/reconciled after response where applicable;
+- all concurrent callers sharing an IP/process budget coordinate through the same limiter or an equivalent distributed budget;
+- 429/rate-limit responses use documented server signals/Retry-After when available plus bounded backoff/jitter;
+- retrying a heavy request consumes/account for budget and cannot form a synchronized retry storm;
+- reaching the budget delays/degrades collection explicitly and emits data-health state rather than silently dropping events;
+- the point-in-time rate-weight table is versioned with the run manifest.
+
+### Network source allowlist
+
+Authoritative collectors use an explicit scheme/host/path allowlist for first-party venue endpoints.
+
+For Hyperliquid current production collection, the transport accepts only the configured official read-only API/WS hosts and documented read-only paths/channels for the selected network. Test fixtures inject a fake transport/client rather than weakening production host validation.
+
+A URL merely ending in `/info` is insufficient authoritative-source validation.
+
+### Strict connector normalization
+
+Connector adapters never fabricate valid-looking economic fields.
+
+- missing/invalid fill price, size, side, timestamp, identity or required currency metadata produces a quarantined normalization result with reason codes;
+- no proof-critical connector uses `0`, empty string or another plausible value as a missing-field substitute;
+- canonical fill normalization has one strict validation contract shared across connectors;
+- raw evidence remains available for forensic repair;
+- raw/projection hashes use canonical deterministic serialization of original bytes/typed fields, not `repr(dict)` or implementation-dependent float formatting.
 
 ### Durable persistence and corruption contract
 
@@ -14305,6 +14387,21 @@ The following numbered items form the normative acceptance catalog. Each item is
 1144. corrupt or unreadable CCXT/universe snapshots produce DISCOVERY_STATE_CORRUPT or equivalent fail-visible state rather than an empty healthy universe;
 1145. malformed discovery rows and venue failures are surfaced/quarantined with stale provenance and cannot silently shrink the certifying universe;
 1146. discovery failure, zero genuine candidates and intentionally disabled discovery are distinct typed states in reports and run manifests.
+1147. certifying collection requires durable provenance and any recorder/storage failure marks affected evidence PROVENANCE_INCOMPLETE_NON_CERTIFIABLE rather than remaining silently certifiable;
+1148. proof-relevant fetch provenance contains exact per-request/page bounds, response hash/parse status, run id, code/config hashes and source identity rather than request type alone;
+1149. process-memory CollectionRecorder state is telemetry only and cannot by itself satisfy durable dataset/economic provenance;
+1150. Hyperliquid time-range pagination honors inclusive start/end semantics and never blindly advances a saturated page by last_timestamp+1;
+1151. fills sharing a page-boundary timestamp are retained exactly once using stable native/canonical fill identity, and ambiguous non-progress fails visibly;
+1152. the documented userFillsByTime recent-history retention ceiling is represented explicitly and history beyond it is incomplete unless repaired from authoritative archive evidence;
+1153. Copy-Vault/wallet-history completeness cannot be certified solely from userFillsByTime when the requested interval exceeds the observable retention frontier;
+1154. every paginated raw record stores the actual cursor/start/end used for that network response rather than the original broad query bounds;
+1155. canonical Hyperliquid REST admission enforces point-in-time endpoint/item weight budgets shared across concurrent collectors rather than fixed inter-request sleep alone;
+1156. 429/rate-limit retry behavior is bounded, server-signal aware where available, jittered/coordinated and cannot silently create data gaps or retry storms;
+1157. authoritative venue clients validate an explicit official scheme+host+path/channel allowlist; path suffix alone cannot establish source authenticity;
+1158. strict connector normalization quarantines missing/invalid fill price, size, side or timestamp and cannot fabricate zero-valued fills;
+1159. all authoritative connectors share one strict canonical fill-validation contract before data can affect positions/PnL;
+1160. proof identity/raw references use deterministic canonical byte/field serialization and cannot depend on repr(dict), insertion order or binary-float string representation;
+1161. pagination boundary, retention-truncation, rate-budget and provenance-recorder failure cases are mandatory deterministic regression fixtures in the certifying data path.
 
 ## Non-goals
 
