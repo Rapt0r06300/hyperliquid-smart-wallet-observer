@@ -3805,6 +3805,7 @@ This specification intentionally preserves all previously validated design layer
 - **Exact Cost & Reference Semantics V6.14:** placement-charged ALO priority economics, point-in-time fee-tier state, funding/oracle notional exactness, allMids fallback provenance and final reference-price/accounting closure;
 - **Exact Protocol Constants & Accounting V6.15:** versioned numeric contract constants, precise mark/oracle construction, action/open-order feasibility, Chase/TWAP frontend semantics, liquidation thresholds, Hyperp caps and fill-ledger PnL/margin closure.
 - **Priority / Transport Exactness V6.19:** exact IOC/ALO/gossip priority economics, GitHub-hosted latency boundary, SDK market-order protection and transport-feasibility semantics;
+- **Fill / WebSocket / Reconciliation Exactness V6.20:** raw fill granularity, fee-component reconciliation, snapshot/reconnect idempotency, CLOID/OID state repair and stream-feasibility exactness;
 - **Liquidation, Margin & Trigger Exactness V6.16:** exact backstop threshold/transfer, cross-vs-isolated margin state, TP/SL child lifecycle and funding-transfer accounting.
 - **Portfolio-Margin, Delisting & Accounting Exactness V6.17:** exact account-abstraction limits, borrow/LTV/liquidation state, delisting settlement and spot/perp accounting provenance.
 - **ADL Exactness V6.18:** exact auto-deleveraging trigger, ranking index, previous-mark execution and queue semantics.
@@ -10642,6 +10643,244 @@ Verified against the current official Hyperliquid Portfolio graphs and Miscellan
 
 These rules close documentation coverage; they do not create a new alpha hypothesis.
 
+
+### Profitability Convergence V6.20 — fill, websocket and reconciliation exactness
+
+V6.20 closes the remaining data-plane details that can silently alter fill count, fee attribution, queue evidence or collector continuity.
+
+The rule is:
+
+> **raw execution evidence is preserved at the finest causally available granularity; aggregation and frontend convenience fields may be derived later, but never replace canonical fills/order state.**
+
+### Canonical fill-granularity rule
+
+Hyperliquid `userFills` and `userFillsByTime` support `aggregateByTime`.
+
+Current official semantics state that when aggregation is enabled:
+
+- a crossing order filled by multiple resting orders can have partial fills combined;
+- a resting order filled by multiple crossing orders is aggregated only when those fills are in the same block.
+
+Therefore:
+
+- canonical replay/execution evidence uses **unaggregated fills** whenever available;
+- `aggregateByTime=true` is permitted only for derived analytics/compact summaries;
+- queue, adverse-selection, partial-fill timing, implementation shortfall and maker/taker attribution cannot be certified from an aggregated stream when the aggregation destroys required detail;
+- if only aggregated history exists for a period, mark execution granularity `AGGREGATED_FILL_EVIDENCE` and downgrade claims accordingly.
+
+### Fill identity and deduplication
+
+Current `WsFill` exposes fields including:
+
+- `tid`: unique trade id;
+- `oid`: order id;
+- L1 transaction `hash`;
+- timestamp;
+- coin;
+- side;
+- price;
+- size;
+- `crossed`;
+- fee;
+- fee token;
+- optional builder fee;
+- liquidation metadata where applicable.
+
+Use source-native `tid` as the primary trade identity where present.
+
+A robust dedup key may include source/DEX + `tid`, with hash/oid/time used for reconciliation and corruption detection.
+
+Do not use timestamp+price+size alone as a unique fill key.
+
+### Fee-field anti-double-counting
+
+Current official fill schema states:
+
+> `builderFee` is already included in `fee`.
+
+Therefore:
+
+- canonical fill cash flow charges `fee` exactly once;
+- `builderFee` is a fee-attribution component, not an additional cost added on top of `fee`;
+- negative `fee` remains a rebate and preserves sign;
+- `feeToken` is explicit and any conversion to USD/reference value uses point-in-time conversion;
+- builder/deployer/referral/priority attribution must reconcile to total fee/cost ledgers without double counting.
+
+A candidate is invalid if its +4 USD/day proof depends on adding or subtracting a component twice.
+
+### Maker/taker truth from fill evidence
+
+Current `WsFill.crossed` identifies whether the order crossed the spread.
+
+Use the venue-native field as first-choice maker/taker evidence when available.
+
+Do not infer maker/taker solely from:
+
+- side;
+- order type label;
+- whether the submitted limit price was aggressive;
+- post-hoc BBO reconstruction.
+
+Those may be cross-checks, not replacements for direct fill evidence.
+
+### Snapshot versus incremental stream semantics
+
+For streaming user endpoints that expose `isSnapshot`:
+
+- the initial snapshot is bootstrap state/history, not a burst of new events;
+- subsequent `isSnapshot=false` messages are incremental events;
+- reconnect snapshots are deduplicated against committed identities;
+- snapshot watermark and reconnect time are persisted;
+- a row seen in both a reconnect snapshot and prior committed stream is counted once.
+
+This applies especially to fills and funding streams.
+
+For state-style subscriptions whose first message is a full state and later messages are deltas/changed entities, persist the bootstrap/delta boundary explicitly.
+
+### WebSocket idle timeout / heartbeat exactness
+
+Current Hyperliquid WebSocket documentation states that the server closes a connection if it has not **sent** a message on that connection for 60 seconds.
+
+For quiet subscriptions:
+
+- collector emits documented `{"method":"ping"}` heartbeats before idle timeout;
+- `pong` is health evidence, not a market event;
+- heartbeat messages are excluded from trading/event counts;
+- heartbeat failure promotes connection health to `DEGRADED/STALE`;
+- reconnect uses snapshot/reconciliation before returning the feed to `HEALTHY`.
+
+Low-activity markets must not appear to have data gaps simply because no market event occurred for a minute.
+
+### Reconnect repair contract
+
+Official docs state missed data during reconnect can be present in snapshot acknowledgement and can also be repaired through the corresponding info request.
+
+Collector recovery sequence:
+
+1. mark connection degraded;
+2. persist last committed source identity/time;
+3. reconnect;
+4. process bootstrap snapshot as reconciliation evidence;
+5. query repair endpoint where needed;
+6. deduplicate by source-native identities;
+7. verify monotonic continuity / expected coverage;
+8. only then return to healthy incremental mode.
+
+A reconnect is not considered repaired merely because the socket reopened.
+
+### CLOID / OID reconciliation
+
+Hyperliquid supports:
+
+- venue order id `oid`;
+- optional client order id `cloid`;
+- current CLOID format as a 128-bit hex identifier;
+- status query by either oid or cloid;
+- cancel-by-cloid where applicable.
+
+Paper/replay ledgers therefore retain both when present.
+
+Rules:
+
+- never replace the venue oid with cloid;
+- cloid is provenance/reconciliation identity, not trade identity;
+- status lookup result `unknownOid` is not interpreted as proof that an order never existed without checking collection gaps/account scope;
+- modify/cancel history preserves old/new identity relationships;
+- client-generated identifiers cannot collide across simulated strategies without a namespace policy.
+
+### Account / DEX scope exactness
+
+Read-only queries are account- and sometimes DEX-scoped.
+
+Current official `openOrders` semantics default to the first perp DEX when DEX is omitted; spot open orders are included with the first perp DEX.
+
+Therefore:
+
+- multi-DEX collectors specify and store DEX scope explicitly;
+- absence from a query with the wrong/default DEX is not evidence of no order;
+- account address used for state lookup is stored separately from any hypothetical signer/agent identity;
+- no API-wallet address is used as a substitute for the master/subaccount state address.
+
+This is a read-model rule only; Alina still operates without signing wallets.
+
+### OrderUpdates versus OpenOrders role separation
+
+Use:
+
+- `openOrders` / `frontendOpenOrders` as point-in-time state/bootstrap;
+- `orderUpdates` as lifecycle change evidence;
+- fills as execution evidence;
+- historical/order-status queries as reconciliation/backfill.
+
+No one source alone is assumed complete for every lifecycle transition.
+
+Especially:
+
+- STP cancel can occur without a trade print;
+- trigger state can change before fill;
+- liquidation/delisting/scheduled-cancel states can terminate orders outside ordinary user cancel flow.
+
+### Frontend metadata boundary
+
+`frontendOpenOrders` and `FrontendMarket` expose useful UI/order semantics.
+
+Use them for:
+
+- trigger classification;
+- frontend-origin/order-type provenance;
+- TP/SL interpretation;
+- builder/flow-provenance research.
+
+Do not infer a fundamentally different matching engine from a frontend label unless the protocol rule actually differs.
+
+### Scale-order classification
+
+Current official order-type documentation describes `Scale` as multiple limit orders distributed over a price range.
+
+Until a stronger source defines a server-native parent lifecycle:
+
+- treat Scale as an **execution decomposition/controller**, not a unique alpha source;
+- retain child limit orders as the canonical executable units;
+- charge every child fee/queue/latency effect;
+- do not award a fictional atomic parent fill;
+- compare Scale only against simpler passive ladder / adaptive execution baselines.
+
+### Feed-rate and subscription feasibility
+
+Current documented WebSocket limits remain feasibility inputs, including current maxima for:
+
+- connections;
+- new connections/minute;
+- subscriptions;
+- unique users on user-specific streams;
+- sent messages/minute;
+- simultaneous inflight WS post requests.
+
+A broad Copy-Vault/trigger-map design that exceeds these public-interface limits must:
+
+- shard within allowed hosted resources;
+- reduce/rotate coverage;
+- use archive/batch sources;
+- or report coverage as constrained.
+
+It cannot silently assume unlimited per-wallet streaming.
+
+### V6.20 source basis
+
+Verified on 2026-09-26 against current official Hyperliquid:
+
+- Info endpoint;
+- WebSocket subscriptions;
+- WebSocket timeout/heartbeat docs;
+- Exchange endpoint;
+- L1 data schema;
+- Builder Codes docs;
+- Rate limits/user limits;
+- order types.
+
+All semantics remain versioned.
+
+
 ### Research basis for Profitability Convergence V6
 
 High-signal external research reviewed on 2026-09-25 motivates these hypotheses, while **Alina's own certified evidence remains the authority for promotion**:
@@ -12043,7 +12282,27 @@ The following numbered items form the normative acceptance catalog. Each item is
 817. a priority-sensitive edge may be killed when competitive priority economics absorb its post-cost advantage;
 818. conflicting official snippets are reconciled against current Markdown plus first-party implementation/version evidence before a protocol rule is frozen;
 819. V6.19 keeps all numeric latency/priority observations versioned and does not treat empirical current-mainnet effects as deterministic guarantees;
-820. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, API-wallet operation, private keys, live probing, self-hosted nodes or user-PC dependencies.
+820. all V6.19 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, API-wallet operation, private keys, live probing, self-hosted nodes or user-PC dependencies;
+821. canonical execution evidence preserves unaggregated fills when available and does not use aggregateByTime-compressed fills for queue/partial-fill proof;
+822. periods with only aggregated fill evidence are labeled AGGREGATED_FILL_EVIDENCE and receive weaker execution-certification status;
+823. source-native trade id tid is the preferred fill dedup identity where available and timestamp-price-size alone is insufficient;
+824. builderFee is treated as a component already included in the reported total fee under the current Hyperliquid fill schema;
+825. feeToken and fee sign are preserved so rebates and non-default fee currencies cannot be mis-accounted;
+826. venue-native crossed is preferred for maker/taker attribution and reconstructed aggressiveness remains a cross-check;
+827. reconnect/bootstrap snapshots are deduplicated against previously committed fill/order identities and are never counted as fresh duplicate events;
+828. current 60-second server-idle WebSocket timeout is versioned and quiet streams use heartbeat/pong health handling;
+829. heartbeat/pong traffic is excluded from market-event and opportunity counts;
+830. reconnect recovery requires snapshot/backfill reconciliation and continuity checks before feed health returns to HEALTHY;
+831. both oid and optional 128-bit cloid are retained for order reconciliation without conflating either with trade identity;
+832. unknownOid does not prove nonexistence when account/DEX scope or data continuity is uncertain;
+833. multi-DEX open-order queries preserve explicit DEX scope and do not infer no-order state from the first-DEX default;
+834. openOrders/frontendOpenOrders, orderUpdates, fills and historical status sources have distinct bootstrap/lifecycle/execution/reconciliation roles;
+835. frontend labels remain provenance/semantic hints and cannot invent matching-engine behavior absent a protocol rule;
+836. Scale is modeled as child limit-order decomposition/controller until stronger point-in-time server-native parent semantics are proven;
+837. Scale/adaptive ladders charge child-level queue, latency, fee and partial-fill economics rather than atomic-parent fills;
+838. user-specific streaming coverage respects current connection/subscription/unique-user/message constraints and reports constrained coverage when limits bind;
+839. data-plane sharding/rotation cannot silently convert partial wallet coverage into complete-market trigger/copy evidence;
+840. all V6.20 work remains GitHub-hosted, paper/read-only and cannot introduce signed actions, private keys, live probing, self-hosted nodes or user-PC dependencies.
 
 791. every relevant perp records oracle-source class so AMM, formula-index, Hyperp, HIP-3 and ordinary spot-oracle contracts are not normalized as identical;
 792. AMM-perp relative-value research uses executable AMM quotes for candidate notional rather than raw pool marginal price alone;
