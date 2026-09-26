@@ -13071,6 +13071,14 @@ The following findings extend the verified weakness inventory. They were found b
 319. **Market-Truth L2 parsing rejects NaN but still admits Infinity and trusts source level ordering.** `_to_float` rejects only NaN, while `_levels` accepts any positive converted value and does not sort or enforce monotone bid/ask ordering or duplicate-price conservation. `_Book.best_bid/best_ask` then trust element zero. A non-finite or unsorted raw book can therefore create a false executable best price/depth.
 320. **The generic maker queue omits better-priced visible liquidity that has price priority.** `_replay_maker` initializes queue-ahead from only the quantity exactly at `limit_price`. For a BUY maker, higher bid levels have execution priority; for a SELL maker, lower ask levels do. Those levels are not included in queue-ahead, while matching-flow logic also excludes trades executed at those better prices, so the model can reach/fill the paper order too early.
 321. **Maker queue consumption trusts subsequent public-trade batches without rechecking their proof quality.** The initial L2 snapshot must pass `data_gate_ready` and a quality score, but the later `PUBLIC_TRADE_BATCH` events used to consume queue-ahead are accepted solely by type/instrument/time/price/size/side. Their own quality, provenance, source continuity, timestamp validity and contamination state are not required before they can create a modeled fill.
+322. **Canonical market-event construction can mark an event signal-eligible even when its raw payload is not valid JSON.** `normalization/market_events.py::canonicalize_tick_record` catches `json.loads(raw_payload_text)` failure and stores the raw text string anyway. If parsed summary/provenance gates pass, the event is still emitted with `data_gate_ready=True` / potentially `signal_eligible=True`, even though downstream L2/trade consumers cannot reconstruct the asserted market structure from the raw payload.
+323. **CanonicalEventWriter can permanently suppress an event after an I/O failure in the same process.** `append` inserts each `event_id` into the in-memory `_seen` set before opening/writing/fsyncing the canonical ledger. If write/fsync fails, a retry through the same writer can classify the never-durably-written event as a duplicate and omit it.
+324. **Canonical market-event identity omits the source/venue identity.** `event_id` hashes `source_tick_ref|channel|instrument|received_ts_ms|written_ts_ms`, while `source_tick_ref` itself is only raw hash + receive timestamp. `source_id`, connection/session identity and source-native event identity are absent. Distinct venue/source observations with identical payload/timestamps can therefore collide and be deduplicated as one event despite representing separate evidence.
+325. **CanonicalEventWriter replay silently drops corrupt ledger lines.** `iter_events` catches JSON parse failure and continues without a corruption counter, byte/line identity or contamination state. A damaged canonical event ledger can therefore be replayed as a shorter apparently-valid event set.
+326. **TruthChain mutation/evidence publication is not atomic around reconciliation.** `TruthChain.execute` mutates `PaperLedger` first, computes reconciliation afterward, and merely labels the result `RECONCILIATION_FAILED` when it is bad; there is no rollback. In addition, an `EvidenceWriter.append` failure occurs after ledger mutation. Either path can leave subsequent decisions operating on state that was never successfully reconciled/published as one complete truth-chain transaction.
+327. **TruthChain preprocesses CLOSE quantities before canonical intent validation.** `_prepare_intent` runs before `replay_executable_fill::_validate_intent`; for CLOSE, an explicit non-positive or non-finite requested quantity can fail the `>0` branch and be replaced with the entire open-position quantity. Invalid caller input can therefore be normalized into a full close instead of being rejected as an invalid intent.
+328. **Partial canonicalization loss does not automatically contaminate MarketTruthPipeline execution.** The pipeline records `rejected_tick_reasons`, but if at least one tick canonicalizes it still executes `TruthChain` on survivors. There is no required proof that rejected ticks lie outside the causal interval needed by the fill; an `APPLIED` result can therefore coexist with silently missing required upstream market evidence.
+
 
 
 
@@ -13454,6 +13462,14 @@ Requirements:
 - L2 executable books are normalized to canonical price ordering, finite positive price/size, duplicate-price conservation and crossed-book rejection before any best-price/depth read;
 - maker queue-ahead includes all visible price-priority liquidity ahead of the modeled order, not only the exact-price level;
 - every public trade/order-flow event allowed to consume maker queue-ahead independently satisfies the same-run causal-time, source, integrity and data-quality contract as the initiating book;
+- proof-eligible canonical events require a successfully parsed, schema-compatible raw payload; a valid hash of unparsable bytes is integrity evidence but not semantic market evidence;
+- canonical event identity binds source/venue/session/native lineage in addition to payload/time/channel/instrument identity so independent observations cannot collapse across sources;
+- canonical event-ledger append is commit-after-durability: dedupe state advances only after the row is durably persisted, and failed writes remain safely retryable;
+- canonical event replay reports/blocks parse corruption rather than silently shortening the event set;
+- TruthChain ledger mutation, reconciliation and evidence publication form one transactional/rollback unit; a reconciliation or evidence-write failure cannot leave authoritative mutable state advanced;
+- raw ReplayIntent validation happens before close/reduce normalization, and explicit malformed/non-finite/non-positive size cannot be converted into a full-close request;
+- any canonicalization rejection intersecting the fill's required causal window makes that fill `EVIDENCE_CONTAMINATED/GAP_UNRESOLVED` unless an immutable exclusion proof demonstrates irrelevance;
+
 
 - strategy data contracts fail closed on every requested venue not covered by an explicit required-family contract;
 - Gate and Bitget receive explicit replay-grade family requirements before their data can participate in certifying Cross-Venue/Lead-Lag windows;
@@ -15858,6 +15874,15 @@ Proof-facing temporal segmentation and cross-venue timing are properties of immu
 1561. every public-trade batch used to deplete maker queue-ahead is bound to the same instrument/run/window and must pass finite numeric, timestamp, continuity, provenance and data-quality gates;
 1562. corrupt/low-quality/unbound public trade flow cannot create or accelerate a certifying maker fill;
 1563. all blocker-classified weaknesses 318-321 remain implementation blockers until strict numeric-domain, canonical-book, price-priority queue and trade-quality regression tests prove closure.
+1564. proof-eligible L2/trade canonical events require raw-payload semantic parse success; hashed-but-unparseable payloads cannot become signal_eligible/data-gate-ready evidence;
+1565. canonical event_id/source_tick_ref identity binds source/venue/session/native-event lineage strongly enough that two independent sources with identical payload/timestamps do not dedupe-collide;
+1566. CanonicalEventWriter updates durable dedupe membership only after successful append+durability commit, and an injected write/fsync failure followed by retry persists the event exactly once;
+1567. canonical event-ledger iter/replay surfaces malformed lines with exact location/reason and blocks proof use of the affected interval rather than silently skipping them;
+1568. TruthChain applies ledger mutation, reconciliation and evidence append atomically or performs deterministic rollback to the pre-intent state on any reconciliation/evidence-publication failure;
+1569. deterministic failure injection after ledger mutation but before/inside evidence append leaves positions, cash, fees, event chain and proof state identical to the pre-intent state or durably recoverable to one committed transaction;
+1570. ReplayIntent numeric/domain validation precedes _prepare_intent normalization, and malformed/NaN/Infinity/non-positive explicit CLOSE quantity cannot be transformed into an implicit full close;
+1571. MarketTruthPipeline binds every rejected tick to its source/time interval and cannot return proof-eligible APPLIED when rejected/corrupt evidence intersects the causal book/trade interval used by the fill;
+1572. all blocker-classified weaknesses 322-328 remain implementation blockers until canonical-payload, identity, durable-writer, transactional-truth-chain and partial-canonicalization regression tests prove closure.
 
 ## Non-goals
 
