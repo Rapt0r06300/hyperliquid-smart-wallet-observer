@@ -12956,11 +12956,39 @@ The following findings extend the verified weakness inventory. They were found b
 214. **PaperLedger funding mutation is not position-bound or settlement-idempotent.** `apply_funding` directly changes `funding_net_usdc` and cash for any coin/side/amount, without proving a matching open position, settlement timestamp/rate/notional provenance or a native funding-event id. Replaying the same funding payment can credit/debit it twice, and an orphan funding payment can alter canonical paper equity.
 215. **The generic funding-payment helper neutralizes invalid inputs instead of failing closed.** `compute_funding_payment_usdc` clamps negative notional/intervals to zero, returns 0.0 for an unknown side, and does not reject NaN/±Infinity before arithmetic. In a proof path, malformed funding inputs can become a harmless-looking zero or non-finite cash flow rather than typed invalid evidence.
 
+216. **PaperSimConnector overstates accepted partial fills in its canonical fill object.** `paper_trading/paper_connector.py::apply_intent` accepts a measured partial fill when it clears `min_fill_ratio`, but constructs `PaperSimFill.notional_usdt` from the originally requested notional instead of `exec_result.filled_notional_usdc`. A 90%-filled request can therefore be exposed to downstream code as a 100%-notional fill even though the embedded execution receipt says otherwise.
+217. **The PaperSimConnector one-sided compatibility path can turn a measured partial fill into a full approximate fill.** With only bids or asks present, it first runs `simulate_depth_execution`; if the partial fill is above the threshold, it replaces the reference mid with that partial-fill average and then calls canonical execution with `execution_truth=None` / `strict_book=False`. The compatibility branch of `simulate_execution` consequently reports `filled_notional_usdc=requested`, `fill_ratio=1.0` and `FILLED_APPROXIMATE`, discarding the previously measured residual.
+218. **The same one-sided compatibility path destroys the original mark/reference-price identity.** After the first depth walk, `mid_price` is overwritten with `depth_result.average_fill_price`; the resulting `PaperSimFill.mid_price` and second-stage execution reference are therefore an execution average, not the market mid that existed at decision time. Slippage/reference-price attribution becomes circular.
+219. **Protective V26 exits bypass the canonical executable-price chain.** `sltp_runtime.apply_sltp_exits`, `auto_unstuck.apply_auto_unstuck` and `graded_halt.force_exit_all_positions` directly create realized CLOSE events at a supplied mark/mid plus a flat `cost_bps`, mutate/remove positions, and do not route the exit through the same L2/depth/partial-fill/liquidity-consumption authority used by canonical PaperEngine execution. A protective decision may use mark price as a trigger, but realized exit PnL requires an executable fill receipt.
+220. **The SL/TP runtime conflates trigger-price semantics with fill-price semantics.** The function explicitly evaluates exits on the supplied `mid_prices` value and then records that same value as `exit_price`. Hyperliquid TP/SL semantics use mark price for trigger activation, while the subsequent execution remains a separate fill process; current code can therefore be wrong both when its input is merely midpoint and when it treats a valid mark trigger as an executable fill.
+221. **SL/TP funding economics are an accrual approximation yet can coexist with numeric realized PnL.** The runtime averages recent hourly funding rates, multiplies by fractional holding hours and exit notional, and when funding evidence is absent it computes net PnL with funding zero while only downgrading `pnl_strict`. Downstream consumers that read the numeric `estimated_net_pnl_usdc` without honoring the strictness field can treat incomplete cost accounting as realized proof.
+222. **The V26 protective pipeline fails open on exceptions.** `v26_exit_pipeline.run_v26_exit_pipeline` catches broad exceptions separately around observation, graded halt and auto-unstuck and converts them to logged no-ops. `vol_adjusted_barriers` also catches an exception from the whole pipeline. When a configured loss halt or protective-exit component fails, the safe state is not merely “continue as before”; new risk must remain blocked until the protective state is reconciled.
+223. **A RED forced-exit episode can be marked complete when positions remain open.** After `force_exit_all_positions`, the V26 pipeline calls `DEFAULT_GRADED_HALT.mark_forced_exit_done()` unconditionally. The force-exit helper deliberately leaves positions with missing/invalid marks open, and can return an empty/partial `forced` list. The RED state can therefore remember “forced exit done” and stop retrying during the same RED episode although exposure remains.
+224. **The graded-halt loss window neutralizes missing close PnL and does not validate finiteness.** `realized_window_pnl_usd` adds `float(ev.get("estimated_net_pnl_usdc") or 0.0)`; a CLOSE with missing economics becomes zero loss, while NaN can contaminate the sum so RED/AMBER comparisons become false. A loss halt must be stricter than the PnL evidence it is protecting.
+225. **`funding_settlement.net_funding_settled` is still inferred from a prorated accrual rather than reconstructed from settlement events.** `decouper` counts crossed hourly boundaries but allocates the pre-existing continuous `funding_accrued_usdt` uniformly across elapsed time. When hourly funding rates or position notionals vary, the resulting “settled” amount need not equal the actual sum at settlement instants. This value may remain a migration estimate, but cannot be canonical settled cash flow.
 
 
 
 
 
+
+
+
+### Protective-exit and paper-connector execution-truth contract
+
+Every OPEN/ADD/REDUCE/CLOSE that changes proof-facing paper position/PnL uses one conserved execution authority.
+
+- requested, filled and missed notional/quantity are distinct immutable fields and every outward fill object reports actual filled economics;
+- a partial measured depth walk can never be promoted into a later full approximate fill; compatibility paths preserve the measured residual or remain diagnostic-only;
+- reference mid/mark, trigger price, executable book, average fill price and fee-adjusted effective price remain separate typed fields;
+- Hyperliquid mark price may activate a TP/SL trigger when protocol semantics require it, but the close is realized only after a causal executable-price/partial-fill receipt;
+- SL/TP, catastrophic stop, timeout, graded halt, auto-unstuck and any other protective exit all route through the canonical exit execution model before they can mutate canonical positions or realized PnL;
+- protective execution failure/missing book leaves the exposure explicitly OPEN/PENDING_EXIT and blocks incompatible new risk rather than synthesizing a mark fill;
+- a configured RED/halt episode remains pending until every targeted exposure is either closed with executable evidence or explicitly accounted as unresolved; an empty/partial force-exit result cannot set done=true;
+- exceptions inside mandatory halt/protection logic produce a persistent fail-closed risk state, not a logged no-op;
+- funding used in realized proof is reconstructed from exact settlement instants/rates/notional exposure and immutable settlement identity; continuous/prorated accrual is separately labelled estimate;
+- a numeric PnL with missing funding/cost evidence remains non-certifiable regardless of whether a side field says `pnl_strict=false`;
+- halt loss windows reject/quarantine missing or non-finite close economics and cannot interpret unknown loss as zero.
 
 ### Semantic replay and Market-Truth exactly-once contract
 
@@ -15417,6 +15445,18 @@ The following numbered items form the normative acceptance catalog. Each item is
 1405. replay/retry of an already-applied funding settlement is exactly-once and cannot alter cash or funding PnL a second time;
 1406. funding helpers reject unknown side, non-finite values and invalid negative notional/interval domains with typed invalid evidence rather than returning a neutral zero;
 1407. all blocker-classified weaknesses 212-215 from the 2026-09-26 proof-chain/funding audit remain implementation blockers until event-set-hash, journal-corruption, orphan-funding and duplicate-settlement regression tests prove closure.
+1408. PaperSimConnector outward fill notional/quantity equals the actual canonical filled amount and an accepted partial fill never reports the requested full notional;
+1409. a one-sided compatibility depth result preserves its measured filled/missed quantities and cannot be re-expanded into FILLED_APPROXIMATE at 100% requested size;
+1410. paper-connector receipts keep decision/reference mid, trigger/mark, raw VWAP and fee-adjusted fill price as separate auditable fields;
+1411. SL/TP, timeout, catastrophic-stop, graded-halt and auto-unstuck exits cannot realize PnL or remove/reduce canonical positions without a causal canonical exit-fill receipt;
+1412. mark-price trigger tests and executable-fill tests are separate, and fixtures prove mark activation alone never implies a fill at the mark;
+1413. protective exit with missing executable liquidity remains pending/open with explicit unresolved exposure and cannot silently disappear from risk/equity;
+1414. mandatory V26 halt/protection exceptions persist a fail-closed state that blocks incompatible new exposure until recovery/reconciliation;
+1415. RED forced-exit done is set only after all targeted positions are verifiably closed or each unresolved position is durably accounted; missing marks cause retry rather than permanent completion;
+1416. graded-halt loss-window inputs require finite explicit realized PnL; missing/NaN/Infinity CLOSE economics cannot become zero or GREEN;
+1417. SL/TP realized proof uses exact funding settlement evidence; average-rate × fractional-hour funding remains an explicitly non-certifying estimate;
+1418. funding_settlement cannot label a prorated continuous accrual as canonical settled funding unless it exactly reconciles to immutable per-settlement events;
+1419. all blocker-classified weaknesses 216-225 remain implementation blockers until deterministic partial-fill, price-semantic, protective-exit, halt-retry and funding-settlement tests prove closure.
 
 ## Non-goals
 
