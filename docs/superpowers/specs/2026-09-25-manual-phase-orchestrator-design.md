@@ -12740,6 +12740,140 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 15. **The 100% branch-coverage requirement is specified but not yet wired in the development toolchain.** Current `pyproject.toml` includes pytest/ruff but no coverage/pytest-cov dependency or enforced branch threshold. Until the gate is implemented, the repository cannot claim the coverage requirement is satisfied.
 16. **Historical/experimental pipelines can still compute their own economics.** Examples include V9/static-cost paper logic, experimental ledgers and HyperLab simplified fill/equity models. They may remain research fixtures, but they cannot publish authoritative PnL, equity, capacity, risk or promotion state.
 17. **Simulator calibration itself can overfit.** Queue/fill/latency parameters chosen because they maximize strategy PnL create a circular proof. Practitioner evidence favors calibrating execution models against fixed order-action traces and order-level outcomes, then evaluating strategy PnL separately OOS.
+18. **Disabled PC/self-hosted workflows remain in the active workflow directory.** Jobs such as `alina-self-hosted*.yml`, `hypersmart-runner-smoke-final-v1.yml` and `local-readonly-observer.yml` are currently guarded by `if: false` and point at GitHub-hosted runners, so they do not currently touch the user's PC. However they still contain PC-specific paths, local-observer logic and self-hosted semantics. Repository policy must eliminate this dormant capability surface rather than trusting a Boolean that can later be edited.
+19. **The current “100% coverage” probe measures line coverage, not branch coverage.** `coverage-parallel-probe.yml` currently runs `coverage run --parallel-mode --source=src` without branch measurement enabled, while `check_coverage_ratchet.py` validates only statement percentage/missing lines. A green 100% status therefore does not currently prove the spec's 100% branch requirement.
+20. **Proof-critical runtime persistence can silently reset or drop state.** `RuntimeState` converts unreadable JSON to an empty mapping and logs write failures without failing the caller. `ForwardFrozen` skips malformed JSONL lines. Corruption must never be reinterpreted as “no prior state”.
+21. **Several persistence helpers are atomic in name/intent but not yet crash-durable proofs.** `capture/atomic_checkpoint.py` returns a logically atomic record but performs no durable write; other JSON state paths use temp-file replace or append without a complete fsync/checksum/torn-tail recovery contract. Process-crash success is not power-loss durability.
+22. **Raw-data serialization contains lossy fallbacks.** `SqliteRawStore.put()` falls back to serializing `repr(payload)` if JSON encoding fails, and a malformed stored payload can be returned as `None`. Raw provenance used for proof must preserve bytes/typed parse status rather than silently changing representation.
+23. **The profit optimizer consumes derived/estimated log PnL rather than exclusively canonical reconciled ledger PnL.** `profit_optimizer._apply_pnl()` sums `row.estimated_net_pnl_usdc`. Diagnostic estimates must never select a strategy or count as certified economic evidence.
+24. **The optimizer's “walk-forward” partition is not a causal walk-forward split.** `_bucket_for_index()` assigns 60/20/20 by row index; `walk_forward_validator.py` currently only re-exports the strategy tournament. This does not prove chronological ordering, episode containment, purge or embargo.
+25. **Supplemental economic rows can be appended out of chronological context.** Optimizer input reads one decision source and then supplemental ledger rows. Index-based splitting can therefore place later-read rows in a fold unrelated to their actual event time.
+26. **Dedupe identity currently includes derived PnL in some paths.** `_optimizer_event_key()` and `_analysis_event_key()` can combine an otherwise stable event identity with a PnL value. Recomputing the same economic event with a corrected PnL can therefore defeat deduplication instead of replacing/quarantining the conflicting projection.
+27. **Missing economics are still normalized to zero in log analysis.** Current event parsing returns `0.0` for missing OPEN fees, missing CLOSE net PnL and generic missing PnL/fee values in several branches. Unknown/malformed proof-critical economics must remain unknown, not become a neutral number.
+28. **A finite sentinel can masquerade as an infinite/undefined metric.** `profit_factor_net` currently returns `999.0` when gains exist with no losses. Sentinel metrics must be typed explicitly and cannot enter thresholds/rankings as ordinary finite measurements.
+29. **Current log-source selection relies on filesystem freshness rather than an immutable run manifest.** `_existing_decision_files()` chooses the first non-stale file using file mtime. Mtime is useful for UI health but is not sufficient provenance for certifying which run/session/epoch produced economic truth.
+30. **Statistical promotion routines overstate their methodology.** `stepm_romano_wolf()` is currently Holm step-down over individually bootstrapped p-values, not the Romano-Wolf joint-dependence stepdown described by the name/docstring. `spa_test()` and `borne_basse_nette()` resample individual observations i.i.d.; for serially dependent trading PnL this can understate uncertainty.
+31. **A valid purge/embargo implementation exists but is not structurally required by the optimizer path.** `backtesting/purged_split.py` correctly documents historical leakage, yet current profit optimization does not prove that every selection path uses it. A dead guard is not a guard.
+32. **Forward-freeze durability can be weakened by malformed-line skipping and short config hashes.** `ForwardFrozen` skips malformed records and uses a truncated SHA-1-derived config id. A corrupted seal must fail closed, and proof-critical config identity must use the canonical full resolved-config digest.
+33. **Certification environments are not fully locked transitively.** Direct research/tool versions are mostly pinned, but `pyproject.toml` runtime dependencies are ranges and CI installs the editable project against live dependency resolution. Economic/replay proof must bind to a fully resolved dependency/environment manifest so the same code SHA cannot silently mean different software.
+
+
+### Durable persistence and corruption contract
+
+Proof-critical persistence is **fail-closed and crash-recoverable**.
+
+Rules:
+
+- unreadable/corrupt JSON, JSONL, SQLite rows, checkpoint records or economic-memory artifacts yield a typed corruption state and block the affected certification scope;
+- malformed records are never silently skipped when they can affect freeze state, event identity, accounting, PnL, costs, data provenance or promotion;
+- an empty/default state may be created only when provenance proves that no prior authoritative state exists;
+- append-only journals detect torn tails, duplicate sequence numbers, gaps, checksum/hash-chain breaks and conflicting event identities;
+- durable file commits use a platform-appropriate crash-consistency protocol: write temp/new record, flush file contents, atomically publish/rename where applicable, and durably commit the containing metadata/directory or use a transactional database primitive providing equivalent guarantees;
+- writers are single-writer/serialized or use explicit optimistic concurrency/fencing; concurrent proof writers cannot race silently;
+- checkpoints include schema/semantics version, last durable event identity/sequence, state hash, config hash and data/venue-rule lineage;
+- recovery verifies checkpoint hash, replays the immutable tail, and compares final semantic state hash before reopening the affected scope;
+- crash/fault-injection tests exercise failure before write, during payload write, after file flush, before publish, after publish/before directory durability, during append, and during recovery;
+- a helper that merely returns a complete checkpoint dictionary cannot itself satisfy durable-checkpoint certification.
+
+Raw payloads preserve original bytes or an immutable byte-level content hash plus explicit parse status. Serialization failure is a data-quality failure, never permission to replace the payload with `repr(...)` as canonical raw truth.
+
+### Canonical economic-log and optimizer contract
+
+Strategy selection, validation and reporting consume **canonical economic events**, not convenient log estimates.
+
+The optimizer input is built from the canonical reconciled ledger/closed-position event stream with explicit:
+
+- event/fill/position identity;
+- causal timestamp;
+- session/run/epoch identity;
+- realized versus unrealized status;
+- raw fill/cost/funding components;
+- PnL validity status.
+
+Diagnostic fields such as `estimated_net_pnl_usdc`, markout estimates, predicted edge or UI snapshots may be analyzed but cannot determine selection score, promotion, certified ROI/PF or the +4 USD economic objective unless independently reconciled into canonical accounting truth.
+
+Missing PnL, fee, funding, cost, notional or mark is represented as `None`/typed UNKNOWN with a reason code. Generic `or 0.0` fallbacks are forbidden for proof-critical economics.
+
+Event dedupe identity is independent of derived PnL/fee/mark values. A stable native/canonical event identity that reappears with different derived economics is a **projection conflict** that triggers reconciliation; it is never treated as a second economic event.
+
+Authoritative log/report source selection is manifest-based. Filesystem mtime may report liveness/health only; it cannot choose the certifying session. Every certifying read specifies exact run/session/epoch and immutable manifest/hash lineage.
+
+### True temporal validation contract
+
+Any artifact labeled `walk-forward`, `OOS`, `holdout`, `forward` or `CPCV` must implement the named semantics rather than merely emit a similarly named report.
+
+For temporal strategy selection:
+
+1. canonical events/episodes are ordered by causal event time with deterministic tie-breaking;
+2. all events belonging to one economic episode/position remain in the same fold;
+3. train/validation/holdout boundaries are timestamps/regime blocks, never ingestion-row index;
+4. purge removes training episodes whose label/exit horizon overlaps a later fold;
+5. embargo is justified from the horizon/dependence structure and versioned;
+6. supplemental/backfilled rows are inserted into their causal location before splitting, never appended after fold assignment;
+7. the untouched holdout never affects configuration ranking, thresholds, feature choice, simulator calibration, data cleaning choices or retry decisions;
+8. repeated inspection of a holdout retires it from final-proof status and requires a new untouched forward/OOS surface.
+
+The existing `purged_split` logic becomes a mandatory dependency or equivalent certified implementation for every path whose labels/trades can cross temporal boundaries. Static call-graph/contract tests must prove that no optimizer bypass exists.
+
+### Dependence-aware statistical validation
+
+Financial event/PnL observations are not assumed i.i.d.
+
+Any gate advertised as Hansen SPA, White Reality Check, Romano-Wolf StepM, bootstrap lower confidence bound or equivalent must match the published method closely enough for the claimed statistical guarantee.
+
+Requirements:
+
+- serial/cross-strategy dependence is preserved with stationary, circular/moving-block, dependent multiplier or another justified dependence-aware resampling method;
+- block/dependence parameters are data-dependent or preregistered and reported;
+- SPA/Reality-Check style max statistics use the joint candidate distribution and appropriate centering/studentization;
+- Romano-Wolf naming is reserved for a genuine joint resampling stepdown procedure; Holm-Bonferroni remains labeled Holm if that is what is implemented;
+- bootstrap confidence bounds used for promotion preserve dependence at the economically relevant episode/time scale;
+- Monte Carlo repetition count is chosen to make p-value/quantile simulation error small relative to the decision threshold, and the simulation error is reported;
+- exact seed, candidate universe/trial count, benchmark, block rule and statistic version are part of the proof manifest;
+- small-sample/low-effective-sample cases fail closed rather than returning precise-looking p-values.
+
+Until corrected, the current i.i.d. bootstrap helpers and mislabeled StepM routine are **diagnostic/research-only** and cannot satisfy final economic-promotion gates.
+
+### Cloud-only workflow capability contract
+
+GitHub automation for Alina is cloud-only by construction, not by convention.
+
+The active `.github/workflows` directory must contain no workflow capable of reaching, observing, waking or depending on the user's PC and no self-hosted runner path. A dormant `if: false` gate is insufficient long-term protection.
+
+Requirements:
+
+- all `runs-on` values are from an explicit GitHub-hosted allowlist;
+- no workflow references user-machine paths, `ALINA_LOCAL_TARGET`, persistent local lab roots or self-hosted runner labels/groups;
+- obsolete PC/self-hosted workflow definitions are removed from the active workflow directory or converted into inert documentation outside executable Actions discovery;
+- repository governance statically scans every workflow for forbidden runner labels, PC paths and local-machine capability markers;
+- future workflow additions that introduce self-hosted/local-machine semantics fail governance before merge/push certification;
+- GitHub-hosted Windows jobs are allowed when needed for deterministic Windows compatibility testing; they are not user-PC execution.
+
+Current disabled PC/self-hosted workflow files therefore remain tracked cleanup debt until removed from the executable workflow surface.
+
+### Executable branch-coverage proof
+
+The spec's 100% branch requirement is satisfied only by a report that actually contains branch data.
+
+The current line-only ratchet is insufficient. The corrected gate must:
+
+- execute coverage with branch measurement enabled (`--branch` or equivalent configuration);
+- aggregate branch data correctly across shards;
+- fail if the report contains no branch metrics;
+- require zero missing branches and zero missing lines for the required scope;
+- validate `num_branches`, `covered_branches` and `missing_branches` (or tool-equivalent fields), not just `percent_covered`;
+- prevent an old line-only baseline/ratchet from publishing a misleading “100%” branch claim;
+- provide one documented local command for user-started Codex that measures the same scope and semantics as the cloud aggregate.
+
+### Reproducible dependency/environment proof
+
+A code SHA is not a complete experimental identity.
+
+Every certifying replay/backtest/forward run records a fully resolved environment digest including Python implementation/version, OS/architecture where semantically relevant, direct and transitive package versions, critical native-library versions, and the exact dependency lock/wheel provenance used.
+
+Certification must be reproducible from an immutable lock or equivalent fully resolved artifact. Live network resolution of broad dependency ranges may be used for exploratory development but cannot define the final economic-proof environment.
+
+Numerical/scientific library upgrades require explicit replay/parity revalidation before old economic proofs are transferred to the new environment.
 
 ### Canonical economic runtime boundary
 
@@ -13979,6 +14113,42 @@ The following numbered items form the normative acceptance catalog. Each item is
 1079. static/current risk configuration cannot contain multiple effective definitions for the same control under one schema version;
 1080. simulator economic truth cannot depend on machine-local time, random seeds not recorded in the run manifest, local path ordering or process restart timing;
 1081. a current-code weakness explicitly listed in the 2026-09-26 system-wide audit remains a tracked implementation blocker until a deterministic regression test proves closure on the canonical path.
+1082. corrupt/unreadable proof-critical persisted state yields a typed corruption failure and cannot silently reset to an empty/default state;
+1083. malformed proof-critical JSONL records cannot be skipped when they may affect freeze state, accounting, provenance, event identity or promotion;
+1084. durable checkpoints/journals use crash-consistent persistence with checksum/hash-chain, sequence/gap detection and checkpoint-plus-tail semantic-state verification;
+1085. crash/fault-injection tests cover torn writes and commit-boundary failures and recovery must reproduce the last acknowledged canonical state exactly;
+1086. raw canonical evidence preserves original bytes/content hash and parse status; repr(payload) or None fallback cannot replace failed raw serialization/parsing;
+1087. strategy selection and promotion consume canonical reconciled ledger economics rather than estimated_net_pnl or other diagnostic PnL fields;
+1088. missing proof-critical PnL/fee/funding/cost fields remain UNKNOWN/UNMEASURABLE and cannot be normalized to zero by generic parsing fallbacks;
+1089. economic event dedupe identity is independent of derived PnL/fee/mark values and conflicting projections of one stable event trigger reconciliation rather than a second count;
+1090. authoritative economic log/report reads select an exact run/session/epoch manifest rather than choosing truth by filesystem mtime;
+1091. profit factor and other undefined/infinite metrics use typed states rather than arbitrary finite sentinels such as 999 that could pass ordinary thresholds;
+1092. any artifact labeled walk-forward/OOS/holdout/CPCV uses causal time/regime folds and cannot partition final evidence by ingestion-row index;
+1093. every economic episode/position remains wholly within one validation fold and supplemental/backfilled rows are causally inserted before fold assignment;
+1094. temporal selection paths enforce purge/embargo whenever outcome horizons can overlap later folds and static/runtime contracts prove there is no optimizer bypass;
+1095. repeated inspection/use of a holdout for tuning retires that dataset slice from final-proof status and requires a new untouched OOS/forward surface;
+1096. current walk_forward_validator re-export behavior and index-based tournament split cannot satisfy walk-forward certification until replaced/wired to the canonical temporal protocol;
+1097. final promotion bootstrap/statistical gates preserve serial and cross-candidate dependence using a justified dependence-aware resampling method;
+1098. Romano-Wolf/StepM naming is used only for genuine joint-resampling stepdown inference; Holm stepdown remains labeled Holm and cannot borrow Romano-Wolf guarantees;
+1099. SPA/Reality-Check style claims use joint max-statistic, centering/studentization and time-series resampling appropriate to dependent financial data;
+1100. bootstrap lower bounds used for promotion preserve dependence at the relevant episode/time scale and report block/dependence parameters;
+1101. bootstrap Monte Carlo error is quantified and repetition count is sufficient relative to the promotion threshold; small effective samples fail closed;
+1102. current iid SPA/lower-bound helpers and mislabeled stepm routine are research-only until dependence-aware regression tests validate the claimed methods;
+1103. active GitHub workflow files contain no self-hosted runner labels/groups, user-PC target paths, local persistent lab roots or capability to reach/wake the user's PC;
+1104. an if:false guard is not considered permanent removal of PC/self-hosted capability debt; obsolete PC workflows are removed from executable .github/workflows discovery or converted to inert documentation;
+1105. repository governance scans all workflows against an explicit GitHub-hosted runner allowlist and forbidden PC/local capability markers;
+1106. GitHub-hosted Windows runners remain allowed for Windows compatibility tests and are explicitly distinguished from user-PC/self-hosted execution;
+1107. branch coverage is measured with branch instrumentation enabled and a report lacking branch metrics fails certification;
+1108. the coverage aggregate requires zero missing branches as well as zero missing lines and validates branch-count fields rather than line percent alone;
+1109. the current line-only coverage ratchet cannot claim compliance with the 100% branch requirement until its measurement and gate are upgraded;
+1110. local user-started Codex has one documented deterministic branch-coverage command measuring the same first-party scope/semantics as the cloud gate;
+1111. every certifying run records a fully resolved direct+transitive dependency/environment digest in addition to code/config/data/rule hashes;
+1112. final economic proofs are produced under an immutable/reconstructible dependency lock or equivalent resolved artifact rather than live broad-range package resolution;
+1113. scientific/numerical dependency upgrades invalidate automatic carry-forward of economic proofs until replay/parity/numeric regression validation succeeds;
+1114. forward-freeze seals fail closed on malformed journal records and use the canonical full resolved-config digest rather than a short truncated proof identifier;
+1115. proof-critical persistence has an explicit writer-concurrency/fencing policy and concurrent writers cannot race or overwrite acknowledged state silently;
+1116. a logical checkpoint helper without durable storage cannot be cited as crash-durability evidence;
+1117. all current 2026-09-26 continuation-audit findings remain implementation blockers until the corresponding deterministic regression/fault/statistical/governance test proves closure.
 
 ## Non-goals
 
