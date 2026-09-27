@@ -19,6 +19,7 @@ GATES = (
     ProofGate("CROSS_REPO_PUBLICATION", "dataset_v2", ("publication_receipt", "main_alina_head", "dataset_head", "manifest_sha256"), "reconcile_publication_consistency", "CROSS_REPO_IDENTITY_INVALID", ("QUALITY", "REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
     ProofGate("SECURITY", "alina", ("paper_only", "read_only", "real_execution"), "validate_closure_receipt", "EXECUTION_SURFACE_INVALID", ("DONE",)),
     ProofGate("QUALITY", "dataset_v2", ("manifest", "gap_counts", "sequence_state"), "check_dataset_quality", "QUALITY_NOT_SAFE", ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
+    ProofGate("COUNT_EXACTNESS", "dataset_v2", ("exact_record_counts", "exact_trade_counts", "global_unique_trade_count", "cross_shard_overlap_count"), "validate_dataset_health_receipt", "COUNT_COVERAGE_INCOMPLETE", ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF")),
     ProofGate("REPLAY_COMPATIBLE", "dataset_v2", ("safe_manifest", "replay_compatibility_receipt"), "enforce_safe_replay_invariant", "REPLAY_COMPATIBILITY_NOT_PROVEN", ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
     ProofGate("REPLAY", "alina", ("frozen_selection", "replay_receipt"), "run_economic_objective_campaigns", "REPLAY_NOT_DETERMINISTIC", ("BACKTEST", "OOS", "FORWARD_PAPER")),
     ProofGate("BACKTEST", "alina", ("replay_events", "cost_model"), "run_economic_objective_campaigns", "BACKTEST_NOT_COMPLETE", ("OOS", "FORWARD_PAPER", "PNL_PROOF")),
