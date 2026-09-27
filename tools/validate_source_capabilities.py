@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 VENUES = {"hyperliquid", "binance", "bybit", "okx", "gate", "bitget"}
-CAPABILITIES = {"trades", "bbo", "l2", "clock_sync", "recovery", "replay_adapter"}
+CAPABILITIES = {"trades", "bbo", "l2", "clock_sync", "recovery", "replay_adapter", "sequence_integrity", "venue_status", "official_archive"}
 
 
 def canonical(value):
