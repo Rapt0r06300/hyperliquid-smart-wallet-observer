@@ -57,6 +57,7 @@ class ReplayAnalysis:
     pnl_by_coin: dict[str, float] = field(default_factory=dict)
     pnl_by_wallet: dict[str, float] = field(default_factory=dict)
     action_counts: dict[str, int] = field(default_factory=dict)
+    unmeasurable_count: int = 0
 
 
 def default_logs_to_send_dir(root: Path = Path(".")) -> Path:
@@ -195,7 +196,7 @@ def _analysis_from_events(log_dir: Path, events: tuple[DecisionEvent, ...]) -> R
     pnl_by_wallet: defaultdict[str, float] = defaultdict(float)
     total_pnl = 0.0
     total_fees = 0.0
-    accepted = refused = positive = negative = 0
+    accepted = refused = positive = negative = unmeasurable = 0
     for event in events:
         actions[event.bot_decision] += 1
         if _is_refused_event(event):
@@ -204,8 +205,11 @@ def _analysis_from_events(log_dir: Path, events: tuple[DecisionEvent, ...]) -> R
                 reasons[event.reason] += 1
         elif _is_accepted_event(event):
             accepted += 1
-        pnl = event.estimated_net_pnl_usdc or 0.0
-        fee = event.fee_cost_usdc or 0.0
+        pnl = event.estimated_net_pnl_usdc
+        fee = event.fee_cost_usdc
+        if pnl is None or fee is None:
+            unmeasurable += 1
+            continue
         total_pnl += pnl
         total_fees += fee
         if pnl > 0:
@@ -240,7 +244,7 @@ def _stream_summary_from_file(log_dir: Path, path: Path) -> ReplayAnalysis:
     pnl_by_wallet: defaultdict[str, float] = defaultdict(float)
     total_pnl = 0.0
     total_fees = 0.0
-    accepted = refused = positive = negative = event_count = 0
+    accepted = refused = positive = negative = event_count = unmeasurable = 0
     for raw in _iter_jsonl_rows(path):
         event = _row_to_event(raw)
         event_count += 1
@@ -251,8 +255,11 @@ def _stream_summary_from_file(log_dir: Path, path: Path) -> ReplayAnalysis:
                 reasons[event.reason] += 1
         elif _is_accepted_event(event):
             accepted += 1
-        pnl = event.estimated_net_pnl_usdc or 0.0
-        fee = event.fee_cost_usdc or 0.0
+        pnl = event.estimated_net_pnl_usdc
+        fee = event.fee_cost_usdc
+        if pnl is None or fee is None:
+            unmeasurable += 1
+            continue
         total_pnl += pnl
         total_fees += fee
         if pnl > 0:
