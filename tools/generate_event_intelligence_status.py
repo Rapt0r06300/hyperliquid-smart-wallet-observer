@@ -47,10 +47,16 @@ def main() -> int:
         files = []
         for token in re.split(r"\s*[+,/]\s*|\s+\+\s+", refs):
             token = token.strip()
-            if token.endswith(".py"):
+            name = token.split(":")[0].strip()
+            if name.endswith(".py"):
                 files.extend(
                     str(path.relative_to(root))
-                    for path in list(root.rglob(token.split(":")[0]))[:5]
+                    for path in list(root.rglob(name))[:5]
+                )
+            elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                files.extend(
+                    str(path.relative_to(root))
+                    for path in list(root.rglob(f"{name}.py"))[:5]
                 )
         files = sorted(set(files))
         callers = []
