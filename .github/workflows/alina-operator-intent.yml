@@ -71,6 +71,7 @@ jobs:
             stable=("schema_version","intent","request_id","requested_by","config","paper_only","read_only","real_execution")
             if any(old.get(k) != row.get(k) for k in stable):
               raise SystemExit("request id already exists with different payload")
+            row=old
           else:
             p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
           intent_digest=hashlib.sha256(json.dumps(row,sort_keys=True,separators=(",",":")).encode()).hexdigest()
