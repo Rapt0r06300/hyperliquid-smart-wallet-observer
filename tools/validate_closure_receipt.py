@@ -12,7 +12,12 @@ REQUIRED = {
     "phase", "phase_epoch", "source_collection_epoch", "analysis_stage",
     "campaign_ids", "workflow_run_ids", "dataset_selection_id",
     "trade_count_exact", "unique_trade_count_exact", "safe_count",
-    "replay_compatible_count", "copy_vault_status", "lead_lag_status",
+    "replay_compatible_count", "raw_record_count", "valid_record_count",
+    "unique_record_count", "raw_trade_count", "unique_trade_count_global",
+    "partial_count", "rejected_count", "quarantined_record_count",
+    "uncompressed_size_coverage", "uncompressed_size_exact",
+    "normative_gate_registry_digest", "normative_gate_count",
+    "copy_vault_status", "lead_lag_status",
     "cross_venue_status", "oos_status", "forward_status",
     "two_segment_resume_status", "event_intelligence_wiring_complete",
     "scoreboard_artifact", "paper_read_only", "self_hosted_used",
@@ -65,6 +70,12 @@ def main() -> int:
     ):
         if not isinstance(receipt[name], bool):
             raise SystemExit(f"closure field must be boolean: {name}")
+    for name in ("raw_record_count", "valid_record_count", "unique_record_count", "raw_trade_count", "partial_count", "rejected_count", "quarantined_record_count", "normative_gate_count"):
+        if not isinstance(receipt[name], int) or receipt[name] < 0:
+            raise SystemExit(f"closure count must be a non-negative integer: {name}")
+    for name in ("uncompressed_size_coverage", "uncompressed_size_exact"):
+        if not isinstance(receipt[name], bool):
+            raise SystemExit(f"closure storage field must be boolean: {name}")
     if receipt["paper_read_only"] is not True:
         raise SystemExit("paper/read-only closure invariant missing")
     if receipt["self_hosted_used"] is not False:
