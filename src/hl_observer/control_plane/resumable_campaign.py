@@ -95,6 +95,7 @@ class CampaignManifest:
     source_collection_epoch: int | None = None
     collection_cutoff_at_utc: str | None = None
     dataset_selection_id: str | None = None
+    analysis_stage: str | None = None
     checkpoint_lineage: list[dict[str, Any]] = field(default_factory=list)
     terminal_evidence_digest: str | None = None
 
@@ -148,6 +149,9 @@ def validate_manifest(m: CampaignManifest) -> None:
                 raise ValueError("V2 ANALYZE manifest requires collection_cutoff_at_utc")
             if not m.dataset_selection_id:
                 raise ValueError("V2 ANALYZE manifest requires dataset_selection_id")
+            expected_stage = ANALYSIS_STAGE_BY_KIND.get(m.kind)
+            if expected_stage and m.analysis_stage not in (None, expected_stage):
+                raise ValueError("ANALYZE manifest analysis_stage does not match campaign kind")
 
     for out in m.outputs:
         if out.get("quality_status") == "SAFE" and not out.get("replay_compatible", False):
