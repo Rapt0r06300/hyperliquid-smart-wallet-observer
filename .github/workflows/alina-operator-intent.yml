@@ -74,4 +74,10 @@ jobs:
           git add control/operator-intents
           git diff --cached --quiet && exit 0
           git commit -m "operator: persist intent ${{ inputs.request_id }}"
-          git push origin HEAD:main
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((i*2))
+          done
+          exit 1
