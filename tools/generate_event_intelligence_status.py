@@ -27,6 +27,13 @@ def main() -> int:
     parser.add_argument("--repo-root", default=".")
     args = parser.parse_args()
     root = Path(args.repo_root)
+    python_files = sorted(root.rglob("*.py"))
+    file_text = {}
+    for candidate in python_files:
+        try:
+            file_text[candidate] = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
     rows = []
     for line in Path(args.source).read_text(encoding="utf-8").splitlines():
         match = ROW.match(line)
@@ -46,14 +53,23 @@ def main() -> int:
                     for path in list(root.rglob(token.split(":")[0]))[:5]
                 )
         files = sorted(set(files))
-        status = (
-            "MISSING" if not files
-            else (
-                "IMPLEMENTED_BUT_PARTIAL"
-                if ("À prouver" in proof or "⏳" in proof)
-                else "IMPLEMENTED_AND_WIRED"
-            )
-        )
+        callers = []
+        for evidence in files:
+            stem = Path(evidence).stem
+            for candidate, text in file_text.items():
+                if str(candidate.relative_to(root)) == evidence:
+                    continue
+                if re.search(rf"(?m)^\\s*(?:from|import)\\s+[^#]*\\b{re.escape(stem)}\\b", text):
+                    callers.append(str(candidate.relative_to(root)))
+        callers = sorted(set(callers))
+        if not files:
+            status = "MISSING"
+        elif not callers:
+            status = "IMPLEMENTED_BUT_NOT_WIRED"
+        elif ("À prouver" in proof or "⏳" in proof):
+            status = "IMPLEMENTED_BUT_PARTIAL"
+        else:
+            status = "IMPLEMENTED_AND_WIRED"
         tests = []
         for evidence in files:
             candidate = root / "tests" / Path(evidence).name.replace(".py", "")
@@ -73,14 +89,14 @@ def main() -> int:
             "declared_references": refs,
             "implementation_contract": implementation,
             "evidence_files": files,
-            "actual_callers": files,
+            "actual_callers": callers,
             "required_dataset_family": "external_events",
             "current_data_availability": "STRUCTURAL_ONLY",
             "target_economic_families": [
                 "copy_vault", "lead_lag", "cross_venue_dislocation"
             ],
             "tests": sorted(set(tests)),
-            "runtime_evidence": files,
+            "runtime_evidence": callers,
             "wiring_status": status,
             "status": status,
             "proof_status": proof_status,
@@ -88,8 +104,14 @@ def main() -> int:
             "reason": (
                 "Structural implementation is present; economic proof remains "
                 "data/OOS/forward dependent."
-                if status != "MISSING"
-                else "No declared implementation evidence was resolved."
+                "Structural implementation is present and referenced by runtime imports; "
+                "economic proof remains data/OOS/forward dependent."
+                if callers and status != "MISSING"
+                else (
+                    "Implementation evidence exists but no runtime caller was resolved."
+                    if files
+                    else "No declared implementation evidence was resolved."
+                )
             ),
             "evidence_digest": evidence_digest,
         })
