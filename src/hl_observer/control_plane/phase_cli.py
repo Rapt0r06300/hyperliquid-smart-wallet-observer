@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -29,9 +30,15 @@ def _persist_transition_receipt(receipt, receipt_dir: str = "control/phase-recei
     os.replace(temporary, target)
 
 
+def _safe_identity(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value or ""):
+        raise argparse.ArgumentTypeError("identity must be path-safe and bounded")
+    return value
+
+
 def _request_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--request-id", required=True)
-    parser.add_argument("--requested-by", default="operator")
+    parser.add_argument("--request-id", required=True, type=_safe_identity)
+    parser.add_argument("--requested-by", default="operator", type=_safe_identity)
 
 
 def _intent_args(parser: argparse.ArgumentParser) -> None:
