@@ -9,6 +9,14 @@ from pathlib import Path
 
 VENUES = ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
 CAPABILITIES = ("trades", "bbo", "l2", "clock_sync", "recovery", "replay_adapter")
+NATIVE_MODULES = {
+    "hyperliquid": ("src/hl_observer/venues/hyperliquid.py", "src/hl_observer/collection/hyperliquid_clock_sync.py"),
+    "binance": ("src/hl_observer/venues/binance.py",),
+    "bybit": ("src/hl_observer/venues/bybit.py",),
+    "okx": ("src/hl_observer/venues/okx.py",),
+    "gate": ("src/hl_observer/venues/gate.py",),
+    "bitget": ("src/hl_observer/venues/bitget.py",),
+}
 KEYWORDS = {
     "trades": ("trade", "fills"),
     "bbo": ("bbo", "best_bid", "best_ask"),
@@ -59,6 +67,7 @@ def main() -> int:
             ]
             caps[capability] = {
                 "status": "FILE_PRESENT" if hits else "MISSING",
+                "runtime_status": "UNVALIDATED",
                 "evidence": sorted(hits)[:20],
             }
         module_token = f"{venue},"
@@ -70,7 +79,15 @@ def main() -> int:
         rows.append({
             "venue": venue,
             "status": "FILE_PRESENT" if evidence else "MISSING",
+            "runtime_status": "UNVALIDATED",
             "evidence_files": evidence,
+            "native_entrypoints": [
+                module for module in NATIVE_MODULES.get(venue, ())
+                if (root.parent.parent / module).exists()
+            ],
+            "required_strategy_families": [
+                "copy_vault", "lead_lag", "cross_venue_dislocation"
+            ],
             "registry": {
                 "path": str(registry_path),
                 "wired": registry_wired,
@@ -79,7 +96,7 @@ def main() -> int:
             "capabilities": caps,
         })
     body = {
-        "schema_version": "alina.source_capability_matrix.v2",
+        "schema_version": "alina.source_capability_matrix.v3",
         "source_root": args.root,
         "venues": rows,
         "policy": (
