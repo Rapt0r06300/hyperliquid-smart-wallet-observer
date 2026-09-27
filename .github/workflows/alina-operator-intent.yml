@@ -60,7 +60,8 @@ jobs:
           p.parent.mkdir(parents=True,exist_ok=True)
           if p.exists():
             old=json.loads(p.read_text())
-            if old != row:
+            stable=("schema_version","intent","request_id","requested_by","config","paper_only","read_only","real_execution")
+            if any(old.get(k) != row.get(k) for k in stable):
               raise SystemExit("request id already exists with different payload")
           else:
             p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
