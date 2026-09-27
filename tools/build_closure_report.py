@@ -38,6 +38,7 @@ def main() -> int:
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     event = load(Path("docs/event-intelligence-120-status.json"), {})
+    gate_registry = load(Path("docs/normative-gate-registry.json"), {})
     spec = Path("docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md")
     spec_text = spec.read_text(encoding="utf-8") if spec.exists() else ""
     backlog = []
@@ -178,12 +179,15 @@ def main() -> int:
             "event intelligence contains non-wired or partial rows" if not event_wired else None,
             "analysis campaigns are not all terminal COMPLETE" if not complete_analysis else None,
             "uncompressed size coverage is incomplete" if report.get("uncompressed_size_coverage") is not True else None,
+            "normative gate registry is unavailable" if not gate_registry else None,
         ],
         "implementation_backlog": backlog,
         "analysis_campaign_status": analysis_status,
         "modules": modules,
         "dataset_health_digest": health.get("receipt_digest") if isinstance(health, dict) else None,
         "event_intelligence_registry_digest": event.get("registry_digest") if isinstance(event, dict) else None,
+        "normative_gate_registry_digest": gate_registry.get("registry_digest") if isinstance(gate_registry, dict) else None,
+        "normative_gate_count": gate_registry.get("gate_count", 0) if isinstance(gate_registry, dict) else 0,
     }
     report["remaining_blockers"] = [
         value for value in report["remaining_blockers"] if value
