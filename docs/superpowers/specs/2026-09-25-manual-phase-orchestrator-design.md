@@ -17376,3 +17376,874 @@ Before this specification itself is considered implementation-ready, the impleme
 | paper/read-only | negative live-endpoint reachability test |
 
 The implementation plan may add stricter tests. It may not remove these classes without replacing them with demonstrably stronger evidence.
+
+## Coding-agent implementation runbook — Jules / Codex / equivalent (2026-09-27)
+
+This section is **normative**. It translates the canonical design above into an implementation procedure that a coding agent can execute without inventing a parallel architecture. It is intentionally operational and prescriptive.
+
+### Mission contract for the coding agent
+
+The coding agent is not being asked to brainstorm. It is being asked to **finish the remaining implementation debt described by this specification** on the existing architecture.
+
+Before touching code, the agent must accept these invariants:
+
+- repository of record for Alina code: `Rapt0r06300/hyperliquid-smart-wallet-observer`, branch `main`;
+- durable Dataset V2/data-plane repository: `Rapt0r06300/alina-smartflow-datasets-v2`, branch `main`;
+- this exact file remains the **single canonical specification** and is updated in place if implementation evidence requires clarification;
+- do not create another V6.x spec, "final spec", "Jules spec", "vNext spec", duplicate roadmap, or parallel orchestration document;
+- one principal coding agent by default; no swarm/subagents/multi-agent fan-out unless the user explicitly requests it;
+- do not wake, use, depend on, or configure the user's PC from GitHub;
+- do not create or re-enable any self-hosted runner;
+- GitHub cloud automation uses GitHub-hosted runners only;
+- a user-started local Jules/Codex session may use local deterministic CPU for tests/replays/backtests because the user explicitly started that local process;
+- Alina is paper/read-only only: no real order, no testnet order, no private key, no signature, no deposit/withdrawal, no live execution endpoint;
+- Carry/Funding Carry remains disabled by active scope; active economic families are Copy-Vault, Lead-Lag and Cross-Venue Dislocation;
+- economic completion is not "tests pass"; economic completion is reproducible evidence after real costs, OOS/forward, capacity, data-quality and fail-closed gates.
+
+The agent must maintain a small execution ledger with four states: `DONE`, `IN_PROGRESS`, `BLOCKED`, `TODO`. It must continue while any feasible `TODO` remains.
+
+### Step 0 — Preflight: prove the state before modifying it
+
+Do this first in every coding run.
+
+In the main Alina checkout:
+
+```bash
+git branch --show-current
+git rev-parse HEAD
+git status --short
+git diff --stat
+git log -5 --oneline
+```
+
+If Dataset V2 is also checked out:
+
+```bash
+git -C ../alina-smartflow-datasets-v2 branch --show-current
+git -C ../alina-smartflow-datasets-v2 rev-parse HEAD
+git -C ../alina-smartflow-datasets-v2 status --short
+git -C ../alina-smartflow-datasets-v2 log -5 --oneline
+```
+
+Then read, in this order:
+
+1. `SECURITY.md`;
+2. `AGENTS.md`;
+3. `CLAUDE.md`;
+4. this canonical specification;
+5. only the code/workflows/tests relevant to the first unfinished item.
+
+Do **not** begin by rescanning the complete Git history or loading giant old logs.
+
+Immediately search for the current phase-control implementation and do not assume it exists:
+
+```bash
+git grep -n "alina-phase\|phase_epoch\|source_collection_epoch\|collection_cutoff\|analysis_stage"
+git grep -n "create-resumable-campaigns\|workflow_dispatch\|repository_dispatch" .github src tools tests
+```
+
+In Dataset V2, search the same concepts plus:
+
+```bash
+git grep -n "campaign_id\|lease\|checkpoint\|SAFE\|replay_compat\|exact_trade\|unique_trade"
+```
+
+Expected rule: if `control/alina-phase.json` is absent, that is not a documentation problem; it is implementation debt and must be created as described below.
+
+Before coding, write a compact done-contract in the worklog. At minimum it must include:
+
+- authoritative phase file exists and is schema-validated;
+- phase transitions are implemented and fail closed;
+- campaign manifests bind phase/epoch/cutoff/source epoch;
+- split-brain/duplicate dispatch is impossible by construction and tested;
+- scheduled work is a watchdog, not an independent source of intent;
+- analysis stages are resumable and explicit through OOS/forward and scoreboard;
+- exact/unique trade-count completeness is honest;
+- SAFE and replayability remain distinct;
+- two-segment fresh-runner resume is proven;
+- Event Intelligence 1..120 wiring state is machine-derived;
+- each active family reaches its own independent economic proof or a typed `UNMEASURABLE/MORE_DATA/KILL`;
+- final dual-repository receipt exists;
+- final commits contain real diffs.
+
+### Step 1 — Establish one phase-state schema and one parser
+
+Primary durable file in Dataset V2:
+
+`control/alina-phase.json`
+
+Minimum schema:
+
+```json
+{
+  "schema_version": 1,
+  "phase": "IDLE",
+  "epoch": 1,
+  "requested_at_utc": "2026-09-27T00:00:00Z",
+  "collection_started_at_utc": null,
+  "collection_cutoff_at_utc": null,
+  "source_collection_epoch": null,
+  "analysis_stage": null,
+  "requested_by": "operator",
+  "request_id": null
+}
+```
+
+Required behavior:
+
+- `phase` accepts only `IDLE|COLLECT|ANALYZE`;
+- `epoch` is a positive integer and increments on every transition;
+- timestamps are UTC ISO-8601 and parsed strictly;
+- `ANALYZE` requires `source_collection_epoch` and `collection_cutoff_at_utc`;
+- `COLLECT` clears analysis-only fields;
+- invalid/missing/unknown fields fail closed;
+- never "repair" malformed control state silently;
+- write phase changes atomically/idempotently;
+- include request identity so a duplicated user/API request cannot create two transitions.
+
+Implementation preference in main Alina:
+
+- reuse an existing orchestration/control package if one already owns campaign control;
+- otherwise create a small package such as:
+  - `src/hl_observer/orchestration/phase_state.py`
+  - `src/hl_observer/orchestration/phase_controller.py`
+  - `src/hl_observer/orchestration/models.py`
+- do not put new orchestration logic into legacy `hyper_smart_observer/`;
+- do not create a second PnL engine, a second risk engine, or a second replay engine.
+
+Dataset V2 should contain only the durable state/data-plane counterpart needed to validate and execute the same contract, not a divergent copy of business logic.
+
+Tests required before proceeding:
+
+- valid IDLE/COLLECT/ANALYZE parse;
+- invalid phase rejects;
+- missing field rejects;
+- invalid timestamp rejects;
+- epoch non-integer/non-positive rejects;
+- duplicate `request_id` is idempotent;
+- ANALYZE without source epoch/cutoff rejects;
+- stale phase file cannot be treated as current merely because JSON is valid.
+
+### Step 2 — Implement exact phase transitions
+
+Implement these transitions as explicit commands/API calls, not ad-hoc file edits.
+
+#### IDLE -> COLLECT
+
+The transition must:
+
+1. read and validate current durable state;
+2. require current phase to permit transition;
+3. increment `epoch`;
+4. set `phase=COLLECT`;
+5. set `collection_started_at_utc=now`;
+6. clear `collection_cutoff_at_utc`;
+7. clear `source_collection_epoch`;
+8. clear `analysis_stage`;
+9. persist atomically;
+10. emit a transition receipt with previous/new epoch and state digest;
+11. dispatch only collection-capable work for the new epoch.
+
+#### COLLECT -> ANALYZE
+
+The transition must:
+
+1. validate current COLLECT state;
+2. remember the just-finished collection epoch;
+3. increment the global phase epoch;
+4. set `phase=ANALYZE`;
+5. set `source_collection_epoch=<finished collection epoch>`;
+6. set `collection_cutoff_at_utc=now`;
+7. set `analysis_stage=DRAIN`;
+8. persist atomically;
+9. prevent any new collection claim after cutoff;
+10. allow already-claimed bounded collection units to seal/publish once;
+11. create/freeze the exact Dataset V2 selection eligible for analysis.
+
+#### ANALYZE -> IDLE
+
+The transition must be operator-driven. The analysis pipeline may set `analysis_stage=DONE`, but must not silently change the top-level phase to IDLE.
+
+Tests:
+
+- epoch increases exactly once;
+- duplicate same request is no-op with same receipt;
+- concurrent transition requests cannot both win;
+- stale worker observing old epoch is refused;
+- current-epoch already-claimed collection may seal after ANALYZE transition but cannot claim another unit;
+- no new replay/backtest/PnL campaign can start in COLLECT;
+- no new collection campaign can start in ANALYZE.
+
+### Step 3 — Migrate campaign manifests without rewriting history
+
+Do not mutate historical v1 campaign truth.
+
+For every **new** resumable campaign, require fields equivalent to:
+
+```json
+{
+  "schema_version": 2,
+  "campaign_id": "...",
+  "campaign_kind": "...",
+  "code_sha": "...",
+  "config_hash": "...",
+  "work_plan_hash": "...",
+  "dataset_generation": "...",
+  "creation_phase": "COLLECT",
+  "phase_epoch": 42,
+  "source_collection_epoch": null,
+  "collection_cutoff_at_utc": null,
+  "dataset_selection_id": null,
+  "lease": {},
+  "checkpoint_lineage": [],
+  "terminal_evidence_digest": null
+}
+```
+
+For analysis campaigns, `source_collection_epoch`, `collection_cutoff_at_utc` and a frozen `dataset_selection_id` are mandatory.
+
+Migration solution:
+
+- parser accepts v1 as immutable historical evidence;
+- writer emits only v2 for new campaigns;
+- v1 cannot acquire new mutable work under a current epoch unless explicitly migrated by a deterministic migration command that creates a new v2 lineage referencing, not rewriting, the v1 source;
+- new worker claim validates phase + epoch + campaign state + lease in one admission path;
+- worker completion validates the same ownership before publishing terminal state.
+
+Tests:
+
+- v1 readable;
+- v1 historical data not modified;
+- v2 cannot omit epoch;
+- stale-epoch claim rejected;
+- wrong source collection epoch rejected for analysis;
+- checkpoint lineage digest changes only through valid append;
+- terminal state immutable.
+
+### Step 4 — Eliminate split brain between main Alina and Dataset V2
+
+Architecture to implement:
+
+`main Alina operator intent -> idempotent cross-repo dispatch -> Dataset V2 durable campaign -> worker -> immutable receipt -> main Alina status reader`
+
+Main Alina owns:
+
+- operator command;
+- orchestration semantics;
+- campaign request shape;
+- strategy/economic code;
+- user-facing status.
+
+Dataset V2 owns:
+
+- durable heavy dataset;
+- durable campaign/lease/checkpoint state for GitHub-hosted execution;
+- immutable published evidence.
+
+Never keep two mutable campaign-progress databases.
+
+Create one deterministic request identity:
+
+```text
+request_id = hash(
+  operator_intent +
+  main_code_sha +
+  requested_phase_epoch +
+  campaign_kind +
+  normalized_config
+)
+```
+
+Dataset V2 must return the existing campaign if the same request is dispatched twice.
+
+Cross-repository receipt must bind:
+
+- request id;
+- campaign id;
+- main Alina SHA;
+- Dataset V2 SHA/manifest identity;
+- phase epoch;
+- source collection epoch where relevant;
+- workflow run id;
+- dispatch time;
+- terminal evidence digest when complete.
+
+Race tests must cover:
+
+- duplicate dispatch;
+- delayed dispatch;
+- retry after API timeout;
+- two controllers dispatching same request;
+- local/user-started run colliding with GitHub-hosted cloud lease;
+- stale workflow run completing after another owner has advanced the lease.
+
+No duplicate economic credit is allowed.
+
+### Step 5 — Make scheduled workflows watchdogs, not intent
+
+Inspect every scheduled workflow that can create collection/replay/backtest/PnL work.
+
+Specifically inspect Dataset V2 `.github/workflows/create-resumable-campaigns.yml` and every workflow that it dispatches or that independently creates campaigns.
+
+Required change:
+
+- schedule may wake a lightweight controller;
+- controller reloads durable phase;
+- controller derives missing/due work from durable manifests;
+- controller creates only work allowed by the current phase;
+- missing one or more schedule invocations changes latency, never correctness;
+- cron time is never used as evidence that work "must already exist";
+- no workflow relies on runner-local state from a previous run.
+
+For autonomous COLLECT continuity, use explicit same-repository `workflow_dispatch` or `repository_dispatch` for successor jobs and keep schedule as a recovery watchdog. GitHub-hosted standard jobs are bounded; design every collector generation to checkpoint and hand off before the hard platform limit.
+
+Never use a push created by `GITHUB_TOKEN` as the required successor trigger.
+
+Tests:
+
+- skip N watchdog invocations -> later controller reconstructs exact due work;
+- controller rerun -> no duplicate campaign;
+- wrong phase -> campaign not created;
+- runner restart -> state recovered only from durable state;
+- cancellation during dispatch -> retry is idempotent.
+
+### Step 6 — Main-repository operator surface
+
+Add or extend one existing CLI/operator family. Do not create a competing CLI framework.
+
+Required capabilities:
+
+```text
+phase status
+phase collect
+phase analyze
+phase idle
+campaign status
+campaign pause
+campaign resume
+campaign retry
+research-cycle status
+research-cycle start
+```
+
+Exact command spelling is not normative; one coherent surface is.
+
+The `research-cycle start` command must not secretly run all modes at once. It should:
+
+- show current phase;
+- create an idempotent operator request;
+- transition only to the user-requested phase;
+- dispatch through the same canonical controller;
+- print campaign/request ids and exact next state.
+
+Status must read durable remote/cloud state for cloud campaigns, not a local approximation.
+
+If the current `src/hl_observer/cli.py` is too large, follow existing repository guidance: implement logic in small imported modules and add only thin CLI wiring.
+
+Tests:
+
+- help text;
+- valid transition commands;
+- invalid transition returns typed non-zero result;
+- duplicate command is idempotent;
+- status with unavailable Dataset V2 is explicit `UNAVAILABLE`, never fabricated;
+- no command can activate self-hosted or real execution.
+
+### Step 7 — Complete COLLECT as replay-grade evidence production
+
+Do not treat "workflow succeeded" as collector success.
+
+For every active family and required venue/source, implement/verify the collection contracts already specified above:
+
+Copy-Vault:
+- full qualifying universe freeze;
+- broad REST state sweeps;
+- targeted fills reconciliation;
+- bounded premium user-specific WS slots;
+- leader position lifecycle;
+- follower-side BBO/L2/cost/capacity evidence;
+- funding/non-funding ledger evidence when needed to separate trading PnL from flows.
+
+Lead-Lag:
+- same-runner cross-venue BBO/trades/L2 where feasible;
+- exchange event time + local receive wall clock + monotonic receive time;
+- server-clock probes with RTT/offset/uncertainty;
+- sequence/gap/out-of-order/duplicate accounting;
+- shadow confirmation for priority candidates where practical.
+
+Cross-Venue:
+- synchronized BBO;
+- reconstructible L2;
+- depth curves/VWAP at tested notionals on both legs;
+- tick/lot/min-notional/contract multiplier;
+- fee provenance;
+- venue status;
+- capacity and quote-age evidence.
+
+Native venues to verify, not assume:
+
+- Hyperliquid;
+- Binance;
+- Bybit;
+- OKX;
+- Gate;
+- Bitget.
+
+CCXT remains discovery-only unless an existing native collector explicitly supports the execution-quality path.
+
+Do not replace working native collectors with CCXT.
+
+### Step 8 — Close exact trade counts and global uniqueness
+
+Dataset metrics cannot call counts exact until completeness is true.
+
+Implementation procedure:
+
+1. enumerate every trade-bearing immutable asset;
+2. parse exact record count using the authoritative adapter;
+3. preserve native trade id where available;
+4. define canonical fallback identity only when no stable native id exists;
+5. compute within-shard unique count;
+6. compute global cross-shard unique count;
+7. detect overlaps from retry, rotation, archive overlap, republish and resumed capture;
+8. publish count completeness flags plus reasons for any missing/unparseable shard;
+9. bind totals to the exact Dataset V2 catalog/index digest.
+
+Never replace a missing exact count with an estimate.
+
+Tests must contain duplicate examples across:
+- same shard;
+- adjacent shards;
+- replayed/retried shards;
+- archive/live overlap;
+- missing native ids;
+- timestamp collisions with different trade economics.
+
+### Step 9 — Finish SAFE -> replay-compatible migration
+
+SAFE is a data-quality class, not proof that every strategy replay can consume the asset.
+
+For each eligible legacy asset:
+
+1. identify the family-specific replay adapter;
+2. validate schema;
+3. validate chronology;
+4. validate event identity/dedup;
+5. validate required BBO/L2 reconstruction properties;
+6. validate timing fields and causal ordering;
+7. validate mandatory cost/instrument metadata for the target family;
+8. classify `REPLAY_COMPATIBLE`, `PARTIAL`, `QUARANTINED` or `REJECTED` with reason code;
+9. persist immutable receipt containing asset digest + adapter/schema version;
+10. do not allow a future SAFE publication without this gate if replay compatibility is required by its advertised family.
+
+Process the entire eligible corpus until no candidate remains unclassified. Use resumable batches and checkpoints; do not load all data into RAM at once.
+
+### Step 10 — ANALYZE stage machine
+
+ANALYZE is an explicit resumable stage machine:
+
+```text
+DRAIN
+-> QUALITY
+-> REPLAY
+-> BACKTEST
+-> OOS
+-> FORWARD_PAPER
+-> PNL_PROOF
+-> SCOREBOARD
+-> DONE
+```
+
+Do not skip OOS or FORWARD because helper functions exist elsewhere.
+
+Each stage needs:
+
+- input selection id/digest;
+- code SHA;
+- config hash;
+- start/end timestamp;
+- checkpoint id;
+- output artifact ids/hashes;
+- status;
+- typed failure reason;
+- resume cursor where relevant.
+
+Stage transition is allowed only after the predecessor emits a valid terminal receipt.
+
+#### DRAIN
+
+- reject new collection claims;
+- wait only for already-owned bounded collection units;
+- seal them;
+- freeze collection cutoff;
+- freeze eligible dataset selection.
+
+#### QUALITY
+
+- run family-specific data readiness;
+- quarantine gaps/invalid sequence/timing uncertainty;
+- produce exact eligible intervals.
+
+#### REPLAY
+
+- deterministic replay only from frozen eligible data;
+- no network lookahead;
+- all parse/drop counts accounted for;
+- output event conservation receipt.
+
+#### BACKTEST
+
+- use canonical execution/cost/risk/ledger;
+- no alternate simplified PnL path;
+- include fees/spread/slippage/latency/partial fills/non-fill/capacity.
+
+#### OOS
+
+- OOS identity frozen before evaluation;
+- no parameter tuning from OOS result without invalidating and refreezing a new proof cycle;
+- persist effective N and dependence-aware statistics.
+
+#### FORWARD_PAPER
+
+- strictly post-freeze;
+- paper/read-only;
+- no result may be backfilled from training;
+- missing evidence stays missing.
+
+#### PNL_PROOF
+
+For each active family independently:
+- calculate net after-cost economic truth;
+- no compensation between modules;
+- enforce capacity and fillability;
+- fail closed when required cost/data is missing;
+- classify PASS / MORE_DATA / UNMEASURABLE / KILL using the existing canonical contracts.
+
+#### SCOREBOARD
+
+- bind all metrics to exact temporal segment and artifact hashes;
+- include data quality, costs, capacity, fill rate, latency, OOS, forward and drawdown;
+- do not display synthetic/placeholder profit as proof.
+
+### Step 11 — Prove each active economic family end-to-end
+
+#### Copy-Vault proof path
+
+Minimum causal chain:
+
+`leader discovery -> frozen leader selection -> leader action/fill -> lifecycle reconstruction -> follower observable time -> follower executable price/capacity -> PaperIntent -> canonical execution -> paper fill -> leader exit/reduce handling -> canonical ledger -> OOS/forward net PnL`
+
+Reject when:
+- leader edge unmeasurable;
+- entry is stale;
+- follower capacity insufficient;
+- costs exceed remaining edge;
+- close/reduce has no matching paper position;
+- selection or lifecycle uses future evidence.
+
+#### Lead-Lag proof path
+
+Minimum causal chain:
+
+`source event -> normalized event time -> receive/clock uncertainty -> feature state available at t -> target reaction after t -> executable follower entry -> canonical execution -> exit -> ledger -> OOS/forward proof`
+
+Reject when:
+- measured lag does not exceed uncertainty and cannot be corroborated;
+- clocks are incomparable;
+- target quote is stale;
+- data was only known after entry;
+- same event duplicated across feeds;
+- results disappear under latency/cost stress.
+
+#### Cross-Venue proof path
+
+Minimum causal chain:
+
+`same-underlying identity -> synchronized executable books -> two-leg route -> per-leg VWAP/cost/capacity -> hedge/non-atomic penalty -> PaperIntent(s) -> canonical execution -> matched exposure -> convergence/timeout exit -> ledger -> OOS/forward proof`
+
+Reject when:
+- midpoint-only spread is used;
+- one leg lacks depth/cost/freshness;
+- instrument multipliers/quote currencies are incompatible;
+- legs are not exposure-matched;
+- non-atomic hedge risk is ignored;
+- exit economics are missing.
+
+### Step 12 — Event Intelligence 1..120: prove wiring, not file presence
+
+Generate a machine-readable registry with one row per item and exactly one structural status:
+
+- `IMPLEMENTED_AND_WIRED`;
+- `IMPLEMENTED_BUT_PARTIAL`;
+- `IMPLEMENTED_BUT_NOT_WIRED`;
+- `BROKEN`;
+- `MISSING`;
+- `NOT_APPLICABLE`.
+
+For each item store:
+
+- item id;
+- source file/module;
+- actual caller(s);
+- required Dataset V2 family;
+- current data availability;
+- target economic family/feature path;
+- tests;
+- runtime/replay evidence;
+- wiring status;
+- `PROVEN_EDGE` separately as true/false/unknown;
+- reason/evidence links.
+
+Do not hand-edit all 120 statuses if they can be derived. Build a deterministic audit that follows imports/registry/callers plus explicit declared mappings, then make the human Markdown coverage document a rendered view of that machine registry.
+
+A feature can be structurally wired while economic edge remains unproven. Do not conflate the two.
+
+### Step 13 — Real two-segment GitHub-hosted resume proof
+
+A unit test is not enough. Produce one real cloud smoke using durable Dataset V2 state.
+
+Segment A must:
+
+- start a canonical current-epoch campaign;
+- complete useful work;
+- publish at least one durable checkpoint;
+- stop/cancel before terminal completion.
+
+Segment B must run on a fresh GitHub-hosted runner and:
+
+- reload no state from runner A's filesystem;
+- read durable campaign state;
+- acquire/renew a valid lease;
+- resume after the checkpoint;
+- skip already-completed units;
+- finish the campaign;
+- emit exactly one terminal result.
+
+Receipt must contain:
+
+- both workflow run ids;
+- main Alina HEAD;
+- Dataset V2 HEAD;
+- campaign id;
+- phase/source epoch;
+- checkpoint ids;
+- selection id;
+- completed-unit identities;
+- proof of no duplicate work;
+- terminal artifact/evidence digest.
+
+Also run deterministic interruption fixtures around:
+- before checkpoint write;
+- after checkpoint write before lease release;
+- during publish;
+- after publish before terminal manifest update;
+- lease expiry;
+- duplicate worker wakeup.
+
+### Step 14 — Self-hosted firewall
+
+The repository still contains historical filenames/workflows that may mention self-hosted operation. The coding agent must treat these as dangerous legacy surfaces, not as permission.
+
+Audit:
+
+```bash
+git grep -n "self-hosted\|runs-on:.*self" .github tools src docs
+```
+
+Required result for runnable cloud workflows:
+
+- no active workflow required by the canonical path may target `self-hosted`;
+- no canonical workflow may wake a PC, use a local tunnel, remote desktop, LAN host, or machine-specific runner label;
+- historical files may remain only if they are demonstrably non-runnable/archived and cannot be accidentally selected by canonical orchestration;
+- preferable solution for obsolete runnable self-hosted workflows is to disable/remove their triggers or delete the obsolete workflow when doing so does not destroy required history; Git history remains the archive;
+- add a CI/static gate that fails if a canonical active workflow introduces `runs-on: self-hosted`.
+
+Do not create a "GitHub-like self runner". Use actual GitHub-hosted runners.
+
+### Step 15 — API/source-rule fidelity
+
+When implementing or changing source adapters, verify current first-party documentation rather than copying stale constants from old docs.
+
+At minimum keep the following currently verified constraints represented by tests/config:
+
+Hyperliquid:
+- time-range `/info` pagination returns at most 500 elements/distinct blocks per response and must continue from the last returned timestamp;
+- user-fill and related history endpoints have additional weight per returned items;
+- user-specific WebSocket streams can begin with `isSnapshot: true`; snapshot/incremental semantics must be handled explicitly;
+- user-specific WebSocket capacity is scarce and must not be used as a full-universe design;
+- `/exchange` remains outside the operational code path.
+
+GitHub Actions:
+- standard GitHub-hosted job execution is bounded to six hours;
+- `workflow_dispatch` and `repository_dispatch` are explicit exceptions that can create successor workflow runs when authenticated with repository `GITHUB_TOKEN`;
+- ordinary `GITHUB_TOKEN`-triggered push events must not be assumed to recursively launch successor workflows.
+
+Encode source-rule versions/provenance so a rule change becomes detectable rather than silently changing proof semantics.
+
+### Step 16 — Deterministic tests before expensive runs
+
+Use the smallest sufficient deterministic test first, then expand.
+
+Recommended sequence:
+
+1. formatter/lint/static syntax for changed files;
+2. targeted unit tests for changed modules;
+3. orchestration/manifest/lease tests;
+4. safety/no-real-trade tests;
+5. dataset/replay fixture tests;
+6. family-specific integration tests;
+7. full repository suite if practical;
+8. GitHub-hosted smoke only for cloud behavior that local fixtures cannot prove;
+9. real two-segment smoke;
+10. economic replay/backtest/OOS/forward only after data/readiness gates pass.
+
+Never weaken a gate, remove a test, xfail/skip a failing critical test, or reduce coverage requirements merely to get green.
+
+A feature is not DONE if:
+- only a stub exists;
+- only a test mock proves behavior while the real caller is not wired;
+- only docs changed;
+- only workflow YAML exists without a real executable target;
+- only a happy-path test passes while restart/idempotency/fail-closed behavior is untested.
+
+### Step 17 — Commit discipline
+
+For each coherent implementation wave:
+
+1. `git status --short`;
+2. inspect the real diff;
+3. run relevant tests;
+4. `git diff --check`;
+5. confirm no generated data/secrets/runtime artifacts are accidentally staged;
+6. commit the coherent block on `main` as required by the current project workflow;
+7. verify the new commit:
+   - has changed files;
+   - has non-zero diff when a content change was intended;
+   - has a tree SHA different from its parent;
+8. record the commit SHA in the execution ledger;
+9. continue to the next unfinished block.
+
+Never use empty commits as proof of progress.
+
+Never use destructive `reset --hard`, destructive `clean`, history rewrite, or force-push as a normal implementation method.
+
+If the working tree already contains user changes, preserve them. Do not overwrite unrelated work.
+
+### Step 18 — Failure handling without loops
+
+For any failing action:
+
+- first failure: inspect exact error and fix the likely cause;
+- second materially identical failure: change method;
+- third materially equivalent failure: mark exact blocker, preserve successful work, and continue independent tasks.
+
+Examples of method change:
+- oversized GitHub Contents API write -> use Git data blob/tree/commit API;
+- giant file tool truncation -> fetch by blob SHA/raw file and operate deterministically;
+- flaky network integration -> replace repeated blind retries with fixture + bounded backoff + explicit degraded state;
+- runner timeout -> checkpoint earlier and resume on new runner;
+- source unavailable from GitHub-hosted region -> typed unavailable/degraded state and scientifically valid archive/fallback path if available.
+
+Do not keep retrying the same request indefinitely.
+
+### Step 19 — Final closure report and machine receipt
+
+The entire workstream is DONE only when a final machine-readable receipt and a concise human report prove the current state of **both** repositories.
+
+Required fields:
+
+```json
+{
+  "main_alina_head": "...",
+  "dataset_v2_head": "...",
+  "canonical_spec_blob": "...",
+  "phase": "...",
+  "phase_epoch": 0,
+  "source_collection_epoch": null,
+  "analysis_stage": "...",
+  "campaign_ids": [],
+  "workflow_run_ids": [],
+  "dataset_selection_id": "...",
+  "trade_count_exact": false,
+  "unique_trade_count_exact": false,
+  "safe_count": 0,
+  "replay_compatible_count": 0,
+  "copy_vault_status": "...",
+  "lead_lag_status": "...",
+  "cross_venue_status": "...",
+  "oos_status": "...",
+  "forward_status": "...",
+  "two_segment_resume_status": "...",
+  "event_intelligence_wiring_complete": false,
+  "scoreboard_artifact": "...",
+  "paper_read_only": true,
+  "self_hosted_used": false,
+  "real_execution_reachable": false,
+  "remaining_blockers": []
+}
+```
+
+Every boolean/number must be calculated from current evidence, not hand-set for appearance.
+
+Final human report must state:
+
+- what was actually implemented;
+- what was tested;
+- exact commits;
+- exact remaining blockers, if any;
+- whether the three active families are economically proven, require more data, are unmeasurable, or are killed;
+- whether the +4 USD net/day per-family target is met by valid evidence on the same certified state;
+- confirmation that no real/testnet execution was enabled;
+- confirmation that no self-hosted runner or user-PC dependency was introduced.
+
+If any required closure item is missing, say `NOT DONE` and list the exact remainder. Do not use "almost done" as a substitute for the machine contract.
+
+### Step 20 — Recommended implementation order for Jules
+
+Unless a newly discovered hard dependency requires a narrower reorder, execute in this exact order:
+
+1. preflight and current-state audit;
+2. phase-state schema/parser;
+3. atomic phase transitions;
+4. campaign v2 phase/epoch migration;
+5. idempotent Alina -> Dataset V2 dispatch and split-brain protection;
+6. turn schedule into watchdog-only intent reconstruction;
+7. main-Alina operator surface;
+8. self-hosted firewall;
+9. exact trade count + global uniqueness closure;
+10. full SAFE -> replay-compatible migration;
+11. source/venue capability verification;
+12. explicit ANALYZE stage machine through OOS/FORWARD;
+13. Copy-Vault E2E proof wiring;
+14. Lead-Lag E2E proof wiring;
+15. Cross-Venue E2E proof wiring;
+16. Event Intelligence 1..120 machine wiring audit;
+17. deterministic interruption/failure matrix;
+18. real two-segment GitHub-hosted resume smoke;
+19. independent family PnL proof and scoreboard;
+20. final dual-repository closure receipt;
+21. final HEAD/diff/tree verification.
+
+The agent must **continue automatically from one numbered item to the next** while feasible. It does not stop after producing a plan, one commit, one test result, or one workflow run.
+
+### Step 21 — Coding-agent stop conditions
+
+The agent may stop only when one of these is true:
+
+1. all requested work covered by this run is DONE and verified;
+2. a real external/platform/credential/tool limit prevents further progress, all independent work is complete, and an exact checkpoint is written;
+3. the user explicitly says to stop.
+
+A valid blocked checkpoint contains:
+
+- last verified main Alina HEAD;
+- last verified Dataset V2 HEAD;
+- phase/epoch;
+- completed items;
+- exact failing operation and error;
+- methods already tried;
+- remaining items;
+- next deterministic action.
+
+Anything less is not a completion checkpoint.
+
