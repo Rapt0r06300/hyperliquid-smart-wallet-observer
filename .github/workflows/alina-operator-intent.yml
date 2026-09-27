@@ -1,0 +1,76 @@
+name: alina-operator-intent
+on:
+  workflow_dispatch:
+    inputs:
+      intent:
+        description: "Canonical operator intent"
+        required: true
+        type: choice
+        options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, pause, resume, retry]
+      request_id:
+        description: "Idempotent request identity"
+        required: true
+        type: string
+      requested_by:
+        required: false
+        default: "github-operator"
+        type: string
+      config_json:
+        required: false
+        default: "{}"
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: alina-operator-intent
+  cancel-in-progress: false
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Persist immutable operator intent
+        env:
+          INTENT: "${{ inputs.intent }}"
+          REQUEST_ID: "${{ inputs.request_id }}"
+          REQUESTED_BY: "${{ inputs.requested_by }}"
+          CONFIG_JSON: "${{ inputs.config_json }}"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime,json,os,pathlib
+          config=json.loads(os.environ["CONFIG_JSON"])
+          if not isinstance(config,dict): raise SystemExit("config_json must be object")
+          row={
+            "schema_version":"alina.operator_intent.v1",
+            "intent":os.environ["INTENT"],
+            "request_id":os.environ["REQUEST_ID"],
+            "requested_by":os.environ["REQUESTED_BY"],
+            "requested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),
+            "main_code_sha":os.environ.get("GITHUB_SHA"),
+            "config":config,
+            "paper_only":True,
+            "read_only":True,
+            "real_execution":False,
+          }
+          p=pathlib.Path("control/operator-intents")/(row["request_id"]+".json")
+          p.parent.mkdir(parents=True,exist_ok=True)
+          if p.exists():
+            old=json.loads(p.read_text())
+            if old != row:
+              raise SystemExit("request id already exists with different payload")
+          else:
+            p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
+          PY
+      - name: Publish operator intent
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add control/operator-intents
+          git diff --cached --quiet && exit 0
+          git commit -m "operator: persist intent ${{ inputs.request_id }}"
+          git push origin HEAD:main
