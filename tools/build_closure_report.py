@@ -42,7 +42,13 @@ def main() -> int:
         if not isinstance(row, dict):
             operator_status_invalid.append(status_path.name)
             continue
-        if row.get("schema_version") != "alina.operator_status.v1" or not row.get("request_id"):
+        valid_states = {"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"}
+        if (
+            row.get("schema_version") != "alina.operator_status.v1"
+            or not row.get("request_id")
+            or row.get("state") not in valid_states
+            or row.get("terminal") is not (row.get("state") in {"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
+        ):
             operator_status_invalid.append(status_path.name)
             continue
         operator_status_rows.append({
