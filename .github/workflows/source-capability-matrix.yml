@@ -9,6 +9,7 @@ on:
       - "src/hl_observer/sources/**"
       - "src/hl_observer/venues/**"
       - "tools/generate_source_capabilities.py"
+      - "tools/validate_source_capabilities.py"
 permissions:
   contents: write
 concurrency:
@@ -22,6 +23,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Generate conservative capability matrix
         run: python tools/generate_source_capabilities.py
+      - name: Validate capability matrix
+        run: python tools/validate_source_capabilities.py
       - name: Publish matrix
         run: |
           set -euo pipefail
