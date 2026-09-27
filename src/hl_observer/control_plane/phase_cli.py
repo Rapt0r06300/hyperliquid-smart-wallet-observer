@@ -9,6 +9,7 @@ from typing import Sequence
 
 from hl_observer.control_plane.phase_state import AlinaPhaseState
 from hl_observer.control_plane.phase_controller import PhaseController
+from hl_observer.control_plane.analyze_stage_machine import ANALYZE_STAGES
 from hl_observer.control_plane.resumable_campaign import (
     CampaignManifest,
     select_due_campaigns,
@@ -36,6 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--request-id", type=str, required=True, help="Operator request UUID or string")
     p_analyze.add_argument("--requested-by", type=str, default="operator", help="Requesting identity")
     p_analyze.add_argument("--initial-stage", type=str, default="DRAIN", help="Initial analysis stage")
+
+    # advance analyze stage
+    p_adv = subparsers.add_parser("advance-stage", help="Advance analysis stage in ANALYZE phase")
+    p_adv.add_argument("--target-stage", type=str, required=True, choices=ANALYZE_STAGES, help="Target stage to advance to")
 
     # phase idle
     p_idle = subparsers.add_parser("idle", help="Transition to IDLE phase")
@@ -74,6 +79,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             initial_stage=args.initial_stage,
         )
         print(json.dumps(receipt.to_dict(), indent=2))
+        return 0
+
+    elif args.command == "advance-stage":
+        new_state = controller.advance_analysis_stage(stage=args.target_stage)
+        print(json.dumps(new_state.to_dict(), indent=2))
         return 0
 
     elif args.command == "idle":
