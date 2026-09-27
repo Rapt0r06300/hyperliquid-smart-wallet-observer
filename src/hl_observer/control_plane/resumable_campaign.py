@@ -13,6 +13,8 @@ SCHEMA_VERSION_V1 = "alina.resumable_campaign.v1"
 SCHEMA_VERSION_V2 = "alina.resumable_campaign.v2"
 SUPPORTED_SCHEMAS = frozenset({SCHEMA_VERSION_V1, SCHEMA_VERSION_V2})
 
+COLLECT_CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection"})
+ANALYZE_CAMPAIGN_KINDS = frozenset({"replay","backtest","module_pnl_proof"})
 CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})
 CAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
 ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"})
@@ -306,6 +308,10 @@ def select_due_campaigns(
             if current_phase is not None and m.creation_phase != current_phase:
                 continue
             if current_epoch is not None and m.phase_epoch != current_epoch:
+                continue
+            if current_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
+                continue
+            if current_phase == "ANALYZE" and m.kind not in ANALYZE_CAMPAIGN_KINDS:
                 continue
 
         buckets.setdefault(m.kind, []).append(m)
