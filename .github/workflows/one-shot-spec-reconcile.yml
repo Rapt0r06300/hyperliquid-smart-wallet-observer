@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Rebuild audited catalog exactly once
+      - name: Rebuild and upload audited catalog exactly once
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -21,5 +21,5 @@ jobs:
           gh api "repos/${GITHUB_REPOSITORY}/git/blobs/146a0c986df0b8875a6a7bc1126f3ae484238d51" --jq .content | base64 -d > /tmp/old.md
           python -c "from pathlib import Path; p=Path('/tmp/current.md'); cur=p.read_text(encoding='utf-8'); old=Path('/tmp/old.md').read_text(encoding='utf-8'); needle='NEW-DEFECT-001'; removed=0; exec('while needle in cur:'+chr(10)+' pos=cur.index(needle)'+chr(10)+' h=cur.rfind(chr(10)+\"## \",0,pos)'+chr(10)+' assert h>=0'+chr(10)+' e=cur.find(chr(10)+\"## \",pos)'+chr(10)+' e=len(cur) if e<0 else e'+chr(10)+' cur=cur[:h]+cur[e:]'+chr(10)+' removed+=1'); assert removed>=1; pos=old.index(needle); h=old.rfind(chr(10)+'## ',0,pos); assert h>=0; block=old[h:].strip(); guard='## Canonical reconciliation guard — source completeness contract (2026-09-27)'+chr(10)*2+'This section is normative. Future canonical-spec edits must preserve the complete audited defect catalog, the interrupted Work reconciliation, the final Work closure hardening, Alina-main/Dataset-V2 ownership, paper/read-only safety, and every stricter fail-closed contract. Oversized-write recovery must never restore an older snapshot that discards newer requirements. Completeness that cannot be proven is UNMEASURABLE.'+chr(10); p.write_text(cur.rstrip()+chr(10)*2+block+chr(10)*2+guard,encoding='utf-8'); print('removed old catalog copies',removed)"
           python -c "from pathlib import Path; import re; s=Path('/tmp/current.md').read_text(encoding='utf-8'); ids=[int(x) for x in re.findall(r'NEW-DEFECT-([0-9]{3})',s)]; bad=[i for i in range(1,451) if ids.count(i)!=1]; assert not bad,bad[:20]; req=['Normative closure hardening — final consolidated contracts','Dataset V2','GitHub-hosted','paper/read-only','Canonical reconciliation guard — source completeness contract']; miss=[x for x in req if x not in s]; assert not miss,miss; print('VERIFIED 001..450 exactly once; closure markers present; bytes',len(s.encode()))"
-          CONTENT=$(base64 -w0 /tmp/current.md)
-          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${SPEC}" -f message='docs(spec): restore complete audited roadmap' -f content="$CONTENT" -f sha="$CUR_SHA" -f branch=main >/dev/null
+          python -c "import base64,json; from pathlib import Path; payload={'message':'docs(spec): restore complete audited roadmap','content':base64.b64encode(Path('/tmp/current.md').read_bytes()).decode(),'sha':'$CUR_SHA','branch':'main'}; Path('/tmp/payload.json').write_text(json.dumps(payload))"
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${SPEC}" --input /tmp/payload.json >/dev/null
