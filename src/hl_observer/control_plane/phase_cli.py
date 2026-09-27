@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -12,6 +13,20 @@ from hl_observer.control_plane.resumable_campaign import (
     CampaignManifest,
     select_due_campaigns,
 )
+
+
+def _persist_transition_receipt(receipt, receipt_dir: str = "control/phase-receipts") -> None:
+    target = Path(receipt_dir) / f"{receipt.request_id}.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = receipt.to_dict()
+    if target.exists():
+        existing = json.loads(target.read_text(encoding="utf-8"))
+        if existing != payload:
+            raise ValueError("phase transition receipt identity conflict")
+        return
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+    os.replace(temporary, target)
 
 
 def _request_args(parser: argparse.ArgumentParser) -> None:
@@ -31,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--state-file", default="control/alina-phase.json")
     parser.add_argument("--intent-file", default=None)
+    parser.add_argument("--receipt-dir", default="control/phase-receipts")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     p_status = subparsers.add_parser("status", help="Show current phase state")
@@ -175,21 +191,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(controller.current_state.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "collect":
-        print(json.dumps(controller.transition_to_collect(
+        receipt = controller.transition_to_collect(
             request_id=args.request_id, requested_by=args.requested_by
-        ).to_dict(), indent=2, sort_keys=True))
+        )
+        _persist_transition_receipt(receipt, args.receipt_dir)
+        print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "analyze":
-        print(json.dumps(controller.transition_to_analyze(
+        receipt = controller.transition_to_analyze(
             request_id=args.request_id,
             requested_by=args.requested_by,
             initial_stage=args.initial_stage,
-        ).to_dict(), indent=2, sort_keys=True))
+        )
+        _persist_transition_receipt(receipt, args.receipt_dir)
+        print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
         return 0
     if args.command == "idle":
-        print(json.dumps(controller.transition_to_idle(
+        receipt = controller.transition_to_idle(
             request_id=args.request_id, requested_by=args.requested_by
-        ).to_dict(), indent=2, sort_keys=True))
+        )
+        _persist_transition_receipt(receipt, args.receipt_dir)
+        print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
         return 0
 
     intent_names = {
@@ -223,6 +245,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             receipt = controller.transition_to_idle(
                 request_id=args.request_id, requested_by=args.requested_by
             )
+        _persist_transition_receipt(receipt, args.receipt_dir)
         print(json.dumps(receipt.to_dict(), indent=2, sort_keys=True))
         return 0
     return 1
