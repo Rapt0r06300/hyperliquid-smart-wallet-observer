@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 from typing import Any, Iterable, Mapping
 
 from hl_observer.strategies.active_scope import (
@@ -67,6 +69,49 @@ def prove_module(
         net >= threshold_usd,
         True,
     ))
+
+
+
+def independent_module_verdict(
+    module: str,
+    rows: Iterable[Mapping[str, Any]],
+    threshold_usd: float = 4.0,
+) -> dict[str, Any]:
+    """Return a fail-closed independent certificate without cross-module compensation."""
+    evidence = list(rows)
+    canonical_module = _canonical_module(module)
+    if canonical_module not in MODULES or not strategy_can_materialize(module):
+        raise ValueError("unknown or inactive module")
+    if not evidence:
+        verdict = {"module": canonical_module, "status": "MORE_DATA", "reason": "NO_SAFE_REPLAY_COMPATIBLE_EVIDENCE", "proof_of_pnl": False, "sample_size": 0}
+    elif any(row.get("quality_status") != "SAFE" or not row.get("replay_compatible", False) for row in evidence):
+        verdict = {"module": canonical_module, "status": "UNMEASURABLE", "reason": "NON_SAFE_OR_NON_REPLAY_COMPATIBLE_INPUT", "proof_of_pnl": False, "sample_size": len(evidence)}
+    else:
+        result = prove_module(canonical_module, evidence, threshold_usd)
+        verdict = dict(result)
+        verdict["status"] = "PROVEN" if result["threshold_met"] else "KILL"
+        verdict["reason"] = "NET_DAILY_THRESHOLD_MET" if result["threshold_met"] else "NET_DAILY_THRESHOLD_NOT_MET"
+    verdict["certificate_digest"] = hashlib.sha256(json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return verdict
+
+
+def independent_module_certificates(
+    evidence: Mapping[str, Iterable[Mapping[str, Any]]],
+    threshold_usd: float = 4.0,
+) -> dict[str, Any]:
+    certificates = {
+        module: independent_module_verdict(module, evidence.get(module, ()), threshold_usd)
+        for module in MODULES
+    }
+    return {
+        "schema": "alina.independent_module_pnl_certificates.v1",
+        "threshold_usd_per_day": threshold_usd,
+        "modules": certificates,
+        "aggregate_allowed": False,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
 
 
 def prove_all(
