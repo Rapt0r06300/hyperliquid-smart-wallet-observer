@@ -236,6 +236,14 @@ class PhaseController:
     def advance_analysis_stage(self, stage: str) -> AlinaPhaseState:
         if self._state.phase != "ANALYZE":
             raise ValueError(f"Cannot advance analysis_stage when phase is {self._state.phase}")
+        ordered = ("DRAIN", "QUALITY", "REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD", "DONE")
+        if stage not in ordered:
+            raise ValueError(f"Unknown analysis stage: {stage}")
+        current = self._state.analysis_stage
+        if current not in ordered:
+            raise ValueError(f"Invalid current analysis stage: {current}")
+        if ordered.index(stage) < ordered.index(current):
+            raise ValueError(f"Analysis stage regression: {current}->{stage}")
         new_state = AlinaPhaseState(
             schema_version=self._state.schema_version,
             phase="ANALYZE",
