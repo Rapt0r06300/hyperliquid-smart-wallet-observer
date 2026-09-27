@@ -7,6 +7,8 @@ per realized settlement. Missing/invalid rows are dropped rather than zero-fille
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import time
 from collections.abc import Iterable, Mapping
 from typing import Any
@@ -60,20 +62,46 @@ async def fetch_hyperliquid_funding_settlements(
             return []
 
         by_time: dict[int, Mapping[str, Any]] = {}
+        rejected_rows = 0
+        duplicate_rows = 0
         for raw in payload:
             if not isinstance(raw, Mapping):
+                rejected_rows += 1
                 continue
             try:
                 ts = int(raw.get("time"))
                 funding = float(raw.get("fundingRate"))
             except (TypeError, ValueError, OverflowError):
+                rejected_rows += 1
+                continue
+            if ts < start or ts > end:
+                rejected_rows += 1
                 continue
             if ts < start or ts > end:
                 continue
             if not (-1.0 < funding < 1.0):
+                rejected_rows += 1
                 continue
+            if ts in by_time:
+                duplicate_rows += 1
             by_time[ts] = raw
 
+        coverage = {
+            "schema": "alina.hyperliquid_funding_coverage.v1",
+            "coin": coin,
+            "request_start_ms": start,
+            "request_end_ms": end,
+            "response_rows": len(payload),
+            "accepted_rows": len(by_time),
+            "rejected_rows": rejected_rows,
+            "duplicate_timestamp_rows": duplicate_rows,
+            "pagination_complete": False,
+            "coverage_status": "UNPROVEN_SINGLE_REQUEST_NO_PAGINATION",
+            "data_gate_ready": False,
+        }
+        coverage["receipt_digest"] = hashlib.sha256(
+            json.dumps(coverage, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         result: list[TickEnvelope] = []
         for sequence, ts in enumerate(sorted(by_time), start=1):
             raw = dict(by_time[ts])
@@ -108,12 +136,15 @@ async def fetch_hyperliquid_funding_settlements(
                         "request_end_ms": end,
                         "request_send_wall_ms": sent_wall_ms,
                         "request_receive_wall_ms": receive_wall_ms,
+                        "coverage_receipt": coverage,
                     },
                     parsed_summary={
                         "funding_rate": float(raw["fundingRate"]),
                         "premium": premium,
                         "authoritative_history": True,
-                        "data_gate_ready": True,
+                        "data_gate_ready": False,
+                        "coverage_status": coverage["coverage_status"],
+                        "coverage_receipt_digest": coverage["receipt_digest"],
                     },
                 )
             )
