@@ -70,6 +70,8 @@ def main() -> int:
     ):
         if not isinstance(receipt[name], bool):
             raise SystemExit(f"closure field must be boolean: {name}")
+    if len(str(receipt["normative_gate_registry_digest"] or "")) != 64:
+        raise SystemExit("normative gate registry digest missing")
     for name in ("raw_record_count", "valid_record_count", "unique_record_count", "raw_trade_count", "partial_count", "rejected_count", "quarantined_record_count", "normative_gate_count"):
         if not isinstance(receipt[name], int) or receipt[name] < 0:
             raise SystemExit(f"closure count must be a non-negative integer: {name}")
