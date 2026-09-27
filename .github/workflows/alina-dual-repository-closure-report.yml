@@ -27,13 +27,16 @@ jobs:
         run: |
           set -euo pipefail
           PYTHONPATH=src python tools/generate_gate_registry.py
+          python tools/validate_gate_registry.py
           python tools/build_closure_report.py \
             --dataset-root dataset-v2 \
             --main-head "$(git rev-parse HEAD)" \
             --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
             --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
-      - name: Validate closure receipt
-        run: python tools/validate_closure_receipt.py
+      - name: Validate gate and closure receipts
+        run: |
+          python tools/validate_gate_registry.py
+          python tools/validate_closure_receipt.py
       - name: Publish closure report
         run: |
           set -euo pipefail
