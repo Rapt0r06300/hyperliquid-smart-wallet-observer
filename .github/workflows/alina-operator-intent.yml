@@ -22,7 +22,7 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: alina-operator-intent
+  group: alina-operator-intent-${{ inputs.request_id }}
   cancel-in-progress: false
 jobs:
   persist:
