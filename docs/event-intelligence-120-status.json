@@ -1,977 +1,2928 @@
 {
-  "schema_version": "alina.event_intelligence_status.v1",
-  "source": "docs/event-intelligence-120-coverage.md",
-  "classification_legend": {
-    "IMPLEMENTED_AND_WIRED": "structural wiring evidence resolved",
-    "IMPLEMENTED_BUT_PARTIAL": "structural implementation exists but economic proof remains pending",
-    "IMPLEMENTED_BUT_NOT_WIRED": "implementation exists without a live caller/data path",
-    "BROKEN": "generated checker found a broken path",
-    "MISSING": "no implementation evidence",
-    "NOT_APPLICABLE": "out of scope"
-  },
   "items": [
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "foundation + worldmonitor + module_bridges",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 1,
       "idea": "Créer Event Intelligence / Global Regime Detector",
-      "declared_references": "foundation + worldmonitor + module_bridges",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "external_event.py",
+      "evidence_digest": "6db88c6dd79a348d4722afe5f116446e238a0b521d255067d58cc3c81e3d4b83",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
       "id": 2,
       "idea": "Contrat ExternalEvent séparé",
-      "declared_references": "external_event.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "external_event.py + replay guards",
+      "evidence_digest": "6db88c6dd79a348d4722afe5f116446e238a0b521d255067d58cc3c81e3d4b83",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
       "id": 3,
       "idea": "Horloge causale retrieval/ingest",
-      "declared_references": "external_event.py + replay guards",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/external_event.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "archive.py + source_discovery integration",
+      "evidence_digest": "497e1ef22a0c69c413930b62d75b032adf4a2d13529ac705f3a62b274696dbbb",
+      "evidence_files": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
       "id": 4,
       "idea": "Archivage Data Vault",
-      "declared_references": "archive.py + source_discovery integration",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "archive.py + WorldMonitorEvent.to_archive_record",
+      "evidence_digest": "497e1ef22a0c69c413930b62d75b032adf4a2d13529ac705f3a62b274696dbbb",
+      "evidence_files": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
       "id": 5,
       "idea": "Conserver R1/R2 structurés",
-      "declared_references": "archive.py + WorldMonitorEvent.to_archive_record",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "hyper_smart_observer/runtime/archive.py",
+        "src/hl_observer/event_intelligence/archive.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/worldmonitor.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "worldmonitor.py",
+      "evidence_digest": "af8dd4bc788d085bccf4b834b1d10335167fad1db423cac60ba6f1cff441d69a",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/worldmonitor.py"
+      ],
       "id": 6,
       "idea": "World Monitor comme méta-source",
-      "declared_references": "worldmonitor.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/worldmonitor.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "direct_sources.py",
+      "evidence_digest": "f2e1ccb0525af739b18d9f2f85fe1b124b40f87f1d541bb20a8076899ac28050",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
       "id": 7,
       "idea": "Sources primaires directes",
-      "declared_references": "direct_sources.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "GET-only adapters/documentation",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 8,
       "idea": "Pas de scraping UI principal",
-      "declared_references": "GET-only adapters/documentation",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/candidates.py",
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "candidates.py + module_bridges.py",
+      "evidence_digest": "1a4e61ae1bfc6d31508a762e9f617c2e71a93db032f3e1d5134762e49bbc2528",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/candidates.py",
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
       "id": 9,
       "idea": "News Leads Markets",
-      "declared_references": "candidates.py + module_bridges.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/candidates.py",
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/candidates.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "PredictionShiftTracker + candidates.py",
+      "evidence_digest": "3887d789f7cc21ad79e0298a8e8d0a705e65ab2b304b897f6033df24757e105f",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/candidates.py"
+      ],
       "id": 10,
       "idea": "Prediction Leading",
-      "declared_references": "PredictionShiftTracker + candidates.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/candidates.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "worldmonitor prediction + no CLOB/private key",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 11,
       "idea": "Polymarket read-only uniquement",
-      "declared_references": "worldmonitor prediction + no CLOB/private key",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "regimes.py MICROSTRUCTURE_LED/UNEXPLAINED",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 12,
       "idea": "Silent Divergence",
-      "declared_references": "regimes.py MICROSTRUCTURE_LED/UNEXPLAINED",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/regimes.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "regimes.py",
+      "evidence_digest": "ef08997e1c729793a41f4f649df9befaffabba666912dc8ca45b6afb936cc7b0",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/regimes.py"
+      ],
       "id": 13,
       "idea": "Taxonomie de régimes",
-      "declared_references": "regimes.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/regimes.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "features.py",
+      "evidence_digest": "cf456bce0fb74905f3aca07c2ec7cef182977e2d8921afb9b6452751f273d7fb",
+      "evidence_files": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
       "id": 14,
       "idea": "Velocity Spike",
-      "declared_references": "features.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "features.py + validation numeric strata",
+      "evidence_digest": "cf456bce0fb74905f3aca07c2ec7cef182977e2d8921afb9b6452751f273d7fb",
+      "evidence_files": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
       "id": 15,
       "idea": "Keyword/abnormal spike via baselines",
-      "declared_references": "features.py + validation numeric strata",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/backtesting/features.py",
+        "src/hl_observer/event_intelligence/features.py",
+        "src/hl_observer/ml/features.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "corroboration/source_count features",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 16,
       "idea": "Convergence multi-source",
-      "declared_references": "corroboration/source_count features",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "source diversity + corroboration metadata",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 17,
       "idea": "Triangulation",
-      "declared_references": "source diversity + corroboration metadata",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "sequences.py/propagation timing",
+      "evidence_digest": "979909a9bc467aa6683a5bf7c4d9106bfc2ca1c983759f22837bc71e9e0e60eb",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
       "id": 18,
       "idea": "Corroboration latency",
-      "declared_references": "sequences.py/propagation timing",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "World Monitor structured source; quality gates",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 19,
       "idea": "OSINT rapide comme lead",
-      "declared_references": "World Monitor structured source; quality gates",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "adapter reads payload metadata; no source-count constants",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 20,
       "idea": "Inventaire sources non hardcodé",
-      "declared_references": "adapter reads payload metadata; no source-count constants",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "SourceTier + source metadata",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 21,
       "idea": "Score de provenance",
-      "declared_references": "SourceTier + source metadata",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "features.py source_diversity_ratio",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 22,
       "idea": "Diversité des sources",
-      "declared_references": "features.py source_diversity_ratio",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "ExternalEvent keys + archive dedupe",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 23,
       "idea": "Déduplication événementielle",
-      "declared_references": "ExternalEvent keys + archive dedupe",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "revision/supersedes_revision + archive",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 24,
       "idea": "Révisions/corrections préservées",
-      "declared_references": "revision/supersedes_revision + archive",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "methodology_version",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 25,
       "idea": "Méthodologie versionnée",
-      "declared_references": "methodology_version",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "no directional World Monitor score path",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 26,
       "idea": "CII non utilisé comme BUY/SELL",
-      "declared_references": "no directional World Monitor score path",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "classification metadata only",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 27,
       "idea": "Scores IA = features seulement",
-      "declared_references": "classification metadata only",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "ExternalEventType + World Monitor cross-source",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 28,
       "idea": "Événements militaires/géopolitiques",
-      "declared_references": "ExternalEventType + World Monitor cross-source",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "cross-source normalization maps to MILITARY",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 29,
       "idea": "GPS jamming/spoofing",
-      "declared_references": "cross-source normalization maps to MILITARY",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "cross-source/context architecture",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 30,
       "idea": "Aviation/NOTAM comme contexte",
-      "declared_references": "cross-source/context architecture",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "SUPPLY_CHAIN event type/context",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 31,
       "idea": "Maritime/AIS/chokepoints",
-      "declared_references": "SUPPLY_CHAIN event type/context",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "event family/context + relevance mapping",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 32,
       "idea": "Features supply-chain",
-      "declared_references": "event family/context + relevance mapping",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "INFRASTRUCTURE event type + relevance/context routing",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 33,
       "idea": "Infrastructure critique",
-      "declared_references": "INFRASTRUCTURE event type + relevance/context routing",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "INFRASTRUCTURE context/filter only; no direct order",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 34,
       "idea": "Infrastructure Cascade",
-      "declared_references": "INFRASTRUCTURE context/filter only; no direct order",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "CYBER/OUTAGE types + context",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 35,
       "idea": "Internet outages/BGP/cyber",
-      "declared_references": "CYBER/OUTAGE types + context",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "asset relevance + module filters",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 36,
       "idea": "Cyber seulement si économiquement pertinent",
-      "declared_references": "asset relevance + module filters",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "USGS/EONET/GDACS direct adapters",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 37,
       "idea": "Catastrophes naturelles",
-      "declared_references": "USGS/EONET/GDACS direct adapters",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "regimes.map_event_to_assets",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 38,
       "idea": "Mapping événement→actifs",
-      "declared_references": "regimes.map_event_to_assets",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "mapping routes attention only",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 39,
       "idea": "Pas de causalité hardcodée",
-      "declared_references": "mapping routes attention only",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "FRED adapter + MACRO type",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 40,
       "idea": "Macro/banques centrales",
-      "declared_references": "FRED adapter + MACRO type",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "macro.py",
+      "evidence_digest": "19bb9815bd1ab83e0eb81300b09f4d8b042b36b732d06f1d7a5875fe890db464",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
       "id": 41,
       "idea": "Macro Event Clock",
-      "declared_references": "macro.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "MacroWindow phases + surprise score",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 42,
       "idea": "Événements attendus vs surprises",
-      "declared_references": "MacroWindow phases + surprise score",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "PredictionShiftTracker",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 43,
       "idea": "Prediction markets comme attentes",
-      "declared_references": "PredictionShiftTracker",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "macro.py/regimes SurpriseContext",
+      "evidence_digest": "19bb9815bd1ab83e0eb81300b09f4d8b042b36b732d06f1d7a5875fe890db464",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
       "id": 44,
       "idea": "surprise_score",
-      "declared_references": "macro.py/regimes SurpriseContext",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/macro.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "module_bridges LeadLagEventContext",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 45,
       "idea": "Brancher d'abord Lead-Lag",
-      "declared_references": "module_bridges LeadLagEventContext",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "price_discovery.py",
+      "evidence_digest": "8810491a8e8936ed5b8056e177e3cb3828265ed6ecc9ed89f5ae988521e1e781",
+      "evidence_files": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
       "id": 46,
       "idea": "External Event → Venue Price Discovery",
-      "declared_references": "price_discovery.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "EventMarketReaction",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 47,
       "idea": "Mesurer first_venue",
-      "declared_references": "EventMarketReaction",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "EventMarketReaction",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 48,
       "idea": "Mesurer reaction_latency_ms",
-      "declared_references": "EventMarketReaction",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "price_discovery.py",
+      "evidence_digest": "8810491a8e8936ed5b8056e177e3cb3828265ed6ecc9ed89f5ae988521e1e781",
+      "evidence_files": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
       "id": 49,
       "idea": "Mesurer peak dispersion",
-      "declared_references": "price_discovery.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "price_discovery.py",
+      "evidence_digest": "8810491a8e8936ed5b8056e177e3cb3828265ed6ecc9ed89f5ae988521e1e781",
+      "evidence_files": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
       "id": 50,
       "idea": "Mesurer edge half-life",
-      "declared_references": "price_discovery.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/research/price_discovery.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "candidates.py executable room",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 51,
       "idea": "Mesurer edge restant sur HL",
-      "declared_references": "candidates.py executable room",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "NativeMarketSnapshot depth/capacity in outcomes",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 52,
       "idea": "Profondeur avant/après événement",
-      "declared_references": "NativeMarketSnapshot depth/capacity in outcomes",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "executable spread components in outcomes",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 53,
       "idea": "spread_expansion",
-      "declared_references": "executable spread components in outcomes",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "capacity/fill metrics support",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 54,
       "idea": "depth_withdrawal",
-      "declared_references": "capacity/fill metrics support",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "existing microstructure remains composable via module bridge",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 55,
       "idea": "order-flow imbalance",
-      "declared_references": "existing microstructure remains composable via module bridge",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "existing native market data composable with event windows",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 56,
       "idea": "Volume/trades agressifs",
-      "declared_references": "existing native market data composable with event windows",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "event-window context feeds existing OI data",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 57,
       "idea": "OI avant/après",
-      "declared_references": "event-window context feeds existing OI data",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "event-window context feeds existing funding data",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 58,
       "idea": "Funding",
-      "declared_references": "event-window context feeds existing funding data",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "LIQUIDATION_LED regime + existing liquidation modules",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 59,
       "idea": "Liquidations/cascades",
-      "declared_references": "LIQUIDATION_LED regime + existing liquidation modules",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "outcomes.py capacity_usd",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 60,
       "idea": "Capacité exécutable",
-      "declared_references": "outcomes.py capacity_usd",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "CrossVenueEventContext",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 61,
       "idea": "Event Intelligence comme filtre Cross-Venue",
-      "declared_references": "CrossVenueEventContext",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "module bridge + validation stratification",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 62,
       "idea": "Event-conditioned Cross-Venue",
-      "declared_references": "module bridge + validation stratification",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "may_bypass_costs=False/capacity=False",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 63,
       "idea": "Ne jamais relâcher coûts Cross-Venue",
-      "declared_references": "may_bypass_costs=False/capacity=False",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "module_bridges.py",
+      "evidence_digest": "066798f084298a7d4637bf16473f5cd29133802fd2e44cec1997d2ba2ee03367",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
       "id": 64,
       "idea": "Brancher Copy-Vault",
-      "declared_references": "module_bridges.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/module_bridges.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "measure_copy_vault_event_reactions",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 65,
       "idea": "leader_event_reaction_latency",
-      "declared_references": "measure_copy_vault_event_reactions",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stats per event_family",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 66,
       "idea": "leader_event_specialization",
-      "declared_references": "stats per event_family",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "NO_EVENT controls available in validation",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 67,
       "idea": "Comparer leaders hors événement",
-      "declared_references": "NO_EVENT controls available in validation",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "leader stats measure timing only",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 68,
       "idea": "Ne pas inférer information privilégiée",
-      "declared_references": "leader stats measure timing only",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "NO_EVENT/control observations",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 69,
       "idea": "Dataset événements négatifs",
-      "declared_references": "NO_EVENT/control observations",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "placebo_timestamps",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 70,
       "idea": "Placebos timestamps",
-      "declared_references": "placebo_timestamps",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "permute_event_labels + shifted placebos",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 71,
       "idea": "Randomiser labels/timestamps",
-      "declared_references": "permute_event_labels + shifted placebos",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "select_no_event_controls",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 72,
       "idea": "Groupe NO_EVENT",
-      "declared_references": "select_no_event_controls",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify event_family",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 73,
       "idea": "Backtest par famille",
-      "declared_references": "stratify event_family",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify asset",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 74,
       "idea": "Backtest par actif",
-      "declared_references": "stratify asset",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify venue",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 75,
       "idea": "Backtest par venue",
-      "declared_references": "stratify venue",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "market_session_utc + stratify session",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 76,
       "idea": "Backtest par session",
-      "declared_references": "market_session_utc + stratify session",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify corroboration_count",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 77,
       "idea": "Backtest par corroboration",
-      "declared_references": "stratify corroboration_count",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify source_tier",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 78,
       "idea": "Backtest par source tier",
-      "declared_references": "stratify source_tier",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify_numeric surprise_score",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 79,
       "idea": "Backtest par surprise",
-      "declared_references": "stratify_numeric surprise_score",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify_numeric velocity_zscore",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 80,
       "idea": "Backtest par velocity",
-      "declared_references": "stratify_numeric velocity_zscore",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratify_numeric prediction_delta_pp",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 81,
       "idea": "Backtest par prediction shift",
-      "declared_references": "stratify_numeric prediction_delta_pp",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "chronological_split",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 82,
       "idea": "Train/validation/OOS chronologiques",
-      "declared_references": "chronological_split",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "purged_chronological_split",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 83,
       "idea": "Purged/embargo",
-      "declared_references": "purged_chronological_split",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "protocol.freeze_event_research",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 84,
       "idea": "Freeze paramètres",
-      "declared_references": "protocol.freeze_event_research",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "assert_forward_after_freeze + scoreboard forward",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 85,
       "idea": "Forward post-freeze",
-      "declared_references": "assert_forward_after_freeze + scoreboard forward",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "independent_event_count + bootstrap_mean_ci",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 86,
       "idea": "N minimal + incertitude",
-      "declared_references": "independent_event_count + bootstrap_mean_ci",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "outcomes + canonical scoreboard",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 87,
       "idea": "PnL toujours NET",
-      "declared_references": "outcomes + canonical scoreboard",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "incremental_effect",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 88,
       "idea": "Comparer à baseline Lead-Lag",
-      "declared_references": "incremental_effect",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "incremental_vs_control/placebo",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 89,
       "idea": "PnL incrémental",
-      "declared_references": "incremental_vs_control/placebo",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "canonical scoreboard + event bundle",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 90,
       "idea": "Sharpe/PF/DD/ES/hit/capacité",
-      "declared_references": "canonical scoreboard + event bundle",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "N indépendant + controls/placebos",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 91,
       "idea": "Rejeter edge mono-événement fragile",
-      "declared_references": "N indépendant + controls/placebos",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/scoreboard.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "scoreboard.py",
+      "evidence_digest": "91a8528403f5f42f178845ec2411353036c2baaa1de03aeb4a1340012a69ca8a",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/scoreboard.py"
+      ],
       "id": 92,
       "idea": "Scoreboard Event Edge",
-      "declared_references": "scoreboard.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/scoreboard.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "outcomes + canonical scoreboard",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 93,
       "idea": "UNMEASURABLE si coût manque",
-      "declared_references": "outcomes + canonical scoreboard",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/health.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "health.py",
+      "evidence_digest": "0fb68bc0ddd92680748760f919c8bc15791a4fd7a3bb6ef72ebc131037829c6a",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/health.py"
+      ],
       "id": 94,
       "idea": "Health/freshness World Monitor",
-      "declared_references": "health.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/health.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "WorldMonitorEvent.usable_for_signal",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 95,
       "idea": "Événement stale non signalable",
-      "declared_references": "WorldMonitorEvent.usable_for_signal",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "health gaps/source_active separation",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 96,
       "idea": "Source down ≠ aucun événement",
-      "declared_references": "health gaps/source_active separation",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "detect_intelligence_gap",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 97,
       "idea": "Intelligence gaps",
-      "declared_references": "detect_intelligence_gap",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "coverage_by_family",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 98,
       "idea": "Couverture par famille",
-      "declared_references": "coverage_by_family",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "methodology_version + revision",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 99,
       "idea": "Versionner mapping source/event",
-      "declared_references": "methodology_version + revision",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "event_intelligence package boundaries",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 100,
       "idea": "Architecture simple adaptateurs→normalisation→features",
-      "declared_references": "event_intelligence package boundaries",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "documented adapter base/self-host-compatible architecture",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 101,
       "idea": "Étudier/self-host World Monitor",
-      "declared_references": "documented adapter base/self-host-compatible architecture",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "integration uses API/contracts, no copied WM code",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 102,
       "idea": "Ne pas intégrer AGPL aveuglément",
-      "declared_references": "integration uses API/contracts, no copied WM code",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "DirectSourceSpec attribution + docs policy",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 103,
       "idea": "Vérifier licence upstream",
-      "declared_references": "DirectSourceSpec attribution + docs policy",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "direct_sources.py",
+      "evidence_digest": "f2e1ccb0525af739b18d9f2f85fe1b124b40f87f1d541bb20a8076899ac28050",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
       "id": 104,
       "idea": "World Monitor comme catalogue",
-      "declared_references": "direct_sources.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/direct_sources.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "compare_source_latency",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 105,
       "idea": "Mesurer valeur ajoutée World Monitor",
-      "declared_references": "compare_source_latency",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "primary adapters + aggregator bridge",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 106,
       "idea": "Garder primaire + WM selon rôle",
-      "declared_references": "primary adapters + aggregator bridge",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "neutral event taxonomy",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 107,
       "idea": "Événements positifs et négatifs",
-      "declared_references": "neutral event taxonomy",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "archive + price_discovery + scoreboard",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 108,
       "idea": "Bibliothèque event→market response",
-      "declared_references": "archive + price_discovery + scoreboard",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "sequences.py",
+      "evidence_digest": "979909a9bc467aa6683a5bf7c4d9106bfc2ca1c983759f22837bc71e9e0e60eb",
+      "evidence_files": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
       "id": 109,
       "idea": "Chercher séquences récurrentes",
-      "declared_references": "sequences.py",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "Structural implementation is present; economic proof remains data/OOS/forward dependent.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [
+        "src/hl_observer/event_intelligence/sequences.py"
+      ],
+      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "IMPLEMENTED_BUT_PARTIAL"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "summarize_patterns + validation",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 110,
       "idea": "Extraire séquences tradables seulement si répétées",
-      "declared_references": "summarize_patterns + validation",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "causal regime classification",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 111,
       "idea": "Explicatif ≠ prédictif",
-      "declared_references": "causal regime classification",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "ingest_ts/decision gates",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 112,
       "idea": "Disponibilité avant entrée obligatoire",
-      "declared_references": "ingest_ts/decision gates",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "no LLM-generated evidence path",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 113,
       "idea": "LLM ne peut inventer preuve",
-      "declared_references": "no LLM-generated evidence path",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "classification_confidence + raw_evidence_ref",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 114,
       "idea": "IA peut classifier, jamais preuve primaire",
-      "declared_references": "classification_confidence + raw_evidence_ref",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "methodology_version",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 115,
       "idea": "Versionner tout classifieur",
-      "declared_references": "methodology_version",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "map_event_to_assets",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 116,
       "idea": "market relevance, pas BUY/SELL",
-      "declared_references": "map_event_to_assets",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "stratification by family/sample",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 117,
       "idea": "Rares + fréquents séparables",
-      "declared_references": "stratification by family/sample",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "module bridges only",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 118,
       "idea": "World Monitor rend les edges plus sélectifs",
-      "declared_references": "module bridges only",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "foundation→sources→validation→bridges",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 119,
       "idea": "Ordre P0→P5 implémenté par couches",
-      "declared_references": "foundation→sources→validation→bridges",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     },
     {
+      "actual_callers": [],
+      "current_data_availability": "STRUCTURAL_ONLY",
+      "declared_references": "canonical scoreboard + incremental OOS/forward",
+      "evidence_digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "evidence_files": [],
       "id": 120,
       "idea": "Succès = dollars nets prouvés",
-      "declared_references": "canonical scoreboard + incremental OOS/forward",
-      "status": "IMPLEMENTED_BUT_PARTIAL",
+      "implementation_contract": "✅ Implémenté",
       "proof_status": "UNMEASURABLE",
-      "proof_text": "⏳ À prouver par données/OOS/forward"
+      "proof_text": "⏳ À prouver par données/OOS/forward",
+      "reason": "No declared implementation evidence was resolved.",
+      "required_dataset_family": "external_events",
+      "runtime_evidence": [],
+      "status": "MISSING",
+      "target_economic_families": [
+        "copy_vault",
+        "lead_lag",
+        "cross_venue_dislocation"
+      ],
+      "tests": [],
+      "wiring_status": "MISSING"
     }
   ],
+  "registry_digest": "062bf0315fc2161c374d819389491e30cc40176fe919bc0b7621b1e39b06eb4b",
+  "schema_version": "alina.event_intelligence_status.v1",
+  "source": "docs/event-intelligence-120-coverage.md",
   "summary": {
-    "IMPLEMENTED_BUT_PARTIAL": 120
+    "BROKEN": 0,
+    "IMPLEMENTED_AND_WIRED": 0,
+    "IMPLEMENTED_BUT_NOT_WIRED": 0,
+    "IMPLEMENTED_BUT_PARTIAL": 22,
+    "MISSING": 98,
+    "NOT_APPLICABLE": 0
   }
 }
