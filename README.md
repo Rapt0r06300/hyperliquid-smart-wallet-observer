@@ -1,357 +1,163 @@
-# Alina SmartFlow — HyperSmart Research Engine
+# Alina Smart Flow
 
-**Read-only Hyperliquid smart-wallet observer with paper trading simulation & measurable research.**
+**Research engine quantitatif strictement paper/read-only.**
 
-A local-only observation engine for Hyperliquid mainnet. **No real execution ever. Aucune exécution réelle.** Discovers interesting wallets, scores them by edge, and runs paper-only strategies to test profitability assumptions before they reach real money.
+Alina Smart Flow collecte des données réelles, reconstruit des conditions d'exécution réalistes, exécute replays/backtests/OOS/forward paper et mesure l'edge **net après coûts**. Aucun ordre réel ou testnet, aucune clé privée, aucune signature, aucun dépôt/retrait/transfert.
 
----
+## Source de vérité
 
-## 🚀 Quick Start
+Spec canonique unique :
 
-### For Windows (Portable)
+`docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md`
 
-```bash
-# 1. Clone or extract
-cd <project-folder>
+Elle est mise à jour **en place**. Les anciens labels V6.x sont historiques et ne constituent pas des specs concurrentes.
 
-# 2. Launch the bot
-LANCER_HYPERSMART.cmd
-```
+Pour un agent de code, lire en priorité :
 
-The bot starts with 1000 USDT simulated capital and begins collecting read-only data from Hyperliquid. Dashboard runs at:
+1. `SECURITY.md`
+2. `AGENTS.md`
+3. `CLAUDE.md`
+4. la spec canonique
+5. seulement les fichiers nécessaires au bloc courant
 
-```
-http://127.0.0.1:8794/v2
-```
+## Périmètre économique actif
 
-### To Run Backtests & Scenario Search
+Trois familles uniquement :
 
-```bash
-ANALYSER_BACKTESTS_REPLAYS.cmd quick
-# or: full, deep, maximum
-```
+- **Copy-Vault**
+- **Lead-Lag**
+- **Cross-Venue Dislocation**
 
-Results go to `runtime/replay/`.
+`Carry / Funding Carry = DISABLED_BY_SCOPE`.
 
----
+Cible finale : **>= +4.00 USD NET/jour prouvés par famille séparément**, sans compensation. États honnêtes : `PROVEN`, `MORE_DATA`, `UNMEASURABLE`, `KILL`.
 
-## 🎯 Périmètre économique officiel — Active Economic Scope
+## Repositories
 
-The canonical economic scope contains exactly three active paper-only families:
+### Repo principal
 
-- **Copy-Vault** — wallet/vault-copy research and paper simulation.
-- **Lead-Lag** — causal short-horizon lead-lag research.
-- **Cross-Venue Dislocation** — executable cross-venue dislocation research.
+`Rapt0r06300/hyperliquid-smart-wallet-observer` · `main`
 
-**Carry is `DISABLED_BY_SCOPE`**. Historical carry/funding modules and measurements may remain for audit/backward compatibility, but Carry is not an active economic family and must never be promoted by the active scope.
+Il possède :
 
-## 🎯 What It Does
+- runtime actif `src/hl_observer/`
+- logique économique/paper
+- orchestration et contrats de campagne
+- surface opérateur
+- replay/backtest/OOS/forward/PnL proof/scoreboard
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Wallet Discovery** | ✅ Live | Finds top Hyperliquid wallets by PnL & consistency |
-| **Copy-Trading Simulation** | 🔒 Locked | Measures profitability, now **−7.97 bps** out-of-sample |
-| **Funding Arbitrage** | 🟡 Standby | Historical/compatibility surface; Carry remains `DISABLED_BY_SCOPE` |
-| **Cross-Venue Funding** | 🕐 Measuring | Historical measurement surface; active family is Cross-Venue Dislocation |
-| **Liquidation Tracking** | ⏸️ Suspended | Collects clusters, awaits decision logic |
-| **Paper Settlements** | ✅ Fixed | Funding accrual now matches **hourly reality** (not linear interpolation) |
+`hyper_smart_observer/` reste legacy/compatibilité : ne pas y créer une architecture concurrente.
 
----
+### Dataset V2
 
-## 📊 Current Measurements (July 22, 2026)
+`Rapt0r06300/alina-smartflow-datasets-v2` · `main`
 
-- **Carry Funding**: historical measurement only; Carry is `DISABLED_BY_SCOPE`  
-- **Arbitrage**: Mid-price +0.54% → execution price −2.7% (illusion detected)  
-- **Liquidations**: 231 clusters tracked over 31.6h; signal logic pending
+Il possède :
 
-→ See [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) for up-to-date verdicts.
+- actifs Dataset V2 durables
+- manifests/checkpoints/leases de campagnes cloud lourdes
+- publication de données et receipts
+- heavy data plane GitHub-hosted
 
----
+Un même campaign ne doit jamais avoir deux vérités mutables concurrentes.
 
-## 🛡️ Security — The One Line Red
+## Phase Orchestrator
 
-**GOLDEN RULE: Read-only always. Paper only. No real execution.**
+Le contrat canonique utilise :
 
-### Forbidden ❌
-- Mainnet order execution  
-- Private keys, seeds, signatures  
-- Real deposit/withdrawal  
-- Testnet executor (active)  
-- LLM in hot decision path  
-- Fake PnL presented as real
+- `IDLE` — aucun nouveau travail lourd
+- `COLLECT` — collecte uniquement
+- `ANALYZE` — gel de la collecte puis analyse
 
-### Allowed ✅
-- Public scraping (proxy rotation OK)  
-- Hyperliquid `/info` REST read-only  
-- Hyperliquid WebSocket read-only  
-- CSV/JSON/TXT imports  
-- SQLite local storage  
-- Paper simulation & backtesting  
-- Local dashboard (read-only)  
-- Detailed logs to `logs/logs a envoyer/`
+Pipeline cible :
 
-Run security checks anytime:
+`DRAIN -> QUALITY -> REPLAY -> BACKTEST -> OOS -> FORWARD_PAPER -> PNL_PROOF -> SCOREBOARD -> DONE`
 
-```powershell
-python -m pytest -q tests/test_hypersmart_*.py
-```
+Le HEAD du 27 septembre 2026 contient la fondation `src/hl_observer/control_plane/`, notamment :
 
----
+- `phase_state.py`
+- `phase_controller.py`
+- `phase_cli.py`
+- `resumable_campaign.py`
+- `dispatch_receipt.py`
+- `campaign_adapters.py`
+- `module_pnl_proof.py`
 
-## 🏗️ Architecture
+La présence de ces fichiers ne ferme pas automatiquement les `OPEN-*`/`WKR-*`. La spec reste l'autorité du travail restant.
 
-```
-src/hl_observer/                    # Active runtime: CLI, UI, collection, edge, paper, backtests
-├── strategies/
-│   └── active_scope.py              # ← Economic authority (Scope V2-20260729)
-├── paper_trading/
-│   ├── core_decision.py
-│   └── funding_settlement.py        # ← Hourly accrual (fixed 21/07)
-├── collection/
-│   └── hyperliquid_client.py        # ← Read-only API layer
-└── backtesting/
-    └── scenario_search.py           # ← Lab: anti-overfit research engine
+## Cloud et PC utilisateur
 
-hyper_smart_observer/               # Legacy (dYdX v4): do not extend
-```
+Toute automatisation cloud Alina doit être **GitHub-hosted uniquement**.
 
-**Key modules:**
+Interdit depuis ChatGPT Work/GitHub :
 
-1. **Job A — Discovery**: Collect public wallets, score on PnL/consistency/drawdown, build shortlist.
-2. **Job B — Simulation**: Read leader moves, compute edge, emit paper trades (never real).
-3. **Job C — Dashboard**: Display PnL, positions, decisions, logs, health status.
+- `runs-on: self-hosted`
+- réveiller ou utiliser le PC utilisateur
+- SSH/tunnel/agent local vers le PC
+- dépendre d'un fichier/service/processus disponible uniquement sur le PC
 
----
+Un chemin local n'est valable que si l'utilisateur le lance explicitement. Une mission Work Cloud ne doit jamais en dépendre.
 
-## 🔄 Two Launchers, Two Jobs
+## Données et preuve économique
 
-### 1. Runtime (Daily Use)
+Un workflow vert n'est pas une preuve de qualité.
 
-```cmd
-LANCER_HYPERSMART.cmd
-```
+Selon le chemin économique, Alina doit préserver ce qui est nécessaire : timestamps exchange/receive/monotonic, clock offset/RTT/uncertainty, BBO/L2/trades, snapshot/delta, séquences/gaps/duplicates, fee provenance, tick/lot/min-notional/multiplier, depth/VWAP/capacity/quote age, manifests et checksums.
 
-- Starts CORE profile only (low resource)  
-- Persistent poller + read-only leader collection  
-- Reuses existing collectors  
-- Default: `http://127.0.0.1:8794/v2`  
-- Paper capital resets to 1000 USDT on launch
+La preuve économique doit prendre en compte les coûts et contraintes pertinents : fees, spread, slippage, latency, partial/missed fills, liquidity, capacity, funding pertinent, exits, drawdown, causality, no-lookahead, OOS, forward et effective-N.
 
-### 2. Research (Massive Backtests)
+**Missing != 0. Unknown != healthy. Backtest positif != preuve économique.**
 
-```cmd
-ANALYSER_BACKTESTS_REPLAYS.cmd
-```
+## Sources prioritaires
 
-- Local-only, resource-capped  
-- Searches ~600 parameter combinations  
-- Produces consolidated report: `RESULTATS_RECHERCHE.md`  
-- Never auto-starts with the bot  
-- Ctrl-C = **pause without loss** (all judgments saved, resume automatic)
+- Hyperliquid
+- Binance
+- Bybit
+- OKX
+- Gate
+- Bitget
 
-Full docs: [`docs/LANCEURS_HYPERSMART.md`](docs/LANCEURS_HYPERSMART.md)
+CCXT reste discovery-only lorsqu'aucun chemin natif d'exécution/replay n'est explicitement prévu.
 
----
+## Agents et quota minimal
 
-## 📋 Doctrine
+- un seul agent principal par défaut
+- pas de swarm/subagents/multi-agent sauf demande explicite
+- lire la spec une fois puis travailler par sections ciblées
+- préférer grep/parsers/scripts/calculs/tests déterministes aux appels modèle
+- éviter les rapports intermédiaires
+- réutiliser l'existant avant de créer du nouveau
+- après deux échecs identiques, changer de méthode
 
-```
-OBSERVE FIRST
-SCORE SECOND
-SIMULATE LOCALLY THIRD
+Si la mission demande explicitement **implémentation totale d'abord, validation globale ensuite**, les tests peuvent être écrits/modifiés pendant l'implémentation mais exécutés en phase finale. Les exigences de preuve et de sécurité restent obligatoires avant fermeture globale.
 
-READ ONLY
-PAPER ONLY
-SIMULATION ONLY
+## Sécurité
 
-DENY BY DEFAULT
-SCORE IS NOT SIGNAL
-PAPER TRADE IS NOT ORDER
+Voir `SECURITY.md`.
 
-HISTORICAL PnL IS NOT FUTURE PROFIT
-NO GUARANTEED PROFIT
-```
+Résumé non négociable :
 
-Every decision is logged and explainable. Every refusal is logged and explainable. No chart is synthetic. No promise is made.
+- 0 ordre réel
+- 0 ordre testnet
+- 0 `/exchange` opérationnel
+- 0 clé privée/seed
+- 0 signature
+- 0 dépôt/retrait/transfert
+- paper/read-only + fail-closed
 
----
+## Documents clés
 
-## 📁 Portable Mode (Windows 10/11 x64)
+| Document | Rôle |
+|---|---|
+| `docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md` | Spec canonique et backlog normatif |
+| `AGENTS.md` | Instructions compactes pour agents |
+| `CLAUDE.md` | Compatibilité pour agents lisant CLAUDE.md |
+| `SECURITY.md` | Invariants no-real-trade |
+| `src/hl_observer/` | Runtime actif |
+| `src/hl_observer/control_plane/` | Phase/campaign control plane |
 
-The **entire folder** is portable. Move to a new PC without reinstalling Python:
+## Principe directeur
 
-1. Stop cleanly: `LANCER_HYPERSMART.cmd stop`
-2. Copy the full folder (including hidden files)
-3. Paste on new PC to short path (e.g., `C:\HyperSmart`)
-4. Double-click `LANCER_HYPERSMART.cmd`
+**Mesurer l'edge réel sans se mentir.**
 
-Embedded runtimes (`tools/python`, `tools/git`) follow the folder. All paths are relative. On first launch post-move, only machine identity and expired locks regenerate.
-
-**Maintenance:**
-
-```bash
-LANCER_HYPERSMART.cmd portable-check
-LANCER_HYPERSMART.cmd portable-install
-LANCER_HYPERSMART.cmd portable-build
-```
-
----
-
-## 📈 Measurement & Reporting
-
-### Morning Report
-
-Auto-generated every 6h: `rapports/RAPPORT_DU_JOUR.md`
-
-- PnL 24h by strategy  
-- Position economics ($/day, amortization)  
-- Collector health  
-- Ledger lessons  
-- Weekly refusal PnL  
-- Today's TODO list
-
-### The Lab (Scenario Search)
-
-[`RECHERCHE-SCENARIO-REPLAY.cmd`] runs **4 phases**:
-
-1. **Gather**: 438k+ candidates, 355k marks  
-2. **Audit**: Data quality gates  
-3. **Search**: ~600 combinations × 4 sub-populations (multi-fidelity, CPCV folds)  
-4. **Report**: Per-module recommendation in French + JSON block
-
-Anti-lie gates (never relaxed):
-- Two disjoint time halves with embargo  
-- Costs stressed ×1.5  
-- Neighbor plateau  
-- ≥30 trades per half  
-
-**Classifications:**
-- **OR** = net > 0 on ≥3/4 epochs → promoted  
-- **ARGENT** = 1–2 epochs positive  
-
-Output: `runtime/replay/RESULTATS_RECHERCHE.md`, `PEPITES.md`, `QUALITE_DONNEES.md`
-
----
-
-## 🧪 Testing
-
-### Quick Smoke Test
-
-```powershell
-python -m pytest -q tests/test_hypersmart_*.py
-```
-
-### Full Suite
-
-```powershell
-python -m pytest -q
-```
-
-Covers:
-- No dYdX import in Hyperliquid runtime (isolation)  
-- No real execution anywhere  
-- Paper capital tracking  
-- Edge calculation accuracy  
-- Data freshness gates  
-
----
-
-## 📚 Key Documents
-
-| File | Purpose |
-|------|---------|
-| [`OBJECTIF.md`](OBJECTIF.md) | Condensed mandate (1 page) |
-| [`CLAUDE.md`](CLAUDE.md) | Agent rules & code standards |
-| [`AGENTS.md`](AGENTS.md) | Tools, guardrails, decision instruments |
-| [`SECURITY.md`](SECURITY.md) | No-real-trade proofs |
-| [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) | **↑ Source of truth for current status** |
-| [`docs/LANCEURS_HYPERSMART.md`](docs/LANCEURS_HYPERSMART.md) | Launcher guide |
-| [`outils de test/README.md`](outils%20de%20test/README.md) | Test tools index (92 closed inquiries) |
-
----
-
-## 🌟 The Why
-
-One true north: **measurable edge without lying**.
-
-- ✅ Measure everything on real data  
-- ✅ Refuse what you can't prove  
-- ✅ Explain every refusal  
-- ✅ No synthetic charts  
-- ✅ No promised gains  
-- ✅ No real money at risk  
-
-A positive PnL is not guaranteed. Losses are possible. The engine exists to **reduce bad decisions**, filter signals better, and explain losses—never to deceive.
-
----
-
-## 💬 Logs to Send
-
-Share diagnostic logs here:
-
-```
-logs/logs a envoyer/
-```
-
-Should explain:
-
-- What opportunity was observed  
-- Why the bot refused/accepted in paper  
-- What data was missing or stale  
-- What edge and costs were calculated  
-- How paper PnL evolved  
-
-These improve the engine without inventing gains.
-
----
-
-## 🏠 Project Name Evolution
-
-**HyperSmart** → **Alina SmartFlow — HyperSmart Research Engine**
-
-The name shift preserves technical identity while reflecting evolution:
-- **Alina** = software name  
-- **SmartFlow** = flow analysis (signals, data, streams at core)
-
-Historic names (`HYPERSMART_*`, scripts, modules) stay for backward compatibility.
-
----
-
-## ⚡ Common Commands
-
-```powershell
-# Start the bot
-LANCER_HYPERSMART.cmd
-
-# Run research lab
-ANALYSER_BACKTESTS_REPLAYS.cmd quick
-
-# CLI help
-python -m hl_observer --help
-
-# Broad public market discovery (CCXT metadata only)
-python -m hl_observer discover-ccxt-universe
-
-# Start UI only
-python -m hl_observer ui
-
-# Verify safety
-python -m pytest -q tests/test_hypersmart_*.py
-```
-
-### CCXT Universe Scout
-
-CCXT sert uniquement à découvrir les marchés publics des venues configurées dans
-`ccxt_universe`. Il produit `data/ccxt_universe.json`, le coverage, les différences
-depuis le snapshot précédent et les candidats multi-venues. `NATIVE_ELIGIBLE` indique
-qu’un collecteur natif Alina existe pour la venue (Hyperliquid, Binance, Bybit ou OKX) ;
-les autres marchés restent `DISCOVERY_ONLY` et ne vont jamais dans le hot path
-Cross-Venue/Lead-Lag. Aucune clé API n’est nécessaire.
-
----
-
-## 📝 License & Support
-
-Questions? Check [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) first—it's the single source of truth for live status.
-
-Contributions should follow [`CLAUDE.md`](CLAUDE.md) (rules) and [`AGENTS.md`](AGENTS.md) (tools/gates).
+Le but n'est pas seulement de faire tourner du code, mais d'obtenir des résultats économiquement reproductibles avec données fiables, coûts réalistes, replays/backtests rigoureux, OOS/forward et validation fail-closed.
