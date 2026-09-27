@@ -244,6 +244,8 @@ class PhaseController:
             raise ValueError(f"Invalid current analysis stage: {current}")
         if ordered.index(stage) < ordered.index(current):
             raise ValueError(f"Analysis stage regression: {current}->{stage}")
+        if ordered.index(stage) > ordered.index(current) + 1:
+            raise ValueError(f"Analysis stage skip is forbidden: {current}->{stage}")
         new_state = AlinaPhaseState(
             schema_version=self._state.schema_version,
             phase="ANALYZE",
