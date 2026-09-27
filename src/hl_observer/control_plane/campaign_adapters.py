@@ -100,6 +100,15 @@ def _selection_args(ctx: AdapterContext) -> list[str]:
         cutoff = _cutoff_ts_ms(ctx.partition.get("collection_cutoff_at_utc"))
         if cutoff is not None:
             args.extend(["--end-ts-ms", str(cutoff)])
+    for key, flag in (
+        ("dataset_selection_id", "--dataset-selection-id"),
+        ("collection_cutoff_at_utc", "--collection-cutoff-at-utc"),
+    ):
+        value = ctx.partition.get(key)
+        if value:
+            args.extend([flag, str(value)])
+    if ctx.partition.get("source_collection_epoch") is not None:
+        args.extend(["--source-collection-epoch", str(int(ctx.partition["source_collection_epoch"]))])
     return args
 
 
