@@ -11,7 +11,7 @@ from hl_observer.strategies.active_scope import (
     strategy_can_materialize,
 )
 
-MODULES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+MODULES = ("copy_vault", "lead_lag", "cross_venue_dislocation")
 
 
 @dataclass(frozen=True)
@@ -29,10 +29,8 @@ class ModulePnl:
 
 
 def _canonical_module(module: str) -> str:
-    value = canonical_strategy_family(module)
-    if value == "cross_venue_dislocation":
-        return "cross_venue_dislocation_v2"
-    return value
+    # Versioned aliases are inputs only; certificates use one public family name.
+    return canonical_strategy_family(module)
 
 
 def prove_module(
