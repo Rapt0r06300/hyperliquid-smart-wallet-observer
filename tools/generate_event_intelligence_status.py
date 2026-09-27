@@ -105,7 +105,7 @@ def main() -> int:
             "runtime_evidence": callers,
             "wiring_status": status,
             "coverage_state": (
-                "UNMEASURABLE" if callers else ("WIRED" if files else "REGISTERED")
+                "UNMEASURABLE" if callers and ("À prouver" in proof or "⏳" in proof) else ("WIRED" if callers else "REGISTERED")
             ),
             "status": status,
             "proof_status": proof_status,
