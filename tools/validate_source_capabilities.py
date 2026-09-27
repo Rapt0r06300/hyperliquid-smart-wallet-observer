@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--matrix", default="docs/source-capability-matrix.json")
     args = parser.parse_args()
     matrix = json.loads(Path(args.matrix).read_text(encoding="utf-8"))
-    if matrix.get("schema_version") != "alina.source_capability_matrix.v2":
+    if matrix.get("schema_version") not in {"alina.source_capability_matrix.v2", "alina.source_capability_matrix.v3"}:
         raise SystemExit("unsupported source capability matrix schema")
     digest = matrix.get("matrix_digest")
     body = dict(matrix)
