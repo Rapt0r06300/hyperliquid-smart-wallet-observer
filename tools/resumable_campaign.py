@@ -100,6 +100,14 @@ def main() -> int:
         if path.exists():
             print(sha256_json(json.loads(path.read_text(encoding="utf-8"))))
             return 0
+        if args.creation_phase is None or args.phase_epoch is None:
+            raise SystemExit("new campaigns require --creation-phase and --phase-epoch")
+        if args.creation_phase == "ANALYZE" and (
+            args.source_collection_epoch is None
+            or not args.collection_cutoff_at_utc
+            or not args.dataset_selection_id
+        ):
+            raise SystemExit("ANALYZE campaigns require source epoch, cutoff and dataset selection")
         now = datetime.now(timezone.utc)
         manifest = CampaignManifest(
             args.campaign_id or path.stem,
