@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -574,10 +575,10 @@ def _event_net_pnl(row: dict[str, Any]) -> float | None:
         return 0.0
     if event_type == "PAPER_OPEN":
         fee = _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
-        return -fee if fee is not None else 0.0
+        return -fee if fee is not None else None
     if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
         pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
-        return pnl if pnl is not None else 0.0
+        return pnl if pnl is not None else None
     return _to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl"))
 
 
@@ -601,9 +602,10 @@ def _to_str(value: Any) -> str | None:
 
 def _to_float(value: Any) -> float | None:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
+    return parsed if math.isfinite(parsed) else None
 
 
 def _to_int(value: Any) -> int | None:
