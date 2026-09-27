@@ -67,6 +67,17 @@ def _workspace(ctx: AdapterContext) -> Path:
     return Path.cwd() / "campaign-workspaces" / ctx.campaign_id / ctx.unit_id
 
 
+def _cutoff_ts_ms(value: Any) -> int | None:
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return int(parsed.timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def _selection_args(ctx: AdapterContext) -> list[str]:
     args: list[str] = []
     for key, flag in (
@@ -85,6 +96,10 @@ def _selection_args(ctx: AdapterContext) -> list[str]:
         value = ctx.partition.get(key)
         if value is not None:
             args.extend([flag, str(int(value))])
+    if ctx.partition.get("end_ts_ms") is None:
+        cutoff = _cutoff_ts_ms(ctx.partition.get("collection_cutoff_at_utc"))
+        if cutoff is not None:
+            args.extend(["--end-ts-ms", str(cutoff)])
     return args
 
 
