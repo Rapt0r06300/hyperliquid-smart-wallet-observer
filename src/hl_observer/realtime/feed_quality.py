@@ -402,11 +402,13 @@ class FeedQualityGate:
             self._unresolved_gap = False
             self._coherent_events = 0
         for index, event in enumerate(events):
-            exchange_ts = (
-                event.exchange_ts_ms
-                if event.exchange_ts_ms is not None
-                else int(received_ts_ms)
-            )
+            if event.exchange_ts_ms is None:
+                self.total_events += 1
+                snapshots.append(
+                    self._reject(["MISSING_EXCHANGE_TIMESTAMP"], received_ts_ms)
+                )
+                continue
+            exchange_ts = int(event.exchange_ts_ms)
             reasons = self._start_observation(
                 exchange_ts_ms=exchange_ts,
                 received_ts_ms=received_ts_ms,
@@ -704,6 +706,7 @@ class FeedQualityGate:
     def _contains_hard_rejection(reasons: Sequence[str]) -> bool:
         hard = {
             "DUPLICATE_EVENT",
+            "MISSING_EXCHANGE_TIMESTAMP",
             "NON_MONOTONIC_EXCHANGE_TIMESTAMP",
             "NON_MONOTONIC_RECEIVE_TIMESTAMP",
             "NON_MONOTONIC_SEQUENCE",
