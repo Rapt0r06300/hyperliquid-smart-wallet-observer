@@ -168,6 +168,30 @@ def upload_file(*, repository: str, tag: str, path: Path) -> None:
         time.sleep(min(20.0, float(2 ** (attempt - 1))))
 
 
+def assert_existing_asset_compatible(
+    manifest: Mapping[str, Any],
+    remote: Mapping[str, Any],
+) -> None:
+    """Reject an identity collision when a release already contains another digest."""
+    expected_sha = str(manifest.get("sha256") or "").lower()
+    expected_size = int(manifest.get("bytes") or 0)
+    remote_digest = str(remote.get("digest") or "")
+    remote_sha = (
+        remote_digest.split(":", 1)[1].lower()
+        if remote_digest.lower().startswith("sha256:")
+        else ""
+    )
+    remote_size = int(remote.get("size") or 0)
+    if len(expected_sha) != 64 or expected_size <= 0:
+        raise PublishError("Manifest lacks immutable bytes/sha256 identity.")
+    if remote_size != expected_size or remote_sha != expected_sha:
+        raise PublishError(
+            "release asset identity conflict: "
+            f"{manifest.get('release_asset')} already exists with a different "
+            "size or digest"
+        )
+
+
 def publish_bundle(
     bundle_root: str | Path,
     *,
@@ -219,6 +243,16 @@ def publish_bundle(
     release_id = int(release.get("id") or 0)
     if release_id <= 0:
         raise PublishError("Release id is missing.")
+
+    # A release tag plus asset name is an immutable publication identity.
+    # Repeating an identical publication is idempotent; clobbering a different
+    # digest is a hard conflict and must fail closed.
+    existing_assets = release_asset_map(release)
+    for manifest in manifests:
+        asset_name = str(manifest.get("release_asset") or "")
+        existing = existing_assets.get(asset_name)
+        if existing is not None:
+            assert_existing_asset_compatible(manifest, existing)
 
     # Upload immutable data assets first.
     for manifest in manifests:
