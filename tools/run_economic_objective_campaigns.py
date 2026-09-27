@@ -409,6 +409,8 @@ def run_campaigns(
             "campaign_count": len(campaigns),
             "scoreboards_path": str(scoreboards_path),
             "report_path": str(report_path),
+            "stage_receipt_path": str(stage_receipt_path),
+            "stage_receipt_digest": stage_receipt["artifact_digest"],
         },
     }
     copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
@@ -829,6 +831,40 @@ def run_campaigns(
         "lead_lag": lead_raw,
         "cross_venue_dislocation_v2": cross_raw,
     }
+    stage_receipt = {
+        "schema": "alina.analysis_stage_artifact.v1",
+        "analysis_stage": analysis_stage,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+        "input_selection": {
+            "dataset_workspace": dataset_mode,
+            "dataset_source_manifest": (
+                str(dataset_manifest_path) if dataset_manifest_path is not None else None
+            ),
+            "source_summary": dataset_sources,
+        },
+        "campaigns": [
+            {
+                "family": row.get("family"),
+                "analysis_stage": row.get("analysis_stage"),
+                "objective_status": row.get("objective_status"),
+                "daily_evidence": row.get("daily_evidence"),
+            }
+            for row in campaigns
+        ],
+        "scoreboard_artifact": str(scoreboards_path),
+        "report_artifact": str(report_path),
+    }
+    stage_receipt_path = (
+        root / REPORT_DIR / "analysis_stages" / f"{analysis_stage.lower()}.json"
+    )
+    stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
+    stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)
+    stage_receipt_path.write_text(
+        json.dumps(stage_receipt, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
     preliminary_plan = build_collection_plan(campaigns, raw_reports)
     collector_state = inspect_bounded_collectors(root)
     if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
