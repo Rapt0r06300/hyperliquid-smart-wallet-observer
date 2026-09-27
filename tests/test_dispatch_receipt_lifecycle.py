@@ -48,3 +48,13 @@ def test_failed_dispatch_requires_failure_code():
 def test_terminal_dispatch_cannot_look_running():
     with pytest.raises(ValueError, match="terminal_at_utc"):
         validate_dispatch_receipt(_base(status="RUNNING", terminal_at_utc="2026-09-27T00:01:00Z"))
+
+
+def test_v1_complete_receipt_upgrades_to_terminal_state():
+    raw = _base(terminal_evidence_digest="c" * 64).to_dict()
+    raw.pop("status")
+    raw.pop("terminal_at_utc")
+    upgraded = DispatchReceipt.from_dict(raw)
+    validate_dispatch_receipt(upgraded)
+    assert upgraded.status == "COMPLETE"
+    assert upgraded.terminal_at_utc == upgraded.dispatched_at_utc
