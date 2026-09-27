@@ -8,6 +8,7 @@ on:
     paths:
       - "docs/event-intelligence-120-coverage.md"
       - "tools/generate_event_intelligence_status.py"
+      - "tools/validate_event_intelligence_status.py"
 permissions:
   contents: write
 concurrency:
@@ -21,6 +22,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Generate wiring registry
         run: python tools/generate_event_intelligence_status.py
+      - name: Validate wiring registry
+        run: python tools/validate_event_intelligence_status.py
       - name: Publish registry
         run: |
           set -euo pipefail
