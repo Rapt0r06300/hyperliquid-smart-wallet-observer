@@ -15,6 +15,9 @@ class ProofGate:
 
 GATES = (
     ProofGate("PROVENANCE", "dataset_v2", ("release_manifest", "asset_sha256"), "validate_publication_receipts", "PROVENANCE_INVALID", ("QUALITY", "REPLAY", "BACKTEST")),
+    ProofGate("STORAGE", "dataset_v2", ("compressed_bytes", "uncompressed_bytes_receipt", "storage_coverage"), "validate_dataset_health_receipt", "STORAGE_COVERAGE_INCOMPLETE", ("QUALITY", "REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
+    ProofGate("CROSS_REPO_PUBLICATION", "dataset_v2", ("publication_receipt", "main_alina_head", "dataset_head", "manifest_sha256"), "reconcile_publication_consistency", "CROSS_REPO_IDENTITY_INVALID", ("QUALITY", "REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
+    ProofGate("SECURITY", "alina", ("paper_only", "read_only", "real_execution"), "validate_closure_receipt", "EXECUTION_SURFACE_INVALID", ("DONE",)),
     ProofGate("QUALITY", "dataset_v2", ("manifest", "gap_counts", "sequence_state"), "check_dataset_quality", "QUALITY_NOT_SAFE", ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
     ProofGate("REPLAY_COMPATIBLE", "dataset_v2", ("safe_manifest", "replay_compatibility_receipt"), "enforce_safe_replay_invariant", "REPLAY_COMPATIBILITY_NOT_PROVEN", ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER")),
     ProofGate("REPLAY", "alina", ("frozen_selection", "replay_receipt"), "run_economic_objective_campaigns", "REPLAY_NOT_DETERMINISTIC", ("BACKTEST", "OOS", "FORWARD_PAPER")),
