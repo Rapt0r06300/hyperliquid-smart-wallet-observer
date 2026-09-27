@@ -1201,7 +1201,7 @@ def main() -> int:
         plan_bytes = plan_path.read_bytes()
         (output_root / "collection_plan.json").write_bytes(plan_bytes)
         (output_root / "collection_plan.sha256").write_text(
-            hashlib.sha256(plan_bytes).hexdigest() + "\\n",
+            hashlib.sha256(plan_bytes).hexdigest() + "\n",
             encoding="utf-8",
         )
     if plan_rows is not None:
