@@ -1,7 +1,7 @@
 {
-  "matrix_digest": "e058df8f124465505cf0d9e28b8b50b222f97a25b40dc55d65e1fdb3a215eafa",
-  "policy": "FILE_PRESENT is not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
-  "schema_version": "alina.source_capability_matrix.v1",
+  "matrix_digest": "8166eac00ebb20af6d38f0237e9e4614c2469c1cb8f809876950ec2be465d006",
+  "policy": "FILE_PRESENT and registry.wired are not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
+  "schema_version": "alina.source_capability_matrix.v2",
   "source_root": "src/hl_observer",
   "venues": [
     {
@@ -259,6 +259,11 @@
         "src/hl_observer/experimental/signaux.py",
         "src/hl_observer/explorer/__init__.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "hyperliquid"
     },
@@ -512,8 +517,15 @@
         "src/hl_observer/runtime/lead_lag_event_runtime.py",
         "src/hl_observer/security/dependances.py",
         "src/hl_observer/simulation/lead_lag_campaign_adapter.py",
-        "src/hl_observer/simulation/lead_lag_measured_replay.py"
+        "src/hl_observer/simulation/lead_lag_measured_replay.py",
+        "src/hl_observer/venues/binance.py",
+        "src/hl_observer/venues/registre_venues.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "binance"
     },
@@ -681,6 +693,11 @@
         "src/hl_observer/venues/bybit.py",
         "src/hl_observer/venues/registre_venues.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "bybit"
     },
@@ -821,6 +838,11 @@
         "src/hl_observer/venues/okx.py",
         "src/hl_observer/venues/registre_venues.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "okx"
     },
@@ -1034,7 +1056,6 @@
         "src/hl_observer/collection/proxy_pool.py",
         "src/hl_observer/collection/trade_reconciliation.py",
         "src/hl_observer/config/settings.py",
-        "src/hl_observer/control_plane/module_pnl_proof.py",
         "src/hl_observer/copy_fidelity/tracking_error.py",
         "src/hl_observer/copy_vault/leader_available_margin_gate.py",
         "src/hl_observer/copy_vault/liquidation_distance_gate.py",
@@ -1067,8 +1088,14 @@
         "src/hl_observer/datasets/v2_export.py",
         "src/hl_observer/decision_engine/local_engine.py",
         "src/hl_observer/decision_engine/noyau_unique.py",
-        "src/hl_observer/edge/cost_validation.py"
+        "src/hl_observer/edge/cost_validation.py",
+        "src/hl_observer/edge/empirical_edge.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "gate"
     },
@@ -1149,6 +1176,11 @@
         "src/hl_observer/venues/bitget.py",
         "src/hl_observer/venues/registre_venues.py"
       ],
+      "registry": {
+        "path": "src/hl_observer/venues/registre_venues.py",
+        "policy": "registry wiring is structural evidence only",
+        "wired": true
+      },
       "status": "FILE_PRESENT",
       "venue": "bitget"
     }
