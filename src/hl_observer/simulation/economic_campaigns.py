@@ -7,6 +7,7 @@ measurements remain ``None`` and therefore fail the shared +4 USD objective.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -33,7 +34,30 @@ from .economic_objective import (
 )
 
 SCHEMA_VERSION = "hypersmart.economic_campaign_evidence.v1"
+ANTI_LOOKAHEAD_SCHEMA = "lead_lag.anti_lookahead_receipt.v1"
 REPORT_DIR = Path("runtime") / "reports" / "economic_campaigns"
+
+
+def _valid_anti_lookahead_receipt(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if value.get("schema_version") != ANTI_LOOKAHEAD_SCHEMA:
+        return False
+    if value.get("method") != "ONLINE_PRIOR_ALIGNED_RETURNS_ONLY":
+        return False
+    if value.get("future_exit_excluded_from_entry") is not True:
+        return False
+    if value.get("paper_read_only") is not True or value.get("real_execution") is not False:
+        return False
+    digest = value.get("receipt_sha256")
+    if not isinstance(digest, str) or len(digest) != 64:
+        return False
+    material = dict(value)
+    material.pop("receipt_sha256", None)
+    expected = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return digest == expected
 
 
 def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -121,6 +145,21 @@ def _attach_economic_contract(row: dict[str, Any], payload: Mapping[str, Any]) -
 
 
 def _finish(row: dict[str, Any]) -> dict[str, Any]:
+    for segment_name in ("oos", "forward"):
+        segment = row.get(segment_name)
+        if not isinstance(segment, Mapping):
+            continue
+        receipt = segment.get("anti_lookahead_receipt")
+        if not _valid_anti_lookahead_receipt(receipt):
+            segment_copy = dict(segment)
+            segment_copy["no_lookahead"] = False
+            segment_copy["anti_lookahead_receipt_valid"] = False
+            row[segment_name] = segment_copy
+        else:
+            segment_copy = dict(segment)
+            segment_copy["no_lookahead"] = True
+            segment_copy["anti_lookahead_receipt_valid"] = True
+            row[segment_name] = segment_copy
     binding = audit_economic_contract_receipt(
         row.get("economic_contract"),
         expected_family=row.get("family"),
