@@ -77,8 +77,6 @@ async def fetch_hyperliquid_funding_settlements(
             if ts < start or ts > end:
                 rejected_rows += 1
                 continue
-            if ts < start or ts > end:
-                continue
             if not (-1.0 < funding < 1.0):
                 rejected_rows += 1
                 continue
