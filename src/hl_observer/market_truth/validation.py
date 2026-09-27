@@ -85,11 +85,12 @@ def evaluate_research_candidate(
     )
     backtest_rows = list(backtest_trades)
     forward_rows = list(forward_trades)
-    if not causal_events:
+    causal_event_rows = list(causal_events)
+    if not causal_event_rows:
         quality_violations += 1
     backtest_report = run_validation_gates(
         backtest_rows,
-        events=list(causal_events),
+        events=causal_event_rows,
         min_trades=min_backtest_trades,
         min_pf=min_backtest_pf,
         min_oos_pf=min_oos_pf,
