@@ -1,64 +1,209 @@
-# AGENTS.md — Alina SmartFlow · Discovery V3.2
+# AGENTS.md — Alina Smart Flow
 
-> Routeur compact chargé automatiquement. Les détails restent lazy-load pour économiser au maximum le quota modèle.
+Dernière mise à jour : **2026-09-27**.
 
-Dernière mise à jour : 2026-09-11
-Runtime actif : `src/hl_observer/`. Repère des résultats déjà tranchés par la mesure : `docs/LOIS_MESUREES.md`.
+Ce fichier est volontairement compact : il route l'agent vers la spec canonique et évite de gaspiller du contexte.
 
 ## Autorité
 
-Priorité : `SECURITY.md` > `docs/HYPERSMART_CONSTITUTION.md` > code/tests/gates/manifests du HEAD exact > ce fichier > docs ciblées. Un texte historique ne peut jamais assouplir sécurité, provenance ou gate machine.
+Ordre de priorité :
+
+1. `SECURITY.md`
+2. `docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md`
+3. code + tests + workflows + manifests + receipts du **HEAD courant**
+4. ce fichier
+5. `CLAUDE.md` et documentation ciblée
+
+Les anciens README, rapports, addenda et noms de versions ne peuvent pas contredire la spec canonique ou le HEAD réel.
+
+## Repositories
+
+Code principal :
+
+- `Rapt0r06300/hyperliquid-smart-wallet-observer`
+- branche source de vérité : `main`
+- runtime actif : `src/hl_observer/`
+
+Dataset/data plane :
+
+- `Rapt0r06300/alina-smartflow-datasets-v2`
+- branche source de vérité : `main`
+
+Dataset V2 possède l'état durable des campagnes cloud lourdes. Le repo principal possède l'intention opérateur, l'orchestration, la logique économique et la surface utilisateur. Ne jamais créer deux copies mutables concurrentes d'un même état de campagne.
 
 ## Mission
 
-Familles canoniques : `copy_vault`, `lead_lag`, `cross_venue_dislocation_v2`.
-Cible finale : **>= +4.00 USD NET/jour PROUVÉS par famille, séparément**, sur le même SHA certifié, sans compensation. Autorité finale : `python tools/run_daily_economic_certification.py .`.
+Familles économiques actives uniquement :
 
-Sécurité absolue : `READ-ONLY-MAINNET · LOCAL-DECISION · PAPER-ONLY · DENY-BY-DEFAULT`.
-Interdits : ordre réel/testnet, `/exchange` réel, signature, clé/seed, dépôt/retrait, argent réel. Donnée stale/incertaine/incomplète => fail-closed.
+- `copy_vault`
+- `lead_lag`
+- `cross_venue_dislocation`
 
-## Reprise V3.2 — quota maximalement préservé
+`carry/funding_carry = DISABLED_BY_SCOPE`.
 
-**Première commande par défaut :**
-`python tools/codex_research_context.py --auto`
+Cible finale : **>= +4.00 USD NET/jour PROUVÉS par famille, séparément**, sans compensation et seulement après coûts, capacité, causalité, OOS/forward et qualité de données.
 
-Le JSON compact produit est la source normale de reprise : HEAD, famille, ledger, `PROCESS_MEMORY`, veto motifs, trial accounting, état semantic discovery, surfaces disponibles et prochaines actions.
+États honnêtes autorisés : `PROVEN`, `MORE_DATA`, `UNMEASURABLE`, `KILL`.
 
-Après ce pack :
-1. lire uniquement le code/fichier compact nécessaire à la prochaine décision ;
-2. charger `docs/CODEX_GOAL_RUNBOOK.md` ou `$alina-quant-research` seulement quand une vraie décision Discovery/TOURNAMENT/EXPLOIT/PIVOT l'exige ;
-3. lire `.agents/skills/alina-quant-research/references/discovery-v32.md` uniquement en Discovery/champion-challenger ;
-4. ne lire les gros résultats qu'après leurs `RESULT_SUMMARY.json` / `BATCH_SUMMARY.json`.
+## Sécurité absolue
 
-**Interdit comme reprise normale :** rescanner l'**historique Git complet**, relire les **775** optimisations scellées, charger de gros logs/raw trials, ou parcourir tout le dépôt pour reconstruire l'état. Si HEAD a avancé : seulement le **delta Git** pertinent depuis `base_sha`.
+Alina est **PAPER / READ-ONLY / FAIL-CLOSED**.
 
-## Modèle décide, PC calcule
+Interdit :
 
-Objectif de cadence : **1 décision modèle -> gros batch local -> résumé compact -> 1 décision modèle**.
-Tout calcul déterministe faisable localement reste local : Python, numpy/scipy, pytest, replays, backtests, bootstrap, permutations, Monte-Carlo, optimisation et agrégation. CPU-first ; multiprocessing/threads/batchs permis. GPU seulement si un besoin mesuré le justifie.
+- ordre réel ou testnet
+- `/exchange` opérationnel
+- clé privée, seed, mnemonic
+- signature
+- dépôt/retrait/transfert
+- activation d'un chemin d'exécution réelle
 
-`python tools/codex_semantic_discovery.py --family <family> --pool-size 2000 --shortlist 12`
-peut générer un grand pool local, filtrer invalides/doublons/vetos et n'exposer au modèle qu'une shortlist. `PROCESS_MEMORY.jsonl` et `HYPOTHESIS_LEDGER.jsonl` restent append-only.
+Donnée stale/incomplète/contradictoire/incertaine => refus explicite, jamais invention.
 
-**Sous-agents IA : interdits** dans une campagne économique Discovery. Ils restent autorisés pour travaux techniques indépendants hors campagne quant, avec surfaces disjointes et intégration vérifiée.
+## Cloud / PC utilisateur
 
-## Contrôleur scientifique
+Pour ChatGPT Work, GitHub Actions et toute automatisation cloud :
 
-Discovery V3.2 enveloppe V3.1 sans changer ses preuves économiques :
-- DISCOVERY : 12 hypothèses structurelles par défaut, minimum 8, >=5 archétypes ;
-- TOURNAMENT : falsifier bon marché, classer causalité/données/headroom/valeur d'information ;
-- EXPLOIT : gros calcul local seulement sur survivants ;
-- REDISCOVERY : 2 retunings `PARAMETER_ONLY` sans progrès ou 2 évaluations non positives => `PIVOT` ;
-- CHALLENGER : après 3 `IMPROVE` consécutifs sans FREEZE, >=4 challengers orthogonaux avant un 4e improve.
+- GitHub-hosted uniquement
+- aucun self-hosted runner
+- ne jamais réveiller/utiliser/dépendre du PC utilisateur
+- aucun SSH/tunnel/agent local vers le PC
+- aucun fichier local utilisateur comme source requise
 
-Mémoire négative : veto seulement pour mécanisme+contexte suffisamment équivalents et preuve répétée haute confiance. Un retest reste admissible avec nouvelle donnée/surface, mécanisme matériellement différent ou contradiction fraîche. Mémoire positive = boost borné, jamais certification.
+Un calcul local n'est permis que lorsqu'un utilisateur lance explicitement un agent/runtime local. Une mission Work Cloud ne doit jamais basculer vers ce chemin.
 
-Toute variante évaluée compte dans la pression de recherche. Toute OOS/forward observée puis utilisée pour retuner devient feedback : refreeze et nouvelle preuve disjointe. Frais, spread, slippage, latence, capacité, fill/liquidatabilité, closed positions, provenance et no-lookahead restent obligatoires.
+## Contrat de travail agent
 
-## Done / Git
+Par défaut : **un seul agent principal**.
 
-Feature DONE = codée + testée + câblée ; ne jamais supprimer/skip/xfail un test ni baisser une gate pour obtenir du vert. `main` est l'état final ; pas de `reset --hard`/clean destructeur. Runtime de collecte actif annoncé par l'utilisateur => lecture seule.
+Pas de subagents, swarm ou multi-agent sauf demande explicite.
 
-Mission économique DONE seulement si le même `main` certifie les 3 familles à >= +4.00 USD NET/jour avec le contrat machine courant et gates finales vertes.
+Pour reprendre un chantier :
 
-**Sécurité : 0 ordre réel · 0 argent réel · 0 clé privée · 0 signature · 0 dépôt/retrait.**
+1. lire le HEAD actuel ;
+2. lire `SECURITY.md` ;
+3. lire ce fichier ;
+4. lire la spec canonique une fois pour identifier le prochain travail ;
+5. ensuite n'ouvrir que les sections/fichiers nécessaires au bloc courant.
+
+Ne pas rescanner l'historique Git complet, les gros logs ou les anciennes roadmaps pour reconstruire un état déjà disponible dans le HEAD/receipts.
+
+Réutiliser l'existant avant de créer un nouveau système.
+
+Si une action échoue deux fois de la même manière, changer de méthode.
+
+## Mode quota minimal
+
+Le modèle sert aux décisions de code qui exigent du raisonnement.
+
+Privilégier pour le reste :
+
+- `git`
+- `rg/grep`
+- parsers/scripts Python
+- JSON/jq
+- checksums
+- calculs déterministes
+- replays/backtests
+- tests/lint/static analysis
+- GitHub API/Actions quand le cloud est nécessaire
+
+Batcher les lectures. Ne pas relire la spec entière après chaque changement. Pas de rapport intermédiaire long si l'utilisateur demande une implémentation.
+
+## Mode « implémentation totale puis tests finaux »
+
+Si la mission explicite demande :
+
+**implémenter toute la spec d'abord, puis lancer une validation globale à la fin**
+
+alors :
+
+- écrire/modifier le code et les tests nécessaires ;
+- ne pas exécuter tests, CI, replays/backtests/OOS/forward intermédiaires sauf blocage de compréhension ;
+- sauvegarder régulièrement de vrais diffs ;
+- continuer immédiatement au bloc suivant ;
+- lancer la validation globale seulement après épuisement du backlog d'implémentation.
+
+Cela change l'ordre d'exécution, **pas** la Definition of Done finale : preuves/tests/gates restent obligatoires avant fermeture globale.
+
+## Control plane actuel
+
+Le runtime actif contient `src/hl_observer/control_plane/` avec notamment :
+
+- `phase_state.py`
+- `phase_controller.py`
+- `phase_cli.py`
+- `resumable_campaign.py`
+- `dispatch_receipt.py`
+- `campaign_adapters.py`
+- `module_pnl_proof.py`
+
+Le contrat cible reste :
+
+- `IDLE`
+- `COLLECT`
+- `ANALYZE`
+
+Pendant ANALYZE :
+
+`DRAIN -> QUALITY -> REPLAY -> BACKTEST -> OOS -> FORWARD_PAPER -> PNL_PROOF -> SCOREBOARD -> DONE`
+
+La présence de ces fichiers ne signifie pas que tous les `OPEN-*`/`WKR-*` sont fermés. La spec décide du travail restant.
+
+## Architecture
+
+Ne pas étendre `hyper_smart_observer/` comme nouvelle architecture.
+
+Ne pas créer de deuxième :
+
+- orchestrateur
+- phase controller
+- PnL truth engine
+- ledger
+- replay engine
+- RiskEngine
+- scoreboard
+- Dataset system
+
+Préférer de petits modules importables sous `src/hl_observer/` et du wiring mince vers les callers existants.
+
+## Données et PnL
+
+Jamais de donnée synthétique présentée comme preuve réelle.
+
+**Missing != 0. Unknown != healthy.**
+
+Une preuve doit utiliser, selon le chemin :
+
+- timestamps exchange/receive/monotonic
+- clock offset/RTT/uncertainty
+- BBO/L2/trades reconstructibles
+- gaps/out-of-order/duplicates
+- frais/spread/slippage/latence
+- partial/missed fills
+- profondeur/VWAP/capacité
+- tick/lot/min-notional/multiplier
+- exits/funding pertinents
+- causalité/no-lookahead
+- OOS/forward
+- effective-N
+- provenance + manifests + hashes
+
+## Git
+
+`main` est l'état final.
+
+- préserver le travail existant
+- pas de `reset --hard`, clean destructeur ou rebase destructif comme méthode normale
+- éviter branches/systèmes parallèles inutiles
+- un commit doit contenir un vrai diff
+- ne jamais annoncer « sauvegardé » sans vérifier le vrai commit/diff
+- si une plateforme impose une PR, utiliser une branche courte ciblant `main`
+
+Un commit n'est pas une condition d'arrêt : continuer tant que la mission autorisée contient du travail réalisable.
+
+## Definition of Done
+
+Une feature n'est DONE que si elle est réellement codée, câblée et finalement validée selon la spec.
+
+La mission globale n'est DONE que si la matrice de fermeture canonique est satisfaite, les deux repos sont cohérents, la sécurité reste paper/read-only et les résultats économiques sont prouvés ou classés honnêtement.
