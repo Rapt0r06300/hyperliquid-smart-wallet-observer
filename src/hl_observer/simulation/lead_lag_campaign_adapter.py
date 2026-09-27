@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import bisect
 import hashlib
+import json
 import statistics
 from collections.abc import Mapping
 from typing import Any
@@ -19,6 +20,33 @@ from hl_observer.simulation.economic_objective import (
     evaluate_objective,
 )
 from hl_observer.strategies.lead_lag_paper import SignalLeadLag, rejouer_lead_lag
+
+
+ANTI_LOOKAHEAD_SCHEMA = "lead_lag.anti_lookahead_receipt.v1"
+
+
+def _anti_lookahead_receipt(signals: list[SignalLeadLag]) -> dict[str, Any]:
+    material = {
+        "schema_version": ANTI_LOOKAHEAD_SCHEMA,
+        "method": "ONLINE_PRIOR_ALIGNED_RETURNS_ONLY",
+        "signals": [
+            {
+                "ts_ms": int(signal.ts_ms),
+                "coin": str(signal.coin),
+                "signe_leader": int(signal.signe_leader),
+                "edge_bps_prevu": float(signal.edge_bps_prevu),
+                "horizon_ms": int(signal.horizon_ms),
+            }
+            for signal in signals
+        ],
+        "future_exit_excluded_from_entry": True,
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    digest = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {**material, "receipt_sha256": digest}
 
 
 def signals_from_tape(
@@ -98,7 +126,7 @@ def signals_from_tape(
         "median_full_spread_bps": (
             round(float(statistics.median(spread_samples)), 6) if spread_samples else None
         ),
-        "no_lookahead": True,
+        "anti_lookahead_receipt": _anti_lookahead_receipt(signals),
         "read_only": True,
         "real_execution": False,
     }
@@ -240,7 +268,11 @@ def campaign_from_replay(
             "trade_ids_sha256": oos.get("trade_ids_sha256"),
             "duplicate_trade_ids": oos.get("duplicate_trade_ids"),
             "liquidatable_net": oos.get("LIQUIDATABLE_NET") is True,
-            "no_lookahead": True,
+            "anti_lookahead_receipt": (
+                raw.get("signals_meta", {}).get("anti_lookahead_receipt")
+                if isinstance(raw.get("signals_meta"), Mapping)
+                else None
+            ),
         },
         "forward": {
             "gross_pnl_usd": forward.get("gross_pnl_usd"),
