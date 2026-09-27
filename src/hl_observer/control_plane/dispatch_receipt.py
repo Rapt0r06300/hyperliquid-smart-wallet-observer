@@ -53,3 +53,20 @@ class DispatchReceipt:
         if unknown:
             raise ValueError(f"Unknown dispatch receipt fields: {sorted(unknown)}")
         return cls(**dict(raw))
+
+
+def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
+    """Fail closed on incomplete or contradictory cross-repository identity."""
+    if not receipt.request_id or not receipt.campaign_id:
+        raise ValueError("dispatch receipt requires request_id and campaign_id")
+    if not receipt.main_code_sha or not receipt.dataset_repo_sha:
+        raise ValueError("dispatch receipt requires both repository SHAs")
+    if receipt.creation_phase not in {"IDLE", "COLLECT", "ANALYZE"}:
+        raise ValueError("dispatch receipt has invalid creation phase")
+    if not isinstance(receipt.phase_epoch, int) or receipt.phase_epoch < 1:
+        raise ValueError("dispatch receipt has invalid phase epoch")
+    if receipt.creation_phase == "ANALYZE":
+        if not isinstance(receipt.source_collection_epoch, int) or receipt.source_collection_epoch < 1:
+            raise ValueError("analysis dispatch requires source collection epoch")
+    if not receipt.dispatched_at_utc.endswith("Z"):
+        raise ValueError("dispatch timestamp must be UTC")
