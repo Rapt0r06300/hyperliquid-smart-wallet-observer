@@ -85,6 +85,7 @@ def main() -> int:
     parser.add_argument("--operator-request-id")
     parser.add_argument("--current-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
     parser.add_argument("--current-epoch", type=int)
+    parser.add_argument("--current-analysis-stage")
     parser.add_argument("--expected-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
     parser.add_argument("--expected-epoch", type=int)
     parser.add_argument("--token")
@@ -142,7 +143,12 @@ def main() -> int:
 
     if args.command == "list-due":
         manifests = [load(item) for item in sorted(path.glob("*.json"))]
-        print("\n".join(item.campaign_id for item in select_due_campaigns(manifests, current_phase=args.current_phase, current_epoch=args.current_epoch)))
+        print("\n".join(item.campaign_id for item in select_due_campaigns(
+            manifests,
+            current_phase=args.current_phase,
+            current_epoch=args.current_epoch,
+            current_analysis_stage=args.current_analysis_stage,
+        )))
         return 0
 
     manifest = load(path)
