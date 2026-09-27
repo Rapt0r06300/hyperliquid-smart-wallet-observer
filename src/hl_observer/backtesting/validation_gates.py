@@ -136,14 +136,26 @@ def regime_robustness_gate(trades, pnls, *, buckets: int = 4, max_slice_share: f
 
 def lookahead_gate(events, *, min_gap_ms: int = 0) -> dict:
     if not events:
-        return {"gate": "lookahead", "passed": True, "skipped": True, "reason": "no_events"}
+        return {
+            "gate": "lookahead",
+            "passed": False,
+            "skipped": False,
+            "reason": "causal_events_required",
+            "violation_count": None,
+        }
     try:
         from hl_observer.backtesting.lookahead_analysis import lookahead_analysis_report
         rep = lookahead_analysis_report(events, min_gap_ms=min_gap_ms)
         return {"gate": "lookahead", "passed": bool(rep.get("ok")),
                 "violation_count": rep.get("violation_count", 0)}
     except Exception as exc:  # noqa: BLE001
-        return {"gate": "lookahead", "passed": True, "skipped": True, "reason": str(exc)[:50]}
+        return {
+            "gate": "lookahead",
+            "passed": False,
+            "skipped": False,
+            "reason": f"lookahead_analysis_error:{str(exc)[:50]}",
+            "violation_count": None,
+        }
 
 
 def monte_carlo_drawdown_gate(pnls, *, runs: int = 1000, seed: int = 7, max_p95_dd_over_net: float = 2.0) -> dict:
