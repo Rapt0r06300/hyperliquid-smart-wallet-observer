@@ -19,6 +19,7 @@ Pur, déterministe (seed). Réutilise l'existant, zéro duplication de logique l
 
 from __future__ import annotations
 
+import math
 import random
 from typing import Any
 
@@ -36,10 +37,12 @@ def _pnls(trades: Any) -> list[float]:
             v = t.get("net_pnl_usdc", t.get("pnl", t.get("net_pnl_usd")))
         else:
             v = getattr(t, "net_pnl_usdc", getattr(t, "pnl", None))
-        if v is not None:
+        if v is not None and not isinstance(v, bool):
             try:
-                out.append(float(v))
-            except (TypeError, ValueError):
+                numeric = float(v)
+                if math.isfinite(numeric):
+                    out.append(numeric)
+            except (TypeError, ValueError, OverflowError):
                 continue
     return out
 
