@@ -66,6 +66,7 @@ def main() -> int:
             "continue",
             "finish",
             "fail",
+            "retry",
         ],
     )
     parser.add_argument("path")
@@ -176,6 +177,15 @@ def main() -> int:
         return 0
     if args.command == "fail":
         mark_terminal(manifest, "FAILED", args.reason)
+        save(path, manifest, args.expected_digest)
+        return 0
+    if args.command == "retry":
+        if manifest.status != "STUCK":
+            raise SystemExit("only STUCK campaigns may be operator-retried")
+        manifest.lease = None
+        manifest.next_due_at = None
+        manifest.consecutive_failures = 0
+        transition(manifest, "RUNNING", args.reason or "operator_retry")
         save(path, manifest, args.expected_digest)
         return 0
     return 2
