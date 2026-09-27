@@ -6,25 +6,65 @@ Pur, 0 réseau, 0 ordre réel.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+import math
+from typing idef netter(intentions: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate finite signed intents and preserve an input conservation receipt."""
+    net: dict[tuple[str, str], float] = {}
+    brut: dict[tuple[str, str], float] = {}
+    included: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
 
-
-def netter(intentions: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Agrège les intentions signées par (venue, coin), tous modules confondus, en un delta net + mesure de
-    l'économie (brut − |net|). `intentions` = [{module, venue, coin, montant_signe}]."""
-    net: dict[tuple, float] = {}
-    brut: dict[tuple, float] = {}
-    for it in intentions:
-        m = it.get("montant_signe")
-        coin, venue = it.get("coin"), it.get("venue")
-        if not isinstance(m, (int, float)) or not coin or not venue:
+    for index, it in enumerate(intentions or ()):
+        if not isinstance(it, dict):
+            rejected.append({"index": index, "reason": "INTENT_NOT_OBJECT"})
             continue
-        cle = (str(venue).upper(), str(coin).upper())
-        net[cle] = round(net.get(cle, 0.0) + float(m), 8)
-        brut[cle] = round(brut.get(cle, 0.0) + abs(float(m)), 8)
-    resultat = {"%s/%s" % c: {"net": net[c], "brut": brut[c], "economie": round(brut[c] - abs(net[c]), 8)}
-                for c in net}
-    return {"net_par_cle": resultat, "n_cles": len(resultat)}
+        amount = it.get("montant_signe")
+        coin, venue = it.get("coin"), it.get("venue")
+        if (
+            isinstance(amount, bool)
+            or not isinstance(amount, (int, float))
+            or not math.isfinite(float(amount))
+            or not coin
+            or not venue
+        ):
+            rejected.append({
+                "index": index,
+                "reason": "MALFORMED_OR_NON_FINITE_INTENT",
+            })
+            continue
+        key = (str(venue).upper(), str(coin).upper())
+        value = float(amount)
+        net[key] = round(net.get(key, 0.0) + value, 8)
+        brut[key] = round(brut.get(key, 0.0) + abs(value), 8)
+        included.append({
+            "index": index,
+            "module": it.get("module"),
+            "venue": key[0],
+            "coin": key[1],
+            "montant_signe": value,
+        })
+
+    result = {
+        "%s/%s" % key: {
+            "net": net[key],
+            "brut": brut[key],
+            "economie": round(brut[key] - abs(net[key]), 8),
+        }
+        for key in net
+    }
+    return {
+        "net_par_cle": result,
+        "n_cles": len(result),
+        "included_intentions": included,
+        "rejected_intentions": rejected,
+        "conservation": {
+            "input_count": len(included) + len(rejected),
+            "included_count": len(included),
+            "rejected_count": len(rejected),
+            "complete": True,
+        },
+    }
+n(resultat)}
 
 
 __all__ = ["netter"]
