@@ -22,7 +22,7 @@ REQUIRED = {
     "cross_venue_status", "oos_status", "forward_status",
     "two_segment_resume_status", "event_intelligence_wiring_complete",
     "scoreboard_artifact", "paper_read_only", "self_hosted_used",
-    "real_execution_reachable", "remaining_blockers",
+    "real_execution_reachable", "remaining_blockers", "operator_status",
 }
 VALID_STATUSES = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
 
@@ -85,6 +85,11 @@ def main() -> int:
         raise SystemExit("self-hosted closure invariant violated")
     if receipt["real_execution_reachable"] is not False:
         raise SystemExit("real execution closure invariant violated")
+    operator_status = receipt["operator_status"]
+    if not isinstance(operator_status, dict) or not isinstance(operator_status.get("rows"), list):
+        raise SystemExit("operator_status receipt is invalid")
+    if int(operator_status.get("count") or 0) != len(operator_status["rows"]):
+        raise SystemExit("operator_status count mismatch")
     if not isinstance(receipt["remaining_blockers"], list):
         raise SystemExit("remaining_blockers must be a list")
     print(json.dumps({
