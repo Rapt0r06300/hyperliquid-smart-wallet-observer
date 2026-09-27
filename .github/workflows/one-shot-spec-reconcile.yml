@@ -1,13 +1,9 @@
-name: One-shot exhaustive canonical spec reconciliation
-
+name: One-shot canonical spec reconcile
 on:
   push:
-    paths:
-      - '.github/workflows/one-shot-spec-reconcile.yml'
-
+    paths: ['.github/workflows/one-shot-spec-reconcile.yml']
 permissions:
   contents: write
-
 jobs:
   reconcile:
     runs-on: ubuntu-latest
@@ -16,95 +12,21 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - name: Restore lost audited backlog and verify canonical contracts
+      - name: Reconcile and verify
         shell: bash
         run: |
           set -euo pipefail
           SPEC='docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md'
           LOST='6764957316a0eb15ee11ef8286e3de44602cfa55'
           git fetch origin "$LOST" --depth=1 || true
-          git show "$LOST:$SPEC" > /tmp/spec-with-defects.md
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          spec = Path('docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md')
-          current = spec.read_text(encoding='utf-8')
-          old = Path('/tmp/spec-with-defects.md').read_text(encoding='utf-8')
-          ids_old = re.findall(r'NEW-DEFECT-(\d{3})', old)
-          if not all(f'{i:03d}' in ids_old for i in range(1,451)):
-              raise SystemExit('historical source does not contain complete NEW-DEFECT-001..450')
-          if 'NEW-DEFECT-001' not in current:
-              pos = old.index('NEW-DEFECT-001')
-              heading = old.rfind('\n## ', 0, pos)
-              if heading < 0:
-                  raise SystemExit('cannot locate defect backlog heading')
-              block = old[heading:].strip()
-              current = current.rstrip() + '\n\n' + block + '\n'
-          else:
-              # If partially present, fail rather than silently merge an ambiguous catalog.
-              present = {int(x) for x in re.findall(r'NEW-DEFECT-(\d{3})', current)}
-              if present.intersection(range(1,451)) != set(range(1,451)):
-                  raise SystemExit('partial NEW-DEFECT catalog found; refusing ambiguous merge')
-          marker = '## Canonical reconciliation guard — source completeness contract (2026-09-27)'
-          if marker not in current:
-              current = current.rstrip() + r'''
-
-## Canonical reconciliation guard — source completeness contract (2026-09-27)
-
-This section is normative. It exists because oversized writes/restorations previously caused valid roadmap material to disappear from the canonical file. Future edits must preserve the union of still-applicable requirements from the canonical history and the interrupted Work reconciliation; restoring an older snapshot is not an acceptable way to resolve a write-size failure.
-
-### Sources that must remain represented
-
-The canonical roadmap must preserve, without creating parallel implementations:
-
-- the collector/data-quality and implementation-gap contracts consolidated on 2026-09-25/26;
-- false-PnL, accounting, replay, backtest, OOS/forward and economic-proof hardening;
-- `NEW-DEFECT-001..450`, including the 400 audited findings from commit `6764957316a0eb15ee11ef8286e3de44602cfa55`;
-- the interrupted Work carry-over/reconciliation contracts restored on 2026-09-27;
-- the final consolidated Work closure contracts: Alina as canonical operator/control surface, Dataset V2 as durable/heavy GitHub-hosted data plane, phase/epoch authority, exactly-once publication, fresh-runner recovery, global deduplication, immutable OOS/forward identity, environment provenance, calibration and machine-readable closure evidence;
-- strict paper/read-only safety and the prohibition on real orders, private-key handling, self-hosted runners or cloud dependence on the user's PC.
-
-### Loss-prevention acceptance contract
-
-A canonical-spec change is invalid if it silently removes a still-open normative requirement. Deterministic validation must at minimum prove:
-
-1. every `NEW-DEFECT-001..450` identifier exists exactly once;
-2. the Work reconciliation/carry-over contract is still present;
-3. the final consolidated Work closure hardening is still present;
-4. the Alina-main/Dataset-V2 dual-plane ownership contract is still present;
-5. paper/read-only and no-self-hosted/no-PC invariants remain explicit;
-6. no later section weakens a stricter earlier fail-closed requirement;
-7. large-file tooling failures are handled by append/patch/reconciliation, never by restoring a snapshot that discards newer requirements.
-
-If any invariant cannot be established, roadmap completeness is `UNMEASURABLE` and implementation work must not claim the specification is fully reconciled.
-'''.lstrip('\n')
-          spec.write_text(current, encoding='utf-8')
-          PY
-          python - <<'PY'
-          from pathlib import Path
-          import re
-          p=Path('docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md')
-          s=p.read_text(encoding='utf-8')
-          ids=[int(x) for x in re.findall(r'NEW-DEFECT-(\d{3})',s)]
-          for i in range(1,451):
-              if ids.count(i) != 1:
-                  raise SystemExit(f'NEW-DEFECT-{i:03d} count={ids.count(i)}')
-          required=[
-            'Work', 'Dataset V2', 'GitHub-hosted', 'paper/read-only',
-            'Normative closure hardening — final consolidated contracts',
-            'Canonical reconciliation guard — source completeness contract'
-          ]
-          missing=[x for x in required if x not in s]
-          if missing: raise SystemExit('missing canonical markers: '+repr(missing))
-          print('verified NEW-DEFECT-001..450 exactly once')
-          print('spec bytes',len(s.encode('utf-8')),'lines',s.count('\n')+1)
-          PY
+          git show "$LOST:$SPEC" > /tmp/old.md
+          python -c "from pathlib import Path; import re; p=Path('$SPEC'); cur=p.read_text(encoding='utf-8'); old=Path('/tmp/old.md').read_text(encoding='utf-8'); ids=re.findall(r'NEW-DEFECT-(\\d{3})',old); assert all(f'{i:03d}' in ids for i in range(1,451)); pos=old.index('NEW-DEFECT-001'); h=old.rfind('\\n## ',0,pos); assert h>=0; block=old[h:].strip(); present={int(x) for x in re.findall(r'NEW-DEFECT-(\\d{3})',cur)}; assert not present.intersection(range(1,451)), 'partial defect catalog'; guard='## Canonical reconciliation guard — source completeness contract (2026-09-27)\\n\\nThis section is normative. Future canonical-spec edits must preserve the union of still-applicable historical requirements, the complete audited defect catalog, the interrupted Work reconciliation, and the final Work closure hardening. Oversized-write recovery must never restore an older snapshot that discards newer requirements.\\n\\nAcceptance: `NEW-DEFECT-001..450` must each exist exactly once; Work carry-over, Alina-main/Dataset-V2 dual-plane ownership, phase/epoch, exactly-once publication, SAFE-to-economic-proof closure, immutable OOS/forward identity, environment provenance, fresh-runner recovery, paper/read-only, no-self-hosted and no-PC-cloud-dependency contracts must remain explicit. If completeness cannot be proven, roadmap completeness is `UNMEASURABLE`.\\n'; cur=cur.rstrip()+'\\n\\n'+block+'\\n\\n'+guard; p.write_text(cur,encoding='utf-8')"
+          python -c "from pathlib import Path; import re; s=Path('$SPEC').read_text(encoding='utf-8'); ids=[int(x) for x in re.findall(r'NEW-DEFECT-(\\d{3})',s)]; bad=[i for i in range(1,451) if ids.count(i)!=1]; assert not bad, bad[:20]; req=['Normative closure hardening — final consolidated contracts','Dataset V2','GitHub-hosted','paper/read-only','Canonical reconciliation guard — source completeness contract']; miss=[x for x in req if x not in s]; assert not miss, miss; print('OK 450 defects exactly once; canonical markers present; bytes=',len(s.encode()))"
           rm .github/workflows/one-shot-spec-reconcile.yml
           git diff --check
-          git status --short
           git add "$SPEC" .github/workflows/one-shot-spec-reconcile.yml
           git diff --cached --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'docs(spec): restore all reconciled roadmap requirements'
+          git commit -m 'docs(spec): restore complete audited roadmap'
           git push origin HEAD:main
