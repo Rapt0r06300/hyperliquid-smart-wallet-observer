@@ -236,6 +236,8 @@ def main() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered, encoding="utf-8")
     print(rendered, end="")
+    if plan["errors"]:
+        return 2
     if plan["selected_coin_count"] <= 0:
         return 2
     return 0
