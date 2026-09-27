@@ -237,6 +237,7 @@ def _analysis_from_events(log_dir: Path, events: tuple[DecisionEvent, ...]) -> R
         pnl_by_coin={key: round(value, 8) for key, value in sorted(pnl_by_coin.items())},
         pnl_by_wallet={key: round(value, 8) for key, value in sorted(pnl_by_wallet.items())},
         action_counts=dict(actions),
+        unmeasurable_count=unmeasurable,
     )
 
 
@@ -287,6 +288,7 @@ def _stream_summary_from_file(log_dir: Path, path: Path) -> ReplayAnalysis:
         pnl_by_coin={key: round(value, 8) for key, value in sorted(pnl_by_coin.items())},
         pnl_by_wallet={key: round(value, 8) for key, value in sorted(pnl_by_wallet.items())},
         action_counts=dict(actions),
+        unmeasurable_count=unmeasurable,
     )
 
 
