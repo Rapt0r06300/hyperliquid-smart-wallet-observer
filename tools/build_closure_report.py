@@ -62,13 +62,49 @@ def main() -> int:
     )
     replayable = int(totals.get("REPLAYABLE_SHARDS") or 0)
     campaign_ids = sorted(str(row.get("campaign_id")) for row in campaigns if row.get("campaign_id"))
+    analysis_kinds = (
+        "replay",
+        "backtest",
+        "oos",
+        "forward_paper",
+        "module_pnl_proof",
+        "scoreboard",
+    )
     analysis_status = {
         str(row.get("kind")): str(row.get("status"))
         for row in campaigns
-        if row.get("kind") in {"replay", "backtest", "module_pnl_proof"}
+        if row.get("kind") in set(analysis_kinds)
     }
-    complete_analysis = all(analysis_status.get(kind) == "COMPLETE"
-                            for kind in ("replay", "backtest", "module_pnl_proof"))
+    complete_analysis = all(
+        analysis_status.get(kind) == "COMPLETE"
+        for kind in analysis_kinds
+    )
+    analyze_selections = sorted({
+        str(row.get("dataset_selection_id"))
+        for row in campaigns
+        if row.get("creation_phase") == "ANALYZE"
+        and row.get("dataset_selection_id")
+    })
+    workflow_run_ids = sorted({
+        str((row.get("cursor") or {}).get("last_run_id"))
+        for row in campaigns
+        if isinstance(row.get("cursor"), dict)
+        and (row.get("cursor") or {}).get("last_run_id")
+    })
+    scoreboard_artifact = None
+    for row in campaigns:
+        if row.get("kind") != "scoreboard":
+            continue
+        for unit in (row.get("completed_units") or {}).values():
+            payload = unit.get("result") if isinstance(unit, dict) else None
+            if isinstance(payload, dict):
+                scoreboard_artifact = (
+                    payload.get("evidence_release_tag")
+                    or payload.get("evidence_tag")
+                    or payload.get("scoreboard_artifact")
+                )
+                if scoreboard_artifact:
+                    break
     family_names = ("copy_vault", "lead_lag", "cross_venue_dislocation")
     modules = {
         name: {
@@ -89,8 +125,10 @@ def main() -> int:
         "source_collection_epoch": phase.get("source_collection_epoch"),
         "analysis_stage": phase.get("analysis_stage"),
         "campaign_ids": campaign_ids,
-        "workflow_run_ids": [],
-        "dataset_selection_id": None,
+        "workflow_run_ids": workflow_run_ids,
+        "dataset_selection_id": (
+            analyze_selections[0] if len(analyze_selections) == 1 else None
+        ),
         "trade_count_exact": bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")),
         "unique_trade_count_exact": bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")),
         "safe_count": int(totals.get("SAFE_SHARDS") or 0),
@@ -100,9 +138,21 @@ def main() -> int:
         "cross_venue_status": modules["cross_venue_dislocation"]["status"],
         "oos_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "forward_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
-        "two_segment_resume_status": "UNMEASURABLE",
+        "two_segment_resume_status": (
+            "PROVEN"
+            if (
+                isinstance(load(root / "catalog/RESUME_SMOKE_RECEIPT.json"), dict)
+                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
+                    "segment_a_workflow_result"
+                ) == "success"
+                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
+                    "segment_b_workflow_result"
+                ) == "success"
+            )
+            else "UNMEASURABLE"
+        ),
         "event_intelligence_wiring_complete": event_wired,
-        "scoreboard_artifact": None,
+        "scoreboard_artifact": scoreboard_artifact,
         "paper_read_only": True,
         "self_hosted_used": False,
         "real_execution_reachable": False,
