@@ -59,7 +59,14 @@ class DispatchReceipt:
         unknown = set(raw) - allowed
         if unknown:
             raise ValueError(f"Unknown dispatch receipt fields: {sorted(unknown)}")
-        return cls(**dict(raw))
+        payload = dict(raw)
+        # v1 receipts had no lifecycle fields. Preserve their meaning while
+        # upgrading them into the explicit v2 state machine.
+        if "status" not in payload:
+            payload["status"] = "COMPLETE" if payload.get("terminal_evidence_digest") else "DISPATCHED"
+        if payload.get("status") == "COMPLETE" and "terminal_at_utc" not in payload:
+            payload["terminal_at_utc"] = payload.get("dispatched_at_utc")
+        return cls(**payload)
 
 
 def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
