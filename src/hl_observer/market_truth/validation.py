@@ -95,12 +95,14 @@ def evaluate_research_candidate(
         min_pf=min_backtest_pf,
         min_oos_pf=min_oos_pf,
     )
+    invalid_forward_pnls = _invalid_pnl_count(forward_rows)
     forward_pnls = _pnls(forward_rows)
     forward_pf = profit_factor(forward_pnls)
     forward_net = sum(forward_pnls)
     forward_dd = max_drawdown(forward_pnls)
     forward_report = {
         "trades": len(forward_pnls),
+        "invalid_economic_rows": invalid_forward_pnls,
         "profit_factor": "inf" if forward_pf == float("inf") else round(forward_pf, 6),
         "net_pnl_usdc": round(forward_net, 10),
         "max_drawdown_usdc": round(forward_dd, 10),
@@ -108,6 +110,15 @@ def evaluate_research_candidate(
         "min_profit_factor": float(min_forward_pf),
         "max_drawdown_limit_usdc": float(max_forward_drawdown_usdc),
     }
+    if invalid_forward_pnls:
+        return ResearchVerdict(
+            verdict="KILL",
+            reason="FORWARD_EVIDENCE_INVALID",
+            backtest=backtest_report,
+            forward=forward_report,
+            quality_violations=quality_violations,
+            reconciliation_violations=reconciliation_violations,
+        )
     if quality_violations or reconciliation_violations:
         return ResearchVerdict(
             verdict="KILL",
@@ -158,20 +169,36 @@ def evaluate_research_candidate(
     )
 
 
+def _trade_pnl_value(trade: Any) -> Any:
+    if isinstance(trade, (int, float)) and not isinstance(trade, bool):
+        return trade
+    if isinstance(trade, Mapping):
+        return trade.get("net_pnl_usdc", trade.get("pnl"))
+    return getattr(trade, "net_pnl_usdc", getattr(trade, "pnl", None))
+
+
+def _invalid_pnl_count(trades: Iterable[Any]) -> int:
+    invalid = 0
+    for trade in trades:
+        value = _trade_pnl_value(trade)
+        try:
+            if value is None or isinstance(value, bool) or not math.isfinite(float(value)):
+                invalid += 1
+        except (TypeError, ValueError, OverflowError):
+            invalid += 1
+    return invalid
+
+
 def _pnls(trades: Iterable[Any]) -> list[float]:
     values: list[float] = []
     for trade in trades:
-        value = (
-            trade
-            if isinstance(trade, (int, float))
-            else trade.get("net_pnl_usdc", trade.get("pnl"))
-            if isinstance(trade, Mapping)
-            else getattr(trade, "net_pnl_usdc", getattr(trade, "pnl", None))
-        )
+        value = _trade_pnl_value(trade)
         try:
-            if value is not None:
-                values.append(float(value))
-        except (TypeError, ValueError):
+            if value is not None and not isinstance(value, bool):
+                numeric = float(value)
+                if math.isfinite(numeric):
+                    values.append(numeric)
+        except (TypeError, ValueError, OverflowError):
             continue
     return values
 
