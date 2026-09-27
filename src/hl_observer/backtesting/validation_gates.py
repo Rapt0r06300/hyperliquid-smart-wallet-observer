@@ -68,6 +68,17 @@ def _pf_str(pf: float):
     return "inf" if pf == float("inf") else round(pf, 3)
 
 
+def economic_integrity_gate(trades, pnls) -> dict:
+    total = len(list(trades or ())) if not isinstance(trades, list) else len(trades)
+    invalid = max(0, total - len(pnls))
+    return {
+        "gate": "economic_integrity",
+        "passed": invalid == 0,
+        "invalid_rows": invalid,
+        "reason": None if invalid == 0 else "malformed_or_missing_pnl",
+    }
+
+
 def sample_size_gate(pnls, *, min_trades: int = 30) -> dict:
     n = len(pnls)
     return {"gate": "sample_size", "passed": n >= int(min_trades), "n": n, "min": int(min_trades)}
@@ -187,8 +198,10 @@ def run_validation_gates(
 ) -> dict:
     """Rapport unifié : lance tous les gates, verdict global. DEPLOY_CANDIDATE seulement
     si tous les gates critiques (non skippés) passent. Verdict de recherche, paper-only."""
-    pnls = _pnls(trades)
+    trade_rows = list(trades or ())
+    pnls = _pnls(trade_rows)
     gates = [
+        economic_integrity_gate(trade_rows, pnls),
         sample_size_gate(pnls, min_trades=min_trades),
         profit_factor_gate(pnls, min_pf=min_pf),
         out_of_sample_gate(pnls, min_oos_pf=min_oos_pf),
@@ -211,5 +224,5 @@ def run_validation_gates(
 __all__ = [
     "run_validation_gates", "profit_factor", "max_drawdown", "sample_size_gate",
     "profit_factor_gate", "out_of_sample_gate", "regime_robustness_gate",
-    "lookahead_gate", "monte_carlo_drawdown_gate",
+    "lookahead_gate", "monte_carlo_drawdown_gate", "economic_integrity_gate",
 ]
