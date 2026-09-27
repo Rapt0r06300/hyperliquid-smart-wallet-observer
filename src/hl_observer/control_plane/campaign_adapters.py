@@ -13,6 +13,18 @@ from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[3]
 ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
+ANALYSIS_STAGE_BY_KIND = {
+    "replay": "REPLAY",
+    "backtest": "BACKTEST",
+    "oos": "OOS",
+    "forward_paper": "FORWARD_PAPER",
+    "module_pnl_proof": "PNL_PROOF",
+    "scoreboard": "SCOREBOARD",
+}
+
+
+def _analysis_stage(kind: str) -> str | None:
+    return ANALYSIS_STAGE_BY_KIND.get(str(kind))
 
 
 @dataclass(frozen=True)
@@ -277,7 +289,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             str(workspace),
             "--no-start-collection",
             "--analysis-stage",
-            str(ctx.kind).upper(),
+            _analysis_stage(ctx.kind) or str(ctx.kind).upper(),
         ], workspace
 
     raise ValueError(f"unsupported campaign kind: {ctx.kind}")
@@ -439,7 +451,7 @@ def run_one_unit(
                 "stdout": stdout,
                 "stderr": stderr,
                 "analysis_stage": (
-                    str(ctx.kind).upper() if ctx.kind in ECONOMIC_KINDS else None
+                    _analysis_stage(ctx.kind)
                 ),
             }
         )
