@@ -170,6 +170,7 @@ def main() -> int:
         "unique_trade_count_global": totals.get("TOTAL_UNIQUE_TRADES_GLOBAL"),
         "trade_count_failure_reason_count": int(totals.get("TRADE_COUNT_FAILURE_REASON_COUNT") or 0),
         "global_unique_failure_reason_count": int(totals.get("GLOBAL_UNIQUE_FAILURE_REASON_COUNT") or 0),
+        "cross_shard_overlap_trade_count": int(totals.get("TOTAL_CROSS_SHARD_OVERLAP_TRADES") or 0),
         "uncompressed_size_coverage": (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") if isinstance(health, dict) else False,
         "uncompressed_size_exact": (health.get("coverage") or {}).get("uncompressed_bytes_exact") if isinstance(health, dict) else False,
         "uncompressed_size_exact_assets": (health.get("coverage") or {}).get("uncompressed_size_exact_assets", 0) if isinstance(health, dict) else 0,
