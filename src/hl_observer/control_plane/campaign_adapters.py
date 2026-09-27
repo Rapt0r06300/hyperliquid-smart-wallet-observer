@@ -464,6 +464,13 @@ def run_one_unit(
             return AdapterResult("FAILED", _digest(payload), payload, False)
 
     last_cmd, output_root, _ = commands[-1]
+    collection_plan_sha256 = None
+    if output_root is not None:
+        digest_path = output_root / "collection_plan.sha256"
+        if digest_path.is_file():
+            collection_plan_sha256 = digest_path.read_text(
+                encoding="utf-8"
+            ).strip().split()[0]
     stdout = phases[-1]["stdout"] if phases else ""
     stderr = phases[-1]["stderr"] if phases else ""
     payload = {
@@ -475,6 +482,8 @@ def run_one_unit(
         "stdout": stdout,
         "stderr": stderr,
         "output_root": str(output_root) if output_root is not None else None,
+        "collection_plan_sha256": collection_plan_sha256,
+        "universe_discovery_required": ctx.kind == "market_collection",
         "safe_workspace": (
             str(output_root) if ctx.kind in ECONOMIC_KINDS and output_root is not None else None
         ),
