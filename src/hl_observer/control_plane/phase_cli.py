@@ -85,17 +85,31 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _campaign_status(controller: PhaseController, manifest_dir: str) -> int:
     manifests: list[CampaignManifest] = []
+    invalid: list[str] = []
     root = Path(manifest_dir)
-    if root.exists():
-        for path in root.glob("*.json"):
-            try:
-                manifests.append(
-                    CampaignManifest.from_dict(
-                        json.loads(path.read_text(encoding="utf-8"))
-                    )
+    if not root.exists():
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "reason": "campaign_state_unavailable",
+            "manifest_dir": str(root),
+        }, indent=2, sort_keys=True))
+        return 2
+    for path in root.glob("*.json"):
+        try:
+            manifests.append(
+                CampaignManifest.from_dict(
+                    json.loads(path.read_text(encoding="utf-8"))
                 )
-            except (OSError, ValueError, TypeError) as exc:
-                print(f"Warning: skipping invalid manifest {path}: {exc}", file=sys.stderr)
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            invalid.append(f"{path.name}: {exc}")
+    if invalid:
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "reason": "invalid_durable_campaign_state",
+            "invalid_manifests": sorted(invalid),
+        }, indent=2, sort_keys=True))
+        return 2
     state = controller.current_state
     due = select_due_campaigns(
         manifests, current_phase=state.phase, current_epoch=state.epoch
