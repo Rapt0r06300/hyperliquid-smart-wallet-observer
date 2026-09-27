@@ -1,35 +1,79 @@
-"""[AUD-268..291 / DATA-048,276,320] Registre AGREGE des adaptateurs de venues. Chaque venue porte
-desormais un adaptateur OFFLINE prouve (normalizers + tests) ET une frontiere de pull LIVE honnete :
-REQUIRES_NETWORK (public, reseau) ou REQUIRES_KEY (fournisseur paye). On ne declare JAMAIS 'live-ok' :
-le pull live reste gate. Complementaire de research.venue_capabilities (etat prudent par defaut).
-stdlib pure, 0 reseau."""
+"""[AUD-268..291 / DATA-048,276,320] Aggregate venue capability registry.
+
+Each venue exposes an offline normalizer boundary and an explicit live boundary.
+Live pulls remain network-gated; this registry never enables execution.
+"""
 from __future__ import annotations
 
-from . import (bitget, bybit, coinbase, defillama, deribit, drift, dune, gate, glassnode, gmx, kraken, nansen, okx)
+from . import (
+    binance,
+    bitget,
+    bybit,
+    coinbase,
+    defillama,
+    deribit,
+    drift,
+    dune,
+    gate,
+    glassnode,
+    gmx,
+    hyperliquid,
+    kraken,
+    nansen,
+    okx,
+)
 
-_MODULES = (bybit, okx, gate, bitget, coinbase, deribit, kraken, drift, gmx, nansen, dune, glassnode, defillama)
+_MODULES = (
+    hyperliquid,
+    binance,
+    bybit,
+    okx,
+    gate,
+    bitget,
+    coinbase,
+    deribit,
+    kraken,
+    drift,
+    gmx,
+    nansen,
+    dune,
+    glassnode,
+    defillama,
+)
 
 
 def registre() -> dict:
-    """venue -> capacites() (adaptateur offline + frontiere live)."""
-    return {m.VENUE: m.capacites() for m in _MODULES}
+    """venue -> capabilities (offline adapter plus live pull boundary)."""
+    return {module.VENUE: module.capacites() for module in _MODULES}
 
 
 def offline_ready() -> list:
-    return sorted(v for v, c in registre().items() if c["adaptateur"] == "OFFLINE_READY")
+    return sorted(
+        venue for venue, capabilities in registre().items()
+        if capabilities["adaptateur"] == "OFFLINE_READY"
+    )
 
 
 def par_frontiere_live() -> dict:
-    """Repartit les venues par frontiere de pull live (REQUIRES_NETWORK vs REQUIRES_KEY)."""
-    out: dict = {}
-    for v, c in registre().items():
-        out.setdefault(c["pull_live"], []).append(v)
-    return {k: sorted(vs) for k, vs in out.items()}
+    """Group venues by live pull boundary."""
+    out: dict[str, list[str]] = {}
+    for venue, capabilities in registre().items():
+        out.setdefault(capabilities["pull_live"], []).append(venue)
+    return {key: sorted(values) for key, values in out.items()}
 
 
-def ready_multi_venue(requis=("bybit", "okx", "coinbase", "deribit", "kraken")) -> dict:
-    """READY_MULTI_VENUE = toutes les venues requises ont un adaptateur OFFLINE_READY (AUD-276/320)."""
+def ready_multi_venue(
+    requis=("hyperliquid", "binance", "bybit", "okx", "gate", "bitget"),
+) -> dict:
+    """Require the six canonical venues to have offline-ready adapters."""
     reg = registre()
-    manquants = [v for v in requis if reg.get(v, {}).get("adaptateur") != "OFFLINE_READY"]
-    return {"ready": not manquants, "manquants": manquants,
-            "offline_ready": offline_ready(), "n_venues": len(reg)}
+    manquants = [
+        venue for venue in requis
+        if reg.get(venue, {}).get("adaptateur") != "OFFLINE_READY"
+    ]
+    return {
+        "ready": not manquants,
+        "manquants": manquants,
+        "offline_ready": offline_ready(),
+        "n_venues": len(reg),
+    }
