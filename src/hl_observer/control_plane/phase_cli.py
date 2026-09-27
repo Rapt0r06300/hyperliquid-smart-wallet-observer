@@ -148,6 +148,7 @@ def _write_intent(args, controller: PhaseController, intent: str) -> int:
         "requested_at_utc": state.requested_at_utc,
         "phase": state.phase,
         "phase_epoch": state.epoch,
+        "analysis_stage": state.analysis_stage,
         "source_collection_epoch": state.source_collection_epoch,
         "collection_cutoff_at_utc": state.collection_cutoff_at_utc,
         "main_code_sha": args.main_code_sha,
