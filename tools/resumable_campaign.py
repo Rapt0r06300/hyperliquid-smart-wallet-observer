@@ -11,6 +11,7 @@ import tempfile
 
 from hl_observer.control_plane.resumable_campaign import (
     CampaignManifest,
+    ANALYSIS_STAGE_BY_KIND,
     acquire_lease,
     complete_work_unit,
     mark_continuation,
