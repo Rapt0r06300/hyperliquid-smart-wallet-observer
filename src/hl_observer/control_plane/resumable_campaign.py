@@ -15,10 +15,15 @@ SUPPORTED_SCHEMAS = frozenset({SCHEMA_VERSION_V1, SCHEMA_VERSION_V2})
 
 CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})
 CAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
-ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED"})
+ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"})
 TERMINAL_STATES = frozenset({"COMPLETE","FAILED","UNAVAILABLE","PARTIAL","REJECT"})
 ALL_STATES = ACTIVE_STATES | TERMINAL_STATES
-_ALLOWED = {"PENDING":{"RUNNING","FAILED","UNAVAILABLE","REJECT"},"RUNNING":{"CONTINUATION_REQUIRED","COMPLETE","FAILED","UNAVAILABLE","PARTIAL","REJECT"},"CONTINUATION_REQUIRED":{"RUNNING","FAILED","UNAVAILABLE","PARTIAL","REJECT"}}
+_ALLOWED = {
+    "PENDING":{"RUNNING","FAILED","UNAVAILABLE","REJECT"},
+    "RUNNING":{"CONTINUATION_REQUIRED","STUCK","COMPLETE","FAILED","UNAVAILABLE","PARTIAL","REJECT"},
+    "CONTINUATION_REQUIRED":{"RUNNING","STUCK","FAILED","UNAVAILABLE","PARTIAL","REJECT"},
+    "STUCK":{"RUNNING","FAILED","UNAVAILABLE","PARTIAL","REJECT"},
+}
 NON_RETRYABLE = frozenset({"SCHEMA","DIGEST","SAFETY","PROVENANCE","QUALITY","NONDETERMINISTIC","REPLAY_INCOMPATIBLE"})
 RETRYABLE = frozenset({"INFRASTRUCTURE","TEMPORARY_EXTERNAL"})
 
@@ -254,9 +259,16 @@ def mark_continuation(
     )
     current_text = current.isoformat().replace("+00:00", "Z")
     if stop:
-        return transition(m, "FAILED", "stop_limit_reached", now=current_text)
-    transition(m, "CONTINUATION_REQUIRED", reason, now=current_text)
-    m.next_due_at = next_due_at
+        if failure:
+            transition(m, "STUCK", reason or "bounded_retry_exhausted", now=current_text)
+            # A stuck campaign is actionable, not terminal. The controller may retry
+            # it after a durable cooldown without spinning in a hot loop.
+            m.next_due_at = (current + timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+        else:
+            return transition(m, "FAILED", "stop_limit_reached", now=current_text)
+    else:
+        transition(m, "CONTINUATION_REQUIRED", reason, now=current_text)
+        m.next_due_at = next_due_at
     m.lease = None
     return m
 
