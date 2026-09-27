@@ -148,6 +148,14 @@ def main() -> int:
                 and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
                     "segment_b_workflow_result"
                 ) == "success"
+                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
+                    "terminal_campaign_status"
+                ) == "COMPLETE"
+                and int(
+                    load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
+                        "terminal_completed_units"
+                    ) or 0
+                ) > 0
             )
             else "UNMEASURABLE"
         ),
