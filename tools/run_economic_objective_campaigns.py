@@ -189,8 +189,13 @@ def run_campaigns(
     start_collection: bool = True,
     collection_duration_s: float = 24 * 60 * 60,
     collection_startup_wait_s: float = 3.0,
+    analysis_stage: str | None = None,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    analysis_stage = str(analysis_stage or os.environ.get("ALINA_ANALYSIS_STAGE") or "BACKTEST").upper()
+    allowed_stages = {"BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD"}
+    if analysis_stage not in allowed_stages:
+        raise ValueError(f"unsupported analysis stage: {analysis_stage}")
     dataset_mode = is_dataset_workspace(root)
     dataset_manifest_path = None
     dataset_sources: dict[str, object] | None = None
@@ -398,6 +403,13 @@ def run_campaigns(
         "provisional_without_physical_freeze": copy_freeze is None,
         "dataset_workspace": dataset_mode,
         "dataset_source_summary": dataset_sources,
+        "analysis_stage": analysis_stage,
+        "analysis_stage_contract": {
+            "stage": analysis_stage,
+            "campaign_count": len(campaigns),
+            "scoreboards_path": str(scoreboards_path),
+            "report_path": str(report_path),
+        },
     }
     copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
     copy_raw["next_hypothesis_v4"] = copy_v4
@@ -794,6 +806,19 @@ def run_campaigns(
     write_campaign(root, cross_campaign)
 
     campaigns = [copy_campaign, lead_campaign, cross_campaign]
+    for campaign in campaigns:
+        campaign["analysis_stage"] = analysis_stage
+        campaign["analysis_stage_contract"] = {
+            "stage": analysis_stage,
+            "paper_read_only": True,
+            "real_execution": False,
+            "input_selection": {
+                "dataset_workspace": dataset_mode,
+                "dataset_source_manifest": (
+                    str(dataset_manifest_path) if dataset_manifest_path is not None else None
+                ),
+            },
+        }
     scoreboards_path = export_scoreboards(root)
     markdown = render_campaign_report(campaigns)
     report_path = root / REPORT_DIR / "HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md"
@@ -851,6 +876,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-start-collection", action="store_true")
     parser.add_argument("--collection-duration-s", type=float, default=24 * 60 * 60)
     parser.add_argument("--collection-startup-wait-s", type=float, default=3.0)
+    parser.add_argument(
+        "--analysis-stage",
+        choices=["BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD"],
+        default=None,
+    )
     args = parser.parse_args(argv)
     result = run_campaigns(
         Path(args.root).resolve(),
@@ -860,6 +890,7 @@ def main(argv: list[str] | None = None) -> int:
         start_collection=not args.no_start_collection,
         collection_duration_s=args.collection_duration_s,
         collection_startup_wait_s=args.collection_startup_wait_s,
+        analysis_stage=args.analysis_stage,
     )
     for row in result["campaigns"]:
         net = row.get("net_pnl_usd")
