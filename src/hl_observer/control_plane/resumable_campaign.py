@@ -125,6 +125,12 @@ def validate_manifest(m: CampaignManifest) -> None:
     if m.schema_version == SCHEMA_VERSION_V2:
         if m.creation_phase not in ("COLLECT", "ANALYZE", "IDLE"):
             raise ValueError("V2 manifest must specify valid creation_phase")
+        if m.creation_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
+            raise ValueError("COLLECT manifest has analysis-only or unknown kind")
+        if m.creation_phase == "ANALYZE" and m.kind not in ANALYZE_CAMPAIGN_KINDS:
+            raise ValueError("ANALYZE manifest has collection-only or unknown kind")
+        if m.creation_phase == "IDLE":
+            raise ValueError("V2 campaign cannot be created in IDLE")
         if not isinstance(m.phase_epoch, int) or m.phase_epoch < 1:
             raise ValueError("V2 manifest requires positive integer phase_epoch")
         if m.creation_phase == "ANALYZE":
