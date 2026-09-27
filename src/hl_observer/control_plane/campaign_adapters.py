@@ -11,7 +11,7 @@ import time
 from typing import Any, Callable
 
 ROOT = Path(__file__).resolve().parents[3]
-ECONOMIC_KINDS = frozenset({"backtest", "module_pnl_proof"})
+ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
 
 
 @dataclass(frozen=True)
