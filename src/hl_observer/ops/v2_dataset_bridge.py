@@ -55,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
             "events": sum(item.event_count for item in shards),
             "bytes": sum(item.bytes for item in shards),
             "dataset_ids": [item.dataset_id for item in shards],
+            "dataset_selection_id": args.dataset_selection_id,
+            "source_collection_epoch": args.source_collection_epoch,
+            "collection_cutoff_at_utc": args.collection_cutoff_at_utc,
             "legacy_import": False,
             "real_execution": False,
         }
