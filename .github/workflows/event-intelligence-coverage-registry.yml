@@ -9,6 +9,8 @@ on:
       - "docs/event-intelligence-120-coverage.md"
       - "tools/generate_event_intelligence_status.py"
       - "tools/validate_event_intelligence_status.py"
+      - "src/hl_observer/event_intelligence/**"
+      - "src/hl_observer/control_plane/module_pnl_proof.py"
 permissions:
   contents: write
 concurrency:
