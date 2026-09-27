@@ -189,7 +189,6 @@ def discover_cloud_universe(
             item[0],
         )
     )
-    ranked.sort(key=lambda item: item[0])
     discovery_only.sort(key=lambda item: item[0])
     if max_coins > 0:
         ranked = ranked[: int(max_coins)]
