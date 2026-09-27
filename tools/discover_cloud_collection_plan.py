@@ -105,7 +105,7 @@ def _normalize_against_hl(
 def discover_cloud_universe(
     *,
     min_venues: int = 2,
-    max_coins: int = 120,
+    max_coins: int = 0,
     batch_size: int = 8,
 ) -> dict[str, Any]:
     errors: dict[str, str] = {}
@@ -176,6 +176,11 @@ def discover_cloud_universe(
         for coin, symbols in joined.items()
         if len(symbols) >= minimum
     ]
+    discovery_only = [
+        (coin, symbols)
+        for coin, symbols in joined.items()
+        if len(symbols) < minimum
+    ]
     majors = {"BTC": 0, "ETH": 1, "SOL": 2, "HYPE": 3}
     ranked.sort(
         key=lambda item: (
@@ -184,6 +189,8 @@ def discover_cloud_universe(
             item[0],
         )
     )
+    ranked.sort(key=lambda item: item[0])
+    discovery_only.sort(key=lambda item: item[0])
     if max_coins > 0:
         ranked = ranked[: int(max_coins)]
 
@@ -211,6 +218,15 @@ def discover_cloud_universe(
         },
         "selected_coin_count": len(rows),
         "selected": rows,
+        "discovery_only": [
+            {
+                "coin": coin,
+                "venue_count": len(symbols),
+                "symbols": dict(sorted(symbols.items())),
+                "tier": "C",
+            }
+            for coin, symbols in discovery_only
+        ],
         "batches": batches,
         "errors": errors,
         "read_only": True,
@@ -222,7 +238,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output")
     parser.add_argument("--min-venues", type=int, default=2)
-    parser.add_argument("--max-coins", type=int, default=120)
+    parser.add_argument("--max-coins", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=8)
     args = parser.parse_args()
     plan = discover_cloud_universe(
