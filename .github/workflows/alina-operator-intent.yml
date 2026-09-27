@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import datetime,json,os,pathlib,re
+          import datetime,hashlib,json,os,pathlib,re
           request_id=os.environ["REQUEST_ID"]
           if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id):
             raise SystemExit("request_id must be a path-safe bounded identifier")
@@ -73,6 +73,22 @@ jobs:
               raise SystemExit("request id already exists with different payload")
           else:
             p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
+          intent_digest=hashlib.sha256(json.dumps(row,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+          status={
+            "schema_version":"alina.operator_status.v1",
+            "request_id":row["request_id"],
+            "intent":row["intent"],
+            "intent_digest":intent_digest,
+            "state":"DISPATCHED",
+            "terminal":False,
+            "workflow_run_id":os.environ.get("GITHUB_RUN_ID"),
+            "main_code_sha":os.environ.get("GITHUB_SHA"),
+            "updated_at_utc":row["requested_at_utc"],
+            "paper_only":True,
+            "read_only":True,
+            "real_execution":False,
+          }
+          status_path.write_text(json.dumps(status,sort_keys=True,indent=2)+"\n")
           PY
       - name: Validate durable operator status
         run: |
