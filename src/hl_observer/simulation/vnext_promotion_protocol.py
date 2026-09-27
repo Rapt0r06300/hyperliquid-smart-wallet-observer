@@ -191,15 +191,14 @@ def validate_certification_entry(candidate: Mapping[str, Any]) -> bool:
 
     observed_dataset = candidate.get("observed_dataset_sha256")
     observed_config = candidate.get("observed_config_sha256")
-    if observed_dataset is not None or observed_config is not None:
-        if not _is_sha256(observed_dataset):
-            raise ValueError("certification requires a full observed_dataset_sha256")
-        if not _is_sha256(observed_config):
-            raise ValueError("certification requires a full observed_config_sha256")
-        if not hmac.compare_digest(str(observed_dataset), str(freeze_manifest["dataset_sha256"])):
-            raise ValueError("certification dataset fingerprint changed after freeze")
-        if not hmac.compare_digest(str(observed_config), str(freeze_manifest["config_sha256"])):
-            raise ValueError("certification config fingerprint changed after freeze")
+    if not _is_sha256(observed_dataset):
+        raise ValueError("certification requires a full observed_dataset_sha256")
+    if not _is_sha256(observed_config):
+        raise ValueError("certification requires a full observed_config_sha256")
+    if not hmac.compare_digest(str(observed_dataset), str(freeze_manifest["dataset_sha256"])):
+        raise ValueError("certification dataset fingerprint changed after freeze")
+    if not hmac.compare_digest(str(observed_config), str(freeze_manifest["config_sha256"])):
+        raise ValueError("certification config fingerprint changed after freeze")
 
     consumed_freeze_hash = candidate.get("consumed_freeze_hash")
     if not _is_sha256(consumed_freeze_hash):
