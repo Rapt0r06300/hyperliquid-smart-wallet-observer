@@ -36,6 +36,7 @@ def main() -> int:
     root = Path(args.dataset_root)
     phase = load(root / "control/alina-phase.json", {})
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
+    copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     event = load(Path("docs/event-intelligence-120-status.json"), {})
     spec = Path("docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md")
     spec_text = spec.read_text(encoding="utf-8") if spec.exists() else ""
@@ -133,6 +134,9 @@ def main() -> int:
         "unique_trade_count_exact": bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")),
         "safe_count": int(totals.get("SAFE_SHARDS") or 0),
         "replay_compatible_count": replayable,
+        "uncompressed_size_coverage": (health.get("coverage") or {}).get("uncompressed_bytes_exact") if isinstance(health, dict) else False,
+        "uncompressed_size_exact_assets": (health.get("coverage") or {}).get("uncompressed_size_exact_assets", 0) if isinstance(health, dict) else 0,
+        "uncompressed_size_unavailable_assets": (health.get("coverage") or {}).get("uncompressed_size_unavailable_assets", 0) if isinstance(health, dict) else 0,
         "copy_vault_status": modules["copy_vault"]["status"],
         "lead_lag_status": modules["lead_lag"]["status"],
         "cross_venue_status": modules["cross_venue_dislocation"]["status"],
@@ -161,6 +165,11 @@ def main() -> int:
         ),
         "event_intelligence_wiring_complete": event_wired,
         "scoreboard_artifact": scoreboard_artifact,
+        "copy_vault_coverage_receipt": {
+            "status": copy_vault_coverage.get("status") if isinstance(copy_vault_coverage, dict) else "UNAVAILABLE",
+            "digest": copy_vault_coverage.get("receipt_digest") if isinstance(copy_vault_coverage, dict) else None,
+            "reconciliation": copy_vault_coverage.get("reconciliation") if isinstance(copy_vault_coverage, dict) else {},
+        },
         "paper_read_only": True,
         "self_hosted_used": False,
         "real_execution_reachable": False,
@@ -168,6 +177,7 @@ def main() -> int:
             "implementation backlog is not empty" if backlog else "economic certificates not loaded",
             "event intelligence contains non-wired or partial rows" if not event_wired else None,
             "analysis campaigns are not all terminal COMPLETE" if not complete_analysis else None,
+            "uncompressed size coverage is incomplete" if report.get("uncompressed_size_coverage") is not True else None,
         ],
         "implementation_backlog": backlog,
         "analysis_campaign_status": analysis_status,
