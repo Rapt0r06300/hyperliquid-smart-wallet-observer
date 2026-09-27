@@ -193,3 +193,153 @@ This interrupted Work mission is closed only when all of the following are true:
 11. One end-to-end closure receipt proves checkpoint/resume and the complete economic pipeline.
 12. Paper/read-only remains strict and no current-cloud path depends on a user PC or self-hosted runner.
 
+### 11. Close cross-repository publication/checkpoint failure windows
+
+The Work conversation did not finish the exactly-once contract between Dataset V2 Releases and campaign manifests.
+
+Required:
+
+- Release publication and campaign checkpoint are linked by one immutable publication receipt;
+- if a Release succeeds but manifest commit/push fails, the next run discovers and adopts the exact matching immutable output instead of recomputing it;
+- a manifest cannot claim an output whose Release asset/digest is absent or mismatched;
+- proof/evidence tags referenced by certification are immutable; `--clobber` must not silently alter certifying evidence;
+- push/rebase conflicts after lease claim or publication preserve lease lineage and cannot apply a work unit twice;
+- a reconciliation job/report detects orphan Releases, orphan manifests, digest conflicts and incomplete publications.
+
+A repeated unit after any publication-boundary failure must converge to exactly one durable output and one authoritative completed-unit identity.
+
+### 12. Finish the Work-requested six-state audit of the 120 Event Intelligence/Data Expansion ideas
+
+The current 1→120 registry is structural inventory only. It does not satisfy the Work requirement to determine the real operational state of every idea.
+
+Every idea must carry exactly one of:
+
+- `IMPLEMENTED_AND_WIRED`;
+- `IMPLEMENTED_BUT_PARTIAL`;
+- `IMPLEMENTED_BUT_NOT_WIRED`;
+- `BROKEN`;
+- `MISSING`;
+- `NOT_APPLICABLE`.
+
+Each row must bind:
+
+- implementation file(s);
+- deterministic test(s);
+- actual canonical runtime/research caller;
+- required Dataset V2 family/source;
+- last verified code SHA;
+- status reason;
+- structural-proof state;
+- economic-proof state.
+
+A file that exists and has tests but has no reachable canonical caller is not `IMPLEMENTED_AND_WIRED`.
+
+An idea whose required Dataset V2 evidence is incomplete, unsafe or not replay-compatible is at most `IMPLEMENTED_BUT_PARTIAL` for the affected experiment.
+
+The repository-wide cabling audit must be reconciled with this registry so `TESTE_SEULEMENT` / orphan components cannot silently satisfy a wired claim.
+
+### 13. Complete replay-compatibility backfill rather than only having the mechanism
+
+The replay-compatibility mechanism exists, but Work required actual closure of the eligible population.
+
+Required:
+
+- finish or explicitly scope the remaining replay-compatibility candidate population;
+- machine-check that every SAFE shard consumed by official research has `replay_compatible=true` for its declared consumer/schema;
+- SAFE promotion uses a real minimal deterministic replay through the actual consumer adapter, not only parser/schema acceptance;
+- replay compatibility is versioned per family/consumer, so trade replayability does not imply synchronized-L2 replayability;
+- repair/promotion preserves original PARTIAL/REJECTED/QUARANTINED history;
+- Dataset health explains why SAFE, replayable and trade-safe populations differ by venue/family.
+
+No official economic run may silently select a shard whose replay contract is unverified.
+
+### 14. Add campaign backlog/stuck-work observability
+
+The Work conversation required a system that can be understood without manually reading hundreds of manifests or raw workflow logs.
+
+Publish one machine-readable/human-readable campaign health view containing at least:
+
+- counts by `PENDING`, `RUNNING`, `CONTINUATION_REQUIRED`, terminal status and campaign kind;
+- oldest pending age;
+- active lease owner/age/expiry;
+- attempts, no-progress count and consecutive failures;
+- backlog size by kind;
+- last durable output/checkpoint;
+- current blocking reason;
+- current phase/epoch and execution backend.
+
+A campaign remaining `PENDING` with zero attempts beyond the declared controller SLO must become an explicit alert/reason, not look healthy.
+
+### 15. Prove catch-up, timeout margin and concurrency semantics
+
+GitHub Actions scheduling is a recovery mechanism, not a correctness primitive.
+
+Required tests/proofs:
+
+- missed or delayed scheduled controller invocations catch up from durable state without duplicate campaigns;
+- cron timing is never used as economic/causal time;
+- every heavy unit reaches its soft deadline early enough to publish durable data/evidence and checkpoint before the platform job limit;
+- concurrency groups cannot silently cancel or replace the only pending work representing an operator phase transition;
+- recovery after a completely missed controller interval depends only on phase/campaign/output state, never on RAM or a permanent process;
+- current authoritative workflows enumerate their runner labels and prove no dependency on preserved self-hosted/user-PC workflows.
+
+### 16. Demonstrate a forced two-segment resume and failure matrix
+
+The Work mission explicitly required resumability to be demonstrated, not only unit-tested.
+
+Required closure tests:
+
+- force a first GitHub-hosted unit to stop after producing a durable checkpoint but before campaign completion;
+- start a fresh runner and resume from that checkpoint;
+- prove no recollection/recount/republication of already completed units;
+- compare uninterrupted versus interrupted/resumed execution and require identical deterministic semantic result digests;
+- inject bounded failures after collection publication, during quality, during replay, during backtest, after evidence Release publication and before manifest checkpoint;
+- every failure point must converge to the same final authoritative identity as the uninterrupted run.
+
+### 17. Bind OOS/forward and scoreboard to immutable proof identity
+
+The Work chain is not complete if backtest, OOS/forward and scoreboard can drift apart.
+
+Required:
+
+- TRAIN/selection, OOS and forward partitions cannot overlap;
+- OOS/forward bind the same frozen code/config/data/environment/cost/clock identities;
+- Copy-Vault, Lead-Lag and Cross-Venue keep separate economic verdicts;
+- generic `arbitrage` cannot double-count Cross-Venue economics;
+- scoreboard outputs reference exact dataset manifest, canonical ledger/PnL receipt and all required proof hashes;
+- missing fee/slippage/funding/latency/capacity evidence remains `UNMEASURABLE`;
+- the +4 USD research milestone is evaluated on complete eligible UTC days including zero-trade days, never only active/profitable days.
+
+### 18. Produce the final Work closure report from repository evidence
+
+The interrupted Work mission is not closed until one generated report contains:
+
+- principal Alina HEAD and Dataset V2 HEAD;
+- exact code/tree SHAs used by the demonstrated campaign;
+- current phase/epoch and execution backend;
+- six-state status of all 120 Event Intelligence/Data Expansion ideas;
+- exact raw trades, globally unique trades, SAFE trades and replayable trades with completeness flags;
+- record/shard counts by family and venue;
+- SAFE/PARTIAL/REJECTED/QUARANTINED counts;
+- replay-compatibility coverage and remaining unverified population;
+- one real SAFE replay-smoke receipt;
+- Copy-Vault, Lead-Lag and Cross-Venue OOS/forward/economic status separately;
+- forced checkpoint/resume proof;
+- scoreboard/proof artifact identities;
+- campaign backlog/stuck-work state;
+- confirmation that current cloud execution is GitHub-hosted only and paper/read-only;
+- every remaining external blocker with a machine-readable reason.
+
+### Additional Work carry-over Done Contract
+
+In addition to the existing Done Contract above, Work recovery is not complete until:
+
+13. Release publication and campaign checkpoint have tested exactly-once recovery across failure boundaries.
+14. Every Event Intelligence/Data Expansion idea 1→120 has the six-state wiring classification with concrete evidence.
+15. Replay-compatibility coverage is complete or every unverified remainder is explicitly excluded from official research.
+16. Campaign backlog/stuck-work state is visible from one canonical health report.
+17. Controller catch-up, timeout margin and concurrency semantics are demonstrated under GitHub-hosted execution.
+18. A forced fresh-runner continuation and interruption matrix prove real checkpoint/resume behavior.
+19. OOS/forward/scoreboard are bound to immutable proof identity and separate module verdicts.
+20. The final Work closure report is generated from repository evidence rather than manual claims.
+
