@@ -27,6 +27,8 @@ jobs:
         run: |
           set -euo pipefail
           python tools/build_closure_report.py --dataset-root dataset-v2
+      - name: Validate closure receipt
+        run: python tools/validate_closure_receipt.py
       - name: Publish closure report
         run: |
           set -euo pipefail
