@@ -13,8 +13,9 @@ REQUIRED = {
     "campaign_ids", "workflow_run_ids", "dataset_selection_id",
     "trade_count_exact", "unique_trade_count_exact", "safe_count",
     "replay_compatible_count", "raw_record_count", "valid_record_count",
-    "unique_record_count", "raw_trade_count", "unique_trade_count_global",
+    "unique_record_count", "raw_trade_count", "unique_trade_count_global", "cross_shard_overlap_trade_count",
     "partial_count", "rejected_count", "quarantined_record_count",
+    "cross_shard_overlap_trade_count",
     "uncompressed_size_coverage", "uncompressed_size_exact",
     "normative_gate_registry_digest", "normative_gate_count",
     "copy_vault_status", "lead_lag_status",
@@ -72,7 +73,7 @@ def main() -> int:
             raise SystemExit(f"closure field must be boolean: {name}")
     if len(str(receipt["normative_gate_registry_digest"] or "")) != 64:
         raise SystemExit("normative gate registry digest missing")
-    for name in ("raw_record_count", "valid_record_count", "unique_record_count", "raw_trade_count", "partial_count", "rejected_count", "quarantined_record_count", "normative_gate_count"):
+    for name in ("raw_record_count", "valid_record_count", "unique_record_count", "raw_trade_count", "partial_count", "rejected_count", "quarantined_record_count", "normative_gate_count", "cross_shard_overlap_trade_count"):
         if not isinstance(receipt[name], int) or receipt[name] < 0:
             raise SystemExit(f"closure count must be a non-negative integer: {name}")
     for name in ("uncompressed_size_coverage", "uncompressed_size_exact"):
