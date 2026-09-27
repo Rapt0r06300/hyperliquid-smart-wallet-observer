@@ -7,7 +7,6 @@ import hashlib
 import json
 from pathlib import Path
 
-
 STATUSES = {
     "IMPLEMENTED_AND_WIRED",
     "IMPLEMENTED_BUT_PARTIAL",
@@ -20,12 +19,12 @@ PROOFS = {"PROVEN", "UNPROVEN", "UNMEASURABLE", "KILL", "MORE_DATA"}
 
 
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--path", default="docs/event-intelligence-120-status.json")
-    p.add_argument("--repo-root", default=".")
-    a = p.parse_args()
-    root = Path(a.repo_root)
-    body = json.loads(Path(a.path).read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", default="docs/event-intelligence-120-status.json")
+    parser.add_argument("--repo-root", default=".")
+    args = parser.parse_args()
+    root = Path(args.repo_root)
+    body = json.loads(Path(args.path).read_text(encoding="utf-8"))
     if body.get("schema_version") != "alina.event_intelligence_status.v1":
         raise SystemExit("unsupported event registry schema")
     rows = body.get("items")
@@ -36,6 +35,16 @@ def main():
         proof = row.get("proof_status")
         if status not in STATUSES or proof not in PROOFS:
             raise SystemExit(f"invalid state for event {row.get('id')}")
+        if row.get("wiring_status") != status:
+            raise SystemExit(f"wiring status mismatch for event {row.get('id')}")
+        if row.get("required_dataset_family") != "external_events":
+            raise SystemExit(f"dataset family missing for event {row.get('id')}")
+        target_families = row.get("target_economic_families")
+        if target_families != ["copy_vault", "lead_lag", "cross_venue_dislocation"]:
+            raise SystemExit(f"target family contract missing for event {row.get('id')}")
+        for field in ("actual_callers", "tests", "runtime_evidence"):
+            if not isinstance(row.get(field), list):
+                raise SystemExit(f"{field} must be a list for event {row.get('id')}")
         files = row.get("evidence_files") or []
         if not isinstance(files, list):
             raise SystemExit(f"invalid evidence list for event {row.get('id')}")
@@ -47,7 +56,7 @@ def main():
         if proof == "PROVEN" and status != "IMPLEMENTED_AND_WIRED":
             raise SystemExit(f"event {row.get('id')} claims proof without wired implementation")
         expected = hashlib.sha256(json.dumps(sorted(files), sort_keys=True).encode()).hexdigest()
-        if row.get("evidence_digest") and row["evidence_digest"] != expected:
+        if row.get("evidence_digest") != expected:
             raise SystemExit(f"event {row.get('id')} evidence digest mismatch")
     summary = body.get("summary") or {}
     for status in STATUSES:
