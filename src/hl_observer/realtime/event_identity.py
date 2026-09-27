@@ -22,6 +22,12 @@ _VOLATILE_FIELDS = {
     "received_at_ms",
     "recv_ts_ms",
     "write_ts_ms",
+    "recv_wall_ts_ms",
+    "received_ts_ms",
+    "written_ts_ms",
+    "recu_ms",
+    "local_monotonic_ns",
+    "monotonic_ns",
     "frame_sequence",
     "event_index_in_frame",
 }
