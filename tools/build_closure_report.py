@@ -35,6 +35,24 @@ def main() -> int:
 
     root = Path(args.dataset_root)
     phase = load(root / "control/alina-phase.json", {})
+    operator_status_rows = []
+    operator_status_invalid = []
+    for status_path in sorted(Path("control/operator-status").glob("*.json")):
+        row = load(status_path, None)
+        if not isinstance(row, dict):
+            operator_status_invalid.append(status_path.name)
+            continue
+        if row.get("schema_version") != "alina.operator_status.v1" or not row.get("request_id"):
+            operator_status_invalid.append(status_path.name)
+            continue
+        operator_status_rows.append({
+            "request_id": row.get("request_id"),
+            "intent": row.get("intent"),
+            "state": row.get("state"),
+            "terminal": row.get("terminal") is True,
+            "workflow_run_id": row.get("workflow_run_id"),
+            "updated_at_utc": row.get("updated_at_utc"),
+        })
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     event = load(Path("docs/event-intelligence-120-status.json"), {})
@@ -129,6 +147,12 @@ def main() -> int:
         "analysis_stage": phase.get("analysis_stage"),
         "campaign_ids": campaign_ids,
         "workflow_run_ids": workflow_run_ids,
+        "operator_status": {
+            "count": len(operator_status_rows),
+            "rows": operator_status_rows,
+            "invalid_files": sorted(operator_status_invalid),
+            "non_terminal_count": sum(1 for row in operator_status_rows if not row["terminal"]),
+        },
         "dataset_selection_id": (
             analyze_selections[0] if len(analyze_selections) == 1 else None
         ),
@@ -192,6 +216,7 @@ def main() -> int:
             "analysis campaigns are not all terminal COMPLETE" if not complete_analysis else None,
             "uncompressed size coverage is incomplete" if report.get("uncompressed_size_coverage") is not True else None,
             "normative gate registry is unavailable" if not gate_registry else None,
+            "operator status receipt is invalid" if operator_status_invalid else None,
             "environment provenance is unavailable" if complete_analysis and not report.get("environment_provenance") else None,
         ],
         "implementation_backlog": backlog,
