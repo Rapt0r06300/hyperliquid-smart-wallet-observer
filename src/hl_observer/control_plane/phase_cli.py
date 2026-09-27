@@ -112,7 +112,10 @@ def _campaign_status(controller: PhaseController, manifest_dir: str) -> int:
         return 2
     state = controller.current_state
     due = select_due_campaigns(
-        manifests, current_phase=state.phase, current_epoch=state.epoch
+        manifests,
+        current_phase=state.phase,
+        current_epoch=state.epoch,
+        current_analysis_stage=state.analysis_stage,
     )
     print(json.dumps({
         "current_phase": state.phase,
