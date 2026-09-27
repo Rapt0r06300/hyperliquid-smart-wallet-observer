@@ -68,28 +68,83 @@ def inv_completed_sans_residu(statut: Any, residu: Any) -> dict[str, Any]:
 
 
 def verifier_tous(etat: dict[str, Any]) -> dict[str, Any]:
-    """Applique tous les invariants présents dans `etat` et agrège les violations. Un champ absent est ignoré
-    (l'invariant n'est pas applicable), mais une valeur présente et fausse est TOUJOURS signalée."""
-    violations = []
-    checks = {
-        "hedge_qty": lambda: inv_hedge_qty(etat.get("hedge_qty"), etat.get("actual_fill_qty"))
-        if "hedge_qty" in etat else {"ok": True},
-        "reduce_only": lambda: inv_reduce_only(etat.get("exposition_avant"), etat.get("exposition_apres"))
-        if "exposition_apres" in etat else {"ok": True},
-        "fill_unique": lambda: inv_fill_unique(etat.get("fill_ids", [])),
-        "position_fermee": lambda: inv_position_fermee(etat.get("position_disparue"), etat.get("avait_fermeture"))
-        if "position_disparue" in etat else {"ok": True},
-        "pnl_sans_fill": lambda: inv_pnl_sans_fill(etat.get("realized_pnl"), etat.get("n_fills"))
-        if "realized_pnl" in etat else {"ok": True},
-        "liquidite_unique": lambda: inv_liquidite_unique(etat.get("consommations", [])),
-        "completed_residu": lambda: inv_completed_sans_residu(etat.get("statut"), etat.get("residu"))
-        if "statut" in etat else {"ok": True},
+    """Apply every invariant with explicit missing-evidence semantics.
+
+    An empty or incomplete state is never a vacuous success. Each advertised
+    invariant must either receive its complete input tuple or emit
+    MISSING_REQUIRED_EVIDENCE.
+    """
+    if not isinstance(etat, dict) or not etat:
+        return {
+            "ok": False,
+            "violations": [{
+                "invariant": "suite",
+                "raison": "MISSING_REQUIRED_EVIDENCE",
+            }],
+            "n_violations": 1,
+        }
+
+    violations: list[dict[str, Any]] = []
+
+    def require(name: str, fields: tuple[str, ...], fn):
+        missing = [field for field in fields if field not in etat]
+        if missing:
+            violations.append({
+                "invariant": name,
+                "raison": "MISSING_REQUIRED_EVIDENCE",
+                "missing_fields": missing,
+            })
+            return
+        result = fn()
+        if not result.get("ok", False):
+            violations.append({
+                "invariant": name,
+                "raison": result.get("raison", "VIOLATION"),
+            })
+
+    require(
+        "hedge_qty",
+        ("hedge_qty", "actual_fill_qty"),
+        lambda: inv_hedge_qty(etat["hedge_qty"], etat["actual_fill_qty"]),
+    )
+    require(
+        "reduce_only",
+        ("exposition_avant", "exposition_apres"),
+        lambda: inv_reduce_only(etat["exposition_avant"], etat["exposition_apres"]),
+    )
+    require(
+        "fill_unique",
+        ("fill_ids",),
+        lambda: inv_fill_unique(etat["fill_ids"]),
+    )
+    require(
+        "position_fermee",
+        ("position_disparue", "avait_fermeture"),
+        lambda: inv_position_fermee(
+            etat["position_disparue"], etat["avait_fermeture"]
+        ),
+    )
+    require(
+        "pnl_sans_fill",
+        ("realized_pnl", "n_fills"),
+        lambda: inv_pnl_sans_fill(etat["realized_pnl"], etat["n_fills"]),
+    )
+    require(
+        "liquidite_unique",
+        ("consommations",),
+        lambda: inv_liquidite_unique(etat["consommations"]),
+    )
+    require(
+        "completed_residu",
+        ("statut", "residu"),
+        lambda: inv_completed_sans_residu(etat["statut"], etat["residu"]),
+    )
+    return {
+        "ok": not violations,
+        "violations": violations,
+        "n_violations": len(violations),
     }
-    for nom, fn in checks.items():
-        r = fn()
-        if not r.get("ok", False):
-            violations.append({"invariant": nom, "raison": r.get("raison", "VIOLATION")})
-    return {"ok": (not violations), "violations": violations, "n_violations": len(violations)}
+
 
 
 __all__ = ["inv_hedge_qty", "inv_reduce_only", "inv_fill_unique", "inv_position_fermee", "inv_pnl_sans_fill",
