@@ -8,8 +8,10 @@ on:
     paths:
       - "src/hl_observer/sources/**"
       - "src/hl_observer/venues/**"
+      - "config/source_rules.yaml"
       - "tools/generate_source_capabilities.py"
       - "tools/validate_source_capabilities.py"
+      - "tools/validate_source_rules.py"
 permissions:
   contents: write
 concurrency:
@@ -21,6 +23,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Validate versioned source rules
+        run: python tools/validate_source_rules.py
       - name: Generate conservative capability matrix
         run: python tools/generate_source_capabilities.py
       - name: Validate capability matrix
