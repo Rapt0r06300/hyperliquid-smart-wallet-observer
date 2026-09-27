@@ -1,0 +1,33 @@
+name: source-capability-matrix
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "11 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "src/hl_observer/sources/**"
+      - "src/hl_observer/venues/**"
+      - "tools/generate_source_capabilities.py"
+permissions:
+  contents: write
+concurrency:
+  group: source-capability-matrix
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Generate conservative capability matrix
+        run: python tools/generate_source_capabilities.py
+      - name: Publish matrix
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/source-capability-matrix.json
+          git diff --cached --quiet && exit 0
+          git commit -m "sources: publish capability matrix"
+          git push origin HEAD:main
