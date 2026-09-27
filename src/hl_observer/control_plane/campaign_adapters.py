@@ -148,6 +148,11 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             str(out),
             "--coins",
             coins,
+            *(
+                ["--plan-file", str(ctx.partition["plan_file"])]
+                if ctx.partition.get("plan_file")
+                else []
+            ),
             "--duration-s",
             str(duration),
             "--collector-version",
