@@ -26,6 +26,7 @@ jobs:
           DATASET_V2_HEAD: "${{ github.event.workflow_run.head_sha || 'main' }}"
         run: |
           set -euo pipefail
+          PYTHONPATH=src python tools/generate_gate_registry.py
           python tools/build_closure_report.py \
             --dataset-root dataset-v2 \
             --main-head "$(git rev-parse HEAD)" \
@@ -38,7 +39,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add docs/alina-closure-report.json
+          git add docs/alina-closure-report.json docs/normative-gate-registry.json
           git diff --cached --quiet && exit 0
           git commit -m "closure: publish dual-repository status report"
           git push origin HEAD:main
