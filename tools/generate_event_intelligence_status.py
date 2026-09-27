@@ -98,6 +98,9 @@ def main() -> int:
             "tests": sorted(set(tests)),
             "runtime_evidence": callers,
             "wiring_status": status,
+            "coverage_state": (
+                "UNMEASURABLE" if callers else ("WIRED" if files else "REGISTERED")
+            ),
             "status": status,
             "proof_status": proof_status,
             "proof_text": proof,
@@ -118,7 +121,7 @@ def main() -> int:
     if len(rows) != 120 or [row["id"] for row in rows] != list(range(1, 121)):
         raise SystemExit("registry must contain ids 1..120")
     body = {
-        "schema_version": "alina.event_intelligence_status.v1",
+        "schema_version": "alina.event_intelligence_status.v2",
         "source": str(Path(args.source)),
         "items": rows,
         "summary": {
