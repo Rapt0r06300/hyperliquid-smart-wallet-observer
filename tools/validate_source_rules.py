@@ -70,6 +70,10 @@ def main() -> int:
     actions = rules.get("github_actions") or {}
     if actions.get("hosted_job_max_seconds") != 21600:
         raise SystemExit("GitHub-hosted six-hour bound missing")
+    if actions.get("successor_dispatch") != "workflow_dispatch_or_repository_dispatch":
+        raise SystemExit("successor dispatch must use explicit workflow dispatch")
+    if actions.get("token_push_recursion_assumed") is not False:
+        raise SystemExit("GITHUB_TOKEN push recursion must not be assumed")
     execution = rules.get("execution") or {}
     if execution != {
         "paper_only": True,
