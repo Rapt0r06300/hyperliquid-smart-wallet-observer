@@ -15,6 +15,14 @@ SUPPORTED_SCHEMAS = frozenset({SCHEMA_VERSION_V1, SCHEMA_VERSION_V2})
 
 COLLECT_CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection"})
 ANALYZE_CAMPAIGN_KINDS = frozenset({"replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard"})
+ANALYSIS_STAGE_BY_KIND = {
+    "replay": "REPLAY",
+    "backtest": "BACKTEST",
+    "oos": "OOS",
+    "forward_paper": "FORWARD_PAPER",
+    "module_pnl_proof": "PNL_PROOF",
+    "scoreboard": "SCOREBOARD",
+}
 CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard"})
 CAMPAIGN_KIND_ORDER = ("scoreboard","module_pnl_proof","forward_paper","oos","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
 ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"})
@@ -295,6 +303,7 @@ def select_due_campaigns(
     *,
     current_phase: str | None = None,
     current_epoch: int | None = None,
+    current_analysis_stage: str | None = None,
     now: str | None = None,
 ) -> list[CampaignManifest]:
     current = _parse_ts(now or _now())
@@ -318,6 +327,12 @@ def select_due_campaigns(
             if current_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
                 continue
             if current_phase == "ANALYZE" and m.kind not in ANALYZE_CAMPAIGN_KINDS:
+                continue
+            if (
+                current_phase == "ANALYZE"
+                and current_analysis_stage is not None
+                and ANALYSIS_STAGE_BY_KIND.get(m.kind) != current_analysis_stage
+            ):
                 continue
 
         buckets.setdefault(m.kind, []).append(m)
