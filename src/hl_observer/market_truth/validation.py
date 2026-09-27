@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Iterable, Mapping
 
 from hl_observer.backtesting.validation_gates import (
@@ -51,10 +52,29 @@ def evaluate_research_candidate(
 ) -> ResearchVerdict:
     """Return PEPITE only after both causal backtest and real forward paper pass."""
     evidence_rows = list(evidence)
+    if not evidence_rows:
+        return ResearchVerdict(
+            verdict="KILL",
+            reason="TRUTH_EVIDENCE_MISSING",
+            backtest={},
+            forward={},
+            quality_violations=1,
+            reconciliation_violations=1,
+        )
+
+    def valid_quality_score(row: Mapping[str, Any]) -> bool:
+        value = (row.get("fill") or {}).get("feed_quality_score")
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and 0.0 <= float(value) <= 1.0
+        )
+
     quality_violations = sum(
         1
         for row in evidence_rows
-        if not bool((row.get("fill") or {}).get("feed_quality_score"))
+        if not valid_quality_score(row)
         or str((row.get("fill") or {}).get("status") or "")
         in {"QUALITY_BLOCKED", "STALE_BOOK", "UNMEASURABLE"}
     )
@@ -65,6 +85,8 @@ def evaluate_research_candidate(
     )
     backtest_rows = list(backtest_trades)
     forward_rows = list(forward_trades)
+    if not causal_events:
+        quality_violations += 1
     backtest_report = run_validation_gates(
         backtest_rows,
         events=list(causal_events),
