@@ -438,6 +438,9 @@ def run_one_unit(
                 "returncode": returncode,
                 "stdout": stdout,
                 "stderr": stderr,
+                "analysis_stage": (
+                    str(ctx.kind).upper() if ctx.kind in ECONOMIC_KINDS else None
+                ),
             }
         )
 
@@ -465,6 +468,9 @@ def run_one_unit(
     stderr = phases[-1]["stderr"] if phases else ""
     payload = {
         "status": "COMPLETE",
+        "analysis_stage": (
+            str(ctx.kind).upper() if ctx.kind in ECONOMIC_KINDS else None
+        ),
         "returncode": 0,
         "stdout": stdout,
         "stderr": stderr,
