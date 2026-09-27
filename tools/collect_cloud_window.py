@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import shutil
 import time
@@ -1192,7 +1193,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    plan_rows = _load_plan_rows(Path(args.plan_file)) if args.plan_file else None
+    plan_path = Path(args.plan_file) if args.plan_file else None
+    plan_rows = _load_plan_rows(plan_path) if plan_path else None
+    if plan_path is not None:
+        output_root = Path(args.output)
+        output_root.mkdir(parents=True, exist_ok=True)
+        plan_bytes = plan_path.read_bytes()
+        (output_root / "collection_plan.json").write_bytes(plan_bytes)
+        (output_root / "collection_plan.sha256").write_text(
+            hashlib.sha256(plan_bytes).hexdigest() + "\\n",
+            encoding="utf-8",
+        )
     if plan_rows is not None:
         coins = sorted({str(row["coin"]).upper() for row in plan_rows})
     else:
