@@ -1,174 +1,19 @@
-name: hypersmart-runner-smoke-final-v1
+name: .github/workflows/hypersmart-runner-smoke-final-v1.yml-disabled
 
 on:
   workflow_dispatch:
-    inputs:
-      expected_sha:
-        description: "SHA exact de main à vérifier"
-        required: true
-        type: string
-      control_path:
-        description: "Contrat JSON suivi par Git"
-        required: true
-        default: "control/alina_final_jobs/final-economic-certification-v1-20260819.json"
-        type: string
 
 permissions:
   contents: read
 
-concurrency:
-  group: hypersmart-runner-smoke-final-v1
-  cancel-in-progress: false
-
 jobs:
-  smoke:
-    name: Preuve GitHub vers PC HyperSmart
-    if: >-
-      false &&
-      github.repository == 'Rapt0r06300/hyperliquid-smart-wallet-observer' &&
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' &&
-      github.actor == 'Rapt0r06300' &&
-      github.event.repository.fork == false
-    runs-on: ubuntu-latest # PC/self-hosted disabled by repository policy
-    timeout-minutes: 10
-    env:
-      HL_ENABLE_MAINNET_EXECUTION: '0'
-      HL_ENABLE_TESTNET_EXECUTION: '0'
-      REAL_MAINNET_TRADING: 'false'
-      TESTNET_EXECUTION_ENABLED: 'false'
-      HYPERSMART_ENABLE_REAL_ORDERS: '0'
-      ENABLE_REAL_ORDERS: '0'
-      HYPERSMART_ANALYSIS_LOCAL_ONLY: '1'
-      PYTHONUTF8: '1'
-      PYTHONIOENCODING: 'utf-8'
+  disabled:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
-      - name: Gate public avant checkout
-        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
-        env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
-          CONTROL_PATH: ${{ inputs.control_path }}
+      - name: GitHub-hosted-only policy
         run: |
-          $ErrorActionPreference = 'Stop'
-          if ($env:GITHUB_REPOSITORY -cne 'Rapt0r06300/hyperliquid-smart-wallet-observer') { throw 'SMOKE_REPOSITORY_REFUSED' }
-          if ($env:GITHUB_EVENT_NAME -cne 'workflow_dispatch') { throw 'SMOKE_EVENT_REFUSED' }
-          if ($env:GITHUB_REF -cne 'refs/heads/main') { throw 'SMOKE_REF_REFUSED' }
-          if ($env:GITHUB_ACTOR -cne 'Rapt0r06300') { throw 'SMOKE_ACTOR_REFUSED' }
-          if ($env:EXPECTED_SHA -cnotmatch '^[0-9a-f]{40}$' -or $env:EXPECTED_SHA -cne $env:GITHUB_SHA) { throw 'SMOKE_SHA_REFUSED' }
-          if ($env:CONTROL_PATH -cnotmatch '^control/alina_final_jobs/[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.json$') { throw 'SMOKE_CONTROL_PATH_REFUSED' }
-          $event = Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ([string]$event.repository.full_name -cne 'Rapt0r06300/hyperliquid-smart-wallet-observer') { throw 'SMOKE_EVENT_REPOSITORY_REFUSED' }
-          if ($event.repository.fork -eq $true) { throw 'SMOKE_FORK_REFUSED' }
-          if ([string]$event.sender.login -cne 'Rapt0r06300') { throw 'SMOKE_SENDER_REFUSED' }
-          Write-Host 'HYPERSMART_SMOKE_PUBLIC_GATE_OK' -ForegroundColor Green
-
-      - name: Checkout exact sans credentials persistants
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ inputs.expected_sha }}
-          clean: true
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Valider le contrat et produire la preuve locale
-        id: proof
-        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
-        env:
-          EXPECTED_SHA: ${{ inputs.expected_sha }}
-          CONTROL_PATH: ${{ inputs.control_path }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $env:GIT_CONFIG_COUNT = '1'
-          $env:GIT_CONFIG_KEY_0 = 'safe.directory'
-          $env:GIT_CONFIG_VALUE_0 = $env:GITHUB_WORKSPACE
-          $actual = (git rev-parse HEAD).Trim().ToLowerInvariant()
-          if ($actual -cne $env:EXPECTED_SHA) { throw 'SMOKE_CHECKOUT_SHA_REFUSED' }
-          $headers = @{
-            Authorization = "Bearer $env:GITHUB_TOKEN"
-            Accept = 'application/vnd.github+json'
-            'X-GitHub-Api-Version' = '2022-11-28'
-            'User-Agent' = 'HyperSmart-Runner-Smoke'
-          }
-          $main = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/commits/main" -Headers $headers
-          if (([string]$main.sha).Trim().ToLowerInvariant() -cne $actual) { throw 'SMOKE_STALE_MAIN_REFUSED' }
-          & git ls-files --error-unmatch -- $env:CONTROL_PATH | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'SMOKE_UNTRACKED_CONTROL_REFUSED' }
-          $control = Get-Content -LiteralPath $env:CONTROL_PATH -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ([string]$control.schema -cne 'alina.self_hosted_control.v1') { throw 'SMOKE_CONTROL_SCHEMA_REFUSED' }
-          if ([string]$control.job_id -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw 'SMOKE_JOB_ID_REFUSED' }
-          $forbidden = @('command','commands','shell','script','powershell','cmd','executable','private_key','signature','exchange')
-          foreach ($name in @($control.PSObject.Properties.Name)) {
-            if ($forbidden -contains ([string]$name).ToLowerInvariant()) { throw "SMOKE_ARBITRARY_FIELD_REFUSED: $name" }
-          }
-          $pythonCandidates = New-Object System.Collections.Generic.List[string]
-          $machinePython = [Environment]::GetEnvironmentVariable('ALINA_PYTHON_EXE', 'Machine')
-          if (-not [string]::IsNullOrWhiteSpace($machinePython)) { $pythonCandidates.Add($machinePython) | Out-Null }
-          foreach ($candidate in @(
-            'C:\HyperSmart-Runner-Data\runtime\python\Scripts\python.exe',
-            'C:\Users\flo\Desktop\Projet invest\portable_runtime\python\python.exe',
-            'C:\Users\flo\Desktop\Projet invest\tools\python\python.exe'
-          )) {
-            $pythonCandidates.Add($candidate) | Out-Null
-          }
-          $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
-          if ($pythonCommand) { $pythonCandidates.Add([string]$pythonCommand.Source) | Out-Null }
-          $python = ''
-          foreach ($candidate in @($pythonCandidates | Select-Object -Unique)) {
-            if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
-            & $candidate -c "import sys, pydantic; raise SystemExit(0 if sys.version_info >= (3,11) else 2)" 2>$null
-            if ($LASTEXITCODE -eq 0) {
-              $python = [System.IO.Path]::GetFullPath($candidate)
-              break
-            }
-          }
-          if ([string]::IsNullOrWhiteSpace($python)) { throw 'SMOKE_PYTHON_REFUSED' }
-          Write-Host "SMOKE_PYTHON_OK: $python"
-          $env:HYPERSMART_CHECKOUT_SRC = Join-Path $env:GITHUB_WORKSPACE 'src'
-          $proofDir = Join-Path $env:RUNNER_TEMP 'hypersmart-runner-smoke'
-          New-Item -ItemType Directory -Force -Path $proofDir | Out-Null
-          $request = Join-Path $proofDir 'worker_request.json'
-          $bundle = Join-Path $proofDir 'control_bundle.json'
-          & $python -c "import os,runpy,sys; sys.path.insert(0, os.environ['HYPERSMART_CHECKOUT_SRC']); runpy.run_module('hl_observer.ops.self_hosted_control', run_name='__main__')" --control $env:CONTROL_PATH --project-sha $actual --worker-request $request --bundle-output $bundle
-          if ($LASTEXITCODE -ne 0) { throw 'SMOKE_CONTROL_CONTRACT_REFUSED' }
-          $modulePath = (& $python -c "import os,pathlib,sys; sys.path.insert(0, os.environ['HYPERSMART_CHECKOUT_SRC']); import hl_observer; print(pathlib.Path(hl_observer.__file__).resolve())" | Select-Object -Last 1).Trim()
-          if (-not $modulePath.StartsWith((Join-Path $env:GITHUB_WORKSPACE 'src'), [StringComparison]::OrdinalIgnoreCase)) { throw 'SMOKE_EXACT_CHECKOUT_IMPORT_REFUSED' }
-          $payload = [ordered]@{
-            schema = 'hypersmart.runner_smoke_proof.v1'
-            completed_at_utc = [DateTimeOffset]::UtcNow.ToString('o')
-            repository = $env:GITHUB_REPOSITORY
-            github_run_id = $env:GITHUB_RUN_ID
-            github_sha = $actual
-            branch = 'main'
-            runner_name = $env:RUNNER_NAME
-            required_label = 'hypersmart-final-v1'
-            exact_checkout_import = $true
-            control_contract_valid = $true
-            paper_only = $true
-            read_only = $true
-            real_execution = $false
-            arbitrary_command = $false
-            pull_request_or_fork = $false
-            development_workspace_touched = $false
-          }
-          $proofPath = Join-Path $proofDir 'HYPERSMART_RUNNER_SMOKE_PROOF.json'
-          $payload | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $proofPath -Encoding UTF8
-          "proof_dir=$proofDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "## HyperSmart runner smoke`n`n- SHA: ``$actual```n- PAPER/READ-ONLY: **OK**`n- Contrat contrôlé: **OK**`n- Commande arbitraire: **NON**" | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding UTF8
-          Write-Host 'HYPERSMART_RUNNER_SMOKE_LOCAL_OK' -ForegroundColor Green
-
-      - name: Publier la preuve compacte GitHub
-        id: upload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: hypersmart-runner-smoke-${{ github.run_id }}
-          path: ${{ steps.proof.outputs.proof_dir }}/HYPERSMART_RUNNER_SMOKE_PROOF.json
-          if-no-files-found: error
-          retention-days: 7
-          compression-level: 6
-
-      - name: Conclure la liaison GitHub PC GitHub
-        shell: powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File {0}
-        run: |
-          if ('${{ steps.upload.outcome }}' -ne 'success') { throw 'SMOKE_ARTIFACT_REFUSED' }
-          Write-Host 'GITHUB_PC_GITHUB_SMOKE_OK' -ForegroundColor Green
+          echo "Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted."
+          echo "Use the GitHub-hosted Alina SmartFlow workflows and Dataset V2 contracts."
+          exit 1
