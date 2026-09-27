@@ -76,6 +76,16 @@ def main() -> int:
     parser.add_argument("--config-sha256", default="schedule")
     parser.add_argument("--work-plan-sha256", default="schedule")
     parser.add_argument("--cursor-json")
+    parser.add_argument("--creation-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
+    parser.add_argument("--phase-epoch", type=int)
+    parser.add_argument("--source-collection-epoch", type=int)
+    parser.add_argument("--collection-cutoff-at-utc")
+    parser.add_argument("--dataset-selection-id")
+    parser.add_argument("--operator-request-id")
+    parser.add_argument("--current-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
+    parser.add_argument("--current-epoch", type=int)
+    parser.add_argument("--expected-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
+    parser.add_argument("--expected-epoch", type=int)
     parser.add_argument("--token")
     parser.add_argument("--owner")
     parser.add_argument("--ttl-s", type=int, default=20_700)
@@ -103,6 +113,19 @@ def main() -> int:
             (now + timedelta(days=7)).isoformat(),
             created_at=now.isoformat(),
             cursor=_json_object(args.cursor_json),
+            schema_version=(
+                "alina.resumable_campaign.v2"
+                if args.creation_phase is not None else "alina.resumable_campaign.v1"
+            ),
+            creation_phase=args.creation_phase,
+            phase_epoch=args.phase_epoch,
+            source_collection_epoch=args.source_collection_epoch,
+            collection_cutoff_at_utc=args.collection_cutoff_at_utc,
+            dataset_selection_id=args.dataset_selection_id,
+            history=(
+                [{"event": "operator_request", "request_id": args.operator_request_id}]
+                if args.operator_request_id else []
+            ),
         )
         save(path, manifest)
         print(sha256_json(manifest.to_dict()))
@@ -110,7 +133,7 @@ def main() -> int:
 
     if args.command == "list-due":
         manifests = [load(item) for item in sorted(path.glob("*.json"))]
-        print("\n".join(item.campaign_id for item in select_due_campaigns(manifests)))
+        print("\n".join(item.campaign_id for item in select_due_campaigns(manifests, current_phase=args.current_phase, current_epoch=args.current_epoch)))
         return 0
 
     manifest = load(path)
