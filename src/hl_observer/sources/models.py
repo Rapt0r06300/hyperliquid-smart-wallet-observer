@@ -71,6 +71,9 @@ class FetchProvenance:
     git_head: str | None = None
     ok: bool = True
     source_ts_ms: int | None = None    # server timestamp if available
+    clock_offset_ms: float | None = None
+    clock_uncertainty_ms: float | None = None
+    clock_synchronized: bool = False
     latency_ms: float | None = None
     rate_weight: int | None = None
     raw_hash: str | None = None
