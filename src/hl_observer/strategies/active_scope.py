@@ -35,6 +35,8 @@ _SCOPE: tuple[StrategyScopeEntry, ...] = (
                        "Entity clustering can annotate evidence but cannot create paper PnL."),
     StrategyScopeEntry("funding_carry", StrategyScopeStatus.DISABLED, False,
                        "Outside the active V2 economic scope; collection remains read-only."),
+    StrategyScopeEntry("carry", StrategyScopeStatus.DISABLED, False,
+                       "Carry is disabled by scope and cannot create paper intents or PnL."),
     StrategyScopeEntry("triangular_arbitrage", StrategyScopeStatus.RESEARCH_ONLY, False,
                        "Research diagnostics only; no canonical paper execution."),
     StrategyScopeEntry("market_making", StrategyScopeStatus.RESEARCH_ONLY, False,
