@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Iterable, Mapping, Any
-MODULES=("copy_vault","lead_lag","cross_venue_dislocation_v2","arbitrage")
+MODULES=("copy_vault","lead_lag","cross_venue_dislocation_v2")
 @dataclass(frozen=True)
 class ModulePnl:
     module:str; gross_pnl:float; fees:float; slippage:float; funding_financing:float; net_pnl:float; sample_size:int; threshold_usd:float; threshold_met:bool; proof_of_pnl:bool
