@@ -1,179 +1,195 @@
-# HyperSmart Observer — Agent Rules
+# CLAUDE.md — Alina Smart Flow
 
-## Mission
-HyperSmart Observer observe **Hyperliquid** en lecture seule, score les wallets smart-money et le marché, et **simule des décisions paper en local**. Il ne doit **jamais** envoyer d'ordre réel. But : produire un PnL paper réaliste, proche de ce qu'on aurait eu en vrai sur Hyperliquid — sans jamais le maquiller ni le promettre.
+> Compatibilité pour les agents qui chargent automatiquement `CLAUDE.md`.
+> Les anciens addenda de juillet 2026 sont supersédés par ce fichier, `AGENTS.md`, `SECURITY.md` et la spec canonique.
 
-## 📍 État & feuille de route (2026-07-08)
-Document **maître** (état actuel, méthode de travail, architecture, config, commandes, roadmap) :
-**`docs/ETAT_ET_FEUILLE_DE_ROUTE.md`**. Objectif condensé : `OBJECTIF.md`. Recherche de scénarios
-replay (après les 48h) : `docs/REPLAY_SCENARIO_SEARCH.md`. Config détaillée : `docs/CONFIG_FLAGS.md`.
-Résumé express : sizing = **marge $50 × levier 10 = notional $500** (PnL en dollars, plus de centimes) ;
-**firehose userFills multiplexé (V27)** pour un max de signaux frais ; **run 48h en cours** qui
-enregistre le replay (candidats+marks, avec coin) ; testnet verrouillé, mainnet lecture seule.
-Doc **consolidée** le 2026-07-08 : les anciens .md obsolètes ont été supprimés (récupérables via git).
+Dernière mise à jour : **2026-09-27**.
 
-## Venue & Runtime (IMPORTANT — ne pas confondre)
-- **Venue = Hyperliquid uniquement.** Simulation paper locale, read-only.
-- **Runtime ACTIF de la simulation = `src/hl_observer`.** Lancé par `LANCER_HYPERSMART.cmd` → `tools/start_hypersmart_simulation.ps1` → `python -m hl_observer ui` (port 8794, `PYTHONPATH=src`).
-  - Collecte Hyperliquid : `hyperliquid/` (`/info`), `collection/`, `realtime/` (WS public).
-  - Moteur d'edge : `src/hl_observer/edge/edge_calculator.py` (`compute_net_edge`, plancher net par défaut 30 bps).
-  - PnL / exits : `src/hl_observer/paper_trading/` (marqué `FAST_STATUS_MARK_TO_MARKET_HYPERLIQUID`, `sltp_runtime.py`).
-  - Plancher profit-USD **déjà présent** : env `HYPERSMART_SIMULATION_MIN_EXPECTED_EDGE_USDT` → reason `EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS`.
-- **`hyper_smart_observer/dydx_v4/` = vrai dYdX LEGACY** — sa config pointe `indexer.dydx.trade`. Ce **n'est PAS** la simulation Hyperliquid. `ui/dydx_routes.py` = panneau secondaire dYdX. **Ne jamais y porter d'idées destinées à la simu.**
-- **`hyper_smart_observer/` (hors dydx_v4)** = legacy/compat isolé. Ne pas étendre.
-- **Toute nouvelle intégration (copy / arbitrage / funding) vise `src/hl_observer/`** (`edge/`, `paper_trading/`, `signals/`, `risk/`, `arbitrage/`, `funding/`), jamais `dydx_v4`.
+## Source de vérité
 
-## Sécurité non négociable
-- Aucun ordre réel, aucun `/exchange` réel, aucune clé privée, aucune signature réelle, aucun wallet connect pour agir, aucun endpoint d'exécution activé.
-- Les mots trading (trade, order, buy, sell, exchange, signature, hedge, arbitrage, PaperIntent, MockExchange…) sont **autorisés** en tests/mocks/paper/sim/backtest/audit/doc/dashboard. Seule l'**action réelle** est interdite.
-- L'audit sécurité distingue un **mot** (test/mock/doc) d'un **vrai appel** opérationnel dangereux.
-- `PaperIntent` / `PaperTrade` ne sont pas des ordres.
+Spec canonique unique :
 
-## Vérité des données (règle dure)
-- **Aucune donnée fabriquée, aucune démo présentée comme réelle.** Données réelles Hyperliquid ou **état vide honnête**.
-- Donnée manquante / trop vieille / contradictoire / incomplète → `INSUFFICIENT_DATA` ou `NO_TRADE`.
-- Ne jamais inventer PnL, wallets, fills, positions, ni mouvement de courbe.
+`docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md`
 
-## Vérité du PnL paper
-- Le PnL vient d'un **ledger d'événements**, pas d'un compteur fragile.
-- Composants : cash, positions ouvertes/fermées, prix entrée/sortie, realized, unrealized, equity, drawdown, fees, funding, spread, slippage, latence, partial/missed fills, liquidation, exits.
-- **Dashboard, audit, logs, exports convergent sur le même ledger.** Si le dashboard montre une perte, l'audit doit l'expliquer (trade, signal, wallet, coin, prix, coûts, funding, latence, exit, cause).
+Ne pas créer de nouvelle V6.x/final/vNext spec. Toute clarification normative se fait dans ce fichier en place.
 
-## But quant
-Moins de trades, beaucoup plus propres. Filtrer les mauvais signaux ; ne garder que les signaux frais, cohérents, liquides, à **edge net positif après** frais + spread + slippage + latence + dégradation de copie. Juger au **profit factor**, pas au winrate brut. Jamais de promesse de PnL.
+Ordre d'autorité :
+
+`SECURITY.md > spec canonique > HEAD réel (code/tests/workflows/manifests/receipts) > AGENTS.md > CLAUDE.md`.
+
+## Repos et runtime
+
+Repo principal :
+
+`Rapt0r06300/hyperliquid-smart-wallet-observer` — `main`
+
+Runtime actif :
+
+`src/hl_observer/`
+
+Dataset V2 :
+
+`Rapt0r06300/alina-smartflow-datasets-v2` — `main`
+
+Ne pas développer une nouvelle architecture dans `hyper_smart_observer/`; ce répertoire est legacy/compatibilité.
+
+## Sécurité
+
+Alina reste strictement **paper/read-only**.
+
+Aucun :
+
+- ordre réel
+- ordre testnet
+- `/exchange` opérationnel
+- clé privée/seed/mnemonic
+- signature
+- dépôt/retrait/transfert
+- argent réel
+
+`HL_ENABLE_MAINNET_EXECUTION=0` et `HL_ENABLE_TESTNET_EXECUTION=0` restent la doctrine du runtime officiel.
+
+Ne jamais présenter une donnée synthétique, une valeur par défaut ou un zéro inventé comme preuve réelle.
+
+## Cloud uniquement pour les missions Work/GitHub
+
+Une mission ChatGPT Work Cloud ou GitHub :
+
+- ne doit jamais utiliser le PC utilisateur ;
+- ne doit jamais réveiller le PC ;
+- ne doit jamais dépendre d'un service/fichier/processus local utilisateur ;
+- ne doit jamais créer ou utiliser un self-hosted runner ;
+- utilise GitHub-hosted pour l'automatisation cloud.
+
+Un chemin local n'est valable que si l'utilisateur lance explicitement une session/runtime local.
+
+## Périmètre économique
+
+Actif :
+
+1. Copy-Vault
+2. Lead-Lag
+3. Cross-Venue Dislocation
+
+Désactivé :
+
+`Carry / Funding Carry = DISABLED_BY_SCOPE`.
+
+Objectif final : **>= +4.00 USD NET/jour prouvés pour chacune des trois familles séparément**.
+
+Aucune compensation entre familles.
+
+Un résultat non prouvé doit rester `MORE_DATA`, `UNMEASURABLE` ou `KILL`, jamais être maquillé en succès.
+
+## Control plane
+
+Le contrat canonique est fondé sur :
+
+- `IDLE`
+- `COLLECT`
+- `ANALYZE`
+
+Le HEAD contient une fondation sous `src/hl_observer/control_plane/` :
+
+- phase state/controller
+- phase CLI
+- resumable campaign schema v2
+- dispatch receipt
+- campaign adapters
+- module PnL proof
+
+L'analyse cible suit :
+
+`DRAIN -> QUALITY -> REPLAY -> BACKTEST -> OOS -> FORWARD_PAPER -> PNL_PROOF -> SCOREBOARD -> DONE`.
+
+Ne déduire aucun `DONE` du simple fait qu'un module existe. Utiliser les `OPEN-*`, `WKR-*`, le runbook et les contrats de fermeture de la spec.
+
+## Ownership cross-repo
+
+Repo principal :
+
+- intention opérateur
+- orchestration sémantique
+- stratégie/économie
+- surface utilisateur
+
+Dataset V2 :
+
+- état durable des campagnes cloud
+- leases/checkpoints
+- actifs Dataset V2 immuables
+- evidence/receipts lourds
+
+Interdit de maintenir deux progress stores mutables concurrents.
+
+Tout dispatch cross-repo doit être idempotent et lié à des SHA/ids/hashes explicites.
 
 ## Règles d'ingénierie
-- Ne rien supprimer brutalement (dossiers, logs, données, tests, configs, simulation, scripts de lancement).
-- Pas de module isolé sans test **et** plan de câblage.
-- Préférer de petits modules importables sous `src/hl_observer`.
-- Ne pas éditer via Write/bash les très gros fichiers tronqués par le mount (`src/hl_observer/cli.py` ~3400 l., `ui/routes.py`) — ajouter via nouveaux petits modules importés.
-- Renforcer l'existant plutôt que créer des doublons ; ne pas introduire de 3ᵉ architecture.
 
-## Portage GitHub (repos dans `runtime/research/github_repos_v24/`)
-- Ne pas copier en aveugle. Classer chaque idée : `COPY_DIRECT`, `COPY_ADAPTED`, `PORT_BEHAVIOR`, `INSPIRE_ONLY`, `SKIP_WITH_REASON`, `DEFERRED_WITH_PLAN`.
-- Ne jamais prétendre avoir lu un fichier non lu, ni porté un comportement sans test/branchement le prouvant.
-- Aucun repo externe ne bypasse le RiskEngine, le ledger, ou le no-real-trade.
-- Toute idée retenue passe par DecisionEngine/RiskEngine → PaperIntent ou NO_TRADE → PaperLedger.
+- un seul agent principal par défaut ;
+- pas de swarm/subagents/multi-agent sauf demande explicite ;
+- réutiliser l'existant avant de créer une abstraction ;
+- ne pas dupliquer orchestrateur, PnL engine, ledger, replay engine, RiskEngine, scoreboard ou Dataset system ;
+- privilégier les petits modules sous `src/hl_observer/` et le wiring mince ;
+- ne pas inventer ce qui n'a pas été vérifié ;
+- après deux échecs identiques, changer de méthode.
 
-## Tests
-Sous-ensemble ciblé (sandbox, `PYTHONPATH=src`) :
-`python -m pytest -q tests/test_error_handler.py tests/test_circuit_breaker.py tests/test_retry_policy.py tests/test_state_manager.py tests/test_no_real_trade_foundations.py tests/test_paper_ledger.py tests/test_pnl_reconciliation.py tests/test_orderbook_execution_simulator.py tests/test_simulation_realism_audit.py`
+## Quota minimal
 
-Vérité complète (sur Windows, gros fichiers non tronqués) :
-`set PYTHONPATH=src && python -m pytest -q`
+Pour une mission longue :
 
-Sécurité (runtime Hyperliquid) :
-`python -m hl_observer doctor` · `python -m hl_observer safety-audit` · `python -m hl_observer audit-safety`
+1. lire le HEAD courant ;
+2. charger `SECURITY.md`, `AGENTS.md` et la spec ;
+3. construire un petit backlog interne ;
+4. travailler par sections ciblées ;
+5. utiliser grep/parsers/scripts/calculs déterministes au lieu de multiplier les appels modèle ;
+6. éviter rapports intermédiaires et relectures inutiles.
+
+Si l'utilisateur demande explicitement **implémentation totale puis tests à la fin**, respecter cet ordre :
+
+- coder/câbler/configurer toute la spec ;
+- écrire ou adapter les tests sans forcément les exécuter pendant cette phase ;
+- sauvegarder des diffs réels ;
+- poursuivre jusqu'à épuisement du backlog implémentable ;
+- ensuite exécuter une seule campagne de validation finale et corriger ce qu'elle révèle.
+
+## Vérité des données
+
+Les chemins officiels doivent préserver ce qui est nécessaire à une preuve replay-grade, notamment :
+
+- timestamps exchange/receive/monotonic
+- clock sync, RTT, offset, uncertainty
+- BBO/L2/trades et snapshot/delta
+- séquences/gaps/out-of-order/duplicates
+- fee provenance
+- tick/lot/min-notional/contract multiplier
+- depth/VWAP/capacity/quote age
+- provenance/manifests/checksums
+
+Venues/sources à conserver ou vérifier selon la spec : Hyperliquid, Binance, Bybit, OKX, Gate, Bitget.
+
+CCXT reste discovery-only tant qu'un chemin natif d'exécution/replay n'est pas explicitement défini.
+
+## Vérité du PnL
+
+Une preuve économique doit intégrer les coûts et contraintes réellement applicables :
+
+fees + spread + slippage + latency + partial/missed fills + liquidity + capacity + funding pertinent + exits + drawdown + causality + no-lookahead + OOS + forward + effective-N.
+
+Un backtest brut positif n'est jamais une certification.
+
+## Git
+
+`main` est la source de vérité finale.
+
+- préserver le travail existant ;
+- éviter branches parallèles inutiles ;
+- ne pas utiliser `reset --hard`/clean destructeur/rebase destructif comme méthode normale ;
+- vérifier qu'un commit annoncé contient un vrai diff ;
+- un commit intermédiaire n'est pas une raison de s'arrêter.
 
 ## Definition of Done
-Une feature est DONE seulement si : codée, testée, documentée, câblée (ou marquée `PARTIAL_NOT_WIRED`), et sans affaiblir le no-real-trade. Un rapport sans code n'est accepté que pour une étape d'analyse. Une simulation qui ignore fees/slippage/funding, ou un dashboard dont le PnL diverge de l'audit, n'est pas DONE.
 
-## Addendum 2026-07-04 — bascule vers testnet contrôlé
-Le cap produit change : la simulation paper complète ne doit plus être le coeur du système. Elle reste en legacy/minimal guardrail pour tester les décisions, les coûts et les refus, mais le chemin cible devient :
+La fermeture globale est celle de la spec canonique, pas celle de ce fichier.
 
-1. `mainnet_readonly_observer` lit Hyperliquid mainnet uniquement en lecture seule : vrais prix, carnets, wallets, fills publics, signaux et santé des sources.
-2. `decision_engine` décide localement, explique chaque décision, écrit une evidence chain et refuse si la donnée est trop vieille, contradictoire, insuffisante ou trop coûteuse.
-3. `testnet_executor` peut envoyer une action uniquement vers un environnement testnet à fausse monnaie, jamais vers mainnet.
-
-Contraintes obligatoires pour le testnet :
-- `REAL_MAINNET_TRADING=false`.
-- `TESTNET_ONLY=true`.
-- `CONFIRM_TESTNET_EXECUTION=true` pour toute action externe testnet.
-- `MAX_TESTNET_NOTIONAL` et `MAX_OPEN_TESTNET_POSITIONS` doivent limiter le risque testnet.
-- L'interface officielle à utiliser est `TestnetExchangeAdapter`, avec un fake adapter obligatoire pour les tests.
-- Par défaut, aucun secret, aucune clé privée et aucune signature réelle ne sont utilisés. Une vraie signature testnet ne pourra être ajoutée que dans un futur sprint explicite, isolé et audité.
-- Tout adaptateur doit refuser si l'environnement n'est pas explicitement testnet.
-- Tout ordre mainnet reste impossible.
-
-Le dashboard doit distinguer clairement :
-- observation mainnet read-only ;
-- décision locale ;
-- simulation minimale legacy ;
-- exécution testnet verrouillée ;
-- PnL testnet, avec l'avertissement que la liquidité testnet peut diverger du mainnet.
-
-La prochaine architecture à privilégier est donc :
-`mainnet_readonly_observer -> decision_engine -> testnet_executor -> journal/dashboard/audit`.
-
-## Addendum 2026-07-08 — Autorisation élargie (décision explicite de Flo)
-
-Directive du propriétaire du projet : **TOUT EST AUTORISÉ, SAUF L'EXÉCUTION RÉELLE.**
-
-Concrètement, sont désormais **pleinement autorisés** (aucune hésitation, deny-by-default levé pour la collecte de données) :
-- scraping public agressif et continu (24/7) de Hyperliquid et de toute source publique (leaderboards, DOM, API publiques, dashboards tiers) ;
-- ingestion multi-sources, multi-IP / pool de proxies, concurrence maximale, firehose WebSocket complet ;
-- découverte de wallets à large échelle, backfill massif, caches, indexation ;
-- usage de l'ordinateur, navigateur, tout outil de collecte ;
-- toute analyse, tout scoring, tout backtest, toute simulation paper, tout module IA.
-
-**Reste INTERDIT — ligne dure non négociable (inchangée) :**
-- aucune exécution réelle : aucun ordre réel, aucun `/exchange` réel, aucun argent réel ;
-- aucune clé privée, aucun seed/mnemonic, aucune signature réelle, aucun wallet-connect pour agir ;
-- aucun dépôt/retrait/transfert réel ; aucun endpoint d'exécution activé.
-
-**Garde-fous conservés car ils servent l'objectif de Flo (et non par prudence excessive) :**
-- **vérité des données** : ne jamais présenter une donnée fabriquée comme réelle ; un PnL paper doit rester réaliste et traçable au ledger (sinon les 48h ne valent rien) ;
-- **respect des limites techniques** des sources (rate limits, backoff) — non par timidité, mais parce que se faire bannir = MOINS de données, pas plus ;
-- **discipline d'ingénierie** : tests + pas de suppression brutale, pour ne pas casser le travail existant.
-
-En cas de doute entre « collecter plus » et « rester poli avec la source » : collecter plus, mais via proxies/backoff pour ne pas se faire couper. La seule vraie barrière est l'action réelle.
-
-## Règle « rien n'échappe aux tests » (décision de Flo, 2026-07-11)
-
-**Tout nouveau fichier / module / brique doit être pris en compte par les tests.** Concrètement :
-
-- L'audit `TEST-AUDIT-complet.cmd` (racine) **auto-découvre** le code : tout dossier de 1er niveau
-  contenant du `.py` est scanné. Créer un nouveau paquet ne nécessite AUCUNE modification de l'audit.
-- L'audit garde une **empreinte** (`tools/audit_manifest.json`) et signale à chaque passage les
-  fichiers **ajoutés** et **supprimés** depuis la fois précédente.
-- Un **nouveau module dans `src/` ou `hyper_smart_observer/` sans test associé = ÉCHEC BLOQUANT.**
-  Le module et son test se créent dans le même mouvement, jamais l'un sans l'autre.
-- Le rapport `resultat-audit.md` liste **chaque fichier du bot** (lignes, importé par combien,
-  testé oui/non, % de couverture réelle) : aucun fichier ne peut se cacher.
-
-Rappel : `resultat-audit.md` est réécrit **après chaque contrôle** — il existe même si l'audit est
-interrompu (Ctrl-C, fermeture, crash).
-
-## 🏆 Addendum 2026-07-22 — ÉTAT D'ESPRIT GAGNANT + instruments en place
-
-**Le cap, non négociable : PnL paper POSITIF et ROI POSITIF.** On y croit, on pousse fort, on
-explore toutes les pistes, on ne se résigne jamais. « Tout est possible. » Flo a promis de l'argent
-à ses parents — l'objectif est sérieux et on le vise pour de vrai.
-
-**Mais le gagnant refuse le faux gain.** Un PnL maquillé, un edge d'illusion, un gain issu d'une
-baisse de sécurité — tout ça trahit l'objectif. La règle du gagnant est donc double et indivisible :
-**ambition maximale pour TROUVER l'edge** (collecte massive, univers large, nouveaux signaux, IA)
-+ **honnêteté totale pour ne GARDER que ce qui survit** aux coûts réels (frais+spread+slippage+
-latence) ET bat l'alternative (cash/HLP), sur données vraies. La discipline (tests, no-real-trade,
-vérité des données, PBO anti-sur-ajustement) **n'est pas un frein : c'est le chemin** vers un PnL
-positif qui se répète. En cas de doute « beau chiffre vs vérité » → **la vérité, toujours.**
-
-**Instruments désormais disponibles (s'en servir, ne pas les réinventer) :**
-- `ops/diagnostic_pnl.py` — la cervelle « comprendre le PnL & trouver l'edge », écrite dans le RECAP.
-- `ops/loop_readiness.py` (score BOT-READY + autonomie N0→N2, réel hors échelle) · `tools/bot_ready.py`.
-- `backtesting/robustesse_selection.py` — PBO : la recherche extrême ne fabrique plus de faux gagnant.
-- `funding/arb_executable.py` (prix exécutable) · `tools/collecter_carnet.py` (carnet bid/ask, à
-  brancher dans la calibration arb) · `collection/collecte_fiable.py` (collecte fiable).
-- Les 4 leviers d'edge et leur verdict au 22/07 : voir `AGENTS.md` §Instruments et `docs/LOIS_MESUREES.md`.
-- TOUT-TESTER : ne plante jamais en silence, streame en direct + ETA, pytest & recherche en
-  parallèle, RECAP-COMPLET.md ultra riche (à analyser mot par mot), collecte auto-démarrée +
-  archivée (rien de supprimé). Détail : `docs/audit/TOUT-TESTER_50_AMELIORATIONS.md` et
-  `docs/audit/50_AMELIORATIONS_DATA.md`.
-
-## Addendum 2026-07-30 — Contexte permanent & scope (mémorisation, supersede le carry actif)
-
-**Objectif absolu.** PnL PAPER NET **ultra positif** + ROI PAPER NET **ultra positif**, mais UNIQUEMENT s'ils survivent, reproductibles, à : fees + spread + slippage + latence + partial fills + queue/non-fill + capacité + stress adverse + OOS/walk-forward + forward post-freeze. **Jamais** fabriquer du PnL en abaissant coûts, latence, gates ou exigences statistiques. Négatif après preuve → `KILL` ; données insuffisantes → `MORE_DATA` ; positif → prouver qu'il le reste sous toutes les contraintes réelles.
-
-**Scope stratégique ACTIF (seul autorisé à créer des effets paper) :** 1) **Cross-Venue** — dislocations de prix réellement exécutables ; 2) **Lead-Lag** — surtout Binance → Hyperliquid, conditionné microstructure/régime ; 3) **Copy-Wallet / Copy-Vault**. En **recherche / SHADOW** jusqu'à validation : TWAP/metaorders, OFI/MLOFI/microprice/queue depletion, entity consensus, Global L4/order-intent, wallet×Binance anticipation, maker queue-aware execution, liquidations/TP-SL/order-priority/mempool.
-
-**CARRY / FUNDING = ABANDONNÉ.** `funding_carry = LEGACY / DISABLED_BY_SCOPE`. Conservé seulement pour historique/audit/réconciliation : **aucun** signal actif, position paper, PnL actif, allocation de capital, influence sur le scoreboard, ni optimisation. Ne **jamais** contourner l'allowlist autoritaire (`strategies/active_scope.py`).
-
-**Direction technique.** GLOBAL HL DATA → Orders/L4/Fills/TWAP → Wallet/Entity Intelligence → Binance Lead-Lag → L2/L4 Microstructure → Executable Edge → Canonical Paper Engine → PnL/ROI OOS+Forward. 10 subscriptions user-specific HL = slots premium : **8 CORE + 2 CHALLENGERS**. Scoring sur **notre** copyability/executability, jamais le PnL brut du leader.
-
-**Statistiques.** Jamais « 1 fill = 1 observation indépendante ». Regrouper par métaordre/burst/wallet×coin×episode/jour ; cluster/block bootstrap, placebos, DSR/PBO, temporal OOS, wallet/day/regime holdout, forward post-freeze.
-
-**Exécution paper — une seule vérité.** Signal → Gate → PaperIntent → Canonical Execution → Fill → Position → Ledger → Liquidatable Equity. Prix : jamais simple mid ; BBO/L2 causal, VWAP, partial fills, capacité, consommation de liquidité, latence réelle, queue model si maker.
-
-**Git (règle dure).** Par bloc logique réellement terminé : audit → code → tests verts → preuve runtime/replay → `git diff --check` → **COMMIT IMMÉDIAT sur `main`** → SHA au commit ledger. 1 bloc = 1 commit. Pas de gros commit final. Jamais `reset --hard`, `clean` destructif, rebase destructif. Toujours vérifier HEAD + worktree ; préserver le travail local/non poussé ; ne jamais croire un ancien `DONE` sans vérifier code+appelant+données+runtime+ledger+tests.
-
-**Sécurité.** PAPER / READ-ONLY UNIQUEMENT : 0 ordre réel, 0 `/exchange`, 0 clé privée, 0 signature, 0 dépôt/retrait, aucune exécution mainnet/testnet.
+Avant de dire DONE, il faut notamment une cohérence vérifiée entre les deux repos, le respect strict du paper/read-only, les stages OOS/forward/scoreboard/receipts requis et un statut économique honnête pour chaque famille.
