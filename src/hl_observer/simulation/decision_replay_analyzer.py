@@ -143,6 +143,7 @@ def aggregate_replay_analyses(analyses: Iterable[ReplayAnalysis]) -> ReplayAnaly
     event_count = accepted = refused = positive = negative = 0
     total_pnl = 0.0
     total_fees = 0.0
+    unmeasurable = 0
     for analysis in analyses:
         events.extend(analysis.events)
         event_count += analysis.event_count
@@ -152,6 +153,7 @@ def aggregate_replay_analyses(analyses: Iterable[ReplayAnalysis]) -> ReplayAnaly
         negative += analysis.negative_count
         total_pnl += analysis.total_estimated_pnl_usdc
         total_fees += analysis.total_fees_usdc
+        unmeasurable += analysis.unmeasurable_count
         for reason, count in analysis.top_refusal_reasons:
             reasons[reason] += count
         for action, count in analysis.action_counts.items():
@@ -174,6 +176,7 @@ def aggregate_replay_analyses(analyses: Iterable[ReplayAnalysis]) -> ReplayAnaly
         pnl_by_coin={key: round(value, 8) for key, value in sorted(pnl_by_coin.items())},
         pnl_by_wallet={key: round(value, 8) for key, value in sorted(pnl_by_wallet.items())},
         action_counts=dict(actions),
+        unmeasurable_count=unmeasurable,
     )
 
 
@@ -436,6 +439,7 @@ def _read_summary_cache(log_dir: Path, signature: dict[str, Any]) -> ReplayAnaly
         pnl_by_coin={str(k): float(v) for k, v in dict(payload.get("pnl_by_coin") or {}).items()},
         pnl_by_wallet={str(k): float(v) for k, v in dict(payload.get("pnl_by_wallet") or {}).items()},
         action_counts={str(k): int(v) for k, v in dict(payload.get("action_counts") or {}).items()},
+        unmeasurable_count=int(payload.get("unmeasurable_count") or 0),
     )
 
 
@@ -459,6 +463,7 @@ def _write_summary_cache(log_dir: Path, path: Path, signature: dict[str, Any], a
                     "pnl_by_coin": analysis.pnl_by_coin,
                     "pnl_by_wallet": analysis.pnl_by_wallet,
                     "action_counts": analysis.action_counts,
+                    "unmeasurable_count": analysis.unmeasurable_count,
                     "read_only": True,
                     "execution": "forbidden",
                 },
