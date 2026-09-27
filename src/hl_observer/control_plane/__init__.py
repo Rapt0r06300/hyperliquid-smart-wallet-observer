@@ -22,3 +22,9 @@ __all__ = [
     "build_typed_control_event",
     "validate_typed_control_event",
 ]
+
+from hl_observer.control_plane.dispatch_receipt import (
+    DispatchReceipt,
+    generate_request_id,
+    validate_dispatch_receipt,
+)
