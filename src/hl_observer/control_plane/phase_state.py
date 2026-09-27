@@ -110,5 +110,19 @@ def validate_phase_state(state: AlinaPhaseState) -> None:
             raise ValueError("ANALYZE phase requires an explicit analysis_stage")
 
     elif state.phase == "IDLE":
-        if state.analysis_stage is not None:
-            raise ValueError("IDLE phase must have null analysis_stage")
+        if any(
+            value is not None
+            for value in (
+                state.collection_started_at_utc,
+                state.collection_cutoff_at_utc,
+                state.source_collection_epoch,
+                state.analysis_stage,
+            )
+        ):
+            raise ValueError("IDLE phase must not retain active collection or analysis fields")
+
+    if state.phase == "ANALYZE":
+        started = parse_iso_utc(state.collection_started_at_utc) if state.collection_started_at_utc else None
+        cutoff = parse_iso_utc(state.collection_cutoff_at_utc) if state.collection_cutoff_at_utc else None
+        if started is None or cutoff is None or cutoff < started:
+            raise ValueError("ANALYZE cutoff must be at or after collection start")
