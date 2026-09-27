@@ -16,6 +16,7 @@ STATUSES = {
     "NOT_APPLICABLE",
 }
 PROOFS = {"PROVEN", "UNPROVEN", "UNMEASURABLE", "KILL", "MORE_DATA"}
+COVERAGE_STATES = {"REGISTERED", "WIRED", "DATA_PRESENT", "CONSUMED", "VALIDATED", "UNMEASURABLE", "UNSUPPORTED", "RETIRED"}
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     args = parser.parse_args()
     root = Path(args.repo_root)
     body = json.loads(Path(args.path).read_text(encoding="utf-8"))
-    if body.get("schema_version") != "alina.event_intelligence_status.v1":
+    if body.get("schema_version") not in {"alina.event_intelligence_status.v1", "alina.event_intelligence_status.v2"}:
         raise SystemExit("unsupported event registry schema")
     rows = body.get("items")
     if not isinstance(rows, list) or [row.get("id") for row in rows] != list(range(1, 121)):
@@ -35,6 +36,8 @@ def main():
         proof = row.get("proof_status")
         if status not in STATUSES or proof not in PROOFS:
             raise SystemExit(f"invalid state for event {row.get('id')}")
+        if row.get("coverage_state") not in COVERAGE_STATES:
+            raise SystemExit(f"invalid coverage lifecycle for event {row.get('id')}")
         if row.get("wiring_status") != status:
             raise SystemExit(f"wiring status mismatch for event {row.get('id')}")
         if row.get("required_dataset_family") != "external_events":
