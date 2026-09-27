@@ -11698,9 +11698,15 @@ Existing historical campaign manifests are not deleted.
 
 ## Workflow changes
 
-Dataset V2 is the orchestration home.
+Alina uses a **dual-plane control contract**.
 
-Expected changes are concentrated in:
+- The **main Alina repository is the canonical operator/control surface**. A user starting from Alina must be able to request every canonical phase and the complete research chain without manually operating Dataset V2 internals.
+- **Dataset V2 is the canonical durable data plane and the default heavy GitHub-hosted execution plane** when work is delegated to GitHub.
+- The two planes reuse the same campaign schema, campaign identity, phase/epoch metadata, SAFE/replay gates, economic engines, checkpoints and proof manifests. They must never grow independent economic logic.
+- Starting a campaign from Alina may execute an allowed bounded adapter directly in the Alina environment or dispatch the heavy unit to Dataset V2, but both paths must preserve the same immutable campaign identity and proof semantics.
+- Current autonomous cloud operation remains GitHub-hosted only. Nothing in this dual-plane contract authorizes a self-hosted runner, PC wake-up or dependency on the user's machine.
+
+Dataset V2 cloud changes are concentrated in:
 
 - `.github/workflows/create-resumable-campaigns.yml`
 - `.github/workflows/resumable-campaign-controller.yml`
@@ -11708,7 +11714,7 @@ Expected changes are concentrated in:
 - phase-control helper code/tests under `tools/` and `tests/`
 - `control/alina-phase.json`
 
-The main Alina repository should only receive the smallest required campaign-model/CLI changes and tests needed for epoch metadata, phase filtering, and analysis staging.
+The main Alina repository must additionally expose a complete operator-facing control surface for `IDLE`, `COLLECT`, `ANALYZE` and full-chain execution. That surface may delegate heavy work to Dataset V2 but may not require the operator to leave Alina or reproduce orchestration logic manually.
 
 Legacy manual diagnostic workflows may remain available, but they must not bypass the phase guard for normal operation.
 
@@ -16351,219 +16357,251 @@ This catalog is considered implemented only when:
 - no correction weakens paper/read-only safety, no-real-order guarantees, or existing canonical acceptance gates;
 - the implementation remains deterministic and uses local tests/fixtures for these defects unless external first-party behavior itself must be verified.
 
-## Work carry-over — unfinished items from the interrupted GitHub Work run
+## Work conversation reconciliation — remaining open implementation debt (2026-09-27)
 
-This section is the canonical carry-over from the interrupted Work execution that implemented the resumable GitHub campaign foundation. It records only work that remains materially incomplete after comparing the Work conversation with the current `main` state of the principal repository and Dataset V2. It does not reopen items already implemented.
+This section reconciles the unfinished Work conversation against the current state of both canonical repositories. It is a **remaining-work ledger**, not a historical replay of everything Work attempted. Items already landed are not reopened merely because Work once described them as unfinished.
 
-### 1. Principal Alina repository remains an operator/control-plane entry point
+Audit snapshot used for this reconciliation:
 
-Dataset V2 is the default heavy GitHub-hosted execution and durable-data plane, but it is **not** the only user-facing orchestration surface.
+- main Alina repository HEAD at reconciliation start: `a7c19d24a09eb054ae827bd4fece389de44695a6`;
+- Dataset V2 repository HEAD at reconciliation start: `4b7d3e387b33ccb41cf8c81b8456b3a870c1a1d1`;
+- Work conversation reviewed: `https://chatgpt.com/share/6ab68761-68f4-83eb-9def-5c1c2e546dbe`;
+- Dataset V2 remains the canonical durable dataset repository;
+- current Alina remains strictly paper/read-only: no real orders, no private keys, no trading endpoint activation.
 
-Required invariant:
+### What Work had already materially delivered
 
-`operator intent in Alina principal -> canonical campaign protocol -> chosen execution backend -> Dataset V2 evidence -> canonical analysis/accounting`
+The following areas are considered **implemented foundations**, subject to the stricter closure contracts elsewhere in this spec:
 
-The principal Alina repository must be able to launch every canonical phase and campaign family itself through one supported operator surface, including at minimum:
+- resumable campaign protocol, immutable terminal states, digests and idempotent work-unit completion;
+- lease acquisition/expiry and stale-worker protection;
+- atomic campaign CLI and bounded campaign adapters;
+- Dataset V2 controller/worker workflows on GitHub-hosted runners;
+- Dataset V2 catalog/index/metrics infrastructure;
+- exact parsed trade-count machinery for most existing trade shards;
+- SAFE => replay-compatible migration tooling;
+- Dataset V2 release publication/materialization bridge;
+- full-universe Copy-Vault campaign sharding with a maximum of 10 unique users per lane;
+- separation of module PnL proof so one module cannot rescue another by compensation;
+- structural Event Intelligence registry covering ideas 1..120.
 
-- `IDLE`;
-- `COLLECT`;
-- `ANALYZE`;
-- market collection;
-- Copy-Vault collection;
-- Event Intelligence collection;
-- official archive collection;
-- replay;
-- backtest;
-- Copy-Vault / Lead-Lag / Cross-Venue analysis;
-- module PnL proof;
-- scoreboard/report generation;
-- checkpoint/resume.
+Presence of these components does **not** satisfy the remaining closure items below.
 
-The principal repository must reuse the same campaign manifests, adapters, hashes, SAFE gates and economic engines as Dataset V2. It must not create a second economic implementation.
+### OPEN-1 — Canonical operator surface must exist in the main Alina repository
 
-Dataset V2 remains the preferred backend for long/heavy GitHub-hosted execution and durable publication. A run initiated from Alina principal may dispatch to Dataset V2, but operator intent and campaign identity remain visible and controllable from Alina.
+The earlier wording “Dataset V2 is the orchestration home” is too restrictive when read as exclusive ownership.
 
-### 2. Implement the canonical manual phase state machine for real
+The corrected architecture is:
 
-The current Dataset V2 scheduler still creates collection, replay and periodic economic campaigns from schedules. The canonical manual-phase design is not complete until one durable phase authority exists.
+- **main Alina repository owns operator intent, orchestration semantics, campaign types, economic logic and canonical user-facing launch commands;**
+- **Dataset V2 owns durable dataset state and is the default heavy GitHub-hosted execution/data plane;**
+- Alina must be able to launch the complete chain from the main repository without requiring the operator to manually manipulate Dataset V2 internals;
+- cloud execution requested through ChatGPT/GitHub delegates heavy work to Dataset V2;
+- a user-started local Alina process may run the same canonical pipeline only when the user explicitly starts it; no cloud workflow may wake or depend on the user's PC;
+- neither mode may duplicate strategy, execution, accounting, SAFE-gate or PnL logic.
 
-Required durable state:
+Required canonical capabilities from main Alina:
 
-- `IDLE`;
-- `COLLECT`;
-- `ANALYZE`;
-- monotonically increasing `phase_epoch`;
-- source collection epoch/cutoff for every analysis run;
-- actor/reason/timestamp of each phase transition;
-- schema/version and content digest.
+- start collection;
+- stop/drain collection;
+- start analysis;
+- run replay;
+- run backtest;
+- run OOS/forward paper validation;
+- run Copy-Vault / Lead-Lag / Cross-Venue analysis;
+- run module PnL proof;
+- publish/read scoreboard;
+- inspect campaign status;
+- pause/resume/retry a resumable campaign;
+- launch a full research cycle through one operator-facing command/API.
 
-The canonical phase file may live in Dataset V2 or another explicitly chosen control location, but the principal Alina operator surface must be able to mutate it safely. There must be one authority, not independent phase state in both repositories.
+A suitable implementation may expose one CLI family such as `alina campaign ...` or equivalent. Names are not normative; behavior is.
 
-### 3. Stop mixed continuous creation once manual phases are authoritative
+**Done when:** one operator action from the main Alina repository can create/dispatch a canonical campaign and follow it through Dataset V2 without manual edits in the Dataset V2 repository, while a deterministic user-started local path can reuse the same campaign/economic contracts without any alternate PnL engine.
 
-After the phase state machine is activated:
+### OPEN-2 — Implement the actual IDLE / COLLECT / ANALYZE phase controller
 
-- `IDLE` creates no heavy work;
-- `COLLECT` creates only collection-compatible campaigns;
-- `ANALYZE` creates only quality/replay/backtest/PnL/scoreboard work for the frozen source collection epoch;
-- scheduled triggers act only as watchdog/recovery mechanisms;
-- schedules never create work contrary to the current operator phase.
+The current Dataset V2 resumable workflows are real, but they still create mixed scheduled work. At reconciliation time:
 
-The existing hourly/six-hourly campaign creation behavior must be migrated rather than silently coexisting with the manual phase controller.
+- there is no canonical `control/alina-phase.json`;
+- current campaign workflows do not carry `phase_epoch`, `source_collection_epoch` or `collection_cutoff`;
+- the scheduled campaign creator can create collection, replay, backtest and PnL campaigns from time cadence rather than from one authoritative operating phase.
 
-### 4. Add phase/epoch isolation to resumable campaign manifests and workers
+This remains a direct unfinished item from the Work mission.
 
-The resumable campaign protocol must persist and validate at least:
+Required behavior:
 
+`IDLE`
+- create no new heavy work;
+- leave durable evidence untouched;
+- status/read-only operations remain available.
+
+`COLLECT`
+- create only collection/archive/Event-Intelligence campaigns allowed by the current collection epoch;
+- do not create new replay/backtest/PnL-proof work.
+
+`ANALYZE`
+- stop creating new collection work;
+- drain only already-claimed current-epoch collection units;
+- freeze the collection cutoff and eligible Dataset V2 evidence;
+- run `QUALITY -> REPLAY -> BACKTEST -> OOS/FORWARD -> PNL_PROOF -> SCOREBOARD`;
+- persist a terminal analysis receipt.
+
+**Done when:** phase transitions are controlled by one versioned state object, stale queued workers fail closed on phase/epoch mismatch, and deterministic tests prove that COLLECT cannot start analysis work and ANALYZE cannot start new collection work.
+
+### OPEN-3 — Campaign schema migration for phase/epoch identity
+
+Current resumable campaign v1 foundations predate the manual-phase contract.
+
+A new backward-compatible campaign schema must bind at minimum:
+
+- `campaign_id`;
+- campaign kind;
+- code SHA;
+- config/work-plan hashes;
+- dataset generation;
 - creation phase;
 - `phase_epoch`;
-- `source_collection_epoch` for analysis work;
-- collection cutoff;
-- immutable code/config/work-plan identity;
-- execution backend identity.
+- for analysis, `source_collection_epoch`;
+- `collection_cutoff`;
+- frozen Dataset V2 selection identity;
+- lease owner/run identity;
+- checkpoint lineage;
+- terminal evidence digest.
 
-Controller selection must exclude stale-epoch work.
+Historical v1 manifests stay immutable. Migration must not rewrite historical campaign truth.
 
-Workers must perform a second fail-closed phase/epoch check immediately before claim/execution. A queued worker from an older phase must not start heavy work after the operator changes phase.
+**Done when:** old v1 manifests remain readable as historical evidence, new campaigns cannot omit phase/epoch identity, and stale-epoch workers cannot mutate current-epoch state.
 
-A campaign already terminal remains immutable. Historical manifests remain readable but cannot become current merely because their lease expired.
+### OPEN-4 — Prevent split-brain between Alina and Dataset V2
 
-### 5. Implement deterministic COLLECT -> ANALYZE drain semantics
+Because Alina must be able to launch work while Dataset V2 executes cloud-heavy units, there must be exactly one durable ownership authority per campaign.
 
-When switching from `COLLECT` to `ANALYZE`:
+Requirements:
 
-- stop creation/claim of new collection units immediately;
-- allow only already-claimed collection units to finish within their valid leases;
-- expire/reconcile abandoned claims deterministically;
-- seal/index the resulting collection epoch;
-- freeze the eligible SAFE evidence set;
-- begin analysis only after the drain/freeze checkpoint is durable.
+- operator requests from Alina are idempotent;
+- dispatching the same request twice cannot create two independent campaigns;
+- the main repo must not maintain an independent mutable copy of Dataset V2 campaign progress;
+- Dataset V2 durable manifest/lease state is authoritative for cloud execution;
+- a locally user-started Alina run and a GitHub-hosted Dataset V2 worker cannot simultaneously own the same campaign lease;
+- resume/retry preserves one lineage and one terminal result;
+- cross-repository dispatch receipts bind main-repo source SHA, Dataset V2 HEAD/manifest identity and campaign id.
 
-Unclaimed historical collection backlog must not delay analysis.
+**Done when:** race tests prove duplicate dispatch, delayed webhook/workflow dispatch, retry and local/cloud overlap cannot create duplicate collection, duplicate backtest, duplicate PnL credit or divergent campaign histories.
 
-### 6. Finish exact-count and global-dedup coverage
+### OPEN-5 — Finish exact trade-count coverage
 
-Dataset V2 metrics are already materialized, but current coverage is not complete.
+Current Dataset V2 metrics are useful but explicitly incomplete.
 
-As of the verification that created this carry-over:
+At the reconciliation snapshot, `catalog/DATA_METRICS.json` reports:
 
+- `TOTAL_TRADES_COLLECTED = 27,036,872`;
 - `TOTAL_TRADES_COUNT_COVERAGE_COMPLETE = false`;
-- at least one trade shard still lacks an exact trade count;
+- `TRADE_SHARDS_MISSING_EXACT_COUNT = 1`;
 - `TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE = false`;
-- hundreds of trade shards still lack an exact unique-count result.
+- `TRADE_SHARDS_MISSING_EXACT_UNIQUE_COUNT = 478`.
 
-Completion requires:
+Therefore “exact total unique trades” is **not yet a closed capability**.
 
-- every relevant trade shard to have deterministic exact parsed counts;
-- exact duplicate counts with reason/provenance;
-- global cross-shard deduplication or an explicitly versioned global-identity pass;
-- aggregate totals regenerated only from verified shard facts;
-- unknown coverage to remain explicit rather than zero-filled.
+Remaining work:
 
-A within-shard unique total is not a substitute for global unique-trade truth.
+- exact-parse the final trade shard missing a trade count;
+- finish exact unique-trade counts for every trade shard;
+- distinguish within-shard uniqueness from global cross-shard uniqueness;
+- deduplicate overlaps caused by rotation, retry, archive overlap, release republish or resumed collection;
+- preserve native trade ids when available and use a canonical fallback identity only when necessary;
+- publish completeness flags and reason codes instead of implying exactness from partial coverage.
 
-### 7. Complete the SAFE -> replayable -> economic-proof closure
+**Done when:** both total-count and total-unique-trade coverage flags are true, no trade shard lacks exact counts, and global unique-trade totals are reproducible from immutable Dataset V2 assets.
 
-Dataset V2 may contain SAFE shards while final economic proof remains disabled.
+### OPEN-6 — Finish SAFE => replay-compatible migration over the whole eligible corpus
 
-The Work mission is not complete until the current generation can demonstrate:
+Replay compatibility tooling exists, but migration remains partial.
 
-`SAFE evidence -> replay-compatible selection -> deterministic replay -> backtest -> OOS/forward -> module PnL proof -> scoreboard`
+At the reconciliation snapshot, `catalog/REPLAY_COMPAT_PATCH.json` reports:
 
-with immutable evidence receipts.
+- 195 release assets processed;
+- all 195 processed assets passed that specific parse/chronology smoke;
+- `remaining_candidates_for_filter = 7,804`.
 
-A dataset-level `SAFE` status must not imply `proof_of_pnl_allowed=true`. Economic proof becomes allowed only when every mandatory dependency for the exact module/path has a passing receipt.
+This backlog must not be hidden by the existence of SAFE shards.
 
-### 8. Materialize the machine-readable acceptance/gate registry
+Remaining work:
 
-The spec already defines scoped gate classes and proposes `config/acceptance_criteria.yaml`, but the registry is still absent from the principal repository.
+- process every replay-eligibility candidate;
+- preserve explicit failure reasons for incompatible assets;
+- move/reclassify incompatible SAFE legacy evidence to PARTIAL/REJECT/QUARANTINED as appropriate;
+- ensure replay compatibility is based on the actual family-specific replay adapter, not only generic JSON parsing;
+- bind replay schema/version and asset digest;
+- ensure newly published assets pass the same gate before they can become SAFE.
 
-Implement the registry so every blocking criterion has machine-readable:
+**Done when:** no eligible legacy candidate remains unclassified and every SAFE shard required by an official replay has a current family-specific replay-compatible receipt.
 
-- stable ID;
-- gate class;
-- smallest scope;
-- applicable phase(s);
-- dependencies;
-- required evidence artifacts;
-- enforcement action;
-- failure state/reason code;
-- recovery/remediation action;
-- waiver policy.
+### OPEN-7 — Close Dataset V2 proof-of-PnL readiness rather than relying on global SAFE status
 
-The orchestrator must consume this registry rather than relying only on prose or hard-coded independent gates.
+The current Dataset V2 quality registry can report an active dataset status of SAFE while also retaining `proof_of_pnl_allowed = false`.
 
-### 9. Prove backend parity and prevent split-brain ownership
+This distinction is correct and must be preserved.
 
-Alina principal and Dataset V2 must be two launch surfaces over one protocol, not two authorities.
+Remaining work:
 
-Required tests:
+- proof eligibility is computed per immutable experiment selection/path, never inferred from a repository-wide SAFE label;
+- every PnL proof selection must contain only the exact SAFE + replay-compatible shards required by that path;
+- missing execution-critical families keep that path UNMEASURABLE;
+- selection receipts bind dataset/index/catalog hashes plus exact shard ids/hashes/bounds;
+- proof status becomes PASS only after data, costs, execution and temporal gates all pass.
 
-- same frozen inputs + same code/config/rule/environment hashes produce the same campaign partitioning and economic results regardless of launch surface;
-- only one valid lease can own a campaign unit;
-- a principal-launched run handed to Dataset V2 preserves the same `campaign_id`, epoch, hashes and checkpoint lineage;
-- stale/local and cloud controllers cannot both advance the same campaign;
-- backend switching cannot duplicate durable outputs or PnL evidence.
+**Done when:** an official module proof can demonstrate its selected Dataset V2 closure without relying on a coarse global dataset status, and a missing mandatory shard/cost automatically produces UNMEASURABLE.
 
-Current ChatGPT/GitHub autonomous operation remains GitHub-hosted only and must never touch the user's PC.
+### OPEN-8 — Demonstrate the real two-segment E2E resume smoke promised by Work
 
-### 10. Produce one end-to-end closure receipt for the interrupted Work mission
+The Work mission explicitly left the final E2E closure after the controller/worker work.
 
-Before this carry-over is considered complete, produce one deterministic, inspectable closure run that proves the whole intended chain:
+A real current smoke must prove:
 
-`operator command -> phase transition -> COLLECT -> durable Dataset V2 publication -> exact COUNT -> quality/SAFE -> ANALYZE drain/freeze -> REPLAY -> BACKTEST -> OOS/FORWARD -> per-module PNL_PROOF -> SCOREBOARD -> checkpoint -> forced continuation/resume -> terminal receipt`
+`COLLECT -> VALIDATE -> COUNT -> SAFE -> MATERIALIZE -> REPLAY -> BACKTEST -> OOS/FORWARD -> SCOREBOARD -> CHECKPOINT -> RESUME`
 
-The closure receipt must bind:
+The test must use durable Dataset V2 state and at least two GitHub-hosted execution segments.
 
-- principal repository SHA;
-- Dataset V2 SHA/generation;
-- exact selected shard identities/hashes;
-- resolved environment/dependency digest;
-- config/rule/cost hashes;
-- campaign/phase epochs;
-- every stage result;
-- final module-level proof status;
-- no-real-order / paper-read-only assertions.
+Required failure injection:
 
-A technically successful workflow is insufficient if any mandatory economic evidence remains `UNMEASURABLE`.
+1. segment A performs useful work and publishes a checkpoint;
+2. execution stops before terminal completion;
+3. segment B starts on a fresh GitHub-hosted runner;
+4. it reacquires ownership only after valid lease semantics;
+5. it resumes from durable state rather than restarting from zero;
+6. it does not recollect/recount/replay already completed work;
+7. final evidence has one campaign lineage and one terminal result.
 
-### Work carry-over Done Contract
+**Done when:** a machine-readable E2E receipt includes workflow run ids, both repository HEADs, campaign/checkpoint ids, selected dataset manifest, terminal scoreboard/economic status and proof that no completed unit was duplicated.
 
-This interrupted Work mission is closed only when all of the following are true:
+### OPEN-9 — Make OOS and forward/paper explicit orchestration stages
 
-1. Alina principal can launch the canonical phases and full chain without duplicating business/economic logic.
-2. Dataset V2 remains the durable heavy GitHub-hosted execution/data plane.
-3. One authoritative `IDLE/COLLECT/ANALYZE` state machine is active.
-4. Campaign manifests and workers enforce phase/epoch isolation.
-5. COLLECT -> ANALYZE drain/freeze is deterministic and resumable.
-6. Exact trade-count coverage is complete for all relevant trade shards.
-7. Global unique-trade coverage is complete or explicitly proven with a canonical global dedup pass.
-8. SAFE/replayable evidence can flow through the full official economic chain without bypasses.
-9. The machine-readable acceptance registry exists and is enforced.
-10. Principal/backend parity and single-lease ownership are regression-tested.
-11. One end-to-end closure receipt proves checkpoint/resume and the complete economic pipeline.
-12. Paper/read-only remains strict and no current-cloud path depends on a user PC or self-hosted runner.
+Having OOS/forward helpers in the codebase is not sufficient.
 
-### 11. Close cross-repository publication/checkpoint failure windows
+The autonomous chain must persist distinct artifacts for:
 
-The Work conversation did not finish the exactly-once contract between Dataset V2 Releases and campaign manifests.
+- TRAIN/selection;
+- validation where applicable;
+- OOS;
+- post-freeze forward/paper;
+- final economic proof.
 
-Required:
+Rules:
 
-- Release publication and campaign checkpoint are linked by one immutable publication receipt;
-- if a Release succeeds but manifest commit/push fails, the next run discovers and adopts the exact matching immutable output instead of recomputing it;
-- a manifest cannot claim an output whose Release asset/digest is absent or mismatched;
-- proof/evidence tags referenced by certification are immutable; `--clobber` must not silently alter certifying evidence;
-- push/rebase conflicts after lease claim or publication preserve lease lineage and cannot apply a work unit twice;
-- a reconciliation job/report detects orphan Releases, orphan manifests, digest conflicts and incomplete publications.
+- freeze boundary is immutable;
+- OOS and forward sets cannot overlap TRAIN or each other contrary to policy;
+- no missing OOS/forward result is converted to zero;
+- N/effective-N and complete-day policy are enforced;
+- final scoreboard names the exact temporal segment behind every metric.
 
-A repeated unit after any publication-boundary failure must converge to exactly one durable output and one authoritative completed-unit identity.
+**Done when:** the phase controller can resume each stage independently and the final module receipt proves temporal separation by hashes/intervals/episode identities.
 
-### 12. Finish the Work-requested six-state audit of the 120 Event Intelligence/Data Expansion ideas
+### OPEN-10 — Close the 120 Event Intelligence/Data Expansion items by wiring status, not registry presence
 
-The current 1→120 registry is structural inventory only. It does not satisfy the Work requirement to determine the real operational state of every idea.
+The current `docs/event-intelligence-120-coverage.md` marks all 120 ideas technically implemented, while every row still says economic proof remains to be established.
 
-Every idea must carry exactly one of:
+The unfinished Work requirement was stronger: each item must be classified from the live repository as one of:
 
 - `IMPLEMENTED_AND_WIRED`;
 - `IMPLEMENTED_BUT_PARTIAL`;
@@ -16572,124 +16610,523 @@ Every idea must carry exactly one of:
 - `MISSING`;
 - `NOT_APPLICABLE`.
 
-Each row must bind:
+A module/file existing is not evidence of wiring.
 
-- implementation file(s);
-- deterministic test(s);
-- actual canonical runtime/research caller;
-- required Dataset V2 family/source;
-- last verified code SHA;
-- status reason;
-- structural-proof state;
-- economic-proof state.
+Required audit:
 
-A file that exists and has tests but has no reachable canonical caller is not `IMPLEMENTED_AND_WIRED`.
+- identify real callers;
+- identify required Dataset V2 families;
+- prove those data families are actually collected and eligible;
+- prove the feature reaches the intended module experiment path;
+- prove no dead module is counted as wired;
+- keep `PROVEN_EDGE` separate from structural wiring.
 
-An idea whose required Dataset V2 evidence is incomplete, unsafe or not replay-compatible is at most `IMPLEMENTED_BUT_PARTIAL` for the affected experiment.
+**Done when:** a machine-readable 1..120 status registry is regenerated from code/data wiring checks and the human coverage document is derived from or reconciled against it.
 
-The repository-wide cabling audit must be reconciled with this registry so `TESTE_SEULEMENT` / orphan components cannot silently satisfy a wired claim.
+### OPEN-11 — Re-verify native venue and cloud-source coverage under the current chain
 
-### 13. Complete replay-compatibility backfill rather than only having the mechanism
+The Work mission explicitly required real verification of existing sources rather than assuming an integration is healthy.
 
-The replay-compatibility mechanism exists, but Work required actual closure of the eligible population.
+Required current verification:
 
-Required:
+- Hyperliquid;
+- Binance;
+- Bybit;
+- OKX;
+- Gate;
+- Bitget;
+- official archive paths where used.
 
-- finish or explicitly scope the remaining replay-compatibility candidate population;
-- machine-check that every SAFE shard consumed by official research has `replay_compatible=true` for its declared consumer/schema;
-- SAFE promotion uses a real minimal deterministic replay through the actual consumer adapter, not only parser/schema acceptance;
-- replay compatibility is versioned per family/consumer, so trade replayability does not imply synchronized-L2 replayability;
-- repair/promotion preserves original PARTIAL/REJECTED/QUARANTINED history;
-- Dataset health explains why SAFE, replayable and trade-safe populations differ by venue/family.
+For each source/family needed by Copy-Vault, Lead-Lag or Cross-Venue:
 
-No official economic run may silently select a shard whose replay contract is unverified.
+- collection actually runs on GitHub-hosted infrastructure;
+- source timestamps and receive timestamps are preserved;
+- L2/BBO snapshot/delta semantics are reconstructible where required;
+- gaps/out-of-order/duplicates are measured;
+- source health is distinct from “workflow process alive”;
+- publication reaches Dataset V2 with immutable manifest/checksum/provenance;
+- required replay adapter exists;
+- inability to access a venue from a GitHub-hosted runner yields a typed degraded/unavailable state and a validated archive/fallback path where scientifically acceptable.
 
-### 14. Add campaign backlog/stuck-work observability
+**Done when:** a source-capability matrix is generated from current evidence, not stale documentation, and every module path can name exactly which healthy source capabilities it depends on.
 
-The Work conversation required a system that can be understood without manually reading hundreds of manifests or raw workflow logs.
+### OPEN-12 — GitHub-hosted scheduling must be treated as lossy, not as an exact clock
 
-Publish one machine-readable/human-readable campaign health view containing at least:
+The autonomous cloud system must not require cron delivery at an exact instant.
 
-- counts by `PENDING`, `RUNNING`, `CONTINUATION_REQUIRED`, terminal status and campaign kind;
-- oldest pending age;
-- active lease owner/age/expiry;
-- attempts, no-progress count and consecutive failures;
-- backlog size by kind;
-- last durable output/checkpoint;
-- current blocking reason;
-- current phase/epoch and execution backend.
+Operational basis reviewed during this reconciliation:
 
-A campaign remaining `PENDING` with zero attempts beyond the declared controller SLO must become an explicit alert/reason, not look healthy.
+- standard GitHub-hosted jobs are bounded and therefore long campaigns must checkpoint before runner termination;
+- scheduled/queued Actions can be delayed or discarded during service pressure;
+- every GitHub-hosted job starts on an ephemeral environment.
 
-### 15. Prove catch-up, timeout margin and concurrency semantics
+Therefore:
 
-GitHub Actions scheduling is a recovery mechanism, not a correctness primitive.
+- schedule is only a watchdog;
+- missing one scheduled controller invocation cannot orphan a campaign;
+- explicit dispatch from Alina must be available;
+- the next controller pass reconstructs due work solely from durable manifests/checkpoints;
+- no correctness rule may depend on runner-local files surviving;
+- concurrency policy must not silently replace/cancel pending campaign ownership in a way that loses work;
+- workers stop with enough margin to publish durable state before the platform job limit.
 
-Required tests/proofs:
+**Done when:** deterministic scheduler-loss tests skip one or more expected watchdog invocations and the campaign still reaches exactly one correct terminal state after a later controller/explicit dispatch.
 
-- missed or delayed scheduled controller invocations catch up from durable state without duplicate campaigns;
-- cron timing is never used as economic/causal time;
-- every heavy unit reaches its soft deadline early enough to publish durable data/evidence and checkpoint before the platform job limit;
-- concurrency groups cannot silently cancel or replace the only pending work representing an operator phase transition;
-- recovery after a completely missed controller interval depends only on phase/campaign/output state, never on RAM or a permanent process;
-- current authoritative workflows enumerate their runner labels and prove no dependency on preserved self-hosted/user-PC workflows.
+### OPEN-13 — Final closure must verify both repositories, not only implementation files
 
-### 16. Demonstrate a forced two-segment resume and failure matrix
+The Work conversation ended before its own promised final publication/verification contract was demonstrated.
 
-The Work mission explicitly required resumability to be demonstrated, not only unit-tested.
+Final closure for this workstream requires one concise machine-readable/human report containing:
 
-Required closure tests:
-
-- force a first GitHub-hosted unit to stop after producing a durable checkpoint but before campaign completion;
-- start a fresh runner and resume from that checkpoint;
-- prove no recollection/recount/republication of already completed units;
-- compare uninterrupted versus interrupted/resumed execution and require identical deterministic semantic result digests;
-- inject bounded failures after collection publication, during quality, during replay, during backtest, after evidence Release publication and before manifest checkpoint;
-- every failure point must converge to the same final authoritative identity as the uninterrupted run.
-
-### 17. Bind OOS/forward and scoreboard to immutable proof identity
-
-The Work chain is not complete if backtest, OOS/forward and scoreboard can drift apart.
-
-Required:
-
-- TRAIN/selection, OOS and forward partitions cannot overlap;
-- OOS/forward bind the same frozen code/config/data/environment/cost/clock identities;
-- Copy-Vault, Lead-Lag and Cross-Venue keep separate economic verdicts;
-- generic `arbitrage` cannot double-count Cross-Venue economics;
-- scoreboard outputs reference exact dataset manifest, canonical ledger/PnL receipt and all required proof hashes;
-- missing fee/slippage/funding/latency/capacity evidence remains `UNMEASURABLE`;
-- the +4 USD research milestone is evaluated on complete eligible UTC days including zero-trade days, never only active/profitable days.
-
-### 18. Produce the final Work closure report from repository evidence
-
-The interrupted Work mission is not closed until one generated report contains:
-
-- principal Alina HEAD and Dataset V2 HEAD;
-- exact code/tree SHAs used by the demonstrated campaign;
-- current phase/epoch and execution backend;
-- six-state status of all 120 Event Intelligence/Data Expansion ideas;
-- exact raw trades, globally unique trades, SAFE trades and replayable trades with completeness flags;
-- record/shard counts by family and venue;
+- main Alina HEAD;
+- Dataset V2 HEAD;
+- real commits used;
+- no empty-commit/tree-equality accident for claimed changes;
+- current campaign/phase state;
+- exact raw/unique/SAFE/replayable trade totals and completeness flags;
 - SAFE/PARTIAL/REJECTED/QUARANTINED counts;
-- replay-compatibility coverage and remaining unverified population;
-- one real SAFE replay-smoke receipt;
-- Copy-Vault, Lead-Lag and Cross-Venue OOS/forward/economic status separately;
-- forced checkpoint/resume proof;
-- scoreboard/proof artifact identities;
-- campaign backlog/stuck-work state;
-- confirmation that current cloud execution is GitHub-hosted only and paper/read-only;
-- every remaining external blocker with a machine-readable reason.
+- replay-smoke result;
+- E2E two-segment resume result;
+- Copy-Vault status;
+- Lead-Lag status;
+- Cross-Venue status;
+- OOS/forward status;
+- scoreboard artifact identity;
+- active GitHub-hosted workflow run ids/results;
+- confirmation that current cloud execution did not use or depend on the user's PC/self-hosted runner;
+- any remaining external blocker stated explicitly.
 
-### Additional Work carry-over Done Contract
+No future Work run may mark this workstream DONE solely because controller, worker, metrics or replay-gate files exist.
 
-In addition to the existing Done Contract above, Work recovery is not complete until:
+### Priority order for closing the Work debt
 
-13. Release publication and campaign checkpoint have tested exactly-once recovery across failure boundaries.
-14. Every Event Intelligence/Data Expansion idea 1→120 has the six-state wiring classification with concrete evidence.
-15. Replay-compatibility coverage is complete or every unverified remainder is explicitly excluded from official research.
-16. Campaign backlog/stuck-work state is visible from one canonical health report.
-17. Controller catch-up, timeout margin and concurrency semantics are demonstrated under GitHub-hosted execution.
-18. A forced fresh-runner continuation and interruption matrix prove real checkpoint/resume behavior.
-19. OOS/forward/scoreboard are bound to immutable proof identity and separate module verdicts.
-20. The final Work closure report is generated from repository evidence rather than manual claims.
+Close in this order unless a narrower blocking dependency forces a local reordering:
+
+1. main-Alina operator surface and dual-plane ownership contract;
+2. IDLE/COLLECT/ANALYZE phase controller + epoch-aware campaign schema;
+3. split-brain/idempotent cross-repository dispatch;
+4. exact trade/global-unique count completion;
+5. full SAFE=>replay-compatible migration;
+6. source/venue capability verification;
+7. real two-segment E2E resume smoke;
+8. explicit OOS/forward orchestration;
+9. 1..120 live wiring-status audit;
+10. final dual-repository closure report.
+
+### Non-regression rules
+
+- Do not create a second economic engine to satisfy the main-Alina launch requirement.
+- Do not move durable heavy data back into the main repository.
+- Do not make Dataset V2 the only operator interface.
+- Do not let local/user-started support become an excuse for cloud workflows to wake or depend on the user's PC.
+- Do not call a trade count exact while completeness flags are false.
+- Do not call a shard SAFE merely because generic parsing succeeds.
+- Do not call a module profitable without its own independent net after-cost OOS/forward proof.
+- Do not let Event Intelligence registry completeness substitute for live wiring or economic validation.
+- Preserve strict paper/read-only behavior until an entirely separate future real-money authorization/spec exists.
+
+## Work conversation reconciliation backlog — 2026-09-27
+
+This section reconciles the unfinished Work-mode mission from the shared conversation with the current repositories. It is a **closure backlog**, not a claim that the underlying components are absent. Many building blocks now exist, but the items below remain open until the stated end-to-end proof is produced.
+
+Current evidence used for this reconciliation:
+
+- main Alina HEAD observed during reconciliation: `a7c19d24a09eb054ae827bd4fece389de44695a6`;
+- Dataset V2 HEAD observed during reconciliation: `46eb131d6a66425f24b546a6decda7e2c1e145f2`;
+- Dataset V2 currently contains `create-resumable-campaigns.yml`, `resumable-campaign-controller.yml`, `resumable-campaign-worker.yml`, campaign manifests and `catalog/DATA_METRICS.json`;
+- the Work conversation reported the first five campaign lots as locally/test-wise complete, then explicitly left controller/worker/manifest policy, SAFE/replay closure, exact counts, full E2E smoke, publication and final CI observation as remaining work;
+- repository presence alone never closes a Work item. Closure requires the deterministic proof described below.
+
+### WKR-01 — Implement the real manual phase authority
+
+**Status: OPEN.**
+
+Create and make authoritative `control/alina-phase.json` (or an equivalent single canonical phase state with the same semantics). The current Dataset V2 repository does not contain that file.
+
+Required states:
+
+- `IDLE`;
+- `COLLECT`;
+- `ANALYZE`.
+
+A phase transition must carry an epoch/version and be the only source of intent for starting new heavy work.
+
+**Done when:** a deterministic test and one GitHub-hosted smoke prove that changing the phase changes admissible work and stale queued work from an older epoch cannot start.
+
+### WKR-02 — Stop scheduled campaign creation from being an independent source of intent
+
+**Status: OPEN.**
+
+The current `create-resumable-campaigns.yml` creates market collection, Copy-Vault collection, Event Intelligence collection, replay, backtest and PnL campaigns from its schedule. This violates the intended phase separation if left authoritative.
+
+The schedule may remain as a watchdog/recovery trigger, but it may not independently decide to create both collection and heavy analysis work.
+
+**Done when:** scheduled/watchdog runs only reconcile work permitted by the current phase/epoch, and a test proves a dropped/delayed GitHub schedule cannot create wrong-phase work or lose durable pending work.
+
+### WKR-03 — Add phase/epoch/cutoff identity to resumable campaign manifests
+
+**Status: OPEN.**
+
+The current `CampaignManifest` pins code/config/work-plan/dataset generation but does not yet carry the complete manual-phase identity required by this spec.
+
+Every new campaign must bind:
+
+- creation phase;
+- phase epoch;
+- source collection epoch for analysis;
+- immutable collection cutoff for analysis;
+- operator/control-plane request identity.
+
+**Done when:** stale-epoch claims fail closed and replay/backtest/PnL evidence can be traced to one frozen collection epoch and cutoff.
+
+### WKR-04 — Complete the Alina-main operator control surface
+
+**Status: OPEN.**
+
+The main repository already contains resumable campaign primitives and bounded adapters, but it does not yet expose one complete operator path that can launch the canonical chain from Alina itself.
+
+Required operator intents include equivalents of:
+
+- start/continue collection;
+- stop/drain collection;
+- analyze;
+- run replay;
+- run backtest/OOS/forward;
+- run per-module PnL proof;
+- publish scoreboard;
+- resume current campaign;
+- run the complete chain.
+
+The implementation may use a CLI/API/UI surface consistent with the existing architecture; exact command spelling is not normative.
+
+**Done when:** an operator can start from the main Alina repository and drive the complete chain without manually editing Dataset V2 internals.
+
+### WKR-05 — Prove parity between Alina-direct and Dataset-V2-hosted execution
+
+**Status: OPEN.**
+
+The two launch paths must be orchestration variants, not two research engines.
+
+For the same immutable input selection and campaign identity, both backends must produce the same:
+
+- selected datasets;
+- normalized/replayed event sequence;
+- execution receipts;
+- PnL ledger;
+- scoreboard/certification outcome.
+
+**Done when:** a deterministic parity fixture compares both backends and hashes the same proof-facing outputs.
+
+### WKR-06 — Prevent cross-plane split-brain ownership
+
+**Status: OPEN.**
+
+Alina-direct and Dataset V2 must not simultaneously own the same campaign lease or advance the same cursor independently.
+
+**Done when:** lease ownership is globally unambiguous for a campaign, stale owners are rejected, and failure-injection tests prove only one durable successor can advance state.
+
+### WKR-07 — Finish exact trade-count coverage
+
+**Status: OPEN, measurable current gap.**
+
+Current Dataset V2 metrics report:
+
+- `TOTAL_TRADES_COUNT_COVERAGE_COMPLETE=false`;
+- `TRADE_SHARDS_MISSING_EXACT_COUNT=1`.
+
+No official total may be described as fully exact while this remains false.
+
+**Done when:** every trade-bearing shard has an exact parser-derived trade count or is explicitly rejected/quarantined, and the global coverage flag is true.
+
+### WKR-08 — Finish exact unique-trade coverage and cross-shard deduplication
+
+**Status: OPEN, measurable current gap.**
+
+Current Dataset V2 metrics report:
+
+- `TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE=false`;
+- `TRADE_SHARDS_MISSING_EXACT_UNIQUE_COUNT=478`;
+- only `TOTAL_UNIQUE_TRADES_WITHIN_SHARDS`, which is not sufficient proof of global uniqueness across overlapping shards/releases/retries.
+
+**Done when:** deterministic event/trade identity deduplicates across shards and campaign retries, every relevant shard has exact unique-count evidence, and a global unique-trade total is reproducible from immutable manifests.
+
+### WKR-09 — Complete uncompressed-size accounting
+
+**Status: OPEN.**
+
+The Work contract required both compressed and uncompressed byte counts. Current `DATA_METRICS.json` reports `TOTAL_UNCOMPRESSED_BYTES=0`.
+
+**Done when:** uncompressed size is either measured exactly for every applicable asset or explicitly marked unavailable per asset with coverage status; zero cannot mean both “measured zero” and “not measured”.
+
+### WKR-10 — Reconcile SAFE versus replayable count semantics
+
+**Status: OPEN.**
+
+Dataset V2 currently distinguishes SAFE and replayable records/trades, which is correct, but the large difference between those populations must be explainable by machine-readable reasons rather than left as an opaque aggregate.
+
+**Done when:** every replayable-but-not-SAFE and SAFE-but-not-consumable case has a deterministic classification/reason, and official backtests consume only the exact evidence class required by the experiment.
+
+### WKR-11 — Produce one authoritative Dataset V2 health receipt
+
+**Status: PARTIAL.**
+
+`DATA_METRICS.json` exists, but the Work done contract requires an immediately answerable, reproducible health view.
+
+It must bind:
+
+- dataset commit;
+- included releases/assets/shards;
+- schema version;
+- computation timestamp;
+- exact count-coverage flags;
+- global unique-trade count;
+- by-venue/by-family/by-symbol breakdowns;
+- SAFE/PARTIAL/REJECTED/QUARANTINED/UNMEASURABLE state as applicable;
+- replay compatibility;
+- first/last timestamp and freshness;
+- gaps/duplicates/out-of-order/invalid counts;
+- compressed and uncompressed storage coverage.
+
+**Done when:** one lightweight artifact answers “how much usable data/trades do we have?” without downloading all assets and can be recomputed bit-for-bit from source manifests.
+
+### WKR-12 — Replace the 120-item binary IMPLEMENTED registry with real wiring states
+
+**Status: OPEN.**
+
+The current Event Intelligence registry marks all 120 retained ideas simply `IMPLEMENTED`. The Work mission explicitly required per-item classification:
+
+- `IMPLEMENTED_AND_WIRED`;
+- `IMPLEMENTED_BUT_PARTIAL`;
+- `IMPLEMENTED_BUT_NOT_WIRED`;
+- `BROKEN`;
+- `MISSING`;
+- `NOT_APPLICABLE`.
+
+Presence of a class/function or a registry row is insufficient.
+
+**Done when:** every one of the 120 items has a machine-generated status backed by actual caller/data-path/test evidence, and the report distinguishes structural implementation from economic proof.
+
+### WKR-13 — Prove Event Intelligence data availability and incremental economic value
+
+**Status: OPEN.**
+
+The 120-item registry explicitly says PnL remains to be proved. Structural coverage cannot be treated as a completed Work mission.
+
+**Done when:** the relevant Event Intelligence paths consume real Dataset V2 evidence and produce causal train/OOS/forward incremental comparisons against their frozen baselines, with missing costs/evidence remaining `UNMEASURABLE`.
+
+### WKR-14 — Close Copy-Vault full-universe freshness and coverage proof
+
+**Status: PARTIAL / MUST REVALIDATE.**
+
+Dataset V2 now creates frozen Copy-Vault selections and shards them into lanes, which addresses a large part of the Work requirement. Closure still requires proof that:
+
+- the frozen selection represents the intended public universe at selection time;
+- every selected vault is assigned exactly once;
+- no overlapping active sweep creates double evidence;
+- Hyperliquid per-IP user subscription limits are respected;
+- snapshots/fills/positions are fresh enough for the scoring window;
+- the historical stale-scoring/promotion failure cannot recur;
+- every lane either finishes, resumes or reports an explicit terminal reason.
+
+**Done when:** a full-universe campaign receipt reconciles selected → scheduled → collected → published → qualified counts with no silent loss.
+
+### WKR-15 — Demonstrate Lead-Lag from SAFE Dataset V2 evidence to proof output
+
+**Status: NOT YET DEMONSTRATED END TO END.**
+
+The Work done contract requires the actual chain, not module presence.
+
+**Done when:** at least one frozen Lead-Lag experiment runs:
+
+`SAFE data -> causal replay -> train -> OOS -> forward/paper -> all-in costs -> scoreboard`
+
+with exchange/receive/ingest clock evidence, no lookahead, executable lagger pricing, measured/declared latency provenance and exact input manifest.
+
+### WKR-16 — Demonstrate Cross-Venue from synchronized executable evidence to proof output
+
+**Status: NOT YET DEMONSTRATED END TO END.**
+
+**Done when:** at least one frozen route runs:
+
+`SAFE synchronized venue evidence -> replay -> matched two-leg execution -> backtest -> OOS/forward -> all-in PnL -> scoreboard`
+
+with bid/ask/L2/VWAP capacity, fees, slippage, staleness, latency, convergence/timeout and matched exposure. Mid-vs-mid evidence cannot close this task.
+
+### WKR-17 — Revalidate Copy-Vault from leader lifecycle to follower PnL
+
+**Status: NOT YET DEMONSTRATED END TO END.**
+
+**Done when:** one immutable proof chain covers:
+
+`user fills -> OPEN/ADD/REDUCE/CLOSE reconstruction -> leader selection -> follower entry -> partial fills/costs -> leader exit/reduce -> follower exit -> realized ledger -> OOS/forward scoreboard`
+
+and all lifecycle events are uniquely identified and replayable.
+
+### WKR-18 — Finish independent per-module PnL proof
+
+**Status: PARTIAL / MUST REVALIDATE.**
+
+The Work conversation added tests preventing incomplete fusion, non-SAFE PnL and cross-module compensation, but final cloud proof was not demonstrated.
+
+Required independent verdicts:
+
+- Copy-Vault;
+- Lead-Lag;
+- Cross-Venue.
+
+No module may rescue another module's target, and `arbitrage` reporting must never double-count the same Cross-Venue economic episode.
+
+**Done when:** each module has its own immutable daily certificate and the aggregate view is only a presentation layer over non-overlapping certificates.
+
+### WKR-19 — Prove checkpoint/resume under real GitHub-hosted interruption
+
+**Status: PARTIAL.**
+
+Lease/checkpoint primitives exist. Closure requires a real failure/restart proof, not only unit tests.
+
+**Done when:** a GitHub-hosted campaign is deliberately interrupted after durable progress and a successor resumes from the exact cursor without duplicate collection, duplicate trade counting, duplicate replay or duplicate publication.
+
+### WKR-20 — Prove durable cross-repository publication consistency
+
+**Status: OPEN.**
+
+A work unit can touch Dataset V2 Releases, catalog/index/metrics and campaign state while its code is pinned in the main Alina repository. Those references must never disagree after a crash or partial push.
+
+**Done when:** publication has a deterministic commit protocol/reconciliation rule that can recover from failure between Release upload, index/catalog update and campaign-manifest update without accepting orphaned or falsely completed evidence.
+
+### WKR-21 — Run the Work-requested two-segment E2E smoke
+
+**Status: OPEN UNTIL RECEIPT EXISTS.**
+
+The shared Work plan explicitly left a two-segment smoke covering replay/backtest/scoreboard.
+
+Required smoke:
+
+1. collect/publish or select immutable Dataset V2 evidence for segment A;
+2. validate/count/SAFE/replay it;
+3. checkpoint;
+4. continue with segment B in a later GitHub-hosted run;
+5. replay/backtest the frozen combined eligible evidence;
+6. produce OOS/forward where the family contract requires it;
+7. publish module scoreboard;
+8. verify no duplicate unit/event/trade/PnL evidence after resume.
+
+**Done when:** one machine-readable E2E receipt binds every stage and artifact hash.
+
+### WKR-22 — Make the final done-contract machine-verifiable
+
+**Status: OPEN.**
+
+The Work mission required a final report with exact counts, module states, replay smoke, resume status and safety state. That should not depend on prose.
+
+Publish one final status artifact that contains at minimum:
+
+- main Alina HEAD/tree SHA;
+- Dataset V2 HEAD/tree SHA;
+- current phase/epoch;
+- campaign IDs and terminal states;
+- exact/raw/unique/SAFE/replayable trade coverage;
+- shard quality counts;
+- replay-smoke receipt;
+- Copy-Vault/Lead-Lag/Cross-Venue proof states;
+- OOS/forward states;
+- checkpoint/resume receipt;
+- paper/read-only flags;
+- GitHub-hosted runner provenance;
+- no-current-self-hosted dependency result;
+- unresolved blockers.
+
+**Done when:** the artifact is generated from repository evidence, not manually edited, and every `DONE` claim is derivable from it.
+
+### WKR-23 — Treat GitHub scheduling as lossy delivery, durable manifests as truth
+
+**Status: OPEN HARDENING ITEM.**
+
+GitHub-hosted jobs are bounded and scheduled workflows may be delayed or dropped under platform load. The controller therefore cannot equate “cron fired” with “work exists”.
+
+**Done when:** campaign intent is durably recorded before dispatch, controller runs are reconstructive/idempotent, missed watchdog ticks lose no campaign state, and every long unit checkpoints before the GitHub-hosted job limit.
+
+### WKR-24 — Final publication integrity check for every implementation wave
+
+**Status: OPEN PROCESS GATE.**
+
+The Work history included detached-worktree/commit confusion and later empty-commit incidents. A claimed implementation is not complete until GitHub proves it exists.
+
+For every future implementation batch:
+
+- read the current `main` HEAD before modifying;
+- commit only real changes;
+- push to `main`;
+- verify final HEAD;
+- verify changed-file list;
+- verify commit diff is non-empty;
+- verify new Tree SHA differs from the parent when files were claimed changed;
+- never use an empty commit as proof that work was saved.
+
+This is a completion gate, not optional bookkeeping.
+
+### Work-reconciliation completion contract
+
+The Work mission is not closed until the following chain is demonstrated on immutable real evidence:
+
+`ALINA OPERATOR INTENT -> PHASE/EPOCH -> COLLECT -> PUBLISH DATASET V2 -> VALIDATE -> COUNT -> SAFE/REPLAYABLE -> REPLAY -> BACKTEST -> OOS/FORWARD -> MODULE PNL PROOF -> SCOREBOARD -> CHECKPOINT -> RESUME`
+
+and all of the following are true:
+
+- Alina main can initiate the chain;
+- Dataset V2 can execute the heavy GitHub-hosted path;
+- both paths share one campaign/proof contract;
+- exact count coverage is complete or explicitly scoped as incomplete;
+- no non-SAFE evidence enters official economic proof;
+- no Work item is closed merely because a file or test exists;
+- no PC/self-hosted dependency is required by the current canonical cloud path;
+- real execution remains disabled and the system remains paper/read-only.
+
+### WKR-25 — Publish canonical campaign backlog and stuck-work health
+
+**Status: OPEN.**
+
+The resumable protocol is not operationally closed while an operator must inspect hundreds of campaign manifests or raw Actions logs to discover stalled work.
+
+Publish one canonical machine-readable and human-readable campaign-health view derived from durable campaign state. It must include at minimum:
+
+- counts by campaign kind and `PENDING`, `RUNNING`, `CONTINUATION_REQUIRED` and terminal status;
+- oldest pending age and next-due age;
+- active lease owner, acquisition time and expiry;
+- chunk index, attempts, no-progress count and consecutive-failure count;
+- backlog size by kind;
+- current phase, phase epoch and execution backend;
+- last durable output/checkpoint identity;
+- current blocking/status reason;
+- controller/worker freshness without equating process liveness with campaign progress.
+
+A campaign that remains `PENDING` with zero attempts beyond the declared controller SLO must surface an explicit stuck/backlog reason. A healthy cron/workflow process is not evidence that campaign work is progressing.
+
+**Done when:** one generated health artifact can identify every active/stalled campaign and its durable recovery point without manual inspection of individual manifests or workflow logs.
+
+### WKR-26 — Expand interruption proof into a deterministic failure-boundary matrix
+
+**Status: OPEN.**
+
+WKR-19, WKR-20 and WKR-21 require real interruption and publication recovery. Closure must also prove that failures at different stage boundaries converge to the same authoritative result.
+
+Inject bounded failures at least:
+
+- after durable collection/Release publication but before campaign-manifest checkpoint;
+- during quality/reconciliation before SAFE/freeze completion;
+- during replay after partial durable progress;
+- during backtest/economic evaluation after a durable checkpoint;
+- after proof/evidence publication but before terminal campaign state is committed;
+- after a controller/watchdog interval is delayed or entirely missed.
+
+For every injected failure:
+
+- resume on a fresh GitHub-hosted runner;
+- preserve the same campaign/phase/epoch lineage;
+- adopt already-published immutable outputs instead of recomputing or republishing them;
+- produce no duplicate shard, trade, event, ledger row or PnL credit;
+- leave no orphan authoritative output;
+- require the final semantic result/proof digest to match the uninterrupted control run when inputs are identical.
+
+**Done when:** a machine-readable failure-matrix receipt proves deterministic convergence and exactly-once economic evidence across every required interruption boundary.
+
