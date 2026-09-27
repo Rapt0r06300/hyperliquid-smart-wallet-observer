@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -25,6 +26,9 @@ def main() -> int:
         raise SystemExit("OPERATOR_STATUS_REQUEST_MISMATCH")
     if status.get("intent") != intent.get("intent"):
         raise SystemExit("OPERATOR_STATUS_INTENT_MISMATCH")
+    expected_digest = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if status.get("intent_digest") != expected_digest:
+        raise SystemExit("OPERATOR_STATUS_INTENT_DIGEST_MISMATCH")
     if status.get("state") not in NON_TERMINAL | TERMINAL:
         raise SystemExit("OPERATOR_STATUS_STATE_INVALID")
     if status.get("terminal") != (status["state"] in TERMINAL):
