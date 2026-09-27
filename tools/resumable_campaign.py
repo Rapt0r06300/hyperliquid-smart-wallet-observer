@@ -120,7 +120,7 @@ def main() -> int:
         return 0
 
     if args.command in {"start", "acquire-lease"}:
-        token = acquire_lease(manifest, args.owner or "manual", max(60, int(args.ttl_s)))
+        token = acquire_lease(manifest, args.owner or "manual", max(60, int(args.ttl_s)), expected_phase=args.expected_phase, expected_epoch=args.expected_epoch)
         if args.command == "start" and manifest.status != "RUNNING":
             transition(manifest, "RUNNING", "worker_started")
         save(path, manifest, args.expected_digest)
