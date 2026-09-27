@@ -20,6 +20,7 @@ from hl_observer.control_plane.dispatch_receipt import generate_request_id, Disp
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Alina SmartFlow Phase & Campaign Control Plane")
     parser.add_argument("--state-file", type=str, default="control/alina-phase.json", help="Path to alina-phase.json")
+    parser.add_argument("--intent-file", type=str, default=None, help="Optional durable operator-intent output")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -42,9 +43,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_idle.add_argument("--request-id", type=str, required=True, help="Operator request UUID or string")
     p_idle.add_argument("--requested-by", type=str, default="operator", help="Requesting identity")
 
+    # Canonical operator intents. These create deterministic, paper-only intent envelopes;
+    # Dataset V2 remains the durable heavy execution plane.
+    intent_commands = {
+        "replay": "replay",
+        "backtest": "backtest",
+        "oos": "oos",
+        "forward": "forward_paper",
+        "pnl-proof": "module_pnl_proof",
+        "scoreboard": "scoreboard",
+        "full-cycle": "full_cycle",
+        "pause": "pause",
+        "resume": "resume",
+        "retry": "retry",
+    }
+    for command in intent_commands:
+        p_intent = subparsers.add_parser(command, help=f"Create {command} operator intent")
+        p_intent.add_argument("--request-id", type=str, required=True)
+        p_intent.add_argument("--requested-by", type=str, default="operator")
+        p_intent.add_argument("--config-json", type=str, default="{}")
+        p_intent.add_argument("--main-code-sha", type=str, default="working-tree")
+
     # campaign status
     c_status = subparsers.add_parser("campaign-status", help="Inspect active campaigns for current phase")
-    c_status.add_argument("--manifest-dir", type=str, default="campaigns/", help="Directory containing campaign manifests")
+    c_status.add_argument("--manifest-dir", type=str, default="campaigns/")
 
     return parser
 
@@ -82,6 +104,49 @@ def main(argv: Sequence[str] | None = None) -> int:
             requested_by=args.requested_by,
         )
         print(json.dumps(receipt.to_dict(), indent=2))
+        return 0
+
+    elif args.command in {"replay", "backtest", "oos", "forward", "pnl-proof", "scoreboard", "full-cycle", "pause", "resume", "retry"}:
+        try:
+            config = json.loads(args.config_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--config-json must be valid JSON: {exc}")
+        if not isinstance(config, dict):
+            parser.error("--config-json must be a JSON object")
+        state = controller.current_state
+        intent_kind = {
+            "replay": "replay",
+            "backtest": "backtest",
+            "oos": "oos",
+            "forward": "forward_paper",
+            "pnl-proof": "module_pnl_proof",
+            "scoreboard": "scoreboard",
+            "full-cycle": "full_cycle",
+            "pause": "pause",
+            "resume": "resume",
+            "retry": "retry",
+        }[args.command]
+        if intent_kind in {"replay", "backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard", "full_cycle"} and state.phase != "ANALYZE":
+            raise ValueError(f"{args.command} requires ANALYZE phase, current={state.phase}")
+        envelope = {
+            "schema_version": "alina.operator_intent.v1",
+            "request_id": args.request_id,
+            "intent": intent_kind,
+            "requested_by": args.requested_by,
+            "requested_at_utc": state.requested_at_utc,
+            "phase": state.phase,
+            "phase_epoch": state.epoch,
+            "source_collection_epoch": state.source_collection_epoch,
+            "collection_cutoff_at_utc": state.collection_cutoff_at_utc,
+            "main_code_sha": args.main_code_sha,
+            "config": config,
+            "paper_only": True,
+            "read_only": True,
+            "real_execution": False,
+        }
+        if args.intent_file:
+            Path(args.intent_file).write_text(json.dumps(envelope, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(envelope, indent=2, sort_keys=True))
         return 0
 
     elif args.command == "campaign-status":
