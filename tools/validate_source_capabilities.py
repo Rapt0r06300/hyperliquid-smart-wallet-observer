@@ -34,13 +34,17 @@ def main() -> int:
     for row in rows:
         if row.get("status") == "MISSING":
             raise SystemExit(f"venue has no structural evidence: {row.get('venue')}")
+        if not isinstance(row.get("native_entrypoints"), list):
+            raise SystemExit(f"native entrypoint evidence missing: {row.get('venue')}")
+        if row.get("runtime_status") not in {"UNVALIDATED", "DEGRADED", "HEALTHY"}:
+            raise SystemExit(f"invalid runtime status: {row.get('venue')}")
         if row.get("registry", {}).get("wired") is not True:
             raise SystemExit(f"venue is not wired in canonical registry: {row.get('venue')}")
         caps = row.get("capabilities")
         if not isinstance(caps, dict) or set(caps) != CAPABILITIES:
             raise SystemExit(f"capability columns incomplete: {row.get('venue')}")
         for name, value in caps.items():
-            if not isinstance(value, dict) or value.get("status") not in {"FILE_PRESENT", "MISSING"}:
+            if not isinstance(value, dict) or value.get("status") not in {"FILE_PRESENT", "MISSING"} or value.get("runtime_status") not in {"UNVALIDATED", "DEGRADED", "HEALTHY"}:
                 raise SystemExit(f"invalid capability status: {row.get('venue')}:{name}")
     print(json.dumps({"venues": len(rows), "matrix_digest": digest}, sort_keys=True))
     return 0
