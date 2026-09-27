@@ -33,6 +33,69 @@ MAX_INTERLEG_OBSERVATION_SKEW_MS = 250.0
 MAX_SPREAD_BPS = 100.0
 DEFAULT_MAX_HOLDING_MS = 4 * 60 * 60 * 1000.0
 DEFAULT_MAX_OBSERVATION_GAP_MS = 300_000.0
+NORMALIZATION_RECEIPT_SCHEMA = "cross_venue.normalization_receipt.v1"
+NORMALIZATION_TRANSFORMATIONS = (
+    "instrument_mapping",
+    "contract_multiplier_to_usd_notional",
+    "quote_currency_to_usd_notional",
+    "canonical_book_level_order",
+)
+
+
+def _build_normalization_receipt(
+    *,
+    source_mode: str,
+    mappings: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    canonical_mappings = sorted(
+        {json.dumps(dict(row), sort_keys=True, separators=(",", ":")) for row in mappings}
+    )
+    material = {
+        "schema_version": NORMALIZATION_RECEIPT_SCHEMA,
+        "source_mode": source_mode,
+        "mappings": [json.loads(row) for row in canonical_mappings],
+        "transformations": list(NORMALIZATION_TRANSFORMATIONS),
+        "output_units": "USD_NOTIONAL",
+        "paper_read_only": True,
+        "real_execution": False,
+    }
+    receipt_sha256 = hashlib.sha256(
+        json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {**material, "receipt_sha256": receipt_sha256}
+
+
+def _valid_normalization_receipt(
+    receipt: object,
+    *,
+    source_mode: str,
+) -> bool:
+    if not isinstance(receipt, Mapping):
+        return False
+    if receipt.get("schema_version") != NORMALIZATION_RECEIPT_SCHEMA:
+        return False
+    if receipt.get("source_mode") != source_mode:
+        return False
+    if receipt.get("transformations") != list(NORMALIZATION_TRANSFORMATIONS):
+        return False
+    if receipt.get("output_units") != "USD_NOTIONAL":
+        return False
+    if receipt.get("paper_read_only") is not True or receipt.get("real_execution") is not False:
+        return False
+    mappings = receipt.get("mappings")
+    if not isinstance(mappings, list) or not mappings:
+        return False
+    if any(
+        not isinstance(row, Mapping)
+        or row.get("schema_version") != MAPPING_SCHEMA_VERSION
+        or row.get("exact") is not True
+        or row.get("unit_equivalent") is not True
+        for row in mappings
+    ):
+        return False
+    expected = _build_normalization_receipt(source_mode=source_mode, mappings=mappings)
+    return expected["receipt_sha256"] == receipt.get("receipt_sha256")
+
 
 
 def _number(value: object) -> float | None:
@@ -312,6 +375,7 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
     series: dict[str, list[tuple]] = {}
     depth: dict[str, list[tuple[float, float]]] = {}
     seen: set[tuple[str, float, str]] = set()
+    normalization_mappings: list[dict[str, Any]] = []
     counters = {
         "lines_read": 0,
         "certified_snapshots": 0,
@@ -339,6 +403,7 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
                 if not proof["ok"]:
                     counters["legacy_uncertified_rows_rejected"] += 1
                     continue
+                normalization_mappings.append(dict(proof["mapping"]))
                 ts = float(proof["snapshot_ts_ms"])
                 observation_id = str(row.get("observation_id") or "")
                 key = (coin, ts, observation_id)
@@ -370,6 +435,10 @@ def load_certified_atomic_series(root: str | Path, *, coins: Sequence[str] | Non
         "max_venue_skew_ms": float(max_skew_ms),
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
         "capacity_definition": "minimum USD capacity on the four BBO top levels",
+        "normalization_receipt": _build_normalization_receipt(
+            source_mode=SOURCE_MODE,
+            mappings=normalization_mappings,
+        ) if normalization_mappings else None,
         "legacy_rows_never_upgraded": True,
         "paper_read_only": True,
         "real_execution": False,
@@ -390,6 +459,7 @@ def load_certified_atomic_bbo_series(
     series: dict[str, list[tuple]] = {}
     depth: dict[str, list[tuple[float, float]]] = {}
     seen: set[str] = set()
+    normalization_mappings: list[dict[str, Any]] = []
     counters = {
         "lines_read": 0,
         "certified_snapshots": 0,
@@ -417,6 +487,7 @@ def load_certified_atomic_bbo_series(
                 if not proof["ok"]:
                     counters["legacy_uncertified_rows_rejected"] += 1
                     continue
+                normalization_mappings.append(dict(proof["mapping"]))
                 event_id = str(row.get("event_id") or "")
                 if not event_id or event_id in seen:
                     counters["duplicates_rejected"] += 1
@@ -444,6 +515,10 @@ def load_certified_atomic_bbo_series(
         "max_venue_skew_ms": float(max_skew_ms),
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
         "capacity_definition": "minimum USD capacity on the four raw BBO sides",
+        "normalization_receipt": _build_normalization_receipt(
+            source_mode=BBO_SOURCE_MODE,
+            mappings=normalization_mappings,
+        ) if normalization_mappings else None,
         "legacy_rows_never_upgraded": True,
         "paper_read_only": True,
         "real_execution": False,
@@ -528,9 +603,14 @@ def load_certified_atomic_union_series(
         and all(meta.get("mapping_verified") is True for meta in used_meta),
         "skew_verified": bool(used_meta)
         and all(meta.get("skew_verified") is True for meta in used_meta),
-        "contract_multipliers_normalized": True,
-        "quote_currencies_normalized": True,
-        "sizes_normalized_to_usd_notional": True,
+        "normalization_receipt": _build_normalization_receipt(
+            source_mode=UNION_SOURCE_MODE,
+            mappings=[
+                mapping
+                for meta in used_meta
+                for mapping in (meta.get("normalization_receipt") or {}).get("mappings", [])
+            ],
+        ) if used_meta else None,
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
         "capacity_definition": "minimum USD capacity on certified four-side union",
         "overlap_policy": "BBO_OWNS_PER_COIN_INTERVAL_L2_EXTENDS_OUTSIDE",
