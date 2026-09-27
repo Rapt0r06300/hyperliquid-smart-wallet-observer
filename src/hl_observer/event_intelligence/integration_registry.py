@@ -13,10 +13,9 @@ from dataclasses import asdict, dataclass
 from hl_observer.event_intelligence.idea_coverage import IDEA_COVERAGE
 
 STRATEGY_FAMILIES = (
-    "arbitrage",
     "copy_vault",
-    "cross_venue_dislocation",
     "lead_lag",
+    "cross_venue_dislocation",
 )
 
 
@@ -35,9 +34,9 @@ def _strategy_families(idea_id: int) -> tuple[str, ...]:
     # Foundations, source quality and empirical validation constrain every
     # module.  Module-specific bridges retain their narrower ownership.
     if 45 <= idea_id <= 60:
-        return ("arbitrage", "cross_venue_dislocation", "lead_lag")
+        return ("cross_venue_dislocation", "lead_lag")
     if 61 <= idea_id <= 63:
-        return ("arbitrage", "cross_venue_dislocation")
+        return ("cross_venue_dislocation",)
     if 64 <= idea_id <= 68:
         return ("copy_vault",)
     return STRATEGY_FAMILIES
@@ -48,7 +47,7 @@ def _dataset_families(idea_id: int) -> tuple[str, ...]:
     strategies = set(_strategy_families(idea_id))
     if "copy_vault" in strategies:
         families.extend(("copy_vault_fills", "copy_vault_l2", "copy_vault_positions"))
-    if strategies.intersection({"lead_lag", "cross_venue_dislocation", "arbitrage"}):
+    if strategies.intersection({"lead_lag", "cross_venue_dislocation"}):
         families.extend(
             (
                 "bbo",
