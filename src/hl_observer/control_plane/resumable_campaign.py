@@ -202,6 +202,11 @@ def acquire_lease(
     from datetime import timedelta
     current = _parse_ts(now or _now())
 
+    # V1 manifests remain readable as historical evidence, but cannot acquire
+    # a lease or mutate durable campaign state after the V2 cutover.
+    if m.schema_version == SCHEMA_VERSION_V1:
+        raise ValueError("V1 manifest is immutable; migrate to V2 before execution")
+
     # Phase/Epoch Guard for V2
     if m.schema_version == SCHEMA_VERSION_V2:
         if expected_epoch is not None and m.phase_epoch != expected_epoch:
