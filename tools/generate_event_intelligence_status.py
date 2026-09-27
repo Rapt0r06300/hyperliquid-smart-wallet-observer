@@ -59,7 +59,7 @@ def main() -> int:
             for candidate, text in file_text.items():
                 if str(candidate.relative_to(root)) == evidence:
                     continue
-                if re.search(rf"(?m)^\\s*(?:from|import)\\s+[^#]*\\b{re.escape(stem)}\\b", text):
+                if re.search(rf"(?m)^\s*(?:from|import)\s+[^#]*\b{re.escape(stem)}\b", text):
                     callers.append(str(candidate.relative_to(root)))
         callers = sorted(set(callers))
         if not files:
@@ -105,8 +105,6 @@ def main() -> int:
             "proof_status": proof_status,
             "proof_text": proof,
             "reason": (
-                "Structural implementation is present; economic proof remains "
-                "data/OOS/forward dependent."
                 "Structural implementation is present and referenced by runtime imports; "
                 "economic proof remains data/OOS/forward dependent."
                 if callers and status != "MISSING"
