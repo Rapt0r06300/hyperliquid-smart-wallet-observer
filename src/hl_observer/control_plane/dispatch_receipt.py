@@ -7,6 +7,10 @@ import hashlib
 import json
 from typing import Any, Mapping
 
+
+DISPATCH_STATUSES = frozenset({"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
+TERMINAL_DISPATCH_STATUSES = frozenset({"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
+
 from hl_observer.control_plane.phase_state import sha256_json, canonical_json, _now
 
 
@@ -38,6 +42,9 @@ class DispatchReceipt:
     source_collection_epoch: int | None
     workflow_run_id: str | None
     dispatched_at_utc: str
+    status: str = "DISPATCHED"
+    terminal_at_utc: str | None = None
+    failure_code: str | None = None
     terminal_evidence_digest: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,3 +77,18 @@ def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
             raise ValueError("analysis dispatch requires source collection epoch")
     if not receipt.dispatched_at_utc.endswith("Z"):
         raise ValueError("dispatch timestamp must be UTC")
+    if receipt.status not in DISPATCH_STATUSES:
+        raise ValueError(f"dispatch receipt has invalid status: {receipt.status}")
+    is_terminal = receipt.status in TERMINAL_DISPATCH_STATUSES
+    if is_terminal != (receipt.terminal_at_utc is not None):
+        raise ValueError("terminal dispatch status requires terminal_at_utc, and non-terminal status forbids it")
+    if receipt.terminal_at_utc is not None and not receipt.terminal_at_utc.endswith("Z"):
+        raise ValueError("terminal dispatch timestamp must be UTC")
+    if receipt.status == "FAILED" and not receipt.failure_code:
+        raise ValueError("failed dispatch receipt requires failure_code")
+    if receipt.status != "FAILED" and receipt.failure_code is not None:
+        raise ValueError("failure_code is only valid for FAILED dispatches")
+    if receipt.status == "COMPLETE" and not receipt.terminal_evidence_digest:
+        raise ValueError("complete dispatch receipt requires terminal evidence digest")
+    if receipt.status != "COMPLETE" and receipt.terminal_evidence_digest is not None:
+        raise ValueError("terminal evidence digest is only valid for COMPLETE dispatches")
