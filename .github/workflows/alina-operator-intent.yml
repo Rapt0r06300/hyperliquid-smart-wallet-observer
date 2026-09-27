@@ -58,6 +58,8 @@ jobs:
           }
           p=pathlib.Path("control/operator-intents")/(row["request_id"]+".json")
           p.parent.mkdir(parents=True,exist_ok=True)
+          status_path=pathlib.Path("control/operator-status")/(row["request_id"]+".json")
+          status_path.parent.mkdir(parents=True,exist_ok=True)
           if p.exists():
             old=json.loads(p.read_text())
             stable=("schema_version","intent","request_id","requested_by","config","paper_only","read_only","real_execution")
@@ -71,7 +73,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add control/operator-intents
+          git add control/operator-intents control/operator-status
           git diff --cached --quiet && exit 0
           git commit -m "operator: persist intent ${{ inputs.request_id }}"
           for i in 1 2 3 4 5; do
