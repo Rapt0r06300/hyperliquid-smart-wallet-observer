@@ -41,14 +41,20 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import datetime,json,os,pathlib
+          import datetime,json,os,pathlib,re
+          request_id=os.environ["REQUEST_ID"]
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id):
+            raise SystemExit("request_id must be a path-safe bounded identifier")
+          requested_by=os.environ["REQUESTED_BY"]
+          if not re.fullmatch(r"[A-Za-z0-9@._:-]{1,128}", requested_by):
+            raise SystemExit("requested_by contains unsupported characters")
           config=json.loads(os.environ["CONFIG_JSON"])
           if not isinstance(config,dict): raise SystemExit("config_json must be object")
           row={
             "schema_version":"alina.operator_intent.v1",
             "intent":os.environ["INTENT"],
-            "request_id":os.environ["REQUEST_ID"],
-            "requested_by":os.environ["REQUESTED_BY"],
+            "request_id":request_id,
+            "requested_by":requested_by,
             "requested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),
             "main_code_sha":os.environ.get("GITHUB_SHA"),
             "config":config,
