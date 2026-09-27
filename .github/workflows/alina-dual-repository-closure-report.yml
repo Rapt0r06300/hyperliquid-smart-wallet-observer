@@ -1,0 +1,38 @@
+name: alina-dual-repository-closure-report
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: alina-dual-repository-closure-report
+  cancel-in-progress: false
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Rapt0r06300/alina-smartflow-datasets-v2
+          ref: main
+          path: dataset-v2
+          persist-credentials: false
+      - name: Build conservative closure report
+        env:
+          ALINA_MAIN_HEAD: "${{ github.sha }}"
+          DATASET_V2_HEAD: "${{ github.event.workflow_run.head_sha || 'main' }}"
+        run: |
+          set -euo pipefail
+          python tools/build_closure_report.py --dataset-root dataset-v2
+      - name: Publish closure report
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/alina-closure-report.json
+          git diff --cached --quiet && exit 0
+          git commit -m "closure: publish dual-repository status report"
+          git push origin HEAD:main
