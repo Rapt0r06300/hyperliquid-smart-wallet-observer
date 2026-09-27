@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 VENUES = ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
-CAPABILITIES = ("trades", "bbo", "l2", "clock_sync", "recovery", "replay_adapter")
+CAPABILITIES = ("trades", "bbo", "l2", "clock_sync", "recovery", "replay_adapter", "sequence_integrity", "venue_status", "official_archive")
 NATIVE_MODULES = {
     "hyperliquid": ("src/hl_observer/venues/hyperliquid.py", "src/hl_observer/collection/hyperliquid_clock_sync.py"),
     "binance": ("src/hl_observer/venues/binance.py",),
@@ -24,6 +24,9 @@ KEYWORDS = {
     "clock_sync": ("clock", "offset", "rtt"),
     "recovery": ("reconnect", "backfill", "resume"),
     "replay_adapter": ("replay", "normaliz"),
+    "sequence_integrity": ("sequence", "prev_seq", "gap"),
+    "venue_status": ("status", "maintenance", "trading_state"),
+    "official_archive": ("archive", "historical", "download"),
 }
 
 
