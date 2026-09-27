@@ -68,6 +68,9 @@ class CampaignManifest:
     paper_only: bool = True
     read_only: bool = True
     real_execution: bool = False
+    phase_epoch: int | None = None
+    source_collection_epoch: int | None = None
+    collection_cutoff: str | None = None
     limits: dict[str, int] = field(default_factory=lambda: asdict(StopLimits()))
 
     def to_dict(self) -> dict[str, Any]:
