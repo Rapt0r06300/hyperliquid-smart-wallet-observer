@@ -68,6 +68,13 @@ jobs:
           else:
             p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
           PY
+      - name: Validate durable operator status
+        run: |
+          set -euo pipefail
+          python tools/validate_operator_status.py \
+            --intent "control/operator-intents/${{ inputs.request_id }}.json" \
+            --status "control/operator-status/${{ inputs.request_id }}.json"
+
       - name: Publish operator intent
         run: |
           set -euo pipefail
