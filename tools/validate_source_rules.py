@@ -6,17 +6,53 @@ import argparse
 import json
 from pathlib import Path
 
-try:
-    import yaml
-except ImportError as exc:
-    raise SystemExit("PyYAML is required to validate source rules") from exc
+def _scalar(value: str) -> object:
+    value = value.strip()
+    if value in {"true", "True"}:
+        return True
+    if value in {"false", "False"}:
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        return value.strip("'\\\"")
+
+
+def _load_rules(path: Path) -> dict:
+    try:
+        import yaml
+    except ImportError:
+        # The checked-in rules file is intentionally a scalar-only YAML document.
+        # Keep the validator usable on a clean GitHub-hosted Python image.
+        root: dict[str, object] = {}
+        stack: list[tuple[int, dict]] = [(-1, root)]
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.rstrip()
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indent = len(line) - len(line.lstrip())
+            key, sep, value = line.strip().partition(":")
+            if not sep:
+                continue
+            while stack and indent <= stack[-1][0]:
+                stack.pop()
+            parent = stack[-1][1]
+            if value.strip():
+                parent[key] = _scalar(value)
+            else:
+                child: dict[str, object] = {}
+                parent[key] = child
+                stack.append((indent, child))
+        return root
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--path", default="config/source_rules.yaml")
     args = parser.parse_args()
-    body = yaml.safe_load(Path(args.path).read_text(encoding="utf-8"))
+    body = _load_rules(Path(args.path))
     if not isinstance(body, dict) or body.get("schema_version") != "alina.source_rules.v1":
         raise SystemExit("unsupported source rules schema")
     rules = body.get("rules")
