@@ -28,6 +28,9 @@ def main() -> int:
     expected = hashlib.sha256(canonical(body).encode()).hexdigest()
     if digest != expected:
         raise SystemExit("source capability matrix digest mismatch")
+    rules = matrix.get("source_rules")
+    if not isinstance(rules, dict) or len(str(rules.get("sha256") or "")) != 64:
+        raise SystemExit("source rules provenance missing")
     rows = matrix.get("venues")
     if not isinstance(rows, list) or {row.get("venue") for row in rows} != VENUES:
         raise SystemExit("source capability matrix must contain exactly six canonical venues")
