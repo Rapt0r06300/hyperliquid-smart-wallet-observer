@@ -374,7 +374,7 @@ def run_one_unit(
                     str(workspace),
                     "--no-start-collection",
                     "--analysis-stage",
-                    str(ctx.kind).upper(),
+                    _analysis_stage(ctx.kind) or str(ctx.kind).upper(),
                 ],
                 workspace,
                 "economic_campaign",
@@ -424,7 +424,7 @@ def run_one_unit(
         if output_root is not None:
             output_root.mkdir(parents=True, exist_ok=True)
         try:
-            cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)), analysis_stage=ctx.kind)
+            cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)), analysis_stage=_analysis_stage(ctx.kind))
         except subprocess.TimeoutExpired:
             payload = {
                 "status": "CONTINUATION_REQUIRED",
@@ -488,7 +488,7 @@ def run_one_unit(
     payload = {
         "status": "COMPLETE",
         "analysis_stage": (
-            str(ctx.kind).upper() if ctx.kind in ECONOMIC_KINDS else None
+            _analysis_stage(ctx.kind)
         ),
         "returncode": 0,
         "stdout": stdout,
