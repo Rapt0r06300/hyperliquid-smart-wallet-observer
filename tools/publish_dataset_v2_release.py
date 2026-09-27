@@ -8,6 +8,7 @@ to its own dataset repository; no user PC and no cross-repository PAT is require
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -315,6 +316,14 @@ def publish_bundle(
     }
     run_path = root / "RUN_MANIFEST.json"
     write_manifest(run_manifest, run_path)
+    run_identity = {
+        "release_asset": "RUN_MANIFEST.json",
+        "bytes": run_path.stat().st_size,
+        "sha256": hashlib.sha256(run_path.read_bytes()).hexdigest(),
+    }
+    existing_run = release_asset_map(release).get("RUN_MANIFEST.json")
+    if existing_run is not None:
+        assert_existing_asset_compatible(run_identity, existing_run)
     upload_file(repository=repository, tag=tag, path=run_path)
 
     # Refresh once more so RUN_MANIFEST itself is visible before success.
