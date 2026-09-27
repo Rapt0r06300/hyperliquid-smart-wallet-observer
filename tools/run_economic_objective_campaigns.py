@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import platform
 import sys
 import time
 from pathlib import Path
@@ -143,6 +144,27 @@ def _stable_json_sha256(payload: object) -> str:
     ).hexdigest()
 
 
+def _environment_provenance(root: Path) -> dict[str, Any]:
+    dependency_files = []
+    for pattern in ("requirements*.txt", "pyproject.toml", "poetry.lock", "uv.lock"):
+        dependency_files.extend(sorted(root.glob(pattern)))
+    dependency_digest = _stable_json_sha256({
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in dependency_files
+        if path.is_file()
+    })
+    return {
+        "os": platform.platform(),
+        "runner_architecture": platform.machine(),
+        "python_version": platform.python_version(),
+        "python_executable": sys.executable,
+        "timezone": os.environ.get("TZ") or time.tzname[0],
+        "dependency_files": [str(path.relative_to(root)) for path in dependency_files if path.is_file()],
+        "dependency_digest": dependency_digest,
+        "github_runner_image": os.environ.get("ImageOS") or os.environ.get("RUNNER_OS"),
+    }
+
+
 def _microstructure_source_paths(metadata: object) -> list[str]:
     """Extract only local paths actually inspected by the L2/trade loader."""
 
@@ -192,6 +214,7 @@ def run_campaigns(
     analysis_stage: str | None = None,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    environment_provenance = _environment_provenance(root)
     analysis_stage = str(analysis_stage or os.environ.get("ALINA_ANALYSIS_STAGE") or "BACKTEST").upper()
     allowed_stages = {"BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD"}
     if analysis_stage not in allowed_stages:
@@ -795,6 +818,7 @@ def run_campaigns(
         "provisional_without_physical_freeze": cross_freeze is None,
         "dataset_workspace": dataset_mode,
         "dataset_source_summary": dataset_sources,
+        "environment_provenance": environment_provenance,
     }
     cross_raw["next_hypothesis_v3"] = qualify_cross_venue_train_only(
         cross_trades,
@@ -844,6 +868,7 @@ def run_campaigns(
             ),
             "source_summary": dataset_sources,
         },
+        "environment_provenance": environment_provenance,
         "campaigns": [
             {
                 "family": row.get("family"),
