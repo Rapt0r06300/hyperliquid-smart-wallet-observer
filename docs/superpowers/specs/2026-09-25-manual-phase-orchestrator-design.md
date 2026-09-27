@@ -16131,3 +16131,223 @@ This change does not:
 - replace existing native venue collectors without a demonstrated need.
 
 Its purpose is to make the existing GitHub architecture operationally simple: collect when instructed, stop cleanly when instructed, then spend compute on evidence generation instead of competing workloads.
+
+## Additional code-level defect catalog — 2026-09-27
+
+This section records **50 newly identified implementation defects that were not previously enumerated as code-level defects in this canonical specification**. It is an in-place extension of the same canonical spec, not a new V6.x specification. These findings were obtained from the current `main` tree and are defects/backlog items only: this section does not claim that they are already fixed.
+
+Each item is fail-closed: the correction must add a deterministic regression test proving both the failing case and the corrected behavior.
+
+1. **NEW-DEFECT-001 — weighted rate limiter accepts booleans as weights.**  
+   File: `src/hl_observer/api_governance/weighted_rate_limiter.py`.  
+   `bool` is an `int` in Python, so `True` / `False` pass the numeric check in `consommer()`. Reject booleans explicitly for economic/rate quantities.
+
+2. **NEW-DEFECT-002 — weighted rate limiter accepts NaN weight and can poison budget accounting.**  
+   File: `src/hl_observer/api_governance/weighted_rate_limiter.py`.  
+   `float("nan") < 0` is false and later comparisons with NaN are non-ordering, so a NaN weight can enter the event list and corrupt `poids_utilise()`. Require finite positive/zero weights.
+
+3. **NEW-DEFECT-003 — invalid/NaN `now_ms` can discard limiter history.**  
+   File: `src/hl_observer/api_governance/weighted_rate_limiter.py`.  
+   The pruning expression is not guarded against non-finite timestamps; a NaN clock value makes all age comparisons false and can erase prior events before appending a new event. Validate finite timestamps before mutating state.
+
+4. **NEW-DEFECT-004 — rate limiter has no monotonic-time regression guard.**  
+   File: `src/hl_observer/api_governance/weighted_rate_limiter.py`.  
+   A caller supplying a timestamp older than the previous call can retain future events or compute the sliding window incorrectly. Track the last accepted clock value or require a monotonic clock.
+
+5. **NEW-DEFECT-005 — reserved quota accepts a negative critical reserve.**  
+   File: `src/hl_observer/api_governance/reserved_api_quota.py`.  
+   `reserve_critique` is only capped above by `quota_total`; a negative reserve increases the discovery pool above the intended total. Constructor validation must reject negative reserve values.
+
+6. **NEW-DEFECT-006 — reserved quota accepts negative request cost.**  
+   File: `src/hl_observer/api_governance/reserved_api_quota.py`.  
+   A negative `cout` can pass admission and then reduce `_utilise`, effectively creating extra quota. Costs must be finite and strictly non-negative.
+
+7. **NEW-DEFECT-007 — reserved quota accepts NaN request cost and poisons state.**  
+   File: `src/hl_observer/api_governance/reserved_api_quota.py`.  
+   NaN comparisons do not fail safely and `_utilise += NaN` makes future quota calculations unusable. Reject non-finite values before admission and mutation.
+
+8. **NEW-DEFECT-008 — reserved quota never resets by time window.**  
+   File: `src/hl_observer/api_governance/reserved_api_quota.py`.  
+   `_utilise` only increases and has no window/epoch reset, so a long-lived process eventually exhausts quota forever even after the venue quota window has renewed. Tie usage to a documented window or explicit reset epoch.
+
+9. **NEW-DEFECT-009 — API QoS queue is unbounded.**  
+   File: `src/hl_observer/api_governance/request_qos.py`.  
+   `FileQoS.ajouter()` has no capacity/backpressure policy; a stalled consumer can grow memory without bound. Add a bounded queue and a typed overflow/degradation policy.
+
+10. **NEW-DEFECT-010 — API QoS has no request expiry/deadline semantics.**  
+    File: `src/hl_observer/api_governance/request_qos.py`.  
+    Old emergency/reconcile/data-refresh requests remain eligible indefinitely and may execute after their information is stale. Store enqueue/deadline timestamps and expire stale work deterministically.
+
+11. **NEW-DEFECT-011 — depth pricer can mishandle a NaN target notional.**  
+    File: `src/hl_observer/arbitrage/orderbook_depth_pricer.py`.  
+    A NaN `target_notional_usdt` is not rejected up front and can traverse levels while the remaining amount is NaN, producing a plausible-looking result instead of `UNMEASURABLE`. Require a finite strictly positive target.
+
+12. **NEW-DEFECT-012 — depth pricer silently trusts caller level ordering.**  
+    File: `src/hl_observer/arbitrage/orderbook_depth_pricer.py`.  
+    An unsorted ask/bid ladder produces the wrong VWAP without any error. The function must either validate monotonic level order for the requested side or receive a typed, prevalidated book object.
+
+13. **NEW-DEFECT-013 — malformed depth numeric fields can raise instead of quarantine.**  
+    File: `src/hl_observer/arbitrage/orderbook_depth_pricer.py`.  
+    Direct `float(...)` conversion of malformed `price/px/size/sz` values can throw and abort a batch. Return a typed invalid-depth result with row provenance rather than crashing or silently skipping.
+
+14. **NEW-DEFECT-014 — depth pricer accepts booleans as prices/sizes.**  
+    File: `src/hl_observer/arbitrage/orderbook_depth_pricer.py`.  
+    `True` and `False` are converted to `1.0` and `0.0`, allowing malformed schema data to become economic depth. Explicitly reject booleans and non-finite values.
+
+15. **NEW-DEFECT-015 — optimal-notional search accepts zero/negative candidate notionals.**  
+    File: `src/hl_observer/arbitrage/optimal_notional_search.py`.  
+    Negative or zero entries in `tailles` are evaluated as if they were valid sizing candidates and can distort the selected optimum. Candidate notionals must be finite and strictly positive.
+
+16. **NEW-DEFECT-016 — optimal-notional search does not reject NaN edge/cost values.**  
+    File: `src/hl_observer/arbitrage/optimal_notional_search.py`.  
+    NaN `gross_edge_bps` or NaN returned by `cout_bps` can propagate into the curve and selected result. Non-finite economics must yield a typed `UNMEASURABLE` candidate.
+
+17. **NEW-DEFECT-017 — cost callback is evaluated twice per candidate size.**  
+    File: `src/hl_observer/arbitrage/optimal_notional_search.py`.  
+    `cout_bps(t)` is called once through `net_usd()` and again for `net_bps`. A stateful, sampled, or expensive cost function can therefore produce internally inconsistent values for the same size. Evaluate once and reuse the exact result.
+
+18. **NEW-DEFECT-018 — all-negative sizing curve still returns an “optimal” notional.**  
+    File: `src/hl_observer/arbitrage/optimal_notional_search.py`.  
+    If every candidate loses money, the function still returns the least-negative size as `taille_optimale`. The economic result must instead be a typed no-trade/non-positive-optimum state unless the caller explicitly requests diagnostic argmax behavior.
+
+19. **NEW-DEFECT-019 — cross-venue roundtrip does not validate positive notional.**  
+    File: `src/hl_observer/arbitrage/cross_venue_roundtrip.py`.  
+    `notional_usd` is passed through without an explicit finite/positive precondition. Reject zero, negative, boolean, NaN and infinite notionals before pricing legs.
+
+20. **NEW-DEFECT-020 — roundtrip exit is sized by the original USD notional instead of the actual opened quantity.**  
+    File: `src/hl_observer/arbitrage/cross_venue_roundtrip.py`.  
+    The same `notional_usd` is independently priced on entry and exit. After a price move this can close a different base quantity than was opened, leaving a synthetic residual or misstating costs. Exit sizing must be derived from actual simulated filled quantities per leg.
+
+21. **NEW-DEFECT-021 — roundtrip fee overrides accept negative/NaN fees.**  
+    File: `src/hl_observer/arbitrage/cross_venue_roundtrip.py`.  
+    User-supplied `fee_bps_hl` / `fee_bps_binance` are converted with `float()` but not validated. Negative fees can fabricate edge and NaN fees can return `statut="OK"` with NaN economics. Require finite rule-validated fee values or explicit rebate semantics.
+
+22. **NEW-DEFECT-022 — marginal sizing accepts negative tranche sizes.**  
+    File: `src/hl_observer/arbitrage/marginal_edge_sizing.py`.  
+    A negative tranche reduces total size and can invert weighted economics. Every tranche size must be finite and strictly positive.
+
+23. **NEW-DEFECT-023 — marginal sizing accepts NaN edge and can return NaN economics.**  
+    File: `src/hl_observer/arbitrage/marginal_edge_sizing.py`.  
+    `NaN <= 0` is false, so a NaN marginal edge can be accumulated rather than stopping/failing closed. Validate every tranche and cost as finite before use.
+
+24. **NEW-DEFECT-024 — hysteresis keeps an open state on NaN edge.**  
+    File: `src/hl_observer/arbitrage/profit_hysteresis.py`.  
+    The docstring says non-measurable edge should close an open exposure, but NaN is still an `int/float`; both threshold comparisons are false and the function returns `MAINTENIR`. Treat non-finite edge as non-measurable and fail closed.
+
+25. **NEW-DEFECT-025 — hysteresis constructor accepts NaN thresholds.**  
+    File: `src/hl_observer/arbitrage/profit_hysteresis.py`.  
+    The `<=` ordering check does not reject NaN, allowing a permanently broken hysteresis band. Require finite thresholds before checking ordering.
+
+26. **NEW-DEFECT-026 — repricing tolerance accepts negative `min_ticks`.**  
+    File: `src/hl_observer/arbitrage/repricing_tolerance.py`.  
+    A negative minimum makes essentially every finite movement satisfy `ticks >= min_ticks`, defeating the anti-churn guard. Require a finite non-negative threshold.
+
+27. **NEW-DEFECT-027 — NaN current/target price is mislabeled as “under tolerance”.**  
+    File: `src/hl_observer/arbitrage/repricing_tolerance.py`.  
+    NaN price inputs pass the type gate; `delta_ticks` becomes NaN and the function returns `repricer=False` with `SOUS_LA_TOLERANCE` instead of `NON_MESURABLE`. Reject non-finite prices explicitly.
+
+28. **NEW-DEFECT-028 — conversion TTL accepts a negative TTL configuration.**  
+    File: `src/hl_observer/arbitrage/conversion_ttl.py`.  
+    A negative TTL is treated like ordinary expiry rather than invalid configuration. TTL must be finite and non-negative, with configuration failure distinct from stale data.
+
+29. **NEW-DEFECT-029 — conversion helper can return NaN with reason `OK`.**  
+    File: `src/hl_observer/arbitrage/conversion_ttl.py`.  
+    NaN amount/rate values pass the `isinstance` tests and can produce `valeur=NaN, refuse=False, raison="OK"`. All economic inputs must be finite.
+
+30. **NEW-DEFECT-030 — conversion helper accepts booleans as amount/rate/age.**  
+    File: `src/hl_observer/arbitrage/conversion_ttl.py`.  
+    Boolean schema contamination can become numeric conversion data because booleans satisfy `isinstance(x, (int, float))`. Reject booleans explicitly.
+
+31. **NEW-DEFECT-031 — negative depeg factor silently disables the haircut.**  
+    File: `src/hl_observer/arbitrage/depeg_haircut.py`.  
+    A negative `facteur` drives the computed excess below zero and the `max(0, ...)` clamp turns it into no haircut even during a depeg. Configuration must reject negative factors.
+
+32. **NEW-DEFECT-032 — negative depeg cap can create a negative haircut and increase edge.**  
+    File: `src/hl_observer/arbitrage/depeg_haircut.py`.  
+    A negative `plafond_bps` can make `haircut_bps` negative; subtracting it increases reported edge. Cap/threshold/factor must be finite and constrained to valid domains.
+
+33. **NEW-DEFECT-033 — tick rounding is direction-blind.**  
+    File: `src/hl_observer/arbitrage/tick_lot_preflight.py`.  
+    `arrondir_tick()` always floors price. Valid conservative rounding differs by order side/context; blindly flooring both buy and sell prices can create an inadmissible or artificially favorable executable price. Require side-aware venue rounding.
+
+34. **NEW-DEFECT-034 — NaN price can crash tick rounding.**  
+    File: `src/hl_observer/arbitrage/tick_lot_preflight.py`.  
+    NaN passes the numeric type check and reaches `math.floor(NaN)`, which raises instead of returning `UNMEASURABLE`. Reject non-finite values before arithmetic.
+
+35. **NEW-DEFECT-035 — tick/lot preflight accepts booleans as numeric price/size.**  
+    File: `src/hl_observer/arbitrage/tick_lot_preflight.py`.  
+    Boolean values can be converted into valid-looking price/quantity values. Apply strict numeric schema validation excluding `bool`.
+
+36. **NEW-DEFECT-036 — minimum-notional preflight can certify NaN legs.**  
+    File: `src/hl_observer/arbitrage/minimum_notional_preflight.py`.  
+    NaN price/size/minimum satisfy the current numeric type test; `n < mn` is false with NaN, so a malformed leg can avoid the invalid list and the function can return `ok=True`. Require finite values.
+
+37. **NEW-DEFECT-037 — minimum-notional preflight does not require positive price and size.**  
+    File: `src/hl_observer/arbitrage/minimum_notional_preflight.py`.  
+    Two negative inputs can multiply to a positive notional and pass the minimum check. Price and quantity must each satisfy the venue's positive-domain constraints independently.
+
+38. **NEW-DEFECT-038 — missing funding rate is silently converted to zero carry.**  
+    File: `src/hl_observer/arbitrage/funding_adjusted_edge.py`.  
+    `float(funding_rate or 0.0)` treats missing/falsey funding evidence as zero. Missing funding evidence must be `UNKNOWN/UNMEASURABLE`, never free carry.
+
+39. **NEW-DEFECT-039 — unknown funding side returns a usable numeric gross edge.**  
+    File: `src/hl_observer/arbitrage/funding_adjusted_edge.py`.  
+    For an unknown side, the function returns `adjusted_edge_bps == gross_edge_bps` with reason `SIDE_UNKNOWN`. A downstream consumer that ignores the reason can trade/rank on the number. Unknown side must make the adjusted value non-certifiable/non-numeric.
+
+40. **NEW-DEFECT-040 — missing gross edge is silently converted to zero.**  
+    File: `src/hl_observer/arbitrage/funding_adjusted_edge.py`.  
+    `gross_edge_bps or 0.0` converts absent evidence into a valid-looking zero edge. Preserve absence as `UNMEASURABLE`.
+
+41. **NEW-DEFECT-041 — opening detector mishandles the Python 3.10 StrEnum shim.**  
+    File: `src/hl_observer/analysis/opening_detector.py`.  
+    It uses `str(delta.action)`, while the closing detector already documents that the compatibility Enum can stringify as `ClassName.NAME`. OPEN/ADD/FLIP actions can therefore be missed under the shim. Normalize `.value` first, as the closing path does.
+
+42. **NEW-DEFECT-042 — opening detector drops `direction` evidence before classification.**  
+    Files: `src/hl_observer/analysis/opening_detector.py`, `opening_classifier.py`.  
+    `classify_opening()` supports a `direction` argument for DCA/average detection, but the detector never passes it. DCA evidence in the delta is therefore unreachable through this normal path.
+
+43. **NEW-DEFECT-043 — every generic OPEN/FLIP is labeled momentum-chase by side alone.**  
+    File: `src/hl_observer/analysis/opening_classifier.py`.  
+    With no breakout/pullback/momentum evidence, any OPEN/FLIP LONG becomes `MOMENTUM_CHASE_LONG` and SHORT becomes `MOMENTUM_CHASE_SHORT`. This invents strategy intent. Unknown evidence must remain UNKNOWN/HEDGE_OR_UNKNOWN.
+
+44. **NEW-DEFECT-044 — ADD classification preempts DCA evidence.**  
+    File: `src/hl_observer/analysis/opening_classifier.py`.  
+    The function returns `SCALE_IN_*` for `action=="ADD"` before checking whether `direction` contains DCA/average semantics. A DCA add can never reach the DCA branch. Reorder or explicitly resolve competing evidence.
+
+45. **NEW-DEFECT-045 — profitable REDUCE is automatically labeled TAKE_PROFIT.**  
+    File: `src/hl_observer/analysis/closing_classifier.py`.  
+    Positive `closed_pnl` does not prove the trader's motive was take-profit; a risk reduction, hedge rebalance or forced reduction can also realize profit. Keep motive UNKNOWN unless causal evidence exists.
+
+46. **NEW-DEFECT-046 — losing CLOSE is automatically labeled STOP_LOSS.**  
+    File: `src/hl_observer/analysis/closing_classifier.py`.  
+    Negative `closed_pnl` does not prove a stop-loss order or stop-driven decision. Time exits, liquidity exits, manual exits and forced flows can lose money. Require causal evidence before assigning STOP_LOSS.
+
+47. **NEW-DEFECT-047 — PnL attribution silently skips malformed PnL rows.**  
+    File: `src/hl_observer/analysis/pnl_attribution.py`.  
+    Conversion errors are caught and ignored, so corrupted rows disappear from aggregate attribution and can make the remaining dataset look cleaner. Return contamination/rejected-row counts and block certifying attribution when proof-critical rows are malformed.
+
+48. **NEW-DEFECT-048 — PnL attribution has no event identity/deduplication guard.**  
+    File: `src/hl_observer/analysis/pnl_attribution.py`.  
+    The helper sums every supplied row, so reconnect/backfill duplicates can double-count realized PnL. Certifying use must consume canonical deduplicated event identities or reject duplicate input.
+
+49. **NEW-DEFECT-049 — stablecoin converter ignores the `stable` argument.**  
+    File: `src/hl_observer/arbitrage/stablecoin_conversion.py`.  
+    `convertir_stable_usd(montant, stable, ...)` never checks `stable` or `est_stable()`; a non-stable asset can be passed through the stablecoin conversion path and receive stable semantics. Validate the asset and its conversion pair explicitly.
+
+50. **NEW-DEFECT-050 — symbol normalizer omits common USDC quote suffixes.**  
+    File: `src/hl_observer/arbitrage/symbol_normalizer.py`.  
+    The suffix list strips USD/USDT variants but not `-USDC`, `/USDC` or `_USDC`. Equivalent BTC/USDC-style venue symbols can therefore fail to normalize to the same canonical coin and be misclassified as cross-venue symbol mismatches. Add tested quote-aware normalization rather than ad-hoc suffix stripping.
+
+### Acceptance for this additional defect catalog
+
+This catalog is considered implemented only when:
+
+- every `NEW-DEFECT-001..050` has at least one deterministic regression test reproducing the old failure;
+- corrections reject non-finite/boolean/invalid-domain economic values explicitly rather than converting them into plausible numbers;
+- malformed evidence produces a typed fail-closed result, not a silent skip, zero default, NaN success, or uncaught batch-wide crash;
+- classification code distinguishes observed facts from inferred intent and uses `UNKNOWN` when causal evidence is absent;
+- sizing/cost/depth logic preserves actual filled quantity and economically valid venue constraints;
+- deduplication/idempotency-sensitive accounting paths cannot count the same economic event twice;
+- no correction weakens paper/read-only safety, no-real-order guarantees, or existing canonical acceptance gates;
+- the implementation remains deterministic and uses local tests/fixtures for these defects unless external first-party behavior itself must be verified.
+
