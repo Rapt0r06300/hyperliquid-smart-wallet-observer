@@ -280,7 +280,11 @@ def _run(
     cmd: list[str],
     *,
     timeout: int,
+    analysis_stage: str | None = None,
 ) -> Any:
+    env = os.environ.copy()
+    if analysis_stage:
+        env["ALINA_ANALYSIS_STAGE"] = analysis_stage
     return runner(
         cmd,
         capture_output=True,
@@ -288,6 +292,7 @@ def _run(
         timeout=max(1, int(timeout)),
         check=False,
         cwd=str(ROOT),
+        env=env,
     )
 
 
@@ -397,7 +402,7 @@ def run_one_unit(
         if output_root is not None:
             output_root.mkdir(parents=True, exist_ok=True)
         try:
-            cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)))
+            cp = _run(runner, cmd, timeout=max(1, int(remaining - 5)), analysis_stage=ctx.kind)
         except subprocess.TimeoutExpired:
             payload = {
                 "status": "CONTINUATION_REQUIRED",
