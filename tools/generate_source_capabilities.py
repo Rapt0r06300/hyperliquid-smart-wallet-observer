@@ -98,8 +98,13 @@ def main() -> int:
             },
             "capabilities": caps,
         })
+    rules_path = root.parent.parent / "config" / "source_rules.yaml"
     body = {
         "schema_version": "alina.source_capability_matrix.v3",
+        "source_rules": {
+            "path": str(rules_path),
+            "sha256": hashlib.sha256(rules_path.read_bytes()).hexdigest() if rules_path.is_file() else None,
+        },
         "source_root": args.root,
         "venues": rows,
         "policy": (
