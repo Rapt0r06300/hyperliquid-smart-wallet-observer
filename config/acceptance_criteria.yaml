@@ -76,7 +76,7 @@ gates:
   - id: EVENT_INTELLIGENCE_WIRING
     owner: event_intelligence
     input_evidence: [docs/event-intelligence-120-status.json]
-    validator: tools.generate_event_intelligence_status
+    validator: tools.validate_event_intelligence_status
     failure_code: EVENT_STATUS_UNRESOLVED
     blocks: [event_conditioned_proof]
   - id: FRESH_RUNNER_RESTORE
@@ -85,3 +85,21 @@ gates:
     validator: tools.restore_durable_state
     failure_code: RESTORE_RECONSTRUCTION_FAILED
     blocks: [resume_claim, closure]
+  - id: CAMPAIGN_RESILIENCE
+    owner: recovery
+    input_evidence: [catalog/campaigns, catalog/CAMPAIGN_RESILIENCE_RECEIPT.json]
+    validator: tools.validate_campaign_resilience
+    failure_code: RESILIENCE_LINEAGE_INCOMPLETE
+    blocks: [resume, recovery, closure]
+  - id: SOURCE_RULE_PROVENANCE
+    owner: source_adapters
+    input_evidence: [config/source_rules.yaml, docs/source-capability-matrix.json]
+    validator: tools.validate_source_rules
+    failure_code: SOURCE_RULE_UNVERSIONED
+    blocks: [collection, replay, economic_proof]
+  - id: FINAL_CLOSURE_RECEIPT
+    owner: closure
+    input_evidence: [docs/alina-closure-report.json]
+    validator: tools/validate_closure_receipt
+    failure_code: CLOSURE_RECEIPT_INVALID
+    blocks: [DONE]
