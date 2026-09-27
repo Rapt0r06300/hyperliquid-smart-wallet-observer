@@ -19,67 +19,49 @@ jobs:
           HEAD_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)
           TREE_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${HEAD_SHA}" --jq .tree.sha)
           CUR_SHA=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${SPEC}?ref=main" --jq .sha)
-          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${CUR_SHA}" --jq .content | base64 -d > /tmp/current.md
-          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/146a0c986df0b8875a6a7bc1126f3ae484238d51" --jq .content | base64 -d > /tmp/old.md
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${CUR_SHA}" > /tmp/current.json
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/146a0c986df0b8875a6a7bc1126f3ae484238d51" > /tmp/old.json
           cat > /tmp/reconcile.py <<'PY'
           from pathlib import Path
-          import re
-          cur = Path('/tmp/current.md').read_text(encoding='utf-8')
-          old = Path('/tmp/old.md').read_text(encoding='utf-8')
+          import base64, json, re
+          def decode(path):
+              obj=json.loads(Path(path).read_text())
+              return base64.b64decode(obj['content']).decode('utf-8')
+          cur=decode('/tmp/current.json')
+          old=decode('/tmp/old.json')
           def section_for(text, needle):
-              pos = text.index(needle)
-              start = text.rfind('\n## ', 0, pos)
-              if start < 0:
-                  raise RuntimeError(f'heading not found for {needle}')
-              end = text.find('\n## ', pos)
-              if end < 0:
-                  end = len(text)
+              pos=text.index(needle); start=text.rfind('\n## ',0,pos); end=text.find('\n## ',pos)
+              if start<0: raise RuntimeError('missing heading '+needle)
+              if end<0: end=len(text)
               return text[start:end].strip()
           def remove_sections(text, needle):
-              removed = 0
+              n=0
               while needle in text:
-                  pos = text.index(needle)
-                  start = text.rfind('\n## ', 0, pos)
-                  if start < 0:
-                      raise RuntimeError(f'heading not found while removing {needle}')
-                  end = text.find('\n## ', pos)
-                  if end < 0:
-                      end = len(text)
-                  text = text[:start] + text[end:]
-                  removed += 1
-              return text, removed
-          # Remove every stale/duplicated defect-catalog section from the current spec.
-          cur, r1 = remove_sections(cur, 'NEW-DEFECT-001')
-          cur, r2 = remove_sections(cur, 'NEW-DEFECT-051')
-          # Rebuild from one authoritative historical copy of each audited tranche.
-          first50 = section_for(old, 'NEW-DEFECT-001')
-          next400 = section_for(old, 'NEW-DEFECT-051')
-          guard = '''## Canonical reconciliation guard — source completeness contract (2026-09-27)
+                  pos=text.index(needle); start=text.rfind('\n## ',0,pos); end=text.find('\n## ',pos)
+                  if start<0: raise RuntimeError('missing heading while removing '+needle)
+                  if end<0: end=len(text)
+                  text=text[:start]+text[end:]; n+=1
+              return text,n
+          cur,r1=remove_sections(cur,'NEW-DEFECT-001')
+          cur,r2=remove_sections(cur,'NEW-DEFECT-051')
+          first50=section_for(old,'NEW-DEFECT-001')
+          next400=section_for(old,'NEW-DEFECT-051')
+          guard='''## Canonical reconciliation guard — source completeness contract (2026-09-27)
 
           This section is normative. Future canonical-spec edits must preserve the complete audited defect catalog, interrupted Work reconciliation, final Work closure hardening, Alina-main/Dataset-V2 ownership, paper/read-only safety, and every stricter fail-closed contract. Oversized-write recovery must never restore an older snapshot that discards newer requirements. Completeness that cannot be proven is `UNMEASURABLE`.
           '''.strip()
-          merged = cur.rstrip() + '\n\n' + first50 + '\n\n' + next400 + '\n\n' + guard + '\n'
-          ids = [int(x) for x in re.findall(r'NEW-DEFECT-([0-9]{3})', merged)]
-          bad = [i for i in range(1, 451) if ids.count(i) != 1]
-          if bad:
-              raise RuntimeError(f'defect IDs not exactly once: {bad[:20]}')
-          required = [
-              'Normative closure hardening — final consolidated contracts',
-              'Dataset V2', 'GitHub-hosted', 'paper/read-only',
-              'Canonical reconciliation guard — source completeness contract',
-          ]
-          missing = [x for x in required if x not in merged]
-          if missing:
-              raise RuntimeError(f'missing canonical markers: {missing}')
-          Path('/tmp/merged.md').write_text(merged, encoding='utf-8')
-          print(f'VERIFIED: removed {r1+r2} stale catalog sections; NEW-DEFECT-001..450 exactly once; bytes={len(merged.encode())}')
+          merged=cur.rstrip()+'\n\n'+first50+'\n\n'+next400+'\n\n'+guard+'\n'
+          ids=[int(x) for x in re.findall(r'NEW-DEFECT-([0-9]{3})',merged)]
+          bad=[i for i in range(1,451) if ids.count(i)!=1]
+          if bad: raise RuntimeError('defect IDs not exactly once '+repr(bad[:20]))
+          required=['Normative closure hardening — final consolidated contracts','Dataset V2','GitHub-hosted','paper/read-only']
+          missing=[x for x in required if x not in merged]
+          if missing: raise RuntimeError('missing markers '+repr(missing))
+          Path('/tmp/merged.md').write_text(merged,encoding='utf-8')
+          Path('/tmp/blob.json').write_text(json.dumps({'content':base64.b64encode(merged.encode()).decode(),'encoding':'base64'}))
+          print('VERIFIED',r1+r2,'stale sections removed; 001..450 exactly once; bytes',len(merged.encode()))
           PY
           python /tmp/reconcile.py
-          python - <<'PY'
-          import base64, json
-          from pathlib import Path
-          Path('/tmp/blob.json').write_text(json.dumps({'content': base64.b64encode(Path('/tmp/merged.md').read_bytes()).decode(), 'encoding':'base64'}))
-          PY
           NEW_BLOB=$(gh api --method POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input /tmp/blob.json --jq .sha)
           python - <<PY
           import json
