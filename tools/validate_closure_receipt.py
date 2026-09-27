@@ -45,9 +45,26 @@ def main() -> int:
         raise SystemExit("invalid closure phase")
     if not isinstance(receipt["phase_epoch"], int) or receipt["phase_epoch"] < 1:
         raise SystemExit("invalid closure phase epoch")
-    for name in ("copy_vault_status", "lead_lag_status", "cross_venue_status"):
+    for name in (
+        "copy_vault_status",
+        "lead_lag_status",
+        "cross_venue_status",
+        "oos_status",
+        "forward_status",
+        "two_segment_resume_status",
+    ):
         if receipt[name] not in VALID_STATUSES:
-            raise SystemExit(f"invalid family status: {name}")
+            raise SystemExit(f"invalid closure status: {name}")
+    for name in (
+        "trade_count_exact",
+        "unique_trade_count_exact",
+        "event_intelligence_wiring_complete",
+        "paper_read_only",
+        "self_hosted_used",
+        "real_execution_reachable",
+    ):
+        if not isinstance(receipt[name], bool):
+            raise SystemExit(f"closure field must be boolean: {name}")
     if receipt["paper_read_only"] is not True:
         raise SystemExit("paper/read-only closure invariant missing")
     if receipt["self_hosted_used"] is not False:
