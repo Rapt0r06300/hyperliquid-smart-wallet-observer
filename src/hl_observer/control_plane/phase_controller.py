@@ -147,6 +147,8 @@ class PhaseController:
 
         if self._state.phase != "COLLECT":
             raise ValueError(f"Transition to ANALYZE requires phase COLLECT, current: {self._state.phase}")
+        if initial_stage != "DRAIN":
+            raise ValueError("ANALYZE must begin at DRAIN")
 
         prev_epoch = self._state.epoch
         finished_collection_epoch = prev_epoch
