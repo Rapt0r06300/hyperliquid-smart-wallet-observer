@@ -1,0 +1,32 @@
+name: event-intelligence-coverage-registry
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "31 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "docs/event-intelligence-120-coverage.md"
+      - "tools/generate_event_intelligence_status.py"
+permissions:
+  contents: write
+concurrency:
+  group: event-intelligence-coverage-registry
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Generate wiring registry
+        run: python tools/generate_event_intelligence_status.py
+      - name: Publish registry
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/event-intelligence-120-status.json
+          git diff --cached --quiet && exit 0
+          git commit -m "event-intelligence: publish wiring status registry"
+          git push origin HEAD:main
