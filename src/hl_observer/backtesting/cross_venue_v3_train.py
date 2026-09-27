@@ -423,23 +423,20 @@ def _placebo_net(trades: Sequence[Mapping[str, Any]]) -> float:
 
 
 def _normalization_proof_ok(source_mode: str, source_meta: Mapping[str, Any] | None) -> bool:
-    """Require upstream certified mapping and USD-size normalization before PnL."""
+    """Require an immutable, content-bound normalization receipt before PnL."""
 
     if not isinstance(source_meta, Mapping) or source_meta.get("source_mode") != source_mode:
         return False
     if source_meta.get("mapping_verified") is not True:
         return False
-    explicit_units = bool(
-        source_meta.get("contract_multipliers_normalized") is True
-        and source_meta.get("quote_currencies_normalized") is True
-        and source_meta.get("sizes_normalized_to_usd_notional") is True
-    )
-    certified_loader_units = source_meta.get("capacity_definition") in {
-        "minimum USD capacity on the four raw BBO sides",
-        "minimum USD capacity on the four BBO top levels",
-        "minimum USD capacity on certified four-side union",
-    }
-    return explicit_units or certified_loader_units
+    receipt = source_meta.get("normalization_receipt")
+    if not isinstance(receipt, Mapping):
+        return False
+    try:
+        from hl_observer.backtesting.cross_venue_certified import _valid_normalization_receipt
+    except ImportError:
+        return False
+    return _valid_normalization_receipt(receipt, source_mode=source_mode)
 
 
 def explore_cross_venue_v3_train(
