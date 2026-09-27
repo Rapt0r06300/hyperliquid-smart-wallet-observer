@@ -9,6 +9,10 @@ import secrets
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "alina.resumable_campaign.v1"
+SCHEMA_VERSION_V1 = "alina.resumable_campaign.v1"
+SCHEMA_VERSION_V2 = "alina.resumable_campaign.v2"
+SUPPORTED_SCHEMAS = frozenset({SCHEMA_VERSION_V1, SCHEMA_VERSION_V2})
+
 CAMPAIGN_KINDS = frozenset({"market_collection","copy_vault_collection","official_archive_collection","event_intelligence_collection","replay","backtest","module_pnl_proof"})
 CAMPAIGN_KIND_ORDER = ("module_pnl_proof","backtest","replay","market_collection","copy_vault_collection","event_intelligence_collection","official_archive_collection")
 ACTIVE_STATES = frozenset({"PENDING","RUNNING","CONTINUATION_REQUIRED"})
@@ -50,7 +54,7 @@ class CampaignManifest:
     config_sha256: str
     work_plan_sha256: str
     expires_at: str
-    schema_version: str = SCHEMA_VERSION
+    schema_version: str = SCHEMA_VERSION_V1
     status: str = "PENDING"
     status_reason: str = "created"
     created_at: str = field(default_factory=_now)
@@ -70,6 +74,15 @@ class CampaignManifest:
     real_execution: bool = False
     limits: dict[str, int] = field(default_factory=lambda: asdict(StopLimits()))
 
+    # Schema V2 fields
+    creation_phase: str | None = None
+    phase_epoch: int | None = None
+    source_collection_epoch: int | None = None
+    collection_cutoff_at_utc: str | None = None
+    dataset_selection_id: str | None = None
+    checkpoint_lineage: list[dict[str, Any]] = field(default_factory=list)
+    terminal_evidence_digest: str | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -85,14 +98,36 @@ class CampaignManifest:
 
 
 def validate_manifest(m: CampaignManifest) -> None:
-    if m.schema_version != SCHEMA_VERSION: raise ValueError("unsupported schema")
-    if m.kind not in CAMPAIGN_KINDS: raise ValueError("unknown campaign kind")
-    if m.status not in ALL_STATES: raise ValueError("invalid status")
-    if not m.paper_only or not m.read_only or m.real_execution: raise ValueError("unsafe execution flags")
-    for name in ("code_sha","config_sha256","work_plan_sha256"):
-        if not getattr(m,name): raise ValueError(f"missing pinned {name}")
-    if _parse_ts(m.expires_at) <= _parse_ts(m.created_at): raise ValueError("invalid expiry")
-    if m.chunk_index < 0 or m.attempts < 0: raise ValueError("negative counters")
+    if m.schema_version not in SUPPORTED_SCHEMAS:
+        raise ValueError(f"unsupported schema: {m.schema_version}")
+    if m.kind not in CAMPAIGN_KINDS:
+        raise ValueError("unknown campaign kind")
+    if m.status not in ALL_STATES:
+        raise ValueError("invalid status")
+    if not m.paper_only or not m.read_only or m.real_execution:
+        raise ValueError("unsafe execution flags")
+    for name in ("code_sha", "config_sha256", "work_plan_sha256"):
+        if not getattr(m, name):
+            raise ValueError(f"missing pinned {name}")
+    if _parse_ts(m.expires_at) <= _parse_ts(m.created_at):
+        raise ValueError("invalid expiry")
+    if m.chunk_index < 0 or m.attempts < 0:
+        raise ValueError("negative counters")
+
+    # Schema V2 Specific Validations
+    if m.schema_version == SCHEMA_VERSION_V2:
+        if m.creation_phase not in ("COLLECT", "ANALYZE", "IDLE"):
+            raise ValueError("V2 manifest must specify valid creation_phase")
+        if not isinstance(m.phase_epoch, int) or m.phase_epoch < 1:
+            raise ValueError("V2 manifest requires positive integer phase_epoch")
+        if m.creation_phase == "ANALYZE":
+            if not isinstance(m.source_collection_epoch, int) or m.source_collection_epoch < 1:
+                raise ValueError("V2 ANALYZE manifest requires positive integer source_collection_epoch")
+            if not m.collection_cutoff_at_utc:
+                raise ValueError("V2 ANALYZE manifest requires collection_cutoff_at_utc")
+            if not m.dataset_selection_id:
+                raise ValueError("V2 ANALYZE manifest requires dataset_selection_id")
+
     for out in m.outputs:
         if out.get("quality_status") == "SAFE" and not out.get("replay_compatible", False):
             raise ValueError("SAFE output must be replay compatible")
@@ -102,51 +137,86 @@ def validate_manifest(m: CampaignManifest) -> None:
 
 def transition(m: CampaignManifest, target: str, reason: str, *, now: str | None = None) -> CampaignManifest:
     validate_manifest(m)
-    if m.status in TERMINAL_STATES: raise ValueError("terminal manifest is immutable")
-    if target not in _ALLOWED.get(m.status, set()): raise ValueError(f"invalid transition {m.status}->{target}")
+    if m.status in TERMINAL_STATES:
+        raise ValueError("terminal manifest is immutable")
+    if target not in _ALLOWED.get(m.status, set()):
+        raise ValueError(f"invalid transition {m.status}->{target}")
     old = m.status
-    m.status = target; m.status_reason = reason; m.updated_at = now or _now()
-    m.history.append({"at":m.updated_at,"from":old,"to":target,"reason":reason})
-    validate_manifest(m); return m
+    m.status = target
+    m.status_reason = reason
+    m.updated_at = now or _now()
+    m.history.append({"at": m.updated_at, "from": old, "to": target, "reason": reason})
+    validate_manifest(m)
+    return m
 
 
 def work_unit_id(m: CampaignManifest, partition: Mapping[str, Any]) -> str:
-    return sha256_json({"kind":m.kind,"code_sha":m.code_sha,"config":m.config_sha256,"dataset":m.dataset_generation,"partition":dict(partition)})
+    return sha256_json({"kind": m.kind, "code_sha": m.code_sha, "config": m.config_sha256, "dataset": m.dataset_generation, "partition": dict(partition)})
 
 
 def complete_work_unit(m: CampaignManifest, unit_id: str, result_sha256: str, result: Mapping[str, Any]) -> bool:
     prior = m.completed_units.get(unit_id)
     if prior:
-        if prior.get("sha256") != result_sha256: raise ValueError("work-unit checksum collision")
+        if prior.get("sha256") != result_sha256:
+            raise ValueError("work-unit checksum collision")
         return False
-    m.completed_units[unit_id] = {"sha256":result_sha256,"result":dict(result)}
-    m.updated_at = _now(); return True
+    m.completed_units[unit_id] = {"sha256": result_sha256, "result": dict(result)}
+    m.updated_at = _now()
+    return True
 
 
-def acquire_lease(m: CampaignManifest, owner_run_id: str, ttl_s: int, *, now: str | None = None) -> str:
+def acquire_lease(
+    m: CampaignManifest,
+    owner_run_id: str,
+    ttl_s: int,
+    *,
+    expected_phase: str | None = None,
+    expected_epoch: int | None = None,
+    now: str | None = None,
+) -> str:
     from datetime import timedelta
     current = _parse_ts(now or _now())
-    if m.lease and _parse_ts(m.lease["expires_at"]) > current: raise ValueError("active lease")
+
+    # Phase/Epoch Guard for V2
+    if m.schema_version == SCHEMA_VERSION_V2:
+        if expected_epoch is not None and m.phase_epoch != expected_epoch:
+            raise ValueError(f"Stale phase epoch: manifest={m.phase_epoch}, current={expected_epoch}")
+        if expected_phase is not None and m.creation_phase != expected_phase:
+            raise ValueError(f"Phase mismatch: manifest={m.creation_phase}, current={expected_phase}")
+
+    if m.lease and _parse_ts(m.lease["expires_at"]) > current:
+        raise ValueError("active lease")
+
     token = secrets.token_urlsafe(32)
     expires = current + timedelta(seconds=max(60, ttl_s))
-    m.lease = {"owner_run_id":str(owner_run_id),"lease_token_sha256":hashlib.sha256(token.encode()).hexdigest(),"acquired_at":current.isoformat().replace("+00:00","Z"),"expires_at":expires.isoformat().replace("+00:00","Z")}
+    m.lease = {
+        "owner_run_id": str(owner_run_id),
+        "lease_token_sha256": hashlib.sha256(token.encode()).hexdigest(),
+        "acquired_at": current.isoformat().replace("+00:00", "Z"),
+        "expires_at": expires.isoformat().replace("+00:00", "Z"),
+    }
     return token
 
 
 def verify_lease(m: CampaignManifest, token: str, *, now: str | None = None) -> bool:
-    if not m.lease: return False
+    if not m.lease:
+        return False
     current = _parse_ts(now or _now())
     return current < _parse_ts(m.lease["expires_at"]) and secrets.compare_digest(m.lease["lease_token_sha256"], hashlib.sha256(token.encode()).hexdigest())
 
 
 def release_lease(m: CampaignManifest, token: str) -> None:
-    if not verify_lease(m, token): raise ValueError("stale lease")
-    m.lease = None; m.updated_at = _now()
+    if not verify_lease(m, token):
+        raise ValueError("stale lease")
+    m.lease = None
+    m.updated_at = _now()
 
 
 def classify_failure(category: str) -> bool:
-    if category in NON_RETRYABLE: return False
-    if category in RETRYABLE: return True
+    if category in NON_RETRYABLE:
+        return False
+    if category in RETRYABLE:
+        return True
     return False
 
 
@@ -157,6 +227,7 @@ def mark_continuation(
     progressed: bool,
     next_due_at: str | None = None,
     failure: bool = False,
+    checkpoint: Mapping[str, Any] | None = None,
     now: str | None = None,
 ) -> CampaignManifest:
     limits = StopLimits(**m.limits)
@@ -166,6 +237,13 @@ def mark_continuation(
     m.no_progress_count = 0 if progressed else m.no_progress_count + 1
     m.consecutive_failures = m.consecutive_failures + 1 if failure else 0
     wall_clock_s = max(0.0, (current - _parse_ts(m.created_at)).total_seconds())
+
+    if checkpoint:
+        ckpt_entry = dict(checkpoint)
+        ckpt_entry["at"] = current.isoformat().replace("+00:00", "Z")
+        ckpt_entry["digest"] = sha256_json(ckpt_entry)
+        m.checkpoint_lineage.append(ckpt_entry)
+
     stop = (
         m.chunk_index >= limits.max_chunks
         or m.attempts >= limits.max_attempts
@@ -183,19 +261,41 @@ def mark_continuation(
     return m
 
 
-def mark_terminal(m: CampaignManifest, status: str, reason: str) -> CampaignManifest:
-    if status not in TERMINAL_STATES: raise ValueError("not terminal")
-    m.lease = None; return transition(m, status, reason)
+def mark_terminal(m: CampaignManifest, status: str, reason: str, terminal_digest: str | None = None) -> CampaignManifest:
+    if status not in TERMINAL_STATES:
+        raise ValueError("not terminal")
+    m.lease = None
+    if terminal_digest:
+        m.terminal_evidence_digest = terminal_digest
+    return transition(m, status, reason)
 
 
-def select_due_campaigns(items: list[CampaignManifest], *, now: str | None = None) -> list[CampaignManifest]:
+def select_due_campaigns(
+    items: list[CampaignManifest],
+    *,
+    current_phase: str | None = None,
+    current_epoch: int | None = None,
+    now: str | None = None,
+) -> list[CampaignManifest]:
     current = _parse_ts(now or _now())
     buckets: dict[str, list[CampaignManifest]] = {kind: [] for kind in CAMPAIGN_KIND_ORDER}
     for m in items:
-        if m.status not in ACTIVE_STATES: continue
-        if _parse_ts(m.expires_at) <= current: continue
-        if m.lease and _parse_ts(m.lease["expires_at"]) > current: continue
-        if m.next_due_at and _parse_ts(m.next_due_at) > current: continue
+        if m.status not in ACTIVE_STATES:
+            continue
+        if _parse_ts(m.expires_at) <= current:
+            continue
+        if m.lease and _parse_ts(m.lease["expires_at"]) > current:
+            continue
+        if m.next_due_at and _parse_ts(m.next_due_at) > current:
+            continue
+
+        # V2 phase/epoch gating
+        if m.schema_version == SCHEMA_VERSION_V2:
+            if current_phase is not None and m.creation_phase != current_phase:
+                continue
+            if current_epoch is not None and m.phase_epoch != current_epoch:
+                continue
+
         buckets.setdefault(m.kind, []).append(m)
 
     for rows in buckets.values():
