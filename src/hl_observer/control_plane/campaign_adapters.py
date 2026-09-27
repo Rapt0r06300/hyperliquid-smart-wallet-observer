@@ -276,6 +276,8 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             "--root",
             str(workspace),
             "--no-start-collection",
+            "--analysis-stage",
+            str(ctx.kind).upper(),
         ], workspace
 
     raise ValueError(f"unsupported campaign kind: {ctx.kind}")
@@ -359,6 +361,8 @@ def run_one_unit(
                     "--root",
                     str(workspace),
                     "--no-start-collection",
+                    "--analysis-stage",
+                    str(ctx.kind).upper(),
                 ],
                 workspace,
                 "economic_campaign",
