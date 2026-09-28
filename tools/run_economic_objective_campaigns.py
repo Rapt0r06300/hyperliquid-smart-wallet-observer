@@ -429,11 +429,8 @@ def run_campaigns(
         "analysis_stage": analysis_stage,
         "analysis_stage_contract": {
             "stage": analysis_stage,
-            "campaign_count": len(campaigns),
-            "scoreboards_path": str(scoreboards_path),
-            "report_path": str(report_path),
-            "stage_receipt_path": str(stage_receipt_path),
-            "stage_receipt_digest": stage_receipt["artifact_digest"],
+            "paper_read_only": True,
+            "real_execution": False,
         },
     }
     copy_raw["next_hypothesis_v3"] = qualify_copy_vault_train_only(copy_trades)
