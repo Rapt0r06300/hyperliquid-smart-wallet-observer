@@ -282,8 +282,10 @@ class PaperLedger:
                 timestamp_ms=timestamp_ms,
                 refs=refs,
             )
-        close_qty = min(max(0.0, float(quantity)), pos.quantity)
-        if close_qty <= 0 or fill_price <= 0:
+        if not _finite_positive(quantity) or not _finite_positive(fill_price):
+            return self.no_trade(coin=coin, reason="EXIT_FILL_INVALID", timestamp_ms=timestamp_ms, refs=refs)
+        close_qty = min(float(quantity), pos.quantity)
+        if close_qty <= 0:
             return self.no_trade(coin=coin, reason="EXIT_FILL_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         if normalized_side == "LONG":
             gross = (float(fill_price) - pos.average_entry_price) * close_qty
@@ -391,6 +393,8 @@ class PaperLedger:
         timestamp_ms: int,
         refs: dict | None = None,
     ) -> PaperEvent:
+        if not math.isfinite(float(amount_usdc)):
+            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         self.funding_net_usdc += float(amount_usdc)
         cash = first_not_none(self.cash_balance_usdc, 0.0)
         self.cash_balance_usdc = float(cash) + float(amount_usdc)
@@ -659,7 +663,7 @@ def _minimum_optional(
     left: float | None,
     right: float | None,
 ) -> float | None:
-    values = [float(value) for value in (left, right) if value is not None]
+    values = [float(value) for value in (left, right) if value is not None and _finite_positive(value)]
     return min(values) if values else None
 
 
