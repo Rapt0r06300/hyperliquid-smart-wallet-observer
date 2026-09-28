@@ -6,9 +6,15 @@ backtester (no event ever arrives "before" an earlier one). Pure / no network.
 
 from __future__ import annotations
 
+import math
+
 
 def _key(t: dict):
-    return (int(t.get("ts_ms", 0)), int(t.get("seq", 0)))
+    ts = t.get("ts_ms", 0)
+    seq = t.get("seq", 0)
+    if isinstance(ts, bool) or isinstance(seq, bool) or int(ts) < 0 or int(seq) < 0:
+        raise ValueError("trade tick timestamps and sequences must be non-negative")
+    return (int(ts), int(seq))
 
 
 def _dedupe_id(t: dict) -> str:
@@ -18,6 +24,15 @@ def _dedupe_id(t: dict) -> str:
 
 
 def replay_trade_ticks(ticks: list[dict], *, dedupe: bool = True) -> list[dict]:
+    for tick in ticks:
+        if not isinstance(tick, dict):
+            raise ValueError("trade ticks must be mappings")
+        for key in ("px", "sz"):
+            if tick.get(key) is not None and (
+                isinstance(tick.get(key), bool) or not math.isfinite(float(tick[key]))
+                or float(tick[key]) <= 0.0
+            ):
+                raise ValueError("trade price and size must be finite and > 0")
     ordered = sorted(ticks, key=_key)
     if not dedupe:
         return ordered
