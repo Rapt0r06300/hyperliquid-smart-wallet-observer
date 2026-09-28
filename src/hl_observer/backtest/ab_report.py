@@ -7,6 +7,8 @@ aucune action reelle. On juge au profit factor, jamais au winrate brut.
 
 from __future__ import annotations
 
+import math
+
 from hl_observer.backtest.experiment_runner import (
     BacktestSummary,
     summarize_decisions,
@@ -25,6 +27,9 @@ def verdict(baseline: BacktestSummary, variant: BacktestSummary,
             *, min_pf_uplift: float = DEFAULT_MIN_PF_UPLIFT) -> str:
     """KEEP_VARIANT si la variante ameliore nettement le profit factor sans aggraver
     le drawdown ; KEEP_BASELINE si elle degrade ; NEUTRAL sinon."""
+    if (isinstance(min_pf_uplift, bool) or not math.isfinite(float(min_pf_uplift))
+            or float(min_pf_uplift) < 0.0):
+        raise ValueError("min_pf_uplift must be finite and non-negative")
     pf_b, pf_v = _pf(baseline), _pf(variant)
     dd_worse = variant.max_drawdown > baseline.max_drawdown * 1.10
     if pf_v == float("inf") and pf_b != float("inf") and not dd_worse:
