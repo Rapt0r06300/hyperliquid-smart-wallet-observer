@@ -18,7 +18,7 @@ permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
 concurrency:
-  group: event-intelligence-status-publish
+  group: event-intelligence-status-publish-v2
   cancel-in-progress: true
 jobs:
   regenerate:
@@ -41,6 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           python tools/generate_event_intelligence_status.py
+      - name: Validate machine-readable 120-idea status
+        run: |
+          set -euo pipefail
+          python tools/validate_event_intelligence_status.py
       - name: Publish status artifact
         run: |
           set -euo pipefail
