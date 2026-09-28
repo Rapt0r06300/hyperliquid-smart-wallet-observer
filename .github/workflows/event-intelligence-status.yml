@@ -1,0 +1,41 @@
+name: event-intelligence-status
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 */6 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/event-intelligence-120-coverage.md'
+      - 'tools/generate_event_intelligence_status.py'
+      - 'src/hl_observer/event_intelligence/**'
+permissions:
+  contents: write
+concurrency:
+  group: event-intelligence-status
+  cancel-in-progress: false
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Regenerate machine-readable 120-idea status
+        run: |
+          set -euo pipefail
+          python tools/generate_event_intelligence_status.py
+      - name: Publish status artifact
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/event-intelligence-120-status.json
+          git diff --cached --quiet && exit 0
+          git commit -m "event-intelligence: refresh wiring status"
+          git pull --rebase origin main
+          git push origin HEAD:main
