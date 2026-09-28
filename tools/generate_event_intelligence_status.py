@@ -81,29 +81,15 @@ def _resolve_reference_files(
 
 
 def _find_callers(
-    *, root: Path, evidence_files: list[str], python_text: dict[Path, str]
+    *, evidence_files: list[str], import_index: dict[str, set[str]]
 ) -> list[str]:
     callers: set[str] = set()
     for evidence in evidence_files:
         evidence_path = Path(evidence)
         if evidence_path.suffix != ".py":
             continue
-        stem = evidence_path.stem
-        if stem == "__init__":
-            package = evidence_path.parent.name
-            pattern = re.compile(
-                rf"(?m)^\s*(?:from|import)\s+[^#]*\b{re.escape(package)}\b"
-            )
-        else:
-            pattern = re.compile(
-                rf"(?m)^\s*(?:from|import)\s+[^#]*\b{re.escape(stem)}\b"
-            )
-        for candidate, text in python_text.items():
-            rel = str(candidate.relative_to(root))
-            if rel == evidence:
-                continue
-            if pattern.search(text):
-                callers.add(rel)
+        key = evidence_path.parent.name if evidence_path.stem == "__init__" else evidence_path.stem
+        callers.update(path for path in import_index.get(key, ()) if path != evidence)
     return sorted(callers)
 
 
@@ -128,8 +114,14 @@ def main() -> int:
             continue
 
     files_by_name: dict[str, list[Path]] = {}
-    for candidate in python_files:
+    import_index: dict[str, set[str]] = {}
+    for candidate, candidate_text in file_text.items():
         files_by_name.setdefault(candidate.name, []).append(candidate)
+        relative = str(candidate.relative_to(root))
+        for match in re.finditer(r"(?m)^\\s*(?:from|import)\\s+([^#\\n]+)", candidate_text):
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", match.group(1)):
+                for part in token.split("."):
+                    import_index.setdefault(part, set()).add(relative)
     test_text = {
         candidate: text
         for candidate, text in file_text.items()
@@ -155,7 +147,7 @@ def main() -> int:
             set(_resolve_reference_files(root, refs, files_by_name))
             | set(_resolve_reference_files(root, component_contract, files_by_name))
         )
-        callers = _find_callers(root=root, evidence_files=files, python_text=file_text)
+        callers = _find_callers(evidence_files=files, import_index=import_index)
 
         policy_only = bool(component_contract) and (
             component_contract.startswith("docs/")
