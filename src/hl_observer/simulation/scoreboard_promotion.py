@@ -53,9 +53,9 @@ def _gate_gt0(value: object) -> str:
 
 
 def _gate_bool(value: object) -> str:
-    if value is None:
+    if value is None or not isinstance(value, bool):
         return MISSING
-    return PASS if bool(value) else FAIL
+    return PASS if value else FAIL
 
 
 def _gate_min(value: object, mini: float) -> str:
