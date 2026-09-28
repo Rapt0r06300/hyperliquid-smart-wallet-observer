@@ -62,35 +62,6 @@ def audit_paper_ledger(
     rows = [dict(row) for row in events]
     issues: list[PnlAuditIssue] = []
     if not rows:
-        if snapshot is not None:
-            starting = _snapshot_number(snapshot, "starting_balance_usdc")
-            realized = _snapshot_number(snapshot, "realized_pnl_usdc")
-            unrealized = _snapshot_number(snapshot, "unrealized_pnl_usdc")
-            fees = _snapshot_number(snapshot, "fees_paid_usdc")
-            funding = _snapshot_number(snapshot, "funding_net_usdc")
-            equity = _snapshot_number(snapshot, "equity_usdc")
-            if None not in (starting, realized, unrealized, fees, funding, equity):
-                assert starting is not None
-                assert realized is not None
-                assert unrealized is not None
-                assert fees is not None
-                assert funding is not None
-                assert equity is not None
-                expected = starting + realized + unrealized - fees + funding
-                if abs(equity - expected) <= tolerance_usdc:
-                    return PnlLedgerAudit(
-                        status=TRUSTED,
-                        pnl_valid=True,
-                        events_checked=0,
-                        realized_pnl_usdc=realized,
-                        fees_paid_usdc=fees,
-                        funding_net_usdc=funding,
-                        unrealized_pnl_usdc=unrealized,
-                        recalculated_equity_usdc=round(expected, 10),
-                        recalculated_net_pnl_usdc=round(expected - starting, 10),
-                        open_positions={},
-                        issues=(),
-                    )
         return PnlLedgerAudit(
             status=UNMEASURABLE,
             pnl_valid=False,
@@ -102,7 +73,13 @@ def audit_paper_ledger(
             recalculated_equity_usdc=None,
             recalculated_net_pnl_usdc=None,
             open_positions={},
-            issues=(PnlAuditIssue("NO_LEDGER_EVENTS", None, "Aucun événement canonique disponible."),),
+            issues=(
+                PnlAuditIssue(
+                    "NO_LEDGER_EVENTS",
+                    None,
+                    "Un snapshot seul ne constitue pas une preuve de replay économique.",
+                ),
+            ),
         )
 
     try:
@@ -320,6 +297,8 @@ def _finite(value: object) -> float | None:
 
 
 def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
     try:
         return int(value)  # type: ignore[arg-type]
     except (TypeError, ValueError, OverflowError):
