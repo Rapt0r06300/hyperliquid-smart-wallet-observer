@@ -186,8 +186,18 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
     if provenance["complete"] is not True:
         reasons.append("PROOF_PROVENANCE_INCOMPLETE")
 
-    oos_positive = (_number(oos.get("net_pnl_usd")) or 0.0) > 0.0
-    forward_positive = (_number(forward.get("net_pnl_usd")) or 0.0) > 0.0
+    oos_net = _number(oos.get("net_pnl_usd"))
+    forward_net = _number(forward.get("net_pnl_usd"))
+    oos_positive = oos_net is not None and oos_net > 0.0
+    forward_positive = forward_net is not None and forward_net > 0.0
+    anti_lookahead_proven = (
+        oos.get("no_lookahead") is True
+        and oos.get("anti_lookahead_receipt_valid") is True
+        and forward.get("no_lookahead") is True
+        and forward.get("anti_lookahead_receipt_valid") is True
+    )
+    if not anti_lookahead_proven:
+        reasons.append("ANTI_LOOKAHEAD_RECEIPT_INCOMPLETE")
     forward_post_freeze = forward.get("post_freeze") is True
     placebo_beaten = placebos.get("beaten") is True
     liquidatable = payload.get("liquidatable_net") is True
@@ -216,6 +226,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         and provenance["complete"] is True
         and oos_positive
         and forward_positive
+        and anti_lookahead_proven
         and forward_post_freeze
         and placebo_beaten
         and economic_binding.get("ready") is True
@@ -230,6 +241,7 @@ def certify_campaign(expected_family: str, payload: Mapping[str, Any] | None) ->
         "liquidatable_net": liquidatable,
         "oos_positive": oos_positive,
         "forward_positive": forward_positive,
+        "anti_lookahead_proven": anti_lookahead_proven,
         "forward_post_freeze": forward_post_freeze,
         "placebo_beaten": placebo_beaten,
         "costs_complete": costs_complete,
