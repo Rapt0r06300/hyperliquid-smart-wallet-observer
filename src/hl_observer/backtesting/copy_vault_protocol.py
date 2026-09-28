@@ -33,6 +33,9 @@ MAX_TARGET_LAG_MS = 30_000
 HORIZONS_MS = (300_000, 900_000, 1_800_000, 3_600_000)
 NOTIONAL_USD = 150.0
 MAX_OPEN_POSITIONS = 6
+PAPER_EQUITY_USD = 100.0
+PAPER_LEVERAGE = 1.0
+MAX_GROSS_EXPOSURE_USD = PAPER_EQUITY_USD * PAPER_LEVERAGE
 MIN_TRAIN_TRADES = 8
 TRAIN_FRACTION = 0.60
 VALIDATION_FRACTION = 0.20
@@ -111,6 +114,10 @@ def protocol_signature() -> dict[str, Any]:
         "horizons_ms": list(HORIZONS_MS),
         "notional_usd": NOTIONAL_USD,
         "max_open_positions": MAX_OPEN_POSITIONS,
+        "paper_equity_usd": PAPER_EQUITY_USD,
+        "paper_leverage": PAPER_LEVERAGE,
+        "max_gross_exposure_usd": MAX_GROSS_EXPOSURE_USD,
+        "capital_margin_policy": "gross_notional_leq_paper_equity_times_leverage_v1",
         "fee_source": "hl_observer.economics.families:build_copy_vault_contract",
         "economic_contract": economic.receipt(),
         "assumption_snapshot_hash": economic.registry.snapshot_hash(),
@@ -140,7 +147,7 @@ __all__ = [
     "METAORDER_GAP_MS",
     "MIN_COMPLETE_PROOF_DAYS",
     "MIN_TRAIN_TRADES",
-    "NOTIONAL_USD",
+    "NOTIONAL_USD", "PAPER_EQUITY_USD", "PAPER_LEVERAGE", "MAX_GROSS_EXPOSURE_USD",
     "PROTOCOL_NAME",
     "POST_FREEZE_PROOF_POLICY",
     "TRAIN_ECONOMIC_GATE_VERSION",
