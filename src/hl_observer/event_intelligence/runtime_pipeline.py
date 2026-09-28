@@ -7,6 +7,7 @@ it cannot authorize promotion, PnL proof or execution.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from dataclasses import asdict
 from collections.abc import Iterable
 
 from hl_observer.event_intelligence.external_event import (
@@ -32,7 +33,15 @@ from hl_observer.event_intelligence.sequences import (
     build_propagation_pattern,
     summarize_patterns,
 )
-from hl_observer.event_intelligence.validation import compare_source_latency
+from hl_observer.event_intelligence.protocol import assert_forward_after_freeze, freeze_event_research
+from hl_observer.event_intelligence.validation import (
+    EventStudyObservation,
+    compare_source_latency,
+    incremental_effect,
+    placebo_timestamps,
+    purged_chronological_split,
+    select_no_event_controls,
+)
 
 
 def build_runtime_evidence(
@@ -189,4 +198,58 @@ def build_runtime_evidence(
     }
 
 
-__all__ = ["build_runtime_evidence"]
+def build_research_protocol_evidence(
+    observations: Iterable[EventStudyObservation],
+    *,
+    now_ms: int,
+    methodology_version: str,
+    config: dict[str, object] | None = None,
+    embargo_ms: int = 300_000,
+    minimum_independent_events: int = 20,
+) -> dict[str, object]:
+    rows = tuple(sorted(observations, key=lambda row: (row.ts_ms, row.observation_id)))
+    split = purged_chronological_split(rows, embargo_ms=int(embargo_ms))
+    training_cutoff_ms = max(
+        (row.end_ts_ms if row.end_ts_ms is not None else row.ts_ms for row in split.train),
+        default=int(now_ms),
+    )
+    freeze = freeze_event_research(
+        config or {},
+        training_cutoff_ms=int(training_cutoff_ms),
+        created_at_ms=int(now_ms),
+        methodology_version=str(methodology_version),
+    )
+    for row in split.forward:
+        assert_forward_after_freeze(freeze, observation_ts_ms=row.ts_ms)
+    event_timestamps = tuple(row.ts_ms for row in rows)
+    controls = select_no_event_controls(
+        event_timestamps_ms=event_timestamps,
+        candidate_timestamps_ms=(),
+    )
+    placebos = placebo_timestamps(event_timestamps)
+    effect = incremental_effect(
+        split.oos,
+        (),
+        (),
+        min_independent_events=int(minimum_independent_events),
+    )
+    return {
+        "schema": "alina.event_intelligence_research_protocol.v1",
+        "observation_count": len(rows),
+        "train_count": len(split.train),
+        "oos_count": len(split.oos),
+        "forward_count": len(split.forward),
+        "embargo_ms": split.embargo_ms,
+        "control_timestamps_ms": list(controls),
+        "placebo_timestamps_ms": list(placebos),
+        "freeze": asdict(freeze),
+        "incremental_effect": asdict(effect),
+        "proof_state": "UNMEASURABLE" if not rows else "REQUIRES_SCOREBOARD",
+        "proof_of_pnl_allowed": False,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
+__all__ = ["build_research_protocol_evidence", "build_runtime_evidence"]
