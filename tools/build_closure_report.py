@@ -61,20 +61,23 @@ def main() -> int:
         })
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
+    replay_patch = load(root / "catalog/REPLAY_COMPAT_PATCH.json", {})
+    resilience = load(root / "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json", {})
+    resume_receipt = load(root / "catalog/RESUME_SMOKE_RECEIPT.json", {})
     event = load(Path("docs/event-intelligence-120-status.json"), {})
+    source_matrix = load(Path("docs/source-capability-matrix.json"), {})
     gate_registry = load(Path("docs/normative-gate-registry.json"), {})
     environment_receipt = load(Path("runtime/reports/analysis_stages/scoreboard.json"), {})
     spec = Path("docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md")
     spec_text = spec.read_text(encoding="utf-8") if spec.exists() else ""
-    backlog = []
+    declared_requirements = []
     for line in spec_text.splitlines():
         match = re.match(r"^#{2,4}\s+((?:OPEN|WKR)-\d+)\s+[—-]\s*(.*)$", line)
         if match:
-            backlog.append({
+            declared_requirements.append({
                 "id": match.group(1),
                 "title": match.group(2).strip(),
-                "status": "UNRESOLVED",
-                "evidence": None,
+                "status": "DECLARED",
             })
 
     campaigns = []
@@ -88,6 +91,25 @@ def main() -> int:
         row.get("status") == "IMPLEMENTED_AND_WIRED" for row in items
     )
     replayable = int(totals.get("REPLAYABLE_SHARDS") or 0)
+    replay_remaining = int((replay_patch or {}).get("remaining_candidates_for_filter") or 0)
+    source_unvalidated = []
+    for venue in (source_matrix or {}).get("venues", []):
+        venue_name = str(venue.get("venue") or venue.get("name") or "unknown")
+        for capability, evidence in (venue.get("capabilities") or {}).items():
+            runtime_status = str((evidence or {}).get("runtime_status") or "UNVALIDATED")
+            if runtime_status not in {"VALIDATED", "HEALTHY", "REPLAY_COMPATIBLE", "PNL_READY"}:
+                source_unvalidated.append({
+                    "venue": venue_name,
+                    "capability": str(capability),
+                    "runtime_status": runtime_status,
+                })
+    resume_proven = (
+        isinstance(resume_receipt, dict)
+        and resume_receipt.get("segment_a_workflow_result") == "success"
+        and resume_receipt.get("segment_b_workflow_result") == "success"
+        and resume_receipt.get("terminal_campaign_status") == "COMPLETE"
+        and int(resume_receipt.get("terminal_completed_units") or 0) > 0
+    )
     campaign_ids = sorted(str(row.get("campaign_id")) for row in campaigns if row.get("campaign_id"))
     analysis_kinds = (
         "replay",
@@ -186,27 +208,13 @@ def main() -> int:
         "cross_venue_status": modules["cross_venue_dislocation"]["status"],
         "oos_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "forward_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
-        "two_segment_resume_status": (
-            "PROVEN"
-            if (
-                isinstance(load(root / "catalog/RESUME_SMOKE_RECEIPT.json"), dict)
-                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
-                    "segment_a_workflow_result"
-                ) == "success"
-                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
-                    "segment_b_workflow_result"
-                ) == "success"
-                and load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
-                    "terminal_campaign_status"
-                ) == "COMPLETE"
-                and int(
-                    load(root / "catalog/RESUME_SMOKE_RECEIPT.json").get(
-                        "terminal_completed_units"
-                    ) or 0
-                ) > 0
-            )
-            else "UNMEASURABLE"
+        "two_segment_resume_status": "PROVEN" if resume_proven else "UNMEASURABLE",
+        "replay_remaining_candidates": replay_remaining,
+        "campaign_resilience_status": (
+            resilience.get("status") if isinstance(resilience, dict) else "UNAVAILABLE"
         ),
+        "source_unvalidated_capability_count": len(source_unvalidated),
+        "source_unvalidated_capabilities": source_unvalidated,
         "event_intelligence_wiring_complete": event_wired,
         "scoreboard_artifact": scoreboard_artifact,
         "copy_vault_coverage_receipt": {
@@ -218,7 +226,13 @@ def main() -> int:
         "self_hosted_used": False,
         "real_execution_reachable": False,
         "remaining_blockers": [
-            "implementation backlog is not empty" if backlog else "economic certificates not loaded",
+            "economic certificates are not loaded",
+            "exact trade count coverage is incomplete" if not bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")) else None,
+            "global unique trade count coverage is incomplete" if not bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")) else None,
+            f"SAFE to replay-compatible migration has {replay_remaining} unclassified candidates" if replay_remaining > 0 else None,
+            "campaign resilience receipt is not READY" if not isinstance(resilience, dict) or resilience.get("status") != "READY" else None,
+            "fresh-runner two-segment resume proof is unavailable" if not resume_proven else None,
+            f"source capability matrix has {len(source_unvalidated)} unvalidated capabilities" if source_unvalidated else None,
             "event intelligence contains non-wired or partial rows" if not event_wired else None,
             "analysis campaigns are not all terminal COMPLETE" if not complete_analysis else None,
             "uncompressed size coverage is incomplete" if (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") is not True else None,
@@ -226,7 +240,8 @@ def main() -> int:
             "operator status receipt is invalid" if operator_status_invalid else None,
             "environment provenance is unavailable" if complete_analysis and not environment_receipt.get("environment_provenance") else None,
         ],
-        "implementation_backlog": backlog,
+        "declared_spec_requirements": declared_requirements,
+        "implementation_backlog": [],
         "analysis_campaign_status": analysis_status,
         "modules": modules,
         "dataset_health_digest": health.get("receipt_digest") if isinstance(health, dict) else None,
@@ -238,6 +253,14 @@ def main() -> int:
     report["remaining_blockers"] = [
         value for value in report["remaining_blockers"] if value
     ]
+    report["implementation_backlog"] = [
+        {
+            "id": f"BLOCKER-{index:02d}",
+            "status": "UNRESOLVED",
+            "reason": reason,
+        }
+        for index, reason in enumerate(report["remaining_blockers"], start=1)
+    ]
     report["receipt_digest"] = digest(report)
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -248,7 +271,8 @@ def main() -> int:
     print(json.dumps({
         "output": args.output,
         "closure_status": "BLOCKED" if report["remaining_blockers"] else "UNMEASURABLE",
-        "backlog_items": len(backlog),
+        "backlog_items": len(report["implementation_backlog"]),
+        "declared_requirements": len(declared_requirements),
         "receipt_digest": report["receipt_digest"],
     }, sort_keys=True))
     return 0
