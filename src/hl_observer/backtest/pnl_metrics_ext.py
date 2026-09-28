@@ -4,9 +4,15 @@ Complète le profit factor du juge. Pur.
 
 from __future__ import annotations
 
+import math
+
 
 def sharpe(returns, *, rf: float = 0.0) -> float:
-    r = [float(x) - rf for x in returns]
+    if isinstance(rf, bool) or not math.isfinite(float(rf)):
+        return 0.0
+    r = [float(x) - float(rf) for x in returns]
+    if any(not math.isfinite(x) for x in r):
+        return 0.0
     n = len(r)
     if n < 2:
         return 0.0
@@ -17,7 +23,11 @@ def sharpe(returns, *, rf: float = 0.0) -> float:
 
 
 def sortino(returns, *, rf: float = 0.0) -> float:
-    r = [float(x) - rf for x in returns]
+    if isinstance(rf, bool) or not math.isfinite(float(rf)):
+        return 0.0
+    r = [float(x) - float(rf) for x in returns]
+    if any(not math.isfinite(x) for x in r):
+        return 0.0
     n = len(r)
     if n < 2:
         return 0.0
@@ -30,6 +40,9 @@ def sortino(returns, *, rf: float = 0.0) -> float:
 
 
 def calmar(total_return: float, max_drawdown: float) -> float:
+    if (isinstance(total_return, bool) or isinstance(max_drawdown, bool)
+            or not math.isfinite(float(total_return)) or not math.isfinite(float(max_drawdown))):
+        return 0.0
     if max_drawdown <= 0:
         return 0.0
     return round(float(total_return) / float(max_drawdown), 6)
@@ -56,6 +69,9 @@ def mae_mfe_stats(trades) -> dict:
 
 def hit_rate_expectancy(pnls) -> dict:
     vals = [float(p) for p in pnls]
+    if any(not math.isfinite(value) for value in vals):
+        return {"hit_rate": 0.0, "avg_win": 0.0, "avg_loss": 0.0,
+                "expectancy": 0.0, "status": "UNMEASURABLE"}
     n = len(vals)
     wins = [p for p in vals if p > 0]
     losses = [p for p in vals if p < 0]
