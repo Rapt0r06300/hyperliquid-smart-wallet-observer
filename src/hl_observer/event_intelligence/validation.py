@@ -363,12 +363,18 @@ def compare_source_latency(
     primary: ExternalEvent,
     aggregator: ExternalEvent,
 ) -> SourceLatencyComparison:
+    primary_ts = int(primary.ingest_ts_ms)
+    aggregator_ts = int(aggregator.ingest_ts_ms)
+    if primary_ts < 0 or aggregator_ts < 0:
+        raise ValueError("source ingest timestamps must be non-negative")
+    if aggregator_ts < primary_ts:
+        raise ValueError("aggregator timestamp precedes primary timestamp")
     return SourceLatencyComparison(
         primary_source=primary.source,
         aggregator_source=aggregator.source,
-        primary_ingest_ts_ms=int(primary.ingest_ts_ms),
-        aggregator_ingest_ts_ms=int(aggregator.ingest_ts_ms),
-        aggregator_lag_ms=int(aggregator.ingest_ts_ms) - int(primary.ingest_ts_ms),
+        primary_ingest_ts_ms=primary_ts,
+        aggregator_ingest_ts_ms=aggregator_ts,
+        aggregator_lag_ms=aggregator_ts - primary_ts,
     )
 
 
