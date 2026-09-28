@@ -42,7 +42,10 @@ def profit_factor(pnls: Sequence[float]) -> float | None:
     On ne renvoie ni `0` ni un sentinelle `999` : sans perte, le profit factor n'est pas estimable,
     le dire est plus honnête que d'inventer un grand nombre.
     """
-    vals = [float(p) for p in pnls if _fini(p)]
+    raw = list(pnls)
+    if any(not _fini(value) for value in raw):
+        return None
+    vals = [float(p) for p in raw]
     if not vals:
         return None
     gains = sum(p for p in vals if p > 0)
@@ -54,7 +57,10 @@ def profit_factor(pnls: Sequence[float]) -> float | None:
 
 def max_drawdown(pnls: Sequence[float]) -> float | None:
     """Drawdown maximal (nombre ≥ 0) de la courbe cumulée des PnL clos. `None` si vide."""
-    vals = [float(p) for p in pnls if _fini(p)]
+    raw = list(pnls)
+    if any(not _fini(value) for value in raw):
+        return None
+    vals = [float(p) for p in raw]
     if not vals:
         return None
     cumul = 0.0
@@ -72,7 +78,10 @@ def expected_shortfall(pnls: Sequence[float], q: float = 0.05) -> float | None:
 
     Rendu comme un nombre signé (négatif = perte moyenne de queue). `None` si la queue serait vide.
     """
-    vals = sorted(float(p) for p in pnls if _fini(p))
+    raw = list(pnls)
+    if any(not _fini(value) for value in raw):
+        return None
+    vals = sorted(float(p) for p in raw)
     if not vals:
         return None
     k = max(1, int(math.ceil(len(vals) * float(q))))
@@ -84,7 +93,10 @@ def expected_shortfall(pnls: Sequence[float], q: float = 0.05) -> float | None:
 
 def hit_rate(pnls: Sequence[float]) -> float | None:
     """Fraction de trades clos strictement gagnants. `None` si aucun trade."""
-    vals = [float(p) for p in pnls if _fini(p)]
+    raw = list(pnls)
+    if any(not _fini(value) for value in raw):
+        return None
+    vals = [float(p) for p in raw]
     if not vals:
         return None
     return round(sum(1 for p in vals if p > 0) / len(vals), 6)
@@ -96,7 +108,7 @@ def costs_bps(fees_bps=None, spread_bps=None, slippage_bps=None, latency_bps=Non
     Ne jamais compléter une composante absente par 0 : un coût oublié gonfle le net.
     """
     comps = (fees_bps, spread_bps, slippage_bps, latency_bps)
-    if any(c is None or not _fini(c) for c in comps):
+    if any(c is None or not _fini(c) or float(c) < 0.0 for c in comps):
         return None
     return round(sum(float(c) for c in comps), 6)
 
@@ -133,7 +145,10 @@ class ScoreboardRow:
 
 
 def _moyenne(fill_ratios):
-    vals = [float(x) for x in (fill_ratios or []) if _fini(x)]
+    raw = list(fill_ratios or [])
+    if any(not _fini(x) or float(x) < 0.0 or float(x) > 1.0 for x in raw):
+        return None
+    vals = [float(x) for x in raw]
     return round(sum(vals) / len(vals), 6) if vals else None
 
 
@@ -156,7 +171,8 @@ def assembler_ligne(
     forward_net_bps: float | None = None,
 ) -> ScoreboardRow:
     """Assemble la ligne de scoreboard réconciliée. Toute entrée absente reste `UNMEASURABLE`."""
-    pnls = [float(p) for p in (closed_pnls or []) if _fini(p)]
+    raw_pnls = list(closed_pnls or [])
+    pnls = [] if any(not _fini(p) for p in raw_pnls) else [float(p) for p in raw_pnls]
     pnl = round(sum(pnls), 6) if pnls else None
     ct = costs_bps(fees_bps, spread_bps, slippage_bps, latency_bps)
     net = (round(float(gross_edge_bps) - ct, 6)
