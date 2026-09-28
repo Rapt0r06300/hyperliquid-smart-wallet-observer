@@ -19,11 +19,19 @@ class EntryEvent:
     kind: str               # e.g. "WHALE_FILL" | "LIQUIDATION" | "DECISION" | "BOOK"
     payload: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if isinstance(self.ts_ms, bool) or int(self.ts_ms) < 0:
+            raise ValueError("event timestamp must be non-negative")
+        if not str(self.coin).strip() or not str(self.side).strip() or not str(self.kind).strip():
+            raise ValueError("event identity fields are required")
+
 
 class EntryEventRecorder:
     """Bounded ring buffer of entry-context events (idempotent on identical ts+kind+coin)."""
 
     def __init__(self, max_len: int = 10_000) -> None:
+        if isinstance(max_len, bool) or int(max_len) < 1:
+            raise ValueError("max_len must be >= 1")
         self.max_len = int(max_len)
         self._events: list[EntryEvent] = []
         self._seen: set[tuple[int, str, str, str]] = set()
@@ -50,6 +58,8 @@ class EntryEventRecorder:
 
     def window(self, start_ms: int, end_ms: int, *, coin: str | None = None) -> list[EntryEvent]:
         lo, hi = int(start_ms), int(end_ms)
+        if lo < 0 or hi < lo:
+            raise ValueError("invalid event window")
         c = (coin or "").upper() or None
         return [
             e for e in self._events
@@ -65,6 +75,8 @@ def replay_entry_windows(
     post_ms: int = 5_000,
 ) -> list[dict[str, Any]]:
     """For each trigger event, gather the events in [trigger-pre, trigger+post] for replay."""
+    if isinstance(pre_ms, bool) or int(pre_ms) < 0 or isinstance(post_ms, bool) or int(post_ms) < 0:
+        raise ValueError("replay windows must be non-negative")
     evs = sorted(events, key=lambda e: int(e.ts_ms))
     windows: list[dict[str, Any]] = []
     for trig in evs:
