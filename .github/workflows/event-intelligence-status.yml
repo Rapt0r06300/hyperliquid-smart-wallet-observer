@@ -10,6 +10,7 @@ on:
       - 'tools/generate_event_intelligence_status.py'
       - 'tools/validate_event_intelligence_status.py'
       - 'src/hl_observer/event_intelligence/**'
+      - '.github/workflows/event-intelligence-status.yml'
 env:
   GH_TOKEN: "${{ github.token }}"
 
