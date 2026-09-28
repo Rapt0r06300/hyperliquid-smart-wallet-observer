@@ -65,11 +65,11 @@ def _rows() -> tuple[IdeaCoverage, ...]:
         (43,"Prediction markets as expectations","worldmonitor.py+macro.py","IMPLEMENTED"),
         (44,"Surprise score","regimes.py+macro.py","IMPLEMENTED"),
         (45,"Event Intelligence first connected to Lead-Lag","module_bridges.py","IMPLEMENTED"),
-        (46,"External Event to Venue Price Discovery","price_discovery.py","IMPLEMENTED"),
-        (47,"first_venue","price_discovery.py","IMPLEMENTED"),
-        (48,"reaction_latency_ms","price_discovery.py","IMPLEMENTED"),
-        (49,"peak_cross_venue_dispersion_bps","price_discovery.py","IMPLEMENTED"),
-        (50,"edge_half_life_ms","price_discovery.py","IMPLEMENTED"),
+        (46,"External Event to Venue Price Discovery","event_price_discovery.py","IMPLEMENTED"),
+        (47,"first_venue","event_price_discovery.py","IMPLEMENTED"),
+        (48,"reaction_latency_ms","event_price_discovery.py","IMPLEMENTED"),
+        (49,"peak_cross_venue_dispersion_bps","event_price_discovery.py","IMPLEMENTED"),
+        (50,"edge_half_life_ms","event_price_discovery.py","IMPLEMENTED"),
         (51,"Remaining executable edge at HL","candidates.py","IMPLEMENTED"),
         (52,"Depth before/after event","outcomes.py","IMPLEMENTED"),
         (53,"Spread expansion","outcomes.py","IMPLEMENTED"),
@@ -159,6 +159,8 @@ def coverage_summary() -> dict[str, object]:
         "unique_ids": len(set(ids)),
         "statuses": statuses,
         "all_implemented": bool(IDEA_COVERAGE) and all(row.status == "IMPLEMENTED" for row in IDEA_COVERAGE),
+        "complete_1_to_120": set(ids) == set(range(1, 121)),
+        "coverage_valid": len(IDEA_COVERAGE) == 120 and set(ids) == set(range(1, 121)) and all(row.status == "IMPLEMENTED" for row in IDEA_COVERAGE),
     }
 
 
