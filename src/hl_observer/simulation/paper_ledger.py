@@ -82,6 +82,12 @@ class PaperLedger:
     capital_tracker: CapitalAccountingTracker = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
+        if not _finite_positive(self.starting_balance_usdc):
+            raise ValueError("starting_balance_usdc must be finite and positive")
+        if self.cash_balance_usdc is not None and not math.isfinite(float(self.cash_balance_usdc)):
+            raise ValueError("cash_balance_usdc must be finite")
+        if self.high_water_equity_usdc is not None and not math.isfinite(float(self.high_water_equity_usdc)):
+            raise ValueError("high_water_equity_usdc must be finite")
         if self.cash_balance_usdc is None:
             self.cash_balance_usdc = float(self.starting_balance_usdc)
         if self.high_water_equity_usdc is None:
