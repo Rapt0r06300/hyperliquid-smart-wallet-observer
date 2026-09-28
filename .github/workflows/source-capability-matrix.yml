@@ -15,6 +15,7 @@ on:
       - "tools/validate_source_capabilities.py"
       - "tools/validate_source_rules.py"
 permissions:
+  # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
 concurrency:
   group: source-capability-matrix
@@ -24,7 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Validate versioned source rules
         run: python tools/validate_source_rules.py
       - name: Generate conservative capability matrix
