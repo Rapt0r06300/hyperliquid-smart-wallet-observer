@@ -536,8 +536,19 @@ def summarize(trades: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             gains += pnl
         elif pnl < 0:
             losses -= pnl
+    financeable_count = sum(1 for row in rows if row.get("financeable_under_paper_policy") is True)
+    non_financeable_count = len(rows) - financeable_count
     return {
         "positions_ouvertes": len(rows), "positions_fermees": len(rows),
+        "paper_capital_policy": {
+            "equity_usd": float(MAX_GROSS_EXPOSURE_USD),
+            "max_gross_exposure_usd": float(MAX_GROSS_EXPOSURE_USD),
+            "leverage": 1.0,
+            "execution": "forbidden",
+            "read_only": True,
+        },
+        "financeable_trade_count": financeable_count,
+        "non_financeable_trade_count": non_financeable_count,
         "gross_pnl_usd": round(gross, 8), "fees_usd": round(fees, 8),
         "spread_cost_usd": round(spread, 8), "slippage_cost_usd": round(slippage, 8),
         "latency_cost_usd": round(latency, 8), "net_pnl_usd": round(net, 8),
