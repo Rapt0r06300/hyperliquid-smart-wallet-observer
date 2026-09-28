@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,7 +24,8 @@ def _float(value: Any) -> float | None:
     if value in (None, ""):
         return None
     try:
-        return float(value)
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
 
