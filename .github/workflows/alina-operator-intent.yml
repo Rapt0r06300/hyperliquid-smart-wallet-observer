@@ -6,7 +6,7 @@ on:
         description: "Canonical operator intent"
         required: true
         type: choice
-        options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, pause, resume, retry]
+        options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, drain, pause, resume, retry]
       family:
         description: "Strategy family or all families"
         required: true
@@ -67,7 +67,7 @@ jobs:
           phase=json.loads(phase_path.read_text(encoding="utf-8"))
           if phase.get("phase") not in {"IDLE","COLLECT","ANALYZE"}:
             raise SystemExit("canonical phase state is invalid")
-          analysis_intents={"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle"}
+          analysis_intents={"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle","drain"}
           if os.environ["INTENT"] in analysis_intents and phase["phase"] != "ANALYZE":
             raise SystemExit("analysis intent requires ANALYZE phase")
           if os.environ["INTENT"] == "start_collection" and phase["phase"] != "COLLECT":
