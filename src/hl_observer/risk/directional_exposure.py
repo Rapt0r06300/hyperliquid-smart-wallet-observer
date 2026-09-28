@@ -1,59 +1,43 @@
-"""Garde-fou d'exposition DIRECTIONNELLE et de CONCENTRATION (2026-07-11).
-
-POURQUOI CE MODULE EXISTE. Une session live a ete observee avec **9 positions ouvertes, presque
-toutes SHORT**, pour ~4 500 $ de notionnel sur 1 000 $ de capital. Le garde-fou de portefeuille
-existant (`_portfolio_open_refusal`) ne regardait que l'exposition **BRUTE** : il additionne des
-`abs()`, donc 6 shorts et 1 long lui paraissent aussi diversifies que 7 paris opposes. Or ce n'est
-pas un portefeuille : c'est **le meme pari, repete 9 fois**.
-
-Consequence mesuree sur le run precedent : **97 % de la perte venait des shorts** (-62,63 $ contre
--1,36 $ pour les longs), parce que le book etait short a 73 % dans un marche haussier. Un mouvement
-de +1 % du marche fait alors perdre 2,5 % du capital d'un coup, sur toutes les positions a la fois.
-
-Ce module ajoute les deux limites qui manquaient :
-  1. **exposition NETTE directionnelle** : |somme signee des notionnels| plafonnee en % du capital ;
-  2. **concentration par COIN** : on ne peut pas empiler N positions sur le meme marche.
-
-Il ne PREDIT rien et ne cherche pas a gagner : il empeche de tout perdre sur un seul pari.
-Pur, sans I/O, sans effet de bord. Paper-only. Aucun ordre.
-"""
+"""Fail-closed directional and concentration exposure guard."""
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-# % du capital autorise en exposition NETTE directionnelle (100 % = 1x le capital)
 NET_EXPOSURE_PCT_ENV = "HYPERSMART_MAX_NET_DIRECTIONAL_PCT"
-# notionnel maximum cumule sur UN SEUL marche, en % du capital
 COIN_CONCENTRATION_PCT_ENV = "HYPERSMART_MAX_COIN_NOTIONAL_PCT"
-
-DEFAULT_NET_EXPOSURE_PCT = 100.0        # exposition nette <= 1x le capital
-DEFAULT_COIN_CONCENTRATION_PCT = 60.0   # un seul marche <= 60 % du capital
+DEFAULT_NET_EXPOSURE_PCT = 100.0
+DEFAULT_COIN_CONCENTRATION_PCT = 60.0
 
 
 def _f(value: Any, default: float = 0.0) -> float:
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
         return default
+    return parsed if math.isfinite(parsed) else default
 
 
 def _env_pct(name: str, default: float) -> float:
     raw = os.environ.get(name)
-    if raw is None or str(raw).strip() == "":
-        return default
-    v = _f(raw, default)
-    return v if v > 0 else default          # une valeur <= 0 est INVALIDE, pas "illimite"
+    if raw is None or not str(raw).strip():
+        value = default
+    else:
+        value = _f(raw, float("nan"))
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"invalid exposure limit: {name}")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
 class ExposureSnapshot:
-    gross_usdt: float          # somme des |notionnels|
-    net_usdt: float            # somme SIGNEE (positif = net long)
+    gross_usdt: float
+    net_usdt: float
     long_usdt: float
     short_usdt: float
-    by_coin: dict[str, float]  # notionnel BRUT par marche
+    by_coin: dict[str, float]
 
     @property
     def net_bias(self) -> str:
@@ -63,33 +47,42 @@ class ExposureSnapshot:
 
 
 def snapshot_exposure(positions: Mapping[Any, Any] | Iterable[Any]) -> ExposureSnapshot:
-    """Photographie de l'exposition, a partir des positions virtuelles du ledger."""
     rows = positions.values() if isinstance(positions, Mapping) else positions
     gross = net = longs = shorts = 0.0
     by_coin: dict[str, float] = {}
-    for p in rows:
-        if not isinstance(p, dict):
-            continue
-        size = abs(_f(p.get("size")))
-        price = _f(p.get("avg_price")) or _f(p.get("entry_price"))
-        if size <= 0 or price <= 0:
+    for position in rows:
+        if isinstance(position, Mapping):
+            get = position.get
+        else:
+            get = lambda key: getattr(position, key, None)
+        raw_size = get("size")
+        if raw_size is None:
+            raw_size = get("quantity")
+        size = abs(_f(raw_size))
+        raw_price = get("avg_price")
+        if raw_price is None:
+            raw_price = get("average_entry_price")
+        if raw_price is None:
+            raw_price = get("entry_price")
+        price = _f(raw_price)
+        if size <= 0.0 or price <= 0.0:
             continue
         notional = size * price
-        side = str(p.get("direction") or p.get("side") or "").upper()
+        side = str(get("direction") or get("side") or "").upper()
         if side not in {"LONG", "SHORT"}:
-            # dernier recours : le SIGNE de la taille brute porte le sens
-            side = "SHORT" if _f(p.get("size")) < 0 else "LONG"
+            side = str(get("position_side") or "").upper()
+        if side not in {"LONG", "SHORT"}:
+            continue
         sign = 1.0 if side == "LONG" else -1.0
         gross += notional
         net += sign * notional
-        if sign > 0:
+        if sign > 0.0:
             longs += notional
         else:
             shorts += notional
-        coin = str(p.get("coin") or "?").upper()
+        coin = str(get("coin") or "?").upper()
         by_coin[coin] = by_coin.get(coin, 0.0) + notional
-    return ExposureSnapshot(round(gross, 8), round(net, 8), round(longs, 8),
-                            round(shorts, 8), by_coin)
+    return ExposureSnapshot(round(gross, 8), round(net, 8), round(longs, 8), round(shorts, 8), by_coin)
 
 
 def directional_refusal(
@@ -102,49 +95,31 @@ def directional_refusal(
     max_net_pct: float | None = None,
     max_coin_pct: float | None = None,
 ) -> str:
-    """Retourne un motif de REFUS, ou "" si l'ouverture est acceptable.
-
-    Deux verrous, tous deux relatifs au CAPITAL (et non au notionnel, qui est deja leverage) :
-
-    * ``NET_DIRECTIONAL_EXPOSURE_TOO_HIGH`` -- la nouvelle position pousserait le pari
-      directionnel net au-dela du plafond. C'est le verrou qui manquait : sans lui, le bot
-      empile 9 shorts et se retrouve avec 250 % du capital dans un seul sens.
-    * ``COIN_CONCENTRATION_TOO_HIGH`` -- on empilerait trop de notionnel sur UN marche
-      (deux positions ETH SHORT simultanees ont ete observees en live).
-
-    Une position qui REDUIT le desequilibre net est toujours autorisee : on ne bloque jamais le
-    trade qui reequilibre le portefeuille.
-    """
-    equity = abs(_f(equity_usdt))
-    notional = abs(_f(new_notional_usdt))
-    if equity <= 0 or notional <= 0:
-        return ""                          # rien a juger : les autres gates s'en chargent
-
+    try:
+        equity = float(equity_usdt)
+        notional = float(new_notional_usdt)
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_EXPOSURE_INPUT"
+    if not math.isfinite(equity) or not math.isfinite(notional) or equity <= 0.0 or notional <= 0.0:
+        return "INVALID_EXPOSURE_INPUT"
     side_up = str(side or "").upper()
     if side_up not in {"LONG", "SHORT"}:
-        return ""
-
+        return "INVALID_EXPOSURE_SIDE"
+    net_limit = max_net_pct if max_net_pct is not None else DEFAULT_NET_EXPOSURE_PCT
+    coin_limit = max_coin_pct if max_coin_pct is not None else DEFAULT_COIN_CONCENTRATION_PCT
+    try:
+        net_cap = equity * _env_pct(NET_EXPOSURE_PCT_ENV, net_limit) / 100.0
+        coin_cap = equity * _env_pct(COIN_CONCENTRATION_PCT_ENV, coin_limit) / 100.0
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_EXPOSURE_LIMIT"
     snap = snapshot_exposure(positions)
     sign = 1.0 if side_up == "LONG" else -1.0
-
-    net_cap = equity * _env_pct(NET_EXPOSURE_PCT_ENV, max_net_pct or DEFAULT_NET_EXPOSURE_PCT) / 100.0
-    coin_cap = equity * _env_pct(COIN_CONCENTRATION_PCT_ENV, max_coin_pct or DEFAULT_COIN_CONCENTRATION_PCT) / 100.0
-
-    # --- 1. exposition nette directionnelle
-    net_apres = snap.net_usdt + sign * notional
-    if abs(net_apres) > net_cap:
-        # exception : si le trade RAPPROCHE de la neutralite, on l'accepte (il diversifie)
-        if abs(net_apres) < abs(snap.net_usdt):
-            pass
-        else:
-            return "NET_DIRECTIONAL_EXPOSURE_TOO_HIGH"
-
-    # --- 2. concentration sur un seul marche
-    coin_up = str(coin or "?").upper()
-    coin_apres = snap.by_coin.get(coin_up, 0.0) + notional
-    if coin_apres > coin_cap:
+    net_after = snap.net_usdt + sign * notional
+    if abs(net_after) > net_cap and abs(net_after) >= abs(snap.net_usdt):
+        return "NET_DIRECTIONAL_EXPOSURE_TOO_HIGH"
+    coin_after = snap.by_coin.get(str(coin or "?").upper(), 0.0) + notional
+    if coin_after > coin_cap:
         return "COIN_CONCENTRATION_TOO_HIGH"
-
     return ""
 
 
