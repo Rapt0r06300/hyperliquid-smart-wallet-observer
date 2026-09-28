@@ -57,8 +57,12 @@ class ClassificationEnvelope:
     def __post_init__(self) -> None:
         if not str(self.label).strip():
             raise ValueError("classification label is required")
-        if not 0.0 <= float(self.confidence) <= 1.0:
-            raise ValueError("classification confidence must be in [0,1]")
+        try:
+            confidence = float(self.confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("classification confidence must be finite and in [0,1]") from exc
+        if not __import__("math").isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise ValueError("classification confidence must be finite and in [0,1]")
         if not str(self.methodology_version).strip():
             raise ValueError("methodology_version is required")
         if not self.evidence_refs or any(not str(ref).strip() for ref in self.evidence_refs):
@@ -70,7 +74,7 @@ _WORLD_MONITOR = (
         source_id="worldmonitor.cross_source",
         role="corroboration_and_cross_domain_signal",
         source_tier=SourceTier.AGGREGATOR,
-        access_mode="hosted_api_or_self_host",
+        access_mode="github_hosted_api_only",
         primary=False,
         enabled_by_default=False,
         refresh_hint_s=None,
@@ -81,7 +85,7 @@ _WORLD_MONITOR = (
         source_id="worldmonitor.news",
         role="structured_news_metadata",
         source_tier=SourceTier.AGGREGATOR,
-        access_mode="hosted_api_or_self_host",
+        access_mode="github_hosted_api_only",
         primary=False,
         enabled_by_default=False,
         refresh_hint_s=None,
@@ -92,7 +96,7 @@ _WORLD_MONITOR = (
         source_id="worldmonitor.prediction",
         role="prediction_market_aggregation_read_only",
         source_tier=SourceTier.AGGREGATOR,
-        access_mode="hosted_api_or_self_host",
+        access_mode="github_hosted_api_only",
         primary=False,
         enabled_by_default=False,
         refresh_hint_s=None,
