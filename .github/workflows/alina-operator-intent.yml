@@ -141,6 +141,9 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 1
       - name: Dispatch immutable intent to Dataset V2
         env:
           DISPATCH_TOKEN: ${{ secrets.ALINA_DATASET_DISPATCH_TOKEN }}
@@ -153,17 +156,19 @@ jobs:
           python - <<'PY' > "$RUNNER_TEMP/dispatch.json"
           import json, os
           config=json.loads(os.environ["CONFIG_JSON"])
+          import pathlib
+          phase=json.loads(pathlib.Path("control/alina-phase.json").read_text(encoding="utf-8"))
           payload={
               "event_type":"alina_operator_intent",
               "client_payload":{
                   "request_id":os.environ["REQUEST_ID"],
                   "intent":os.environ["INTENT"],
                   "main_code_sha":os.environ["MAIN_CODE_SHA"],
-                  "phase":config.get("phase"),
-                  "phase_epoch":config.get("phase_epoch"),
-                  "source_collection_epoch":config.get("source_collection_epoch"),
-                  "collection_cutoff_at_utc":config.get("collection_cutoff_at_utc"),
-                  "analysis_stage":config.get("analysis_stage"),
+                  "phase":phase.get("phase"),
+                  "phase_epoch":phase.get("epoch"),
+                  "source_collection_epoch":phase.get("source_collection_epoch"),
+                  "collection_cutoff_at_utc":phase.get("collection_cutoff_at_utc"),
+                  "analysis_stage":phase.get("analysis_stage"),
               },
           }
           print(json.dumps(payload,separators=(",",":")))
