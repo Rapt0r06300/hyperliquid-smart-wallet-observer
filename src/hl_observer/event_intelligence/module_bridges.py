@@ -52,6 +52,14 @@ class LeaderAction:
     asset: str
     side: str
 
+    def __post_init__(self) -> None:
+        if not str(self.leader_id).strip() or not str(self.asset).strip():
+            raise ValueError("leader_id and asset are required")
+        if isinstance(self.ts_ms, bool) or int(self.ts_ms) < 0:
+            raise ValueError("ts_ms must be non-negative")
+        if str(self.side).upper() not in {"BUY", "SELL", "LONG", "SHORT"}:
+            raise ValueError("unsupported action side")
+
 
 @dataclass(frozen=True, slots=True)
 class CopyVaultLeaderEventStats:
@@ -137,7 +145,13 @@ def measure_copy_vault_event_reactions(
 ) -> dict[str, CopyVaultLeaderEventStats]:
     """Measure leader reaction latency after causally available external events."""
 
-    family = str(event_family)
+    family = str(event_family).strip()
+    if not family:
+        raise ValueError("event_family is required")
+    if (isinstance(max_reaction_ms, bool) or int(max_reaction_ms) < 0
+            or isinstance(fast_threshold_ms, bool) or int(fast_threshold_ms) < 0
+            or int(fast_threshold_ms) > int(max_reaction_ms)):
+        raise ValueError("reaction windows must be ordered and non-negative")
     usable_events = [
         row for row in events
         if row.usable_for_signal and _family(row) == family
