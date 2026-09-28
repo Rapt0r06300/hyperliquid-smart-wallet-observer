@@ -25,6 +25,7 @@ PUR, sans I/O. Aucun ordre reel.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
 HEALTHY = "HEALTHY"
@@ -90,6 +91,13 @@ def evaluer_sante(
     """
     raisons: list[str] = []
     etats: list[str] = []
+    numeric_values = (queue_lag_ms, max_queue_lag_ms, max_market_data_age_ms)
+    if any(not math.isfinite(float(value)) for value in numeric_values):
+        return SourceHealth(CRITICAL, False, False, ("METRIQUE_NON_FINIE",))
+    if any(int(value) < 0 for value in (fresh_entry_deltas, fresh_follow_signals, reconnects_recents, gaps_detectes, events_dropped, contrat_incomplet)):
+        return SourceHealth(CRITICAL, False, False, ("COMPTEUR_NEGATIF",))
+    if market_data_age_ms is not None and (not math.isfinite(float(market_data_age_ms)) or float(market_data_age_ms) < 0.0):
+        return SourceHealth(CRITICAL, False, False, ("AGE_DONNEE_INVALIDE",))
 
     # --- la source est-elle seulement la ?
     if not source_principale_active:
