@@ -37,7 +37,9 @@ def find_lookahead_violations(events, *, min_gap_ms: int = 0) -> list[LookaheadV
     simply ts <= T; a positive gap also forbids using data more recent than the latency.
     """
     out: list[LookaheadViolation] = []
-    gap = max(0, int(min_gap_ms))
+    if isinstance(min_gap_ms, bool) or int(min_gap_ms) < 0:
+        raise ValueError("min_gap_ms must be non-negative")
+    gap = int(min_gap_ms)
     for i, ev in enumerate(events):
         d_ts, x_ts = _pair(ev)
         cutoff = d_ts - gap
