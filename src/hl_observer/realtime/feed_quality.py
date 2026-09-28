@@ -443,7 +443,11 @@ class FeedQualityGate:
                 and self._coherent_events >= self.config.min_coherent_events
             )
         if snapshots:
-            snapshots[-1] = self.snapshot(now_ms=received_ts_ms)
+            # A transport frame is the atomic recovery unit.  Expose the
+            # post-frame state for every item so callers cannot observe a
+            # misleading pre-recovery snapshot for the first item in a batch.
+            final_snapshot = self.snapshot(now_ms=received_ts_ms)
+            snapshots = [final_snapshot for _ in snapshots]
         return snapshots
 
     def snapshot(self, *, now_ms: int) -> FeedQualitySnapshot:
