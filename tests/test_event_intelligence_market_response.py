@@ -6,19 +6,14 @@ def test_market_response_fails_closed_without_market_data():
     event = ExternalEvent(
         event_id="event-1",
         source="usgs.earthquakes",
-        source_event_id="source-1",
         source_tier=SourceTier.PRIMARY_OFFICIAL,
-        event_type=ExternalEventType.NATURAL_HAZARD,
-        event_ts_ms=1_000,
-        publish_ts_ms=1_100,
+        event_type=ExternalEventType.NEWS,
+        publication_ts_ms=1_100,
         retrieval_ts_ms=1_200,
         ingest_ts_ms=1_200,
-        title="Earthquake",
-        summary="",
+        methodology_version="test-v1",
+        raw_evidence_ref="sha256:event-1",
         entities=("BTC",),
-        assets=("BTC",),
-        classification_confidence=0.9,
-        corroboration_count=1,
     )
 
     evidence = build_market_response_evidence((event,), ())
