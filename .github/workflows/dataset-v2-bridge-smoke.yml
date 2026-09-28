@@ -46,7 +46,16 @@ jobs:
       - name: Materialize one live SAFE shard
         if: env.SAFE_SHARDS != '0'
         run: |
-          python -m hl_observer.ops.v2_dataset_bridge materialize             --families bbo             --max-shards 1             --output "$RUNNER_TEMP/v2-bridge-smoke"             > "$RUNNER_TEMP/v2-materialize.json"
+          DATASET_SELECTION_ID="$(sha256sum "$RUNNER_TEMP/v2-plan.json" | cut -d' ' -f1)"
+          COLLECTION_CUTOFF_AT_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python -m hl_observer.ops.v2_dataset_bridge materialize \
+            --families bbo \
+            --max-shards 1 \
+            --output "$RUNNER_TEMP/v2-bridge-smoke" \
+            --dataset-selection-id "$DATASET_SELECTION_ID" \
+            --source-collection-epoch "${{ github.run_id }}" \
+            --collection-cutoff-at-utc "$COLLECTION_CUTOFF_AT_UTC" \
+            > "$RUNNER_TEMP/v2-materialize.json"
           test -s "$RUNNER_TEMP/v2-bridge-smoke/runtime/reports/datasets/SELECTION_PROVENANCE.json"
           python - <<'PY'
           import json, os
@@ -56,6 +65,7 @@ jobs:
           assert p["quality_status_required"]=="SAFE"
           assert p["selected_shards"]==1
           assert p["real_execution"] is False
+          assert p["provenance_complete"] is True
           print(json.dumps({"selected_shards":p["selected_shards"],"selected_events":p["selected_events"],"selected_bytes":p["selected_bytes"]},sort_keys=True))
           PY
       - name: Report honest no-SAFE state
