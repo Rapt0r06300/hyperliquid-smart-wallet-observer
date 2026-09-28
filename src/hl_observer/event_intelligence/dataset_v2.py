@@ -25,6 +25,7 @@ from hl_observer.event_intelligence.direct_sources import (
 )
 from hl_observer.event_intelligence.integration_registry import integration_contract
 from hl_observer.event_intelligence.runtime_pipeline import (
+    build_market_response_evidence,
     build_research_protocol_evidence,
     build_runtime_evidence,
 )
@@ -211,12 +212,16 @@ def build_public_event_bundle(
         now_ms=now_ms,
         expected_sources=EXPECTED_EVENT_SOURCES,
     )
+    market_response = build_market_response_evidence(collected_events, ())
     research_protocol = build_research_protocol_evidence(
         (),
         now_ms=now_ms,
         methodology_version="event-intelligence-v1",
         config={"collection_run_id": str(collection_run_id)},
     )
+    market_response_digest = hashlib.sha256(
+        json.dumps(market_response, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     research_protocol_digest = hashlib.sha256(
         json.dumps(research_protocol, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -236,6 +241,8 @@ def build_public_event_bundle(
             "schema": runtime_evidence["schema"],
             "runtime_evidence_sha256": runtime_digest,
             "accepted_event_count": runtime_evidence["accepted_event_count"],
+            "market_response_sha256": market_response_digest,
+            "market_response_state": market_response["proof_state"],
             "research_protocol_sha256": research_protocol_digest,
             "research_protocol_state": research_protocol["proof_state"],
             "proof_state": "STRUCTURAL_ONLY",
@@ -254,6 +261,7 @@ def build_public_event_bundle(
             "source_status": source_status,
             "event_intelligence": contract,
             "event_intelligence_runtime": runtime_evidence,
+            "event_intelligence_market_response": market_response,
             "event_intelligence_research_protocol": research_protocol,
             "read_only": True,
             "real_execution": False,
