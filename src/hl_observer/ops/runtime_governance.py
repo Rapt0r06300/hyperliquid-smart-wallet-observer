@@ -1,44 +1,82 @@
-"""[AUD-202/221] Gouvernance runtime : surveillance de DERIVE d'execution (couts/fills/latence vs
-baseline) et REGISTRE UNIFIE des orchestrateurs (un seul point d'entree canonique, pas N pipelines
-paralleles qui divergent). stdlib pure, 0 reseau, 0 ordre reel."""
+"""Runtime governance: fail-closed drift evidence and one canonical orchestrator."""
+
 from __future__ import annotations
 
+import math
 from typing import Mapping
 
 CANONIQUE = "historical_analysis_suite"
 
 
-def detecter_derive_execution(baseline: Mapping[str, float], courant: Mapping[str, float], *,
-                              tolerance: float = 0.20) -> dict:
-    """DERIVE d'execution : compare les metriques d'execution (cout, taux de fill, latence) au
-    baseline ; signale celles qui derivent de plus de `tolerance` (defaut 20%). Le monde a change ->
-    le modele de couts est peut-etre perime."""
-    derives = {}
-    for k, base in baseline.items():
-        cur = float(courant.get(k, base))
-        ref = abs(float(base)) if base else 1e-9
-        ecart = abs(cur - float(base)) / ref
-        if ecart > tolerance:
-            derives[k] = {"baseline": float(base), "courant": cur, "ecart_relatif": round(ecart, 4)}
-    return {"stable": len(derives) == 0, "derives": derives}
+def _finite(value: object) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def detecter_derive_execution(
+    baseline: Mapping[str, float],
+    courant: Mapping[str, float],
+    *,
+    tolerance: float = 0.20,
+) -> dict:
+    """Compare execution metrics; invalid evidence is itself an unstable no-go."""
+    tol = _finite(tolerance)
+    derives: dict[str, dict[str, float | str]] = {}
+    if tol is None or tol < 0.0:
+        return {"stable": False, "derives": {"__config__": {"reason": "TOLERANCE_INVALID"}}}
+    if not baseline:
+        return {"stable": False, "derives": {"__baseline__": {"reason": "BASELINE_MISSING"}}}
+    for key, raw_base in baseline.items():
+        base = _finite(raw_base)
+        current = _finite(courant.get(key, raw_base))
+        if base is None or current is None:
+            derives[str(key)] = {"reason": "METRIC_UNMEASURED"}
+            continue
+        reference = abs(base) if base else 1e-9
+        deviation = abs(current - base) / reference
+        if not math.isfinite(deviation) or deviation > tol:
+            derives[str(key)] = {
+                "baseline": base,
+                "courant": current,
+                "ecart_relatif": round(deviation, 4) if math.isfinite(deviation) else "NONFINITE",
+            }
+    return {"stable": not derives, "derives": derives}
 
 
 class RegistreOrchestrateurs:
-    """Registre UNIFIE des orchestrateurs : un seul est CANONIQUE (point d'entree officiel), les
-    autres explicitement secondaires. Empeche N orchestrateurs concurrents qui divergent."""
+    """Single-writer registry: a second canonical orchestrator is refused."""
 
     def __init__(self, canonique: str = CANONIQUE) -> None:
-        self._canonique = canonique
+        if not str(canonique).strip():
+            raise ValueError("canonical orchestrator is required")
+        self._canonique = str(canonique)
         self._enregistres: dict[str, str] = {}
 
     def enregistrer(self, nom: str, role: str = "secondaire") -> None:
-        self._enregistres[nom] = role
+        name, normalized_role = str(nom).strip(), str(role).strip().lower()
+        if not name:
+            raise ValueError("orchestrator name is required")
+        if normalized_role not in {"canonique", "secondaire"}:
+            raise ValueError("orchestrator role is invalid")
+        if normalized_role == "canonique" and name != self._canonique:
+            raise PermissionError("parallel canonical orchestrator refused")
+        previous = self._enregistres.get(name)
+        if previous is not None and previous != normalized_role:
+            raise PermissionError("orchestrator role mutation refused")
+        self._enregistres[name] = normalized_role
 
     def canonique(self) -> str:
         return self._canonique
 
     def verifier_unicite(self) -> dict:
-        canoniques = [n for n, r in self._enregistres.items() if r == "canonique"]
-        unifie = len(canoniques) == 1 and canoniques[0] == self._canonique
-        return {"unifie": unifie, "canonique": self._canonique,
-                "canoniques_declares": canoniques, "n_orchestrateurs": len(self._enregistres)}
+        canoniques = [name for name, role in self._enregistres.items() if role == "canonique"]
+        unifie = canoniques == [self._canonique]
+        return {
+            "unifie": unifie,
+            "canonique": self._canonique,
+            "canoniques_declares": canoniques,
+            "n_orchestrateurs": len(self._enregistres),
+        }
