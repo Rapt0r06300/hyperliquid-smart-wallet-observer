@@ -217,6 +217,9 @@ def build_public_event_bundle(
         methodology_version="event-intelligence-v1",
         config={"collection_run_id": str(collection_run_id)},
     )
+    research_protocol_digest = hashlib.sha256(
+        json.dumps(research_protocol, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     runtime_digest = hashlib.sha256(
         json.dumps(runtime_evidence, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -233,6 +236,8 @@ def build_public_event_bundle(
             "schema": runtime_evidence["schema"],
             "runtime_evidence_sha256": runtime_digest,
             "accepted_event_count": runtime_evidence["accepted_event_count"],
+            "research_protocol_sha256": research_protocol_digest,
+            "research_protocol_state": research_protocol["proof_state"],
             "proof_state": "STRUCTURAL_ONLY",
             "proof_of_pnl_allowed": False,
         }
