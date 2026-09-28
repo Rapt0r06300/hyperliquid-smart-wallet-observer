@@ -114,9 +114,21 @@ def build_cross_venue_event_context(
     available_assets: Iterable[str] = (),
     event_window_ms: int = 300_000,
 ) -> CrossVenueEventContext:
-    age = int(decision_ts_ms) - int(event.event.available_ts_ms)
+    try:
+        decision_ts = int(decision_ts_ms)
+        window_ms = int(event_window_ms)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("decision_ts_ms and event_window_ms must be integers") from None
+    if (
+        isinstance(decision_ts_ms, bool)
+        or isinstance(event_window_ms, bool)
+        or decision_ts < 0
+        or window_ms < 0
+    ):
+        raise ValueError("decision_ts_ms must be non-negative and event_window_ms must be non-negative")
+    age = decision_ts - int(event.event.available_ts_ms)
     in_window = (
-        0 <= age <= max(0, int(event_window_ms))
+        0 <= age <= window_ms
         and event.usable_for_signal
     )
     relevance = map_event_to_assets(event, available_assets=available_assets)
