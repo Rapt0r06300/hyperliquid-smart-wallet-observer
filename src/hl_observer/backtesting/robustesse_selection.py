@@ -177,7 +177,7 @@ def pbo_cscv(matrice: Sequence[Sequence[float]], *, max_partitions: int = MAX_PA
     pbo = n_surajuste / len(partitions)
     return {"pbo": round(pbo, 4), "n_configs": N, "n_blocs": S, "n_partitions": len(partitions),
             "lambda_median": round(statistics.median(lambdas), 4),
-            "verdict": "SUR_AJUSTE" if pbo > PBO_SEUIL else "ROBUSTE", "real_execution": False}
+            "verdict": "SUR_AJUSTE" if pbo >= PBO_SEUIL else "ROBUSTE", "real_execution": False}
 
 
 def seuil_bruit_multiple_testing(n_essais: int, sigma: float) -> float:
@@ -203,10 +203,16 @@ def verdict_robustesse(matrice: Sequence[Sequence[float]], n_essais: int, *,
             res["seuil_bruit"] = None
             res["bat_le_bruit"] = False
             robuste = False
-        seuil = seuil_bruit_multiple_testing(n_essais, sigma_null)
-        res["seuil_bruit"] = round(seuil, 6)
-        res["bat_le_bruit"] = bool(net_gagnant > seuil)
-        robuste = robuste and res["bat_le_bruit"]
+        else:
+            if isinstance(net_gagnant, bool) or not math.isfinite(float(net_gagnant)):
+                res["seuil_bruit"] = None
+                res["bat_le_bruit"] = False
+                robuste = False
+            else:
+                seuil = seuil_bruit_multiple_testing(n_essais, sigma_null)
+                res["seuil_bruit"] = round(seuil, 6)
+                res["bat_le_bruit"] = bool(float(net_gagnant) > seuil)
+                robuste = robuste and res["bat_le_bruit"]
     res["robuste"] = bool(robuste)
     if res.get("pbo") is None:
         res["verdict"] = "INSUFFISANT"
