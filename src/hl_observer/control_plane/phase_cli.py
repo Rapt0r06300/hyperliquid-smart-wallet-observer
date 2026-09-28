@@ -26,7 +26,10 @@ def _persist_transition_receipt(receipt, receipt_dir: str = "control/phase-recei
             raise ValueError("phase transition receipt identity conflict")
         return
     temporary = target.with_suffix(target.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, target)
 
 
