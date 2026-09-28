@@ -52,6 +52,10 @@ class CollectionRecorder:
     ) -> None:
         self.registry = registry or SourceRegistry(stale_after_ms=stale_after_ms)
         self.raw_store = raw_store or RawStore()
+        if not isinstance(context, RunContext):
+            raise ValueError("context must be a RunContext")
+        if stale_after_ms is not None and (isinstance(stale_after_ms, bool) or int(stale_after_ms) < 1):
+            raise ValueError("stale_after_ms must be >= 1")
         self.context = context
         self.run_id = str(run_id or f"{context.value.lower()}-{os.getpid()}")
         self.config_hash = config_hash
@@ -175,6 +179,8 @@ class CollectionRecorder:
         try:
             sid = self._ensure_registered(request_type)
             ts = int(now_ms if now_ms is not None else _now_ms())
+            if ts < 0:
+                raise ValueError("now_ms must be non-negative")
             self._counter += 1
             request_id = f"{sid}:{ts}:{self._counter}"
             item_count = _safe_len(response)
@@ -224,6 +230,8 @@ class CollectionRecorder:
         try:
             sid = self._ensure_ws_registered(channel)
             ts = int(now_ms if now_ms is not None else _now_ms())
+            if ts < 0:
+                raise ValueError("now_ms must be non-negative")
             self._counter += 1
             request_id = f"{sid}:{ts}:{self._counter}"
             item_count = _safe_len(message)
