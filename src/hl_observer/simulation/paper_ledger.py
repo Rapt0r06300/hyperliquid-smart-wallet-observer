@@ -120,6 +120,8 @@ class PaperLedger:
         refs: dict | None = None,
     ) -> PaperEvent:
         normalized_side = str(side).upper()
+        if not _finite_nonnegative(fee_bps):
+            return self.no_trade(coin=coin, reason="FEE_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         if normalized_side not in {"LONG", "SHORT"}:
             return self.no_trade(coin=coin, reason="SIDE_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         if (
@@ -275,6 +277,8 @@ class PaperLedger:
         refs: dict | None = None,
     ) -> PaperEvent:
         normalized_side = str(side).upper()
+        if not _finite_nonnegative(fee_bps):
+            return self.no_trade(coin=coin, reason="FEE_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         key = self._position_key(
             coin,
             normalized_side,
@@ -655,6 +659,14 @@ def _finite_positive(value: object) -> bool:
     except (TypeError, ValueError, OverflowError):
         return False
     return math.isfinite(parsed) and parsed > 0
+
+
+def _finite_nonnegative(value: object) -> bool:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(parsed) and parsed >= 0
 
 
 def _combine_leg_notionals(
