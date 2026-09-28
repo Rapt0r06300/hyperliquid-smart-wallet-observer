@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import secrets
@@ -210,7 +210,6 @@ def acquire_lease(
     expected_epoch: int | None = None,
     now: str | None = None,
 ) -> str:
-    from datetime import timedelta
     current = _parse_ts(now or _now())
 
     # V1 manifests remain readable as historical evidence, but cannot acquire
@@ -336,6 +335,9 @@ def select_due_campaigns(
     current = _parse_ts(now or _now())
     buckets: dict[str, list[CampaignManifest]] = {kind: [] for kind in CAMPAIGN_KIND_ORDER}
     for m in items:
+        # V1 remains readable evidence but is never executable after cutover.
+        if m.schema_version != SCHEMA_VERSION_V2:
+            continue
         if m.status not in ACTIVE_STATES:
             continue
         if _parse_ts(m.expires_at) <= current:
