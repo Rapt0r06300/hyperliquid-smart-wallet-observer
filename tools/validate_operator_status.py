@@ -18,14 +18,18 @@ def main() -> int:
     args = parser.parse_args()
     intent = json.loads(Path(args.intent).read_text(encoding="utf-8"))
     status = json.loads(Path(args.status).read_text(encoding="utf-8"))
-    if intent.get("schema_version") != "alina.operator_intent.v1":
+    if intent.get("schema_version") not in {"alina.operator_intent.v1", "alina.operator_intent.v2"}:
         raise SystemExit("OPERATOR_INTENT_SCHEMA_INVALID")
-    if status.get("schema_version") != "alina.operator_status.v1":
+    if status.get("schema_version") not in {"alina.operator_status.v1", "alina.operator_status.v2"}:
         raise SystemExit("OPERATOR_STATUS_SCHEMA_INVALID")
     if status.get("request_id") != intent.get("request_id"):
         raise SystemExit("OPERATOR_STATUS_REQUEST_MISMATCH")
     if status.get("intent") != intent.get("intent"):
         raise SystemExit("OPERATOR_STATUS_INTENT_MISMATCH")
+    if intent.get("schema_version") == "alina.operator_intent.v2":
+        for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc"):
+            if status.get(key) != intent.get(key):
+                raise SystemExit(f"OPERATOR_STATUS_{key.upper()}_MISMATCH")
     expected_digest = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if status.get("intent_digest") != expected_digest:
         raise SystemExit("OPERATOR_STATUS_INTENT_DIGEST_MISMATCH")
