@@ -40,9 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbols", default="")
     parser.add_argument("--start-ts-ms", type=int)
     parser.add_argument("--end-ts-ms", type=int)
-    parser.add_argument("--dataset-selection-id", required=True)
-    parser.add_argument("--source-collection-epoch", type=int, required=True)
-    parser.add_argument("--collection-cutoff-at-utc", required=True)
+    parser.add_argument("--dataset-selection-id")
+    parser.add_argument("--source-collection-epoch", type=int)
+    parser.add_argument("--collection-cutoff-at-utc")
     parser.add_argument("--max-shards", type=int, default=0, help="Bound to newest N matching SAFE shards (0 = all).")
     args = parser.parse_args(argv)
 
