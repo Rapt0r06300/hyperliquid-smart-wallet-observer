@@ -5,6 +5,7 @@ trous de sequence (snapshot/delta), et client live-gate qui LEVE toujours (jamai
 pull live reste explicitement derriere une frontiere REQUIRES_NETWORK / REQUIRES_KEY."""
 from __future__ import annotations
 
+import math
 from typing import Mapping, Optional, Sequence
 
 # --- statut honnete de capacite (aligne research.venue_capabilities) ---
@@ -27,7 +28,10 @@ class CleRequiseError(RuntimeError):
 def to_float(x) -> Optional[float]:
     """Conversion sure -> float, None si vide/illisible (jamais un faux 0)."""
     try:
-        return float(x) if x is not None and x != "" else None
+        if x is None or x == "":
+            return None
+        value = float(x)
+        return value if math.isfinite(value) else None
     except (TypeError, ValueError):
         return None
 
@@ -60,7 +64,9 @@ def niveaux(rows: Sequence[Sequence]) -> list:
     out = []
     for r in rows or ():
         try:
-            out.append({"prix": float(r[0]), "taille": float(r[1])})
+            price, size = float(r[0]), float(r[1])
+            if math.isfinite(price) and math.isfinite(size) and price > 0.0 and size >= 0.0:
+                out.append({"prix": price, "taille": size})
         except (TypeError, ValueError, IndexError):
             continue
     return out
