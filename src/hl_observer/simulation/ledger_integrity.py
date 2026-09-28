@@ -30,7 +30,7 @@ class LedgerReadResult:
 
     @property
     def strict_pnl_allowed(self) -> bool:
-        return self.status == LEDGER_OK and not self.errors
+        return self.status == LEDGER_OK and bool(self.events) and not self.errors
 
 
 def canonical_json(value: object) -> str:
