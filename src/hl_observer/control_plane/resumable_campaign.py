@@ -152,6 +152,10 @@ def validate_manifest(m: CampaignManifest) -> None:
             expected_stage = ANALYSIS_STAGE_BY_KIND.get(m.kind)
             if expected_stage and m.analysis_stage not in (None, expected_stage):
                 raise ValueError("ANALYZE manifest analysis_stage does not match campaign kind")
+        if m.status in TERMINAL_STATES:
+            digest = str(m.terminal_evidence_digest or "")
+            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest.lower()):
+                raise ValueError("V2 terminal manifest requires terminal_evidence_digest")
 
     for out in m.outputs:
         if out.get("quality_status") == "SAFE" and not out.get("replay_compatible", False):
@@ -302,8 +306,15 @@ def mark_terminal(m: CampaignManifest, status: str, reason: str, terminal_digest
     if status not in TERMINAL_STATES:
         raise ValueError("not terminal")
     m.lease = None
-    if terminal_digest:
-        m.terminal_evidence_digest = terminal_digest
+    m.terminal_evidence_digest = terminal_digest or sha256_json(
+        {
+            "campaign_id": m.campaign_id,
+            "status": status,
+            "reason": str(reason),
+            "completed_units": m.completed_units,
+            "checkpoint_lineage": m.checkpoint_lineage,
+        }
+    )
     return transition(m, status, reason)
 
 
