@@ -9,6 +9,7 @@ remain honest about every cost component.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Iterable
 
 from hl_observer.collection.native_venue_market import (
@@ -81,9 +82,12 @@ def evaluate_candidate_markout(
         raise ValueError("entry_latency_ms must be >= 0")
     if int(max_entry_wait_ms) < 0 or int(max_exit_wait_ms) < 0:
         raise ValueError("wait limits must be >= 0")
-    notional = float(notional_usd)
-    if notional <= 0.0:
-        raise ValueError("notional_usd must be > 0")
+    try:
+        notional = float(notional_usd)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("notional_usd must be finite and > 0") from exc
+    if not math.isfinite(notional) or notional <= 0.0:
+        raise ValueError("notional_usd must be finite and > 0")
 
     base = dict(
         event_id=candidate.event_id,
@@ -195,14 +199,21 @@ def evaluate_candidate_markout(
             entry_latency_ms=entry.receive_ts_ms - candidate.decision_ts_ms,
         )
 
-    fees = float(fees_bps)
-    slippage = float(slippage_bps)
-    latency_cost = float(latency_bps)
-    if min(fees, slippage, latency_cost) < 0.0:
-        raise ValueError("cost components must be >= 0")
+    try:
+        fees = float(fees_bps)
+        slippage = float(slippage_bps)
+        latency_cost = float(latency_bps)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("cost components must be finite") from exc
+    if any(not math.isfinite(value) or value < 0.0 for value in (fees, slippage, latency_cost)):
+        raise ValueError("cost components must be finite and >= 0")
+    if any(not math.isfinite(value) for value in (gross_mid, executable, spread)):
+        return EventCandidateMarkout(**base, status="UNMEASURABLE", reason="MARKOUT_NONFINITE")
     total_cost = spread + fees + slippage + latency_cost
     net = gross_mid - total_cost
     pnl = notional * net / 10_000.0
+    if not math.isfinite(net) or not math.isfinite(pnl):
+        return EventCandidateMarkout(**base, status="UNMEASURABLE", reason="MARKOUT_NONFINITE")
 
     return EventCandidateMarkout(
         **base,
