@@ -14,6 +14,9 @@ on:
       - "tools/generate_source_capabilities.py"
       - "tools/validate_source_capabilities.py"
       - "tools/validate_source_rules.py"
+env:
+  GH_TOKEN: "${{ github.token }}"
+
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
@@ -42,4 +45,5 @@ jobs:
           git add docs/source-capability-matrix.json
           git diff --cached --quiet && exit 0
           git commit -m "sources: publish capability matrix"
+          gh auth setup-git
           git push origin HEAD:main
