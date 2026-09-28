@@ -69,11 +69,14 @@ MOTIF_OK = "SHARPE_SURVIT_A_LA_DEFLATION"
 def sharpe(pnls: Sequence[float]) -> float:
     """Sharpe brut d'une serie de PnL par trade. Pas d'annualisation : on compare des tirages
     entre eux, pas a un indice."""
-    n = len(pnls)
+    values = [float(value) for value in pnls]
+    if any(not math.isfinite(value) for value in values):
+        return 0.0
+    n = len(values)
     if n < 2:
         return 0.0
-    m = sum(pnls) / n
-    var = sum((x - m) ** 2 for x in pnls) / (n - 1)
+    m = sum(values) / n
+    var = sum((x - m) ** 2 for x in values) / (n - 1)
     sd = math.sqrt(var)
     return (m / sd) if sd > 0 else 0.0
 
@@ -117,7 +120,10 @@ def evaluer(
     tirages de bruit pur donne un Sharpe magnifique -- et parfaitement vide.
     """
     n = len(pnls)
-    if n_essais <= 0:
+    if (isinstance(n_essais, bool) or int(n_essais) <= 0
+            or isinstance(proba_min, bool)
+            or not math.isfinite(float(proba_min))
+            or not 0.0 <= float(proba_min) <= 1.0):
         return VerdictAntiOverfit(
             0.0, n, int(n_essais), 0.0, False, MOTIF_ESSAIS_INCONNUS,
             "on ignore contre combien de concurrents ce scenario a gagne : on ne peut PAS juger "
@@ -129,8 +135,18 @@ def evaluer(
             "%d trades < %d : la variance de l'estimateur de Sharpe ecrase tout." % (n, MIN_TRADES),
         )
 
-    sr = sharpe(pnls)
-    distribution = tuple(float(value) for value in (trial_sharpes or ()))
+    try:
+        values = tuple(float(value) for value in pnls)
+        distribution = tuple(float(value) for value in (trial_sharpes or ()))
+    except (TypeError, ValueError, OverflowError):
+        values, distribution = (), ()
+    if any(not math.isfinite(value) for value in values + distribution):
+        return VerdictAntiOverfit(
+            0.0, n, int(n_essais), 0.0, False,
+            MOTIF_NOISE, "PnL ou distribution de Sharpes non finie.",
+            len(distribution),
+        )
+    sr = sharpe(values)
     p = float(
         deflated_sharpe(
             sr,
