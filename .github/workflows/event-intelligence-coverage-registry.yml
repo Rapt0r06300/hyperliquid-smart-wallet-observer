@@ -12,6 +12,7 @@ on:
       - "src/hl_observer/event_intelligence/**"
       - "src/hl_observer/control_plane/module_pnl_proof.py"
 permissions:
+  # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
 concurrency:
   group: event-intelligence-coverage-registry
@@ -21,7 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Generate wiring registry
         run: python tools/generate_event_intelligence_status.py
       - name: Validate wiring registry
