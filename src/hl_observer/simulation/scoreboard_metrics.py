@@ -188,8 +188,28 @@ def assembler_ligne(
 
     # Verdict conservateur, deny-by-default.
     positifs_requis = (net, oos_net_bps, forward_net_bps)
-    if all(v is not None and _fini(v) for v in positifs_requis) and n_independent is not None:
-        if all(float(v) > 0 for v in positifs_requis) and int(n_independent) >= N_INDEP_MIN_PROMOTE:
+    promotion_measurements_complete = (
+        ct is not None
+        and fr is not None
+        and capacity_usd is not None
+        and _fini(capacity_usd)
+        and float(capacity_usd) > 0.0
+        and latency_p95_ms is not None
+        and _fini(latency_p95_ms)
+        and float(latency_p95_ms) >= 0.0
+        and pf is not None
+        and pnl is not None
+    )
+    independent_count_valid = (
+        n_independent is not None
+        and isinstance(n_independent, int)
+        and n_independent >= N_INDEP_MIN_PROMOTE
+    )
+    if all(v is not None and _fini(v) for v in positifs_requis) and independent_count_valid:
+        if (
+            all(float(v) > 0 for v in positifs_requis)
+            and promotion_measurements_complete
+        ):
             verdict = "PROMOTE"
         elif any(float(v) < 0 for v in positifs_requis):
             verdict = "KILL"
