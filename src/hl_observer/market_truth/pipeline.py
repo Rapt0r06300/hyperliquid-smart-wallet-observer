@@ -82,13 +82,15 @@ class MarketTruthPipeline:
                 event.event_id,
             )
         )
-        if self.canonical_writer is not None:
-            self.canonical_writer.append(accepted)
-
-        if not accepted:
+        # A mixed batch would silently replay a subset of the observed market.
+        # Refuse the whole intent; only a fully canonical batch is durable truth.
+        if rejected_reasons or not accepted:
             reason = _upstream_reason(rejected_reasons)
             truth = self.truth_chain.reject(intent, reason=reason)
+            accepted = []
         else:
+            if self.canonical_writer is not None:
+                self.canonical_writer.append(accepted)
             truth = self.truth_chain.execute(intent, accepted)
         return MarketTruthPipelineResult(
             truth=truth,
