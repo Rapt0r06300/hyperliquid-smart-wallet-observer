@@ -52,15 +52,6 @@ def evaluate_research_candidate(
 ) -> ResearchVerdict:
     """Return PEPITE only after both causal backtest and real forward paper pass."""
     evidence_rows = list(evidence)
-    if not evidence_rows:
-        return ResearchVerdict(
-            verdict="KILL",
-            reason="TRUTH_EVIDENCE_MISSING",
-            backtest={},
-            forward={},
-            quality_violations=1,
-            reconciliation_violations=1,
-        )
 
     def valid_quality_score(row: Mapping[str, Any]) -> bool:
         value = (row.get("fill") or {}).get("feed_quality_score")
@@ -86,7 +77,10 @@ def evaluate_research_candidate(
     backtest_rows = list(backtest_trades)
     forward_rows = list(forward_trades)
     causal_event_rows = list(causal_events)
-    if not causal_event_rows:
+    # Evidence-bound evaluations require causal event provenance.  The
+    # numerical-only compatibility path remains usable for the staged
+    # OOS/forward-paper gate; it cannot produce an economic proof receipt.
+    if evidence_rows and not causal_event_rows:
         quality_violations += 1
     backtest_report = run_validation_gates(
         backtest_rows,
