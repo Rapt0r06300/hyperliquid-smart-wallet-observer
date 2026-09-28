@@ -287,18 +287,31 @@ def certify_workspace(workspace: str | Path) -> dict[str, Any]:
         for family, count in intra.items():
             if int(count or 0) > 0 and family in rows:
                 _append_reason(rows[family], "GLOBAL_TRADE_IDENTITY_DUPLICATE")
+    intra_lineage = global_audit.get("intra_family_duplicate_source_lineages")
+    if isinstance(intra_lineage, Mapping):
+        for family, count in intra_lineage.items():
+            if int(count or 0) > 0 and family in rows:
+                _append_reason(rows[family], "GLOBAL_SOURCE_LINEAGE_DUPLICATE")
 
     pairwise = global_audit.get("pairwise")
     if isinstance(pairwise, Mapping):
         for pair, detail in pairwise.items():
-            if not isinstance(detail, Mapping) or int(detail.get("collision_count") or 0) <= 0:
+            if not isinstance(detail, Mapping):
+                continue
+            exact_reuse = int(detail.get("collision_count") or 0) > 0
+            lineage_reuse = int(detail.get("source_lineage_collision_count") or 0) > 0
+            if not exact_reuse and not lineage_reuse:
                 continue
             left, separator, right = str(pair).partition("__")
             if not separator:
                 continue
             for family in (left, right):
-                if family in rows:
+                if family not in rows:
+                    continue
+                if exact_reuse:
                     _append_reason(rows[family], "CROSS_FAMILY_TRADE_REUSE")
+                if lineage_reuse:
+                    _append_reason(rows[family], "CROSS_FAMILY_SOURCE_LINEAGE_REUSE")
 
     all_certified = bool(
         global_audit.get("no_reuse") is True
@@ -311,6 +324,7 @@ def certify_workspace(workspace: str | Path) -> dict[str, Any]:
             "canonical_events": audit.get("canonical_events"),
             "missing_identity_rows": audit.get("missing_identity_rows"),
             "duplicate_global_events": audit.get("duplicate_global_events"),
+            "duplicate_source_lineages": audit.get("duplicate_source_lineages"),
             "count_matches_campaign": audit.get("count_matches_campaign"),
             "complete": audit.get("complete"),
         }
