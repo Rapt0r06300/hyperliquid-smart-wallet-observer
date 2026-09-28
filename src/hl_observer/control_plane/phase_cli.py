@@ -42,6 +42,12 @@ def _request_id(value: str) -> str:
     return value
 
 
+def _commit_sha(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{40}", value or ""):
+        raise argparse.ArgumentTypeError("main_code_sha must be an exact lowercase Git commit SHA")
+    return value
+
+
 def _request_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--request-id", required=True, type=_request_id)
     parser.add_argument("--requested-by", default="operator", type=_safe_identity)
@@ -50,7 +56,7 @@ def _request_args(parser: argparse.ArgumentParser) -> None:
 def _intent_args(parser: argparse.ArgumentParser) -> None:
     _request_args(parser)
     parser.add_argument("--config-json", default="{}")
-    parser.add_argument("--main-code-sha", default="working-tree")
+    parser.add_argument("--main-code-sha", required=True, type=_commit_sha)
 
 
 def build_parser() -> argparse.ArgumentParser:
