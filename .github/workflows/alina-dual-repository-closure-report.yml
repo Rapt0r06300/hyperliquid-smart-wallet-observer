@@ -1,6 +1,9 @@
 name: alina-dual-repository-closure-report
 on:
   workflow_dispatch:
+env:
+  GH_TOKEN: "${{ github.token }}"
+
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
@@ -47,4 +50,5 @@ jobs:
           git add docs/alina-closure-report.json docs/normative-gate-registry.json
           git diff --cached --quiet && exit 0
           git commit -m "closure: publish dual-repository status report"
+          gh auth setup-git
           git push origin HEAD:main
