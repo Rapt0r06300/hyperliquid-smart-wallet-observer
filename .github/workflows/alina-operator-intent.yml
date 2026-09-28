@@ -9,7 +9,7 @@ on:
         options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, drain, pause, resume, retry]
       family:
         description: "Strategy family or all families"
-        required: true
+        required: false
         default: all
         type: choice
         options: [all, copy_vault, lead_lag, cross_venue_dislocation]
