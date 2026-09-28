@@ -402,11 +402,11 @@ def _decision_file_candidates(
 ) -> tuple[Path, ...]:
     """Return decision logs in UI-friendly priority order.
 
-    The old HyperSmart exporter writes under ``logs/logs à envoyer`` while the
-    dYdX simulation engine writes append-only structured decisions under
-    ``logs/structured/decisions.jsonl``. Prefer the small/latest files first,
-    then the dYdX structured log, and keep the huge append-only export last so a
-    dashboard refresh cannot freeze on a multi-GB historical file.
+    The active Hyperliquid runtime writes under ``logs/logs à envoyer``.
+    The dYdX simulation engine writes append-only structured decisions under
+    ``logs/structured/decisions.jsonl``; that source is included only when
+    ``autoriser_dydx_legacy=True``. The default path therefore cannot silently
+    present legacy venue economics as Hyperliquid paper evidence.
     """
 
     candidates = [
