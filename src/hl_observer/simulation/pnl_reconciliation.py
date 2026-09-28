@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,21 +23,32 @@ def reconcile_pnl(
     actual_equity_usdc: float,
     tolerance_usdc: float = 0.0001,
 ) -> PnlReconciliation:
-    expected = (
-        float(starting_balance_usdc)
-        + float(realized_pnl_usdc)
-        + float(unrealized_pnl_usdc)
-        - float(fees_paid_usdc)
-        + float(funding_net_usdc)
+    values = (
+        starting_balance_usdc,
+        realized_pnl_usdc,
+        unrealized_pnl_usdc,
+        fees_paid_usdc,
+        funding_net_usdc,
+        actual_equity_usdc,
+        tolerance_usdc,
     )
-    diff = float(actual_equity_usdc) - expected
+    try:
+        parsed = tuple(float(value) for value in values)
+    except (TypeError, ValueError, OverflowError):
+        parsed = ()
+    if len(parsed) != len(values) or any(not math.isfinite(value) for value in parsed) or parsed[-1] < 0.0:
+        return PnlReconciliation(False, 0.0, 0.0, 0.0, ("PNL_EVIDENCE_NONFINITE",))
+
+    starting, realized, unrealized, fees, funding, actual, tolerance = parsed
+    expected = starting + realized + unrealized - fees + funding
+    diff = actual - expected
     warnings: list[str] = []
-    if abs(diff) > float(tolerance_usdc):
+    if abs(diff) > tolerance:
         warnings.append("PNL_RECONCILIATION_MISMATCH")
     return PnlReconciliation(
         ok=not warnings,
         expected_equity_usdc=round(expected, 10),
-        actual_equity_usdc=round(float(actual_equity_usdc), 10),
+        actual_equity_usdc=round(actual, 10),
         diff_usdc=round(diff, 10),
         warnings=tuple(warnings),
     )
