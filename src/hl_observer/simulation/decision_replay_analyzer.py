@@ -16,7 +16,7 @@ DECISION_LOG_FILES = (
 )
 STRUCTURED_DECISION_LOG = ("structured", "decisions.jsonl")
 SUMMARY_CACHE_FILE = "simulation_log_summary_cache.json"
-SUMMARY_CACHE_VERSION = 2
+SUMMARY_CACHE_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,10 +408,15 @@ def _decision_file_candidates(log_dir: Path) -> tuple[Path, ...]:
 
 def _file_signature(path: Path) -> dict[str, Any]:
     stat = path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
     return {
         "source_path": str(path.resolve()),
         "source_size": stat.st_size,
         "source_mtime_ns": stat.st_mtime_ns,
+        "source_sha256": digest.hexdigest(),
     }
 
 
@@ -427,21 +432,54 @@ def _read_summary_cache(log_dir: Path, signature: dict[str, Any]) -> ReplayAnaly
         return None
     if payload.get("signature") != signature:
         return None
+    try:
+        counts = {
+            key: int(payload.get(key) or 0)
+            for key in (
+                "event_count", "accepted_count", "refused_count",
+                "positive_count", "negative_count", "unmeasurable_count",
+            )
+        }
+        total_pnl = float(payload.get("total_estimated_pnl_usdc") or 0.0)
+        total_fees = float(payload.get("total_fees_usdc") or 0.0)
+        pnl_by_coin = {str(k): float(v) for k, v in dict(payload.get("pnl_by_coin") or {}).items()}
+        pnl_by_wallet = {str(k): float(v) for k, v in dict(payload.get("pnl_by_wallet") or {}).items()}
+        action_counts = {str(k): int(v) for k, v in dict(payload.get("action_counts") or {}).items()}
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        any(value < 0 for value in counts.values())
+        or not math.isfinite(total_pnl)
+        or not math.isfinite(total_fees)
+        or any(not math.isfinite(value) for value in pnl_by_coin.values())
+        or any(not math.isfinite(value) for value in pnl_by_wallet.values())
+        or any(value < 0 for value in action_counts.values())
+    ):
+        return None
+    reasons = payload.get("top_refusal_reasons", [])
+    if not isinstance(reasons, list):
+        return None
+    try:
+        top_reasons = tuple((str(reason), int(count)) for reason, count in reasons)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if any(count < 0 for _, count in top_reasons):
+        return None
     return ReplayAnalysis(
         source_dir=log_dir,
         events=(),
-        event_count=int(payload.get("event_count") or 0),
-        accepted_count=int(payload.get("accepted_count") or 0),
-        refused_count=int(payload.get("refused_count") or 0),
-        positive_count=int(payload.get("positive_count") or 0),
-        negative_count=int(payload.get("negative_count") or 0),
-        total_estimated_pnl_usdc=float(payload.get("total_estimated_pnl_usdc") or 0.0),
-        total_fees_usdc=float(payload.get("total_fees_usdc") or 0.0),
-        top_refusal_reasons=tuple((str(reason), int(count)) for reason, count in payload.get("top_refusal_reasons", [])),
-        pnl_by_coin={str(k): float(v) for k, v in dict(payload.get("pnl_by_coin") or {}).items()},
-        pnl_by_wallet={str(k): float(v) for k, v in dict(payload.get("pnl_by_wallet") or {}).items()},
-        action_counts={str(k): int(v) for k, v in dict(payload.get("action_counts") or {}).items()},
-        unmeasurable_count=int(payload.get("unmeasurable_count") or 0),
+        event_count=counts["event_count"],
+        accepted_count=counts["accepted_count"],
+        refused_count=counts["refused_count"],
+        positive_count=counts["positive_count"],
+        negative_count=counts["negative_count"],
+        total_estimated_pnl_usdc=total_pnl,
+        total_fees_usdc=total_fees,
+        top_refusal_reasons=top_reasons,
+        pnl_by_coin=pnl_by_coin,
+        pnl_by_wallet=pnl_by_wallet,
+        action_counts=action_counts,
+        unmeasurable_count=counts["unmeasurable_count"],
     )
 
 
