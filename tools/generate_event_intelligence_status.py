@@ -44,7 +44,11 @@ def _load_component_contracts(path: Path) -> dict[int, str]:
     raise SystemExit("unable to parse canonical Event Intelligence component registry")
 
 
-def _resolve_reference_files(root: Path, references: str) -> list[str]:
+def _resolve_reference_files(
+    root: Path,
+    references: str,
+    files_by_name: dict[str, list[Path]],
+) -> list[str]:
     """Resolve explicit paths/module names conservatively into real repository files."""
     resolved: set[str] = set()
     for raw_token in re.split(r"\s*\+\s*|\s*,\s*", references):
@@ -65,12 +69,12 @@ def _resolve_reference_files(root: Path, references: str) -> list[str]:
 
         name = token.split(":")[0].strip()
         if name.endswith(".py"):
-            for path in list(root.rglob(Path(name).name))[:12]:
+            for path in files_by_name.get(Path(name).name, ())[:12]:
                 resolved.add(str(path.relative_to(root)))
             continue
 
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-            for path in list(root.rglob(f"{name}.py"))[:12]:
+            for path in files_by_name.get(f"{name}.py", ())[:12]:
                 resolved.add(str(path.relative_to(root)))
 
     return sorted(resolved)
@@ -123,6 +127,15 @@ def main() -> int:
         except (OSError, UnicodeDecodeError):
             continue
 
+    files_by_name: dict[str, list[Path]] = {}
+    for candidate in python_files:
+        files_by_name.setdefault(candidate.name, []).append(candidate)
+    test_text = {
+        candidate: text
+        for candidate, text in file_text.items()
+        if candidate.name.startswith("test_")
+    }
+
     component_contracts = _load_component_contracts(root / args.component_registry)
 
     rows = []
@@ -139,8 +152,8 @@ def main() -> int:
         component_contract = component_contracts.get(number, "")
 
         files = sorted(
-            set(_resolve_reference_files(root, refs))
-            | set(_resolve_reference_files(root, component_contract))
+            set(_resolve_reference_files(root, refs, files_by_name))
+            | set(_resolve_reference_files(root, component_contract, files_by_name))
         )
         callers = _find_callers(root=root, evidence_files=files, python_text=file_text)
 
@@ -165,12 +178,8 @@ def main() -> int:
             Path(evidence).stem for evidence in files if Path(evidence).suffix == ".py"
         }
         if python_evidence_stems:
-            for candidate in root.rglob("test_*.py"):
-                try:
-                    test_text = candidate.read_text(encoding="utf-8")
-                except (OSError, UnicodeDecodeError):
-                    continue
-                if any(stem in test_text for stem in python_evidence_stems):
+            for candidate, candidate_text in test_text.items():
+                if any(stem in candidate_text for stem in python_evidence_stems):
                     tests.add(str(candidate.relative_to(root)))
 
         proof_status = (
