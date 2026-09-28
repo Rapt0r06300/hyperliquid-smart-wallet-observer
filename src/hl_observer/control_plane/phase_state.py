@@ -79,7 +79,7 @@ def validate_phase_state(state: AlinaPhaseState) -> None:
     if not isinstance(state.epoch, int) or isinstance(state.epoch, bool) or state.epoch < 1:
         raise ValueError(f"Epoch must be positive integer, got: {state.epoch}")
 
-    requested_at = parse_iso_utc(state.requested_at_utc)
+    parse_iso_utc(state.requested_at_utc)
     if not isinstance(state.requested_by, str) or not state.requested_by.strip():
         raise ValueError("requested_by must be a non-empty string")
     if state.request_id is not None and (not isinstance(state.request_id, str) or len(state.request_id) != 64 or any(ch not in "0123456789abcdef" for ch in state.request_id)):
@@ -130,5 +130,3 @@ def validate_phase_state(state: AlinaPhaseState) -> None:
         cutoff = parse_iso_utc(state.collection_cutoff_at_utc) if state.collection_cutoff_at_utc else None
         if started is None or cutoff is None or cutoff < started:
             raise ValueError("ANALYZE cutoff must be at or after collection start")
-        if started < requested_at:
-            raise ValueError("ANALYZE collection start must not precede phase request")
