@@ -68,12 +68,15 @@ class BinanceDepthBook:
         self.asks: dict[float, float] = {}
         self.desync: str | None = None
         self._diff_applique = False
+        self.invalid_levels = 0
 
     # ---- ancrage ----
     def appliquer_snapshot(self, *, last_update_id: int, bids: Iterable[Any] = (), asks: Iterable[Any] = ()) -> None:
         self.last_update_id = int(last_update_id)
-        self.bids = {p: q for p, q in _paires(bids) if q > 0}
-        self.asks = {p: q for p, q in _paires(asks) if q > 0}
+        raw_bids, raw_asks = list(bids or ()), list(asks or ())
+        self.bids = {p: q for p, q in _paires(raw_bids) if q > 0}
+        self.asks = {p: q for p, q in _paires(raw_asks) if q > 0}
+        self.invalid_levels = (len(raw_bids) - len(self.bids)) + (len(raw_asks) - len(self.asks))
         self.desync = None
         self._diff_applique = False
 
@@ -149,6 +152,7 @@ class BinanceDepthBook:
             "last_update_id": self.last_update_id,
             "bids": [[p, q] for p, q in bids],
             "asks": [[p, q] for p, q in asks],
+            "invalid_levels": self.invalid_levels,
             "best_bid": self.best_bid(), "best_ask": self.best_ask(), "mid": self.mid(),
             "real_execution": False,
         }
