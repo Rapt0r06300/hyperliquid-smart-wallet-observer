@@ -6,6 +6,7 @@ bound or the uncertainty is too large.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from statistics import median
 
@@ -16,9 +17,16 @@ class ClockSample:
     local_receive_ms: int
     server_ms: int
 
+    def __post_init__(self) -> None:
+        values = (self.local_send_ms, self.local_receive_ms, self.server_ms)
+        if any(isinstance(value, bool) or int(value) < 0 for value in values):
+            raise ValueError("clock timestamps must be non-negative")
+        if self.local_receive_ms < self.local_send_ms:
+            raise ValueError("clock sample receive time precedes send time")
+
     @property
     def round_trip_ms(self) -> int:
-        return max(0, self.local_receive_ms - self.local_send_ms)
+        return self.local_receive_ms - self.local_send_ms
 
     @property
     def midpoint_local_ms(self) -> float:
@@ -53,14 +61,20 @@ class ClockSynchronizer:
         min_samples: int = 3,
     ) -> None:
         self.venue = venue
+        if (isinstance(max_offset_ms, bool) or not math.isfinite(float(max_offset_ms))
+                or float(max_offset_ms) < 0.0):
+            raise ValueError("max_offset_ms must be finite and >= 0")
+        if (isinstance(max_uncertainty_ms, bool) or not math.isfinite(float(max_uncertainty_ms))
+                or float(max_uncertainty_ms) < 0.0):
+            raise ValueError("max_uncertainty_ms must be finite and >= 0")
+        if isinstance(min_samples, bool) or int(min_samples) < 1:
+            raise ValueError("min_samples must be >= 1")
         self.max_offset_ms = float(max_offset_ms)
         self.max_uncertainty_ms = float(max_uncertainty_ms)
-        self.min_samples = max(1, int(min_samples))
+        self.min_samples = int(min_samples)
         self._samples: list[ClockSample] = []
 
     def add_sample(self, sample: ClockSample) -> ClockSyncState:
-        if sample.local_receive_ms < sample.local_send_ms:
-            raise ValueError("clock sample receive time precedes send time")
         self._samples.append(sample)
         self._samples = self._samples[-31:]
         return self.state()
