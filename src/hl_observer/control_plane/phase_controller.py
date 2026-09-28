@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -60,10 +62,20 @@ class PhaseController:
         if not self.state_file_path:
             return
         self.state_file_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.state_file_path.with_suffix(".tmp")
-        with open(temp_path, "w", encoding="utf-8") as f:
-            json.dump(self._state.to_dict(), f, indent=2, sort_keys=True)
-        temp_path.replace(self.state_file_path)
+        fd, temp_name = tempfile.mkstemp(prefix=f".{self.state_file_path.name}.", dir=self.state_file_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(self._state.to_dict(), handle, indent=2, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_name, self.state_file_path)
+        except BaseException:
+            try:
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+            raise
 
     def transition_to_collect(
         self,
