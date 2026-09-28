@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
@@ -303,7 +304,7 @@ def _mid_from_event(event: Mapping[str, Any]) -> float | None:
         try:
             bid = float(summary["best_bid"])
             ask = float(summary["best_ask"])
-            if 0 < bid <= ask:
+            if math.isfinite(bid) and math.isfinite(ask) and 0 < bid <= ask:
                 return (bid + ask) / 2.0
         except (KeyError, TypeError, ValueError):
             import logging as _lg  # panne rendue VISIBLE (interdiction des except:pass muets)
@@ -320,7 +321,7 @@ def _mid_from_event(event: Mapping[str, Any]) -> float | None:
         ask = float(levels[1][0]["px"])
     except (KeyError, IndexError, TypeError, ValueError):
         return None
-    return (bid + ask) / 2.0 if 0 < bid <= ask else None
+    return (bid + ask) / 2.0 if math.isfinite(bid) and math.isfinite(ask) and 0 < bid <= ask else None
 
 
 __all__ = [
