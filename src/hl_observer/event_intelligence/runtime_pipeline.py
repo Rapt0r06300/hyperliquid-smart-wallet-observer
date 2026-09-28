@@ -101,7 +101,11 @@ def build_runtime_evidence(
         pattern = build_propagation_pattern(observations)
         if pattern is not None:
             propagation_patterns.append(pattern)
-        if len(ordered_cluster) >= 2:
+        if (
+            len(ordered_cluster) >= 2
+            and ordered_cluster[0].source_tier.value == "PRIMARY_OFFICIAL"
+            and ordered_cluster[-1].source_tier.value != "PRIMARY_OFFICIAL"
+        ):
             latency = compare_source_latency(ordered_cluster[0], ordered_cluster[-1])
             source_latency_rows.append({
                 "cluster_id": cluster.cluster_id,
