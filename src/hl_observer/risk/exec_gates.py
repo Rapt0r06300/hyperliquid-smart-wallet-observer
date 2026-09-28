@@ -1,19 +1,9 @@
-"""Execution gates with V9 default thresholds (S6 — mlmodelpoly A7 + Composio).
-
-Hard, deny-by-default vetoes evaluated before any paper entry:
-  * STALE_THRESHOLD_SEC = 5      (signal age)
-  * MIN_DEPTH            = 200    (USDC top-of-book/aggregated depth)
-  * MAX_SPREAD_BPS       = 500    (spread veto)
-  * COOLDOWN_SEC         = 30     (min gap between entries on a key)
-
-Composes the single-purpose guards already in ``hl_observer.risk``.
-
-SAFETY: a passed gate authorises a *paper* intent only; never a real order.
-"""
+"""Fail-closed execution gates for paper-only entry intents."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 from hl_observer.risk.liquidity_guard import liquidity_ok
 from hl_observer.risk.slippage_guard import slippage_ok
@@ -54,32 +44,47 @@ class ExecGateResult:
         return not self.passed
 
 
+def _finite_nonnegative(value: object) -> bool:
+    try:
+        return math.isfinite(float(value)) and float(value) >= 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def evaluate_exec_gates(ctx: ExecGateContext, config: ExecGateConfig | None = None) -> ExecGateResult:
     cfg = config or ExecGateConfig()
     vetoes: list[str] = []
+    limits = (cfg.stale_threshold_sec, cfg.min_depth_usdc, cfg.max_spread_bps, cfg.cooldown_sec, cfg.max_slippage_bps)
+    if not all(_finite_nonnegative(value) for value in limits):
+        vetoes.append("EXEC_GATE_CONFIG_INVALID")
 
-    if not data_fresh(ctx.signal_age_ms, cfg.stale_threshold_sec * 1000):
+    if not data_fresh(ctx.signal_age_ms, float(cfg.stale_threshold_sec) * 1000.0):
         vetoes.append("STALE_SIGNAL")
 
     if ctx.spread_bps is None:
         vetoes.append("SPREAD_UNKNOWN")
+    elif not _finite_nonnegative(ctx.spread_bps):
+        vetoes.append("SPREAD_INVALID")
     elif ctx.spread_bps > cfg.max_spread_bps:
         vetoes.append("SPREAD_TOO_WIDE")
 
     if ctx.depth_usdc is None:
         vetoes.append("DEPTH_UNKNOWN")
+    elif not _finite_nonnegative(ctx.depth_usdc):
+        vetoes.append("DEPTH_INVALID")
     elif not liquidity_ok(ctx.depth_usdc, cfg.min_depth_usdc):
         vetoes.append("DEPTH_TOO_LOW")
 
-    if ctx.estimated_slippage_bps is not None and not slippage_ok(
-        ctx.estimated_slippage_bps, cfg.max_slippage_bps
-    ):
-        vetoes.append("SLIPPAGE_TOO_HIGH")
+    if ctx.estimated_slippage_bps is not None:
+        if not _finite_nonnegative(ctx.estimated_slippage_bps):
+            vetoes.append("SLIPPAGE_INVALID")
+        elif not slippage_ok(ctx.estimated_slippage_bps, cfg.max_slippage_bps):
+            vetoes.append("SLIPPAGE_TOO_HIGH")
 
-    if (
-        ctx.seconds_since_last_entry is not None
-        and ctx.seconds_since_last_entry < cfg.cooldown_sec
-    ):
-        vetoes.append("COOLDOWN_ACTIVE")
+    if ctx.seconds_since_last_entry is not None:
+        if not _finite_nonnegative(ctx.seconds_since_last_entry):
+            vetoes.append("COOLDOWN_INVALID")
+        elif ctx.seconds_since_last_entry < cfg.cooldown_sec:
+            vetoes.append("COOLDOWN_ACTIVE")
 
-    return ExecGateResult(passed=not vetoes, vetoes=tuple(vetoes))
+    return ExecGateResult(passed=not vetoes, vetoes=tuple(dict.fromkeys(vetoes)))
