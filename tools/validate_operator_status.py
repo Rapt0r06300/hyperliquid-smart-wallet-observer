@@ -38,9 +38,11 @@ def main() -> int:
         if intent.get("phase") == "ANALYZE" and not intent.get("source_collection_epoch"):
             raise SystemExit("OPERATOR_INTENT_SOURCE_EPOCH_MISSING")
     if intent.get("schema_version") == "alina.operator_intent.v2":
-        for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc"):
+        for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc", "strategy_family"):
             if status.get(key) != intent.get(key):
                 raise SystemExit(f"OPERATOR_STATUS_{key.upper()}_MISMATCH")
+    if intent.get("strategy_family", "all") not in {"all", "copy_vault", "lead_lag", "cross_venue_dislocation"}:
+        raise SystemExit("OPERATOR_INTENT_FAMILY_INVALID")
     expected_digest = hashlib.sha256(json.dumps(intent, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     if status.get("intent_digest") != expected_digest:
         raise SystemExit("OPERATOR_STATUS_INTENT_DIGEST_MISMATCH")
