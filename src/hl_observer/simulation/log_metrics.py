@@ -102,11 +102,13 @@ def iter_decision_rows(
     log_dir: Path,
     *,
     prefer_append_only: bool = False,
+    historical: bool = False,
     autoriser_dydx_legacy: bool | None = None,   # None -> AUTORISER_DYDX_LEGACY (defini plus bas)
 ) -> Iterable[tuple[Path, int, dict[str, Any]]]:
     if autoriser_dydx_legacy is None:
         autoriser_dydx_legacy = AUTORISER_DYDX_LEGACY
     for path in _existing_decision_files(log_dir, prefer_append_only=prefer_append_only,
+                                         historical=historical,
                                          autoriser_dydx_legacy=autoriser_dydx_legacy):
         with path.open("r", encoding="utf-8-sig") as handle:
             for line_number, line in enumerate(handle, start=1):
@@ -123,6 +125,7 @@ def iter_decision_rows(
 
 
 def analyze_logs_streaming(log_dir: Path, *, prefer_append_only: bool = False,
+                           historical: bool = False,
                            autoriser_dydx_legacy: bool | None = None) -> LogMetricsReport:
     """Par defaut : sources du runtime HYPERLIQUID uniquement (voir AUTORISER_DYDX_LEGACY).
     Le panneau dYdX passe explicitement autoriser_dydx_legacy=True : SES chiffres, SON moteur."""
@@ -131,10 +134,12 @@ def analyze_logs_streaming(log_dir: Path, *, prefer_append_only: bool = False,
     report = LogMetricsReport(
         source_dir=log_dir,
         source_files=tuple(_existing_decision_files(log_dir, prefer_append_only=prefer_append_only,
+                                                    historical=historical,
                                                     autoriser_dydx_legacy=autoriser_dydx_legacy)),
     )
     seen_event_keys: set[str] = set()
     for _path, _line_number, raw in iter_decision_rows(log_dir, prefer_append_only=prefer_append_only,
+                                                       historical=historical,
                                                        autoriser_dydx_legacy=autoriser_dydx_legacy):
         _apply_raw_row(report, raw, seen_event_keys=seen_event_keys, dedupe=False)
     supplemental_files: list[Path] = []
@@ -419,6 +424,7 @@ def _existing_decision_files(
     log_dir: Path,
     *,
     prefer_append_only: bool = False,
+    historical: bool = False,
     autoriser_dydx_legacy: bool = AUTORISER_DYDX_LEGACY,
 ) -> list[Path]:
     """Return one active decision source, preferring fresh/small logs.
@@ -451,7 +457,7 @@ def _existing_decision_files(
         )
     # 1er passage : une source VIVANTE (ecrite recemment). C'est le cas normal.
     for path in candidates:
-        if path.exists() and path.stat().st_size > 0 and not _source_perimee(path):
+        if path.exists() and path.stat().st_size > 0 and (historical or not _source_perimee(path)):
             return [path]
     # 2e passage : rien de frais. On retourne le vide plutot qu'une source perimee — un
     # « aucune decision journalisee » se remarque et se corrige ; un compteur fige d'une
