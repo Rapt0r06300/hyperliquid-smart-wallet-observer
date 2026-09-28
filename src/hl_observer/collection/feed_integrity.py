@@ -156,6 +156,7 @@ class FeedIntegrityState:
             "EXCHANGE_TIME_REGRESSION",
             "RECEIVE_TIME_REGRESSION",
             "MONOTONIC_TIME_REGRESSION",
+            "MISSING_EXCHANGE_TIMESTAMP",
             "MISSING_RECEIVE_TIMESTAMP",
             "EXCHANGE_TIMESTAMP_IN_FUTURE",
         }
@@ -170,6 +171,7 @@ class FeedIntegrityState:
                 self.exchange_time_regressions,
                 self.receive_time_regressions,
                 self.monotonic_regressions,
+                self.missing_exchange_ts,
                 self.missing_receive_ts,
                 self.future_skew_violations,
             )
