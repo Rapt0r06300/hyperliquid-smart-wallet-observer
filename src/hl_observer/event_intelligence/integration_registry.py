@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, dataclass
 
 from hl_observer.event_intelligence.idea_coverage import IDEA_COVERAGE
+from hl_observer.event_intelligence.live_status import wiring_contract
 
 STRATEGY_FAMILIES = (
     "copy_vault",
@@ -95,6 +96,7 @@ def integration_contract() -> dict[str, object]:
             }
         ),
         "proof_state": "STRUCTURAL_ONLY",
+        "wiring": wiring_contract(),
         "proof_of_pnl_allowed": False,
         "paper_only": True,
         "read_only": True,
