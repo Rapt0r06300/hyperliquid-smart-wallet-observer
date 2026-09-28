@@ -15,6 +15,7 @@ blocked entry simply means "no paper entry this tick".
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,11 +62,18 @@ def evaluate_entry(
 
     if circuit_tripped:
         reasons.append("CIRCUIT_BREAKER_TRIPPED")
-    if cfg.require_leader_quality and leader_qualified is False:
-        reasons.append("LEADER_NOT_SMART_MONEY")
+    if cfg.require_leader_quality and leader_qualified is not True:
+        reasons.append("LEADER_QUALITY_UNPROVEN" if leader_qualified is None else "LEADER_NOT_SMART_MONEY")
     if exec_blocked:
         reasons.extend(exec_reasons or ("EXEC_GATE_BLOCKED",))
-    if edge_remaining_bps is not None and edge_remaining_bps < cfg.min_edge_bps:
+    try:
+        edge = float(edge_remaining_bps) if edge_remaining_bps is not None else None
+        minimum = float(cfg.min_edge_bps)
+    except (TypeError, ValueError, OverflowError):
+        edge = minimum = None
+    if edge is None or minimum is None or not math.isfinite(edge) or not math.isfinite(minimum):
+        reasons.append("EDGE_REMAINING_UNMEASURED")
+    elif edge < minimum:
         reasons.append("EDGE_REMAINING_TOO_LOW")
 
     ordered = _dedupe(reasons)
