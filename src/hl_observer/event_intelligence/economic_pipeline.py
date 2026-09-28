@@ -7,8 +7,10 @@ from dataclasses import asdict
 from hl_observer.collection.native_venue_market import NativeMarketSnapshot
 from hl_observer.event_intelligence.candidates import evaluate_event_lead_lag_candidate
 from hl_observer.event_intelligence.module_bridges import (
+    LeaderAction,
     build_cross_venue_event_context,
     build_lead_lag_event_context,
+    measure_copy_vault_event_reactions,
 )
 from hl_observer.event_intelligence.outcomes import evaluate_candidate_markout
 from hl_observer.event_intelligence.regimes import map_event_to_assets
@@ -21,6 +23,7 @@ def build_economic_research_evidence(
     snapshots: Iterable[NativeMarketSnapshot],
     *,
     cost_model: Mapping[str, float | int | None] | None = None,
+    leader_actions: Iterable[LeaderAction] = (),
     horizon_ms: int = 60_000,
     notional_usd: float = 50.0,
 ) -> dict[str, object]:
@@ -29,6 +32,7 @@ def build_economic_research_evidence(
     event_rows = tuple(events)
     snapshot_rows = tuple(snapshots)
     costs = dict(cost_model or {})
+    action_rows = tuple(leader_actions)
     required = ("fees_bps", "slippage_bps", "latency_bps")
     costs_complete = all(costs.get(key) is not None for key in required)
     cost_floor = (
@@ -103,6 +107,23 @@ def build_economic_research_evidence(
                     prediction_delta_pp=world_event.probability_delta_pp,
                 ))
 
+    copy_vault_stats = {
+        family: {
+            leader: asdict(stats)
+            for leader, stats in measure_copy_vault_event_reactions(
+                event_rows,
+                action_rows,
+                event_family=family,
+            ).items()
+        }
+        for family in sorted({row.kind for row in event_rows if row.kind})
+    }
+    copy_observations = sum(
+        stats["observations"]
+        for family in copy_vault_stats.values()
+        for stats in family.values()
+    )
+
     scoreboards = {
         key: asdict(value)
         for key, value in build_scoreboard_slices(
@@ -123,8 +144,16 @@ def build_economic_research_evidence(
         "lead_lag_contexts": lead_contexts,
         "cross_venue_contexts": cross_contexts,
         "copy_vault_context": {
-            "status": "UNMEASURABLE",
-            "reason": "LEADER_ACTIONS_NOT_PROVIDED",
+            "status": "MEASURED" if copy_observations else "UNMEASURABLE",
+            "reason": (
+                "LEADER_EVENT_REACTIONS_MEASURED"
+                if copy_observations
+                else "LEADER_ACTIONS_OR_MATCHES_NOT_PROVIDED"
+            ),
+            "leader_action_count": len(action_rows),
+            "observation_count": copy_observations,
+            "by_event_family": copy_vault_stats,
+            "may_infer_motive": False,
         },
         "scoreboards": scoreboards,
         "reason_counts": dict(sorted(reasons.items())),
