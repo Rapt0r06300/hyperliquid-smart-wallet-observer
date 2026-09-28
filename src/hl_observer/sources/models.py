@@ -125,7 +125,8 @@ class SourceHealthSnapshot:
             raise ValueError("source_id is required")
         if self.age_ms is not None and self.age_ms < 0:
             raise ValueError("age_ms must be non-negative")
-        if self.consecutive_errors < 0 or self.samples < 0:
+        if (isinstance(self.consecutive_errors, bool) or isinstance(self.samples, bool)
+                or self.consecutive_errors < 0 or self.samples < 0):
             raise ValueError("health counters must be non-negative")
         if isinstance(self.success_rate, bool) or not math.isfinite(float(self.success_rate)):
             raise ValueError("success_rate must be finite")
