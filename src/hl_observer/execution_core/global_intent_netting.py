@@ -7,7 +7,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import math
-from typing idef netter(intentions: Iterable[dict[str, Any]]) -> dict[str, Any]:
+from typing import Any
+
+
+def netter(intentions: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate finite signed intents and preserve an input conservation receipt."""
     net: dict[tuple[str, str], float] = {}
     brut: dict[tuple[str, str], float] = {}
