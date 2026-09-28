@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import secrets
+import re
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "alina.resumable_campaign.v1"
@@ -119,6 +120,11 @@ def validate_manifest(m: CampaignManifest) -> None:
         raise ValueError(f"unsupported schema: {m.schema_version}")
     if m.kind not in CAMPAIGN_KINDS:
         raise ValueError("unknown campaign kind")
+    if m.operator_request_id is not None and (
+        not isinstance(m.operator_request_id, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", m.operator_request_id)
+    ):
+        raise ValueError("invalid operator_request_id")
     if m.status not in ALL_STATES:
         raise ValueError("invalid status")
     if not m.paper_only or not m.read_only or m.real_execution:
