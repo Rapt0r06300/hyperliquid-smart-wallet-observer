@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -33,12 +34,19 @@ def freeze_event_research(
         separators=(",", ":"),
         default=str,
     ).encode("utf-8")
+    cutoff = int(training_cutoff_ms)
+    created = int(created_at_ms)
+    if cutoff < 0 or created < 0 or created < cutoff:
+        raise ValueError("freeze timestamps must be non-negative and creation must follow cutoff")
+    method = str(methodology_version).strip()
+    if not method:
+        raise ValueError("methodology_version is required")
     return EventResearchFreeze(
         schema="alina.event_research_freeze.v1",
-        training_cutoff_ms=int(training_cutoff_ms),
-        created_at_ms=int(created_at_ms),
+        training_cutoff_ms=cutoff,
+        created_at_ms=created,
         config_sha256=hashlib.sha256(payload).hexdigest(),
-        methodology_version=str(methodology_version),
+        methodology_version=method,
     )
 
 
