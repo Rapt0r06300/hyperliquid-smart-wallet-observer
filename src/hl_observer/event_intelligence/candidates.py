@@ -8,6 +8,7 @@ candidate is UNMEASURABLE rather than silently promoted.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -38,6 +39,23 @@ class EventLeadLagConfig:
     min_confirming_venues: int = 1
 
     def __post_init__(self) -> None:
+        numeric = (
+            self.min_leader_move_bps,
+            self.min_gross_room_bps,
+            self.min_net_room_bps,
+            self.max_event_age_ms,
+            self.max_current_snapshot_age_ms,
+            self.max_baseline_age_ms,
+            self.min_news_importance,
+            self.min_news_credibility,
+            self.min_prediction_delta_pp,
+            self.min_cross_source_severity,
+            self.min_event_confidence,
+            self.min_corroboration_count,
+            self.min_confirming_venues,
+        )
+        if any(isinstance(value, bool) or not math.isfinite(float(value)) for value in numeric):
+            raise ValueError("candidate thresholds must be finite")
         if self.min_leader_move_bps <= 0:
             raise ValueError("min_leader_move_bps must be > 0")
         if self.min_gross_room_bps < 0 or self.min_net_room_bps < 0:
@@ -48,6 +66,9 @@ class EventLeadLagConfig:
             self.max_baseline_age_ms,
         ) <= 0:
             raise ValueError("age limits must be > 0")
+        if min(self.min_news_importance, self.min_news_credibility,
+               self.min_cross_source_severity) < 0:
+            raise ValueError("quality thresholds must be >= 0")
         if self.min_prediction_delta_pp <= 0:
             raise ValueError("min_prediction_delta_pp must be > 0")
         if not 0.0 <= float(self.min_event_confidence) <= 1.0:
@@ -107,10 +128,18 @@ def evaluate_event_lead_lag_candidate(
     required to be recent relative to the event ingest time.
     """
 
+    if isinstance(decision_ts_ms, bool):
+        raise ValueError("decision_ts_ms must be an integer")
     decision = int(decision_ts_ms)
     event = world_event.event
     target = canonical_coin(coin)
     hl_venue = str(hyperliquid_venue).strip().lower()
+    if cost_floor_bps is not None and (
+        isinstance(cost_floor_bps, bool)
+        or not math.isfinite(float(cost_floor_bps))
+        or float(cost_floor_bps) < 0.0
+    ):
+        raise ValueError("cost_floor_bps must be finite and >= 0")
     if not target:
         raise ValueError("coin is required")
     if decision < event.available_ts_ms:
@@ -293,8 +322,6 @@ def evaluate_event_lead_lag_candidate(
             **common,
         )
     cost_floor = float(cost_floor_bps)
-    if cost_floor < 0.0:
-        raise ValueError("cost_floor_bps must be >= 0")
     net_room = gross_room - cost_floor
     if net_room < float(config.min_net_room_bps):
         return _result(
