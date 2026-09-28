@@ -26,6 +26,13 @@ from hl_observer.event_intelligence.regimes import (
     map_event_to_assets,
 )
 from hl_observer.event_intelligence.source_catalog import build_source_catalog
+from hl_observer.event_intelligence.sequences import (
+    PropagationStage,
+    StageObservation,
+    build_propagation_pattern,
+    summarize_patterns,
+)
+from hl_observer.event_intelligence.validation import compare_source_latency
 
 
 def build_runtime_evidence(
@@ -49,6 +56,8 @@ def build_runtime_evidence(
     clusters = cluster_external_events(accepted)
     event_by_id = {event.event_id: event for event in accepted}
     provenance_rows: list[dict[str, object]] = []
+    source_latency_rows: list[dict[str, object]] = []
+    propagation_patterns = []
     for cluster in clusters:
         cluster_events = [event_by_id[event_id] for event_id in cluster.event_ids if event_id in event_by_id]
         if not cluster_events:
@@ -64,6 +73,35 @@ def build_runtime_evidence(
             "triangulated": score.triangulated,
             "corroboration_latency_ms": score.corroboration_latency_ms,
         })
+        ordered_cluster = sorted(cluster_events, key=lambda row: (row.ingest_ts_ms, row.source))
+        observations = []
+        for event in ordered_cluster:
+            stage = (
+                PropagationStage.PREDICTION
+                if event.event_type.value == "PREDICTION"
+                else PropagationStage.NEWS
+                if event.event_type.value == "NEWS"
+                else PropagationStage.EXTERNAL_EVENT
+            )
+            observations.append(StageObservation(
+                stage=stage,
+                ts_ms=event.ingest_ts_ms,
+                source=event.source,
+                event_id=event.event_id,
+            ))
+        pattern = build_propagation_pattern(observations)
+        if pattern is not None:
+            propagation_patterns.append(pattern)
+        if len(ordered_cluster) >= 2:
+            latency = compare_source_latency(ordered_cluster[0], ordered_cluster[-1])
+            source_latency_rows.append({
+                "cluster_id": cluster.cluster_id,
+                "primary_source": latency.primary_source,
+                "aggregator_source": latency.aggregator_source,
+                "primary_ingest_ts_ms": latency.primary_ingest_ts_ms,
+                "aggregator_ingest_ts_ms": latency.aggregator_ingest_ts_ms,
+                "aggregator_lag_ms": latency.aggregator_lag_ms,
+            })
 
     regimes: Counter[str] = Counter()
     mapped_assets: Counter[str] = Counter()
@@ -120,6 +158,7 @@ def build_runtime_evidence(
         }
 
     catalog = build_source_catalog()
+    pattern_stats = summarize_patterns(propagation_patterns)
     return {
         "schema": "alina.event_intelligence_runtime_evidence.v1",
         "input_event_count": len(rows),
@@ -127,6 +166,16 @@ def build_runtime_evidence(
         "rejection_counts": dict(sorted(rejection_counts.items())),
         "cluster_count": len(clusters),
         "provenance": provenance_rows,
+        "source_latency": source_latency_rows,
+        "propagation_patterns": {
+            key: {
+                "observations": value.observations,
+                "median_total_latency_ms": value.median_total_latency_ms,
+                "p90_total_latency_ms": value.p90_total_latency_ms,
+                "median_inter_stage_ms": list(value.median_inter_stage_ms),
+            }
+            for key, value in sorted(pattern_stats.items())
+        },
         "regime_counts": dict(sorted(regimes.items())),
         "mapped_asset_counts": dict(sorted(mapped_assets.items())),
         "source_health": source_health,
