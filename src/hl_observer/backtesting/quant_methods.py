@@ -14,6 +14,10 @@ from statistics import fmean, pstdev
 def block_bootstrap(x, *, block: int = 10, n: int = 1000, seed: int = 7) -> list:
     """Rééchantillonne la SÉQUENCE par blocs (avec remise) -> distribution du total (net PnL)."""
     xs = [float(v) for v in x]
+    if any(not math.isfinite(v) for v in xs):
+        raise ValueError("bootstrap values must be finite")
+    if isinstance(block, bool) or int(block) < 1 or isinstance(n, bool) or int(n) < 1:
+        raise ValueError("bootstrap block and n must be >= 1")
     L = len(xs)
     if L == 0:
         return []
@@ -37,6 +41,10 @@ def block_bootstrap(x, *, block: int = 10, n: int = 1000, seed: int = 7) -> list
 # ---------- Différenciation fractionnaire (stationnarité sans perdre la mémoire) ----------
 def fractional_diff(series, d: float, *, thresh: float = 1e-4) -> list:
     xs = [float(v) for v in series]
+    if any(not math.isfinite(v) for v in xs) or not math.isfinite(float(d)) or not math.isfinite(float(thresh)):
+        raise ValueError("fractional_diff inputs must be finite")
+    if float(thresh) <= 0.0:
+        raise ValueError("thresh must be > 0")
     w = [1.0]
     k = 1
     while k < len(xs):
@@ -84,6 +92,10 @@ def _norm_ppf(p: float) -> float:
 def probabilistic_sharpe_ratio(sr: float, T: int, *, sr_star: float = 0.0,
                                skew: float = 0.0, kurt: float = 3.0) -> float:
     """Proba que le vrai Sharpe dépasse sr_star, vu T observations."""
+    if any(not math.isfinite(float(value)) for value in (sr, T, sr_star, skew, kurt)):
+        return 0.0
+    if isinstance(T, bool) or int(T) < 2:
+        return 0.0
     denom = math.sqrt(max(1e-9, 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr))
     z = (sr - sr_star) * math.sqrt(max(1, T - 1)) / denom
     return _norm_cdf(z)
@@ -100,6 +112,10 @@ def deflated_sharpe(
     kurt: float = 3.0,
 ) -> float:
     """Déflate le Sharpe pour le NOMBRE d'essais tentés (plus on cherche, plus le seuil monte)."""
+    if any(not math.isfinite(float(value)) for value in (sr, T, n_trials, skew, kurt)):
+        return 0.0
+    if isinstance(T, bool) or int(T) < 2 or isinstance(n_trials, bool) or int(n_trials) < 1:
+        return 0.0
     empirical = [float(value) for value in (trial_sharpes or ()) if math.isfinite(float(value))]
     if empirical:
         n_trials = max(int(n_trials), len(empirical))
@@ -121,6 +137,8 @@ def deflated_sharpe(
 # ---------- Exposant de Hurst (mean-reverting < 0.5 < trending) ----------
 def hurst_exponent(series, *, max_lag: int = 20) -> float:
     xs = [float(v) for v in series]
+    if any(not math.isfinite(v) for v in xs) or isinstance(max_lag, bool) or int(max_lag) < 3:
+        return 0.5
     if len(xs) < max_lag + 2:
         return 0.5
     ll, tt = [], []
@@ -141,6 +159,8 @@ def hurst_exponent(series, *, max_lag: int = 20) -> float:
 # ---------- Entropie de Shannon (mesure de prédictibilité) ----------
 def shannon_entropy(values, *, bins: int = 10) -> float:
     xs = [float(v) for v in values]
+    if any(not math.isfinite(v) for v in xs) or isinstance(bins, bool) or int(bins) < 1:
+        return 0.0
     if len(xs) < 2:
         return 0.0
     lo, hi = min(xs), max(xs)
