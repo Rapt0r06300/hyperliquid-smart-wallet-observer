@@ -23,6 +23,7 @@ from hl_observer.event_intelligence.direct_sources import (
     normalize_gdelt_articles,
     normalize_usgs,
 )
+from hl_observer.event_intelligence.economic_pipeline import build_economic_research_evidence
 from hl_observer.event_intelligence.integration_registry import integration_contract
 from hl_observer.event_intelligence.runtime_pipeline import (
     build_market_response_evidence,
@@ -163,6 +164,7 @@ def build_public_event_bundle(
     archive = EventIntelligenceArchive(output / "raw" / "events_r2.jsonl")
     source_status: dict[str, dict[str, object]] = {}
     collected_events = []
+    collected_world_events = []
 
     for source_id in SOURCE_ORDER:
         try:
@@ -174,6 +176,7 @@ def build_public_event_bundle(
             events = _normalize(source_id, payload, received_ts_ms=now_ms)
             results = archive.append_many(events)
             collected_events.extend(row.event for row in events)
+            collected_world_events.extend(events)
             appended = sum(1 for result in results if result.appended)
             source_status[source_id] = {
                 "status": "COLLECTED" if appended else "NO_DATA",
@@ -213,12 +216,16 @@ def build_public_event_bundle(
         expected_sources=EXPECTED_EVENT_SOURCES,
     )
     market_response = build_market_response_evidence(collected_events, ())
+    economic_research = build_economic_research_evidence(collected_world_events, ())
     research_protocol = build_research_protocol_evidence(
         (),
         now_ms=now_ms,
         methodology_version="event-intelligence-v1",
         config={"collection_run_id": str(collection_run_id)},
     )
+    economic_research_digest = hashlib.sha256(
+        json.dumps(economic_research, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     market_response_digest = hashlib.sha256(
         json.dumps(market_response, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -241,6 +248,8 @@ def build_public_event_bundle(
             "schema": runtime_evidence["schema"],
             "runtime_evidence_sha256": runtime_digest,
             "accepted_event_count": runtime_evidence["accepted_event_count"],
+            "economic_research_sha256": economic_research_digest,
+            "economic_research_state": economic_research["proof_state"],
             "market_response_sha256": market_response_digest,
             "market_response_state": market_response["proof_state"],
             "research_protocol_sha256": research_protocol_digest,
@@ -261,6 +270,7 @@ def build_public_event_bundle(
             "source_status": source_status,
             "event_intelligence": contract,
             "event_intelligence_runtime": runtime_evidence,
+            "event_intelligence_economic_research": economic_research,
             "event_intelligence_market_response": market_response,
             "event_intelligence_research_protocol": research_protocol,
             "read_only": True,
