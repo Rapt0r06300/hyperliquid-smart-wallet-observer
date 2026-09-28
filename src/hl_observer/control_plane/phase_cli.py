@@ -36,8 +36,14 @@ def _safe_identity(value: str) -> str:
     return value
 
 
+def _request_id(value: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{64}", value or ""):
+        raise argparse.ArgumentTypeError("request_id must be an exact lowercase SHA-256")
+    return value
+
+
 def _request_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--request-id", required=True, type=_safe_identity)
+    parser.add_argument("--request-id", required=True, type=_request_id)
     parser.add_argument("--requested-by", default="operator", type=_safe_identity)
 
 
@@ -181,10 +187,14 @@ def _write_intent(args, controller: PhaseController, intent: str) -> int:
         "real_execution": False,
     }
     if args.intent_file:
-        Path(args.intent_file).write_text(
-            json.dumps(envelope, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        target = Path(args.intent_file)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(envelope, sort_keys=True, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
     print(json.dumps(envelope, indent=2, sort_keys=True))
     return 0
 
