@@ -7,6 +7,12 @@ on:
         required: true
         type: choice
         options: [start_collection, analyze, replay, backtest, oos, forward_paper, module_pnl_proof, scoreboard, full_cycle, pause, resume, retry]
+      family:
+        description: "Strategy family or all families"
+        required: true
+        default: all
+        type: choice
+        options: [all, copy_vault, lead_lag, cross_venue_dislocation]
       request_id:
         description: "Idempotent request identity"
         required: true
@@ -36,6 +42,7 @@ jobs:
         env:
           INTENT: "${{ inputs.intent }}"
           REQUEST_ID: "${{ inputs.request_id }}"
+          FAMILY: "${{ inputs.family }}"
           REQUESTED_BY: "${{ inputs.requested_by }}"
           CONFIG_JSON: "${{ inputs.config_json }}"
         run: |
@@ -50,6 +57,10 @@ jobs:
             raise SystemExit("requested_by contains unsupported characters")
           config=json.loads(os.environ["CONFIG_JSON"])
           if not isinstance(config,dict): raise SystemExit("config_json must be object")
+          family=os.environ["FAMILY"]
+          if family not in {"all","copy_vault","lead_lag","cross_venue_dislocation"}:
+            raise SystemExit("unsupported strategy family")
+          if family != "all": config["strategy_family"]=family
           phase_path=pathlib.Path("control/alina-phase.json")
           if not phase_path.is_file():
             raise SystemExit("canonical phase state is missing")
@@ -149,6 +160,7 @@ jobs:
           DISPATCH_TOKEN: ${{ secrets.ALINA_DATASET_DISPATCH_TOKEN }}
           REQUEST_ID: ${{ inputs.request_id }}
           INTENT: ${{ inputs.intent }}
+          FAMILY: ${{ inputs.family }}
           MAIN_CODE_SHA: ${{ github.sha }}
           CONFIG_JSON: ${{ inputs.config_json }}
         run: |
@@ -163,6 +175,7 @@ jobs:
               "client_payload":{
                   "request_id":os.environ["REQUEST_ID"],
                   "intent":os.environ["INTENT"],
+                  "strategy_family":os.environ["FAMILY"],
                   "main_code_sha":os.environ["MAIN_CODE_SHA"],
                   "phase":phase.get("phase"),
                   "phase_epoch":phase.get("epoch"),
