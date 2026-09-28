@@ -23,6 +23,7 @@ from hl_observer.event_intelligence.direct_sources import (
     normalize_usgs,
 )
 from hl_observer.event_intelligence.integration_registry import integration_contract
+from hl_observer.event_intelligence.runtime_pipeline import build_runtime_evidence
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
 
 SOURCE_ORDER = ("usgs_earthquakes", "nasa_eonet", "gdacs", "gdelt_doc")
@@ -155,6 +156,7 @@ def build_public_event_bundle(
     source_client = client or DirectSourceReadOnlyClient(timeout_s=20.0)
     archive = EventIntelligenceArchive(output / "raw" / "events_r2.jsonl")
     source_status: dict[str, dict[str, object]] = {}
+    collected_events = []
 
     for source_id in SOURCE_ORDER:
         try:
@@ -165,6 +167,7 @@ def build_public_event_bundle(
             )
             events = _normalize(source_id, payload, received_ts_ms=now_ms)
             results = archive.append_many(events)
+            collected_events.extend(row.event for row in events)
             appended = sum(1 for result in results if result.appended)
             source_status[source_id] = {
                 "status": "COLLECTED" if appended else "NO_DATA",
@@ -198,6 +201,11 @@ def build_public_event_bundle(
         collection_run_id=str(collection_run_id),
     )
     contract = integration_contract()
+    runtime_evidence = build_runtime_evidence(
+        collected_events,
+        now_ms=now_ms,
+        expected_sources=SOURCE_ORDER,
+    )
     manifests: list[dict[str, Any]] = []
     for relative in bundle["manifests"]:
         path = output / str(relative)
@@ -219,6 +227,7 @@ def build_public_event_bundle(
             "reject_count": sum(row["quality_status"] == "REJECT" for row in manifests),
             "source_status": source_status,
             "event_intelligence": contract,
+            "event_intelligence_runtime": runtime_evidence,
             "read_only": True,
             "real_execution": False,
         }
