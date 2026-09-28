@@ -137,6 +137,7 @@ def main() -> int:
             analysis_stage=args.analysis_stage or (
                 ANALYSIS_STAGE_BY_KIND.get(args.kind or "") if args.creation_phase == "ANALYZE" else None
             ),
+            operator_request_id=args.operator_request_id,
             history=(
                 [{"event": "operator_request", "request_id": args.operator_request_id}]
                 if args.operator_request_id else []
