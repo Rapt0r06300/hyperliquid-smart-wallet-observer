@@ -393,19 +393,23 @@ class PaperLedger:
         timestamp_ms: int,
         refs: dict | None = None,
     ) -> PaperEvent:
-        if not math.isfinite(float(amount_usdc)):
+        try:
+            funding_amount = float(amount_usdc)
+        except (TypeError, ValueError, OverflowError):
             return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
-        self.funding_net_usdc += float(amount_usdc)
+        if not math.isfinite(funding_amount):
+            return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
+        self.funding_net_usdc += funding_amount
         cash = first_not_none(self.cash_balance_usdc, 0.0)
-        self.cash_balance_usdc = float(cash) + float(amount_usdc)
-        event_type = PaperEventType.FUNDING_RECEIVED if amount_usdc >= 0 else PaperEventType.FUNDING_CHARGED
+        self.cash_balance_usdc = float(cash) + funding_amount
+        event_type = PaperEventType.FUNDING_RECEIVED if funding_amount >= 0 else PaperEventType.FUNDING_CHARGED
         appended = self._append(
             PaperEvent.create(
                 event_type,
                 timestamp_ms=timestamp_ms,
                 coin=str(coin).upper(),
                 side=str(side).upper(),
-                funding_usdc=float(amount_usdc),
+                funding_usdc=funding_amount,
                 refs=refs or {},
             )
         )
