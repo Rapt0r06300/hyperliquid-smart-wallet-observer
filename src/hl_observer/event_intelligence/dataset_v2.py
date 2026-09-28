@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import hashlib
 import json
 import time
 from collections import defaultdict
@@ -206,6 +207,9 @@ def build_public_event_bundle(
         now_ms=now_ms,
         expected_sources=SOURCE_ORDER,
     )
+    runtime_digest = hashlib.sha256(
+        json.dumps(runtime_evidence, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     manifests: list[dict[str, Any]] = []
     for relative in bundle["manifests"]:
         path = output / str(relative)
@@ -215,6 +219,13 @@ def build_public_event_bundle(
             "reason": "NO_INDEPENDENT_EXACT_REFERENCE",
         }
         manifest["event_intelligence"] = contract
+        manifest["event_intelligence_runtime"] = {
+            "schema": runtime_evidence["schema"],
+            "runtime_evidence_sha256": runtime_digest,
+            "accepted_event_count": runtime_evidence["accepted_event_count"],
+            "proof_state": "STRUCTURAL_ONLY",
+            "proof_of_pnl_allowed": False,
+        }
         manifest = finalize_manifest(manifest)
         write_manifest(manifest, path)
         manifests.append(manifest)
