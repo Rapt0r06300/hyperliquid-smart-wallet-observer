@@ -18,7 +18,7 @@ permissions:
   contents: write
 concurrency:
   group: event-intelligence-status-publish
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   regenerate:
     runs-on: ubuntu-latest
