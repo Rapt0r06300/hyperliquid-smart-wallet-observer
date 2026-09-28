@@ -19,6 +19,7 @@ from .direct_sources import (
     normalize_gdelt_articles,
     normalize_usgs,
 )
+from .economic_pipeline import build_economic_research_evidence
 from .external_event import (
     ExternalEvent,
     ExternalEventDecision,
@@ -179,6 +180,7 @@ __all__ = [
     "assert_forward_after_freeze",
     "bootstrap_mean_ci",
     "build_cross_venue_event_context",
+    "build_economic_research_evidence",
     "build_event_scoreboard",
     "build_market_response_evidence",
     "build_research_protocol_evidence",
