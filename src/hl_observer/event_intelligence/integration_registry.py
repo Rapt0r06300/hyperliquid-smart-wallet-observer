@@ -53,7 +53,7 @@ def _dataset_families(idea_id: int) -> tuple[str, ...]:
                 "bbo",
                 "funding_settlement",
                 "instrument_metadata",
-                "l2Book",
+                "l2book",
                 "open_interest",
                 "trades",
             )
