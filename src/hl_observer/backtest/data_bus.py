@@ -25,6 +25,8 @@ class DataBus:
         self.hits: dict[str, int] = {"cache": 0, "local": 0, "archive": 0, "api": 0, "miss": 0}
 
     def get(self, key: str) -> object | None:
+        if not str(key).strip():
+            raise ValueError("data key is required")
         if key in self._cache:
             self.hits["cache"] += 1
             return self._cache[key]
