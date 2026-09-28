@@ -14,9 +14,10 @@ from hl_observer.event_intelligence.idea_coverage import IDEA_COVERAGE
 from hl_observer.event_intelligence.live_status import wiring_contract
 
 STRATEGY_FAMILIES = (
+    "arbitrage",
     "copy_vault",
-    "lead_lag",
     "cross_venue_dislocation",
+    "lead_lag",
 )
 
 
