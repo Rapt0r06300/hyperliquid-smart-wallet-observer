@@ -5,13 +5,20 @@ marge disponible minimale pour créditer l'add. Marge inconnue → bloqué. Pur,
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
 def peut_open(available_margin: Any, equity: Any, *, part_min: float = 0.05) -> dict[str, Any]:
     """Autorise l'OPEN/ADD seulement si la marge disponible représente ≥ part_min de l'equity (le leader garde de
     la réserve → geste de conviction, pas d'un trader à bout). Données invalides → bloqué."""
-    if not all(isinstance(x, (int, float)) for x in (available_margin, equity)) or float(equity) <= 0:
+    if (
+        any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(float(x))
+            for x in (available_margin, equity, part_min))
+        or float(available_margin) < 0.0
+        or float(equity) <= 0.0
+        or float(part_min) < 0.0
+    ):
         return {"peut_open": False, "raison": "MARGE_OU_EQUITY_INVALIDE"}
     part = float(available_margin) / float(equity)
     ok = part >= float(part_min)
