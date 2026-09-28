@@ -71,10 +71,7 @@ class PhaseController:
                 os.fsync(handle.fileno())
             os.replace(temp_name, self.state_file_path)
         except BaseException:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
+            Path(temp_name).unlink(missing_ok=True)
             raise
 
     def transition_to_collect(
