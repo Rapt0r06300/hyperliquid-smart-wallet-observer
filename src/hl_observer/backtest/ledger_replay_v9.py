@@ -11,6 +11,7 @@ aucun look-ahead pour la décision d'entrée (filtres structurels V9 uniquement)
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 
 from hl_observer.markets.universe import is_exotic_market
@@ -30,6 +31,15 @@ class ReplayConfig:
     max_signal_age_ms: int = 30_000
     hard_backfill_age_ms: int = 60_000
     allow_exotic: bool = False
+
+    def __post_init__(self) -> None:
+        values = (self.notional_usdt, self.fee_bps, self.spread_bps, self.slippage_bps)
+        if any(isinstance(value, bool) or not math.isfinite(float(value)) or float(value) < 0.0 for value in values):
+            raise ValueError("replay economics must be finite and non-negative")
+        if any(isinstance(value, bool) or int(value) < 0 for value in (self.max_signal_age_ms, self.hard_backfill_age_ms)):
+            raise ValueError("replay age limits must be non-negative")
+        if self.hard_backfill_age_ms < self.max_signal_age_ms:
+            raise ValueError("hard backfill age must cover signal age")
 
     @property
     def round_trip_cost_bps(self) -> float:
@@ -84,6 +94,8 @@ def replay_ledger_v9(rows: list[dict], *, config: ReplayConfig | None = None) ->
         if not coin or side not in {"LONG", "SHORT"} or price in (None, 0):
             continue
         price = float(price)
+        if not math.isfinite(price) or price <= 0.0:
+            continue
 
         if not cfg.allow_exotic and is_exotic_market(coin):
             res.skipped_exotic += 1
@@ -97,6 +109,9 @@ def replay_ledger_v9(rows: list[dict], *, config: ReplayConfig | None = None) ->
         key = f"{wallet}|{coin}|{side}"
 
         if action in ENTRY_ACTIONS:
+            if isinstance(age, bool) or (isinstance(age, (int, float)) and (not math.isfinite(float(age)) or age < 0)):
+                res.skipped_stale += 1
+                continue
             if isinstance(age, (int, float)) and age > cfg.hard_backfill_age_ms:
                 res.skipped_stale += 1
                 continue
