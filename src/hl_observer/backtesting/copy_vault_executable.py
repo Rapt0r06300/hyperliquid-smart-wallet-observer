@@ -29,6 +29,7 @@ from hl_observer.backtesting.copy_vault_protocol import (
     MAX_REFERENCE_LAG_MS,
     MAX_TARGET_LAG_MS,
     METAORDER_GAP_MS,
+    MAX_GROSS_EXPOSURE_USD,
     MIN_TRAIN_TRADES,
     NOTIONAL_USD,
     POST_FREEZE_PROOF_POLICY,
@@ -458,8 +459,11 @@ def replay_metaorders(
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
     counters: dict[str, int] = {
         "metaorders_considered": 0, "completed_positions": 0, "portfolio_capacity_rejected": 0,
+        "capital_margin_rejected": 0,
     }
     active_exit_times: list[int] = []
+    active_notional_usd = 0.0
+    active_positions: list[tuple[int, float]] = []
     trades: list[dict[str, Any]] = []
     seen: set[str] = set()
     for metaorder in sorted(metaorders, key=lambda row: int(row["signal_ts_ms"])):
@@ -481,7 +485,18 @@ def replay_metaorders(
         if trade is None:
             counters[reason] = counters.get(reason, 0) + 1
             continue
-        active_exit_times = [ts for ts in active_exit_times if ts > int(trade["entry_ts_ms"])]
+        current_entry = int(trade["entry_ts_ms"])
+        still_open = [
+            (exit_ts, notional)
+            for exit_ts, notional in active_positions
+            if exit_ts > current_entry
+        ]
+        active_positions = still_open
+        active_notional_usd = sum(notional for _, notional in active_positions)
+        active_exit_times = [exit_ts for exit_ts, _ in active_positions]
+        if active_notional_usd + float(trade["notional_usd"]) > float(MAX_GROSS_EXPOSURE_USD):
+            counters["capital_margin_rejected"] += 1
+            continue
         if len(active_exit_times) >= MAX_OPEN_POSITIONS:
             counters["portfolio_capacity_rejected"] += 1
             continue
@@ -490,6 +505,10 @@ def replay_metaorders(
             continue
         seen.add(trade["trade_id"])
         active_exit_times.append(int(trade["exit_ts_ms"]))
+        active_positions.append((int(trade["exit_ts_ms"]), float(trade["notional_usd"])))
+        active_notional_usd += float(trade["notional_usd"])
+        trade["financeable_under_paper_policy"] = True
+        trade["paper_equity_usd"] = float(MAX_GROSS_EXPOSURE_USD)
         trades.append(trade)
         counters["completed_positions"] += 1
     return trades, counters
