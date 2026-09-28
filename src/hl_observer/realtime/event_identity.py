@@ -91,7 +91,7 @@ def canonicalize_frame(
     channel: str,
     received_at_ms: int,
     frame_sequence: int | None = None,
-    exchange_ts_fields: tuple[str, ...] = ("time", "timestamp", "ts_ms"),
+    exchange_ts_fields: tuple[str, ...] = ("time", "timestamp", "ts_ms", "exchange_ts_ms"),
 ) -> list[CanonicalFrameEvent]:
     """Expand one frame into independently identifiable canonical events."""
 
