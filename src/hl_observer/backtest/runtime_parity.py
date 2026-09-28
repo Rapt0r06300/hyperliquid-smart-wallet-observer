@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from hl_observer.config.settings import Settings
@@ -38,6 +39,11 @@ def compare_runtime_replay_paper(
     decisions, while their run namespaces remain isolated.
     """
 
+    if (isinstance(notional_usdc, bool) or not math.isfinite(float(notional_usdc))
+            or float(notional_usdc) <= 0.0):
+        raise ValueError("notional_usdc must be finite and > 0")
+    if not str(runtime_run_id).strip() or not str(replay_run_id).strip():
+        raise ValueError("run ids are required")
     settings = settings or Settings()
     runtime_scope = build_run_context_scope(RunContext.LIVE, run_id=runtime_run_id)
     replay_scope = build_run_context_scope(RunContext.REPLAY, run_id=replay_run_id)
