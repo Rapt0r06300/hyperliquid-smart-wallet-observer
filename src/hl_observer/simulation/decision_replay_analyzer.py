@@ -64,14 +64,18 @@ def default_logs_to_send_dir(root: Path = Path(".")) -> Path:
     return root / "logs" / LOGS_TO_SEND_DIRNAME
 
 
-def load_decision_events(log_dir: Path) -> tuple[DecisionEvent, ...]:
-    for path in _decision_file_candidates(log_dir):
+def load_decision_events(
+    log_dir: Path, *, autoriser_dydx_legacy: bool = False
+) -> tuple[DecisionEvent, ...]:
+    for path in _decision_file_candidates(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy):
         if path.exists() and path.stat().st_size > 0:
             return tuple(_row_to_event(row) for row in _read_jsonl(path))
     return ()
 
 
-def load_recent_decision_events(log_dir: Path, *, limit: int = 100) -> tuple[DecisionEvent, ...]:
+def load_recent_decision_events(
+    log_dir: Path, *, limit: int = 100, autoriser_dydx_legacy: bool = False
+) -> tuple[DecisionEvent, ...]:
     """Load recent events without decoding a very large append-only log.
 
     The dashboard and realtime replay only need the tail of the stream. Loading
@@ -79,19 +83,23 @@ def load_recent_decision_events(log_dir: Path, *, limit: int = 100) -> tuple[Dec
     realtime freshness gate expire while the gate itself was running.
     """
 
-    path = _primary_decision_file(log_dir)
+    path = _primary_decision_file(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy)
     if path is None or limit <= 0:
         return ()
     rows = _read_recent_jsonl(path, limit=limit)
     return tuple(_row_to_event(row) for row in rows)
 
 
-def analyze_decision_logs(log_dir: Path) -> ReplayAnalysis:
-    events = load_decision_events(log_dir)
+def analyze_decision_logs(
+    log_dir: Path, *, autoriser_dydx_legacy: bool = False
+) -> ReplayAnalysis:
+    events = load_decision_events(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy)
     return _analysis_from_events(log_dir, events)
 
 
-def analyze_decision_logs_summary(log_dir: Path) -> ReplayAnalysis:
+def analyze_decision_logs_summary(
+    log_dir: Path, *, autoriser_dydx_legacy: bool = False
+) -> ReplayAnalysis:
     """Return aggregate log metrics with a source-validated runtime cache.
 
     This keeps quality gates fast while preserving honesty: the cache is reused
@@ -99,7 +107,7 @@ def analyze_decision_logs_summary(log_dir: Path) -> ReplayAnalysis:
     changes, the summary is recomputed from the real rows.
     """
 
-    path = _primary_decision_file(log_dir)
+    path = _primary_decision_file(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy)
     if path is None:
         return _analysis_from_events(log_dir, ())
     signature = _file_signature(path)
@@ -111,8 +119,8 @@ def analyze_decision_logs_summary(log_dir: Path) -> ReplayAnalysis:
     return analysis
 
 
-def count_decision_events_fast(log_dir: Path) -> int:
-    path = _primary_decision_file(log_dir)
+def count_decision_events_fast(log_dir: Path, *, autoriser_dydx_legacy: bool = False) -> int:
+    path = _primary_decision_file(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy)
     if path is None:
         return 0
     cached = _read_summary_cache(log_dir, _file_signature(path))
@@ -380,14 +388,18 @@ def _count_nonempty_lines(path: Path) -> int:
     return count
 
 
-def _primary_decision_file(log_dir: Path) -> Path | None:
-    for path in _decision_file_candidates(log_dir):
+def _primary_decision_file(
+    log_dir: Path, *, autoriser_dydx_legacy: bool = False
+) -> Path | None:
+    for path in _decision_file_candidates(log_dir, autoriser_dydx_legacy=autoriser_dydx_legacy):
         if path.exists() and path.stat().st_size > 0:
             return path
     return None
 
 
-def _decision_file_candidates(log_dir: Path) -> tuple[Path, ...]:
+def _decision_file_candidates(
+    log_dir: Path, *, autoriser_dydx_legacy: bool = False
+) -> tuple[Path, ...]:
     """Return decision logs in UI-friendly priority order.
 
     The old HyperSmart exporter writes under ``logs/logs à envoyer`` while the
@@ -397,13 +409,14 @@ def _decision_file_candidates(log_dir: Path) -> tuple[Path, ...]:
     dashboard refresh cannot freeze on a multi-GB historical file.
     """
 
-    structured = log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG)
-    return (
+    candidates = [
         log_dir / "simulation_decisions_latest.jsonl",
-        structured,
         log_dir / "cli_simulation_decisions_latest.jsonl",
         log_dir / "simulation_decisions_append_only.jsonl",
-    )
+    ]
+    if autoriser_dydx_legacy:
+        candidates.insert(1, log_dir.parent.joinpath(*STRUCTURED_DECISION_LOG))
+    return tuple(candidates)
 
 
 def _file_signature(path: Path) -> dict[str, Any]:
