@@ -26,6 +26,17 @@ def main() -> int:
         raise SystemExit("OPERATOR_STATUS_REQUEST_MISMATCH")
     if status.get("intent") != intent.get("intent"):
         raise SystemExit("OPERATOR_STATUS_INTENT_MISMATCH")
+    import re
+    request_id = intent.get("request_id")
+    if not isinstance(request_id, str) or not re.fullmatch(r"[0-9a-f]{64}", request_id):
+        raise SystemExit("OPERATOR_STATUS_REQUEST_ID_INVALID")
+    if intent.get("schema_version") == "alina.operator_intent.v2":
+        if intent.get("phase") not in {"IDLE", "COLLECT", "ANALYZE"}:
+            raise SystemExit("OPERATOR_INTENT_PHASE_INVALID")
+        if isinstance(intent.get("phase_epoch"), bool) or not isinstance(intent.get("phase_epoch"), int) or intent["phase_epoch"] < 1:
+            raise SystemExit("OPERATOR_INTENT_PHASE_EPOCH_INVALID")
+        if intent.get("phase") == "ANALYZE" and not intent.get("source_collection_epoch"):
+            raise SystemExit("OPERATOR_INTENT_SOURCE_EPOCH_MISSING")
     if intent.get("schema_version") == "alina.operator_intent.v2":
         for key in ("phase", "phase_epoch", "source_collection_epoch", "collection_cutoff_at_utc"):
             if status.get(key) != intent.get(key):
