@@ -6,6 +6,7 @@ decide_fn ONLY the past events (no lookahead), and produces a report. Pure.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -91,7 +92,9 @@ class BacktestSummary:
 def summarize_pnl(realized_pnls) -> BacktestSummary:
     """Profit factor, winrate, expectancy et max drawdown depuis une liste de
     PnL realises (un par trade clos). Aucune donnee inventee."""
-    pnls = [float(x) for x in realized_pnls if x is not None]
+    pnls = [float(x) for x in realized_pnls if x is not None and not isinstance(x, bool)]
+    if any(not math.isfinite(value) for value in pnls):
+        raise ValueError("realized PnL must be finite")
     wins = [p for p in pnls if p > 0.0]
     losses = [p for p in pnls if p < 0.0]
     gross_profit = sum(wins)
