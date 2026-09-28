@@ -11,8 +11,8 @@ class LimiteurPositions:
     """Suit les coins actuellement ouverts pour le vault et plafonne leur nombre. Idempotent par coin."""
 
     def __init__(self, *, max_positions: int = 10) -> None:
-        if isinstance(max_positions, bool) or int(max_positions) < 1:
-            raise ValueError("max_positions must be >= 1")
+        if isinstance(max_positions, bool) or int(max_positions) < 0:
+            raise ValueError("max_positions must be >= 0")
         self.max_positions = int(max_positions)
         self._ouverts: set[str] = set()
 
