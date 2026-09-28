@@ -715,6 +715,7 @@
         "src/hl_observer/signals/copy_conflict_resolver.py",
         "src/hl_observer/signals/distilled_opportunity_detector.py",
         "src/hl_observer/signals/v26_entry_vetos.py",
+        "src/hl_observer/simulation/decision_replay_analyzer.py",
         "src/hl_observer/simulation/economic_campaign_provenance.py",
         "src/hl_observer/simulation/economic_campaigns.py",
         "src/hl_observer/strategies/external_github_bridge.py",
@@ -882,6 +883,7 @@
         "src/hl_observer/signals/copy_conflict_resolver.py",
         "src/hl_observer/signals/distilled_opportunity_detector.py",
         "src/hl_observer/signals/v26_entry_vetos.py",
+        "src/hl_observer/simulation/decision_replay_analyzer.py",
         "src/hl_observer/simulation/economic_campaign_provenance.py",
         "src/hl_observer/simulation/economic_campaigns.py",
         "src/hl_observer/strategies/external_github_bridge.py",
@@ -1044,6 +1046,7 @@
         "src/hl_observer/signals/copy_conflict_resolver.py",
         "src/hl_observer/signals/distilled_opportunity_detector.py",
         "src/hl_observer/signals/v26_entry_vetos.py",
+        "src/hl_observer/simulation/decision_replay_analyzer.py",
         "src/hl_observer/simulation/economic_campaign_provenance.py",
         "src/hl_observer/simulation/economic_campaigns.py",
         "src/hl_observer/strategies/external_github_bridge.py",
@@ -1210,6 +1213,7 @@
         "src/hl_observer/signals/copy_conflict_resolver.py",
         "src/hl_observer/signals/distilled_opportunity_detector.py",
         "src/hl_observer/signals/v26_entry_vetos.py",
+        "src/hl_observer/simulation/decision_replay_analyzer.py",
         "src/hl_observer/simulation/economic_campaign_provenance.py",
         "src/hl_observer/simulation/economic_campaigns.py",
         "src/hl_observer/strategies/external_github_bridge.py",
@@ -1808,6 +1812,7 @@
     },
     {
       "actual_callers": [
+        "src/hl_observer/backtest/trade_tick_replay.py",
         "src/hl_observer/event_intelligence/__init__.py",
         "src/hl_observer/event_intelligence/idea_coverage.py",
         "src/hl_observer/hyperlab/live_ready.py",
@@ -1829,6 +1834,7 @@
       "reason": "Structural implementation is present and referenced by runtime imports; economic proof remains data/OOS/forward dependent.",
       "required_dataset_family": "external_events",
       "runtime_evidence": [
+        "src/hl_observer/backtest/trade_tick_replay.py",
         "src/hl_observer/event_intelligence/__init__.py",
         "src/hl_observer/event_intelligence/idea_coverage.py",
         "src/hl_observer/hyperlab/live_ready.py",
@@ -4616,6 +4622,7 @@
     },
     {
       "actual_callers": [
+        "src/hl_observer/backtest/trade_tick_replay.py",
         "src/hl_observer/event_intelligence/__init__.py",
         "src/hl_observer/event_intelligence/idea_coverage.py",
         "src/hl_observer/hyperlab/live_ready.py",
@@ -4637,6 +4644,7 @@
       "reason": "Structural implementation is present and referenced by runtime imports; economic proof remains data/OOS/forward dependent.",
       "required_dataset_family": "external_events",
       "runtime_evidence": [
+        "src/hl_observer/backtest/trade_tick_replay.py",
         "src/hl_observer/event_intelligence/__init__.py",
         "src/hl_observer/event_intelligence/idea_coverage.py",
         "src/hl_observer/hyperlab/live_ready.py",
@@ -5095,7 +5103,7 @@
       "wiring_status": "MISSING"
     }
   ],
-  "registry_digest": "f555f82fbbf74f4bbee533746dd97ceb2e26f615d9a1e9b3b872e3cd916c51ca",
+  "registry_digest": "acc8bd857b677b15b540d1a8c0efcefdf2a0de3a1125ac0ab8228b6e56e01065",
   "schema_version": "alina.event_intelligence_status.v2",
   "source": "docs/event-intelligence-120-coverage.md",
   "summary": {
