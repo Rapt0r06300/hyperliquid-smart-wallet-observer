@@ -101,7 +101,13 @@ class DirectSourceReadOnlyClient:
         timeout_s: float = 10.0,
     ) -> None:
         self._http_client = http_client
-        self.timeout_s = float(timeout_s)
+        try:
+            timeout = float(timeout_s)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("timeout_s must be finite and positive") from exc
+        if not math.isfinite(timeout) or timeout <= 0.0:
+            raise ValueError("timeout_s must be finite and positive")
+        self.timeout_s = timeout
 
     @property
     def real_execution(self) -> bool:
