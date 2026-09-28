@@ -28,6 +28,8 @@ class EventIntelligenceStatusError(ValueError):
 
 def load_status(path: str | Path = "docs/event-intelligence-120-status.json") -> dict[str, Any]:
     target = Path(path)
+    if str(path) == "docs/event-intelligence-120-status.json" and not target.is_file():
+        target = Path(__file__).resolve().parents[3] / "docs" / "event-intelligence-120-status.json"
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
