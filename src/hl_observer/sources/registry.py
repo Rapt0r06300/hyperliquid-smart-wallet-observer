@@ -10,6 +10,7 @@ Deterministic and pure (caller passes timestamps); no I/O, no network, no order.
 
 from __future__ import annotations
 
+import math
 from collections import deque
 
 from hl_observer.sources.models import (
@@ -32,10 +33,18 @@ class SourceRegistry:
         self._defs: dict[str, SourceDefinition] = {}
         self._history: dict[str, deque[FetchProvenance]] = {}
         self._seen_requests: dict[str, set[str]] = {}
-        self._history_per_source = max(1, history_per_source)
-        self._stale_after_ms = max(1, stale_after_ms)
-        self._down_consecutive_errors = max(1, down_consecutive_errors)
-        self._degraded_success_rate = degraded_success_rate
+        if any(isinstance(value, bool) or int(value) < 1 for value in (
+            history_per_source, stale_after_ms, down_consecutive_errors
+        )):
+            raise ValueError("registry limits must be >= 1")
+        if (isinstance(degraded_success_rate, bool)
+                or not math.isfinite(float(degraded_success_rate))
+                or not 0.0 <= float(degraded_success_rate) <= 1.0):
+            raise ValueError("degraded_success_rate must be in [0, 1]")
+        self._history_per_source = int(history_per_source)
+        self._stale_after_ms = int(stale_after_ms)
+        self._down_consecutive_errors = int(down_consecutive_errors)
+        self._degraded_success_rate = float(degraded_success_rate)
 
     # ---- registration ----
     def register(self, definition: SourceDefinition) -> None:
@@ -69,6 +78,8 @@ class SourceRegistry:
 
     # ---- health ----
     def health(self, source_id: str, *, now_ms: int) -> SourceHealthSnapshot:
+        if isinstance(now_ms, bool) or int(now_ms) < 0:
+            raise ValueError("now_ms must be non-negative")
         hist = self._history.get(source_id)
         if not hist:
             return SourceHealthSnapshot(
