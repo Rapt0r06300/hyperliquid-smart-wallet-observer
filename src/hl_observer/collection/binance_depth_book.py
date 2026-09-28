@@ -129,8 +129,15 @@ class BinanceDepthBook:
         return round((bb + ba) / 2.0, 12) if (bb is not None and ba is not None) else None
 
     def exploitable(self) -> bool:
-        """Un carnet DESYNC n'est pas exploitable : deny-by-default (UNMEASURABLE, pas faux)."""
-        return self.last_update_id is not None and self.desync is None
+        """Un carnet incomplet, croisé ou DESYNC n'est pas exploitable."""
+        bid, ask = self.best_bid(), self.best_ask()
+        return (
+            self.last_update_id is not None
+            and self.desync is None
+            and bid is not None
+            and ask is not None
+            and bid < ask
+        )
 
     def snapshot(self, depth: int = 10) -> dict[str, Any]:
         bids = sorted(self.bids.items(), key=lambda kv: kv[0], reverse=True)[:depth]
