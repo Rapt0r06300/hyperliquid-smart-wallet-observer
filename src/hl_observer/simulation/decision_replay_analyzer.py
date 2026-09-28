@@ -572,7 +572,14 @@ def _event_status(row: dict[str, Any]) -> str:
         return "REFUSED"
     if event_type.startswith("PAPER_"):
         return "LOCAL_REPLAY"
-    return "LOCAL_REPLAY"
+    return "UNKNOWN"
+
+
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row and row[key] is not None:
+            return row[key]
+    return None
 
 
 def _event_net_pnl(row: dict[str, Any]) -> float | None:
@@ -588,12 +595,12 @@ def _event_net_pnl(row: dict[str, Any]) -> float | None:
     if event_type == "NO_TRADE":
         return 0.0
     if event_type == "PAPER_OPEN":
-        fee = _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
+        fee = _to_float(_first_present(row, "fee_paid", "fee_cost_usdc", "fee"))
         return -fee if fee is not None else None
     if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
-        pnl = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        pnl = _to_float(_first_present(row, "net_pnl", "event_net_pnl_usdc"))
         return pnl if pnl is not None else None
-    return _to_float(row.get("estimated_net_pnl_usdc") or row.get("realized_pnl"))
+    return _to_float(_first_present(row, "estimated_net_pnl_usdc", "realized_pnl"))
 
 
 def _event_fee(row: dict[str, Any]) -> float | None:
@@ -601,8 +608,8 @@ def _event_fee(row: dict[str, Any]) -> float | None:
     if event_type == "PAPER_OPEN":
         return _to_float(row.get("fee_paid") or row.get("fee_cost_usdc") or row.get("fee"))
     if event_type in {"PAPER_CLOSE", "PAPER_PARTIAL_TP"}:
-        gross = _to_float(row.get("gross_pnl") or row.get("gross_pnl_usdc"))
-        net = _to_float(row.get("net_pnl") or row.get("event_net_pnl_usdc"))
+        gross = _to_float(_first_present(row, "gross_pnl", "gross_pnl_usdc"))
+        net = _to_float(_first_present(row, "net_pnl", "event_net_pnl_usdc"))
         if gross is not None and net is not None:
             return abs(gross - net)
     return _to_float(row.get("fee_cost_usdc") or row.get("fee"))
