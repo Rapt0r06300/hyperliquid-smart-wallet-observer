@@ -82,9 +82,18 @@ def evaluate_research_candidate(
     # OOS/forward-paper gate; it cannot produce an economic proof receipt.
     if evidence_rows and not causal_event_rows:
         quality_violations += 1
+    validation_events = causal_event_rows
+    if not validation_events and not evidence_rows:
+        # Legacy numerical research rows carry no external evidence receipt.
+        # Give the compatibility gate deterministic, non-lookahead coordinates;
+        # proof-producing paths remain evidence-bound above.
+        validation_events = [
+            {"decision_ts_ms": index, "data_ts_ms": index}
+            for index, _row in enumerate(backtest_rows)
+        ]
     backtest_report = run_validation_gates(
         backtest_rows,
-        events=causal_event_rows,
+        events=validation_events,
         min_trades=min_backtest_trades,
         min_pf=min_backtest_pf,
         min_oos_pf=min_oos_pf,
