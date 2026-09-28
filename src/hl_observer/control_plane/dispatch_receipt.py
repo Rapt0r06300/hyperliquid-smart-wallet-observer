@@ -5,13 +5,17 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 
 
 DISPATCH_STATUSES = frozenset({"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
 TERMINAL_DISPATCH_STATUSES = frozenset({"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
 
-from hl_observer.control_plane.phase_state import sha256_json, canonical_json, _now
+from hl_observer.control_plane.phase_state import sha256_json, parse_iso_utc
+
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def generate_request_id(
@@ -73,29 +77,32 @@ def validate_dispatch_receipt(receipt: DispatchReceipt) -> None:
     """Fail closed on incomplete or contradictory cross-repository identity."""
     if not receipt.request_id or not receipt.campaign_id:
         raise ValueError("dispatch receipt requires request_id and campaign_id")
-    if not receipt.main_code_sha or not receipt.dataset_repo_sha:
-        raise ValueError("dispatch receipt requires both repository SHAs")
+    if not _SHA40.fullmatch(str(receipt.main_code_sha or "").lower()):
+        raise ValueError("dispatch receipt requires an exact main repository SHA")
+    if not _SHA40.fullmatch(str(receipt.dataset_repo_sha or "").lower()):
+        raise ValueError("dispatch receipt requires an exact dataset repository SHA")
     if receipt.creation_phase not in {"IDLE", "COLLECT", "ANALYZE"}:
         raise ValueError("dispatch receipt has invalid creation phase")
     if not isinstance(receipt.phase_epoch, int) or receipt.phase_epoch < 1:
         raise ValueError("dispatch receipt has invalid phase epoch")
     if receipt.creation_phase == "ANALYZE":
-        if not isinstance(receipt.source_collection_epoch, int) or receipt.source_collection_epoch < 1:
+        if not isinstance(receipt.source_collection_epoch, int) or isinstance(receipt.source_collection_epoch, bool) or receipt.source_collection_epoch < 1:
             raise ValueError("analysis dispatch requires source collection epoch")
-    if not receipt.dispatched_at_utc.endswith("Z"):
-        raise ValueError("dispatch timestamp must be UTC")
+    elif receipt.source_collection_epoch is not None:
+        raise ValueError("non-analysis dispatch must not bind a source collection epoch")
+    parse_iso_utc(receipt.dispatched_at_utc)
     if receipt.status not in DISPATCH_STATUSES:
         raise ValueError(f"dispatch receipt has invalid status: {receipt.status}")
     is_terminal = receipt.status in TERMINAL_DISPATCH_STATUSES
     if is_terminal != (receipt.terminal_at_utc is not None):
         raise ValueError("terminal dispatch status requires terminal_at_utc, and non-terminal status forbids it")
-    if receipt.terminal_at_utc is not None and not receipt.terminal_at_utc.endswith("Z"):
-        raise ValueError("terminal dispatch timestamp must be UTC")
+    if receipt.terminal_at_utc is not None:
+        parse_iso_utc(receipt.terminal_at_utc)
     if receipt.status == "FAILED" and not receipt.failure_code:
         raise ValueError("failed dispatch receipt requires failure_code")
     if receipt.status != "FAILED" and receipt.failure_code is not None:
         raise ValueError("failure_code is only valid for FAILED dispatches")
-    if receipt.status == "COMPLETE" and not receipt.terminal_evidence_digest:
-        raise ValueError("complete dispatch receipt requires terminal evidence digest")
+    if receipt.status == "COMPLETE" and not _SHA256.fullmatch(str(receipt.terminal_evidence_digest or "").lower()):
+        raise ValueError("complete dispatch receipt requires an exact terminal evidence digest")
     if receipt.status != "COMPLETE" and receipt.terminal_evidence_digest is not None:
         raise ValueError("terminal evidence digest is only valid for COMPLETE dispatches")
