@@ -43,20 +43,36 @@ jobs:
           python - <<'PY'
           import datetime,hashlib,json,os,pathlib,re
           request_id=os.environ["REQUEST_ID"]
-          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request_id):
+          if not re.fullmatch(r"[0-9a-f]{64}", request_id):
             raise SystemExit("request_id must be a path-safe bounded identifier")
           requested_by=os.environ["REQUESTED_BY"]
           if not re.fullmatch(r"[A-Za-z0-9@._:-]{1,128}", requested_by):
             raise SystemExit("requested_by contains unsupported characters")
           config=json.loads(os.environ["CONFIG_JSON"])
           if not isinstance(config,dict): raise SystemExit("config_json must be object")
+          phase_path=pathlib.Path("control/alina-phase.json")
+          if not phase_path.is_file():
+            raise SystemExit("canonical phase state is missing")
+          phase=json.loads(phase_path.read_text(encoding="utf-8"))
+          if phase.get("phase") not in {"IDLE","COLLECT","ANALYZE"}:
+            raise SystemExit("canonical phase state is invalid")
+          analysis_intents={"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle"}
+          if os.environ["INTENT"] in analysis_intents and phase["phase"] != "ANALYZE":
+            raise SystemExit("analysis intent requires ANALYZE phase")
+          if os.environ["INTENT"] == "start_collection" and phase["phase"] != "COLLECT":
+            raise SystemExit("collection intent requires COLLECT phase")
           row={
-            "schema_version":"alina.operator_intent.v1",
+            "schema_version":"alina.operator_intent.v2",
             "intent":os.environ["INTENT"],
             "request_id":request_id,
             "requested_by":requested_by,
             "requested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),
             "main_code_sha":os.environ.get("GITHUB_SHA"),
+            "phase":phase["phase"],
+            "phase_epoch":phase["epoch"],
+            "analysis_stage":phase.get("analysis_stage"),
+            "source_collection_epoch":phase.get("source_collection_epoch"),
+            "collection_cutoff_at_utc":phase.get("collection_cutoff_at_utc"),
             "config":config,
             "paper_only":True,
             "read_only":True,
@@ -68,7 +84,7 @@ jobs:
           status_path.parent.mkdir(parents=True,exist_ok=True)
           if p.exists():
             old=json.loads(p.read_text())
-            stable=("schema_version","intent","request_id","requested_by","config","paper_only","read_only","real_execution")
+            stable=("schema_version","intent","request_id","requested_by","phase","phase_epoch","analysis_stage","source_collection_epoch","collection_cutoff_at_utc","config","paper_only","read_only","real_execution")
             if any(old.get(k) != row.get(k) for k in stable):
               raise SystemExit("request id already exists with different payload")
             row=old
@@ -76,7 +92,7 @@ jobs:
             p.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n")
           intent_digest=hashlib.sha256(json.dumps(row,sort_keys=True,separators=(",",":")).encode()).hexdigest()
           status={
-            "schema_version":"alina.operator_status.v1",
+            "schema_version":"alina.operator_status.v2",
             "request_id":row["request_id"],
             "intent":row["intent"],
             "intent_digest":intent_digest,
@@ -84,6 +100,10 @@ jobs:
             "terminal":False,
             "workflow_run_id":os.environ.get("GITHUB_RUN_ID"),
             "main_code_sha":os.environ.get("GITHUB_SHA"),
+            "phase":row["phase"],
+            "phase_epoch":row["phase_epoch"],
+            "source_collection_epoch":row.get("source_collection_epoch"),
+            "collection_cutoff_at_utc":row.get("collection_cutoff_at_utc"),
             "updated_at_utc":row["requested_at_utc"],
             "paper_only":True,
             "read_only":True,
