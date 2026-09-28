@@ -48,6 +48,8 @@ def _pnls(trades: Any) -> list[float]:
 
 
 def profit_factor(pnls: list[float]) -> float:
+    if any(not math.isfinite(float(p)) for p in pnls):
+        return float("nan")
     wins = sum(p for p in pnls if p > 0)
     losses = -sum(p for p in pnls if p < 0)
     if losses <= 0:
@@ -65,6 +67,8 @@ def max_drawdown(pnls: list[float]) -> float:
 
 
 def _pf_str(pf: float):
+    if math.isnan(float(pf)):
+        return "nan"
     return "inf" if pf == float("inf") else round(pf, 3)
 
 
@@ -80,19 +84,32 @@ def economic_integrity_gate(trades, pnls) -> dict:
 
 
 def sample_size_gate(pnls, *, min_trades: int = 30) -> dict:
+    if isinstance(min_trades, bool) or int(min_trades) < 1:
+        return {"gate": "sample_size", "passed": False, "n": len(pnls), "min": min_trades,
+                "reason": "invalid_min_trades"}
     n = len(pnls)
     return {"gate": "sample_size", "passed": n >= int(min_trades), "n": n, "min": int(min_trades)}
 
 
 def profit_factor_gate(pnls, *, min_pf: float = 1.1) -> dict:
+    if isinstance(min_pf, bool) or not math.isfinite(float(min_pf)) or float(min_pf) < 0.0:
+        return {"gate": "profit_factor", "passed": False, "pf": None, "min": min_pf,
+                "reason": "invalid_min_profit_factor"}
     pf = profit_factor(pnls)
-    return {"gate": "profit_factor", "passed": pf >= min_pf, "pf": _pf_str(pf), "min": min_pf}
+    return {"gate": "profit_factor", "passed": math.isfinite(pf) and pf >= float(min_pf),
+            "pf": _pf_str(pf), "min": float(min_pf)}
 
 
 def out_of_sample_gate(pnls, *, train_fraction: float = 0.7, min_oos_pf: float = 1.0) -> dict:
-    train, test = split_walk_forward(pnls, train_fraction=train_fraction)
+    if (isinstance(train_fraction, bool) or not math.isfinite(float(train_fraction))
+            or not 0.0 < float(train_fraction) < 1.0
+            or isinstance(min_oos_pf, bool) or not math.isfinite(float(min_oos_pf))
+            or float(min_oos_pf) < 0.0):
+        return {"gate": "out_of_sample", "passed": False,
+                "reason": "invalid_oos_parameters"}
+    train, test = split_walk_forward(pnls, train_fraction=float(train_fraction))
     pf_in, pf_out = profit_factor(train), profit_factor(test)
-    passed = bool(test) and pf_out >= min_oos_pf
+    passed = bool(test) and math.isfinite(pf_out) and pf_out >= float(min_oos_pf)
     return {"gate": "out_of_sample", "passed": passed, "pf_in_sample": _pf_str(pf_in),
             "pf_out_sample": _pf_str(pf_out), "n_test": len(test), "min_oos_pf": min_oos_pf}
 
@@ -173,6 +190,12 @@ def lookahead_gate(events, *, min_gap_ms: int = 0) -> dict:
 
 
 def monte_carlo_drawdown_gate(pnls, *, runs: int = 1000, seed: int = 7, max_p95_dd_over_net: float = 2.0) -> dict:
+    if (isinstance(runs, bool) or int(runs) < 1
+            or isinstance(max_p95_dd_over_net, bool)
+            or not math.isfinite(float(max_p95_dd_over_net))
+            or float(max_p95_dd_over_net) < 0.0):
+        return {"gate": "monte_carlo_dd", "passed": False,
+                "skipped": False, "reason": "invalid_monte_carlo_parameters"}
     """Rebat l'ordre des trades `runs` fois → distribution du pire drawdown. PASS si le
     drawdown p95 reste <= max_p95_dd_over_net × le profit net (le pire chemin est tenable)."""
     if len(pnls) < 5:
@@ -187,7 +210,7 @@ def monte_carlo_drawdown_gate(pnls, *, runs: int = 1000, seed: int = 7, max_p95_
     p95 = dds[int(0.95 * (len(dds) - 1))]
     net = sum(pnls)
     ratio = (p95 / net) if net > 0 else float("inf")
-    passed = net > 0 and ratio <= max_p95_dd_over_net
+    passed = net > 0 and math.isfinite(ratio) and ratio <= float(max_p95_dd_over_net)
     return {"gate": "monte_carlo_dd", "passed": passed, "p95_drawdown": round(p95, 3),
             "net": round(net, 3), "p95_dd_over_net": _pf_str(ratio), "max": max_p95_dd_over_net}
 
