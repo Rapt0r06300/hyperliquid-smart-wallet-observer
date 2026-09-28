@@ -8,6 +8,7 @@ crashing. Pure: the objective is caller-supplied; no order, no fabricated data.
 from __future__ import annotations
 
 import importlib.util
+import math
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -30,12 +31,19 @@ def random_grid_search(
     n_trials: int = 25,
     seed: int = 0,
 ) -> list[Trial]:
+    if not param_space or any(not values for values in param_space.values()):
+        raise ValueError("parameter space must contain non-empty choices")
+    if isinstance(n_trials, bool) or int(n_trials) < 1:
+        raise ValueError("n_trials must be >= 1")
     rng = random.Random(seed)
     keys = sorted(param_space)
     trials: list[Trial] = []
     for _ in range(max(1, int(n_trials))):
         params = {k: rng.choice(param_space[k]) for k in keys}
-        trials.append(Trial(params=params, score=float(objective_fn(params))))
+        score = float(objective_fn(params))
+        if not math.isfinite(score):
+            raise ValueError("optimization objective must return a finite score")
+        trials.append(Trial(params=params, score=score))
     trials.sort(key=lambda t: -t.score)
     return trials
 
