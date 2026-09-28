@@ -47,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        _require_provenance(args)
+        if args.action == "materialize":
+            _require_provenance(args)
+        elif args.start_ts_ms is not None and args.end_ts_ms is not None and args.end_ts_ms < args.start_ts_ms:
+            raise DatasetV2Error("end_ts_ms precedes start_ts_ms")
         if args.max_shards < 0:
             raise DatasetV2Error("max_shards must be non-negative")
         index, digest = load_index()
@@ -70,9 +73,18 @@ def main(argv: list[str] | None = None) -> int:
             "events": sum(item.event_count for item in shards),
             "bytes": sum(item.bytes for item in shards),
             "dataset_ids": [item.dataset_id for item in shards],
-            "dataset_selection_id": args.dataset_selection_id.lower(),
+            "dataset_selection_id": (
+                args.dataset_selection_id.lower()
+                if args.dataset_selection_id is not None
+                else None
+            ),
             "source_collection_epoch": args.source_collection_epoch,
             "collection_cutoff_at_utc": args.collection_cutoff_at_utc,
+            "provenance_complete": (
+                args.dataset_selection_id is not None
+                and args.source_collection_epoch is not None
+                and args.collection_cutoff_at_utc is not None
+            ),
             "quality_status_required": "SAFE",
             "replay_compatible_required": True,
             "legacy_import": False,
