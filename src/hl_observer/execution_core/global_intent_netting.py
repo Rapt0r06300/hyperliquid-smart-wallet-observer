@@ -64,7 +64,6 @@ from typing idef netter(intentions: Iterable[dict[str, Any]]) -> dict[str, Any]:
             "complete": True,
         },
     }
-n(resultat)}
 
 
 __all__ = ["netter"]
