@@ -28,6 +28,7 @@ from hl_observer.event_intelligence.runtime_pipeline import build_runtime_eviden
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
 
 SOURCE_ORDER = ("usgs_earthquakes", "nasa_eonet", "gdacs", "gdelt_doc")
+EXPECTED_EVENT_SOURCES = ("usgs.earthquakes", "nasa.eonet", "gdacs", "gdelt.doc")
 
 
 def _source_params(source_id: str) -> dict[str, object]:
@@ -205,7 +206,7 @@ def build_public_event_bundle(
     runtime_evidence = build_runtime_evidence(
         collected_events,
         now_ms=now_ms,
-        expected_sources=SOURCE_ORDER,
+        expected_sources=EXPECTED_EVENT_SOURCES,
     )
     runtime_digest = hashlib.sha256(
         json.dumps(runtime_evidence, sort_keys=True, separators=(",", ":")).encode()
@@ -247,4 +248,4 @@ def build_public_event_bundle(
     return bundle
 
 
-__all__ = ["SOURCE_ORDER", "build_public_event_bundle"]
+__all__ = ["EXPECTED_EVENT_SOURCES", "SOURCE_ORDER", "build_public_event_bundle"]
