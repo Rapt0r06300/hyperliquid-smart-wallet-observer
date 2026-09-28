@@ -14,7 +14,11 @@ from hl_observer.storage.run_context import RunContext
 def validate_runner_inputs(run_context, events, *, min_gap_ms: int = 0) -> list[str]:
     """Return a list of violation strings (empty = valid)."""
     violations: list[str] = []
-    ctx = run_context if isinstance(run_context, RunContext) else RunContext(str(run_context).upper())
+    try:
+        ctx = run_context if isinstance(run_context, RunContext) else RunContext(str(run_context).upper())
+    except (TypeError, ValueError):
+        violations.append("INVALID_RUN_CONTEXT")
+        return violations
     if ctx == RunContext.LIVE:
         violations.append("RUN_CONTEXT_MUST_NOT_BE_LIVE_FOR_BACKTEST")
     if not events:
