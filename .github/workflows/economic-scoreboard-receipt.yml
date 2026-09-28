@@ -1,6 +1,9 @@
 name: economic-scoreboard-receipt
 on:
   workflow_dispatch:
+env:
+  GH_TOKEN: "${{ github.token }}"
+
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
@@ -28,4 +31,5 @@ jobs:
           git add runtime/reports/economic_family_scoreboards.json
           git diff --cached --quiet && exit 0
           git commit -m "scoreboard: persist economic family receipt"
+          gh auth setup-git
           git push origin HEAD:main
