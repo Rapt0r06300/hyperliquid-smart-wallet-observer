@@ -121,7 +121,11 @@ def build_negative_pnl_audit(log_dir: Path | None = None) -> V19NegativePnlAudit
         "yes",
         "on",
     }
-    metrics = analyze_logs_streaming(effective_log_dir, prefer_append_only=prefer_append_only)
+    metrics = analyze_logs_streaming(
+        effective_log_dir,
+        prefer_append_only=prefer_append_only,
+        historical=True,
+    )
     tournament = run_strategy_tournament(effective_log_dir)
     snapshot = _load_snapshot_pnl(effective_log_dir)
     open_portfolio = _load_open_portfolio_audit(
