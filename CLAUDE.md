@@ -162,3 +162,11 @@ Ne déduis jamais `DONE` de la présence d'un fichier, d'un workflow vert, d'un 
 La fermeture globale est celle de la spec canonique : cohérence des deux repos, data/replay evidence, OOS/forward, PnL proof, scoreboard, receipts, paper/read-only, aucun self-hosted et aucune exécution réelle atteignable.
 
 Pour tous les détails opérationnels, suis `AGENTS.md` puis la spec canonique.
+
+## Portage externe et vérité des preuves
+
+Ne pas copier en aveugle. Toute idée externe est classée exactement comme `COPY_DIRECT`, `COPY_ADAPTED`, `PORT_BEHAVIOR`, `INSPIRE_ONLY`, `SKIP_WITH_REASON` ou `DEFERRED_WITH_PLAN`.
+
+Aucun repo externe ne bypasse le RiskEngine, `PaperIntent`, les gates fail-closed ou le verdict `NO_TRADE`. Ne jamais prétendre avoir lu un fichier non lu, ni porté un comportement sans test et sans branchement vérifiable.
+
+Jamais de promesse de PnL. Aucune donnée fabriquée. Aucun ordre réel.
