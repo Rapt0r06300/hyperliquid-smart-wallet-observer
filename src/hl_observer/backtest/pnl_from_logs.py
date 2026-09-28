@@ -11,6 +11,7 @@ Usage : python -m hl_observer.backtest.pnl_from_logs <chemin.jsonl> [<chemin_var
 from __future__ import annotations
 
 import json
+import math
 import sys
 
 from hl_observer.backtest.ab_report import ab_compare_pnls
@@ -49,9 +50,12 @@ def load_realized_pnls(path: str, *, pnl_key: str = DEFAULT_PNL_KEY, close_only:
             if v is None:
                 continue
             try:
-                pnls.append(float(v))
-            except (TypeError, ValueError):
+                value = float(v)
+            except (TypeError, ValueError, OverflowError):
                 continue
+            if not math.isfinite(value):
+                continue
+            pnls.append(value)
     return pnls
 
 
