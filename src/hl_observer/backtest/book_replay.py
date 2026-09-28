@@ -7,6 +7,7 @@ no fabrication: it only replays the deltas it is given, in order.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -45,17 +46,41 @@ class BookReplayer:
         self._ts = 0
 
     def apply_snapshot(self, *, bids, asks, ts_ms: int) -> None:
-        self._bids = {float(p): float(s) for p, s in bids if float(s) > 0}
-        self._asks = {float(p): float(s) for p, s in asks if float(s) > 0}
+        if isinstance(ts_ms, bool) or int(ts_ms) < self._ts:
+            raise ValueError("book timestamps must be monotonic")
+        def levels(rows):
+            out = {}
+            for price, size in rows:
+                price_f, size_f = float(price), float(size)
+                if (not math.isfinite(price_f) or not math.isfinite(size_f)
+                        or price_f <= 0.0):
+                    raise ValueError("book prices and sizes must be finite")
+                if size_f > 0.0:
+                    out[price_f] = size_f
+            return out
+        self._bids = levels(bids)
+        self._asks = levels(asks)
+        if self._bids and self._asks and max(self._bids) >= min(self._asks):
+            raise ValueError("crossed order book snapshot")
         self._ts = int(ts_ms)
 
     def apply_delta(self, *, side: str, price: float, size: float, ts_ms: int) -> None:
-        book = self._bids if str(side).lower().startswith("b") else self._asks
+        if isinstance(ts_ms, bool) or int(ts_ms) < self._ts:
+            raise ValueError("book timestamps must be monotonic")
+        side_l = str(side).lower()
+        if side_l not in {"bid", "bids", "ask", "asks"}:
+            raise ValueError("unsupported book side")
+        book = self._bids if side_l.startswith("b") else self._asks
         price = float(price)
-        if float(size) <= 0:
+        size = float(size)
+        if not math.isfinite(price) or not math.isfinite(size) or price <= 0.0:
+            raise ValueError("book delta price and size must be finite")
+        if size <= 0:
             book.pop(price, None)          # size 0 removes the level
         else:
-            book[price] = float(size)
+            book[price] = size
+        if self._bids and self._asks and max(self._bids) >= min(self._asks):
+            raise ValueError("crossed order book delta")
         self._ts = int(ts_ms)
 
     def state(self) -> BookState:
