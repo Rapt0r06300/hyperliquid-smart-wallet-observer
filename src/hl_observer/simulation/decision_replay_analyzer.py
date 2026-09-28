@@ -533,7 +533,7 @@ def _write_summary_cache(log_dir: Path, path: Path, signature: dict[str, Any], a
 def _row_to_event(row: dict[str, Any]) -> DecisionEvent:
     event_type = _to_str(row.get("event_type"))
     return DecisionEvent(
-        timestamp_ms=_to_int(row.get("timestamp_ms") or row.get("recorded_at_ms") or row.get("closed_at_ms")),
+        timestamp_ms=_to_int(_first_present(row, "timestamp_ms", "recorded_at_ms", "closed_at_ms")),
         wallet_address=_to_str(row.get("wallet_address") or row.get("leader_wallet")),
         coin=_to_str(row.get("coin") or row.get("market_id")),
         leader_action=_to_str(row.get("leader_action") or row.get("action") or event_type),
@@ -545,10 +545,10 @@ def _row_to_event(row: dict[str, Any]) -> DecisionEvent:
         edge_remaining_bps=_to_float(row.get("edge_remaining_bps")),
         copy_degradation_bps=_to_float(row.get("copy_degradation_bps")),
         signal_age_ms=_to_int(row.get("signal_age_ms")),
-        consensus_wallets=_to_int(row.get("consensus_wallets") or row.get("wallet_count")),
-        copied_notional_usdt=_to_float(row.get("copied_notional_usdt") or row.get("notional") or row.get("size")),
+        consensus_wallets=_to_int(_first_present(row, "consensus_wallets", "wallet_count")),
+        copied_notional_usdt=_to_float(_first_present(row, "copied_notional_usdt", "notional", "size")),
         estimated_net_pnl_usdc=_event_net_pnl(row),
-        gross_pnl_usdc=_to_float(row.get("gross_pnl_usdc") or row.get("gross_pnl")),
+        gross_pnl_usdc=_to_float(_first_present(row, "gross_pnl_usdc", "gross_pnl")),
         fee_cost_usdc=_event_fee(row),
         execution=_to_str(row.get("execution") or "forbidden") or "forbidden",
         research_only=bool(row.get("research_only", True)),
