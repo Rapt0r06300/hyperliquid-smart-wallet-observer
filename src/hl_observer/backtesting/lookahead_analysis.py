@@ -8,7 +8,16 @@ from hl_observer.backtest.no_lookahead_guard import LookaheadViolation, find_loo
 
 
 def lookahead_analysis_report(events, *, min_gap_ms: int = 0) -> dict[str, object]:
-    violations = find_lookahead_violations(events, min_gap_ms=min_gap_ms)
+    if isinstance(min_gap_ms, bool) or int(min_gap_ms) < 0:
+        return {
+            "ok": False,
+            "violation_count": None,
+            "violations": [],
+            "min_gap_ms": min_gap_ms,
+            "reason": "invalid_min_gap_ms",
+            "paper_only": True,
+        }
+    violations = find_lookahead_violations(events, min_gap_ms=int(min_gap_ms))
     return {
         "ok": not violations,
         "violation_count": len(violations),
