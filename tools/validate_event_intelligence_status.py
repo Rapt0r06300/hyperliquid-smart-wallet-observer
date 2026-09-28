@@ -60,22 +60,17 @@ def main():
             raise SystemExit(f"event {row.get('id')} claims proof without wired implementation")
         component_contract = str(row.get("component_contract") or "")
         callers = row.get("actual_callers") or []
-        if component_contract:
-            expected = hashlib.sha256(
-                json.dumps(
-                    {
-                        "files": sorted(files),
-                        "component_contract": component_contract,
-                        "callers": sorted(callers),
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ).encode()
-            ).hexdigest()
-        else:
-            expected = hashlib.sha256(
-                json.dumps(sorted(files), sort_keys=True).encode()
-            ).hexdigest()
+        expected = hashlib.sha256(
+            json.dumps(
+                {
+                    "files": sorted(files),
+                    "component_contract": component_contract,
+                    "callers": sorted(callers),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         if row.get("evidence_digest") != expected:
             raise SystemExit(f"event {row.get('id')} evidence digest mismatch")
     summary = body.get("summary") or {}
