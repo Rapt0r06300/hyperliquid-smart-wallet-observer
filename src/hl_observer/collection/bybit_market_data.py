@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -35,7 +36,8 @@ PUBLIC_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
 def _float(value: object) -> float | None:
     try:
-        return float(value)  # type: ignore[arg-type]
+        parsed = float(value)  # type: ignore[arg-type]
+        return parsed if math.isfinite(parsed) else None
     except (TypeError, ValueError):
         return None
 
@@ -89,7 +91,7 @@ def parse_bybit_linear_instruments(payload: dict[str, object]) -> list[tuple[str
             continue
         if settle and settle != "USDT":
             continue
-        if status not in {"Trading", "PendingOpen"}:
+        if status != "Trading":
             continue
         if contract_type and "perpetual" not in contract_type:
             continue
@@ -298,7 +300,7 @@ class BybitMarketState:
                 side[price] = size
 
     def _valid_bbo(self) -> bool:
-        return bool(self.bids and self.asks and max(self.bids) <= min(self.asks))
+        return bool(self.bids and self.asks and max(self.bids) < min(self.asks))
 
     def _desync(self, reason: str) -> str:
         self.quality = DESYNC
