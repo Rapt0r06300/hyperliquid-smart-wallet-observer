@@ -115,7 +115,7 @@ def _matrice_propre(matrice: Sequence[Sequence[float]]) -> tuple[list[list[float
             vals = [float(x) for x in row]
         except (TypeError, ValueError):
             continue
-        if vals:
+        if vals and all(math.isfinite(value) for value in vals):
             lignes.append(vals)
     if len(lignes) < 2:
         return [], 0
@@ -149,7 +149,10 @@ def pbo_cscv(matrice: Sequence[Sequence[float]], *, max_partitions: int = MAX_PA
         }
     blocs = list(range(S))
     partitions = list(itertools.combinations(blocs, S // 2))
-    if len(partitions) > max_partitions:
+    if isinstance(max_partitions, bool) or int(max_partitions) < 1:
+        return {"pbo": None, "n_configs": N, "n_blocs": S,
+                "verdict": "INSUFFISANT_PARAMETRE_PARTITIONS", "real_execution": False}
+    if len(partitions) > int(max_partitions):
         partitions = random.Random(graine).sample(partitions, max_partitions)
     n_surajuste = 0
     lambdas: list[float] = []
@@ -181,6 +184,8 @@ def seuil_bruit_multiple_testing(n_essais: int, sigma: float) -> float:
     """La performance qu'atteint DÉJÀ le meilleur de `n_essais` tirages d'espérance nulle, par
     pur hasard : σ·√(2·ln N). Un gagnant qui ne la dépasse pas n'a rien prouvé."""
     n = max(int(n_essais or 0), 2)
+    if isinstance(sigma, bool) or not math.isfinite(float(sigma)) or float(sigma) < 0.0:
+        raise ValueError("sigma must be finite and non-negative")
     return float(sigma) * math.sqrt(2.0 * math.log(n))
 
 
@@ -192,8 +197,12 @@ def verdict_robustesse(matrice: Sequence[Sequence[float]], n_essais: int, *,
     n'est jamais 'robuste'."""
     res = pbo_cscv(matrice, max_partitions=max_partitions)
     res["n_essais"] = int(n_essais or 0)
-    robuste = (res.get("pbo") is not None) and (res["pbo"] <= PBO_SEUIL)
-    if net_gagnant is not None and sigma_null:
+    robuste = (res.get("pbo") is not None) and (res["pbo"] < PBO_SEUIL)
+    if net_gagnant is not None or sigma_null is not None:
+        if net_gagnant is None or sigma_null is None:
+            res["seuil_bruit"] = None
+            res["bat_le_bruit"] = False
+            robuste = False
         seuil = seuil_bruit_multiple_testing(n_essais, sigma_null)
         res["seuil_bruit"] = round(seuil, 6)
         res["bat_le_bruit"] = bool(net_gagnant > seuil)
