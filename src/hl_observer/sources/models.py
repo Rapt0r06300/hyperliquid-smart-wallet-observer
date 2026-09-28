@@ -14,6 +14,7 @@ no signature, no fabricated data — provenance only describes what was fetched.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 try:  # py311+
@@ -53,6 +54,8 @@ class SourceDefinition:
     enabled: bool = True
 
     def __post_init__(self) -> None:
+        if not str(self.source_id).strip() or not str(self.endpoint_or_channel).strip():
+            raise ValueError("source identity and endpoint are required")
         if not self.read_only:
             raise ValueError("SourceDefinition.read_only must be True (no real external action)")
 
@@ -82,6 +85,27 @@ class FetchProvenance:
     data_quality: str = "OK"           # OK | DEGRADED | BAD
     error: str | None = None
 
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("fetched_at_ms", self.fetched_at_ms),
+            ("received_at_ms", self.received_at_ms),
+            ("written_at_ms", self.written_at_ms),
+            ("source_ts_ms", self.source_ts_ms),
+            ("item_count", self.item_count),
+            ("rate_weight", self.rate_weight),
+        ):
+            if value is not None and (isinstance(value, bool) or int(value) < 0):
+                raise ValueError(f"{name} must be non-negative")
+        for name, value in (
+            ("clock_offset_ms", self.clock_offset_ms),
+            ("clock_uncertainty_ms", self.clock_uncertainty_ms),
+            ("latency_ms", self.latency_ms),
+        ):
+            if value is not None and (isinstance(value, bool) or not math.isfinite(float(value))):
+                raise ValueError(f"{name} must be finite")
+        if not str(self.source_id).strip() or not str(self.request_id).strip():
+            raise ValueError("source_id and request_id are required")
+
 
 @dataclass(frozen=True, slots=True)
 class SourceHealthSnapshot:
@@ -95,6 +119,18 @@ class SourceHealthSnapshot:
     samples: int = 0
     last_error: str | None = None
     reasons: tuple[str, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        if not str(self.source_id).strip():
+            raise ValueError("source_id is required")
+        if self.age_ms is not None and self.age_ms < 0:
+            raise ValueError("age_ms must be non-negative")
+        if self.consecutive_errors < 0 or self.samples < 0:
+            raise ValueError("health counters must be non-negative")
+        if isinstance(self.success_rate, bool) or not math.isfinite(float(self.success_rate)):
+            raise ValueError("success_rate must be finite")
+        if not 0.0 <= float(self.success_rate) <= 1.0:
+            raise ValueError("success_rate must be in [0, 1]")
 
     @property
     def usable(self) -> bool:
