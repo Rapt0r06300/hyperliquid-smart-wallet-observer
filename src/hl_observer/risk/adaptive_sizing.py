@@ -1,15 +1,9 @@
-"""Streak- and confidence-aware position sizing (S7 — V9, MrFadiAi A3 + CloddsBot).
-
-base = 2% of equity. Each consecutive loss shrinks size by 20% (×0.8),
-each consecutive win grows it by 10% (×1.1), hard-capped at 5% and floored
-at 0.5%. A calibrated confidence in [0,1] scales the result (Brier-coupled).
-
-SAFETY: returns a *paper* size only.
-"""
+"""Conservative finite adaptive paper sizing."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 BASE_PCT = 2.0
 CAP_PCT = 5.0
@@ -36,29 +30,37 @@ def compute_size_pct(
     floor_pct: float = FLOOR_PCT,
     confidence: float = 1.0,
 ) -> SizingDecision:
-    losses = max(0, consecutive_losses)
-    wins = max(0, consecutive_wins)
-    conf = min(1.0, max(0.0, confidence))
-
-    multiplier = (LOSS_FACTOR ** losses) * (WIN_FACTOR ** wins)
-    raw = base_pct * multiplier * conf
-
-    capped = raw > cap_pct
-    floored = raw < floor_pct
-    size = min(cap_pct, max(floor_pct, raw))
-    # A zero confidence collapses size to floor only if we still want exposure;
-    # confidence==0 should mean no size.
+    if (
+        not isinstance(consecutive_losses, int) or isinstance(consecutive_losses, bool)
+        or not isinstance(consecutive_wins, int) or isinstance(consecutive_wins, bool)
+        or consecutive_losses < 0 or consecutive_wins < 0
+    ):
+        raise ValueError("streak counters must be non-negative integers")
+    try:
+        base, cap, floor, conf = map(float, (base_pct, cap_pct, floor_pct, confidence))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("sizing inputs must be numeric") from exc
+    if any(not math.isfinite(value) for value in (base, cap, floor, conf)):
+        raise ValueError("sizing inputs must be finite")
+    if base < 0.0 or floor < 0.0 or cap < floor or not 0.0 <= conf <= 1.0:
+        raise ValueError("invalid sizing bounds")
+    multiplier = (LOSS_FACTOR ** consecutive_losses) * (WIN_FACTOR ** consecutive_wins)
+    raw = base * multiplier * conf
+    if not math.isfinite(raw):
+        raise ValueError("sizing result is non-finite")
     if conf <= 0.0:
-        size = 0.0
-        floored = False
-    return SizingDecision(
-        size_pct=size,
-        multiplier=multiplier,
-        confidence=conf,
-        capped=capped,
-        floored=floored,
-    )
+        return SizingDecision(0.0, multiplier, conf, False, False)
+    capped = raw > cap
+    floored = raw < floor
+    size = min(cap, max(floor, raw))
+    return SizingDecision(size, multiplier, conf, capped, floored)
 
 
 def size_to_notional(size_pct: float, equity_usdc: float) -> float:
-    return max(0.0, size_pct) / 100.0 * max(0.0, equity_usdc)
+    try:
+        size, equity = float(size_pct), float(equity_usdc)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("size and equity must be numeric") from exc
+    if not math.isfinite(size) or not math.isfinite(equity) or size < 0.0 or equity < 0.0:
+        raise ValueError("size and equity must be finite and non-negative")
+    return size / 100.0 * equity
