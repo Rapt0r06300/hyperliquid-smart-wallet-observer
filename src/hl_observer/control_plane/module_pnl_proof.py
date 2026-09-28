@@ -103,10 +103,14 @@ def independent_module_verdict(
     elif any(row.get("quality_status") != "SAFE" or not row.get("replay_compatible", False) for row in evidence):
         verdict = {"module": canonical_module, "status": "UNMEASURABLE", "reason": "NON_SAFE_OR_NON_REPLAY_COMPATIBLE_INPUT", "proof_of_pnl": False, "sample_size": len(evidence)}
     else:
-        result = prove_module(canonical_module, evidence, threshold_usd)
-        verdict = dict(result)
-        verdict["status"] = "PROVEN" if result["threshold_met"] else "KILL"
-        verdict["reason"] = "NET_DAILY_THRESHOLD_MET" if result["threshold_met"] else "NET_DAILY_THRESHOLD_NOT_MET"
+        try:
+            result = prove_module(canonical_module, evidence, threshold_usd)
+        except ValueError as exc:
+            verdict = {"module": canonical_module, "status": "UNMEASURABLE", "reason": f"PNL_EVIDENCE_INVALID:{exc}", "proof_of_pnl": False, "sample_size": len(evidence)}
+        else:
+            verdict = dict(result)
+            verdict["status"] = "PROVEN" if result["threshold_met"] else "KILL"
+            verdict["reason"] = "NET_DAILY_THRESHOLD_MET" if result["threshold_met"] else "NET_DAILY_THRESHOLD_NOT_MET"
     verdict["certificate_digest"] = hashlib.sha256(json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return verdict
 
