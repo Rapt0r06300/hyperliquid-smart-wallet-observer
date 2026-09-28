@@ -52,6 +52,10 @@ class MarketLevel:
     price: float
     size: float
 
+    def __post_init__(self) -> None:
+        if _finite_positive(self.price) is None or _finite_positive(self.size) is None:
+            raise ValueError("L2 price and size must be finite and positive")
+
 
 @dataclass(frozen=True, slots=True)
 class NativeMarketSnapshot:
