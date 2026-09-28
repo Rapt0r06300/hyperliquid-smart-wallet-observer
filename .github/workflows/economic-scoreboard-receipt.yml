@@ -1,6 +1,15 @@
 name: economic-scoreboard-receipt
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "47 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "src/hl_observer/control_plane/module_pnl_proof.py"
+      - "src/hl_observer/simulation/economic_family_scoreboard.py"
+      - "tools/export_economic_family_scoreboards.py"
+      - ".github/workflows/economic-scoreboard-receipt.yml"
 env:
   GH_TOKEN: "${{ github.token }}"
 
@@ -28,7 +37,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add runtime/reports/economic_family_scoreboards.json
+          git add -f runtime/reports/economic_family_scoreboards.json
           git diff --cached --quiet && exit 0
           git commit -m "scoreboard: persist economic family receipt"
           gh auth setup-git
