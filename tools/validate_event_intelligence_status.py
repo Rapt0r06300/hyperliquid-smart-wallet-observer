@@ -16,7 +16,7 @@ STATUSES = {
     "NOT_APPLICABLE",
 }
 PROOFS = {"PROVEN", "UNPROVEN", "UNMEASURABLE", "KILL", "MORE_DATA"}
-COVERAGE_STATES = {"REGISTERED", "WIRED", "DATA_PRESENT", "CONSUMED", "VALIDATED", "UNMEASURABLE", "UNSUPPORTED", "RETIRED"}
+COVERAGE_STATES = {"REGISTERED", "WIRED", "DATA_PRESENT", "CONSUMED", "VALIDATED", "UNMEASURABLE", "UNSUPPORTED", "RETIRED", "NOT_APPLICABLE"}
 
 
 def main():
@@ -58,7 +58,24 @@ def main():
             raise SystemExit(f"event {row.get('id')} claims wired without evidence")
         if proof == "PROVEN" and status != "IMPLEMENTED_AND_WIRED":
             raise SystemExit(f"event {row.get('id')} claims proof without wired implementation")
-        expected = hashlib.sha256(json.dumps(sorted(files), sort_keys=True).encode()).hexdigest()
+        component_contract = str(row.get("component_contract") or "")
+        callers = row.get("actual_callers") or []
+        if component_contract:
+            expected = hashlib.sha256(
+                json.dumps(
+                    {
+                        "files": sorted(files),
+                        "component_contract": component_contract,
+                        "callers": sorted(callers),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+        else:
+            expected = hashlib.sha256(
+                json.dumps(sorted(files), sort_keys=True).encode()
+            ).hexdigest()
         if row.get("evidence_digest") != expected:
             raise SystemExit(f"event {row.get('id')} evidence digest mismatch")
     summary = body.get("summary") or {}

@@ -18,7 +18,7 @@ permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
 concurrency:
-  group: event-intelligence-coverage-registry
+  group: event-intelligence-status-publish
   cancel-in-progress: false
 jobs:
   generate:
@@ -28,6 +28,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Sync latest main before registry generation
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
       - name: Generate wiring registry
         run: python tools/generate_event_intelligence_status.py
       - name: Validate wiring registry
@@ -41,4 +47,9 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "event-intelligence: publish wiring status registry"
           gh auth setup-git
+          if git push origin HEAD:main; then
+            exit 0
+          fi
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main
