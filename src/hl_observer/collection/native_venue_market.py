@@ -121,13 +121,28 @@ class NativeMarketSnapshot:
         now = int(time.time() * 1000) if now_ms is None else int(now_ms)
         bid_f = _finite_positive(bid)
         ask_f = _finite_positive(ask)
+        try:
+            exchange_ts = int(exchange_ts_ms)
+            receive_ts = int(receive_ts_ms)
+            stale_limit = int(stale_after_ms)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("market timestamps and stale limit must be integers") from exc
         derived_quality = quality
         derived_reason = reason
-        if derived_quality is None:
+        if stale_limit < 0 or exchange_ts < 0 or receive_ts < 0:
+            derived_quality = UNMEASURABLE
+            derived_reason = derived_reason or "INVALID_MARKET_TIMESTAMPS"
+        elif receive_ts > now:
+            derived_quality = DESYNC
+            derived_reason = derived_reason or "FUTURE_RECEIVE_TIMESTAMP"
+        elif exchange_ts > receive_ts:
+            derived_quality = DESYNC
+            derived_reason = derived_reason or "EXCHANGE_CLOCK_AHEAD_OF_RECEIVE"
+        elif derived_quality is None:
             if bid_f is None or ask_f is None or ask_f < bid_f:
                 derived_quality = UNMEASURABLE
                 derived_reason = derived_reason or "INVALID_BBO"
-            elif max(0, now - int(receive_ts_ms)) > int(stale_after_ms):
+            elif now - receive_ts > stale_limit:
                 derived_quality = STALE
                 derived_reason = derived_reason or "STALE_RECEIVE_AGE"
             else:
@@ -138,8 +153,8 @@ class NativeMarketSnapshot:
             exchange_symbol=str(exchange_symbol).strip().upper(),
             bid=float(bid_f or 0.0),
             ask=float(ask_f or 0.0),
-            exchange_ts_ms=int(exchange_ts_ms),
-            receive_ts_ms=int(receive_ts_ms),
+            exchange_ts_ms=exchange_ts,
+            receive_ts_ms=receive_ts,
             quality=str(derived_quality),
             bids=tuple(bids),
             asks=tuple(asks),
