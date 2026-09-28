@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import sys
 
 from hl_observer.control_plane.resumable_campaign import (
     CampaignManifest,
@@ -148,7 +149,18 @@ def main() -> int:
         return 0
 
     if args.command == "list-due":
-        manifests = [load(item) for item in sorted(path.glob("*.json"))]
+        manifests = []
+        for item in sorted(path.glob("*.json")):
+            try:
+                manifest = load(item)
+                validate_manifest(manifest)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                # One corrupt historical manifest must not starve all unrelated
+                # campaigns.  Fail it closed by excluding it and emit a stable
+                # diagnostic for operator repair.
+                print(f"invalid_campaign={item.name}:{type(exc).__name__}", file=sys.stderr)
+                continue
+            manifests.append(manifest)
         print("\n".join(item.campaign_id for item in select_due_campaigns(
             manifests,
             current_phase=args.current_phase,
