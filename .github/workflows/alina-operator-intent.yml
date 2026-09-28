@@ -38,7 +38,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-        with:
           fetch-depth: 0
       - name: Persist immutable operator intent
         env:
@@ -159,7 +158,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-        with:
           fetch-depth: 1
       - name: Dispatch immutable intent to Dataset V2
         env:
