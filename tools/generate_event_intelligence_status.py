@@ -244,7 +244,7 @@ def main() -> int:
         raise SystemExit("component registry must contain ids 1..120")
 
     body = {
-        "schema_version": "alina.event_intelligence_status.v3",
+        "schema_version": "alina.event_intelligence_status.v2",
         "source": str(Path(args.source)),
         "component_registry": str(Path(args.component_registry)),
         "items": rows,
