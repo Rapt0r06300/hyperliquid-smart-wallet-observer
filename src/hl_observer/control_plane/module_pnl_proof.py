@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 from typing import Any, Iterable, Mapping
 
 from hl_observer.strategies.active_scope import (
@@ -44,16 +45,33 @@ def prove_module(
     rows = list(rows)
     if not rows:
         raise ValueError("no evidence")
+    try:
+        threshold = float(threshold_usd)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid PnL threshold") from exc
+    if not math.isfinite(threshold) or threshold < 0.0:
+        raise ValueError("invalid PnL threshold")
     if any(
         row.get("quality_status") != "SAFE"
         or not row.get("replay_compatible", False)
         for row in rows
     ):
         raise ValueError("PnL proof requires SAFE replay-compatible inputs")
-    gross = sum(float(row.get("gross_pnl", 0)) for row in rows)
-    fees = sum(float(row.get("fees", 0)) for row in rows)
-    slippage = sum(float(row.get("slippage", 0)) for row in rows)
-    funding = sum(float(row.get("funding_financing", 0)) for row in rows)
+    components = ("gross_pnl", "fees", "slippage", "funding_financing")
+    parsed: dict[str, list[float]] = {key: [] for key in components}
+    for row in rows:
+        for key in components:
+            try:
+                value = float(row.get(key))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"unmeasured PnL component: {key}") from exc
+            if not math.isfinite(value):
+                raise ValueError(f"invalid PnL component: {key}")
+            parsed[key].append(value)
+    gross = sum(parsed["gross_pnl"])
+    fees = sum(parsed["fees"])
+    slippage = sum(parsed["slippage"])
+    funding = sum(parsed["funding_financing"])
     net = gross - fees - slippage - funding
     return asdict(ModulePnl(
         canonical_module,
@@ -63,8 +81,8 @@ def prove_module(
         funding,
         net,
         len(rows),
-        threshold_usd,
-        net >= threshold_usd,
+        threshold,
+        net >= threshold,
         True,
     ))
 
