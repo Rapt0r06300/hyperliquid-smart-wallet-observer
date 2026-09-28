@@ -9,6 +9,9 @@ on:
       - 'docs/event-intelligence-120-coverage.md'
       - 'tools/generate_event_intelligence_status.py'
       - 'src/hl_observer/event_intelligence/**'
+env:
+  GH_TOKEN: "${{ github.token }}"
+
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
@@ -40,4 +43,5 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "event-intelligence: refresh wiring status"
           git pull --rebase origin main
+          gh auth setup-git
           git push origin HEAD:main
