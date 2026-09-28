@@ -266,7 +266,16 @@ def materialize_safe_shards(
     output_root: str | Path,
     *,
     index_sha256: str,
+    dataset_selection_id: str | None = None,
+    source_collection_epoch: int | None = None,
+    collection_cutoff_at_utc: str | None = None,
 ) -> dict[str, Any]:
+    if dataset_selection_id is not None and (len(dataset_selection_id) != 64 or any(ch not in "0123456789abcdef" for ch in dataset_selection_id)):
+        raise DatasetV2Error("invalid dataset_selection_id")
+    if source_collection_epoch is not None and (isinstance(source_collection_epoch, bool) or source_collection_epoch < 0):
+        raise DatasetV2Error("invalid source_collection_epoch")
+    if collection_cutoff_at_utc is not None and not str(collection_cutoff_at_utc).strip():
+        raise DatasetV2Error("invalid collection_cutoff_at_utc")
     root = Path(output_root).resolve()
     data_root = root / "runtime" / "data" / "market_ticks"
     created: list[str] = []
@@ -289,6 +298,9 @@ def materialize_safe_shards(
         "source_repository": DEFAULT_REPOSITORY,
         "source_ref": DEFAULT_REF,
         "source_index_sha256": index_sha256,
+        "dataset_selection_id": dataset_selection_id,
+        "source_collection_epoch": source_collection_epoch,
+        "collection_cutoff_at_utc": collection_cutoff_at_utc,
         "quality_status_required": "SAFE",
         "selected_shards": len(rows),
         "selected_events": sum(item.event_count for item in rows),
@@ -297,6 +309,7 @@ def materialize_safe_shards(
         "paper_only": True,
         "real_execution": False,
         "legacy_import": False,
+        "provenance_complete": dataset_selection_id is not None and source_collection_epoch is not None and collection_cutoff_at_utc is not None,
     }
     path = report_dir / "SELECTION_PROVENANCE.json"
     temporary = path.with_suffix(".json.tmp")
