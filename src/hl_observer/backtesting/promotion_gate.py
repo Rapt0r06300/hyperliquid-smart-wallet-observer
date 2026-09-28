@@ -13,6 +13,7 @@ Un SEUL échec -> RESTE_PAPER. Donnée manquante -> RESTE_PAPER (on ne promeut j
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 PROMOUVOIR_TESTNET = "PROMOUVOIR_TESTNET"
 RESTE_PAPER = "RESTE_PAPER"
@@ -51,11 +52,28 @@ def decision_promotion(
 ) -> VerdictPromotion:
     """Compose les critères. Tout critère non satisfait OU manquant -> RESTE_PAPER (deny-by-default)."""
     motifs: list[str] = []
-    if n_trades is None or int(n_trades) < int(criteres.min_trades):
+    try:
+        trades_value = int(n_trades) if n_trades is not None and not isinstance(n_trades, bool) else None
+    except (TypeError, ValueError, OverflowError):
+        trades_value = None
+    try:
+        pnl_value = float(pnl_paper) if pnl_paper is not None else None
+    except (TypeError, ValueError, OverflowError):
+        pnl_value = None
+    try:
+        pf_value = float(profit_factor) if profit_factor is not None else None
+    except (TypeError, ValueError, OverflowError):
+        pf_value = None
+    criteria_valid = (
+        int(criteres.min_trades) >= 1
+        and math.isfinite(float(criteres.min_profit_factor))
+        and float(criteres.min_profit_factor) > 0.0
+    )
+    if not criteria_valid or trades_value is None or trades_value < int(criteres.min_trades):
         motifs.append("PAS_ASSEZ_DE_TRADES")
-    if pnl_paper is None or float(pnl_paper) <= 0.0:
+    if pnl_value is None or not math.isfinite(pnl_value) or pnl_value <= 0.0:
         motifs.append("PNL_PAPER_NON_POSITIF")
-    if profit_factor is None or float(profit_factor) < float(criteres.min_profit_factor):
+    if pf_value is None or not math.isfinite(pf_value) or pf_value < float(criteres.min_profit_factor):
         motifs.append("PROFIT_FACTOR_TROP_BAS")
     if criteres.exige_survie and not bool(survit):
         motifs.append("NE_SURVIT_PAS_AUX_STRESS")
