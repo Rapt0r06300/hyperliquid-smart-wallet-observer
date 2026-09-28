@@ -141,6 +141,27 @@ def execute_metaorder(
     economic_mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
 ) -> tuple[dict[str, Any] | None, str]:
     """Execute one closed paper episode or return an explicit refusal code."""
+    try:
+        numeric_limits = (
+            float(notional_usd), float(copy_delay_ms), float(max_reference_lag_ms),
+            float(max_target_lag_ms), float(horizon_ms),
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None, "INVALID_EXECUTION_PARAMETERS"
+    if (
+        not math.isfinite(numeric_limits[0]) or numeric_limits[0] <= 0.0
+        or any(not math.isfinite(value) or value < 0.0 for value in numeric_limits[1:])
+        or numeric_limits[4] <= 0.0
+        or int(direction_multiplier) not in (-1, 1)
+    ):
+        return None, "INVALID_EXECUTION_PARAMETERS"
+    try:
+        signal_ms = int(metaorder["signal_ts_ms"])
+        meta_direction = int(metaorder["direction"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None, "INVALID_METAORDER"
+    if signal_ms < 0 or meta_direction not in (-1, 1):
+        return None, "INVALID_METAORDER"
     contract = build_copy_vault_contract(
         mode=economic_mode,
         notional_usd=float(notional_usd),
@@ -234,7 +255,7 @@ def execute_metaorder(
         return None, "NON_CAUSAL_FORWARD_BOOK"
     if min(float(entry["capacity_usd"]), float(exit_book["capacity_usd"])) < float(notional_usd):
         return None, "OBSERVED_TOP_CAPACITY_TOO_LOW"
-    direction = int(metaorder["direction"]) * (1 if int(direction_multiplier) >= 0 else -1)
+    direction = meta_direction * int(direction_multiplier)
     if direction not in (-1, 1):
         return None, "INVALID_DIRECTION"
     reference_mid = (float(reference["bid"]) + float(reference["ask"])) / 2.0
