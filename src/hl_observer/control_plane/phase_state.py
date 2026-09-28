@@ -106,7 +106,12 @@ def validate_phase_state(state: AlinaPhaseState) -> None:
             raise ValueError("COLLECT phase must have null analysis_stage")
 
     elif state.phase == "ANALYZE":
-        if state.source_collection_epoch is None or not isinstance(state.source_collection_epoch, int) or state.source_collection_epoch < 1:
+        if (
+            state.source_collection_epoch is None
+            or isinstance(state.source_collection_epoch, bool)
+            or not isinstance(state.source_collection_epoch, int)
+            or state.source_collection_epoch < 1
+        ):
             raise ValueError("ANALYZE phase requires a valid positive integer source_collection_epoch")
         if state.collection_cutoff_at_utc is None:
             raise ValueError("ANALYZE phase requires collection_cutoff_at_utc")
