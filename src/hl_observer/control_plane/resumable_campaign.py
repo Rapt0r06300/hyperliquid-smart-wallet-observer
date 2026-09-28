@@ -96,6 +96,7 @@ class CampaignManifest:
     collection_cutoff_at_utc: str | None = None
     dataset_selection_id: str | None = None
     analysis_stage: str | None = None
+    operator_request_id: str | None = None
     checkpoint_lineage: list[dict[str, Any]] = field(default_factory=list)
     terminal_evidence_digest: str | None = None
 
