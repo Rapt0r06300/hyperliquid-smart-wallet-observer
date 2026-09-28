@@ -103,7 +103,10 @@ def build_runtime_evidence(
         )
         source_health[source] = {
             "status": str(health.status),
-            "reason": str(health.reason),
+            "reasons": list(health.reasons),
+            "technically_healthy": health.techniquement_sain,
+            "fresh_signals": health.produit_des_signaux_frais,
+            "usable": health.utilisable,
             "last_success_ms": last_success,
             "gap": (
                 {
