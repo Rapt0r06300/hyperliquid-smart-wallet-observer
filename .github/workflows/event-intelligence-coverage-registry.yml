@@ -11,6 +11,9 @@ on:
       - "tools/validate_event_intelligence_status.py"
       - "src/hl_observer/event_intelligence/**"
       - "src/hl_observer/control_plane/module_pnl_proof.py"
+env:
+  GH_TOKEN: "${{ github.token }}"
+
 permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
@@ -37,4 +40,5 @@ jobs:
           git add docs/event-intelligence-120-status.json
           git diff --cached --quiet && exit 0
           git commit -m "event-intelligence: publish wiring status registry"
+          gh auth setup-git
           git push origin HEAD:main
