@@ -104,10 +104,9 @@ def evaluer_session(etat: EtatSession | None,
     """
     if etat is None:
         return VerdictSession(
-            bloque=False, motif=MOTIF_ETAT_NON_FOURNI,
-            detail=("🔴 L'etat de session n'a pas ete fourni au noyau. **On ne pretend PAS qu'il "
-                    "est sain** -- on le SIGNALE. Un invariant AST oblige le chemin d'entree LIVE "
-                    "a le fournir. *Un etat absent n'est pas un etat sain.*"),
+            bloque=True, motif=MOTIF_ETAT_NON_FOURNI,
+            detail=("L'etat de session n'a pas ete fourni au noyau. Les nouvelles entrees "
+                    "restent bloquees jusqu'a reconstruction depuis le ledger."),
         )
     if etat.vierge:
         return VerdictSession(bloque=False, motif=MOTIF_OK,
@@ -151,7 +150,7 @@ def evaluer_session(etat: EtatSession | None,
         g.code for g in getattr(d, "gates", ())
         if getattr(g, "triggered", False) and getattr(g, "blocks_new_entries", False)
     )
-    autorise = bool(getattr(d, "allow_new_entries", True))
+    autorise = bool(getattr(d, "allow_new_entries", False))
 
     if not autorise or bloquants:
         return VerdictSession(
