@@ -103,6 +103,8 @@ class ClockSynchronizer:
         )
 
     def normalize_server_timestamp(self, server_ms: int) -> int:
+        if isinstance(server_ms, bool) or int(server_ms) < 0:
+            raise ValueError("server_ms must be non-negative")
         state = self.state()
         if not state.synchronized:
             raise RuntimeError(f"clock not synchronized: {state.reason}")
