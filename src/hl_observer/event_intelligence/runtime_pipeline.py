@@ -10,6 +10,10 @@ from collections import Counter, defaultdict
 from dataclasses import asdict
 from collections.abc import Iterable
 
+from hl_observer.collection.native_venue_market import NativeMarketSnapshot
+
+from hl_observer.event_intelligence.event_price_discovery import measure_event_price_discovery
+from hl_observer.event_intelligence.market_features import MarketStateObservation, measure_event_market_features
 from hl_observer.event_intelligence.external_event import (
     ExternalEvent,
     ExternalEventReplayGuard,
@@ -202,6 +206,75 @@ def build_runtime_evidence(
     }
 
 
+def build_market_response_evidence(
+    events: Iterable[ExternalEvent],
+    snapshots: Iterable[NativeMarketSnapshot],
+    *,
+    market_observations: Iterable[MarketStateObservation] = (),
+    threshold_bps: float = 5.0,
+    horizon_ms: int = 60_000,
+) -> dict[str, object]:
+    """Build causal event-to-market evidence without authorizing a strategy."""
+
+    event_rows = tuple(events)
+    snapshot_rows = tuple(snapshots)
+    observation_rows = tuple(market_observations)
+    reactions: list[dict[str, object]] = []
+    features: list[dict[str, object]] = []
+    unmeasurable: Counter[str] = Counter()
+    for event in event_rows:
+        assets = map_event_to_assets(event).assets
+        if not assets:
+            unmeasurable["NO_MAPPED_ASSET"] += 1
+            continue
+        for asset in assets:
+            reaction = measure_event_price_discovery(
+                event,
+                snapshot_rows,
+                coin=asset,
+                threshold_bps=float(threshold_bps),
+                horizon_ms=int(horizon_ms),
+            )
+            reactions.append(asdict(reaction))
+            if reaction.status in {"NO_BASELINE", "NO_REACTION"}:
+                unmeasurable[reaction.status] += 1
+            venues = sorted({
+                row.venue for row in observation_rows
+                if row.asset.upper() == asset.upper()
+            })
+            for venue in venues:
+                delta = measure_event_market_features(
+                    observation_rows,
+                    event_ts_ms=event.available_ts_ms,
+                    venue=venue,
+                    asset=asset,
+                )
+                if delta is not None:
+                    features.append(asdict(delta))
+
+    measured = sum(
+        row["status"] not in {"NO_BASELINE", "NO_REACTION"}
+        for row in reactions
+    )
+    return {
+        "schema": "alina.event_market_response_evidence.v1",
+        "event_count": len(event_rows),
+        "snapshot_count": len(snapshot_rows),
+        "market_observation_count": len(observation_rows),
+        "reaction_count": len(reactions),
+        "measured_reaction_count": measured,
+        "feature_delta_count": len(features),
+        "reactions": reactions,
+        "market_feature_deltas": features,
+        "unmeasurable_reasons": dict(sorted(unmeasurable.items())),
+        "proof_state": "REQUIRES_SCOREBOARD" if measured else "UNMEASURABLE",
+        "proof_of_pnl_allowed": False,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def build_research_protocol_evidence(
     observations: Iterable[EventStudyObservation],
     *,
@@ -256,4 +329,4 @@ def build_research_protocol_evidence(
     }
 
 
-__all__ = ["build_research_protocol_evidence", "build_runtime_evidence"]
+__all__ = ["build_market_response_evidence", "build_research_protocol_evidence", "build_runtime_evidence"]
