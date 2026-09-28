@@ -1,13 +1,13 @@
 """Canonical capped Kelly sizing for local paper simulation.
 
-The function is intentionally conservative: it can reduce or reject size, never
-force an entry. It is suitable for copy-trading, arbitrage simulations and
-strategy tournaments that estimate probability and payoff ratio.
+Invalid, absent or non-finite inputs are rejected before any sizing calculation.
+The function can only reduce or reject a paper intent.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +31,18 @@ class KellySizingDecision:
     reason_codes: tuple[str, ...] = field(default_factory=tuple)
 
 
+def _finite(value: object) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _reject(*reasons: str, p: float = 0.0, b: float = 0.0) -> KellySizingDecision:
+    return KellySizingDecision(False, 0.0, 0.0, 0.0, round(p, 8), round(b, 8), tuple(dict.fromkeys(reasons)))
+
+
 def kelly_size_paper(
     *,
     win_probability: float,
@@ -40,47 +52,50 @@ def kelly_size_paper(
     config: KellySizerConfig | None = None,
 ) -> KellySizingDecision:
     cfg = config or KellySizerConfig()
-    p = max(0.0, min(1.0, float(win_probability or 0.0)))
-    b = max(0.0, float(win_loss_ratio or 0.0))
-    equity = max(0.0, float(equity_usdt or 0.0))
-    exposure = max(0.0, float(current_exposure_usdt or 0.0))
-    reasons: list[str] = []
-    if p < cfg.min_win_probability:
-        reasons.append("KELLY_WIN_PROBABILITY_TOO_LOW")
-    if b <= 0:
-        reasons.append("KELLY_WIN_LOSS_RATIO_INVALID")
-    if equity <= 0:
-        reasons.append("KELLY_EQUITY_INVALID")
-    if reasons:
-        return KellySizingDecision(False, 0.0, 0.0, 0.0, round(p, 8), round(b, 8), tuple(reasons))
+    p = _finite(win_probability)
+    b = _finite(win_loss_ratio)
+    equity = _finite(equity_usdt)
+    exposure = _finite(current_exposure_usdt)
+    config_values = (
+        cfg.fraction,
+        cfg.min_win_probability,
+        cfg.max_equity_fraction,
+        cfg.min_notional_usdt,
+        cfg.max_notional_usdt,
+        cfg.max_total_exposure_usdt,
+    )
+    if any(_finite(value) is None for value in config_values):
+        return _reject("KELLY_CONFIG_INVALID")
+    if p is None or b is None or equity is None or exposure is None:
+        return _reject("KELLY_INPUT_INVALID")
+    if not 0.0 <= p <= 1.0:
+        return _reject("KELLY_WIN_PROBABILITY_INVALID", p=p, b=max(b, 0.0))
+    if (
+        not 0.0 <= float(cfg.fraction) <= 1.0
+        or not 0.0 <= float(cfg.min_win_probability) <= 1.0
+        or float(cfg.max_equity_fraction) < 0.0
+        or float(cfg.min_notional_usdt) < 0.0
+        or float(cfg.max_notional_usdt) < float(cfg.min_notional_usdt)
+        or float(cfg.max_total_exposure_usdt) < 0.0
+    ):
+        return _reject("KELLY_CONFIG_INVALID", p=p, b=max(b, 0.0))
+    if b <= 0.0:
+        return _reject("KELLY_WIN_LOSS_RATIO_INVALID", p=p, b=b)
+    if equity <= 0.0 or exposure < 0.0:
+        return _reject("KELLY_EQUITY_INVALID" if equity <= 0.0 else "KELLY_EXPOSURE_INVALID", p=p, b=b)
+    if p < float(cfg.min_win_probability):
+        return _reject("KELLY_WIN_PROBABILITY_TOO_LOW", p=p, b=b)
 
     full = (p * b - (1.0 - p)) / b
-    if full <= 0:
-        return KellySizingDecision(
-            False,
-            0.0,
-            round(full, 8),
-            0.0,
-            round(p, 8),
-            round(b, 8),
-            ("KELLY_NEGATIVE_EDGE",),
-        )
-    used_fraction = min(full * max(0.0, cfg.fraction), max(0.0, cfg.max_equity_fraction))
+    if not math.isfinite(full) or full <= 0.0:
+        return _reject("KELLY_NEGATIVE_EDGE", p=p, b=b)
+    used_fraction = min(full * float(cfg.fraction), float(cfg.max_equity_fraction))
     raw_notional = equity * used_fraction
-    absolute_capped = min(raw_notional, max(0.0, cfg.max_notional_usdt))
     remaining = max(0.0, float(cfg.max_total_exposure_usdt) - exposure)
-    notional = min(absolute_capped, remaining)
-    if notional < cfg.min_notional_usdt:
-        reasons.append("KELLY_NOTIONAL_BELOW_MINIMUM")
-    return KellySizingDecision(
-        accepted=not reasons,
-        notional_usdt=round(notional if not reasons else 0.0, 8),
-        full_kelly_fraction=round(full, 8),
-        used_fraction=round(used_fraction, 8),
-        win_probability=round(p, 8),
-        win_loss_ratio=round(b, 8),
-        reason_codes=tuple(dict.fromkeys(reasons)),
-    )
+    notional = min(raw_notional, float(cfg.max_notional_usdt), remaining)
+    if not math.isfinite(notional) or notional < float(cfg.min_notional_usdt):
+        return KellySizingDecision(False, 0.0, round(full, 8), round(used_fraction, 8), round(p, 8), round(b, 8), ("KELLY_NOTIONAL_BELOW_MINIMUM",))
+    return KellySizingDecision(True, round(notional, 8), round(full, 8), round(used_fraction, 8), round(p, 8), round(b, 8))
 
 
 __all__ = ["KellySizerConfig", "KellySizingDecision", "kelly_size_paper"]
