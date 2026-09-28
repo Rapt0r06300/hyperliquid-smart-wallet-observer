@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
+import math
 
 
 SCHEMA_VERSION = "alina.external_event.v1"
@@ -101,10 +102,19 @@ class ExternalEvent:
             and self.publication_ts_ms > self.retrieval_ts_ms
         ):
             raise ValueError("publication_ts_ms cannot be after retrieval_ts_ms")
-        if not 0.0 <= float(self.classification_confidence) <= 1.0:
-            raise ValueError("classification_confidence must be in [0, 1]")
-        if self.severity is not None and not 0.0 <= float(self.severity) <= 1.0:
-            raise ValueError("severity must be in [0, 1]")
+        try:
+            confidence = float(self.classification_confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("classification_confidence must be finite and in [0, 1]") from exc
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise ValueError("classification_confidence must be finite and in [0, 1]")
+        if self.severity is not None:
+            try:
+                severity = float(self.severity)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("severity must be finite and in [0, 1]") from exc
+            if not math.isfinite(severity) or not 0.0 <= severity <= 1.0:
+                raise ValueError("severity must be finite and in [0, 1]")
         if isinstance(self.corroboration_count, bool) or self.corroboration_count < 1:
             raise ValueError("corroboration_count must be >= 1")
         if isinstance(self.revision, bool) or not isinstance(self.revision, int) or self.revision < 0:
