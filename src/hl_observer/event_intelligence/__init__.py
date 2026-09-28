@@ -58,7 +58,7 @@ from .outcomes import EventCandidateMarkout, evaluate_candidate_markout
 from .event_price_discovery import EventMarketReaction, measure_event_price_discovery
 from .protocol import EventResearchFreeze, assert_forward_after_freeze, freeze_event_research
 from .provenance import EventCluster, ProvenanceScore, cluster_external_events, score_provenance
-from .runtime_pipeline import build_research_protocol_evidence, build_runtime_evidence
+from .runtime_pipeline import build_market_response_evidence, build_research_protocol_evidence, build_runtime_evidence
 from .regimes import (
     AssetRelevance,
     EventRegime,
@@ -180,6 +180,7 @@ __all__ = [
     "bootstrap_mean_ci",
     "build_cross_venue_event_context",
     "build_event_scoreboard",
+    "build_market_response_evidence",
     "build_research_protocol_evidence",
     "build_runtime_evidence",
     "build_lead_lag_event_context",
