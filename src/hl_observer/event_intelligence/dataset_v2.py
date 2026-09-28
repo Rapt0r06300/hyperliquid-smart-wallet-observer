@@ -24,7 +24,10 @@ from hl_observer.event_intelligence.direct_sources import (
     normalize_usgs,
 )
 from hl_observer.event_intelligence.integration_registry import integration_contract
-from hl_observer.event_intelligence.runtime_pipeline import build_runtime_evidence
+from hl_observer.event_intelligence.runtime_pipeline import (
+    build_research_protocol_evidence,
+    build_runtime_evidence,
+)
 from hl_observer.event_intelligence.worldmonitor import WorldMonitorEvent
 
 SOURCE_ORDER = ("usgs_earthquakes", "nasa_eonet", "gdacs", "gdelt_doc")
@@ -208,6 +211,12 @@ def build_public_event_bundle(
         now_ms=now_ms,
         expected_sources=EXPECTED_EVENT_SOURCES,
     )
+    research_protocol = build_research_protocol_evidence(
+        (),
+        now_ms=now_ms,
+        methodology_version="event-intelligence-v1",
+        config={"collection_run_id": str(collection_run_id)},
+    )
     runtime_digest = hashlib.sha256(
         json.dumps(runtime_evidence, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -240,6 +249,7 @@ def build_public_event_bundle(
             "source_status": source_status,
             "event_intelligence": contract,
             "event_intelligence_runtime": runtime_evidence,
+            "event_intelligence_research_protocol": research_protocol,
             "read_only": True,
             "real_execution": False,
         }
