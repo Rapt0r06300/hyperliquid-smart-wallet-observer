@@ -9,6 +9,7 @@ charged twice by the paper ledger.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from enum import Enum
 from typing import Any, Iterable, Mapping
 
@@ -188,17 +189,42 @@ def _validate_intent(intent: ReplayIntent) -> str | None:
         return "INVALID_POSITION_SIDE"
     if str(intent.action).upper() not in {"OPEN", "ADD", "INCREASE", "REDUCE", "CLOSE"}:
         return "INVALID_ACTION"
-    if (
-        (intent.requested_notional_usdc is None or intent.requested_notional_usdc <= 0)
-        and (intent.requested_quantity is None or intent.requested_quantity <= 0)
-    ):
+    try:
+        signal_ts = int(intent.signal_observable_at_ms)
+        numeric = (
+            intent.latency_ms,
+            intent.maker_timeout_ms,
+            intent.extra_queue_ahead_quantity,
+            intent.fee_bps,
+            intent.min_feed_quality_score,
+            intent.max_book_wait_ms,
+            intent.adverse_selection_horizon_ms,
+        )
+        parsed = tuple(float(value) for value in numeric)
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_INTENT_NUMERIC"
+    if signal_ts < 0 or any(not math.isfinite(value) for value in parsed):
+        return "INVALID_INTENT_NUMERIC"
+    if any(value < 0.0 for value in parsed):
+        return "INVALID_INTENT_NUMERIC"
+    requested = [value for value in (intent.requested_notional_usdc, intent.requested_quantity) if value is not None]
+    try:
+        requested_values = [float(value) for value in requested]
+    except (TypeError, ValueError, OverflowError):
+        return "INVALID_INTENT_SIZE"
+    if any(not math.isfinite(value) or value <= 0.0 for value in requested_values):
+        return "INVALID_INTENT_SIZE"
+    if not requested_values:
         return "MISSING_POSITIVE_SIZE"
     if str(intent.execution_style).upper() not in {"TAKER", "MAKER"}:
         return "INVALID_EXECUTION_STYLE"
-    if str(intent.execution_style).upper() == "MAKER" and not (
-        intent.limit_price is not None and intent.limit_price > 0
-    ):
-        return "MAKER_LIMIT_PRICE_REQUIRED"
+    if str(intent.execution_style).upper() == "MAKER":
+        try:
+            limit_price = float(intent.limit_price)
+        except (TypeError, ValueError, OverflowError):
+            return "MAKER_LIMIT_PRICE_REQUIRED"
+        if not math.isfinite(limit_price) or limit_price <= 0.0:
+            return "MAKER_LIMIT_PRICE_REQUIRED"
     return None
 
 
@@ -554,7 +580,7 @@ def _empty_fill(
         queue_ahead_quantity=None,
         matched_trade_quantity=None,
         costs=ExecutionCosts(
-            fee_bps=max(0.0, float(intent.fee_bps)),
+            fee_bps=_safe_nonnegative(intent.fee_bps),
             fee_usdc=0.0,
             spread_bps=None,
             depth_slippage_bps=None,
@@ -628,11 +654,9 @@ def _trades_from_event(event: Mapping[str, Any]) -> list[Mapping[str, Any]]:
 def _to_float(value: Any) -> float | None:
     try:
         converted = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    if converted != converted:
-        return None
-    return converted
+    return converted if math.isfinite(converted) else None
 
 
 __all__ = [
@@ -642,3 +666,11 @@ __all__ = [
     "ReplayIntent",
     "replay_executable_fill",
 ]
+
+
+def _safe_nonnegative(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+    return parsed if math.isfinite(parsed) and parsed >= 0.0 else 0.0
