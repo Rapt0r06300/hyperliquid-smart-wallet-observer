@@ -152,7 +152,7 @@ def execute_metaorder(
         not math.isfinite(numeric_limits[0]) or numeric_limits[0] <= 0.0
         or any(not math.isfinite(value) or value < 0.0 for value in numeric_limits[1:])
         or numeric_limits[4] <= 0.0
-        or int(direction_multiplier) not in (-1, 1)
+        or direction_multiplier not in (-1, 1)
     ):
         return None, "INVALID_EXECUTION_PARAMETERS"
     try:
