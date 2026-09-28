@@ -118,7 +118,7 @@ def main() -> int:
     for candidate, candidate_text in file_text.items():
         files_by_name.setdefault(candidate.name, []).append(candidate)
         relative = str(candidate.relative_to(root))
-        for match in re.finditer(r"(?m)^\\s*(?:from|import)\\s+([^#\\n]+)", candidate_text):
+        for match in re.finditer(r"(?m)^\s*(?:from|import)\s+([^#\n]+)", candidate_text):
             for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", match.group(1)):
                 for part in token.split("."):
                     import_index.setdefault(part, set()).add(relative)
