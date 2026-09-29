@@ -42,6 +42,14 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Fetch canonical Dataset V2 phase authority
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 4 --retry-all-errors \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/Rapt0r06300/alina-smartflow-datasets-v2/contents/control/alina-phase.json \
+            -o "$RUNNER_TEMP/alina-phase.json"
       - name: Persist immutable operator intent
         env:
           INTENT: "${{ inputs.intent }}"
@@ -65,7 +73,7 @@ jobs:
           if family not in {"all","copy_vault","lead_lag","cross_venue_dislocation"}:
             raise SystemExit("unsupported strategy family")
           if family != "all": config["strategy_family"]=family
-          phase_path=pathlib.Path("control/alina-phase.json")
+          phase_path=pathlib.Path(os.environ["RUNNER_TEMP"])/"alina-phase.json"
           if not phase_path.is_file():
             raise SystemExit("canonical phase state is missing")
           phase=json.loads(phase_path.read_text(encoding="utf-8"))
@@ -161,6 +169,14 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 1
+      - name: Fetch canonical Dataset V2 phase authority
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 4 --retry-all-errors \
+            -H "Accept: application/vnd.github.raw+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/Rapt0r06300/alina-smartflow-datasets-v2/contents/control/alina-phase.json \
+            -o "$RUNNER_TEMP/alina-phase.json"
       - name: Dispatch immutable intent to Dataset V2
         env:
           DISPATCH_TOKEN: ${{ secrets.ALINA_DATASET_DISPATCH_TOKEN }}
@@ -179,7 +195,7 @@ jobs:
           import json, os
           config=json.loads(os.environ["CONFIG_JSON"])
           import pathlib
-          phase=json.loads(pathlib.Path("control/alina-phase.json").read_text(encoding="utf-8"))
+          phase=json.loads((pathlib.Path(os.environ["RUNNER_TEMP"])/"alina-phase.json").read_text(encoding="utf-8"))
           payload={
               "event_type":"alina_operator_intent",
               "client_payload":{
