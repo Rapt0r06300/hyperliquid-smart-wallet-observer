@@ -211,7 +211,15 @@ def _write_intent(args, controller: PhaseController, intent: str) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    controller = PhaseController(state_file_path=Path(args.state_file))
+    state_path = Path(args.state_file)
+    if not state_path.is_file():
+        print(json.dumps({
+            "status": "UNAVAILABLE",
+            "reason": "canonical_dataset_v2_phase_state_unavailable",
+            "state_file": str(state_path),
+        }, indent=2, sort_keys=True))
+        return 2
+    controller = PhaseController(state_file_path=state_path)
 
     if args.command == "status":
         print(json.dumps(controller.current_state.to_dict(), indent=2, sort_keys=True))
