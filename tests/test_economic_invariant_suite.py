@@ -23,7 +23,11 @@ def test_non_completed_residual_is_not_misclassified_as_completed_violation():
 
 def test_suite_agrege_violations():
     etat = {"hedge_qty": 1.5, "actual_fill_qty": 1.0,          # violation
+            "exposition_avant": 2.0, "exposition_apres": 1.0,
             "fill_ids": ["x", "x"],                            # violation
+            "position_disparue": False, "avait_fermeture": False,
+            "realized_pnl": 0.0, "n_fills": 2,
+            "consommations": ["book-a", "book-b"],
             "statut": "COMPLETED", "residu": 0.0}              # ok
     r = EIS.verifier_tous(etat)
     assert r["ok"] is False and r["n_violations"] == 2
@@ -32,6 +36,10 @@ def test_suite_agrege_violations():
 
 
 def test_etat_sain_aucune_violation():
-    etat = {"hedge_qty": 0.5, "actual_fill_qty": 1.0, "fill_ids": ["a", "b"],
-            "statut": "COMPLETED", "residu": 0.0, "realized_pnl": 3.0, "n_fills": 2}
+    etat = {"hedge_qty": 0.5, "actual_fill_qty": 1.0,
+            "exposition_avant": 2.0, "exposition_apres": 1.0,
+            "fill_ids": ["a", "b"],
+            "position_disparue": True, "avait_fermeture": True,
+            "statut": "COMPLETED", "residu": 0.0, "realized_pnl": 3.0, "n_fills": 2,
+            "consommations": ["book-a", "book-b"]}
     assert EIS.verifier_tous(etat)["ok"] is True
