@@ -1,0 +1,61 @@
+{
+  "dataset_v2_head": "bc4128e2a987ec3c5401841edb2fe8a5c53b1b96",
+  "generated_at_utc": "2026-09-30T13:12:48.497721Z",
+  "groups": [
+    {
+      "name": "dataset_control",
+      "output_sha256": "d04edfd11516b6aedb39c65f7f446726209adae84dd6bc1dc6b21c54e0d402e3",
+      "output_tail": "........................................................................ [ 83%]\n..............                                                           [100%]\n86 passed in 5.09s\nbash: line 3: tests/test_analysis_stage_gates.py: Permission denied\nbash: line 4: tests/test_campaign_manifest_json.py: Permission denied\nbash: line 5: tests/test_campaign_watchdog_drain.py: Permission denied\nbash: line 6: tests/test_finalize_analysis_drain.py: Permission denied\nbash: line 7: tests/test_workflow_bounds.py: Permission denied\n",
+      "returncode": 126,
+      "status": "FAIL"
+    },
+    {
+      "name": "dataset_data_and_recovery",
+      "output_sha256": "eb6644b933dc44da7feac69af2cd7298788edfcc0d8974e2d9445f11b0f054e6",
+      "output_tail": "........................................................................ [ 83%]\n..............                                                           [100%]\n86 passed in 4.89s\nbash: line 3: tests/test_exact_trade_count_backfill.py: Permission denied\nbash: line 4: tests/test_global_unique_trade_backfill.py: Permission denied\nbash: line 5: tests/test_replay_compatibility.py: Permission denied\nbash: line 6: tests/test_current_scoreboard_closure.py: Permission denied\nbash: line 7: tests/test_persist_analysis_scoreboard.py: Permission denied\nbash: line 8: tests/test_augment_campaign_result.py: Permission denied\n",
+      "returncode": 126,
+      "status": "FAIL"
+    },
+    {
+      "name": "main_control_and_closure",
+      "output_sha256": "e74116d41a6385ec4ff8d74607bc5b52f8c0fd51645f80c30b3b354dd068cb81",
+      "output_tail": ".......                                                                  [100%]\n7 passed in 0.94s\n",
+      "returncode": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "main_module_wiring",
+      "output_sha256": "5953b2415f06b56cf2bd254b2f9fc8271e035f67b5afdfb73cec37c6c655a84d",
+      "output_tail": "..............................................                           [100%]\n46 passed in 2.21s\n",
+      "returncode": 0,
+      "status": "PASS"
+    },
+    {
+      "name": "main_parity_and_economics",
+      "output_sha256": "99838802ae98830066ce6a70a0e59a412b464bc64c3860ef8da76d59cf714cc1",
+      "output_tail": "              \"no_lookahead\": True,\n                    },\n                    \"forward\": {\n                        \"gross_pnl_usd\": 2.8,\n                        \"fees_usd\": 0.1,\n                        \"spread_cost_usd\": 0.1,\n                        \"slippage_cost_usd\": 0.05,\n                        \"latency_cost_usd\": 0.05,\n                        \"net_pnl_usd\": 2.5,\n                        \"sample_count\": 2,\n                        \"liquidatable_net\": True,\n                        \"duplicate_trade_ids\": 0,\n                        \"trade_ids_count\": 2,\n                        \"trade_ids_sha256\": \"h\" * 64,\n                        \"post_freeze\": True,\n                    },\n                    \"placebos\": {\"beaten\": True},\n                },\n            },\n        }\n    \n        campaign = build_lead_lag_campaign(report, freeze=freeze, datasets=datasets)\n    \n        assert campaign[\"net_pnl_usd\"] == 4.5\n        assert campaign[\"closed_positions\"] == 4\n        assert campaign[\"liquidatable_net\"] is True\n        assert campaign[\"objective_status\"] == \"NON_ATTEINT\"\n>       assert \"GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE\" in campaign[\"objective_reasons\"]\nE       AssertionError: assert 'GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE' in ['OOS_NO_LOOKAHEAD_PROOF_MISSING']\n\ntests/test_economic_campaigns.py:405: AssertionError\n=============================== warnings summary ===============================\n../../../../../opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  /home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  /home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED tests/test_economic_campaigns.py::test_executable_copy_campaign_maps_only_closed_liquidatable_evidence - AssertionError: assert 'GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE' in ['OOS_NO_LOOKAHEAD_PROOF_MISSING']\nFAILED tests/test_economic_campaigns.py::test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof - AssertionError: assert 'GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE' in ['OOS_NO_LOOKAHEAD_PROOF_MISSING']\n2 failed, 49 passed, 5 warnings in 4.38s\n",
+      "returncode": 1,
+      "status": "FAIL"
+    },
+    {
+      "name": "main_validators",
+      "output_sha256": "b1acd5187676d4db39398601d62635620fdf1ee86c0e657242b3bcd2b0d82ab9",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"0e694fea63cc1c6b5bf947c1219449dec1fd314b50c8ea3a06e92589056d84c9\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=42\n",
+      "returncode": 0,
+      "status": "PASS"
+    }
+  ],
+  "main_alina_head": "2bf71e0bbbf08074d5c349db407d3da863fab9f4",
+  "paper_only": true,
+  "python_version": "3.12.14",
+  "read_only": true,
+  "real_execution": false,
+  "receipt_digest": "4ed16845545b0f0718460a89f069c570236f6cc5f9cec0f345a8bd8e7cfc3f1f",
+  "runner_architecture": "x86_64",
+  "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "schema": "alina.canonical_spec_verification.v1",
+  "self_hosted_used": false,
+  "status": "FAIL",
+  "workflow_run_attempt": "1",
+  "workflow_run_id": "36719749508"
+}
