@@ -47,6 +47,8 @@ def _ecrire_certification_vnext(root: Path):
         "certification_status": "CERTIFICATION_READY",
         "freeze_manifest": manifest,
         "freeze_hash": freeze_hash,
+        "observed_dataset_sha256": manifest["dataset_sha256"],
+        "observed_config_sha256": manifest["config_sha256"],
         "post_freeze_oos_consumed": True,
         "consumed_freeze_hash": freeze_hash,
         "paper_read_only": True,
