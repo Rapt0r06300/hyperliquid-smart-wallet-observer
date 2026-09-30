@@ -173,6 +173,132 @@ def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
     ]
 
 
+
+
+def _write_economic_audit(tmp_path, *, all_ledgers_valid, all_objectives_met, classifications):
+    target = (
+        tmp_path
+        / "runtime"
+        / "reports"
+        / "economic_campaigns"
+        / "HYPERSMART_ECONOMIC_PROOF_AUDIT.json"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        __import__("json").dumps(
+            {
+                "schema_version": "hypersmart.economic_proof_audit.v1",
+                "paper_read_only": True,
+                "real_execution": False,
+                "missing_families": [],
+                "all_ledgers_valid": all_ledgers_valid,
+                "all_objectives_met": all_objectives_met,
+                "families": [
+                    {"classification": value} for value in classifications
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_module_pnl_unmeasurable_is_complete_stage_not_technical_failure(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    class AuditResult:
+        returncode = 2
+        stdout = "audit written"
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            _write_economic_audit(
+                tmp_path,
+                all_ledgers_valid=False,
+                all_objectives_met=False,
+                classifications=["INVALID"],
+            )
+            return AuditResult()
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path)),
+        runner=runner,
+    )
+
+    assert out.status == "COMPLETE"
+    assert out.payload["economic_proof_status"] == "UNMEASURABLE"
+    assert out.payload["economic_proof_certifying"] is False
+    assert out.payload["phases"][-1]["semantic_status"] == "UNMEASURABLE"
+    assert out.payload["phases"][-1]["certifying"] is False
+
+
+def test_module_pnl_audit_exit_two_without_receipt_remains_technical_failure(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    class AuditResult:
+        returncode = 2
+        stdout = ""
+        stderr = "audit failed before receipt"
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            return AuditResult()
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path)),
+        runner=runner,
+    )
+
+    assert out.status == "FAILED"
+    assert out.payload["phase"] == "module_pnl_audit"
+
+
+def test_module_pnl_more_data_and_kill_are_semantic_not_crashes(tmp_path):
+    for classifications, expected in [
+        (["INCOMPLETE"], "MORE_DATA"),
+        (["VALID_NON_TARGET"], "KILL"),
+    ]:
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def runner(cmd, **kwargs):
+            calls.append(list(cmd))
+            if cmd[1].endswith("tools/audit_economic_objectives.py"):
+                _write_economic_audit(
+                    tmp_path,
+                    all_ledgers_valid=True,
+                    all_objectives_met=False,
+                    classifications=classifications,
+                )
+            return Result()
+
+        out = run_one_unit(
+            context("module_pnl_proof", workspace_root=str(tmp_path)),
+            runner=runner,
+        )
+        assert out.status == "COMPLETE"
+        assert out.payload["economic_proof_status"] == expected
+        assert out.payload["economic_proof_certifying"] is False
+
+
 def test_copy_vault_default_respects_hyperliquid_user_limit(tmp_path):
     cmd, _ = build_command(
         context("copy_vault_collection", output_root=str(tmp_path), duration_s=1)
