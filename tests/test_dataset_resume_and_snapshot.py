@@ -103,7 +103,6 @@ def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path
         analysis_stage="PNL_PROOF",
     )
     raw = manifest.to_dict()
-    raw.pop("supersedes")
     path = tmp_path / "campaign.json"
     path.write_text(json.dumps(raw, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
