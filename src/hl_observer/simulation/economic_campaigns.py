@@ -586,18 +586,24 @@ def build_cross_campaign(
         if isinstance(report.get("temporal_evidence"), Mapping)
         else {}
     )
+    closed = int(realistic.get("positions_fermees") or realistic.get("n_trades") or 0)
+    measured = closed > 0
+
+    def economic_value(key: str) -> Any:
+        return realistic.get(key) if measured else None
+
     row.update(
         {
             "source_status": realistic.get("verdict"),
             "signal_count": realistic.get("n_trades"),
             "opened_positions": realistic.get("positions_ouvertes"),
             "closed_positions": realistic.get("positions_fermees"),
-            "gross_pnl_usd": realistic.get("gross_pnl_usd"),
-            "fees_usd": realistic.get("fees_usd"),
-            "spread_cost_usd": realistic.get("spread_cost_usd"),
-            "slippage_cost_usd": realistic.get("slippage_cost_usd"),
-            "latency_cost_usd": realistic.get("latency_cost_usd"),
-            "net_pnl_usd": realistic.get("net_total_usd"),
+            "gross_pnl_usd": economic_value("gross_pnl_usd"),
+            "fees_usd": economic_value("fees_usd"),
+            "spread_cost_usd": economic_value("spread_cost_usd"),
+            "slippage_cost_usd": economic_value("slippage_cost_usd"),
+            "latency_cost_usd": economic_value("latency_cost_usd"),
+            "net_pnl_usd": economic_value("net_total_usd"),
             "roi_pct": realistic.get("roi_pct"),
             "max_drawdown_usd": realistic.get("max_drawdown_usd"),
             "hit_rate": realistic.get("hit_rate"),
