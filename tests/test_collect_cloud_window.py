@@ -497,3 +497,76 @@ def test_native_transport_adds_receive_clock_when_client_has_none() -> None:
     assert row.local_monotonic_ns is not None
     assert row.connection_id is not None
     assert row.connection_id.startswith("bitget-")
+
+
+def test_l2_coverage_report_is_fail_closed_per_expected_symbol() -> None:
+    m = _module()
+    manifests = [
+        {
+            "venue": "hyperliquid",
+            "family": "l2Book",
+            "symbol": "BTC",
+            "event_count": 5,
+        },
+        {
+            "venue": "binance",
+            "family": "l2Book",
+            "symbol": "BTCUSDT",
+            "event_count": 7,
+        },
+        {
+            "venue": "bybit",
+            "family": "l2Book",
+            "symbol": "BTCUSDT",
+            "event_count": 3,
+        },
+    ]
+    coverage = m._l2_coverage_report(
+        manifests,
+        {
+            "hyperliquid": ["BTC"],
+            "binance": ["BTCUSDT"],
+            "bybit": ["BTCUSDT", "ETHUSDT"],
+            "okx": [],
+            "gate": [],
+            "bitget": [],
+        },
+    )
+    assert coverage["complete"] is False
+    assert coverage["expected_symbol_count"] == 4
+    assert coverage["observed_symbol_count"] == 3
+    assert coverage["missing_symbols"] == {"bybit": ["ETHUSDT"]}
+
+
+def test_l2_coverage_report_accepts_complete_six_venue_coverage() -> None:
+    m = _module()
+    venue_symbols = {
+        "hyperliquid": ["BTC"],
+        "binance": ["BTCUSDT"],
+        "bybit": ["BTCUSDT"],
+        "okx": ["BTC-USDT-SWAP"],
+        "gate": ["BTC_USDT"],
+        "bitget": ["BTCUSDT"],
+    }
+    manifests = [
+        {
+            "venue": venue,
+            "family": "l2Book",
+            "symbol": symbols[0],
+            "event_count": 1,
+        }
+        for venue, symbols in venue_symbols.items()
+    ]
+    coverage = m._l2_coverage_report(manifests, venue_symbols)
+    assert coverage["complete"] is True
+    assert coverage["required_venues"] == [
+        "binance",
+        "bitget",
+        "bybit",
+        "gate",
+        "hyperliquid",
+        "okx",
+    ]
+    assert coverage["expected_symbol_count"] == 6
+    assert coverage["observed_symbol_count"] == 6
+    assert coverage["missing_symbols"] == {}
