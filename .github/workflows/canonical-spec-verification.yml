@@ -45,6 +45,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          # Re-runs must validate the current canonical branch, not the historical
+          # event SHA from the original workflow attempt.
+          ref: main
           fetch-depth: 0
 
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
