@@ -32,7 +32,9 @@ on:
     - cron: "11 4 * * *"
 
 permissions:
-  contents: write
+  # Read-only is the workflow default. The verification job elevates contents
+  # only because its final step publishes the deterministic receipt.
+  contents: read
 
 concurrency:
   group: canonical-spec-verification
@@ -40,17 +42,20 @@ concurrency:
 
 jobs:
   verify:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # Re-runs must validate the current canonical branch, not the historical
           # event SHA from the original workflow attempt.
           ref: main
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: Rapt0r06300/alina-smartflow-datasets-v2
           ref: main
@@ -58,7 +63,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
           cache: pip
