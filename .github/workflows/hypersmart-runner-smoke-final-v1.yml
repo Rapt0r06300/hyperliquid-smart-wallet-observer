@@ -14,6 +14,6 @@ jobs:
     steps:
       - name: GitHub-hosted-only policy
         run: |
-          echo "Disabled permanently: no local PC, self-hosted runner, SSH, or external execution is permitted."
+          echo "Disabled permanently: no local PC, user-machine runner, SSH, or external execution is permitted."
           echo "Use the GitHub-hosted Alina SmartFlow workflows and Dataset V2 contracts."
           exit 1
