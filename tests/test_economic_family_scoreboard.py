@@ -183,6 +183,9 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
 
     assert row["objective_status"] == "ATTEINT"
     assert row["eligible_net_pnl_usd"] == 4.5
+    assert row["comparison_metric_usd"] == 4.5
+    assert row["comparison_metric_source"] == "proof_net_pnl_usd"
+    assert row["measurement_status"] == "MEASURED"
     assert row["signal_count"] == 40
     assert "LIQUIDATABLE_NET" not in row
     assert list(result["families"]).count("cross_venue_dislocation_v2") == 1
