@@ -613,6 +613,14 @@ def load_certified_atomic_union_series(
         ) if used_meta else None,
         "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
         "capacity_definition": "minimum USD capacity on certified four-side union",
+        "sizes_normalized_to_usd_notional": bool(used_meta)
+        and all(
+            _valid_normalization_receipt(
+                meta.get("normalization_receipt"),
+                source_mode=str(meta.get("source_mode") or ""),
+            )
+            for meta in used_meta
+        ),
         "overlap_policy": "BBO_OWNS_PER_COIN_INTERVAL_L2_EXTENDS_OUTSIDE",
         "component_source_meta": {"l2": book_meta, "bbo": bbo_meta},
         "legacy_rows_never_upgraded": True,
