@@ -33,6 +33,7 @@ def test_market_command_uses_real_collector_cli(tmp_path):
     assert "--output" in cmd
     assert "--duration-s" in cmd
     assert "--campaign-unit-json" not in cmd
+    assert "--require-l2" in cmd
     assert output is not None
 
 
