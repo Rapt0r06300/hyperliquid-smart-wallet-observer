@@ -290,7 +290,8 @@ def test_executable_copy_campaign_maps_only_closed_liquidatable_evidence(tmp_pat
 
     assert campaign["net_pnl_usd"] == 8.4
     assert campaign["liquidatable_net"] is True
-    assert campaign["objective_status"] == "ATTEINT"
+    assert campaign["objective_status"] == "NON_ATTEINT"
+    assert "GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE" in campaign["objective_reasons"]
     assert campaign["copy_checkpoint_integrity"]["proof_trade_count"] == 2
     assert campaign["daily_evidence"]["min_daily_net_pnl_usd"] == 4.1
 
@@ -400,7 +401,8 @@ def test_executable_lead_lag_campaign_maps_closed_ledger_and_temporal_proof(
     assert campaign["net_pnl_usd"] == 4.5
     assert campaign["closed_positions"] == 4
     assert campaign["liquidatable_net"] is True
-    assert campaign["objective_status"] == "ATTEINT"
+    assert campaign["objective_status"] == "NON_ATTEINT"
+    assert "GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE" in campaign["objective_reasons"]
 
 
 def test_lead_lag_without_sized_closed_episodes_remains_unmeasured() -> None:
