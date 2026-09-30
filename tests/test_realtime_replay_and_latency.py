@@ -188,7 +188,7 @@ def test_summary_does_not_count_shadow_github_evaluations_as_accepted(tmp_path):
     assert analysis.top_refusal_reasons == (("EDGE_REMAINING_TOO_LOW", 1),)
 
 
-def test_summary_uses_structured_dydx_log_when_latest_export_is_empty(tmp_path):
+def test_summary_does_not_import_legacy_structured_sibling_when_canonical_export_is_empty(tmp_path):
     log_dir = tmp_path / "logs" / "logs à envoyer"
     structured_dir = tmp_path / "logs" / "structured"
     log_dir.mkdir(parents=True)
@@ -238,12 +238,11 @@ def test_summary_uses_structured_dydx_log_when_latest_export_is_empty(tmp_path):
 
     analysis = analyze_decision_logs_summary(log_dir)
 
-    assert analysis.event_count == 4
-    assert analysis.accepted_count == 2
-    assert analysis.refused_count == 2
-    assert analysis.total_estimated_pnl_usdc == 0.15
-    assert analysis.total_fees_usdc == 0.08
-    assert analysis.top_refusal_reasons[:2] == (("EDGE_INSUFFICIENT", 1), ("STALE_SIGNAL", 1))
+    # The canonical analyzer is scoped to its explicit log directory.  Legacy
+    # dYdX sibling logs must not leak into current Alina evidence.
+    assert analysis.event_count == 0
+    assert analysis.accepted_count == 0
+    assert analysis.refused_count == 0
 
 
 def test_realtime_replay_cli_updates_health(tmp_path):
