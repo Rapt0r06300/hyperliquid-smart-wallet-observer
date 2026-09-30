@@ -1,9 +1,5 @@
 {
-  "analysis_campaign_status": {
-    "backtest": "FAILED",
-    "module_pnl_proof": "FAILED",
-    "replay": "COMPLETE"
-  },
+  "analysis_campaign_status": {},
   "analysis_stage": "DRAIN",
   "campaign_ids": [
     "archives-binance-btc-20260927-v4",
@@ -728,22 +724,24 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "2891365668498daaf59b5e68d630dce3320230d7",
   "copy_vault_coverage_receipt": {
-    "digest": "ddf249567a5eaeee2adf46a0d5c1b1dfaf5d73d8839f78cf4ae4f7fc27fdf8f9",
+    "digest": "e5097a2344762c0b2fb60793ba92e2cb433388f92fe9908908a4300dc8c98622",
     "reconciliation": {
-      "no_duplicate_shard_indices": true,
-      "publication_receipts_present": false,
-      "selection_present": false,
-      "sharding_present": false,
-      "silent_loss": true
+      "all_lane_indices_accounted": true,
+      "no_silent_loss": true,
+      "publication_complete": false,
+      "selection_present": true,
+      "selection_verified": true,
+      "sharding_present": true,
+      "ten_user_limit_respected": true
     },
-    "status": "BLOCKED"
+    "status": "MORE_DATA"
   },
   "copy_vault_status": "MORE_DATA",
-  "cross_shard_overlap_trade_count": 2790,
+  "cross_shard_overlap_trade_count": 83286,
   "cross_venue_status": "KILL",
-  "dataset_health_digest": "7e7d849cd850258220c55d5368273826184b0e108ca44b0f3b9c97e87160ac0c",
+  "dataset_health_digest": "32d76dc45f9f694589a8a0f721e17c49a3ef95adc8966a3691cda3089150630e",
   "dataset_selection_id": null,
-  "dataset_v2_head": "46d2462135ca31fbb1b75d6584363664366630c6",
+  "dataset_v2_head": "92ca3890ee89b3cce97709765aa645d032b280e3",
   "declared_spec_requirements": [
     {
       "id": "OPEN-1",
@@ -942,11 +940,11 @@
     }
   ],
   "environment_provenance": null,
-  "event_intelligence_registry_digest": "94940aadfe196e594e2b13ae9516964ca187587c0de211a56e3980aeb92aa5fd",
+  "event_intelligence_registry_digest": "543de9fa0bbb352480d035ce8c52688a4b84eb782bac4fb9dcffb1846ef9710e",
   "event_intelligence_wiring_complete": true,
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T12:00:13.261266Z",
-  "global_unique_failure_reason_count": 11250,
+  "generated_at_utc": "2026-09-30T12:48:17.009217Z",
+  "global_unique_failure_reason_count": 385,
   "implementation_backlog": [
     {
       "id": "BLOCKER-01",
@@ -965,7 +963,7 @@
     }
   ],
   "lead_lag_status": "MORE_DATA",
-  "main_alina_head": "b603a2c98e769bbec2061894a77d945a18d511c2",
+  "main_alina_head": "cfaa2b8901123b6942cb7de9a82b0ae0a77ae62f",
   "modules": {
     "copy_vault": {
       "certificate_digest": "b6f2ff08a8fe9b42bbf6e4d4aaa9da40348b551ae42f9572cc5b86061b90df08",
@@ -1000,7 +998,7 @@
   "raw_record_count": 74328129,
   "raw_trade_count": 27855615,
   "real_execution_reachable": false,
-  "receipt_digest": "a7f89507b1cef72a20a84c41a8369a9386e6138dd57d209d5ee02d05f9d95de3",
+  "receipt_digest": "a5e1d8f65e031baf1806058ccbe292771afde50117f5f87290e28f2056be6c73",
   "rejected_count": 7922,
   "remaining_blockers": [
     "global unique trade count coverage is incomplete",
@@ -1136,7 +1134,7 @@
   "uncompressed_size_unavailable_assets": 0,
   "unique_record_count": 74328129,
   "unique_trade_count_exact": false,
-  "unique_trade_count_global": 1021328,
+  "unique_trade_count_global": null,
   "valid_record_count": 74328129,
   "workflow_run_ids": []
 }
