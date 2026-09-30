@@ -570,3 +570,23 @@ def test_l2_coverage_report_accepts_complete_six_venue_coverage() -> None:
     assert coverage["expected_symbol_count"] == 6
     assert coverage["observed_symbol_count"] == 6
     assert coverage["missing_symbols"] == {}
+
+
+def test_l2_gate_localizes_partial_missing_coverage() -> None:
+    m = _module()
+    coverage = {
+        "expected_symbol_count": 6,
+        "observed_symbol_count": 5,
+        "missing_symbols": {"bybit": ["ETHUSDT"]},
+    }
+    assert m._l2_gate_failure_reason(coverage, required=True) is None
+
+
+def test_l2_gate_rejects_a_completely_empty_l2_capture() -> None:
+    m = _module()
+    coverage = {
+        "expected_symbol_count": 6,
+        "observed_symbol_count": 0,
+        "missing_symbols": {"hyperliquid": ["BTC"]},
+    }
+    assert m._l2_gate_failure_reason(coverage, required=True) == "L2_COLLECTION_EMPTY"
