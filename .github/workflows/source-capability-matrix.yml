@@ -27,13 +27,15 @@ env:
   ENABLE_REAL_ORDERS: "0"
 
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: source-capability-matrix
   cancel-in-progress: false
 
 jobs:
   generate:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
