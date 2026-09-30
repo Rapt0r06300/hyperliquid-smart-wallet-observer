@@ -86,6 +86,7 @@ def main() -> int:
     parser.add_argument("--dataset-selection-id")
     parser.add_argument("--analysis-stage")
     parser.add_argument("--operator-request-id")
+    parser.add_argument("--supersedes")
     parser.add_argument("--current-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
     parser.add_argument("--current-epoch", type=int)
     parser.add_argument("--current-analysis-stage")
@@ -139,6 +140,7 @@ def main() -> int:
                 ANALYSIS_STAGE_BY_KIND.get(args.kind or "") if args.creation_phase == "ANALYZE" else None
             ),
             operator_request_id=args.operator_request_id,
+            supersedes=args.supersedes,
             history=(
                 [{"event": "operator_request", "request_id": args.operator_request_id}]
                 if args.operator_request_id else []
