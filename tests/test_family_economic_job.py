@@ -10,6 +10,7 @@ from hl_observer.economics.families import build_copy_vault_contract
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.family_economic_job import FAMILY_ECONOMIC_SUITES, validate_family_request
 from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
 
 
 def _request(suite: str = "copy-vault-full") -> dict[str, object]:
@@ -77,6 +78,45 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
     }
 
 
+
+
+def _vnext_fixture() -> dict:
+    frozen_at = 1_786_552_000_000
+    manifest = build_freeze_manifest(
+        family="copy_vault",
+        freeze_candidate={"fixture": "copy_vault"},
+        dataset_fingerprint="b" * 64,
+        config={"fixture": True},
+        frozen_at_ms=frozen_at,
+    )
+    return {
+        "certification_status": "CERTIFICATION_READY",
+        "freeze_hash": manifest["freeze_hash"],
+        "freeze_manifest": manifest,
+        "observed_dataset_sha256": manifest["dataset_sha256"],
+        "observed_config_sha256": manifest["config_sha256"],
+        "consumed_freeze_hash": manifest["freeze_hash"],
+        "post_freeze_oos_consumed": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "frozen_at_ms": frozen_at,
+        "temporal_windows": {
+            "validation": {"start_ms": frozen_at + 1, "end_ms": frozen_at + 101},
+            "oos": {"start_ms": frozen_at + 101, "end_ms": frozen_at + 201},
+            "forward": {"start_ms": frozen_at + 201, "end_ms": frozen_at + 301},
+            "placebo": {"start_ms": frozen_at + 301, "end_ms": frozen_at + 401},
+        },
+        "costs_complete": True,
+        "liquidability_complete": True,
+        "provenance_complete": True,
+        "positions_flat": True,
+        "economic_reconciliation_ok": True,
+        "validation_without_recalibration": True,
+        "temporal_disjointness_ok": True,
+        "forward_post_freeze_complete": True,
+        "placebo_complete": True,
+    }
+
 def _valid_copy_campaign() -> dict:
     economic_contract = build_copy_vault_contract(
         mode=EconomicRunMode.CERTIFIABLE,
@@ -132,6 +172,7 @@ def _valid_copy_campaign() -> dict:
             "selected_before_final_evaluation": True,
             "path": "runtime/reports/economic_campaigns/freezes/copy-vault-fixture-v1.json",
         },
+        "vnext_promotion": _vnext_fixture(),
     }
     campaign.update(evaluate_objective(campaign))
     assert campaign["objective_status"] == "ATTEINT"
