@@ -31,3 +31,13 @@ def test_analyser_utilise_wrapper_seulement_pour_une_suite_reproductible() -> No
     assert "SOURCE_CONSUMPTION_COVERAGE.md" in text
     assert "HL_ENABLE_MAINNET_EXECUTION=0" in text
     assert "HL_ENABLE_TESTNET_EXECUTION=0" in text
+
+def test_canonical_runner_loads_tools_from_code_checkout_not_data_workspace() -> None:
+    text = (ROOT / "tools" / "run_economic_objective_campaigns.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    assert '_tool("hypersmart_copy_pipeline", ROOT / "tools" / "pipeline_copie_reel.py")' in text
+    assert '_tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")' in text
+    assert 'root / "tools" / "pipeline_copie_reel.py"' not in text
+    assert 'root / "tools" / "backtest_dislocation_2jambes.py"' not in text
+
