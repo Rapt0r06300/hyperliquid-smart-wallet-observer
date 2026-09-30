@@ -25,7 +25,10 @@ permissions:
   contents: write
 concurrency:
   group: alina-dual-repository-closure-report
-  cancel-in-progress: false
+  # The report is a snapshot of both current main branches. A newer run should
+  # supersede an older snapshot rather than queue behind it and later fight the
+  # branch tip with a stale generated receipt.
+  cancel-in-progress: true
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -58,13 +61,39 @@ jobs:
         run: |
           python tools/validate_gate_registry.py
           python tools/validate_closure_receipt.py
-      - name: Publish closure report
+      - name: Publish closure report from latest repository heads
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add docs/alina-closure-report.json docs/normative-gate-registry.json
-          git diff --cached --quiet && exit 0
-          git commit -m "closure: publish dual-repository status report"
           gh auth setup-git
-          git push origin HEAD:main
+
+          for attempt in 1 2 3 4 5; do
+            # Both repositories may advance while this report is being built.
+            # Always rebuild from their latest durable main heads before push.
+            git fetch origin main
+            git reset --hard origin/main
+            git -C dataset-v2 fetch origin main
+            git -C dataset-v2 reset --hard origin/main
+
+            PYTHONPATH=src python tools/generate_gate_registry.py
+            python tools/validate_gate_registry.py
+            python tools/build_closure_report.py \
+              --dataset-root dataset-v2 \
+              --main-head "$(git rev-parse HEAD)" \
+              --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
+              --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
+            python tools/validate_gate_registry.py
+            python tools/validate_closure_receipt.py
+
+            git add docs/alina-closure-report.json docs/normative-gate-registry.json
+            if git diff --cached --quiet; then
+              exit 0
+            fi
+            git commit -m "closure: publish dual-repository status report"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep "$((attempt * 2))"
+          done
+          exit 1
