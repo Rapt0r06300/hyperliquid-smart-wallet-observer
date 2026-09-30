@@ -18,6 +18,7 @@ from hl_observer.decision_engine.noyau_unique import (
     decider,
     famille_de_la_strategie,
 )
+from hl_observer.risk.session_gate import EtatSession
 from hl_observer.signals.signal_taxonomy import (
     CARRY_STRUCTUREL,
     DISCRETIONNAIRE_PUBLIC,
@@ -56,7 +57,10 @@ def test_la_famille_CARRY_n_est_PAS_une_zone_morte() -> None:
 
 
 def test_le_COPY_est_refuse_par_le_noyau_a_la_porte_1() -> None:
-    d = decider(Contexte(strategie="COPY", coin="BTC", direction="LONG", notional_usd=500.0))
+    d = decider(Contexte(
+        strategie="COPY", coin="BTC", direction="LONG", notional_usd=500.0,
+        etat_session=EtatSession(),
+    ))
     assert d.raison == REFUS_ZONE_MORTE
     assert not d.autorise
 
