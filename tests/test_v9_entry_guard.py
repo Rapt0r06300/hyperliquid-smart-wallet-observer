@@ -31,10 +31,10 @@ def test_leader_quality_optional():
     assert d.allow
 
 
-def test_unknown_leader_quality_does_not_block():
-    # None = unknown (warmup) -> not a hard block
+def test_unknown_leader_quality_blocks_fail_closed():
     d = evaluate_entry(now_sec=0, leader_qualified=None, edge_remaining_bps=20.0)
-    assert d.allow
+    assert d.blocked
+    assert "LEADER_QUALITY_UNPROVEN" in d.reasons
 
 
 def test_low_edge_blocks():
