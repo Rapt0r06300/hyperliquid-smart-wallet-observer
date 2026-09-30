@@ -110,20 +110,20 @@ jobs:
           run_group main_module_wiring python -m pytest -q             tests/test_event_intelligence_complete120.py             tests/test_collect_cloud_copy_vault.py             tests/test_cross_venue_certified.py             tests/test_final_lead_lag_lanes_and_bbo.py
 
           run_group dataset_control bash -lc             'cd dataset-v2 &&
-             python -m pytest -q
-               tests/test_analysis_stage_gates.py
-               tests/test_campaign_manifest_json.py
-               tests/test_campaign_watchdog_drain.py
-               tests/test_finalize_analysis_drain.py
+             python -m pytest -q \
+               tests/test_analysis_stage_gates.py \
+               tests/test_campaign_manifest_json.py \
+               tests/test_campaign_watchdog_drain.py \
+               tests/test_finalize_analysis_drain.py \
                tests/test_workflow_bounds.py'
 
           run_group dataset_data_and_recovery bash -lc             'cd dataset-v2 &&
-             python -m pytest -q
-               tests/test_exact_trade_count_backfill.py
-               tests/test_global_unique_trade_backfill.py
-               tests/test_replay_compatibility.py
-               tests/test_current_scoreboard_closure.py
-               tests/test_persist_analysis_scoreboard.py
+             python -m pytest -q \
+               tests/test_exact_trade_count_backfill.py \
+               tests/test_global_unique_trade_backfill.py \
+               tests/test_replay_compatibility.py \
+               tests/test_current_scoreboard_closure.py \
+               tests/test_persist_analysis_scoreboard.py \
                tests/test_augment_campaign_result.py'
 
           python - <<'PY'
