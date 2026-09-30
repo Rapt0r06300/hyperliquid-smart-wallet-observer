@@ -271,6 +271,42 @@ def test_audit_daily_empty_and_unpublished_are_equivalent_missing_proof() -> Non
     assert "DAILY_NET_PROOF_MISSING" in result["objective_reasons"]
 
 
+def test_audit_honest_unmeasurable_family_is_incomplete_not_corrupt() -> None:
+    campaign, raw = _positive_copy_evidence()
+    raw["trades"] = []
+    for key in (
+        "gross_pnl_usd",
+        "fees_usd",
+        "spread_cost_usd",
+        "slippage_cost_usd",
+        "latency_cost_usd",
+        "net_pnl_usd",
+        "roi_pct",
+        "max_drawdown_usd",
+        "hit_rate",
+        "profit_factor",
+    ):
+        campaign[key] = None
+    campaign["opened_positions"] = 0
+    campaign["closed_positions"] = 0
+    campaign["liquidatable_net"] = False
+    campaign["duplicate_trade_ids"] = None
+    campaign["trade_ids_count"] = None
+    campaign["trade_ids_sha256"] = None
+    campaign["oos"] = None
+    campaign["forward"] = None
+    campaign["placebos"] = None
+    campaign["daily_evidence"] = None
+    campaign.update(evaluate_objective(campaign))
+
+    result = _audit(campaign, raw)
+
+    assert result["ledger_valid"] is True
+    assert result["classification"] == "INCOMPLETE"
+    assert "RAW_TRADES_MISSING" in result["warnings"]
+    assert "RAW_TRADES_REQUIRED_FOR_MEASURED_CLAIM" not in result["issues"]
+
+
 def test_audit_economic_proof_refuse_un_trade_forward_anterieur_au_gel():
     campaign, raw = _positive_copy_evidence()
     raw["trades"][1]["signal_ts_ms"] = 999
