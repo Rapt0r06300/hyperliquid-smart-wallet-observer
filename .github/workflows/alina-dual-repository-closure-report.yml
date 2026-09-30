@@ -1,6 +1,20 @@
 name: alina-dual-repository-closure-report
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "29 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/alina-dual-repository-closure-report.yml"
+      - "tools/build_closure_report.py"
+      - "tools/generate_gate_registry.py"
+      - "tools/validate_closure_receipt.py"
+      - "tools/validate_gate_registry.py"
+      - "src/hl_observer/control_plane/gate_registry.py"
+      - "docs/event-intelligence-120-status.json"
+      - "docs/source-capability-matrix.json"
+      - "runtime/reports/economic_family_scoreboards.json"
 env:
   GH_TOKEN: "${{ github.token }}"
 
