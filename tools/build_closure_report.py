@@ -42,6 +42,62 @@ def _current_analysis_campaigns(campaigns, phase):
     ]
 
 
+def _validated_current_scoreboard(root, phase, current_campaigns):
+    receipt = load(root / "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json", {})
+    if not isinstance(receipt, dict) or receipt.get("schema") != "alina.analysis_scoreboard_receipt.v1":
+        return False, {}, receipt if isinstance(receipt, dict) else {}, "CURRENT_SCOREBOARD_RECEIPT_MISSING"
+
+    stored_receipt_digest = str(receipt.get("receipt_digest") or "")
+    receipt_body = dict(receipt)
+    receipt_body.pop("receipt_digest", None)
+    if len(stored_receipt_digest) != 64 or digest(receipt_body) != stored_receipt_digest:
+        return False, {}, receipt, "CURRENT_SCOREBOARD_RECEIPT_DIGEST_INVALID"
+
+    scoreboard = receipt.get("scoreboard")
+    if not isinstance(scoreboard, dict):
+        return False, {}, receipt, "CURRENT_SCOREBOARD_PAYLOAD_MISSING"
+    if scoreboard.get("schema_version") != "hypersmart.economic_family_scoreboards.v2":
+        return False, {}, receipt, "CURRENT_SCOREBOARD_SCHEMA_INVALID"
+    if digest(scoreboard) != str(receipt.get("scoreboard_sha256") or ""):
+        return False, {}, receipt, "CURRENT_SCOREBOARD_HASH_MISMATCH"
+    if scoreboard.get("paper_read_only") is not True or scoreboard.get("real_execution") is not False:
+        return False, {}, receipt, "CURRENT_SCOREBOARD_NOT_PAPER_ONLY"
+
+    campaign_id = str(receipt.get("campaign_id") or "")
+    campaign = next(
+        (
+            row for row in current_campaigns
+            if str(row.get("campaign_id") or "") == campaign_id
+            and row.get("kind") == "scoreboard"
+        ),
+        None,
+    )
+    if not isinstance(campaign, dict) or campaign.get("status") != "COMPLETE":
+        return False, {}, receipt, "CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE"
+
+    bindings = (
+        ("phase_epoch", phase.get("epoch")),
+        ("source_collection_epoch", phase.get("source_collection_epoch")),
+        ("dataset_selection_id", campaign.get("dataset_selection_id")),
+        ("collection_cutoff_at_utc", campaign.get("collection_cutoff_at_utc")),
+        ("code_sha", campaign.get("code_sha")),
+    )
+    for key, expected in bindings:
+        if receipt.get(key) != expected:
+            return False, {}, receipt, f"CURRENT_SCOREBOARD_BINDING_MISMATCH:{key}"
+
+    env = receipt.get("environment_provenance")
+    if not isinstance(env, dict) or not env:
+        return False, {}, receipt, "CURRENT_SCOREBOARD_ENVIRONMENT_PROVENANCE_MISSING"
+    if len(str(receipt.get("environment_receipt_sha256") or "")) != 64:
+        return False, {}, receipt, "CURRENT_SCOREBOARD_ENVIRONMENT_HASH_MISSING"
+    if not receipt.get("evidence_tag") or not receipt.get("evidence_repository"):
+        return False, {}, receipt, "CURRENT_SCOREBOARD_DURABLE_EVIDENCE_MISSING"
+    if receipt.get("paper_only") is not True or receipt.get("read_only") is not True or receipt.get("real_execution") is not False:
+        return False, {}, receipt, "CURRENT_SCOREBOARD_RECEIPT_SAFETY_INVALID"
+    return True, scoreboard, receipt, "CURRENT_SCOREBOARD_RECEIPT_VALID"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", required=True)
@@ -85,8 +141,6 @@ def main() -> int:
     event = load(Path("docs/event-intelligence-120-status.json"), {})
     source_matrix = load(Path("docs/source-capability-matrix.json"), {})
     gate_registry = load(Path("docs/normative-gate-registry.json"), {})
-    environment_receipt = load(Path("runtime/reports/analysis_stages/scoreboard.json"), {})
-    family_scoreboard = load(Path("runtime/reports/economic_family_scoreboards.json"), {})
     spec = Path("docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md")
     spec_text = spec.read_text(encoding="utf-8") if spec.exists() else ""
     declared_requirements = []
@@ -147,6 +201,12 @@ def main() -> int:
         "scoreboard",
     )
     current_analysis_campaigns = _current_analysis_campaigns(campaigns, phase)
+    (
+        current_scoreboard_valid,
+        current_scoreboard,
+        current_scoreboard_receipt,
+        current_scoreboard_reason,
+    ) = _validated_current_scoreboard(root, phase, current_analysis_campaigns)
     analysis_status = {
         str(row.get("kind")): str(row.get("status"))
         for row in current_analysis_campaigns
@@ -167,24 +227,31 @@ def main() -> int:
         if isinstance(row.get("cursor"), dict)
         and (row.get("cursor") or {}).get("last_run_id")
     })
-    scoreboard_artifact = None
-    for row in current_analysis_campaigns:
-        if row.get("kind") != "scoreboard":
-            continue
-        for unit in (row.get("completed_units") or {}).values():
-            payload = unit.get("result") if isinstance(unit, dict) else None
-            if isinstance(payload, dict):
-                scoreboard_artifact = (
-                    payload.get("evidence_release_tag")
-                    or payload.get("evidence_tag")
-                    or payload.get("scoreboard_artifact")
-                )
-                if scoreboard_artifact:
-                    break
+    scoreboard_artifact = (
+        current_scoreboard_receipt.get("evidence_tag")
+        if current_scoreboard_valid and isinstance(current_scoreboard_receipt, dict)
+        else None
+    )
+    if not scoreboard_artifact:
+        for row in current_analysis_campaigns:
+            if row.get("kind") != "scoreboard":
+                continue
+            for unit in (row.get("completed_units") or {}).values():
+                payload = unit.get("result") if isinstance(unit, dict) else None
+                if isinstance(payload, dict):
+                    scoreboard_artifact = (
+                        payload.get("evidence_release_tag")
+                        or payload.get("evidence_tag")
+                        or payload.get("scoreboard_artifact")
+                    )
+                    if scoreboard_artifact:
+                        break
     family_names = ("copy_vault", "lead_lag", "cross_venue_dislocation")
     scoreboard_families = (
-        family_scoreboard.get("families")
-        if isinstance(family_scoreboard, dict) and isinstance(family_scoreboard.get("families"), dict)
+        current_scoreboard.get("families")
+        if current_scoreboard_valid
+        and isinstance(current_scoreboard, dict)
+        and isinstance(current_scoreboard.get("families"), dict)
         else {}
     )
     family_aliases = {
@@ -221,8 +288,13 @@ def main() -> int:
             "reason": "; ".join(str(value) for value in reasons[:8]) or "economic scoreboard evidence loaded",
             "certificate_digest": digest(row),
         }
-    economic_evidence_loaded = all(
+    economic_evidence_loaded = current_scoreboard_valid and all(
         modules[name]["certificate_digest"] is not None for name in family_names
+    )
+    current_environment_provenance = (
+        current_scoreboard_receipt.get("environment_provenance")
+        if current_scoreboard_valid and isinstance(current_scoreboard_receipt, dict)
+        else None
     )
     report = {
         "schema_version": "alina.final_closure_receipt.v1",
@@ -280,6 +352,17 @@ def main() -> int:
         "source_degraded_capabilities": source_degraded,
         "event_intelligence_wiring_complete": event_wired,
         "scoreboard_artifact": scoreboard_artifact,
+        "scoreboard_provenance": {
+            "valid": current_scoreboard_valid,
+            "reason": current_scoreboard_reason,
+            "campaign_id": current_scoreboard_receipt.get("campaign_id") if isinstance(current_scoreboard_receipt, dict) else None,
+            "phase_epoch": current_scoreboard_receipt.get("phase_epoch") if isinstance(current_scoreboard_receipt, dict) else None,
+            "source_collection_epoch": current_scoreboard_receipt.get("source_collection_epoch") if isinstance(current_scoreboard_receipt, dict) else None,
+            "dataset_selection_id": current_scoreboard_receipt.get("dataset_selection_id") if isinstance(current_scoreboard_receipt, dict) else None,
+            "scoreboard_sha256": current_scoreboard_receipt.get("scoreboard_sha256") if isinstance(current_scoreboard_receipt, dict) else None,
+            "environment_receipt_sha256": current_scoreboard_receipt.get("environment_receipt_sha256") if isinstance(current_scoreboard_receipt, dict) else None,
+            "evidence_tag": current_scoreboard_receipt.get("evidence_tag") if isinstance(current_scoreboard_receipt, dict) else None,
+        },
         "copy_vault_coverage_receipt": {
             "status": copy_vault_coverage.get("status") if isinstance(copy_vault_coverage, dict) else "UNAVAILABLE",
             "digest": copy_vault_coverage.get("receipt_digest") if isinstance(copy_vault_coverage, dict) else None,
@@ -289,7 +372,7 @@ def main() -> int:
         "self_hosted_used": False,
         "real_execution_reachable": False,
         "remaining_blockers": [
-            "independent economic scoreboard evidence is not loaded" if not economic_evidence_loaded else None,
+            f"current-epoch economic scoreboard evidence is invalid: {current_scoreboard_reason}" if not economic_evidence_loaded else None,
             "exact trade count coverage is incomplete" if not bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")) else None,
             "global unique trade count coverage is incomplete" if not bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")) else None,
             f"SAFE to replay-compatible migration has {replay_remaining} unclassified candidates" if replay_remaining > 0 else None,
@@ -301,7 +384,7 @@ def main() -> int:
             "uncompressed size coverage is incomplete" if (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") is not True else None,
             "normative gate registry is unavailable" if not gate_registry else None,
             "operator status receipt is invalid" if operator_status_invalid else None,
-            "environment provenance is unavailable" if complete_analysis and not environment_receipt.get("environment_provenance") else None,
+            "current-epoch environment provenance is unavailable" if complete_analysis and not current_environment_provenance else None,
         ],
         "declared_spec_requirements": declared_requirements,
         "implementation_backlog": [],
@@ -311,7 +394,7 @@ def main() -> int:
         "event_intelligence_registry_digest": event.get("registry_digest") if isinstance(event, dict) else None,
         "normative_gate_registry_digest": gate_registry.get("registry_digest") if isinstance(gate_registry, dict) else None,
         "normative_gate_count": gate_registry.get("gate_count", 0) if isinstance(gate_registry, dict) else 0,
-        "environment_provenance": environment_receipt.get("environment_provenance") if isinstance(environment_receipt, dict) else None,
+        "environment_provenance": current_environment_provenance,
     }
     report["remaining_blockers"] = [
         value for value in report["remaining_blockers"] if value
