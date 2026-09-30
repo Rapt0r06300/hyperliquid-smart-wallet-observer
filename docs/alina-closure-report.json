@@ -1,8 +1,13 @@
 {
   "analysis_campaign_status": {
-    "replay": "FAILED"
+    "backtest": "COMPLETE",
+    "forward_paper": "COMPLETE",
+    "module_pnl_proof": "COMPLETE",
+    "oos": "COMPLETE",
+    "replay": "COMPLETE",
+    "scoreboard": "COMPLETE"
   },
-  "analysis_stage": "REPLAY",
+  "analysis_stage": "DONE",
   "campaign_ids": [
     "analysis-e3-backtest-v2",
     "analysis-e3-forward-paper-v2",
@@ -11,8 +16,14 @@
     "analysis-e3-replay-v2",
     "analysis-e3-resume-proof-v1",
     "analysis-e3-scoreboard-v2",
+    "analysis-e5-backtest-v2",
+    "analysis-e5-forward-paper-v2",
+    "analysis-e5-oos-v2",
+    "analysis-e5-pnl-proof-v2",
     "analysis-e5-replay-v2",
     "analysis-e5-resume-proof-v1",
+    "analysis-e5-retry1-resume-proof-v1",
+    "analysis-e5-scoreboard-v2",
     "archives-binance-btc-20260927-v4",
     "archives-bybit-btc-20260927-v4",
     "backtest-20260925-s3-v4",
@@ -1049,7 +1060,7 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "5d62d0366d14e909e07c82988be61eacdb3328d2",
   "copy_vault_coverage_receipt": {
-    "digest": "e5097a2344762c0b2fb60793ba92e2cb433388f92fe9908908a4300dc8c98622",
+    "digest": "39a2cfd240aff97e100e51d0570ff7055fd233fb2b2191010436db6db6c894db",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
@@ -1061,48 +1072,60 @@
     },
     "status": "MORE_DATA"
   },
-  "copy_vault_status": "UNMEASURABLE",
+  "copy_vault_status": "MORE_DATA",
   "cross_shard_overlap_trade_count": 83286,
-  "cross_venue_status": "UNMEASURABLE",
+  "cross_venue_status": "MORE_DATA",
   "data_exploitability": {
     "analysis_eligible": true,
-    "analysis_stage": "REPLAY",
+    "analysis_stage": "DONE",
     "blockers": [],
     "cross_shard_overlap_trade_count": 83286,
     "economic_proof": {
-      "cost_latency_evidence_current": false,
-      "current": false,
-      "reason": "CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
-      "status": "UNMEASURABLE"
+      "cost_latency_evidence_current": true,
+      "current": true,
+      "reason": "current-epoch economic scoreboard evidence is loaded",
+      "status": "CURRENT_SCOREBOARD_AVAILABLE"
     },
     "global_unique_failure_reason_count": 0,
-    "global_unique_trade_ratio": 0.78883751,
-    "partial_shard_count": 16622,
+    "global_unique_trade_ratio": 0.78883462,
+    "partial_shard_count": 16630,
     "phase": "ANALYZE",
     "phase_epoch": 5,
     "profitability_claimed": false,
-    "quarantined_record_count": 17175382,
-    "raw_record_count": 74328129,
-    "raw_trade_count": 27855615,
-    "rejected_shard_count": 7922,
-    "replay_compatible_shard_count": 11794,
+    "quarantined_record_count": 17175809,
+    "raw_record_count": 74343998,
+    "raw_trade_count": 27855717,
+    "rejected_shard_count": 8282,
+    "replay_compatible_shard_count": 12367,
     "replay_unclassified_candidate_count": 0,
-    "safe_shard_count": 11590,
+    "safe_shard_count": 12155,
     "status": "ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
     "unique_record_count": 74328129,
-    "unique_record_ratio": 1.0,
+    "unique_record_ratio": 0.99978655,
     "unique_trade_count_exact": true,
     "unique_trade_count_global": 21973554,
     "valid_record_count": 74328129,
-    "valid_record_ratio": 1.0
+    "valid_record_ratio": 0.99978655
   },
-  "dataset_health_digest": "a95833bc1793d428d1710166e8c55570d5bdeb13a113314eafe5267287ae234c",
+  "dataset_health_digest": "9219f840932d623f2e9c168920149363f67946774da6ff0baf340a8fd03efe0b",
   "dataset_selection_id": "7a3eac7dd7921edc138f854c3883789f4639b1b77061d7c57a61592abc2530e0",
-  "dataset_v2_head": "35da798e654b5e6e21ecb828bbae5400a1f78c0b",
+  "dataset_v2_head": "483510a90891044277cd60853012d9d846b67d92",
   "declared_spec_requirements": [],
-  "environment_provenance": null,
+  "environment_provenance": {
+    "dependency_digest": "d31ca3a2352360ba8306ae79ec7b1a785adfc8aaa296ea19fd0c18c01d6d7d00",
+    "dependency_files": [
+      "requirements.txt",
+      "pyproject.toml"
+    ],
+    "github_runner_image": "ubuntu24",
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "python_executable": "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+    "python_version": "3.12.14",
+    "runner_architecture": "x86_64",
+    "timezone": "UTC"
+  },
   "event_intelligence_registry_digest": "e6d1f7c39c52fcd444f5e280088f0cbc2d1623a6e8020b2b94f99db8a9850dec",
   "event_intelligence_wiring_complete": true,
   "execution_ledger": [
@@ -1118,8 +1141,8 @@
     },
     {
       "id": "analysis-chain",
-      "reason": "current-epoch analysis stages cannot be declared complete yet",
-      "state": "BLOCKED"
+      "reason": "current-epoch replay/backtest/OOS/forward/PnL/scoreboard campaigns are terminal",
+      "state": "DONE"
     },
     {
       "id": "two-segment-resume-proof",
@@ -1128,47 +1151,75 @@
     },
     {
       "id": "final-dual-repository-closure",
-      "reason": "2 canonical closure blocker(s) remain",
-      "state": "TODO"
+      "reason": "no canonical closure blocker remains",
+      "state": "DONE"
     }
   ],
-  "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T17:42:03.703913Z",
-  "global_unique_failure_reason_count": 0,
-  "implementation_backlog": [
-    {
-      "id": "BLOCKER-01",
-      "reason": "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
-      "status": "UNRESOLVED"
+  "forward_status": "UNMEASURABLE",
+  "generated_at_utc": "2026-09-30T19:07:16.627113Z",
+  "global_closure_provenance": {
+    "coverage": {
+      "coverage": {
+        "replayable_shards": 11794,
+        "trade_count_exact": true,
+        "uncompressed_bytes_exact": true,
+        "unique_record_count_exact": true,
+        "unique_trade_count_exact": true,
+        "valid_record_count_exact": true
+      },
+      "current_global_coverage": {
+        "cross_shard_overlap_trades": 83286,
+        "replayable_shards": 12367,
+        "safe_shards": 12155,
+        "trade_count_exact": true,
+        "trade_count_failure_reason_count": 0,
+        "uncompressed_bytes_coverage_complete": false,
+        "uncompressed_bytes_exact": false,
+        "uncompressed_size_exact_assets": 36134,
+        "uncompressed_size_unavailable_assets": 0,
+        "uncompressed_size_unclassified_assets": 933,
+        "unique_record_count_exact": false,
+        "unique_trade_count_exact": false,
+        "valid_record_count_exact": false
+      },
+      "dataset_selection_id": "7a3eac7dd7921edc138f854c3883789f4639b1b77061d7c57a61592abc2530e0",
+      "health_evidence_commit": "4613a9492440020202c845a68fc61f2c7f858a33",
+      "health_receipt_digest": "a95833bc1793d428d1710166e8c55570d5bdeb13a113314eafe5267287ae234c",
+      "index_sha256": "19424e48be31d34546553f89e07ed80cd9c54e8999947a36b9d2a862eee80444",
+      "phase_epoch": 5,
+      "reason": "FROZEN_COVERAGE_RECEIPT_VALID",
+      "source_collection_epoch": 4,
+      "valid": true
     },
-    {
-      "id": "BLOCKER-02",
-      "reason": "analysis campaigns are not all terminal COMPLETE",
-      "status": "UNRESOLVED"
-    }
-  ],
-  "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "ba88dc7aeec24f8bf56c646f68c806e2bfc26e75",
+    "dataset_v2_head": "1012208592e076b17df7a51a09909da5532b9af6",
+    "reason": "GLOBAL_CLOSURE_RECEIPT_VALID",
+    "receipt_digest": "c59494b7934cffaf55237062a1611f260190d2761f4de41390437401f19a7c24",
+    "valid": true
+  },
+  "global_unique_failure_reason_count": 0,
+  "implementation_backlog": [],
+  "lead_lag_status": "MORE_DATA",
+  "main_alina_head": "ac0e9368a913c604f35c0c2a39cf4cf5412c89bc",
   "modules": {
     "copy_vault": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "5122d707be4524437b0a0a6dbd9607ee388362210cfcf7121adf9e4642f27c80",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "cross_venue_dislocation": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "5b9aa1d6821da4510b3e352627aba7314c67c6739c92b67780e6d00ea01dbc94",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "lead_lag": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "adfe670baff969ef334646ad0b2d75d7ed1aea11238b604f2bccb88ed1e1a716",
+      "reason": "UNMEASURED:closed_positions; UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:oos; UNMEASURED:forward",
+      "status": "MORE_DATA"
     }
   },
   "normative_gate_count": 13,
   "normative_gate_registry_digest": "5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a",
-  "oos_status": "MORE_DATA",
+  "oos_status": "UNMEASURABLE",
   "operator_status": {
     "count": 0,
     "invalid_files": [],
@@ -1176,34 +1227,31 @@
     "rows": []
   },
   "paper_read_only": true,
-  "partial_count": 16622,
+  "partial_count": 16630,
   "phase": "ANALYZE",
   "phase_epoch": 5,
-  "quarantined_record_count": 17175382,
-  "raw_record_count": 74328129,
-  "raw_trade_count": 27855615,
+  "quarantined_record_count": 17175809,
+  "raw_record_count": 74343998,
+  "raw_trade_count": 27855717,
   "real_execution_reachable": false,
-  "receipt_digest": "6cf27852968ead3115a9fa0e57cab534179587408270234614babf79f0c46cd3",
-  "rejected_count": 7922,
-  "remaining_blockers": [
-    "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
-    "analysis campaigns are not all terminal COMPLETE"
-  ],
-  "replay_compatible_count": 11794,
+  "receipt_digest": "3701e6d19d4227fb75ce625466e777b8ac61c7fb4456506ec79c32f08dbf7c4d",
+  "rejected_count": 8282,
+  "remaining_blockers": [],
+  "replay_compatible_count": 12367,
   "replay_remaining_candidates": 0,
-  "safe_count": 11590,
+  "safe_count": 12155,
   "schema_version": "alina.final_closure_receipt.v1",
-  "scoreboard_artifact": null,
+  "scoreboard_artifact": "campaign-evidence-analysis-e5-scoreboard-v2-u0",
   "scoreboard_provenance": {
-    "campaign_id": "analysis-e3-scoreboard-v2",
-    "dataset_selection_id": "3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106",
-    "environment_receipt_sha256": "ebd678512427617aab68239bca8073f0c66566770f7114c6607e5c55da089a26",
-    "evidence_tag": "campaign-evidence-analysis-e3-scoreboard-v2-u2",
-    "phase_epoch": 3,
-    "reason": "CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
-    "scoreboard_sha256": "29f597f2054914880acc4376d2f43a92404c09a71ba4153d264d70e9dbf1f8c0",
-    "source_collection_epoch": 2,
-    "valid": false
+    "campaign_id": "analysis-e5-scoreboard-v2",
+    "dataset_selection_id": "7a3eac7dd7921edc138f854c3883789f4639b1b77061d7c57a61592abc2530e0",
+    "environment_receipt_sha256": "711bc9a6ebbaf9c740dccf867e4933bcbc06af375825d6067cabb6a396c85e20",
+    "evidence_tag": "campaign-evidence-analysis-e5-scoreboard-v2-u0",
+    "phase_epoch": 5,
+    "reason": "CURRENT_SCOREBOARD_RECEIPT_VALID",
+    "scoreboard_sha256": "b8c060d573c78885d9dd653d2c94622dd96410a0d67869b6ca930aec0b84295b",
+    "source_collection_epoch": 4,
+    "valid": true
   },
   "self_hosted_used": false,
   "source_collection_epoch": 4,
@@ -1343,6 +1391,12 @@
     "36737050508",
     "36737264431",
     "36749736279",
-    "36749739934"
+    "36749739934",
+    "36755080572",
+    "36758858290",
+    "36759391935",
+    "36760091490",
+    "36760560403",
+    "36761051198"
   ]
 }
