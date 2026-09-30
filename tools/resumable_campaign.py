@@ -32,11 +32,11 @@ def load(path: str | Path) -> CampaignManifest:
 def save(path: str | Path, manifest: CampaignManifest, expected: str | None = None) -> None:
     target = Path(path)
     if target.exists() and expected:
-        # Compare the normalized schema, not the raw JSON shape. Older durable
-        # manifests may legitimately omit newly-added optional fields (for
-        # example `supersedes`) that from_dict() restores with a null default.
+        # The optimistic-concurrency token is the exact on-disk JSON digest.
+        # Comparing the same representation in validate() and save() prevents
+        # false conflicts when schema defaults evolve.
         current_raw = json.loads(target.read_text(encoding="utf-8"))
-        current = sha256_json(CampaignManifest.from_dict(current_raw).to_dict())
+        current = sha256_json(current_raw)
         if current != expected:
             raise SystemExit("manifest changed")
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +90,6 @@ def main() -> int:
     parser.add_argument("--dataset-selection-id")
     parser.add_argument("--analysis-stage")
     parser.add_argument("--operator-request-id")
-    parser.add_argument("--supersedes")
     parser.add_argument("--current-phase", choices=["IDLE", "COLLECT", "ANALYZE"])
     parser.add_argument("--current-epoch", type=int)
     parser.add_argument("--current-analysis-stage")
@@ -144,7 +143,6 @@ def main() -> int:
                 ANALYSIS_STAGE_BY_KIND.get(args.kind or "") if args.creation_phase == "ANALYZE" else None
             ),
             operator_request_id=args.operator_request_id,
-            supersedes=args.supersedes,
             history=(
                 [{"event": "operator_request", "request_id": args.operator_request_id}]
                 if args.operator_request_id else []
@@ -180,9 +178,7 @@ def main() -> int:
         validate_manifest(manifest)
         # Optimistic-concurrency tokens must describe the exact on-disk JSON.
         # Normalizing through CampaignManifest.to_dict() can add newly introduced
-        # optional fields (for example supersedes=None) that were absent from an
-        # older but still valid manifest, producing an immediate false conflict
-        # when save() compares against the raw file.
+        # optional fields that were absent from an older but still valid manifest.
         raw = json.loads(path.read_text(encoding="utf-8"))
         print(sha256_json(raw))
         return 0
