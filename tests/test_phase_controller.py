@@ -11,6 +11,11 @@ from hl_observer.control_plane.phase_state import (
 from hl_observer.control_plane.phase_controller import PhaseController
 
 
+REQ_1 = "1" * 64
+REQ_2 = "2" * 64
+REQ_3 = "3" * 64
+
+
 def test_valid_idle_state_parse():
     data = {
         "schema_version": 1,
@@ -104,19 +109,19 @@ def test_phase_controller_transitions(tmp_path: Path):
     assert ctrl.current_state.epoch == 1
 
     # IDLE -> COLLECT
-    r1 = ctrl.transition_to_collect(request_id="req-1", now_utc="2026-09-27T01:00:00Z")
+    r1 = ctrl.transition_to_collect(request_id=REQ_1, now_utc="2026-09-27T01:00:00Z")
     assert r1.previous_epoch == 1
     assert r1.new_epoch == 2
     assert ctrl.current_state.phase == "COLLECT"
     assert ctrl.current_state.collection_started_at_utc == "2026-09-27T01:00:00Z"
 
     # Duplicate COLLECT request is idempotent
-    r1_dup = ctrl.transition_to_collect(request_id="req-1", now_utc="2026-09-27T01:05:00Z")
+    r1_dup = ctrl.transition_to_collect(request_id=REQ_1, now_utc="2026-09-27T01:05:00Z")
     assert r1_dup.new_epoch == 2
     assert ctrl.current_state.epoch == 2
 
     # COLLECT -> ANALYZE
-    r2 = ctrl.transition_to_analyze(request_id="req-2", initial_stage="DRAIN", now_utc="2026-09-27T02:00:00Z")
+    r2 = ctrl.transition_to_analyze(request_id=REQ_2, initial_stage="DRAIN", now_utc="2026-09-27T02:00:00Z")
     assert r2.previous_epoch == 2
     assert r2.new_epoch == 3
     assert ctrl.current_state.phase == "ANALYZE"
@@ -127,19 +132,20 @@ def test_phase_controller_transitions(tmp_path: Path):
     # Direct IDLE -> ANALYZE is illegal
     ctrl2 = PhaseController(state_file_path=tmp_path / "idle.json")
     with pytest.raises(ValueError, match="Transition to ANALYZE requires phase COLLECT"):
-        ctrl2.transition_to_analyze(request_id="req-3")
+        ctrl2.transition_to_analyze(request_id=REQ_3)
 
 
 def test_advance_analysis_stage(tmp_path: Path):
     ctrl = PhaseController(state_file_path=tmp_path / "alina-phase.json")
-    ctrl.transition_to_collect(request_id="req-1")
-    ctrl.transition_to_analyze(request_id="req-2")
+    ctrl.transition_to_collect(request_id=REQ_1)
+    ctrl.transition_to_analyze(request_id=REQ_2)
 
     assert ctrl.current_state.analysis_stage == "DRAIN"
     ctrl.advance_analysis_stage("QUALITY")
     assert ctrl.current_state.analysis_stage == "QUALITY"
 
-    ctrl.advance_analysis_stage("DONE")
+    for stage in ("REPLAY", "BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD", "DONE"):
+        ctrl.advance_analysis_stage(stage)
     assert ctrl.current_state.analysis_stage == "DONE"
     # Phase remains ANALYZE until operator sets IDLE
     assert ctrl.current_state.phase == "ANALYZE"

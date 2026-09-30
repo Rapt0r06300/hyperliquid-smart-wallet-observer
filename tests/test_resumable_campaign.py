@@ -3,7 +3,7 @@ import pytest
 from hl_observer.control_plane.resumable_campaign import *
 
 def manifest():
- now=datetime.now(timezone.utc); return CampaignManifest("c1","replay","Rapt0r06300/hyperliquid-smart-wallet-observer","abc","Rapt0r06300/alina-smartflow-datasets-v2","g1","cfg","plan",(now+timedelta(days=1)).isoformat(),created_at=now.isoformat())
+ now=datetime.now(timezone.utc); return CampaignManifest("c1","market_collection","Rapt0r06300/hyperliquid-smart-wallet-observer","a"*40,"Rapt0r06300/alina-smartflow-datasets-v2","g1","b"*64,"c"*64,(now+timedelta(days=1)).isoformat(),schema_version=SCHEMA_VERSION_V2,created_at=now.isoformat(),creation_phase="COLLECT",phase_epoch=1)
 def test_safety_and_transition():
  m=manifest(); validate_manifest(m); transition(m,"RUNNING","go"); assert m.status=="RUNNING"
  m.real_execution=True
@@ -33,8 +33,9 @@ def test_consecutive_failure_limit_is_enforced():
     m.consecutive_failures=3
     m.limits={**m.limits,"max_consecutive_failures":4}
     out=mark_continuation(m,"temporary_failure",progressed=False,failure=True)
-    assert out.status=="FAILED"
+    assert out.status=="STUCK"
     assert out.consecutive_failures==4
+    assert out.next_due_at is not None
 
 def test_successful_progress_resets_failure_counter():
     m=manifest()
@@ -48,17 +49,24 @@ def test_successful_progress_resets_failure_counter():
 def test_due_selection_round_robins_campaign_kinds_before_repeating():
     now=datetime.now(timezone.utc)
     def make(cid, kind):
+        phase = "COLLECT" if kind in COLLECT_CAMPAIGN_KINDS else "ANALYZE"
         return CampaignManifest(
             cid,
             kind,
             "Rapt0r06300/hyperliquid-smart-wallet-observer",
-            "abc",
+            "a"*40,
             "Rapt0r06300/alina-smartflow-datasets-v2",
             "g1",
-            "cfg",
-            "plan",
+            "b"*64,
+            "c"*64,
             (now+timedelta(days=1)).isoformat(),
+            schema_version=SCHEMA_VERSION_V2,
             created_at=now.isoformat(),
+            creation_phase=phase,
+            phase_epoch=1,
+            source_collection_epoch=1 if phase == "ANALYZE" else None,
+            collection_cutoff_at_utc=now.isoformat() if phase == "ANALYZE" else None,
+            dataset_selection_id="selection-1" if phase == "ANALYZE" else None,
         )
     items=[make(f"copy-vault-{i:03d}","copy_vault_collection") for i in range(20)]
     items += [
@@ -69,7 +77,7 @@ def test_due_selection_round_robins_campaign_kinds_before_repeating():
         make("pnl-1","module_pnl_proof"),
         make("archive-1","official_archive_collection"),
     ]
-    selected=select_due_campaigns(items, now=now.isoformat())
+    selected=select_due_campaigns(items, current_epoch=1, now=now.isoformat())
     first_kinds=[m.kind for m in selected[:7]]
     assert len(first_kinds)==len(set(first_kinds))==7
-    assert set(first_kinds)==CAMPAIGN_KINDS
+    assert set(first_kinds)=={m.kind for m in items}

@@ -300,7 +300,7 @@ def mark_continuation(
             # it after a durable cooldown without spinning in a hot loop.
             m.next_due_at = (current + timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
         else:
-            return transition(m, "FAILED", "stop_limit_reached", now=current_text)
+            return mark_terminal(m, "FAILED", "stop_limit_reached")
     else:
         transition(m, "CONTINUATION_REQUIRED", reason, now=current_text)
         m.next_due_at = next_due_at
