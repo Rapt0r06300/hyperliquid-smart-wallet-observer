@@ -107,6 +107,16 @@ def out_of_sample_gate(pnls, *, train_fraction: float = 0.7, min_oos_pf: float =
             or float(min_oos_pf) < 0.0):
         return {"gate": "out_of_sample", "passed": False,
                 "reason": "invalid_oos_parameters"}
+    if len(pnls) < 2:
+        return {
+            "gate": "out_of_sample",
+            "passed": False,
+            "reason": "insufficient_train_test_samples",
+            "pf_in_sample": None,
+            "pf_out_sample": None,
+            "n_test": 0,
+            "min_oos_pf": min_oos_pf,
+        }
     train, test = split_walk_forward(pnls, train_fraction=float(train_fraction))
     pf_in, pf_out = profit_factor(train), profit_factor(test)
     passed = bool(test) and math.isfinite(pf_out) and pf_out >= float(min_oos_pf)
