@@ -35,6 +35,7 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
         "trade_ids_sha256": hash_char * 64,
         "post_freeze": post_freeze,
         "no_lookahead": no_lookahead,
+        "anti_lookahead_receipt_valid": no_lookahead,
     }
 
 
