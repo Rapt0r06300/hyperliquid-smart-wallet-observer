@@ -1,0 +1,215 @@
+{
+  "gate_count": 13,
+  "gates": [
+    {
+      "blocks": [
+        "QUALITY",
+        "REPLAY",
+        "BACKTEST"
+      ],
+      "failure_code": "PROVENANCE_INVALID",
+      "gate_id": "PROVENANCE",
+      "input_evidence": [
+        "release_manifest",
+        "asset_sha256"
+      ],
+      "owner": "dataset_v2",
+      "validator": "validate_publication_receipts"
+    },
+    {
+      "blocks": [
+        "QUALITY",
+        "REPLAY",
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER"
+      ],
+      "failure_code": "STORAGE_COVERAGE_INCOMPLETE",
+      "gate_id": "STORAGE",
+      "input_evidence": [
+        "compressed_bytes",
+        "uncompressed_bytes_receipt",
+        "storage_coverage"
+      ],
+      "owner": "dataset_v2",
+      "validator": "validate_dataset_health_receipt"
+    },
+    {
+      "blocks": [
+        "QUALITY",
+        "REPLAY",
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER"
+      ],
+      "failure_code": "CROSS_REPO_IDENTITY_INVALID",
+      "gate_id": "CROSS_REPO_PUBLICATION",
+      "input_evidence": [
+        "publication_receipt",
+        "main_alina_head",
+        "dataset_head",
+        "manifest_sha256"
+      ],
+      "owner": "dataset_v2",
+      "validator": "reconcile_publication_consistency"
+    },
+    {
+      "blocks": [
+        "DONE"
+      ],
+      "failure_code": "EXECUTION_SURFACE_INVALID",
+      "gate_id": "SECURITY",
+      "input_evidence": [
+        "paper_only",
+        "read_only",
+        "real_execution"
+      ],
+      "owner": "alina",
+      "validator": "validate_closure_receipt"
+    },
+    {
+      "blocks": [
+        "REPLAY",
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER"
+      ],
+      "failure_code": "QUALITY_NOT_SAFE",
+      "gate_id": "QUALITY",
+      "input_evidence": [
+        "manifest",
+        "gap_counts",
+        "sequence_state"
+      ],
+      "owner": "dataset_v2",
+      "validator": "check_dataset_quality"
+    },
+    {
+      "blocks": [
+        "REPLAY",
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER",
+        "PNL_PROOF"
+      ],
+      "failure_code": "COUNT_COVERAGE_INCOMPLETE",
+      "gate_id": "COUNT_EXACTNESS",
+      "input_evidence": [
+        "exact_record_counts",
+        "exact_trade_counts",
+        "global_unique_trade_count",
+        "cross_shard_overlap_count"
+      ],
+      "owner": "dataset_v2",
+      "validator": "validate_dataset_health_receipt"
+    },
+    {
+      "blocks": [
+        "REPLAY",
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER"
+      ],
+      "failure_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
+      "gate_id": "REPLAY_COMPATIBLE",
+      "input_evidence": [
+        "safe_manifest",
+        "replay_compatibility_receipt"
+      ],
+      "owner": "dataset_v2",
+      "validator": "enforce_safe_replay_invariant"
+    },
+    {
+      "blocks": [
+        "BACKTEST",
+        "OOS",
+        "FORWARD_PAPER"
+      ],
+      "failure_code": "REPLAY_NOT_DETERMINISTIC",
+      "gate_id": "REPLAY",
+      "input_evidence": [
+        "frozen_selection",
+        "replay_receipt"
+      ],
+      "owner": "alina",
+      "validator": "run_economic_objective_campaigns"
+    },
+    {
+      "blocks": [
+        "OOS",
+        "FORWARD_PAPER",
+        "PNL_PROOF"
+      ],
+      "failure_code": "BACKTEST_NOT_COMPLETE",
+      "gate_id": "BACKTEST",
+      "input_evidence": [
+        "replay_events",
+        "cost_model"
+      ],
+      "owner": "alina",
+      "validator": "run_economic_objective_campaigns"
+    },
+    {
+      "blocks": [
+        "FORWARD_PAPER",
+        "PNL_PROOF",
+        "SCOREBOARD"
+      ],
+      "failure_code": "OOS_IDENTITY_INVALID",
+      "gate_id": "OOS",
+      "input_evidence": [
+        "frozen_experiment_identity",
+        "backtest_artifact"
+      ],
+      "owner": "alina",
+      "validator": "validate_closure_receipt"
+    },
+    {
+      "blocks": [
+        "PNL_PROOF",
+        "SCOREBOARD"
+      ],
+      "failure_code": "FORWARD_IDENTITY_INVALID",
+      "gate_id": "FORWARD_PAPER",
+      "input_evidence": [
+        "oos_receipt",
+        "paper_observations"
+      ],
+      "owner": "alina",
+      "validator": "validate_closure_receipt"
+    },
+    {
+      "blocks": [
+        "SCOREBOARD"
+      ],
+      "failure_code": "PNL_PROOF_UNMEASURABLE",
+      "gate_id": "PNL_PROOF",
+      "input_evidence": [
+        "safe_replay_events",
+        "canonical_ledger",
+        "module_certificate"
+      ],
+      "owner": "alina",
+      "validator": "module_pnl_proof"
+    },
+    {
+      "blocks": [
+        "DONE"
+      ],
+      "failure_code": "SCOREBOARD_NOT_BOUND",
+      "gate_id": "SCOREBOARD",
+      "input_evidence": [
+        "module_certificates",
+        "oos_receipt",
+        "forward_receipt"
+      ],
+      "owner": "alina",
+      "validator": "validate_closure_receipt"
+    }
+  ],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "registry_digest": "5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a",
+  "schema": "alina.normative_gate_registry.v1"
+}
