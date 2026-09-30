@@ -87,6 +87,9 @@ class FusionRuntimeInput:
     copy_ratio: float = 0.05
     open_positions: tuple[dict[str, object], ...] = ()
     distilled_signal_candidates: tuple[DistilledSignalCandidate, ...] = ()
+    # Optional authoritative evaluation clock. Replays/tests inject it; live
+    # callers may omit it and fall back to the local wall clock.
+    evaluation_time_ms: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +160,11 @@ class FusionRuntimeResult:
 
 
 def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeResult:
+    evaluation_now_ms = (
+        int(payload.evaluation_time_ms)
+        if payload.evaluation_time_ms is not None and int(payload.evaluation_time_ms) > 0
+        else int(time.time() * 1000)
+    )
     external_priority = _external_profile_priority_snapshot()
     external_ids = {str(item["strategy_id"]) for item in external_priority if item.get("strategy_id")}
     session = start_copy_session(
@@ -190,7 +198,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
     maker_quotes = _maker_quotes_from_prices(ordered_events)
     distilled_report = detect_distilled_opportunities(
         list(payload.distilled_signal_candidates),
-        now_ms=max((event.event_time_ms for event in ordered_events), default=0),
+        now_ms=evaluation_now_ms,
     )
 
     no_trade: list[str] = []
@@ -229,7 +237,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
             funding_signals=funding, triangular=triangular,
             distilled_opportunities=distilled_report.opportunities,
             funding_rates_bps_by_coin=funding_rates_bps_for_coins([getattr(s, "coin", "") for s in funding]),
-            now_ms=max((event.event_time_ms for event in ordered_events), default=0),
+            now_ms=evaluation_now_ms,
         )
         paper_engine = run_copy_votes_through_paper_engine(
             conflict_votes,
@@ -300,6 +308,7 @@ def run_fusion_strategy_runtime(payload: FusionRuntimeInput) -> FusionRuntimeRes
                 leader_votes=conflict_votes,
                 ordered_events=ordered_events,
                 latency=latency,
+                evaluation_time_ms=evaluation_now_ms,
             )
             paper_orders.append(
                 controller.run_once(
@@ -651,6 +660,7 @@ def _copy_follow_order_metadata(
     leader_votes: tuple[LeaderVote, ...],
     ordered_events: tuple[PriceEvent, ...],
     latency: LatencyProfile,
+    evaluation_time_ms: int,
 ) -> dict[str, object]:
     """Attach measurable local evidence to direct copy-profile paper orders.
 
@@ -691,14 +701,15 @@ def _copy_follow_order_metadata(
     #     *Un `max(0, ...)` sur un temps n'est pas une protection : c'est un tapis sous lequel on
     #     balaie une contradiction.*
     #
-    # DESORMAIS : une VRAIE montre (`time.time()`), et un refus explicite si on ne peut pas dater.
-    # `age_du_signal` refuse un « maintenant » derive des donnees -- l'invariant est TESTE.
+    # DESORMAIS : une horloge d'evaluation EXPLICITE, fournie par le caller quand il
+    # rejoue/teste un instant donne. Le live peut encore injecter l'horloge locale en amont.
+    # `age_du_signal` refuse toujours un « maintenant » derive des donnees.
     last_vote_ms = max([0] + [int(vote.observed_at_ms or 0) for vote in winning_votes])
     _horodatages_du_lot = (
         [int(event.event_time_ms) for event in ordered_events]
         + [int(vote.observed_at_ms or 0) for vote in leader_votes]
     )
-    context_now_ms = int(time.time() * 1000)          # la montre, pas les donnees
+    context_now_ms = int(evaluation_time_ms)          # horloge explicite, jamais derivee des donnees
     _age = age_du_signal(
         observe_a_ms=last_vote_ms,
         maintenant_local_ms=context_now_ms,
