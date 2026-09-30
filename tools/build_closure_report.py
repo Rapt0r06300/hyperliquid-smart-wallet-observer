@@ -97,16 +97,21 @@ def main() -> int:
     replayable = int(totals.get("REPLAYABLE_SHARDS") or 0)
     replay_remaining = int((replay_patch or {}).get("remaining_candidates_for_filter") or 0)
     source_unvalidated = []
+    source_degraded = []
     for venue in (source_matrix or {}).get("venues", []):
         venue_name = str(venue.get("venue") or venue.get("name") or "unknown")
         for capability, evidence in (venue.get("capabilities") or {}).items():
             runtime_status = str((evidence or {}).get("runtime_status") or "UNVALIDATED")
-            if runtime_status not in {"VALIDATED", "HEALTHY", "REPLAY_COMPATIBLE", "PNL_READY"}:
-                source_unvalidated.append({
-                    "venue": venue_name,
-                    "capability": str(capability),
-                    "runtime_status": runtime_status,
-                })
+            row = {
+                "venue": venue_name,
+                "capability": str(capability),
+                "runtime_status": runtime_status,
+                "runtime_reason": (evidence or {}).get("runtime_reason"),
+            }
+            if runtime_status == "UNVALIDATED":
+                source_unvalidated.append(row)
+            elif runtime_status == "DEGRADED":
+                source_degraded.append(row)
     resume_proven = (
         isinstance(resume_receipt, dict)
         and resume_receipt.get("segment_a_workflow_result") == "success"
@@ -253,6 +258,8 @@ def main() -> int:
         ),
         "source_unvalidated_capability_count": len(source_unvalidated),
         "source_unvalidated_capabilities": source_unvalidated,
+        "source_degraded_capability_count": len(source_degraded),
+        "source_degraded_capabilities": source_degraded,
         "event_intelligence_wiring_complete": event_wired,
         "scoreboard_artifact": scoreboard_artifact,
         "copy_vault_coverage_receipt": {
