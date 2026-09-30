@@ -44,6 +44,7 @@ jobs:
   verify:
     permissions:
       contents: write
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -212,3 +213,16 @@ jobs:
           if row.get("status")!="PASS":
               raise SystemExit("canonical spec deterministic verification failed")
           PY
+
+      - name: Refresh dual-repository closure after verified receipt
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A push created with GITHUB_TOKEN does not recursively start another
+          # push-triggered workflow. Dispatch the closure report explicitly so
+          # its HEAD binding always follows the verified canonical receipt.
+          gh workflow run alina-dual-repository-closure-report.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
