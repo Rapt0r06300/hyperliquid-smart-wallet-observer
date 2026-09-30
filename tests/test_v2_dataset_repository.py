@@ -58,16 +58,17 @@ def test_foreign_release_repository_is_refused() -> None:
         )
 
 
-def test_time_window_uses_overlap_not_filename_guessing() -> None:
+def test_time_window_requires_full_immutable_shard_containment() -> None:
     index = {
         "shards": [
             _safe_row(dataset_id="old", start_ts_ms=0, end_ts_ms=99),
-            _safe_row(dataset_id="hit", start_ts_ms=100, end_ts_ms=200),
-            _safe_row(dataset_id="new", start_ts_ms=201, end_ts_ms=300),
+            _safe_row(dataset_id="left-overlap", start_ts_ms=100, end_ts_ms=200),
+            _safe_row(dataset_id="contained", start_ts_ms=150, end_ts_ms=250),
+            _safe_row(dataset_id="right-overlap", start_ts_ms=201, end_ts_ms=300),
         ]
     }
     rows = select_safe_shards(index, start_ts_ms=150, end_ts_ms=250)
-    assert [row.dataset_id for row in rows] == ["hit", "new"]
+    assert [row.dataset_id for row in rows] == ["contained"]
 
 
 def test_selector_refuses_safe_without_replay_compatibility() -> None:
