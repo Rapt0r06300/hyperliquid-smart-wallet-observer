@@ -1,3 +1,4 @@
+import pytest
 from hl_observer.ops.runtime_governance import (
     detecter_derive_execution, RegistreOrchestrateurs, CANONIQUE)
 
@@ -17,8 +18,9 @@ def test_orchestrateurs_unifies():
     assert r["unifie"] is True and r["n_orchestrateurs"] == 2
 
 
-def test_deux_canoniques_casse_l_unification():
+def test_deux_canoniques_sont_refuses_avant_split_brain():
     reg = RegistreOrchestrateurs()
     reg.enregistrer(CANONIQUE, "canonique")
-    reg.enregistrer("autre_moteur", "canonique")
-    assert reg.verifier_unicite()["unifie"] is False
+    with pytest.raises(PermissionError, match="parallel canonical orchestrator refused"):
+        reg.enregistrer("autre_moteur", "canonique")
+    assert reg.verifier_unicite()["unifie"] is True
