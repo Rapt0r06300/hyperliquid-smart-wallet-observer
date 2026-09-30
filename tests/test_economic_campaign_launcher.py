@@ -29,3 +29,12 @@ def test_launcher_names_only_three_canonical_economic_families():
     assert "Copy-Vault / Lead-Lag / Cross-Venue Dislocation v2" in text
     assert "+4 USD NET" in text
     assert "Carry" not in text
+
+
+def test_analysis_runner_forces_collection_off():
+    text = (ROOT / "tools" / "run_economic_objective_campaigns.py").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    assert "ANALYZE cannot start collectors" in text
+    assert "start_collection=False" in text
+    assert "ensure_bounded_collectors(" not in text
