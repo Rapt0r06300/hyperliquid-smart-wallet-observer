@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE
+from hl_observer.backtesting.cross_venue_certified import BBO_SOURCE_MODE, _build_normalization_receipt
+from hl_observer.config.cross_venue_instruments import mapping_record
 from hl_observer.backtesting.cross_venue_v3_train import (
     FEES_ROUND_TRIP_BPS,
     explore_cross_venue_v3_train,
@@ -21,13 +22,14 @@ def _atomic(ts: int, hl_mid: float, bin_mid: float) -> tuple:
 
 
 def _source_meta() -> dict[str, object]:
+    mapping = mapping_record("BTC", "BTCUSDT")
     return {
         "source_mode": BBO_SOURCE_MODE,
         "mapping_verified": True,
-        "instrument_mapping_schema": "cross_venue_instrument_mapping_v2",
-        "contract_multipliers_normalized": True,
-        "quote_currencies_normalized": True,
-        "sizes_normalized_to_usd_notional": True,
+        "normalization_receipt": _build_normalization_receipt(
+            source_mode=BBO_SOURCE_MODE,
+            mappings=[mapping],
+        ),
     }
 
 
