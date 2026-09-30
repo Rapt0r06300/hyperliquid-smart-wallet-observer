@@ -154,14 +154,15 @@ def main() -> int:
             or component_contract == "package architecture"
         )
 
+        # Wiring status is structural and must stay independent from economic proof.
+        # An implementation with real runtime callers is wired even when its edge is still
+        # UNMEASURABLE/MORE_DATA.  PROVEN_EDGE is tracked separately in proof_status.
         if policy_only and files:
             status = "NOT_APPLICABLE"
         elif not files:
             status = "MISSING"
         elif not callers:
             status = "IMPLEMENTED_BUT_NOT_WIRED"
-        elif "À prouver" in proof or "⏳" in proof:
-            status = "IMPLEMENTED_BUT_PARTIAL"
         else:
             status = "IMPLEMENTED_AND_WIRED"
 
@@ -196,7 +197,8 @@ def main() -> int:
         elif callers and status != "MISSING":
             reason = (
                 "Structural implementation is present and referenced by runtime imports; "
-                "economic proof remains data/OOS/forward dependent."
+                "wiring is complete independently of economic proof, which remains "
+                "tracked by proof_status/data/OOS/forward evidence."
             )
         elif files:
             reason = "Implementation evidence exists but no runtime caller was resolved."
