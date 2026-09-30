@@ -8,7 +8,7 @@ import pytest
 from hl_observer.simulation.ledger_integrity import seal_chain
 from hl_observer.simulation.log_metrics import analyze_logs_streaming
 from hl_observer.simulation.paper_ledger import PaperLedger
-from hl_observer.simulation.pnl_ledger_audit import CONTAMINATED, TRUSTED, audit_paper_ledger
+from hl_observer.simulation.pnl_ledger_audit import CONTAMINATED, TRUSTED, UNMEASURABLE, audit_paper_ledger
 
 
 def _complete_lifecycle() -> PaperLedger:
@@ -74,12 +74,13 @@ def test_semantic_audit_reconciles_open_add_reduce_close_costs_and_funding():
     assert ledger.snapshot()["pnl_audit"]["status"] == TRUSTED
 
 
-def test_empty_new_ledger_has_audited_zero_pnl():
+def test_empty_new_ledger_is_unmeasurable_without_economic_events():
     snapshot = PaperLedger(starting_balance_usdc=1_000.0).snapshot()
 
-    assert snapshot["strict_pnl_allowed"] is True
-    assert snapshot["pnl_audit"]["status"] == TRUSTED
-    assert snapshot["pnl_audit"]["recalculated_net_pnl_usdc"] == 0.0
+    assert snapshot["strict_pnl_allowed"] is False
+    assert snapshot["pnl_audit"]["status"] == UNMEASURABLE
+    assert snapshot["pnl_audit"]["recalculated_net_pnl_usdc"] is None
+    assert snapshot["pnl_audit"]["issues"][0]["code"] == "NO_LEDGER_EVENTS"
 
 
 def test_position_events_reference_authoritative_fee_and_position_identity():
