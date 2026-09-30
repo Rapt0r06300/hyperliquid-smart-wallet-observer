@@ -78,10 +78,7 @@ from hl_observer.datasets.source_discovery import (  # noqa: E402
 )
 from hl_observer.economics.assumptions import EconomicRunMode  # noqa: E402
 from hl_observer.economics.families import build_lead_lag_maker_contract  # noqa: E402
-from hl_observer.ops.bounded_collection import (  # noqa: E402
-    ensure_bounded_collectors,
-    inspect_bounded_collectors,
-)
+from hl_observer.ops.bounded_collection import inspect_bounded_collectors  # noqa: E402
 from hl_observer.simulation.economic_campaigns import (  # noqa: E402
     REPORT_DIR,
     build_copy_campaign,
@@ -946,7 +943,7 @@ def main(argv: list[str] | None = None) -> int:
         cross_budget_s=args.cross_budget_s,
         cross_current_only=args.cross_current_only,
         lead_history_sources=args.lead_history_sources,
-        start_collection=not args.no_start_collection,
+        start_collection=False,
         collection_duration_s=args.collection_duration_s,
         collection_startup_wait_s=args.collection_startup_wait_s,
         analysis_stage=args.analysis_stage,
