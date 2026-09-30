@@ -1043,7 +1043,7 @@
     "replay-2026092717-v5"
   ],
   "campaign_resilience_status": "READY",
-  "canonical_spec_blob": "348c3e4507ec30a1f225e23639307d567d0efaee",
+  "canonical_spec_blob": "5d62d0366d14e909e07c82988be61eacdb3328d2",
   "copy_vault_coverage_receipt": {
     "digest": "e5097a2344762c0b2fb60793ba92e2cb433388f92fe9908908a4300dc8c98622",
     "reconciliation": {
@@ -1060,9 +1060,43 @@
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 83286,
   "cross_venue_status": "UNMEASURABLE",
+  "data_exploitability": {
+    "analysis_eligible": true,
+    "analysis_stage": null,
+    "blockers": [],
+    "cross_shard_overlap_trade_count": 83286,
+    "economic_proof": {
+      "cost_latency_evidence_current": false,
+      "current": false,
+      "reason": "CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
+      "status": "PENDING_ANALYZE"
+    },
+    "global_unique_failure_reason_count": 0,
+    "global_unique_trade_ratio": 0.78883751,
+    "partial_shard_count": 16622,
+    "phase": "COLLECT",
+    "phase_epoch": 4,
+    "profitability_claimed": false,
+    "quarantined_record_count": 17175382,
+    "raw_record_count": 74328129,
+    "raw_trade_count": 27855615,
+    "rejected_shard_count": 7922,
+    "replay_compatible_shard_count": 11794,
+    "replay_unclassified_candidate_count": 0,
+    "safe_shard_count": 11590,
+    "status": "ANALYSIS_ELIGIBLE",
+    "trade_count_exact": true,
+    "trade_count_failure_reason_count": 0,
+    "unique_record_count": 74328129,
+    "unique_record_ratio": 1.0,
+    "unique_trade_count_exact": true,
+    "unique_trade_count_global": 21973554,
+    "valid_record_count": 74328129,
+    "valid_record_ratio": 1.0
+  },
   "dataset_health_digest": "a95833bc1793d428d1710166e8c55570d5bdeb13a113314eafe5267287ae234c",
   "dataset_selection_id": null,
-  "dataset_v2_head": "0832fbab8ee72f67285381a89361e6d3c62181f3",
+  "dataset_v2_head": "8aef57043b3a17e13674438992cb7884eba70fae",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "e6d1f7c39c52fcd444f5e280088f0cbc2d1623a6e8020b2b94f99db8a9850dec",
@@ -1095,7 +1129,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T16:17:02.179194Z",
+  "generated_at_utc": "2026-09-30T16:28:56.623401Z",
   "global_unique_failure_reason_count": 0,
   "implementation_backlog": [
     {
@@ -1110,7 +1144,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "76dc07614332540f31684ef0206d6a7941112664",
+  "main_alina_head": "56a62dda842f36816a0a8469dd3a693736cbba21",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1145,7 +1179,7 @@
   "raw_record_count": 74328129,
   "raw_trade_count": 27855615,
   "real_execution_reachable": false,
-  "receipt_digest": "527520470026d0f485b7b61749c85e285aa5090c17b030891c85fa6220be4b28",
+  "receipt_digest": "6909efdb1edf450cf7675abcd16e171eeae09172b434e0059dfedf0eff7ebc06",
   "rejected_count": 7922,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
