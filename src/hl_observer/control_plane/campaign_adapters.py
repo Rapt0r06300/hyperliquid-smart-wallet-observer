@@ -148,6 +148,46 @@ def _materialize_command(ctx: AdapterContext, workspace: Path) -> list[str]:
     return _dataset_bridge_command(ctx, workspace, action="materialize")
 
 
+def _economic_proof_status(workspace: Path) -> str | None:
+    """Read the semantic PnL-proof verdict produced by the audit.
+
+    This is intentionally separate from subprocess success. A valid audit may
+    conclude that evidence is incomplete/unmeasurable without meaning that the
+    orchestration itself crashed.
+    """
+    path = (
+        workspace
+        / "runtime"
+        / "reports"
+        / "economic_campaigns"
+        / "HYPERSMART_ECONOMIC_PROOF_AUDIT.json"
+    )
+    if not path.is_file():
+        return None
+    try:
+        audit = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if (
+        audit.get("schema_version") != "hypersmart.economic_proof_audit.v1"
+        or audit.get("paper_read_only") is not True
+        or audit.get("real_execution") is not False
+    ):
+        return None
+    if audit.get("missing_families") or audit.get("all_ledgers_valid") is not True:
+        return "UNMEASURABLE"
+    if audit.get("all_objectives_met") is True:
+        return "PASS"
+    classifications = {
+        str(row.get("classification") or "")
+        for row in (audit.get("families") or [])
+        if isinstance(row, dict)
+    }
+    if "INCOMPLETE" in classifications:
+        return "MORE_DATA"
+    return "KILL"
+
+
 def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
     """Build one real bounded command for the requested campaign kind."""
     out = _output_root(ctx)
@@ -424,6 +464,7 @@ def run_one_unit(
         commands = [(cmd, output_root, "unit")]
 
     phases: list[dict[str, Any]] = []
+    economic_proof_status: str | None = None
     for cmd, output_root, phase_name in commands:
         remaining = ctx.soft_deadline_epoch - time.time()
         if remaining <= 5:
@@ -473,6 +514,16 @@ def run_one_unit(
                 ),
             }
         )
+
+        if phase_name == "module_pnl_audit" and ctx.kind == "module_pnl_proof":
+            economic_proof_status = _economic_proof_status(output_root or _workspace(ctx))
+            if economic_proof_status is not None and returncode in {0, 2}:
+                phases[-1]["semantic_status"] = economic_proof_status
+                phases[-1]["certifying"] = economic_proof_status == "PASS"
+                # Exit code 2 from audit_economic_objectives.py means the audit
+                # was produced but mandatory economic evidence is not certifying.
+                # That is a semantic verdict, not an orchestration crash.
+                continue
 
         if returncode != 0:
             payload = _failure_payload(cmd, cp)
@@ -553,4 +604,7 @@ def run_one_unit(
         ),
         "phases": phases,
     }
+    if ctx.kind == "module_pnl_proof":
+        payload["economic_proof_status"] = economic_proof_status
+        payload["economic_proof_certifying"] = economic_proof_status == "PASS"
     return AdapterResult("COMPLETE", _digest(payload), payload, True)
