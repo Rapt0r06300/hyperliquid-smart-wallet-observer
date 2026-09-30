@@ -1,0 +1,51 @@
+{
+  "schema": "checkpoint_oos_shadow_v1",
+  "t_prereg_ms": 1784986837881,
+  "population": "jointure tape shadow_l2_v3 x ledger metaorder_shadow, par metaorder_id",
+  "filtre": {
+    "stade_in": [
+      "CONTINUATION",
+      "LATE_STAGE"
+    ],
+    "ofi_mesurable": true,
+    "l2_eligible": true,
+    "maker_taker": "taker"
+  },
+  "unite": "metaorder_id",
+  "chronologie": "1er fill du metaordre L2-eligible+OFI-mesurable, fill_exchange_time > t_prereg_ms",
+  "fenetre_A": {
+    "taille": 30,
+    "regle": "30 premiers metaordres eligibles apres t_prereg"
+  },
+  "embargo_ms": 300000.0,
+  "fenetre_B": {
+    "taille": 30,
+    "regle": "30 suivants dont t_ordre >= A_fin + embargo"
+  },
+  "eligibilite_l2": {
+    "regle": "book_exchange_time >= fill_exchange_time ET 0 <= latence_pipeline_ms <= plafond",
+    "plafond_ms": 2000.0
+  },
+  "horizon_ms": 300000.0,
+  "fee_ar_base_bps": 9.0,
+  "fees_tiers": [
+    9.0,
+    7.0,
+    5.0
+  ],
+  "notionals": [
+    10.0,
+    25.0,
+    50.0,
+    100.0,
+    250.0,
+    500.0
+  ],
+  "copy_notional_usd": 500.0,
+  "regle_promotion": "AUCUNE promotion si IC bas clusterise (OOS fenetre B) <= 0",
+  "one_shot": true,
+  "note_immuable": "ecrit une seule fois; jamais recalcule; pas de re-decoupage median; pas d'arret opportuniste",
+  "checkpoint_hash": "2836d5515a9b3a70c27e7f480f9da4cb75e814008b689a7ee3fc1d805316d987",
+  "checkpoint_id": "ckpt-oos-shadow-2836d5515a9b",
+  "cree_ts_ms": 1784986837881
+}

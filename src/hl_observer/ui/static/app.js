@@ -1,0 +1,1153 @@
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+let activeFilter = "ALL";
+let logLines = [];
+let autoscanRequested = false;
+let fullRefreshInFlight = false;
+let simulationRefreshInFlight = false;
+let lastSimulationPayload = null;
+let simulationFetchFailures = 0;
+const SIMULATION_CACHE_KEY = "hypersmart:lastSimulationOverview:v1";
+
+function tickClock() {
+  $("#clock").textContent = new Date().toLocaleTimeString();
+}
+
+// --- Anti-saut d'ecran -----------------------------------------------------
+// Les re-render complets (innerHTML) changent la hauteur de page et faisaient
+// "sauter" la vue d'un panneau a l'autre. On capture/restaure la position de
+// scroll et le focus autour de chaque rendu pour garder l'ecran stable.
+function preserveScroll(renderFn) {
+  const x = window.scrollX;
+  const y = window.scrollY;
+  const active = document.activeElement;
+  try {
+    renderFn();
+  } finally {
+    // Restauration synchrone: le re-render ci-dessus est synchrone (innerHTML),
+    // donc la hauteur a deja change ici — on remet la vue ou elle etait.
+    window.scrollTo(x, y);
+    if (active && active !== document.body && typeof active.focus === "function" && document.contains(active)) {
+      try { active.focus({ preventScroll: true }); } catch (_e) { /* focus best-effort */ }
+    }
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
+}
+
+function shortAddress(value) {
+  const text = String(value || "");
+  return text.length > 14 ? `${text.slice(0, 8)}...${text.slice(-6)}` : text;
+}
+
+function formatUsd(value) {
+  const number = Number(value || 0);
+  const sign = number > 0 ? "+" : "";
+  return `${sign}$${number.toFixed(2)}`;
+}
+
+function formatBalance(value) {
+  const number = Number(value || 0);
+  return `$${number.toFixed(2)}`;
+}
+
+function formatClockMs(value) {
+  const number = Number(value || 0);
+  if (!number) return "-";
+  return new Date(number).toLocaleTimeString();
+}
+
+async function getJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${url} ${response.status}`);
+  return await response.json();
+}
+
+async function safeGetJson(url, fallback) {
+  try {
+    return await getJsonWithRetry(url, 2, 180);
+  } catch (error) {
+    console.warn(`load failed ${url}`, error);
+    return fallback;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getJsonWithRetry(url, attempts = 3, delayMs = 250) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await getJson(url);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await sleep(delayMs * (attempt + 1));
+      }
+    }
+  }
+  throw lastError || new Error(`${url} failed`);
+}
+
+function compactSimulationCachePayload(payload) {
+  const botSimulation = payload.bot_simulation || payload.reproduction || {};
+  return {
+    mode: payload.mode,
+    paper_mock_usdc_only: payload.paper_mock_usdc_only,
+    no_real_orders: payload.no_real_orders,
+    no_testnet_executor: payload.no_testnet_executor,
+    readiness: payload.readiness,
+    message: payload.message,
+    next_step: payload.next_step,
+    simulation_started_at_ms: payload.simulation_started_at_ms,
+    fresh_cutoff_ms: payload.fresh_cutoff_ms,
+    last_live_event_ms: payload.last_live_event_ms,
+    seconds_since_last_live_event: payload.seconds_since_last_live_event,
+    counts: payload.counts || {},
+    scanner: payload.scanner || {},
+    autopilot: payload.autopilot || {},
+    fresh_data_coverage: payload.fresh_data_coverage || payload.warehouse_coverage || {},
+    equity: payload.equity || {},
+    pnl_consistency: payload.pnl_consistency || {},
+    loss_diagnostics: payload.loss_diagnostics || {},
+    decision_log_pnl: payload.decision_log_pnl || {},
+    equity_candles: (payload.equity_candles || []).slice(-180),
+    session_equity_history: (payload.session_equity_history || []).slice(-180),
+    no_trade_reasons: (payload.no_trade_reasons || []).slice(0, 20),
+    leaders: (payload.leaders || []).slice(0, 50),
+    consensus: (payload.consensus || []).slice(0, 12),
+    entry_deltas: (payload.entry_deltas || []).slice(0, 30),
+    public_trade_activity: (payload.public_trade_activity || []).slice(0, 10),
+    bot_simulation: {
+      reproduced_entries: botSimulation.reproduced_entries || 0,
+      reproduced_exits: botSimulation.reproduced_exits || 0,
+      refused: botSimulation.refused || 0,
+      important_events: (botSimulation.important_events || []).slice(0, 80),
+      events: (botSimulation.events || []).slice(0, 80),
+      open_positions: (botSimulation.open_positions || []).slice(0, 25)
+    }
+  };
+}
+
+async function getSimulationOverviewPayload() {
+  try {
+    const payload = await getJsonWithRetry("/api/simulation/overview?limit=80", 3, 250);
+    lastSimulationPayload = payload;
+    simulationFetchFailures = 0;
+    try {
+      const compactPayload = JSON.stringify(compactSimulationCachePayload(payload));
+      try {
+        localStorage.setItem(SIMULATION_CACHE_KEY, compactPayload);
+      } catch (_quotaError) {
+        localStorage.removeItem(SIMULATION_CACHE_KEY);
+        localStorage.setItem(SIMULATION_CACHE_KEY, compactPayload);
+      }
+    } catch (storageError) {
+      console.warn("simulation cache write skipped", storageError);
+    }
+    return payload;
+  } catch (error) {
+    simulationFetchFailures += 1;
+    console.warn("simulation overview refresh failed", error);
+    if (!lastSimulationPayload) {
+      try {
+        const cached = localStorage.getItem(SIMULATION_CACHE_KEY);
+        if (cached) {
+          lastSimulationPayload = JSON.parse(cached);
+        }
+      } catch (storageError) {
+        console.warn("simulation cache read skipped", storageError);
+      }
+    }
+    if (lastSimulationPayload) {
+      return {
+        ...lastSimulationPayload,
+        connection_warning: `Connexion API instable, dernier etat conserve (${simulationFetchFailures})`,
+        connection_retrying: true
+      };
+    }
+    return {
+      mode: "LOCAL_RESEARCH_SIMULATION_ONLY",
+      connection_warning: "Connexion API en cours, aucune donnee simulation chargee pour l'instant.",
+      connection_retrying: true,
+      paper_mock_usdc_only: true,
+      no_real_orders: true,
+      no_testnet_executor: true,
+      counts: {},
+      equity: {
+        current_pnl_usdc: 0,
+        current_equity_usdt: 1000,
+        unrealized_pnl_usdc: 0,
+        realized_pnl_usdc: 0,
+        source: "waiting_for_local_api"
+      },
+      bot_simulation: { events: [], open_positions: [], reproduced_entries: 0, reproduced_exits: 0, refused: 0 },
+      pnl_consistency: {
+        ok: true,
+        status: "OK",
+        recomputed_total_pnl_usdc: 0,
+        recomputed_equity_usdt: 1000,
+        display_note: "Solde en attente: 1000 USDT + 0 gain/perte."
+      },
+      loss_diagnostics: {
+        current_session_pnl_usdc: 0,
+        negative_events: 0,
+        positive_events: 0,
+        stale_ratio: 0,
+        costs_paid_usdc: 0,
+        recommendations: ["Attente de la connexion locale; aucune decision inventee."]
+      },
+      no_trade_reasons: [{ reason: "LOCAL_API_RETRYING", count: simulationFetchFailures }],
+      equity_candles: [],
+      readiness: "LOCAL_API_RETRYING",
+      message: "La page conserve l'etat precedent et retente la lecture locale automatiquement."
+    };
+  }
+}
+
+async function postJson(url, body = {}) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`${url} ${response.status}`);
+  return await response.json();
+}
+
+function setAutopilot(discovery) {
+  const title = $("#autopilotTitle");
+  const subtitle = $("#autopilotSubtitle");
+  const state = discovery.state;
+  const running = discovery.running;
+  if (running) {
+    title.textContent = "Recherche automatique en cours";
+    subtitle.textContent = "Decouverte des marches Hyperliquid, leaderboard, prix tous coins, puis recherche des meilleurs wallets.";
+  } else if (state === "discovering") {
+    title.textContent = "Recherche des meilleurs wallets";
+    subtitle.textContent = "Le logiciel cherche des wallets performants sur plusieurs marches, BTC et altcoins compris.";
+  } else if (state === "filtering") {
+    title.textContent = "Filtrage PnL/ROI";
+    subtitle.textContent = "Le logiciel filtre les wallets selon PnL, ROI, activite, liquidite du coin et copiabilite.";
+  } else if (discovery.candidates_found === 0) {
+    title.textContent = "Aucun wallet exploitable trouve";
+    subtitle.textContent = "Aucune source disponible n'a fourni d'adresse exploitable pour le moment.";
+  } else if (discovery.selected_wallets > 0) {
+    title.textContent = "Resume pret";
+    subtitle.textContent = "Recherche terminee. Consulte les resultats simples ou ouvre le mode expert.";
+  } else {
+    title.textContent = "Recherche automatique des meilleurs wallets";
+    subtitle.textContent = "Des wallets ont ete trouves, mais aucun ne passe encore les filtres PnL/ROI/activite.";
+  }
+}
+
+function renderTimeline(discovery) {
+  const activeSteps = ["startup", "security"];
+  if (discovery.last_run_at_ms || discovery.running) activeSteps.push("markets", "prices", "liquidity", "leaderboard", "validation", "sources");
+  if (discovery.candidates_found > 0) activeSteps.push("filters");
+  if (discovery.selected_wallets > 0) activeSteps.push("top500", "queue");
+  if (discovery.backfilled_wallets > 0) activeSteps.push("backfill", "deltas", "openings", "closings", "profits", "playbooks", "follow", "risk");
+  if (discovery.last_run_at_ms && !discovery.running) activeSteps.push("summary");
+  $$(".timeline [data-step]").forEach((node) => {
+    node.classList.toggle("active", activeSteps.includes(node.dataset.step));
+  });
+}
+
+function renderScanOverview(home, autoscan) {
+  const scan = autoscan || home.autoscan || {};
+  const progress = Math.max(0, Math.min(100, Number(scan.progress_percent || 0)));
+  const lastState = scan.last_state || scan.state || "idle";
+  $("#scanStepTitle").textContent = scan.running ? `En cours : ${scan.current_step || "scan"}` : (scan.current_step || "Resume pret");
+  $("#scanProgressBar").style.width = `${progress}%`;
+  $("#scanProgressText").textContent = scan.running
+    ? `${Math.round(progress)}% - le logiciel analyse les donnees disponibles en lecture seule.`
+    : `${Math.round(progress)}% - dernier etat : ${lastState}.`;
+  renderAnalysisMap((home.autoscan && home.autoscan.analyzes) || []);
+}
+
+function renderAnalysisMap(groups) {
+  const target = $("#analysisMap");
+  if (!target) return;
+  target.innerHTML = groups.map((group) => `
+    <div class="analysis-group">
+      <strong>${escapeHtml(group.group)}</strong>
+      <div>${(group.items || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
+    </div>
+  `).join("");
+}
+
+function renderSimpleHome(home) {
+  const discovery = home.simple_cards.discovery;
+  const leaderboard = home.simple_cards.leaderboard || {};
+  const explorer = home.simple_cards.explorer || {};
+  const sources = home.simple_cards.sources || {};
+  const market = home.simple_cards.market;
+  const best = home.simple_cards.best_wallets || {};
+  const intelligence = home.simple_cards.intelligence || {};
+  const security = home.simple_cards.security;
+  $("#cardMarket").textContent = `${sources.sources_attempted ?? 0} sources`;
+  $("#cardMarketDetail").textContent = `Leaderboard ${sources.leaderboard_status || "?"}, Explorer ${sources.explorer_status || "?"}, erreurs ${sources.source_errors ?? 0}.`;
+  $("#cardDiscovery").textContent = `${discovery.candidates_found ?? 0} candidats`;
+  $("#cardDiscoveryDetail").textContent = `${discovery.selected_wallets ?? 0} selectionnes, ${leaderboard.truncated_addresses_rejected ?? 0} tronquees rejetees, ${explorer.candidates_created ?? 0} via Explorer.`;
+  $("#cardBestWallets").textContent = `${intelligence.openings_detected ?? 0} ouvertures`;
+  $("#cardBestWalletsDetail").textContent = `${market.coins_scanned ?? 0} marches, ${intelligence.closings_detected ?? 0} fermetures, ${intelligence.playbooks ?? 0} playbooks, ${intelligence.follow_signals ?? 0} signaux paper.`;
+  $("#cardSecurity").textContent = security.kill_switch ? "STOP" : "Lecture seule";
+  $("#cardSecurityDetail").textContent = security.testnet_locked ? "Mainnet interdit, testnet verrouille." : "Verifie la configuration testnet.";
+  $("#discoveryMessage").textContent = home.discovery_empty_state;
+  setAutopilot(discovery);
+  renderTimeline(discovery);
+}
+
+function renderSourceBreakdown(home, explorerStatus) {
+  const leaderboard = home.simple_cards.leaderboard || {};
+  const explorer = explorerStatus || home.simple_cards.explorer || {};
+  const sources = home.simple_cards.sources || {};
+  $("#sourceBreakdown").innerHTML = [
+    `Leaderboard :: ${leaderboard.status || "IMPORT_REQUIRED"} :: full ${leaderboard.full_addresses_found ?? 0} :: tronquees ${leaderboard.truncated_addresses_rejected ?? 0}`,
+    `Explorer :: ${explorer.status || "IMPORT_REQUIRED"} :: tx ${explorer.transactions_stored ?? 0} :: full ${explorer.full_addresses_found ?? 0}`,
+    `Imports :: disponibles :: prochaine action ${sources.next_action || "import_leaderboard_or_explorer"}`,
+    `DB locale :: disponible :: sources essayees ${sources.sources_attempted ?? 0}`
+  ].map((line) => `<div class="feed-line"><span class="cyan">[SRC]</span> ${escapeHtml(line)}</div>`).join("");
+}
+
+function renderExplorerTape(rows) {
+  $("#explorerTape").innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="${row.candidate_created ? "green" : "orange"}">[TX]</span>
+        ${escapeHtml(row.tx_hash || "-")} :: ${escapeHtml(row.wallet_address || "adresse non exploitable")} :: ${escapeHtml(row.coin || "-")} :: ${escapeHtml(row.status)}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[INFO]</span> Explorer inspecte, mais aucune transaction structuree exploitable n'a encore ete extraite.</div>`;
+}
+
+function renderRejectedWallets(rows) {
+  $("#rejectedWallets").innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `<div class="feed-line"><span class="orange">[REJET]</span> ${escapeHtml(row.address || row.tx_hash || "-")} :: ${escapeHtml(row.reason || row.status || "raison stockee")}</div>`).join("")
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun rejet stocke pour le moment. Les adresses tronquees seront affichees ici si detectees.</div>`;
+}
+
+function renderStatus(status) {
+  $("#modeBadge").textContent = status.mode;
+  $("#safetyBadge").textContent = status.safety_status;
+  $("#safetyBadge").className = `badge pulse ${status.safety_status === "SAFE" ? "green" : status.safety_status === "STOPPED" ? "red" : "orange"}`;
+  $("#testnetBadge").textContent = status.testnet_enabled ? "TESTNET ENABLED" : "TESTNET LOCKED";
+  $("#riskGates").innerHTML = status.risk_gates.map((gate) => `
+    <div class="gate">
+      <span>${escapeHtml(gate.name)}</span>
+      <strong class="${gate.passed ? "green" : "red"}">${gate.passed ? "PASS" : "BLOCK"}</strong>
+    </div>
+  `).join("");
+}
+
+function renderEvents(events) {
+  if (!events.length) {
+    $("#eventFeed").innerHTML = `<div class="feed-line"><span class="cyan">[INFO]</span> Demarrage de la recherche automatique.</div>`;
+    return;
+  }
+  $("#eventFeed").innerHTML = events.slice(-18).reverse().map((event) => `
+    <div class="feed-line">
+      <span class="${event.level === "ERROR" || event.level === "SECURITY" ? "red" : event.level === "WARN" || event.level === "RISK" ? "orange" : "cyan"}">[${escapeHtml(event.level)}]</span>
+      ${escapeHtml(event.message)}
+    </div>
+  `).join("");
+}
+
+function renderDiscoveryStatus(status) {
+  $("#discoveryStatus").textContent = JSON.stringify(status, null, 2);
+}
+
+function renderCandidates(candidates) {
+  $("#candidateTable").innerHTML = candidates.map((candidate) => `
+    <tr>
+      <td>${escapeHtml(candidate.address)}</td>
+      <td>${escapeHtml(candidate.coin || "GLOBAL")}</td>
+      <td>${escapeHtml(candidate.source)}</td>
+      <td>${escapeHtml(candidate.external_pnl_usdc ?? "-")}</td>
+      <td>${escapeHtml(candidate.external_roi_pct ?? "-")}</td>
+      <td>${escapeHtml(Math.round(candidate.discovery_score ?? 0))}</td>
+      <td>${escapeHtml(candidate.decision)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderSelected(rows) {
+  $("#selectedWallets").innerHTML = rows.length
+    ? rows.map((row) => `<div class="feed-line"><span class="green">${escapeHtml(Math.round(row.discovery_score))}</span> ${escapeHtml(row.wallet_address)} :: ${escapeHtml(row.coin || "GLOBAL")} :: ${escapeHtml(row.source)}</div>`).join("")
+    : `<div class="feed-line"><span class="orange">[INFO]</span> Aucun wallet selectionne pour le moment.</div>`;
+}
+
+function renderWalletsFeed(candidates, selected, knownWallets) {
+  const target = $("#walletsFeed");
+  if (!target) return;
+  const rows = candidates.length ? candidates : selected.map((row) => ({
+    address: row.wallet_address,
+    coin: row.coin,
+    source: row.source,
+    discovery_score: row.discovery_score,
+    decision: row.status
+  }));
+  const fallback = knownWallets.map((row) => ({
+    address: row.address,
+    coin: "GLOBAL",
+    source: row.source,
+    discovery_score: row.score,
+    decision: row.status
+  }));
+  const finalRows = rows.length ? rows : fallback;
+  target.innerHTML = finalRows.length
+    ? finalRows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="green">[WALLET]</span>
+        ${escapeHtml(shortAddress(row.address))} :: ${escapeHtml(row.coin || "GLOBAL")} ::
+        score ${escapeHtml(Math.round(row.discovery_score ?? 0))} :: ${escapeHtml(row.decision || row.source || "observe")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun wallet complet stocke pour le moment. Le leaderboard va etre re-tente avant tout import manuel.</div>`;
+}
+
+function renderPositionsFeed(rows) {
+  const target = $("#positionsFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="cyan">${escapeHtml(row.coin)}</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.side || "?")} ${escapeHtml(row.size ?? 0)} ::
+        notional ${escapeHtml(Math.round(row.notional_usdc ?? 0))} :: conf ${escapeHtml(Math.round((row.confidence_score ?? 0) * 100))}%
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucune position reconstruite. Il faut des fills complets via backfill read-only.</div>`;
+}
+
+function renderFillsFeed(rows) {
+  const target = $("#fillsFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="green">[FILL]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} :: ${escapeHtml(row.direction || row.side || "?")} ::
+        px ${escapeHtml(row.price ?? "-")} size ${escapeHtml(row.size ?? "-")} pnl ${escapeHtml(row.closed_pnl ?? "-")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun fill stocke pour le moment. Le backfill demarre seulement sur wallets full-address selectionnes.</div>`;
+}
+
+function renderDeltasFeed(rows) {
+  const target = $("#deltasFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="${row.action === "OPEN" || row.action === "ADD" ? "green" : "orange"}">[${escapeHtml(row.action || "DELTA")}]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} ::
+        ${escapeHtml(row.previous_size ?? 0)} -> ${escapeHtml(row.new_size ?? 0)} :: ${escapeHtml(Math.round(row.delta_notional_usdc ?? 0))} USDC
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun delta reconstruit pour le moment. Les cas incertains restent marques bas-confidence.</div>`;
+}
+
+function renderOpenOrdersFeed(rows) {
+  const target = $("#openOrdersFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="cyan">[ORDER]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} :: oid ${escapeHtml(row.oid || row.cloid || "-")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun open order public stocke. Aucune action reelle n'est possible depuis l'UI.</div>`;
+}
+
+function renderTopByCoinFeed(rows) {
+  const target = $("#topByCoinFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="green">${escapeHtml(row.coin || "GLOBAL")}</span>
+        ${escapeHtml(shortAddress(row.wallet_address || row.wallet || row.address))} :: score ${escapeHtml(Math.round(row.final_score || row.score || 0))}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun classement wallet x coin encore calcule.</div>`;
+}
+
+function renderCopyStatus(payload) {
+  const target = $("#copyStatusFeed");
+  if (!target) return;
+  const leaders = payload.leaders_followed || [];
+  const header = [
+    `mode ${payload.mode || "PAPER_MOCK_USDC"}`,
+    `interval ${payload.polling_interval_seconds || 300}s`,
+    `leaders ${payload.leaders_count || leaders.length || 0}`,
+    `edge obligatoire ${payload.edge_remaining_bps_required ? "oui" : "non"}`
+  ];
+  const leaderRows = leaders.slice(0, 5).map((row) => `
+    <div class="feed-line">
+      <span class="green">[LEADER]</span>
+      ${escapeHtml(shortAddress(row.wallet_address))} :: score ${escapeHtml(Math.round(row.score || 0))} :: ${escapeHtml(row.source || "leaderboard")}
+    </div>
+  `).join("");
+  target.innerHTML = `
+    <div class="feed-line"><span class="cyan">[COPY]</span> ${header.map(escapeHtml).join(" :: ")}</div>
+    <div class="feed-line"><span class="orange">[SAFE]</span> positions virtuelles paper/mock USDC seulement, aucune execution reelle.</div>
+    ${leaderRows || `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun leader shortlist pour le moment.</div>`}
+  `;
+}
+
+function renderLeaderActivity(rows) {
+  const target = $("#leaderActivityFeed");
+  if (!target) return;
+  target.innerHTML = rows.length
+    ? rows.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="${row.copyable ? "green" : "orange"}">[${escapeHtml(row.action || "UNKNOWN")}]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin || "-")} ::
+        ${escapeHtml(row.previous_size ?? 0)} -> ${escapeHtml(row.new_size ?? 0)} :: edge verifie avant paper
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun delta leader observe. Le copy loop reste en dry-run.</div>`;
+}
+
+function renderNoTradeReport(payload) {
+  const target = $("#noTradeFeed");
+  if (!target) return;
+  const reasons = payload.reasons || [];
+  target.innerHTML = reasons.length
+    ? reasons.slice(0, 12).map((row) => `
+      <div class="feed-line">
+        <span class="orange">[NO-TRADE]</span>
+        ${escapeHtml(row.reason)} :: ${escapeHtml(row.count)} refus
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun signal refuse stocke. Un signal sans edge_remaining_bps positif sera bloque.</div>`;
+}
+
+function uniqueSimulationRows(rows, limit = 80) {
+  const seen = new Set();
+  const output = [];
+  for (const row of rows || []) {
+    const key = [
+      row.wallet_address || "",
+      row.coin || "",
+      row.leader_action || "",
+      row.leader_side || "",
+      row.observed_at_ms || "",
+      row.reason || "",
+      row.bot_replay_action || ""
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(row);
+    if (output.length >= limit) break;
+  }
+  return output;
+}
+
+function renderSimulationOverview(payload) {
+  const summary = $("#simulationSummary");
+  if (!summary) return;
+  const counts = payload.counts || {};
+  const equity = payload.equity || {};
+  const scanner = payload.scanner || {};
+  const autopilot = payload.autopilot || {};
+  const pipeline = payload.signal_pipeline || {};
+  const freshCoverage = payload.fresh_data_coverage || payload.warehouse_coverage || {};
+  const pnlConsistency = payload.pnl_consistency || {};
+  const lossDiagnostics = payload.loss_diagnostics || {};
+  const decisionLogPnl = payload.decision_log_pnl || {};
+  const metrics = [
+    ["Gain/perte session", formatUsd(equity.current_pnl_usdc ?? 0)],
+    ["Solde fictif actuel", `${formatBalance(equity.current_equity_usdt ?? 1000)} USDT`],
+    ["Gain/perte encaisse", formatUsd(equity.realized_pnl_usdc ?? 0)],
+    ["Gain/perte en cours", formatUsd(equity.unrealized_pnl_usdc ?? 0)],
+    ["Capital utilise", `${formatBalance(equity.open_exposure_usdt ?? 0)} / libre ${formatBalance(equity.free_equity_usdt ?? 1000)}`],
+    ["Journal (anciens runs, hors session)", `${formatUsd(decisionLogPnl.closed_log_event_pnl_usdc ?? 0)} / ${Number(decisionLogPnl.events || 0)} evts`]
+  ];
+  summary.innerHTML = metrics.map(([label, value]) => `
+    <div class="simulation-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join("");
+
+  const liveStrip = $("#simulationLiveStrip");
+  if (liveStrip) {
+    const secondsSince = payload.seconds_since_last_live_event;
+    const lastEventText = secondsSince === null || secondsSince === undefined
+      ? "aucun delta leader frais"
+      : `${secondsSince}s depuis dernier delta`;
+    const refused = Number(counts.bot_refused || 0);
+    const entries = Number(counts.reproduced_entries || 0);
+    const deltas = Number(counts.live_simulation_deltas || 0);
+    const consensus4s = Number(pipeline.fresh_consensus_groups_4s || counts.consensus_positions || 0);
+    const lastReason = (payload.no_trade_reasons || [])[0]?.reason || "aucun refus";
+    const firstBottleneck = (freshCoverage.bottlenecks || [])[0] || "aucun blocage frais";
+    const latestTrade = (payload.public_trade_activity || [])[0];
+    const liveStale = Boolean(payload.live_data_stale);
+    const beginnerStatus = payload.beginner_status || {};
+    const connectionWarning = payload.connection_warning
+      ? `<div class="simulation-live-pill red"><span>Connexion</span><strong>${escapeHtml(payload.connection_warning)}</strong></div>`
+      : "";
+    const pnlControlClass = pnlConsistency.ok === false ? "red" : "green";
+    const pnlControlText = pnlConsistency.ok === false
+      ? `a verifier :: ecart ${formatUsd(pnlConsistency.pnl_delta_usdc || 0)}`
+      : "OK :: solde = 1000 + gains/pertes";
+    liveStrip.innerHTML = `
+      <div class="simulation-live-pill ${liveStale ? "red" : "green"}">
+        <span>Etat simple</span>
+        <strong>${escapeHtml(beginnerStatus.simple_state || (liveStale ? "Flux live perime" : "Flux live pret"))}</strong>
+      </div>
+      <div class="simulation-live-pill ${pnlControlClass}">
+        <span>Controle du solde</span>
+        <strong>${escapeHtml(pnlControlText)}</strong>
+      </div>
+      <div class="simulation-live-pill ${Number(decisionLogPnl.closed_log_event_pnl_usdc || 0) < 0 ? "red" : "green"}">
+        <span>Journal (anciens runs, hors session)</span>
+        <strong>${escapeHtml(formatUsd(decisionLogPnl.closed_log_event_pnl_usdc || 0))} :: ${escapeHtml(decisionLogPnl.events || 0)} evenements</strong>
+      </div>
+      <div class="simulation-live-pill green">
+        <span>Scan public read-only</span>
+        <strong>${escapeHtml(counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0)} wallets vus / ${escapeHtml(counts.public_trade_promoted_wallets || scanner.public_trade_promoted_wallets || 0)} promus</strong>
+      </div>
+      <div class="simulation-live-pill ${freshCoverage.readiness === "SIMULATION_INPUT_READY" ? "green" : "orange"}">
+        <span>Donnees fraiches</span>
+        <strong>${escapeHtml(freshCoverage.fresh_entry_deltas || 0)} ouvertures :: ${escapeHtml(freshCoverage.fresh_position_deltas || 0)} deltas :: ${escapeHtml(freshCoverage.fresh_window_seconds || 0)}s</strong>
+      </div>
+      <div class="simulation-live-pill ${liveStale ? "red" : deltas ? "green" : "orange"}">
+        <span>Deltas leaders analyses</span>
+        <strong>${escapeHtml(deltas)} analyses :: ${escapeHtml(liveStale ? "trop vieux pour copier" : lastEventText)}</strong>
+      </div>
+      <div class="simulation-live-pill ${consensus4s ? "green" : "orange"}">
+        <span>Consensus leaders</span>
+        <strong>${escapeHtml(consensus4s)} groupes chauds :: meme coin + meme sens</strong>
+      </div>
+      <div class="simulation-live-pill ${(equity.market_marks_available || scanner.market_marks_available) ? "green" : "orange"}">
+        <span>Prix marche reels</span>
+        <strong>${escapeHtml(equity.market_marks_available || scanner.market_marks_available || 0)} marks :: ${escapeHtml((equity.market_mark_sources || scanner.market_mark_sources || []).join(", ") || "en attente")}</strong>
+      </div>
+      <div class="simulation-live-pill ${entries ? "green" : "orange"}">
+        <span>Decision du bot</span>
+        <strong>${escapeHtml(entries ? `${entries} entrees locales / ${counts.reproduced_exits || 0} sorties` : "0 entree acceptee; scan actif")} :: ${escapeHtml(refused)} refus</strong>
+      </div>
+      <div class="simulation-live-pill ${refused && !entries ? "red" : "orange"}">
+        <span>Blocage principal</span>
+        <strong>${escapeHtml(liveStale ? "signaux trop vieux / edge degrade" : firstBottleneck !== "aucun blocage frais" ? firstBottleneck : latestTrade ? `${latestTrade.coin} ${formatUsd(latestTrade.notional_usdc || 0)}` : lastReason)}</strong>
+      </div>
+      ${connectionWarning}
+    `;
+  }
+
+  const walletsTarget = $("#simulationWalletsFeed");
+  const freshTarget = $("#simulationFreshFeed");
+  const consensusTarget = $("#simulationConsensusFeed");
+  const deltasTarget = $("#simulationDeltasFeed");
+  const replayTarget = $("#simulationReplayFeed");
+  const positionsTarget = $("#simulationPositionsFeed");
+  const noTradeTarget = $("#simulationNoTradeFeed");
+  const decisionTape = $("#simulationDecisionTape");
+  const leaders = payload.leaders || [];
+  const consensus = payload.consensus || [];
+  const entryDeltas = payload.entry_deltas || [];
+  const botSimulation = payload.bot_simulation || payload.reproduction || {};
+  const replay = uniqueSimulationRows([...(botSimulation.important_events || []), ...(botSimulation.events || [])], 80);
+  const virtualPositions = botSimulation.open_positions || [];
+  const reasons = payload.no_trade_reasons || [];
+  equity.public_trade_wallets_seen = counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0;
+  equity.live_simulation_deltas = counts.live_simulation_deltas || 0;
+  equity.bot_refused = counts.bot_refused || 0;
+  equity.reproduced_entries = counts.reproduced_entries || 0;
+  equity.last_no_trade_reason = (reasons[0] || {}).reason || null;
+  drawSimulationMetaGraph(payload.equity_candles || [], equity);
+
+  if (decisionTape) {
+    const decisionRows = replay.length
+      ? replay.slice(0, 5).map((row) => {
+        const pnl = row.estimated_net_pnl_usdc;
+        const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
+        const statusClass = row.status === "LOCAL_REPLAY" ? "green" : "orange";
+        return `
+          <div class="feed-line">
+            <span class="${statusClass}">[${escapeHtml(row.bot_replay_action || "NO_TRADE")}]</span>
+            ${escapeHtml(formatClockMs(row.observed_at_ms))} :: ${escapeHtml(shortAddress(row.wallet_address))} ::
+            ${escapeHtml(row.coin)} ${escapeHtml(row.leader_side || "")} ::
+            <span class="${pnlClass}">${pnl === null || pnl === undefined ? "PnL -" : formatUsd(pnl)}</span> ::
+            edge ${escapeHtml(row.edge_remaining_bps ?? "-")} bps :: risque ${escapeHtml(Math.round(row.risk_score ?? 0))} ::
+            ${escapeHtml(row.reason || "simulation locale")}
+          </div>
+        `;
+      }).join("")
+      : `<div class="feed-line"><span class="cyan">[LIVE]</span> ${escapeHtml(payload.connection_warning || payload.next_step || "Simulation armee, attente d'un delta leader frais.")}</div>`;
+    decisionTape.innerHTML = decisionRows;
+  }
+
+  walletsTarget.innerHTML = leaders.length
+    ? leaders.slice(0, 50).map((row) => `
+      <div class="feed-line">
+        <span class="green">[LEADER]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: score ${escapeHtml(Math.round(row.score || 0))} :: ${escapeHtml(row.status || "observe")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucun wallet leader charge. Importer des adresses completes ou relancer la discovery read-only.</div>`;
+
+  if (freshTarget) {
+    const bottlenecks = freshCoverage.bottlenecks || [];
+    const nextActions = freshCoverage.next_actions || [];
+    freshTarget.innerHTML = `
+      <div class="feed-line"><span class="${freshCoverage.readiness === "SIMULATION_INPUT_READY" ? "green" : "orange"}">[ETAT]</span> ${escapeHtml(freshCoverage.readiness || "UNKNOWN")} :: fenetre ${escapeHtml(freshCoverage.fresh_window_seconds || 0)}s</div>
+      <div class="feed-line"><span class="cyan">[WALLETS]</span> candidats ${escapeHtml(freshCoverage.wallet_candidates_total || 0)} :: publics ${escapeHtml(freshCoverage.public_trade_candidates || 0)} :: leaders ${escapeHtml(freshCoverage.selected_top_wallets || 0)} :: actifs ${escapeHtml(freshCoverage.fresh_top_wallets || 0)}</div>
+      <div class="feed-line"><span class="cyan">[FLUX]</span> trades publics frais ${escapeHtml(freshCoverage.fresh_public_trade_events || 0)} / ${escapeHtml(freshCoverage.public_trade_events || 0)} :: prix frais ${escapeHtml(freshCoverage.fresh_market_snapshots || 0)} / ${escapeHtml(freshCoverage.market_snapshots_total || 0)}</div>
+      <div class="feed-line"><span class="cyan">[DELTAS]</span> deltas frais ${escapeHtml(freshCoverage.fresh_position_deltas || 0)} / ${escapeHtml(freshCoverage.position_deltas_total || 0)} :: ouvertures fraiches ${escapeHtml(freshCoverage.fresh_entry_deltas || 0)}</div>
+      <div class="feed-line"><span class="cyan">[PAPER]</span> signaux frais ${escapeHtml(freshCoverage.fresh_follow_signals || 0)} / ${escapeHtml(freshCoverage.follow_signals_total || 0)} :: acceptes ${escapeHtml(freshCoverage.accepted_follow_decisions || 0)} :: refuses ${escapeHtml(freshCoverage.rejected_follow_decisions || 0)}</div>
+      <div class="feed-line"><span class="${bottlenecks.length ? "orange" : "green"}">[BLOCAGES]</span> ${escapeHtml(bottlenecks.length ? bottlenecks.join(" | ") : "aucun blocage frais")}</div>
+      <div class="feed-line"><span class="green">[ACTION]</span> ${escapeHtml(nextActions[0] || "Continuer la collecte read-only; aucune donnee inventee.")}</div>
+    `;
+  }
+
+  consensusTarget.innerHTML = consensus.length
+    ? consensus.slice(0, 8).map((row) => `
+      <div class="feed-line">
+        <span class="${row.crowding_risk === "HIGH" ? "orange" : "green"}">[${escapeHtml(row.direction)}]</span>
+        ${escapeHtml(row.coin)} :: ${escapeHtml(row.wallet_count)} wallets :: score ${escapeHtml(row.consensus_score)} ::
+        crowding ${escapeHtml(row.crowding_risk)}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun consensus multi-wallet detecte sur la fenetre fraiche de 4 secondes.</div>`;
+
+  deltasTarget.innerHTML = entryDeltas.length
+    ? entryDeltas.slice(0, 10).map((row) => `
+      <div class="feed-line">
+        <span class="green">[${escapeHtml(row.action)}]</span>
+        ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} ${escapeHtml(row.direction)} ::
+        px ${escapeHtml(row.price ?? "-")} :: notional ${escapeHtml(Math.round(row.notional_usdc ?? 0))}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Aucune ouverture/augmentation exploitable pour entrer. ${escapeHtml(payload.next_step || "Collecter des fills/positions en lecture seule.")}</div>`;
+
+  replayTarget.innerHTML = replay.length
+    ? replay.slice(0, 14).map((row) => {
+      const pnl = row.estimated_net_pnl_usdc;
+      const pnlClass = pnl === null || pnl === undefined ? "cyan" : Number(pnl) >= 0 ? "green" : "red";
+      const statusClass = row.status === "LOCAL_REPLAY" ? "green" : "orange";
+      return `
+        <div class="feed-line">
+          <span class="${statusClass}">[${escapeHtml(row.bot_replay_action || "NO_TRADE")}]</span>
+          ${escapeHtml(shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} :: leader ${escapeHtml(row.leader_action)} ::
+          <span class="${pnlClass}">${pnl === null || pnl === undefined ? "PnL -" : formatUsd(pnl)}</span> ::
+          edge ${escapeHtml(row.edge_remaining_bps ?? "-")} bps :: score ${escapeHtml(Math.round(row.opportunity_score ?? 0))} ::
+          risque ${escapeHtml(Math.round(row.risk_score ?? 0))} ::
+          taille ${escapeHtml(row.copied_notional_usdt == null ? "-" : formatUsd(row.copied_notional_usdt))} ::
+          ${escapeHtml(row.reason || "local replay")}
+        </div>
+      `;
+    }).join("")
+    : `<div class="feed-line"><span class="orange">[VIDE]</span> Le bot simule n'a encore aucune decision. Lance une collecte read-only bornee pour remplir les deltas.</div>`;
+
+  positionsTarget.innerHTML = virtualPositions.length
+    ? virtualPositions.slice(0, 12).map((row) => {
+      const pnl = Number(row.unrealized_pnl_usdc || 0);
+      const mode = row.position_mode === "CONSENSUS_CLUSTER"
+        ? `consensus ${row.leader_wallets_count || 0} leaders`
+        : "leader seul";
+      return `
+        <div class="feed-line">
+          <span class="${pnl >= 0 ? "green" : "red"}">[${escapeHtml(row.direction)}]</span>
+          ${escapeHtml(row.position_mode === "CONSENSUS_CLUSTER" ? "cluster" : shortAddress(row.wallet_address))} :: ${escapeHtml(row.coin)} :: ${escapeHtml(mode)} ::
+          size ${escapeHtml(row.size)} :: entry ${escapeHtml(row.avg_entry_price)} :: mark ${escapeHtml(row.mark_price)} ::
+          ${escapeHtml(formatUsd(pnl))}
+        </div>
+      `;
+    }).join("")
+    : `<div class="feed-line"><span class="cyan">[FLAT]</span> Le portefeuille virtuel du bot n'a aucune position ouverte.</div>`;
+
+  noTradeTarget.innerHTML = reasons.length
+    ? reasons.slice(0, 10).map((row) => `
+      <div class="feed-line">
+        <span class="orange">[REFUS]</span>
+        ${escapeHtml(row.reason)} :: ${escapeHtml(row.count)}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="cyan">[INFO]</span> Aucun refus stocke. Tout signal incertain sera refuse avant simulation locale.</div>`;
+
+  noTradeTarget.innerHTML += `
+    <div class="feed-line"><span class="green">[FRESH]</span> mode frais uniquement depuis ${escapeHtml(formatClockMs(payload.fresh_cutoff_ms || payload.simulation_started_at_ms))} :: anciens deltas ignores ${escapeHtml(counts.old_deltas_ignored_fresh_only ?? 0)} :: dernier frais ${escapeHtml(formatClockMs(payload.last_live_event_ms))}</div>
+    <div class="feed-line"><span class="cyan">[SCAN]</span> surveillance ${scanner.active ? "active" : "inactive"} :: actifs ${escapeHtml(scanner.target_wallets || counts.target_leaders || 50)} wallets :: flux public ${escapeHtml(counts.public_trade_wallets_seen || scanner.public_trade_wallets_seen || 0)} wallets vus / ${escapeHtml(counts.public_trade_promoted_wallets || scanner.public_trade_promoted_wallets || 0)} promus :: refresh UI ${escapeHtml(scanner.ui_refresh_seconds || 5)}s :: poll ${escapeHtml(scanner.polling_interval_seconds || 300)}s</div>
+    <div class="feed-line"><span class="cyan">[PIPELINE]</span> wallets vus ${escapeHtml(pipeline.wallets_seen_from_public_ws || 0)} -> promus ${escapeHtml(pipeline.wallets_promoted_for_info_followup || 0)} -> leaders uniques ${escapeHtml(pipeline.leaders_loaded_unique || 0)} -> deltas ${escapeHtml(pipeline.leader_deltas_analyzed || 0)} -> consensus 4s ${escapeHtml(pipeline.fresh_consensus_groups_4s || 0)} -> entrees acceptees ${escapeHtml(pipeline.local_entries_accepted || 0)}</div>
+    <div class="feed-line"><span class="${freshCoverage.readiness === "SIMULATION_INPUT_READY" ? "green" : "orange"}">[DONNEES FRAICHES]</span> leaders actifs ${escapeHtml(freshCoverage.fresh_top_wallets || 0)} / ${escapeHtml(freshCoverage.selected_top_wallets || 0)} :: prix frais ${escapeHtml(freshCoverage.fresh_market_snapshots || 0)} :: deltas frais ${escapeHtml(freshCoverage.fresh_position_deltas || 0)} :: ouvertures fraiches ${escapeHtml(freshCoverage.fresh_entry_deltas || 0)}</div>
+    <div class="feed-line"><span class="cyan">[AUTO]</span> ${escapeHtml(autopilot.job_a || "leaderboard")} -> ${escapeHtml(autopilot.job_b || "copy_loop")} -> ${escapeHtml(autopilot.job_c || "reports")} :: reproduction ${escapeHtml(autopilot.position_reproduction || "paper research only")}</div>
+    <div class="feed-line"><span class="cyan">[CAPITAL]</span> depart ${escapeHtml(formatBalance(equity.starting_equity_usdt || 1000))} USDT :: actuel ${escapeHtml(formatBalance(equity.current_equity_usdt || 1000))} USDT</div>
+    <div class="feed-line"><span class="cyan">[CAPITAL UTILISE]</span> positions ouvertes ${escapeHtml(formatBalance(equity.open_exposure_usdt || 0))} :: capital disponible ${escapeHtml(formatBalance(equity.free_equity_usdt ?? 1000))} :: part utilisee ${escapeHtml(Number(equity.open_exposure_pct || 0).toFixed(2))}%</div>
+    <div class="feed-line"><span class="cyan">[PNL]</span> source ${escapeHtml(equity.source || "local")} :: gain/perte realise ${escapeHtml(formatUsd(equity.realized_pnl_usdc || 0))} :: gain/perte ouvert ${escapeHtml(formatUsd(equity.unrealized_pnl_usdc || 0))} :: couts ${escapeHtml(formatUsd(equity.bot_costs_paid_usdc || 0))}</div>
+    <div class="feed-line"><span class="${pnlConsistency.ok === false ? "red" : "green"}">[CONTROLE SOLDE]</span> ${escapeHtml(pnlConsistency.display_note || "Solde controle localement.")} :: gain/perte recalcule ${escapeHtml(formatUsd(pnlConsistency.recomputed_total_pnl_usdc || 0))} :: solde recalcule ${escapeHtml(formatBalance(pnlConsistency.recomputed_equity_usdt || equity.current_equity_usdt || 1000))}</div>
+    <div class="feed-line"><span class="${Number(decisionLogPnl.closed_log_event_pnl_usdc || 0) < 0 ? "red" : "green"}">[JOURNAL DECISIONS]</span> historique local ${escapeHtml(formatUsd(decisionLogPnl.closed_log_event_pnl_usdc || 0))} sur ${escapeHtml(decisionLogPnl.events || 0)} evenements :: scope separe de la session fraiche</div>
+    <div class="feed-line"><span class="${Number((lossDiagnostics.current_session_pnl_usdc || 0)) < 0 ? "red" : "green"}">[DIAGNOSTIC PERTES]</span> negatifs ${escapeHtml(lossDiagnostics.negative_events || 0)} / positifs ${escapeHtml(lossDiagnostics.positive_events || 0)} :: retard ${escapeHtml(Number(lossDiagnostics.stale_ratio || 0).toFixed(2))} :: couts ${escapeHtml(formatUsd(lossDiagnostics.costs_paid_usdc || 0))}</div>
+    <div class="feed-line"><span class="orange">[REGLAGE]</span> ${escapeHtml(((lossDiagnostics.recommendations || [])[0]) || "Continuer a collecter des deltas frais; ne jamais inventer de gain.")}</div>
+    <div class="feed-line"><span class="cyan">[MARK]</span> prix marche ${escapeHtml(equity.market_marks_available || scanner.market_marks_available || 0)} coins :: sources ${escapeHtml((equity.market_mark_sources || scanner.market_mark_sources || []).join(", ") || "aucune")}</div>
+    <div class="feed-line"><span class="green">[HOLD]</span> une position virtuelle reste ouverte jusqu'a REDUCE/CLOSE leader correspondant; elle n'est jamais fermee uniquement parce que le gain/perte en cours est rouge.</div>
+    <div class="feed-line"><span class="${payload.live_data_stale ? "orange" : "green"}">[DEBUTANT]</span> ${escapeHtml((payload.beginner_status || {}).decision_policy || "Le bot refuse les signaux non mesurables avant toute simulation.")}</div>
+    <div class="feed-line"><span class="cyan">[ETAT]</span> ${escapeHtml(payload.readiness || "UNKNOWN")} :: ${escapeHtml(payload.message || "Simulation locale seulement.")}</div>
+  `;
+}
+
+function drawSimulationMetaGraph(candles, equity) {
+  const canvas = $("#simulationMetaGraph");
+  const state = $("#simulationGraphState");
+  const tooltip = $("#simulationGraphTooltip");
+  if (!canvas || !state || !tooltip) return;
+  const rect = canvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(640, Math.floor(rect.width || canvas.width));
+  const height = Math.max(220, Math.min(300, Math.floor(rect.height || 260)));
+  // Ne redimensionner le canvas QUE si la taille change reellement.
+  // Reassigner canvas.width/height le vide et force un reflow a chaque frame
+  // (toutes les secondes) => scintillement + saut de scroll. On l'evite.
+  const nextW = Math.floor(width * ratio);
+  const nextH = Math.floor(height * ratio);
+  if (canvas.width !== nextW) canvas.width = nextW;
+  if (canvas.height !== nextH) canvas.height = nextH;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = "rgba(5,7,13,0.74)";
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = "rgba(0,217,255,0.12)";
+  ctx.lineWidth = 1;
+  for (let x = 44; x < width; x += 64) {
+    ctx.beginPath();
+    ctx.moveTo(x, 12);
+    ctx.lineTo(x, height - 28);
+    ctx.stroke();
+  }
+  for (let y = 24; y < height - 28; y += 44) {
+    ctx.beginPath();
+    ctx.moveTo(44, y);
+    ctx.lineTo(width - 18, y);
+    ctx.stroke();
+  }
+
+  if (!candles.length) {
+    const scanWallets = Number((equity && equity.public_trade_wallets_seen) || 0);
+    const liveDeltas = Number((equity && equity.live_simulation_deltas) || 0);
+    const refused = Number((equity && equity.bot_refused) || 0);
+    const entries = Number((equity && equity.reproduced_entries) || 0);
+    const mid = Math.round(height / 2);
+    ctx.strokeStyle = "rgba(255,176,32,0.65)";
+    ctx.setLineDash([8, 8]);
+    ctx.beginPath();
+    ctx.moveTo(44, mid);
+    ctx.lineTo(width - 18, mid);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#ffb020";
+    ctx.font = "14px Cascadia Code, Consolas, monospace";
+    const waitText = liveDeltas > 0
+      ? `Analyse active : ${liveDeltas} deltas frais, ${refused} refus, ${entries} reproductions. P&L stable car edge insuffisant.`
+      : scanWallets > 0
+      ? `Scan public actif : ${scanWallets} wallets vus. En attente d'un OPEN/ADD confirme pour bouger le P&L.`
+      : "En attente d'un evenement leader frais : P&L bot maintenu a $0.00.";
+    ctx.fillText(waitText, 58, mid - 14);
+    state.textContent = "Gain/perte $0.00 frais uniquement";
+    if (liveDeltas > 0 && refused > 0) {
+      state.textContent = `NO-TRADE ${refused} refus`;
+      state.className = "badge red";
+    } else {
+      state.className = "badge orange";
+    }
+    canvas.onmousemove = null;
+    tooltip.classList.add("hidden");
+    return;
+  }
+
+  const values = candles.flatMap((row) => [row.ha_high, row.ha_low, row.equity_close]);
+  let minValue = Math.min(...values, 0);
+  let maxValue = Math.max(...values, 0);
+  if (minValue === maxValue) {
+    minValue -= 1;
+    maxValue += 1;
+  }
+  const plotLeft = 54;
+  const plotRight = width - 24;
+  const plotTop = 18;
+  const plotBottom = height - 34;
+  const plotHeight = plotBottom - plotTop;
+  const xStep = (plotRight - plotLeft) / Math.max(1, candles.length);
+  const candleWidth = Math.max(5, Math.min(18, xStep * 0.58));
+  const yFor = (value) => plotBottom - ((value - minValue) / (maxValue - minValue)) * plotHeight;
+
+  const zeroY = yFor(0);
+  ctx.strokeStyle = "rgba(232,250,255,0.28)";
+  ctx.beginPath();
+  ctx.moveTo(plotLeft, zeroY);
+  ctx.lineTo(plotRight, zeroY);
+  ctx.stroke();
+
+  const hitboxes = [];
+  candles.forEach((row, index) => {
+    const x = plotLeft + index * xStep + xStep / 2;
+    const openY = yFor(row.ha_open);
+    const closeY = yFor(row.ha_close);
+    const highY = yFor(row.ha_high);
+    const lowY = yFor(row.ha_low);
+    const top = Math.min(openY, closeY);
+    const bodyHeight = Math.max(3, Math.abs(closeY - openY));
+    const color = row.color === "green" ? "#00ff88" : "#ff3b5f";
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, highY);
+    ctx.lineTo(x, lowY);
+    ctx.stroke();
+    ctx.globalAlpha = 0.86;
+    ctx.fillRect(x - candleWidth / 2, top, candleWidth, bodyHeight);
+    ctx.globalAlpha = 1;
+    hitboxes.push({ x, row });
+  });
+
+  ctx.fillStyle = "#8aa0b6";
+  ctx.font = "12px Cascadia Code, Consolas, monospace";
+  ctx.fillText(formatUsd(maxValue), 8, plotTop + 10);
+  ctx.fillText(formatUsd(minValue), 8, plotBottom);
+  const current = Number(equity.current_pnl_usdc || candles[candles.length - 1].equity_close || 0);
+  state.textContent = `Gain/perte ${formatUsd(current)}`;
+  state.className = `badge ${current >= 0 ? "green" : "red"}`;
+
+  canvas.onmousemove = (event) => {
+    const bounds = canvas.getBoundingClientRect();
+    const mouseX = event.clientX - bounds.left;
+    let nearest = hitboxes[0];
+    for (const item of hitboxes) {
+      if (Math.abs(item.x - mouseX) < Math.abs(nearest.x - mouseX)) nearest = item;
+    }
+    if (!nearest) return;
+    const row = nearest.row;
+    tooltip.classList.remove("hidden");
+    tooltip.style.left = `${Math.min(width - 250, Math.max(8, mouseX + 14))}px`;
+    tooltip.style.top = `${Math.max(8, event.clientY - bounds.top - 18)}px`;
+    tooltip.innerHTML = `
+      <strong>${escapeHtml(row.coin)} ${escapeHtml(shortAddress(row.wallet_address))}</strong><br>
+      Gain/perte: ${escapeHtml(formatUsd(row.pnl_usdc))}<br>
+      Solde PnL: ${escapeHtml(formatUsd(row.equity_close))}<br>
+      Source: ${escapeHtml(row.source)}
+    `;
+  };
+  canvas.onmouseleave = () => tooltip.classList.add("hidden");
+}
+
+function renderCoinMetrics(metrics) {
+  const target = $("#coinMetrics");
+  if (!target) return;
+  target.innerHTML = metrics.length
+    ? metrics.slice(0, 20).map((row) => `
+      <div class="feed-line">
+        <span class="cyan">${escapeHtml(row.coin)}</span>
+        depth ${escapeHtml(Math.round(row.depth_usdc ?? 0))} USDC ::
+        spread ${escapeHtml(row.spread_bps == null ? "-" : row.spread_bps.toFixed(2))} bps ::
+        ${row.is_scannable ? "scannable" : escapeHtml(row.rejection_reason || "non scannable")}
+      </div>
+    `).join("")
+    : `<div class="feed-line"><span class="orange">[INFO]</span> Aucune metrique coin stockee pour le moment.</div>`;
+}
+
+function renderActionCatalog(items) {
+  const target = $("#actionCatalog");
+  if (!target) return;
+  const groups = {};
+  items.forEach((item) => {
+    groups[item.group] = groups[item.group] || [];
+    groups[item.group].push(item);
+  });
+  target.innerHTML = Object.entries(groups).map(([group, groupItems]) => `
+    <div class="action-group">
+      <h3>${escapeHtml(group)}</h3>
+      <div class="action-grid">
+        ${groupItems.map((item) => `
+          <button data-action="${escapeHtml(item.action_id)}" ${item.enabled ? "" : "disabled"} title="${escapeHtml(item.description)}">
+            <span>${escapeHtml(item.label)}</span>
+            <small>${escapeHtml(item.enabled ? item.expected_result : item.disabled_reason || "Indisponible")}</small>
+          </button>
+        `).join("")}
+      </div>
+    </div>
+  `).join("");
+  target.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", () => runAction(button.dataset.action));
+  });
+}
+
+function renderLogs(logs) {
+  logLines = logs;
+  const filtered = activeFilter === "ALL" ? logLines : logLines.filter((line) => line.level === activeFilter);
+  $("#logConsole").textContent = filtered.map((line) => {
+    const ts = new Date(line.timestamp_ms).toLocaleTimeString();
+    return `${ts} [${line.level}] ${line.message}`;
+  }).join("\n");
+  $("#logConsole").scrollTop = $("#logConsole").scrollHeight;
+}
+
+async function loadSimpleHome() {
+  if (fullRefreshInFlight) return;
+  fullRefreshInFlight = true;
+  try {
+  const emptyDiscovery = { running: false, state: "idle", candidates_found: 0, selected_wallets: 0, backfilled_wallets: 0 };
+  const home = await safeGetJson("/api/simple-home", {
+    simple_cards: {
+      sources: { sources_attempted: 0, leaderboard_status: "IMPORT_REQUIRED", explorer_status: "IMPORT_REQUIRED", source_errors: 0, next_action: "import_leaderboard_or_explorer" },
+      market: { coins_discovered: 0, coins_scanned: 0, l2_books_analyzed: 0, altcoins_enabled: true },
+      leaderboard: { full_addresses_found: 0, truncated_addresses_rejected: 0 },
+      explorer: { status: "IMPORT_REQUIRED", transactions_stored: 0, full_addresses_found: 0, candidates_created: 0 },
+      discovery: emptyDiscovery,
+      intelligence: {},
+      best_wallets: {},
+      security: { kill_switch: false, testnet_locked: true }
+    },
+    autoscan: { analyzes: [] },
+    discovery_empty_state: "Chargement du scan automatique..."
+  });
+  const [status, discovery, candidates, selected, metrics, events, logs, actions, autoscan, explorerStatus, explorerTape, rejectedCandidates, knownWallets, positions, fills, deltas, openOrders, topByCoin, copyStatus, leaderActivity, noTradeReport, simulationOverview] = await Promise.all([
+    safeGetJson("/api/status", { mode: "PAPER", safety_status: "SAFE", risk_gates: [] }),
+    safeGetJson("/api/discovery/status", emptyDiscovery),
+    safeGetJson("/api/discovery/candidates", []),
+    safeGetJson("/api/discovery/selected", []),
+    safeGetJson("/api/markets/metrics", []),
+    safeGetJson("/api/events/recent", []),
+    safeGetJson("/api/logs", []),
+    safeGetJson("/api/actions/catalog", []),
+    safeGetJson("/api/autoscan/status", home.autoscan || {}),
+    safeGetJson("/api/explorer/status", {}),
+    safeGetJson("/api/explorer/transactions", []),
+    safeGetJson("/api/candidates/rejected", []),
+    safeGetJson("/api/wallets", []),
+    safeGetJson("/api/positions", []),
+    safeGetJson("/api/fills/recent", []),
+    safeGetJson("/api/position-deltas/recent", []),
+    safeGetJson("/api/open-orders", []),
+    safeGetJson("/api/wallets/top-by-coin", []),
+    safeGetJson("/api/copy/status", {}),
+    safeGetJson("/api/copy/leader-activity", []),
+    safeGetJson("/api/copy/no-trade-report", {}),
+    lastSimulationPayload || getSimulationOverviewPayload()
+  ]);
+  // Un seul preserveScroll englobe tout le re-render complet de la page
+  // pour eviter que la vue saute pendant la reconstruction des panneaux.
+  preserveScroll(() => {
+    renderSimpleHome(home);
+    renderScanOverview(home, autoscan);
+    renderSourceBreakdown(home, explorerStatus);
+    renderExplorerTape(explorerTape);
+    renderRejectedWallets(rejectedCandidates);
+    renderStatus(status);
+    renderDiscoveryStatus(discovery);
+    renderCandidates(candidates);
+    renderSelected(selected);
+    renderWalletsFeed(candidates, selected, knownWallets);
+    renderPositionsFeed(positions);
+    renderFillsFeed(fills);
+    renderDeltasFeed(deltas);
+    renderOpenOrdersFeed(openOrders);
+    renderTopByCoinFeed(topByCoin);
+    renderCopyStatus(copyStatus);
+    renderLeaderActivity(leaderActivity);
+    renderNoTradeReport(noTradeReport);
+    renderSimulationOverview(simulationOverview);
+    renderCoinMetrics(metrics);
+    renderEvents(events);
+    renderLogs(logs);
+    renderActionCatalog(actions);
+  });
+  } finally {
+    fullRefreshInFlight = false;
+  }
+}
+
+async function refreshSimulationOverview() {
+  if (simulationRefreshInFlight) return;
+  simulationRefreshInFlight = true;
+  try {
+    const simulationOverview = await getSimulationOverviewPayload();
+    preserveScroll(() => renderSimulationOverview(simulationOverview));
+  } finally {
+    simulationRefreshInFlight = false;
+  }
+}
+
+async function runAction(action) {
+  const result = await postJson("/api/actions", { action });
+  await loadSimpleHome();
+  return result;
+}
+
+async function startAutoScanWithDiscoveryIfAllowed() {
+  if (autoscanRequested) return;
+  autoscanRequested = true;
+  try {
+    postJson("/api/autoscan/start", {})
+      .then(() => loadSimpleHome().catch(() => {}))
+      .catch((error) => {
+        console.warn("autoscan failed", error);
+        logLines.push({ level: "WARN", timestamp_ms: Date.now(), message: "Auto-scan indisponible cote UI, voir logs serveur." });
+        renderLogs(logLines);
+      });
+  } catch (error) {
+    console.warn("autoscan failed", error);
+  }
+}
+
+// Debounce des messages WebSocket: une rafale de messages ne declenche
+// qu'UN seul refresh (au plus toutes les 1.5s) au lieu d'un re-render par
+// message, ce qui evitait le scintillement/saut quand le flux est dense.
+let wsRefreshTimer = null;
+function scheduleWsRefresh() {
+  if (wsRefreshTimer) return;
+  wsRefreshTimer = setTimeout(() => {
+    wsRefreshTimer = null;
+    refreshSimulationOverview().catch(() => {});
+  }, 1500);
+}
+
+function connectWebSocket() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const socket = new WebSocket(`${proto}://${location.host}/ws`);
+  socket.onmessage = () => scheduleWsRefresh();
+  socket.onclose = () => setTimeout(connectWebSocket, 2000);
+}
+
+function wireUi() {
+  $$("[data-action]").forEach((button) => {
+    button.addEventListener("click", () => runAction(button.dataset.action));
+  });
+  $("#expertToggle").addEventListener("click", () => {
+    const hidden = $("#expertPanel").classList.toggle("hidden");
+    $("#terminalPanel").classList.toggle("hidden", hidden);
+    $("#expertToggle").textContent = hidden ? "Afficher les details techniques" : "Masquer les details techniques";
+  });
+  $$("[data-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeFilter = button.dataset.filter;
+      $$("[data-filter]").forEach((node) => node.classList.remove("active"));
+      button.classList.add("active");
+      renderLogs(logLines);
+    });
+  });
+}
+
+// Cadences de refresh: l'ancien 1000ms (simulation) + 10000ms (home complet)
+// etait trop agressif et faisait sauter l'ecran. 4s/20s reste largement
+// temps reel pour une simulation paper et stabilise l'affichage.
+const SIMULATION_REFRESH_MS = 4000;
+const HOME_REFRESH_MS = 20000;
+
+setInterval(tickClock, 1000);
+setInterval(() => refreshSimulationOverview().catch(() => {}), SIMULATION_REFRESH_MS);
+setInterval(() => loadSimpleHome().catch(() => {}), HOME_REFRESH_MS);
+tickClock();
+wireUi();
+connectWebSocket();
+startAutoScanWithDiscoveryIfAllowed();
+refreshSimulationOverview().catch(() => {});
+loadSimpleHome().catch(() => {});

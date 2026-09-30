@@ -1,0 +1,158 @@
+DEBUT 
+=== 1. MESURE T1b (#587) === 
+==============================================================================================
+  #587 / T1b -- CO TER **DANS** LE SPREAD : la derniere porte ouverte du MM
+  T1 : « aucun marche ne paie a notre place » (on est DERRIERE 2 577 $ de file).
+  T1b : et si on se mettait DEVANT, en ameliorant le prix d'un tick ?
+==============================================================================================
+  carnet L2 : 173 coins / 9543 snapshots
+  trades    : 53 coins / 19222 trades
+  coins avec >= 30 snapshots : 29
+
+----------------------------------------------------------------------------------------------
+  🔴 AUCUN INTERIEUR (spread = 1 tick) : 0 / 29 coins
+     -> sur ces marches, coter « dans » le spread est **arithmetiquement impossible**.
+  VIABLES apres frais + selection adverse : 0
+----------------------------------------------------------------------------------------------
+
+  coin      snaps  spread   capture  adverse  INVENT.   NET       motif
+  XPL       38     2.73     2.99     0.00     34.75     -0.01     CAPTURE_INSIDE_INFERIEURE_AUX_
+  LIT       390    3.02     2.96     0.00     27.40     -0.04     CAPTURE_INSIDE_INFERIEURE_AUX_
+  AAVE      288    2.35     2.29     0.00     24.41     -0.71     CAPTURE_INSIDE_INFERIEURE_AUX_
+  FARTCOIN  197    3.31     2.29     0.00     20.32     -0.71     CAPTURE_INSIDE_INFERIEURE_AUX_
+  WLD       345    2.36     2.02     0.00     24.80     -0.98     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ZRO       67     3.15     1.88     0.00     15.87     -1.12     CAPTURE_INSIDE_INFERIEURE_AUX_
+  WLFI      395    1.57     1.51     0.00     8.91      -1.49     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ALGO      31     3.46     1.36     0.00     17.73     -1.64     CAPTURE_INSIDE_INFERIEURE_AUX_
+  BLUR      56     2.92     1.17     0.00     15.95     -1.83     CAPTURE_INSIDE_INFERIEURE_AUX_
+  TRUMP     130    1.90     1.07     0.00     14.51     -1.93     CAPTURE_INSIDE_INFERIEURE_AUX_
+  XRP       226    0.91     0.91     0.00     5.44      -2.09     CAPTURE_INSIDE_INFERIEURE_AUX_
+  NEAR      319    1.05     0.88     0.00     12.79     -2.12     CAPTURE_INSIDE_INFERIEURE_AUX_
+  @107      233    0.15     0.83     0.00     8.56      -2.17     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ARB       358    2.08     0.78     0.00     21.95     -2.22     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ZEC       359    0.19     0.76     0.00     17.00     -2.24     CAPTURE_INSIDE_INFERIEURE_AUX_
+  TAO       131    0.94     0.52     0.00     10.37     -2.48     CAPTURE_INSIDE_INFERIEURE_AUX_
+  SUI       166    0.13     0.47     0.00     9.46      -2.53     CAPTURE_INSIDE_INFERIEURE_AUX_
+  BNB       311    0.34     0.47     0.00     9.64      -2.53     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ADA       76     1.21     0.46     0.00     14.06     -2.54     CAPTURE_INSIDE_INFERIEURE_AUX_
+  LINEA     278    8.36     0.35     0.00     7.45      -2.65     CAPTURE_INSIDE_INFERIEURE_AUX_
+  @142      44     0.16     0.31     0.00     1.93      -2.69     CAPTURE_INSIDE_INFERIEURE_AUX_
+  SOL       419    0.13     0.31     0.00     6.82      -2.69     CAPTURE_INSIDE_INFERIEURE_AUX_
+  HYPE      456    0.15     0.28     0.00     10.63     -2.72     CAPTURE_INSIDE_INFERIEURE_AUX_
+  ETH       495    0.55     0.28     0.00     5.75      -2.72     CAPTURE_INSIDE_INFERIEURE_AUX_
+
+  INVENT. = le prix bouge de combien pendant qu'on PORTE la position (5 min).
+           *Un MM ne gagne pas le spread : il gagne le spread MOINS ce mouvement.*
+
+  ═══════════════════════════════════════════════════════════════════════════
+  VERDICT T1b : coter DANS le spread ne change PAS le verdict de T1.
+  La porte que T1 avait laissee ouverte est FERMEE -- par la mesure, pas par
+  prejuge. Le market making retail sur Hyperliquid est mort, tete de file
+  comprise.
+  ═══════════════════════════════════════════════════════════════════════════
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\t1b_inside_spread.json
+ 
+=== 2. SUITE COMPLETE === 
+........................................................................ [  1%]
+........................................................................ [  3%]
+........................................................................ [  5%]
+........................................................................ [  7%]
+........................................................................ [  9%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+........................................................................ [ 17%]
+...............
+[COUVERTURE] joignables=486  couverts=483  NON TESTES=3  (99.4 %)  baseline=3
+......................................................... [ 19%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+........................................................................ [100%]
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+tests/dydx_v4/test_dydx_refused_route.py: 22 warnings
+tests/dydx_v4/test_dydx_routes_truth_endpoint.py: 11 warnings
+tests/test_dashboard_v2_metagraph.py: 6 warnings
+tests/test_dashboard_v2_panels.py: 6 warnings
+tests/test_dashboard_v2_route.py: 4 warnings
+tests/test_diag_598_qui_refuse.py: 176 warnings
+tests/test_hypersmart_simulation_diagnostic_logs.py: 176 warnings
+tests/test_loop_dashboard_route.py: 176 warnings
+tests/test_no_btc_only_hardcoded_scanner.py: 176 warnings
+tests/test_ui_action_catalog.py: 528 warnings
+tests/test_ui_app.py: 1056 warnings
+tests/test_ui_copy_dashboard.py: 1584 warnings
+tests/test_ui_discovery_autoscan.py: 1584 warnings
+tests/test_ui_discovery_simple_home.py: 1056 warnings
+tests/test_ui_explorer.py: 1056 warnings
+tests/test_ui_leaderboard.py: 528 warnings
+tests/test_ui_multi_assets.py: 880 warnings
+tests/test_ui_no_dead_buttons.py: 352 warnings
+tests/test_ui_overview_paper_ledger.py: 528 warnings
+tests/test_ui_routes.py: 352 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_status_fast.py: 5104 warnings
+tests/test_ui_simulation_v9_filters.py: 1408 warnings
+tests/test_ui_websocket.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+tests/test_whale_watchlist.py::TestWhaleScoreCandidate::test_score_recent_trades_get_higher_recency
+  C:\Users\flo\Desktop\Projet invest\tests\test_whale_watchlist.py:126: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3672 passed, 22403 warnings in 269.05s (0:04:29)
+ 
+=== 3. SAFETY (no-real-trade) === 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+FIN 

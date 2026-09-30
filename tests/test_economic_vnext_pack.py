@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from hl_observer.backtesting import economic_vnext_pack as module
+
+
+def test_vnext_pack_garde_les_trois_familles_separees_et_ne_certifie_rien(
+    tmp_path: Path, monkeypatch
+) -> None:
+    alignment_calls: list[object] = []
+
+    def select_sources(_root, *, candidates):
+        alignment_calls.append(candidates)
+        return [], {"selected_sources": 0}
+
+    monkeypatch.setattr(
+        module,
+        "select_aligned_bbo_sources",
+        select_sources,
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_lead_lag_multiasset_train",
+        lambda _root, _sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_lead_lag_bbo_repricing_train",
+        lambda _root, *, sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "load_preferred_certified_atomic_series",
+        lambda _root: ({}, {}, {"source_mode": "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"}),
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_cross_venue_v4_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_cross_venue_v5_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "_load_copy_raw",
+        lambda _root: {
+            "next_hypothesis_v4": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+            "next_hypothesis_v5": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+            "next_hypothesis_v6": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+            "next_hypothesis_v7": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+            "next_hypothesis_v8": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+            "next_hypothesis_v9": {
+                "status": "NO_ROBUST_TRAIN_CANDIDATE",
+                "selection_eligible": False,
+                "physical_freeze_allowed": False,
+                "heldout_evaluated": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_copy_vault_vnext_train",
+        lambda _raw: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+        },
+    )
+
+    result = module.run_economic_vnext_pack(tmp_path, lead_sources=[])
+
+    assert set(result["families"]) == {"lead_lag", "cross_venue", "copy_vault"}
+    assert result["canonical_campaigns_mutated"] is False
+    assert result["heldout_evaluated"] is False
+    assert result["real_execution"] is False
+    assert result["certification_status"] == "TRAIN_ONLY_NOT_CERTIFIED"
+    assert result["freeze_hash"] is None
+    assert result["post_freeze_oos_consumed"] is False
+    assert (
+        result["research_variants"]["copy_vault_continuation_v4"]["heldout_evaluated"]
+        is False
+    )
+    assert "copy_vault_continuation_v4" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_lifecycle_v5"]["heldout_evaluated"]
+        is False
+    )
+    assert "copy_vault_lifecycle_v5" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_balanced_v6"]["heldout_evaluated"]
+        is False
+    )
+    assert "copy_vault_balanced_v6" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_exit_flow_v7"]["heldout_evaluated"]
+        is False
+    )
+    assert "copy_vault_exit_flow_v7" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_entry_efficiency_v8"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "copy_vault_entry_efficiency_v8" in result["reports"]
+    assert (
+        result["research_variants"]["copy_vault_online_leader_quality_v9"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "copy_vault_online_leader_quality_v9" in result["reports"]
+    assert (
+        result["research_variants"]["cross_venue_persistence_v5"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "cross_venue_persistence_v5" in result["reports"]
+    assert (
+        result["research_variants"]["cross_venue_coverage_union_v6"][
+            "heldout_evaluated"
+        ]
+        is False
+    )
+    assert "cross_venue_coverage_union_v6" in result["reports"]
+    assert (
+        result["research_variants"]["lead_lag_bbo_repricing"]["heldout_evaluated"]
+        is False
+    )
+    assert "lead_lag_bbo_repricing" in result["reports"]
+    assert alignment_calls == [None]
+    assert result["lead_source_alignment"]["requested_sources"] == 0
+    assert (
+        result["lead_source_alignment"]["source_request_mode"]
+        == "LOCAL_AUTO_DISCOVERY_FALLBACK"
+    )
+    assert (tmp_path / result["summary_path"]).is_file()
+
+
+def test_vnext_pack_preserve_une_liste_de_sources_explicite(
+    tmp_path: Path, monkeypatch
+) -> None:
+    source = tmp_path / "source.jsonl"
+    source.write_text("", encoding="utf-8")
+    alignment_calls: list[object] = []
+
+    def select_sources(_root, *, candidates):
+        alignment_calls.append(candidates)
+        return [], {"selected_sources": 0}
+
+    monkeypatch.setattr(module, "select_aligned_bbo_sources", select_sources)
+    monkeypatch.setattr(
+        module,
+        "explore_lead_lag_multiasset_train",
+        lambda _root, _sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_lead_lag_bbo_repricing_train",
+        lambda _root, *, sources: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "load_preferred_certified_atomic_series",
+        lambda _root: ({}, {}, {"source_mode": "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"}),
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_cross_venue_v4_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "explore_cross_venue_v5_train",
+        lambda *_args, **_kwargs: {
+            "status": "NO_ROBUST_TRAIN_CANDIDATE",
+            "selection_eligible": False,
+            "physical_freeze_allowed": False,
+            "freeze_candidate_sha256": None,
+            "heldout_evaluated": False,
+        },
+    )
+    monkeypatch.setattr(module, "_load_copy_raw", lambda _root: None)
+
+    result = module.run_economic_vnext_pack(tmp_path, lead_sources=[source])
+
+    assert alignment_calls == [[source]]
+    assert result["lead_source_alignment"]["requested_sources"] == 1
+    assert (
+        result["lead_source_alignment"]["source_request_mode"]
+        == "EXPLICIT_DATASET_MANIFEST"
+    )

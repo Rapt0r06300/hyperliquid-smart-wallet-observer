@@ -1,0 +1,64 @@
+{
+  "ts_ms": 1785003648308,
+  "PROVENANCE": {
+    "REAL_LIQUIDATION": {
+      "n_confirmes": 0,
+      "note": "aucun flux fill.liquidation confirme collecte ; overshoots_hl=proxy mark-oracle ; liquidation_map=carte de RISQUE"
+    },
+    "MARK_ORACLE_OVERSHOOT_PROXY": {
+      "n_episodes_filtres": 19,
+      "n_avec_bbo_reel": 1,
+      "n_sans_bbo": 18
+    }
+  },
+  "cout": "spread RÉEL bbo + 9 bps frais A/R + 1 bps latence (aucun forfait)",
+  "PROXY_par_horizon": {
+    "15": {
+      "n": 1,
+      "net_somme": -25.61,
+      "net_moyen": -25.609,
+      "net_median": -25.609,
+      "pf": 0.0,
+      "drawdown_bps": -25.61
+    },
+    "30": {
+      "n": 1,
+      "net_somme": -20.24,
+      "net_moyen": -20.243,
+      "net_median": -20.243,
+      "pf": 0.0,
+      "drawdown_bps": -20.24
+    },
+    "60": {
+      "n": 1,
+      "net_somme": -21.71,
+      "net_moyen": -21.707,
+      "net_median": -21.707,
+      "pf": 0.0,
+      "drawdown_bps": -21.71
+    },
+    "120": {
+      "n": 1,
+      "net_somme": -24.15,
+      "net_moyen": -24.146,
+      "net_median": -24.146,
+      "pf": 0.0,
+      "drawdown_bps": -24.15
+    }
+  },
+  "PROXY_2_moities@ref": {
+    "probe_armable": false,
+    "raison": "trop peu d'épisodes mesurables (1, requis 40)",
+    "n_episodes": 1
+  },
+  "PROXY_leave_one_out@ref": {
+    "sans_meilleur_event": 0.0,
+    "sans_meilleur_coin": 0.0,
+    "sans_meilleure_heure": 0.0
+  },
+  "decision": {
+    "REAL_LIQUIDATION": "REFUS_COHORTE — 0 evenement confirme (provenance non securisee)",
+    "MARK_ORACLE_OVERSHOOT_PROXY": "SHADOW_ONLY",
+    "motif_proxy": "echoue le gate cout-reel/2-moities/leave-one-out — voir PROXY_par_horizon"
+  }
+}

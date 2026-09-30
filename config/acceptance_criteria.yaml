@@ -1,0 +1,105 @@
+schema_version: alina.acceptance_registry.v1
+source_spec: docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md
+gates:
+  - id: PHASE_AUTHORITY
+    owner: control_plane
+    input_evidence: [control/alina-phase.json]
+    validator: hl_observer.control_plane.phase_state.validate_phase_state
+    failure_code: INVALID_PHASE_STATE
+    blocks: [campaign_creation, collection, analysis]
+  - id: PHASE_EPOCH_ISOLATION
+    owner: control_plane
+    input_evidence: [campaign_manifest.phase_epoch, control/alina-phase.json]
+    validator: hl_observer.control_plane.resumable_campaign.select_due_campaigns
+    failure_code: STALE_PHASE_EPOCH
+    blocks: [campaign_claim, campaign_resume]
+  - id: PAPER_READ_ONLY
+    owner: security
+    input_evidence: [CampaignManifest.paper_only, CampaignManifest.read_only, CampaignManifest.real_execution]
+    validator: hl_observer.control_plane.resumable_campaign.validate_manifest
+    failure_code: UNSAFE_EXECUTION_IDENTITY
+    blocks: [all_economic_stages]
+  - id: DURABLE_LEASE
+    owner: campaign_protocol
+    input_evidence: [campaign_manifest.lease, owner_run_id, lease_token_sha256]
+    validator: hl_observer.control_plane.resumable_campaign.acquire_lease
+    failure_code: LEASE_CONFLICT
+    blocks: [campaign_worker]
+  - id: CHECKPOINT_LINEAGE
+    owner: campaign_protocol
+    input_evidence: [campaign_manifest.checkpoint_lineage, completed_units]
+    validator: hl_observer.control_plane.resumable_campaign.complete_work_unit
+    failure_code: CHECKPOINT_CONFLICT
+    blocks: [resume, terminalization]
+  - id: IMMUTABLE_PUBLICATION
+    owner: dataset_v2
+    input_evidence: [release_tag, asset_sha256, payload_digest, schema_version]
+    validator: tools.restore_durable_state
+    failure_code: PUBLICATION_DIGEST_CONFLICT
+    blocks: [safe_promotion, economic_proof]
+  - id: EXACT_TRADE_COUNT
+    owner: dataset_v2
+    input_evidence: [catalog/DATA_METRICS.json, catalog/TRADE_COUNT_PATCH.json]
+    validator: tools.backfill_exact_trade_counts
+    failure_code: EXACT_COUNT_INCOMPLETE
+    blocks: [global_trade_totals, economic_proof]
+  - id: GLOBAL_UNIQUE_TRADE_COUNT
+    owner: dataset_v2
+    input_evidence: [native_trade_id, deterministic_fallback_identity, shard_overlap]
+    validator: tools.backfill_global_unique_trade_counts
+    failure_code: GLOBAL_UNIQUE_COUNT_INCOMPLETE
+    blocks: [unique_trade_totals, economic_proof]
+  - id: SAFE_REPLAY_COMPATIBLE
+    owner: replay
+    input_evidence: [quality_status, replay_compatible, replay_schema_version]
+    validator: hl_observer.ops.v2_dataset_bridge
+    failure_code: REPLAY_COMPATIBILITY_MISSING
+    blocks: [replay, backtest, oos, forward_paper]
+  - id: CAUSAL_TEMPORAL_SPLIT
+    owner: research_pipeline
+    input_evidence: [train_interval, oos_interval, forward_interval, freeze_boundary]
+    validator: hl_observer.validation
+    failure_code: TEMPORAL_CONTAMINATION
+    blocks: [oos, forward_paper, pnl_proof]
+  - id: COST_COMPLETENESS
+    owner: economics
+    input_evidence: [fees, spread, slippage, latency, funding, capacity]
+    validator: hl_observer.control_plane.module_pnl_proof
+    failure_code: MISSING_COST_EVIDENCE
+    blocks: [pnl_proof, scoreboard]
+  - id: MODULE_ISOLATION
+    owner: economics
+    input_evidence: [module_id, dataset_selection_id, certificate_digest]
+    validator: hl_observer.control_plane.module_pnl_proof
+    failure_code: MODULE_SCOPE_COLLISION
+    blocks: [module_pnl_proof, scoreboard]
+  - id: EVENT_INTELLIGENCE_WIRING
+    owner: event_intelligence
+    input_evidence: [docs/event-intelligence-120-status.json]
+    validator: tools.validate_event_intelligence_status
+    failure_code: EVENT_STATUS_UNRESOLVED
+    blocks: [event_conditioned_proof]
+  - id: FRESH_RUNNER_RESTORE
+    owner: recovery
+    input_evidence: [catalog/DATASET_HEALTH_RECEIPT.json, catalog/campaigns]
+    validator: tools.restore_durable_state
+    failure_code: RESTORE_RECONSTRUCTION_FAILED
+    blocks: [resume_claim, closure]
+  - id: CAMPAIGN_RESILIENCE
+    owner: recovery
+    input_evidence: [catalog/campaigns, catalog/CAMPAIGN_RESILIENCE_RECEIPT.json]
+    validator: tools.validate_campaign_resilience
+    failure_code: RESILIENCE_LINEAGE_INCOMPLETE
+    blocks: [resume, recovery, closure]
+  - id: SOURCE_RULE_PROVENANCE
+    owner: source_adapters
+    input_evidence: [config/source_rules.yaml, docs/source-capability-matrix.json]
+    validator: tools.validate_source_rules
+    failure_code: SOURCE_RULE_UNVERSIONED
+    blocks: [collection, replay, economic_proof]
+  - id: FINAL_CLOSURE_RECEIPT
+    owner: closure
+    input_evidence: [docs/alina-closure-report.json]
+    validator: tools/validate_closure_receipt
+    failure_code: CLOSURE_RECEIPT_INVALID
+    blocks: [DONE]

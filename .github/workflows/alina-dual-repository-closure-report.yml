@@ -1,0 +1,68 @@
+name: alina-dual-repository-closure-report
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "29 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/alina-dual-repository-closure-report.yml"
+      - "tools/build_closure_report.py"
+      - "tools/generate_gate_registry.py"
+      - "tools/validate_closure_receipt.py"
+      - "tools/validate_gate_registry.py"
+      - "src/hl_observer/control_plane/gate_registry.py"
+      - "docs/event-intelligence-120-status.json"
+      - "docs/source-capability-matrix.json"
+      - "runtime/reports/economic_family_scoreboards.json"
+env:
+  GH_TOKEN: "${{ github.token }}"
+
+permissions:
+  # contents: read is the baseline; publication jobs elevate only where required.
+  contents: write
+concurrency:
+  group: alina-dual-repository-closure-report
+  cancel-in-progress: false
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/alina-smartflow-datasets-v2
+          ref: main
+          path: dataset-v2
+          persist-credentials: false
+      - name: Build conservative closure report
+        env:
+          ALINA_MAIN_HEAD: "${{ github.sha }}"
+          DATASET_V2_HEAD: "${{ github.event.workflow_run.head_sha || 'main' }}"
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python tools/generate_gate_registry.py
+          python tools/validate_gate_registry.py
+          python tools/build_closure_report.py \
+            --dataset-root dataset-v2 \
+            --main-head "$(git rev-parse HEAD)" \
+            --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
+            --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
+      - name: Validate gate and closure receipts
+        run: |
+          python tools/validate_gate_registry.py
+          python tools/validate_closure_receipt.py
+      - name: Publish closure report
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/alina-closure-report.json docs/normative-gate-registry.json
+          git diff --cached --quiet && exit 0
+          git commit -m "closure: publish dual-repository status report"
+          gh auth setup-git
+          git push origin HEAD:main

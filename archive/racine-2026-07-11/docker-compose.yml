@@ -1,0 +1,11 @@
+services:
+  hypersmart-local:
+    image: python:3.11-slim
+    working_dir: /app
+    command: ["python", "-m", "hl_observer.cli", "--help"]
+    volumes:
+      - ./:/app
+    environment:
+      HL_ENABLE_MAINNET_EXECUTION: "false"
+      HYPERSMART_RUNTIME_MODE: "paper"
+      HYPERSMART_REAL_ORDERS_ENABLED: "false"

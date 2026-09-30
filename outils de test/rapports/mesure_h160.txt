@@ -1,0 +1,38 @@
+DEBUT 
+=== 1. les tests de la sonde (bornees=stables / recursives=instables) === 
+......                                                                   [100%]
+6 passed in 0.82s
+ 
+=== 2. LA MESURE sur les MIDS REELS === 
+============================================================================================
+  H-160 — BIAIS RECURSIF sur les MIDS REELS (backtest=toute l'histoire vs live=200 pts)
+  seuil de decision de la direction : 5.0 bps (DirectionConfig.flat_threshold_bps)
+============================================================================================
+  feature                    nature         coin     ecart_max   ecart_moyen  verdict
+--------------------------------------------------------------------------------------------
+  vol_sigma.sigma_blend      bornee          BTC     0.000e+00     0.000e+00  STABLE
+  vol_sigma.sigma_blend      bornee          ETH     0.000e+00     0.000e+00  STABLE
+  vol_sigma.sigma_blend      bornee         HYPE     0.000e+00     0.000e+00  STABLE
+  vol_sigma.sigma_blend      bornee          SOL     0.000e+00     0.000e+00  STABLE
+  volatility.blend_bps       bornee          BTC     0.000e+00     0.000e+00  STABLE
+  volatility.blend_bps       bornee          ETH     0.000e+00     0.000e+00  STABLE
+  volatility.blend_bps       bornee         HYPE     0.000e+00     0.000e+00  STABLE
+  volatility.blend_bps       bornee          SOL     0.000e+00     0.000e+00  STABLE
+  direction.strength_bps     recursive       BTC     5.697e-08     1.282e-08  RECURSIF
+  direction.strength_bps     recursive       ETH     8.657e-08     1.856e-08  RECURSIF
+  direction.strength_bps     recursive      HYPE     1.900e-07     3.651e-08  RECURSIF
+  direction.strength_bps     recursive       SOL     1.521e-07     2.756e-08  RECURSIF
+  rsi_overheat.rsi_14        recursive       BTC     2.000e-04     2.264e-05  RECURSIF
+  rsi_overheat.rsi_14        recursive       ETH     1.000e-04     1.729e-05  RECURSIF
+  rsi_overheat.rsi_14        recursive      HYPE     1.000e-04     1.602e-05  RECURSIF
+  rsi_overheat.rsi_14        recursive       SOL     1.000e-04     1.050e-05  RECURSIF
+--------------------------------------------------------------------------------------------
+  direction.strength_bps : ecart max 1.900e-07 bps -- le seuil de DECISION est 5.0 bps.
+  ✅ VERDICT (H-160) : la feature EST recursive PAR CONSTRUCTION, mais l'ecart
+     qu'elle produit est 3e+07 fois plus PETIT que le seuil qui decide.
+     Le seed de l'EMA s'oublie GEOMETRIQUEMENT : apres 200 points de buffer,
+     il n'en reste rien de mesurable.
+     -> Backtest et live decident LA MEME CHOSE. Le biais recursif n'est PAS
+        l'explication de nos ecarts. Ne pas 'corriger' ce qui ne casse rien.
+-> C:\Users\flo\Desktop\Projet invest\data\reports\biais_recursif.json
+FIN 

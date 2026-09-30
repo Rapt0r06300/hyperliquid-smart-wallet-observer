@@ -1,0 +1,530 @@
+{
+  "audit": "liquidity_consumption",
+  "checks": {
+    "exhausted_snapshot_refused": true,
+    "new_snapshot_replenishes": true,
+    "retry_idempotent": true,
+    "same_snapshot_never_overfilled": true,
+    "second_plan_partial": true
+  },
+  "exhausted": {
+    "accepted": false,
+    "equity_event": {
+      "accounting_status": "PENDING_POSITION_ACCOUNTING",
+      "event_id": "paper-equity:d403ec6382c5c9e0b9d16d0f3d60d0b7a9b100a23da38eea4cd56eff87c112be",
+      "filled_notional_usdc": 0.0,
+      "plan_id": "paper-plan:1c7108da5feb4e1ab851351bd447b0c5950938d4316414416d75b5e4adf2a0dd",
+      "realized_pnl_delta_usdc": null
+    },
+    "execution": {
+      "adverse_selection_bps": null,
+      "cost_status": "MEASURED",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": null,
+      "fill_price": null,
+      "fill_ratio": 0.0,
+      "filled_notional_usdc": 0.0,
+      "filled_quantity": 0.0,
+      "is_maker": false,
+      "latency_bps": 0.0,
+      "level_fills": [],
+      "missed": true,
+      "missed_notional_usdc": 60.0,
+      "net_cost_bps": null,
+      "notional_usdc": 0.0,
+      "partial": false,
+      "queue_ratio": null,
+      "reason": "LIQUIDITY_ALREADY_CONSUMED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": null
+    },
+    "ledger_event": {
+      "coin": "HYPE",
+      "cost_status": "MEASURED",
+      "event_id": "paper-ledger:4cae65a0455c3ff947499d460ef08f6dd74260c72df08bcb58990dea7c6e5056",
+      "event_type": "OPEN",
+      "execution_side": "BUY",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": null,
+      "fill_price": null,
+      "filled_notional_usdc": 0.0,
+      "latency_bps": 0.0,
+      "missed_notional_usdc": 60.0,
+      "paper_only": true,
+      "plan_id": "paper-plan:1c7108da5feb4e1ab851351bd447b0c5950938d4316414416d75b5e4adf2a0dd",
+      "position_side": "LONG",
+      "real_execution": false,
+      "reason": "LIQUIDITY_ALREADY_CONSUMED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": null,
+      "strategy_id": "third"
+    },
+    "liquidity_reservation": {
+      "coin": "HYPE",
+      "execution_side": "BUY",
+      "levels": [],
+      "plan_id": "paper-plan:1c7108da5feb4e1ab851351bd447b0c5950938d4316414416d75b5e4adf2a0dd",
+      "replayed": false,
+      "snapshot_id": "book:one",
+      "venue": "hyperliquid"
+    },
+    "paper_only": true,
+    "plan": {
+      "action": "OPEN",
+      "coin": "HYPE",
+      "decision_ts_ms": 1800000000000,
+      "execution_side": "BUY",
+      "intent_id": "paper-intent:38a7e6632d0efe5ef8db89df9b7550d6b5ce1c9b1bfea6aae9414937387b1974",
+      "paper_only": true,
+      "plan_id": "paper-plan:1c7108da5feb4e1ab851351bd447b0c5950938d4316414416d75b5e4adf2a0dd",
+      "position_side": "LONG",
+      "real_execution": false,
+      "requested_notional_usdc": 60.0,
+      "snapshot_id": "book:one",
+      "strategy_id": "third",
+      "strict_book": true
+    },
+    "position_mutation": {
+      "action": "OPEN",
+      "fill_price": null,
+      "filled_notional_usdc": 0.0,
+      "position_side": "LONG",
+      "quantity_delta": 0.0,
+      "status": "NO_MUTATION"
+    },
+    "real_execution": false
+  },
+  "first": {
+    "accepted": true,
+    "equity_event": {
+      "accounting_status": "PENDING_POSITION_ACCOUNTING",
+      "event_id": "paper-equity:0d5bcd43a8f718c8aabb561c5e853438a0c03bb13f38d1805785400149fab681",
+      "filled_notional_usdc": 60.0,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "realized_pnl_delta_usdc": null
+    },
+    "execution": {
+      "adverse_selection_bps": null,
+      "cost_status": "MEASURED",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "fill_ratio": 1.0,
+      "filled_notional_usdc": 60.0,
+      "filled_quantity": 0.6,
+      "is_maker": false,
+      "latency_bps": 0.0,
+      "level_fills": [
+        {
+          "available_quantity": 1.0,
+          "filled_notional_usdc": 60.0,
+          "filled_quantity": 0.6,
+          "price": 100.0
+        }
+      ],
+      "missed": false,
+      "missed_notional_usdc": 0.0,
+      "net_cost_bps": 54.77386935,
+      "notional_usdc": 60.0,
+      "partial": false,
+      "queue_ratio": null,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628
+    },
+    "ledger_event": {
+      "coin": "HYPE",
+      "cost_status": "MEASURED",
+      "event_id": "paper-ledger:c963e3eb10771b64169c48ea72ab98fd941c4c15ba678934b46a8ab166eca023",
+      "event_type": "OPEN",
+      "execution_side": "BUY",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "latency_bps": 0.0,
+      "missed_notional_usdc": 0.0,
+      "paper_only": true,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628,
+      "strategy_id": "first"
+    },
+    "liquidity_reservation": {
+      "coin": "HYPE",
+      "execution_side": "BUY",
+      "levels": [
+        {
+          "coin": "HYPE",
+          "consumed_quantity": 0.6,
+          "execution_side": "BUY",
+          "price": 100.0,
+          "snapshot_id": "book:one",
+          "venue": "hyperliquid"
+        }
+      ],
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "replayed": false,
+      "snapshot_id": "book:one",
+      "venue": "hyperliquid"
+    },
+    "paper_only": true,
+    "plan": {
+      "action": "OPEN",
+      "coin": "HYPE",
+      "decision_ts_ms": 1800000000000,
+      "execution_side": "BUY",
+      "intent_id": "paper-intent:a8df786126000114f8744fa0e700a8b284d9836753bf1ca73fc5d44755bf4168",
+      "paper_only": true,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "requested_notional_usdc": 60.0,
+      "snapshot_id": "book:one",
+      "strategy_id": "first",
+      "strict_book": true
+    },
+    "position_mutation": {
+      "action": "OPEN",
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "position_side": "LONG",
+      "quantity_delta": 0.6,
+      "status": "APPLY"
+    },
+    "real_execution": false
+  },
+  "fresh_snapshot": {
+    "accepted": true,
+    "equity_event": {
+      "accounting_status": "PENDING_POSITION_ACCOUNTING",
+      "event_id": "paper-equity:7030be65e3513e887cd5acd6cc885363a271413faee6979e93c422c5e8cbd45b",
+      "filled_notional_usdc": 60.0,
+      "plan_id": "paper-plan:8e331eb84559cb97c15c61650d48c4fbb52171bf28e72fe9cfb0b214732e5df8",
+      "realized_pnl_delta_usdc": null
+    },
+    "execution": {
+      "adverse_selection_bps": null,
+      "cost_status": "MEASURED",
+      "execution_snapshot_id": "book:two",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "fill_ratio": 1.0,
+      "filled_notional_usdc": 60.0,
+      "filled_quantity": 0.6,
+      "is_maker": false,
+      "latency_bps": 0.0,
+      "level_fills": [
+        {
+          "available_quantity": 1.0,
+          "filled_notional_usdc": 60.0,
+          "filled_quantity": 0.6,
+          "price": 100.0
+        }
+      ],
+      "missed": false,
+      "missed_notional_usdc": 0.0,
+      "net_cost_bps": 54.77386935,
+      "notional_usdc": 60.0,
+      "partial": false,
+      "queue_ratio": null,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628
+    },
+    "ledger_event": {
+      "coin": "HYPE",
+      "cost_status": "MEASURED",
+      "event_id": "paper-ledger:4d5bd77f7bc11fc1383c47e4d0de66d73f570c114565aa295d1aa926fbed596f",
+      "event_type": "OPEN",
+      "execution_side": "BUY",
+      "execution_snapshot_id": "book:two",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "latency_bps": 0.0,
+      "missed_notional_usdc": 0.0,
+      "paper_only": true,
+      "plan_id": "paper-plan:8e331eb84559cb97c15c61650d48c4fbb52171bf28e72fe9cfb0b214732e5df8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628,
+      "strategy_id": "fresh"
+    },
+    "liquidity_reservation": {
+      "coin": "HYPE",
+      "execution_side": "BUY",
+      "levels": [
+        {
+          "coin": "HYPE",
+          "consumed_quantity": 0.6,
+          "execution_side": "BUY",
+          "price": 100.0,
+          "snapshot_id": "book:two",
+          "venue": "hyperliquid"
+        }
+      ],
+      "plan_id": "paper-plan:8e331eb84559cb97c15c61650d48c4fbb52171bf28e72fe9cfb0b214732e5df8",
+      "replayed": false,
+      "snapshot_id": "book:two",
+      "venue": "hyperliquid"
+    },
+    "paper_only": true,
+    "plan": {
+      "action": "OPEN",
+      "coin": "HYPE",
+      "decision_ts_ms": 1800000000000,
+      "execution_side": "BUY",
+      "intent_id": "paper-intent:6c0acc12afa3f6914a3d7bb7a7b6515f492f80dd8be8c7fb2e307fddf764da92",
+      "paper_only": true,
+      "plan_id": "paper-plan:8e331eb84559cb97c15c61650d48c4fbb52171bf28e72fe9cfb0b214732e5df8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "requested_notional_usdc": 60.0,
+      "snapshot_id": "book:two",
+      "strategy_id": "fresh",
+      "strict_book": true
+    },
+    "position_mutation": {
+      "action": "OPEN",
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "position_side": "LONG",
+      "quantity_delta": 0.6,
+      "status": "APPLY"
+    },
+    "real_execution": false
+  },
+  "ledger": [
+    {
+      "coin": "HYPE",
+      "consumed_quantity": 1.0,
+      "execution_side": "BUY",
+      "price": 100.0,
+      "snapshot_id": "book:one",
+      "venue": "hyperliquid"
+    },
+    {
+      "coin": "HYPE",
+      "consumed_quantity": 0.6,
+      "execution_side": "BUY",
+      "price": 100.0,
+      "snapshot_id": "book:two",
+      "venue": "hyperliquid"
+    }
+  ],
+  "paper_only": true,
+  "passed": true,
+  "real_execution": false,
+  "retry": {
+    "accepted": true,
+    "equity_event": {
+      "accounting_status": "PENDING_POSITION_ACCOUNTING",
+      "event_id": "paper-equity:0d5bcd43a8f718c8aabb561c5e853438a0c03bb13f38d1805785400149fab681",
+      "filled_notional_usdc": 60.0,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "realized_pnl_delta_usdc": null
+    },
+    "execution": {
+      "adverse_selection_bps": null,
+      "cost_status": "MEASURED",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "fill_ratio": 1.0,
+      "filled_notional_usdc": 60.0,
+      "filled_quantity": 0.6,
+      "is_maker": false,
+      "latency_bps": 0.0,
+      "level_fills": [
+        {
+          "available_quantity": 1.0,
+          "filled_notional_usdc": 60.0,
+          "filled_quantity": 0.6,
+          "price": 100.0
+        }
+      ],
+      "missed": false,
+      "missed_notional_usdc": 0.0,
+      "net_cost_bps": 54.77386935,
+      "notional_usdc": 60.0,
+      "partial": false,
+      "queue_ratio": null,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628
+    },
+    "ledger_event": {
+      "coin": "HYPE",
+      "cost_status": "MEASURED",
+      "event_id": "paper-ledger:c963e3eb10771b64169c48ea72ab98fd941c4c15ba678934b46a8ab166eca023",
+      "event_type": "OPEN",
+      "execution_side": "BUY",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "latency_bps": 0.0,
+      "missed_notional_usdc": 0.0,
+      "paper_only": true,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "reason": "FILLED",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628,
+      "strategy_id": "first"
+    },
+    "liquidity_reservation": {
+      "coin": "HYPE",
+      "execution_side": "BUY",
+      "levels": [
+        {
+          "coin": "HYPE",
+          "consumed_quantity": 0.6,
+          "execution_side": "BUY",
+          "price": 100.0,
+          "snapshot_id": "book:one",
+          "venue": "hyperliquid"
+        }
+      ],
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "replayed": true,
+      "snapshot_id": "book:one",
+      "venue": "hyperliquid"
+    },
+    "paper_only": true,
+    "plan": {
+      "action": "OPEN",
+      "coin": "HYPE",
+      "decision_ts_ms": 1800000000000,
+      "execution_side": "BUY",
+      "intent_id": "paper-intent:a8df786126000114f8744fa0e700a8b284d9836753bf1ca73fc5d44755bf4168",
+      "paper_only": true,
+      "plan_id": "paper-plan:6308b6a63c7af09dc34dc4da5d047cb3cab674749c39d40143bb82406d4884a8",
+      "position_side": "LONG",
+      "real_execution": false,
+      "requested_notional_usdc": 60.0,
+      "snapshot_id": "book:one",
+      "strategy_id": "first",
+      "strict_book": true
+    },
+    "position_mutation": {
+      "action": "OPEN",
+      "fill_price": 100.045,
+      "filled_notional_usdc": 60.0,
+      "position_side": "LONG",
+      "quantity_delta": 0.6,
+      "status": "APPLY"
+    },
+    "real_execution": false
+  },
+  "second": {
+    "accepted": true,
+    "equity_event": {
+      "accounting_status": "PENDING_POSITION_ACCOUNTING",
+      "event_id": "paper-equity:4564fa1881236a6aaf61712d555f057c98d73189e01e0c396a9120676c602ed1",
+      "filled_notional_usdc": 40.0,
+      "plan_id": "paper-plan:7c96f61e0266e82a19cfefe5af566dabdf11a77ec14085deb2337ed4298390bd",
+      "realized_pnl_delta_usdc": null
+    },
+    "execution": {
+      "adverse_selection_bps": null,
+      "cost_status": "MEASURED",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "fill_ratio": 0.66666667,
+      "filled_notional_usdc": 40.0,
+      "filled_quantity": 0.4,
+      "is_maker": false,
+      "latency_bps": 0.0,
+      "level_fills": [
+        {
+          "available_quantity": 0.4,
+          "filled_notional_usdc": 40.0,
+          "filled_quantity": 0.4,
+          "price": 100.0
+        }
+      ],
+      "missed": false,
+      "missed_notional_usdc": 20.0,
+      "net_cost_bps": 54.77386935,
+      "notional_usdc": 40.0,
+      "partial": true,
+      "queue_ratio": null,
+      "reason": "PARTIAL_FILL",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628
+    },
+    "ledger_event": {
+      "coin": "HYPE",
+      "cost_status": "MEASURED",
+      "event_id": "paper-ledger:52b058b950e0cff8646c0a2bb7828cf3546e57a14b39f1756c86fa0ed5b43d7d",
+      "event_type": "OPEN",
+      "execution_side": "BUY",
+      "execution_snapshot_id": "book:one",
+      "fee_bps": 4.5,
+      "fill_price": 100.045,
+      "filled_notional_usdc": 40.0,
+      "latency_bps": 0.0,
+      "missed_notional_usdc": 20.0,
+      "paper_only": true,
+      "plan_id": "paper-plan:7c96f61e0266e82a19cfefe5af566dabdf11a77ec14085deb2337ed4298390bd",
+      "position_side": "LONG",
+      "real_execution": false,
+      "reason": "PARTIAL_FILL",
+      "requested_notional_usdc": 60.0,
+      "slippage_bps": 50.25125628,
+      "strategy_id": "second"
+    },
+    "liquidity_reservation": {
+      "coin": "HYPE",
+      "execution_side": "BUY",
+      "levels": [
+        {
+          "coin": "HYPE",
+          "consumed_quantity": 0.4,
+          "execution_side": "BUY",
+          "price": 100.0,
+          "snapshot_id": "book:one",
+          "venue": "hyperliquid"
+        }
+      ],
+      "plan_id": "paper-plan:7c96f61e0266e82a19cfefe5af566dabdf11a77ec14085deb2337ed4298390bd",
+      "replayed": false,
+      "snapshot_id": "book:one",
+      "venue": "hyperliquid"
+    },
+    "paper_only": true,
+    "plan": {
+      "action": "OPEN",
+      "coin": "HYPE",
+      "decision_ts_ms": 1800000000000,
+      "execution_side": "BUY",
+      "intent_id": "paper-intent:44f39a440eaeb624242d03c09d3fba1bf154201611aabea9c07bc7f0e004901a",
+      "paper_only": true,
+      "plan_id": "paper-plan:7c96f61e0266e82a19cfefe5af566dabdf11a77ec14085deb2337ed4298390bd",
+      "position_side": "LONG",
+      "real_execution": false,
+      "requested_notional_usdc": 60.0,
+      "snapshot_id": "book:one",
+      "strategy_id": "second",
+      "strict_book": true
+    },
+    "position_mutation": {
+      "action": "OPEN",
+      "fill_price": 100.045,
+      "filled_notional_usdc": 40.0,
+      "position_side": "LONG",
+      "quantity_delta": 0.4,
+      "status": "APPLY"
+    },
+    "real_execution": false
+  }
+}

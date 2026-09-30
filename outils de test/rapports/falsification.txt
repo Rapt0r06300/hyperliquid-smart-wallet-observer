@@ -1,0 +1,33 @@
+
+FALSIFICATION DE CASHCAT -- 4641 trades LIVE, 382 releves de carnet
+
+==============================================================================
+ ATTAQUE 1 -- LA FILE EST-ELLE PHYSIQUEMENT ATTEIGNABLE ?
+==============================================================================
+  profondeur mediane au meilleur prix : bid 2316 $ | ask 2838 $  (382 releves)
+  trades : 4641 | median 90 $ | p75 175 $ | p95 457 $ | p99 1452 $ | max 14875 $
+
+  QUELLE FRACTION DU FLUX BALAYE LA FILE JUSQU'A NOUS ?
+    fond de file (100 % de la profondeur devant nous) file     2577 $ ->     9 trades ( 0.19 %),     60356 $ de flux
+    milieu de file (50 %)                          file     1289 $ ->    52 trades ( 1.12 %),    138406 $ de flux
+    tete de file (10 %)                            file      258 $ ->   782 trades (16.85 %),    441663 $ de flux
+
+  >>> VERDICT : 0.19 % des trades seulement balayent la file. Le PLAFOND
+      realiste s'effondre. A verifier en dollars ci-dessus.
+
+==============================================================================
+ ATTAQUE 2 -- L'ADVERSE ENFLE-T-IL AVEC L'HORIZON ?
+==============================================================================
+  capture (demi-spread) 17.77 bps | frais aller-retour 3.0 bps
+
+  horizon   n_fills    adverse  IC 90 % adverse            net
+  10 s          696     +6.55  [ +4.77 ;  +8.08]      +8.22
+  30 s         1042     +5.99  [ +4.77 ;  +8.66]      +8.78
+  60 s         1054     +3.88  [ -0.29 ;  +7.76]     +10.89
+  120 s        1064     +6.01  [ +0.60 ; +10.91]      +8.76
+  300 s        1032    +20.30  [+16.27 ; +23.85]      -5.53
+  600 s         900     -4.18  [-14.70 ;  +9.48]     +18.95
+
+  LECTURE : si l'adverse GRANDIT avec l'horizon et depasse 14.8 bps
+  (= capture - frais), alors un maker qui porte son inventaire plus de 30 s PERD.
+  L'edge a 30 s serait alors un artefact d'horizon, pas un edge.

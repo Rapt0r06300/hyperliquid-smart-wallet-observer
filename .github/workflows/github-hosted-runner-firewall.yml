@@ -1,0 +1,20 @@
+name: github-hosted-runner-firewall
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+      - "tools/validate_github_hosted_workflows.py"
+permissions:
+  contents: read
+jobs:
+  firewall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Reject self-hosted runner targets
+        run: python tools/validate_github_hosted_workflows.py

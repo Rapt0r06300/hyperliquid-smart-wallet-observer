@@ -1,0 +1,61 @@
+{
+  "plugin": "RESIDUAL_MOMENTUM",
+  "quotes_par_coin": {
+    "ETH": 5039,
+    "LINK": 4647,
+    "AVAX": 4913,
+    "BTC": 5065,
+    "SOL": 5008,
+    "INJ": 3993,
+    "DASH": 2472,
+    "NEO": 1618,
+    "ONDO": 6,
+    "AAVE": 8
+  },
+  "variantes": {
+    "RESMOM_COURT": {
+      "decision": {
+        "decision": "KILL",
+        "n": 78,
+        "net_median_bps": -17.768,
+        "net_moyen_bps": -18.011,
+        "net_median_usd": -0.01777,
+        "pf": 0.351,
+        "dd_usd": -1.4611,
+        "ic_bas_bps": -23.349,
+        "median_moitie1_bps": -16.471,
+        "median_moitie2_bps": -20.124,
+        "median_sans_meilleur_bps": -17.928,
+        "placebo_median_bps": -8.437,
+        "bat_placebo": false
+      },
+      "placebo": {
+        "median_bps": -8.437,
+        "n": 7
+      },
+      "n_episodes": 78
+    },
+    "RESMOM_LONG": {
+      "decision": {
+        "decision": "KILL",
+        "n": 25,
+        "net_median_bps": -8.152,
+        "net_moyen_bps": -0.317,
+        "net_median_usd": -0.00815,
+        "pf": 0.991,
+        "dd_usd": -0.7599,
+        "ic_bas_bps": -52.838,
+        "median_moitie1_bps": 47.168,
+        "median_moitie2_bps": -35.98,
+        "median_sans_meilleur_bps": -16.194,
+        "placebo_median_bps": -34.849,
+        "bat_placebo": true
+      },
+      "placebo": {
+        "median_bps": -34.849,
+        "n": 3
+      },
+      "n_episodes": 25
+    }
+  }
+}

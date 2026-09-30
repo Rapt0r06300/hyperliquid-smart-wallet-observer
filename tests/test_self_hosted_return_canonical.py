@@ -1,0 +1,345 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+from hl_observer.backtesting.cross_venue_certified import FOUR_FILL_CONTRACT_VERSION, SOURCE_MODE
+from hl_observer.economics.assumptions import EconomicRunMode
+from hl_observer.economics.families import (
+    build_copy_vault_contract,
+    build_cross_venue_contract,
+    build_lead_lag_contract,
+)
+from hl_observer.ops import self_hosted_return
+from hl_observer.ops.final_economic_certification import certify_workspace
+from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
+
+
+FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
+
+
+def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookahead: bool = False) -> dict:
+    return {
+        "sample_count": 1,
+        "gross_pnl_usd": net + 0.4,
+        "fees_usd": 0.1,
+        "spread_cost_usd": 0.1,
+        "slippage_cost_usd": 0.1,
+        "latency_cost_usd": 0.1,
+        "net_pnl_usd": net,
+        "liquidatable_net": True,
+        "duplicate_trade_ids": 0,
+        "trade_ids_count": 1,
+        "trade_ids_sha256": hash_char * 64,
+        "post_freeze": post_freeze,
+        "no_lookahead": no_lookahead,
+    }
+
+
+def _economic_contract(family: str) -> dict:
+    if family == "copy_vault":
+        contract = build_copy_vault_contract(
+            mode=EconomicRunMode.CERTIFIABLE,
+            notional_usd=150.0,
+            copy_delay_ms=60_000.0,
+            max_reference_lag_ms=30_000.0,
+            max_target_lag_ms=30_000.0,
+        )
+    elif family == "lead_lag":
+        contract = build_lead_lag_contract(mode=EconomicRunMode.CERTIFIABLE)
+    else:
+        contract = build_cross_venue_contract(mode=EconomicRunMode.CERTIFIABLE)
+    receipt = contract.receipt()
+    assert receipt["certification"]["ready"] is True
+    return receipt
+
+
+def _campaign(family: str) -> dict:
+    economic_contract = _economic_contract(family)
+    row = {
+        "family": family,
+        "starting_capital_usd": 100.0,
+        "paper_read_only": True,
+        "real_execution": False,
+        "economic_contract": economic_contract,
+        "assumption_snapshot_hash": economic_contract["assumption_snapshot_hash"],
+        "parameters_frozen": True,
+        "parameter_freeze": {
+            "campaign_id": f"freeze-{family}",
+            "frozen_at_ms": 1_799_999_999_999,
+            "selected_before_final_evaluation": True,
+            "parameters_sha256": "e" * 64,
+            "path": f"runtime/reports/economic_campaigns/freezes/{family}/freeze.json",
+        },
+        "dataset_provenance": {"dataset_fingerprint": "d" * 64},
+        "opened_positions": 2,
+        "closed_positions": 2,
+        "gross_pnl_usd": 5.0,
+        "fees_usd": 0.1,
+        "spread_cost_usd": 0.1,
+        "slippage_cost_usd": 0.1,
+        "latency_cost_usd": 0.1,
+        "net_pnl_usd": 4.6,
+        "liquidatable_net": True,
+        "duplicate_trade_ids": 0,
+        "trade_ids_count": 2,
+        "trade_ids_sha256": "a" * 64,
+        "oos": _segment(net=2.1, hash_char="b", no_lookahead=True),
+        "forward": _segment(net=2.1, hash_char="c", post_freeze=True, no_lookahead=True),
+        "placebos": {"beaten": True},
+    }
+    if family == "copy_vault":
+        row["vault_generalization"] = {"sample_count": 20, "net_bps": 1.0}
+        row["copy_checkpoint_integrity"] = {
+            "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+            "receipt_valid": True,
+            "writer_role": "BOUND_WRITER",
+            "writer_run_id": "writer-fixture",
+            "clean_epoch_ms": 1,
+            "duplicate_checkpoint_ids": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "proof_trade_count": 2,
+            "expected_proof_trade_count": 2,
+            "all_proof_trades_exact_checkpoint_bound": True,
+            "all_proof_trades_same_writer_run": True,
+            "all_proof_trades_post_clean_epoch": True,
+        }
+    if family == "cross_venue_dislocation_v2":
+        row["all_positions_two_leg_closed"] = True
+        row["period"] = {
+            "collection_meta": {
+                "source_mode": SOURCE_MODE,
+                "certified_snapshots": 2,
+                "mapping_verified": True,
+                "skew_verified": True,
+                "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
+            }
+        }
+    freeze_manifest = build_freeze_manifest(
+        family=family,
+        freeze_candidate={"fixture": family},
+        dataset_fingerprint="d" * 64,
+        config={"fixture": True, "family": family},
+        frozen_at_ms=1_799_999_999_999,
+    )
+    row["vnext_promotion"] = {
+        "certification_status": "CERTIFICATION_READY",
+        "freeze_hash": freeze_manifest["freeze_hash"],
+        "freeze_manifest": freeze_manifest,
+        "observed_dataset_sha256": freeze_manifest["dataset_sha256"],
+        "observed_config_sha256": freeze_manifest["config_sha256"],
+        "consumed_freeze_hash": freeze_manifest["freeze_hash"],
+        "post_freeze_oos_consumed": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "frozen_at_ms": freeze_manifest["frozen_at_ms"],
+        "temporal_windows": {
+            "validation": {"start_ms": 1_800_000_000_000, "end_ms": 1_800_000_000_100},
+            "oos": {"start_ms": 1_800_000_000_100, "end_ms": 1_800_000_000_200},
+            "forward": {"start_ms": 1_800_000_000_200, "end_ms": 1_800_000_000_300},
+            "placebo": {"start_ms": 1_800_000_000_300, "end_ms": 1_800_000_000_400},
+        },
+        "costs_complete": True,
+        "liquidability_complete": True,
+        "provenance_complete": True,
+        "positions_flat": True,
+        "economic_reconciliation_ok": True,
+        "validation_without_recalibration": True,
+        "temporal_disjointness_ok": True,
+        "forward_post_freeze_complete": True,
+        "placebo_complete": True,
+    }
+    row.update(evaluate_objective(row))
+    assert row["objective_status"] == "ATTEINT"
+    return row
+
+
+def _trade(family: str, *, segment: str, entry_ms: int, exit_ms: int, native_id: str) -> dict:
+    source_lineage_id = f"ETH|1|{entry_ms}|{exit_ms}"
+    if family == "lead_lag":
+        return {
+            "trade_id": native_id,
+            "source_lineage_id": source_lineage_id,
+            "coin": "ETH",
+            "direction": "LONG",
+            "entry_ts_ns": entry_ms * 1_000_000,
+            "exit_ts_ns": exit_ms * 1_000_000,
+            "walk_forward_segment": segment,
+        }
+    if family == "cross_venue_dislocation_v2":
+        return {
+            "trade_id": native_id,
+            "source_lineage_id": source_lineage_id,
+            "coin": "ETH",
+            "basis_in_bps": 10.0,
+            "ts_in": float(entry_ms),
+            "ts_out": float(exit_ms),
+            "walk_forward_segment": segment,
+        }
+    return {
+        "trade_id": native_id,
+        "source_lineage_id": source_lineage_id,
+        "coin": "ETH",
+        "direction": 1,
+        "entry_ts_ms": entry_ms,
+        "exit_ts_ms": exit_ms,
+        "walk_forward_segment": segment,
+    }
+
+
+def _write_workspace(root: Path, *, weak_family: str | None = None) -> None:
+    campaign_dir = root / "runtime" / "reports" / "economic_campaigns"
+    raw_dir = campaign_dir / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    starts = {
+        "copy_vault": 1_800_000_000_000,
+        "lead_lag": 1_800_000_010_000,
+        "cross_venue_dislocation_v2": 1_800_000_020_000,
+    }
+    for family in FAMILIES:
+        campaign = _campaign(family)
+        if family == weak_family:
+            campaign["forward"]["net_pnl_usd"] = -1.0
+            campaign.update(evaluate_objective(campaign))
+        (campaign_dir / f"{family}.json").write_text(json.dumps(campaign), encoding="utf-8")
+        start = starts[family]
+        trades = [
+            _trade(family, segment="oos", entry_ms=start, exit_ms=start + 100, native_id=f"{family}-oos"),
+            _trade(family, segment="forward", entry_ms=start + 1_000, exit_ms=start + 1_100, native_id=f"{family}-forward"),
+        ]
+        payload = {"trades": trades}
+        if family == "lead_lag":
+            payload = {"executable_campaign": {"trades": trades}}
+        (raw_dir / f"{family}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _write_job_result(
+    result_dir: Path,
+    workspace: Path,
+    *,
+    project_sha: str,
+    analysis_complete: bool = True,
+    completion_recorded: bool = True,
+) -> None:
+    result_dir.mkdir(parents=True, exist_ok=True)
+    (result_dir / "JOB_RESULT.json").write_text(
+        json.dumps(
+            {
+                "schema": "alina.autonomous_research_result.v1",
+                "job_id": "canonical-return-test",
+                "status": "SUCCESS",
+                "suite": "economic-full",
+                "mode": "economic",
+                "request_digest": "f" * 64,
+                "project_sha": project_sha,
+                "workspace": str(workspace),
+                "exit_code": 0,
+                "paper_only": True,
+                "real_execution": False,
+                "start_live_collection": False,
+                "analysis_complete": analysis_complete,
+                "completion_recorded": completion_recorded,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _contains_forbidden_raw_key(value: object) -> bool:
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if str(key) in {"trades", "raw_payload", "fills", "dataset_rows"}:
+                return True
+            if _contains_forbidden_raw_key(child):
+                return True
+    elif isinstance(value, list):
+        return any(_contains_forbidden_raw_key(item) for item in value)
+    return False
+
+
+def test_alina_return_est_strictement_derive_de_la_certification_canonique(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    result_dir = tmp_path / "result"
+    _write_workspace(workspace)
+    project_sha = "1" * 40
+    _write_job_result(result_dir, workspace, project_sha=project_sha)
+    monkeypatch.setattr(self_hosted_return, "build_decision", lambda _root: {})
+
+    canonical = certify_workspace(workspace)
+    returned = self_hosted_return.build_return(result_dir)
+
+    assert returned["technical_status"] == "SUCCESS"
+    assert returned["completion_ready"] is True
+    assert returned["project_sha"] == project_sha
+    assert returned["economic_certification"] == canonical
+    assert returned["economic_certification"]["all_families_certified"] is True
+    for family in FAMILIES:
+        certification = returned["economic_certification"]["families"][family]
+        assert certification == canonical["families"][family]
+        assert certification["proof_provenance"]["dataset_fingerprint"] == "d" * 64
+        assert certification["proof_provenance"]["parameters_sha256"] == "e" * 64
+        assert certification["proof_provenance"]["campaign_id"] == f"freeze-{family}"
+        assert certification["proof_provenance"]["complete"] is True
+    assert returned["paper_only"] is True
+    assert returned["real_execution"] is False
+    assert _contains_forbidden_raw_key(returned) is False
+
+
+def test_alina_return_refuse_toute_certification_avant_completion_guard(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    result_dir = tmp_path / "result"
+    _write_workspace(workspace)
+    _write_job_result(
+        result_dir,
+        workspace,
+        project_sha="3" * 40,
+        analysis_complete=False,
+        completion_recorded=False,
+    )
+    monkeypatch.setattr(
+        self_hosted_return,
+        "certify_workspace",
+        lambda _root: (_ for _ in ()).throw(AssertionError("certification called before completion")),
+    )
+    monkeypatch.setattr(
+        self_hosted_return,
+        "build_decision",
+        lambda _root: (_ for _ in ()).throw(AssertionError("brain called before completion")),
+    )
+
+    returned = self_hosted_return.build_return(result_dir)
+
+    assert returned["technical_status"] == "SUCCESS"
+    assert returned["completion_ready"] is False
+    assert returned["economic_certification"] is None
+    assert returned["brain_decision"] is None
+    assert returned["paper_only"] is True
+    assert returned["real_execution"] is False
+    assert returned["message_fr"].startswith("Retour compact prêt")
+
+
+def test_alina_return_ne_surclasse_jamais_un_more_data_ou_kill(
+    tmp_path: Path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    result_dir = tmp_path / "result"
+    _write_workspace(workspace, weak_family="lead_lag")
+    _write_job_result(result_dir, workspace, project_sha="2" * 40)
+    monkeypatch.setattr(self_hosted_return, "build_decision", lambda _root: {})
+
+    canonical = certify_workspace(workspace)
+    returned = self_hosted_return.build_return(result_dir)
+
+    assert canonical["all_families_certified"] is False
+    assert returned["completion_ready"] is True
+    assert returned["economic_certification"] == canonical
+    assert returned["economic_certification"]["all_families_certified"] is False
+    assert returned["economic_certification"]["families"]["lead_lag"]["certified"] is False
+    assert returned["message_fr"].startswith("Retour compact prêt")
+    assert _contains_forbidden_raw_key(returned) is False

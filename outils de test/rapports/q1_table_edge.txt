@@ -1,0 +1,53 @@
+=== [1/2] Construction + validation hors-echantillon ===
+==============================================================================
+ Q1 -- TABLE D'EDGE MESUREE (horizon 60 s, min n=30)
+==============================================================================
+
+  signaux lus            :  273459
+  ecartes coin='' (bug)  :   34556   <- runs d'avant le 11/07, INUTILISABLES
+  ecartes sans mid       :       0
+  ecartes sens illisible :       0
+  ecartes sans futur     :  215545   <- aucun mark a T+60s (on n'extrapole PAS)
+  >>> OBSERVATIONS       :   23358
+
+  coupe CHRONOLOGIQUE : train=16350  test=7008 (le test est STRICTEMENT posterieur)
+  cellules construites : 300  (construite_jusqu_a_ms=1783646429471)
+
+------------------------------------------------------------------------------
+ VALIDATION HORS-ECHANTILLON -- quand la table dit OUI, que fait le prix ?
+------------------------------------------------------------------------------
+
+  signaux de test               :   7008
+  refuses faute de donnees      :    419  (bucket vide -> NO_TRADE, c'est VOULU)
+  la table aurait dit OUI       :     44
+  la table aurait dit NON       :   6545
+
+  >>> LES 'OUI' : markout REEL moyen =   +3.97 bps  |  net apres 12 bps de couts =   -8.03 bps
+      winrate net : 50.0 % (22/44)
+  >>> LES 'NON' : markout REEL moyen =   -0.98 bps  (net  -12.98)
+
+------------------------------------------------------------------------------
+ VERDICT
+------------------------------------------------------------------------------
+  La table dit OUI sur 44 signaux... et le prix fait -8.03 bps net.
+  L'edge est un MIRAGE D'ENTRAINEMENT : il ne survit pas hors echantillon.
+  C'est exactement ce que la borne basse + le split devaient attraper.
+
+------------------------------------------------------------------------------
+ PURGE DES ALPHAS FANTOMES -- on ne livre que ce qui SURVIT au hors-echantillon
+------------------------------------------------------------------------------
+
+  cellules d'entrainement       :    300
+  cellules CONFIRMEES sur test  :     57
+  ... dont a edge NET positif   :      0
+
+  AUCUNE cellule ne survit avec un edge net positif.
+  La table livree AUTORISERA donc... rien. C'est le resultat, pas une panne.
+
+  table LIVREE (purgee) : data\reports\table_edge_mesuree.json
+  table d'entrainement  : data/reports/table_edge_entrainement.json  (AUDIT SEULEMENT)
+  rapport               : data\reports\table_edge_mesuree.txt
+
+=== [2/2] Les tests de Q1 ===
+...........................                                              [100%]
+27 passed in 0.51s

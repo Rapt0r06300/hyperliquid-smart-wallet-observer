@@ -1,0 +1,120 @@
+{
+  "generated_at_utc": "2026-09-30T12:33:46.636725Z",
+  "github_run_id": "36715447737",
+  "github_sha": "9b0f1d044bbb42e483e9bb9a144c172bda7cfc29",
+  "native_heartbeat_present": true,
+  "native_records_written": 767,
+  "paper_read_only": true,
+  "real_execution": false,
+  "receipt_digest": "3677d124c94c0938590a555d6b6e7f3e2d737b942c82b7119ee0db70c0d34931",
+  "runner_kind": "github-hosted",
+  "schema_version": "alina.source_capability_runtime.v1",
+  "venues": {
+    "binance": {
+      "capability_runtime": {
+        "bbo": "DEGRADED",
+        "clock_sync": "DEGRADED",
+        "l2": "DEGRADED",
+        "official_archive": "DEGRADED",
+        "recovery": "DEGRADED",
+        "replay_adapter": "DEGRADED",
+        "sequence_integrity": "DEGRADED",
+        "trades": "DEGRADED",
+        "venue_status": "DEGRADED"
+      },
+      "network_observed": false,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "BINANCE_UNAVAILABLE:HTTPError",
+      "runtime_status": "DEGRADED"
+    },
+    "bitget": {
+      "capability_runtime": {
+        "bbo": "HEALTHY",
+        "clock_sync": "HEALTHY",
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
+      },
+      "last_event_ms": 1790771621644,
+      "network_observed": true,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1790771621644",
+      "runtime_status": "HEALTHY"
+    },
+    "bybit": {
+      "capability_runtime": {
+        "bbo": "DEGRADED",
+        "clock_sync": "DEGRADED",
+        "l2": "DEGRADED",
+        "official_archive": "DEGRADED",
+        "recovery": "DEGRADED",
+        "replay_adapter": "DEGRADED",
+        "sequence_integrity": "DEGRADED",
+        "trades": "DEGRADED",
+        "venue_status": "DEGRADED"
+      },
+      "last_event_ms": 0,
+      "network_observed": false,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+      "runtime_status": "DEGRADED"
+    },
+    "gate": {
+      "capability_runtime": {
+        "bbo": "HEALTHY",
+        "clock_sync": "HEALTHY",
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
+      },
+      "last_event_ms": 1790771618976,
+      "network_observed": true,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1790771618976",
+      "runtime_status": "HEALTHY"
+    },
+    "hyperliquid": {
+      "capability_runtime": {
+        "bbo": "HEALTHY",
+        "clock_sync": "HEALTHY",
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
+      },
+      "network_observed": true,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "HYPERLIQUID_META_OK:234",
+      "runtime_status": "HEALTHY"
+    },
+    "okx": {
+      "capability_runtime": {
+        "bbo": "HEALTHY",
+        "clock_sync": "HEALTHY",
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
+      },
+      "last_event_ms": 1790771625300,
+      "network_observed": true,
+      "observed_at_utc": "2026-09-30T12:33:46.636725Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1790771625300",
+      "runtime_status": "HEALTHY"
+    }
+  }
+}

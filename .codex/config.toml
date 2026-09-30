@@ -1,0 +1,28 @@
+# Alina SmartFlow — configuration Codex de projet.
+# But: maximiser le progrès quantitatif par unité de quota Plus.
+# Modèle recommandé dans l'UI : GPT-5.6 Sol, raisonnement High/Élevé, vitesse Standard.
+
+model_reasoning_effort = "high"
+# Si l'utilisateur ouvre explicitement Plan mode pour une refonte difficile,
+# réserver le niveau maximal de réflexion à cette phase rare.
+plan_mode_reasoning_effort = "xhigh"
+model_verbosity = "low"
+
+# Evite qu'un énorme log pytest/backtest pollue durablement tout le contexte.
+# Le détail complet reste sur disque et Codex peut relire uniquement la tranche utile.
+tool_output_token_limit = 8000
+
+# AGENTS.md est volontairement compact ; ne pas injecter des dizaines de KiB de guides historiques.
+project_doc_max_bytes = 12000
+
+[features]
+# Un Goal long sur Plus doit utiliser un agent principal unique.
+multi_agent = false
+# Fast consomme davantage d'allocation ; l'endurance prime.
+fast_mode = false
+# Les campagnes CPU locales peuvent durer longtemps : éviter la mise en veille pendant leur exécution.
+prevent_idle_sleep = true
+
+[agents]
+# Verrou supplémentaire : aucun sous-agent/spawn/fan-out.
+enabled = false

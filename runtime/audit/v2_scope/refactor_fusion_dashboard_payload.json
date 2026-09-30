@@ -1,0 +1,1031 @@
+{
+  "generated_at": "2026-07-29T21:34:40.713886+00:00",
+  "pnl_snapshot": {
+    "net_pnl_usdc": 0.0,
+    "snapshot_net_pnl_usdc": 0.0,
+    "snapshot_current_equity_usdt": 1000.0,
+    "snapshot_status": "ok"
+  },
+  "loss_attribution": {
+    "coins": [],
+    "wallets": [],
+    "actions": [],
+    "reasons": []
+  },
+  "wallet_copy_candidates": [
+    {
+      "accepted": true,
+      "candidate": {
+        "candidate_id": "mirror:4991f34a3eaf34b72c6e29ea743056ac",
+        "leader_wallet": "0x1111111111111111111111111111111111111111",
+        "coin": "HYPE",
+        "leader_action": "OPEN_LONG",
+        "side": "LONG",
+        "leader_size": 15.0,
+        "leader_price": 100.0,
+        "leader_time": 1785360880443,
+        "observed_time": 1785360880693,
+        "copy_ratio": 0.05,
+        "wallet_score": 0.97984277,
+        "copyability_score": 0.93,
+        "slippage_budget_bps": 18.0,
+        "source_fill_refs": [
+          "fixture_fill_001"
+        ],
+        "confidence": 0.96,
+        "reason_codes": [],
+        "paper_only": true,
+        "external_action": false
+      },
+      "tier": {
+        "name": "S",
+        "min_score": 0.9,
+        "copy_ratio_multiplier": 1.35,
+        "max_margin_usdt": 75.0,
+        "slippage_budget_bps": 16.0
+      },
+      "rank_decay": {
+        "base_score": 0.98,
+        "rank": 1,
+        "age_ms": 5000,
+        "decay_factor": 0.99983956,
+        "decayed_score": 0.97984277,
+        "reason": "OK"
+      },
+      "sizing": {
+        "accepted": true,
+        "margin_usdt": 67.5,
+        "leader_notional_usdt": 100000.0,
+        "ratio_used": 0.000675,
+        "cap_usdt": 75.0,
+        "reason": "OK"
+      },
+      "slippage_budget": {
+        "accepted": true,
+        "requested_budget_bps": 18.0,
+        "tier_budget_bps": 16.0,
+        "total_degradation_bps": 3.8,
+        "reason_codes": []
+      },
+      "edge_estimate": {
+        "measurable": true,
+        "accepted": true,
+        "gross_edge_bps": 72.0,
+        "total_cost_bps": 9.6,
+        "net_edge_bps": 62.4,
+        "threshold_bps": 18.0,
+        "reason_codes": [],
+        "cost_breakdown_bps": {
+          "spread_bps": 1.2,
+          "slippage_bps": 1.8,
+          "fee_bps": 2.0,
+          "latency_penalty_bps": 0.8,
+          "copy_degradation_bps": 3.8,
+          "liquidity_penalty_bps": 0.0,
+          "volatility_penalty_bps": 0.0,
+          "adverse_selection_penalty_bps": 0.0,
+          "crowding_penalty_bps": 0.0,
+          "funding_estimate_bps": 0.0
+        },
+        "edge_fabrique": false,
+        "edge_source_raison": "EDGE_FOURNI_PAR_L_APPELANT"
+      },
+      "entry_cost_guard": {
+        "accepted": true,
+        "reason_codes": [],
+        "required_min_notional_usdt": 25.0,
+        "required_min_edge_bps": 0.0,
+        "observed_notional_usdt": 67.5,
+        "observed_edge_bps": 62.4,
+        "evidence": {
+          "fee_drag_ratio": 0.0,
+          "fee_drag_active": false,
+          "consecutive_losses": 0.0,
+          "worst_coin_pnl_usdc": null,
+          "worst_wallet_pnl_usdc": null,
+          "net_pnl_usdc": 0.0
+        },
+        "paper_only": true,
+        "real_execution": false
+      },
+      "risk_decision": {
+        "allow_new_entries": true,
+        "protection_mode": false,
+        "blocking_codes": [],
+        "gates": [
+          {
+            "code": "SESSION_LOSS_HALT",
+            "severity": "CRITICAL",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "net_pnl_usdc=0.000000 > -5.000000",
+            "next_action": "Pause new paper entries, keep marking open paper positions to market, inspect loss attribution."
+          },
+          {
+            "code": "LOSS_STREAK_HALT",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "consecutive_losses=0 threshold=3",
+            "next_action": "Apply cooldown on the losing coin/wallet and reduce size before any future paper entry."
+          },
+          {
+            "code": "FEE_DRAG_TOO_HIGH",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "fee_drag_ratio=0.000000 threshold=0.350000",
+            "next_action": "Raise minimum notional/edge and reject micro trades whose expected edge cannot cover fees."
+          },
+          {
+            "code": "STALE_SIGNALS_DOMINATE",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "stale_signal_ratio=0.000000 threshold=0.400000",
+            "next_action": "Prioritize WebSocket/public flow freshness and reject delayed copy candidates."
+          },
+          {
+            "code": "EDGE_MODEL_UNRELIABLE",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "edge_bad_ratio=0.000000 threshold=0.350000",
+            "next_action": "Keep NO_TRADE until edge-after-cost is measurable and positive on fresh data."
+          },
+          {
+            "code": "POSITION_MATCHING_UNSTABLE",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "orphan_close_ratio=0.000000 threshold=0.100000",
+            "next_action": "Repair lifecycle matching before allowing reduce/close-driven paper PnL changes."
+          },
+          {
+            "code": "WINRATE_TOO_LOW",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": false,
+            "detail": "winrate=1.000000 threshold=0.420000",
+            "next_action": "Make sizing smaller and require stronger consensus/edge on the next run."
+          },
+          {
+            "code": "PROFIT_FACTOR_TOO_LOW",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": false,
+            "detail": "profit_factor_net=1.250000 threshold=0.900000",
+            "next_action": "Run strategy tournament and quarantine configs that lose on validation/holdout."
+          },
+          {
+            "code": "STRATEGY_TOURNAMENT_PROTECTION",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "best robust strategy is no_trade_baseline",
+            "next_action": "Do not enter new paper positions until a strategy beats no-trade on validation without lookahead."
+          }
+        ],
+        "paper_only": true,
+        "real_execution": false
+      },
+      "paper_intent": {
+        "strategy_id": "wallet_mirror_copy_follow",
+        "coin": "HYPE",
+        "side": "LONG",
+        "action": "OPEN",
+        "target_notional_usdt": 67.5,
+        "confidence": 0.96,
+        "context": "LIVE",
+        "reasons": [
+          "leader_wallet=0x1111111111111111111111111111111111111111",
+          "leader_action=OPEN_LONG",
+          "copy_ratio=0.05000000",
+          "wallet_score=0.9798",
+          "copyability_score=0.9300",
+          "candidate_id=mirror:4991f34a3eaf34b72c6e29ea743056ac",
+          "strategy_kind=COPY_FOLLOW"
+        ],
+        "created_at_ms": 1785360880693,
+        "simulation_only": true,
+        "requires_risk_approval": true
+      },
+      "no_trade_reasons": [],
+      "journal_record": {
+        "event_type": "wallet_mirror_decision",
+        "candidate_id": "mirror:4991f34a3eaf34b72c6e29ea743056ac",
+        "leader_wallet": "0x1111111111111111111111111111111111111111",
+        "coin": "HYPE",
+        "decision": "ACCEPT_PAPER",
+        "reasons": [],
+        "payload": {
+          "candidate": {
+            "candidate_id": "mirror:4991f34a3eaf34b72c6e29ea743056ac",
+            "leader_wallet": "0x1111111111111111111111111111111111111111",
+            "coin": "HYPE",
+            "leader_action": "OPEN_LONG",
+            "side": "LONG",
+            "leader_size": 15.0,
+            "leader_price": 100.0,
+            "leader_time": 1785360880443,
+            "observed_time": 1785360880693,
+            "copy_ratio": 0.05,
+            "wallet_score": 0.97984277,
+            "copyability_score": 0.93,
+            "slippage_budget_bps": 18.0,
+            "source_fill_refs": [
+              "fixture_fill_001"
+            ],
+            "confidence": 0.96,
+            "reason_codes": [],
+            "paper_only": true,
+            "external_action": false
+          },
+          "tier": {
+            "name": "S",
+            "min_score": 0.9,
+            "copy_ratio_multiplier": 1.35,
+            "max_margin_usdt": 75.0,
+            "slippage_budget_bps": 16.0
+          },
+          "rank_decay": {
+            "base_score": 0.98,
+            "rank": 1,
+            "age_ms": 5000,
+            "decay_factor": 0.99983956,
+            "decayed_score": 0.97984277,
+            "reason": "OK"
+          },
+          "sizing": {
+            "accepted": true,
+            "margin_usdt": 67.5,
+            "leader_notional_usdt": 100000.0,
+            "ratio_used": 0.000675,
+            "cap_usdt": 75.0,
+            "reason": "OK"
+          },
+          "edge_net_bps": 62.4,
+          "edge_brut_bps": 72.0,
+          "edge_fabrique": false,
+          "edge_source_raison": "EDGE_FOURNI_PAR_L_APPELANT",
+          "entry_cost_guard": {
+            "accepted": true,
+            "reason_codes": [],
+            "required_min_notional_usdt": 25.0,
+            "required_min_edge_bps": 0.0,
+            "observed_notional_usdt": 67.5,
+            "observed_edge_bps": 62.4,
+            "evidence": {
+              "fee_drag_ratio": 0.0,
+              "fee_drag_active": false,
+              "consecutive_losses": 0.0,
+              "worst_coin_pnl_usdc": null,
+              "worst_wallet_pnl_usdc": null,
+              "net_pnl_usdc": 0.0
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "risk": {
+            "allow_new_entries": true,
+            "protection_mode": false,
+            "blocking_codes": [],
+            "gates": [
+              {
+                "code": "SESSION_LOSS_HALT",
+                "severity": "CRITICAL",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "net_pnl_usdc=0.000000 > -5.000000",
+                "next_action": "Pause new paper entries, keep marking open paper positions to market, inspect loss attribution."
+              },
+              {
+                "code": "LOSS_STREAK_HALT",
+                "severity": "HIGH",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "consecutive_losses=0 threshold=3",
+                "next_action": "Apply cooldown on the losing coin/wallet and reduce size before any future paper entry."
+              },
+              {
+                "code": "FEE_DRAG_TOO_HIGH",
+                "severity": "HIGH",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "fee_drag_ratio=0.000000 threshold=0.350000",
+                "next_action": "Raise minimum notional/edge and reject micro trades whose expected edge cannot cover fees."
+              },
+              {
+                "code": "STALE_SIGNALS_DOMINATE",
+                "severity": "HIGH",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "stale_signal_ratio=0.000000 threshold=0.400000",
+                "next_action": "Prioritize WebSocket/public flow freshness and reject delayed copy candidates."
+              },
+              {
+                "code": "EDGE_MODEL_UNRELIABLE",
+                "severity": "HIGH",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "edge_bad_ratio=0.000000 threshold=0.350000",
+                "next_action": "Keep NO_TRADE until edge-after-cost is measurable and positive on fresh data."
+              },
+              {
+                "code": "POSITION_MATCHING_UNSTABLE",
+                "severity": "MEDIUM",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "orphan_close_ratio=0.000000 threshold=0.100000",
+                "next_action": "Repair lifecycle matching before allowing reduce/close-driven paper PnL changes."
+              },
+              {
+                "code": "WINRATE_TOO_LOW",
+                "severity": "MEDIUM",
+                "triggered": false,
+                "blocks_new_entries": false,
+                "detail": "winrate=1.000000 threshold=0.420000",
+                "next_action": "Make sizing smaller and require stronger consensus/edge on the next run."
+              },
+              {
+                "code": "PROFIT_FACTOR_TOO_LOW",
+                "severity": "MEDIUM",
+                "triggered": false,
+                "blocks_new_entries": false,
+                "detail": "profit_factor_net=1.250000 threshold=0.900000",
+                "next_action": "Run strategy tournament and quarantine configs that lose on validation/holdout."
+              },
+              {
+                "code": "STRATEGY_TOURNAMENT_PROTECTION",
+                "severity": "HIGH",
+                "triggered": false,
+                "blocks_new_entries": true,
+                "detail": "best robust strategy is no_trade_baseline",
+                "next_action": "Do not enter new paper positions until a strategy beats no-trade on validation without lookahead."
+              }
+            ],
+            "paper_only": true,
+            "real_execution": false
+          }
+        },
+        "paper_only": true,
+        "real_execution": false
+      },
+      "paper_only": true,
+      "real_execution": false
+    }
+  ],
+  "arbitrage_opportunities": [
+    {
+      "decision": "ACCEPT_PAPER_ARBITRAGE",
+      "spread": {
+        "accepted": true,
+        "coin": "HYPE",
+        "long_source": "hyperliquid_fixture",
+        "short_source": "cex_fixture",
+        "long_price": 100.0,
+        "short_price": 101.4,
+        "gross_spread_bps": 140.0,
+        "total_cost_bps": 12.0,
+        "net_edge_bps": 128.0,
+        "reason_codes": [],
+        "paper_only": true,
+        "real_execution": false
+      },
+      "paper_opportunity": {
+        "accepted": true,
+        "coin": "HYPE",
+        "long_source": "hyperliquid_fixture",
+        "short_source": "cex_fixture",
+        "gross_spread_bps": 140.0,
+        "total_cost_bps": 10.0,
+        "net_edge_bps": 130.0,
+        "reason_codes": [],
+        "paper_only": true,
+        "external_action": false
+      },
+      "risk_decision": {
+        "allow_new_entries": true,
+        "protection_mode": false,
+        "blocking_codes": [],
+        "gates": [
+          {
+            "code": "SESSION_LOSS_HALT",
+            "severity": "CRITICAL",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "net_pnl_usdc=0.000000 > -5.000000",
+            "next_action": "Pause new paper entries, keep marking open paper positions to market, inspect loss attribution."
+          },
+          {
+            "code": "LOSS_STREAK_HALT",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "consecutive_losses=0 threshold=3",
+            "next_action": "Apply cooldown on the losing coin/wallet and reduce size before any future paper entry."
+          },
+          {
+            "code": "FEE_DRAG_TOO_HIGH",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "fee_drag_ratio=0.000000 threshold=0.350000",
+            "next_action": "Raise minimum notional/edge and reject micro trades whose expected edge cannot cover fees."
+          },
+          {
+            "code": "STALE_SIGNALS_DOMINATE",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "stale_signal_ratio=0.000000 threshold=0.400000",
+            "next_action": "Prioritize WebSocket/public flow freshness and reject delayed copy candidates."
+          },
+          {
+            "code": "EDGE_MODEL_UNRELIABLE",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "edge_bad_ratio=0.000000 threshold=0.350000",
+            "next_action": "Keep NO_TRADE until edge-after-cost is measurable and positive on fresh data."
+          },
+          {
+            "code": "POSITION_MATCHING_UNSTABLE",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "orphan_close_ratio=0.000000 threshold=0.100000",
+            "next_action": "Repair lifecycle matching before allowing reduce/close-driven paper PnL changes."
+          },
+          {
+            "code": "WINRATE_TOO_LOW",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": false,
+            "detail": "winrate=1.000000 threshold=0.420000",
+            "next_action": "Make sizing smaller and require stronger consensus/edge on the next run."
+          },
+          {
+            "code": "PROFIT_FACTOR_TOO_LOW",
+            "severity": "MEDIUM",
+            "triggered": false,
+            "blocks_new_entries": false,
+            "detail": "profit_factor_net=1.100000 threshold=0.900000",
+            "next_action": "Run strategy tournament and quarantine configs that lose on validation/holdout."
+          },
+          {
+            "code": "STRATEGY_TOURNAMENT_PROTECTION",
+            "severity": "HIGH",
+            "triggered": false,
+            "blocks_new_entries": true,
+            "detail": "best robust strategy is no_trade_baseline",
+            "next_action": "Do not enter new paper positions until a strategy beats no-trade on validation without lookahead."
+          }
+        ],
+        "paper_only": true,
+        "real_execution": false
+      },
+      "funding_adjusted_edge_bps": 128.0,
+      "reason_codes": [],
+      "paper_only": true,
+      "real_execution": false
+    }
+  ],
+  "funding_signals": [
+    {
+      "source": "fixture:funding_placeholder",
+      "status": "NO_TRADE",
+      "reason": "FUNDING_LIVE_SOURCE_NOT_PROVIDED_IN_THIS_RUN",
+      "paper_only": true,
+      "real_execution": false
+    }
+  ],
+  "risk_blocks": [],
+  "no_trade_reasons": [],
+  "paper_intents": [
+    {
+      "strategy_id": "wallet_mirror_copy_follow",
+      "coin": "HYPE",
+      "side": "LONG",
+      "action": "OPEN",
+      "target_notional_usdt": 67.5,
+      "confidence": 0.96,
+      "context": "LIVE",
+      "reasons": [
+        "leader_wallet=0x1111111111111111111111111111111111111111",
+        "leader_action=OPEN_LONG",
+        "copy_ratio=0.05000000",
+        "wallet_score=0.9798",
+        "copyability_score=0.9300",
+        "candidate_id=mirror:4991f34a3eaf34b72c6e29ea743056ac",
+        "strategy_kind=COPY_FOLLOW"
+      ],
+      "created_at_ms": 1785360880693,
+      "simulation_only": true,
+      "requires_risk_approval": true
+    }
+  ],
+  "source_labels": [
+    "logs:logs\\logs à envoyer",
+    "fixture:refactor_fusion_wallet_copy_e2e",
+    "fixture:refactor_fusion_arbitrage_e2e",
+    "fixture:fusion_runtime"
+  ],
+  "safety_status": {
+    "paper_only": true,
+    "real_execution": false,
+    "external_order": false,
+    "signature": false,
+    "private_key": false
+  },
+  "extra_panels": {
+    "fusion_runtime": {
+      "session": {
+        "session_id": "fixture:fusion_runtime",
+        "status": "RUNNING",
+        "watchlist": [
+          "0x1111111111111111111111111111111111111111",
+          "0x2222222222222222222222222222222222222222",
+          "0x3333333333333333333333333333333333333333"
+        ],
+        "copy_ratio": 0.05,
+        "paper_only": true,
+        "real_execution": false
+      },
+      "conflict": {
+        "coin": "HYPE",
+        "decision": "FOLLOW",
+        "winning_side": "LONG",
+        "long_score": 3.5,
+        "short_score": 0.2,
+        "reasons": []
+      },
+      "latency": {
+        "count": 4,
+        "min_ms": 250,
+        "p50_ms": 2450,
+        "max_ms": 6200,
+        "stale_count": 1
+      },
+      "drawdown": {
+        "triggered": false,
+        "drawdown_pct": 0.15,
+        "reason": "OK"
+      },
+      "price_discrepancies": [
+        {
+          "coin": "HYPE",
+          "source_a": "cex_fixture",
+          "source_b": "hyperliquid_fixture",
+          "spread_bps": 99.45300845,
+          "decision": "PAPER_DISCREPANCY",
+          "edge_executable_bps": 89.50770761,
+          "source_achat": "hyperliquid_fixture",
+          "source_vente": "cex_fixture",
+          "prix_achat": 100.1,
+          "prix_vente": 101.0,
+          "surestimation_du_mid_bps": 9.94530085,
+          "executable": true
+        }
+      ],
+      "funding_signals": [
+        {
+          "coin": "HYPE",
+          "decision": "FUNDING_SPIKE",
+          "z_score": 2.0,
+          "reason": "FUNDING_SPIKE"
+        }
+      ],
+      "triangular_opportunities": [
+        {
+          "path": [
+            "BTC",
+            "USDC",
+            "HYPE"
+          ],
+          "gross_edge_bps": 150.0,
+          "cost_bps": 22.5,
+          "net_edge_bps": 127.5,
+          "accepted": true,
+          "reason": null
+        },
+        {
+          "path": [
+            "BTC",
+            "HYPE",
+            "USDC"
+          ],
+          "gross_edge_bps": -147.78325123,
+          "cost_bps": 22.5,
+          "net_edge_bps": -170.28325123,
+          "accepted": false,
+          "reason": "TRIANGULAR_EDGE_TOO_LOW"
+        }
+      ],
+      "maker_quotes": [
+        {
+          "coin": "HYPE",
+          "bid": 99.98997,
+          "ask": 100.11003,
+          "size_usdt": 20.0,
+          "paper_only": true
+        },
+        {
+          "coin": "BTC",
+          "bid": 99944.997,
+          "ask": 100065.003,
+          "size_usdt": 20.0,
+          "paper_only": true
+        }
+      ],
+      "delta_neutral_positions": [],
+      "funding_payments": [],
+      "paper_orders": [
+        {
+          "accepted": true,
+          "order_id": "paper:7b2e52906d5199018d2d90b8",
+          "reason": "ACCEPT_PAPER_ORDER",
+          "coin": "HYPE",
+          "side": "LONG",
+          "notional_usdt": 10.0,
+          "action": "OPEN",
+          "order_type": "PAPER_ARBITRAGE_SIGNAL",
+          "strategy_id": "ext_jack_hl_arbitrage_spread",
+          "reference_price": 100.05,
+          "metadata": {
+            "source": "price_discrepancy",
+            "source_a": "cex_fixture",
+            "source_b": "hyperliquid_fixture",
+            "spread_bps": 99.45300845,
+            "profile_family": "cross_exchange_arbitrage",
+            "paper_only": true
+          },
+          "paper_only": true,
+          "real_execution": false
+        }
+      ],
+      "paper_order_strategy_ids": [
+        "ext_jack_hl_arbitrage_spread"
+      ],
+      "paper_engine": {
+        "accepted_count": 0,
+        "refusal_reasons": [
+          "EDGE_NOT_EMPIRICAL_NO_TRADE"
+        ],
+        "equity_usdt": 998.5,
+        "drawdown_usdt": 0.0,
+        "decisions": [],
+        "paper_only": true,
+        "real_execution": false
+      },
+      "distilled_opportunity_report": {
+        "evaluated_candidates": 0,
+        "opportunities": [],
+        "rejected_reasons": {},
+        "message": "distilled GitHub ideas; research-only paper opportunity ranking"
+      },
+      "no_trade_reasons": [
+        "COPY_FOLLOW_BLOCKED_BY_EMPIRICAL_EDGE_GATE",
+        "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY",
+        "STRATEGY_SCOPE_BLOCKED_TRIANGULAR_ARBITRAGE",
+        "STRATEGY_SCOPE_BLOCKED_MARKET_MAKING",
+        "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY",
+        "STRATEGY_SCOPE_BLOCKED_EXTERNAL_GITHUB_PROFILES",
+        "EDGE_NOT_EMPIRICAL_NO_TRADE"
+      ],
+      "strategy_scope": {
+        "scope_version": "V2-20260729",
+        "active_families": [
+          "copy_vault",
+          "cross_venue_dislocation",
+          "lead_lag"
+        ],
+        "entries": [
+          {
+            "family": "cross_venue_dislocation",
+            "status": "ACTIVE",
+            "materializes_paper_economics": true,
+            "reason": "Executable cross-venue evidence may enter the canonical paper core."
+          },
+          {
+            "family": "lead_lag",
+            "status": "ACTIVE",
+            "materializes_paper_economics": true,
+            "reason": "Frozen causal lead-lag evidence may enter the canonical paper core."
+          },
+          {
+            "family": "copy_vault",
+            "status": "ACTIVE",
+            "materializes_paper_economics": true,
+            "reason": "Fresh leader and vault evidence may enter the canonical paper core."
+          },
+          {
+            "family": "twap_metaorder",
+            "status": "SHADOW",
+            "materializes_paper_economics": false,
+            "reason": "Research probe only until forward evidence and ablation are complete."
+          },
+          {
+            "family": "ofi_microprice",
+            "status": "SHADOW",
+            "materializes_paper_economics": false,
+            "reason": "Research probe only until forward evidence and ablation are complete."
+          },
+          {
+            "family": "entity_consensus",
+            "status": "SHADOW",
+            "materializes_paper_economics": false,
+            "reason": "Entity clustering can annotate evidence but cannot create paper PnL."
+          },
+          {
+            "family": "funding_carry",
+            "status": "DISABLED",
+            "materializes_paper_economics": false,
+            "reason": "Outside the active V2 economic scope; collection remains read-only."
+          },
+          {
+            "family": "triangular_arbitrage",
+            "status": "RESEARCH_ONLY",
+            "materializes_paper_economics": false,
+            "reason": "Research diagnostics only; no canonical paper execution."
+          },
+          {
+            "family": "market_making",
+            "status": "RESEARCH_ONLY",
+            "materializes_paper_economics": false,
+            "reason": "Quotes are diagnostics only; queue economics are not yet proven."
+          },
+          {
+            "family": "external_github_profiles",
+            "status": "DISABLED",
+            "materializes_paper_economics": false,
+            "reason": "The retired GitHub bus cannot be a source of trades or PnL."
+          }
+        ],
+        "environment_override_allowed": false
+      },
+      "external_profile_priority": [
+        {
+          "strategy_id": "ext_rezzecup_whale_mirror_primary",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_tony_autonomous_sltp_priority",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_chaininsighter_priority_copy_session",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_jack_hl_arbitrage_spread",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_jack_hl_arbitrage_alt",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_hl_drift_funding_spread",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_funding_arb_basis",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_immutal0_wallet_filter_caps",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_drakkar_triangular_arbitrage",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_arbibot_cross_exchange_spread",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_carlos_cross_source_reconcile",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_hummingbot_market_making_framework",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_interexchange_arbitrage",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_passivbot_grid_risk",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_crypto_arbitrage_spread",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_freqtrade_backtest_discipline",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_prediction_market_backtesting_guard",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_octobot_framework_priority",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_mlmodelpoly_shadow_score",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polyrec_shadow_recommender",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_warp_risk_process_caps",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polymarket_lp_liquidity_guard",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_jlowo_structured_decision",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_mrfadiai_copy_rules",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_djienne_resilience_logging",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polybot_lightweight_rules",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_jonmaa_single_market_rules",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_tradingview_chart_runtime",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_cloddsbot_agentic_research_loop",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_harrier_toolkit_decision_stack",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polymarket_agents_research_path",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polyterm_terminal_ops",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_polyweather_context_features",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        },
+        {
+          "strategy_id": "ext_awesome_prediction_tools_index",
+          "priority_over_internal": false,
+          "paper_only": true,
+          "read_only": true,
+          "direct_external_execution": false
+        }
+      ],
+      "funding_arb": {
+        "enabled": false,
+        "scope_status": "DISABLED",
+        "reason": "STRATEGY_SCOPE_BLOCKED_FUNDING_CARRY",
+        "requested_by_environment": true,
+        "events": [],
+        "positions": []
+      },
+      "external_profile_execution_summary": {
+        "profile_scope": "all",
+        "profiles_total": 0,
+        "profiles_installed": 0,
+        "profiles_unavailable": 0,
+        "profiles_executed": 0,
+        "profiles_with_paper_orders": 0,
+        "paper_orders_total": 0,
+        "all_installed_profiles_executed": false,
+        "unavailable_profile_ids": []
+      },
+      "external_profile_executions": [],
+      "paper_only": true,
+      "real_execution": false
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "record_id": "R-CV-COPY-V21-ENTRY-CAPACITY-LOCK-DISC-9AAA88B",
+  "hypothesis_id": "H-CV-COPY-V21-ENTRY-CAPACITY-DAILY-LOCK",
+  "parent_hypothesis_id": "H-CV-COPY-V20-CAUSAL-DAILY-PROFIT-LOCK",
+  "family": "copy_vault",
+  "stage": "DISCOVERY",
+  "verdict": "PREDECLARED",
+  "baseline": false,
+  "change_class": "EXECUTION",
+  "controller_action": "IMPROVE",
+  "base_sha": "9aaa88b81d55dda478e2394553451d71e584b42d",
+  "created_at_utc": "2026-09-14T07:18:00Z",
+  "mechanism": "Use the v20 causal daily profit lock and executable-net exits, requesting a fixed 600 USD core position whose full capacity is verified fail-closed at the later causal entry book rather than capping size from the earlier reference book.",
+  "temporal_operator": "Process TRAIN signals in observable-time order. Before each signal, sum only same-day PnL already realized. Below 4 USD request a 600 USD core entry after the canonical delay and let the observed entry book accept or reject it all-or-none; above 4 USD request a 75 USD new-vault probe. Close at the first fully liquidatable net -50 or +100 bps crossing, otherwise at one hour.",
+  "conditioning": [
+    "ADD action only",
+    "first leader fill at least 100 USD known at signal time",
+    "non-negative signed five-level depth imbalance",
+    "fixed 600 USD core request accepted only when the causal entry book fills it completely",
+    "post-lock new-vault probe fixed at 75 USD",
+    "realized daily lock threshold 4 USD",
+    "maximum one admitted entry per vault and coin per UTC day",
+    "maximum ten simultaneous positions",
+    "executable-net stop loss 50 bps and take profit 100 bps",
+    "one-hour fallback exit",
+    "canonical costs and exact observed five-level VWAP",
+    "same identities and sizes for direction-flip placebo",
+    "only complete causal actual and placebo episodes aggregated"
+  ],
+  "data_surfaces": [
+    "causal live non-snapshot vault fills",
+    "continuous causal Hyperliquid five-level L2"
+  ],
+  "execution_translation": "Paper-only stateful risk controller. The process always scans, while exposure drops after realized daily profit and every position has a causal loss and profit boundary. No order, collector, future PnL, or invented liquidity is used.",
+  "prediction_target": "At least 4 USD net per TRAIN day with eight trades across three days, profit factor above one, placebo beaten, positive 432-trial-adjusted total lower bound, top positive trade share and largest vault and coin shares at most 60 percent, all episodes complete, and net-risk exits audited.",
+  "falsification_test": "Reject this single fixed policy if any TRAIN gate fails. Heldout and forward remain unopened before physical freeze.",
+  "experiment_ids": [
+    "copy-v21-entry-capacity-daily-lock-train-predeclaration"
+  ],
+  "trial_count": 0,
+  "economic_progress": {
+    "prior_family_trial_count": 431,
+    "new_trial_count": 1,
+    "bonferroni_trial_count": 432,
+    "target_net_usd_per_day": 4.0
+  },
+  "source_refs": [
+    "runtime/reports/economic_campaigns/research_vnext/copy_vault_v20_daily_profit_lock_train.json",
+    "runtime/codex_research/run_copy_v10_causal_risk_exits_train.py",
+    "src/hl_observer/backtesting/copy_vault_executable.py"
+  ],
+  "scientific_signatures": [],
+  "notes": "One fixed TRAIN policy is frozen before outcomes. The causal entry book must fill the requested quantity completely or the candidate is rejected. Finite below-normal CPU execution only.",
+  "rationale": "V20 passed all gates except a slightly negative adjusted lower bound because STBL was capped to 112.22 USD by the earlier reference book despite the actual causal entry book supporting a larger all-or-none fill. Entry-time capacity is the executable fact used by the live order gate; removing the stale pre-entry cap remains fail-closed and targets the sole measured weakness."
+}

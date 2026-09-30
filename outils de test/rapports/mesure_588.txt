@@ -1,0 +1,163 @@
+DEBUT 
+=== TESTS DU MODULE + DU VERROU CABLE === 
+....................................                                     [100%]
+36 passed in 0.51s
+ 
+=== MESURE SUR PRIX REELS (HYPE) === 
+
+==============================================================================
+  T2b / #588 -- LA JAMBE PERP DU CARRY HYPE PEUT-ELLE ETRE LIQUIDEE ?
+==============================================================================
+
+  Levier max HYPE          : 10x
+  Marge de maintenance    : 5.00 %   (doc : moitie de la marge initiale au levier max)
+  Historique horaire      : 4801 bougies (~200 jours)
+  Prix : min 20.602  max 76.990  dernier 64.114
+
+  --- LA PIRE HAUSSE REELLEMENT SUBIE (toutes les entrees possibles, causal)
+      detention 24 h      -> pire hausse subie par le SHORT : +  28.8 %
+      detention 7 jours   -> pire hausse subie par le SHORT : +  68.1 %
+      detention 30 jours  -> pire hausse subie par le SHORT : +  95.6 %
+
+  --- LE CHOIX QU'ON NE PEUT PAS ESQUIVER (detention 30 j, pire hausse +95.6 %)
+      marge m  liquide a      survit ?   rendement brut   rendement REEL    
+      (M/N)    (hausse)       (30 j)     (sur N)          (sur N + M)       
+      ----------------------------------------------------------------------
+      0.15     +9.5 %         NON        33.6 bps         29.2 bps   <- jamais encaisse
+      0.25     +19.0 %        NON        33.6 bps         26.9 bps   <- jamais encaisse
+      0.35     +28.6 %        NON        33.6 bps         24.9 bps   <- jamais encaisse
+      0.50     +42.9 %        NON        33.6 bps         22.4 bps   <- jamais encaisse
+      0.75     +66.7 %        NON        33.6 bps         19.2 bps   <- jamais encaisse
+      1.00     +90.5 %        NON        33.6 bps         16.8 bps   <- jamais encaisse
+      1.50     +138.1 %       OUI        33.6 bps         13.4 bps          
+
+==============================================================================
+  VERDICT
+==============================================================================
+
+  Pour SURVIVRE a la pire hausse reellement observee sur 30 jours (+95.6 %),
+  il faut une marge de 105.41 % du notionnel du perp.
+
+  Capital immobilise pour un carry de 500 $ de notionnel :
+      spot (paye CASH, aucun levier) :   500.00 $
+      marge du perp                  :   527.06 $
+      -------------------------------------------
+      CAPITAL TOTAL                  :  1027.06 $
+
+  Rendement annonce par T2 (sur le notionnel seul) : 33.6 bps / 30 j  (~4.0 % APR)
+  Rendement REEL   (sur le capital TOTAL)          : 16.4 bps / 30 j  (~2.0 % APR)
+
+  En cas de BACKSTOP (equity < 2/3 de la maintenance), la marge de maintenance est
+  CONFISQUEE (doc officielle) : perte seche de 25.00 $ sur 500 $ de notionnel.
+
+  Et surtout : une jambe perp liquidee = plus de couverture = LONG SPOT SEC,
+  c'est-a-dire la zone morte FUNDING_JAMBE_NUE, deja mesuree et deja enterree.
+
+  motif : JAMBE_PERP_SURVIT_AU_PIRE_MOUVEMENT_OBSERVE
+  liquide a +95.6 % ; pire hausse reellement observee +95.6 %. Le tampon tient. MAIS le rendement tombe de 33.60 a 16.36 bps une fois le capital du spot ET la marge du perp comptes (m = 1.05).
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\carry_liquidation_588.json
+
+ 
+=== SUITE COMPLETE === 
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+.....................................................................
+[COUVERTURE] joignables=484  couverts=481  NON TESTES=3  (99.4 %)  baseline=3
+... [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+........................................................................ [ 28%]
+........................................................................ [ 30%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 66%]
+........................................................................ [ 68%]
+........................................................................ [ 70%]
+........................................................................ [ 72%]
+........................................................................ [ 74%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 86%]
+........................................................................ [ 88%]
+........................................................................ [ 90%]
+........................................................................ [ 92%]
+........................................................................ [ 94%]
+........................................................................ [ 96%]
+........................................................................ [ 98%]
+......................................                                   [100%]
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+tests/dydx_v4/test_dydx_refused_route.py: 22 warnings
+tests/dydx_v4/test_dydx_routes_truth_endpoint.py: 11 warnings
+tests/test_dashboard_v2_metagraph.py: 6 warnings
+tests/test_dashboard_v2_panels.py: 6 warnings
+tests/test_dashboard_v2_route.py: 4 warnings
+tests/test_diag_598_qui_refuse.py: 176 warnings
+tests/test_hypersmart_simulation_diagnostic_logs.py: 176 warnings
+tests/test_loop_dashboard_route.py: 176 warnings
+tests/test_no_btc_only_hardcoded_scanner.py: 176 warnings
+tests/test_ui_action_catalog.py: 528 warnings
+tests/test_ui_app.py: 1056 warnings
+tests/test_ui_copy_dashboard.py: 1584 warnings
+tests/test_ui_discovery_autoscan.py: 1584 warnings
+tests/test_ui_discovery_simple_home.py: 1056 warnings
+tests/test_ui_explorer.py: 1056 warnings
+tests/test_ui_leaderboard.py: 528 warnings
+tests/test_ui_multi_assets.py: 880 warnings
+tests/test_ui_no_dead_buttons.py: 352 warnings
+tests/test_ui_overview_paper_ledger.py: 528 warnings
+tests/test_ui_routes.py: 352 warnings
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_status_fast.py: 5104 warnings
+tests/test_ui_simulation_v9_filters.py: 1408 warnings
+tests/test_ui_websocket.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+tests/test_whale_watchlist.py::TestWhaleScoreCandidate::test_score_recent_trades_get_higher_recency
+  C:\Users\flo\Desktop\Projet invest\tests\test_whale_watchlist.py:126: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3566 passed, 22403 warnings in 258.92s (0:04:18)
+ 
+=== SAFETY (no-real-trade) === 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok
+FIN 

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "dashboard.export",
+  "description": "Export the local read-only dashboard snapshot.",
+  "x-read-only": true,
+  "x-data-sources": [
+    "dashboard_payload",
+    "sqlite_snapshots"
+  ],
+  "input": {
+    "type": "object",
+    "additionalProperties": false
+  },
+  "output": {
+    "type": "object"
+  }
+}

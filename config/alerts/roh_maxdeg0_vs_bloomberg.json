@@ -1,0 +1,101 @@
+{
+  "schema_version": "hypersmart.replacement_parity.v1",
+  "subject": "RohOnChain/MAXdeg0 public research configuration in HyperSmart",
+  "reference": "Bloomberg Terminal",
+  "scope": "Selected public research and monitoring workflows only",
+  "verdict": "PARTIAL_SUBSTITUTE",
+  "dimensions": {
+    "source_data_rights": {
+      "state": "UNKNOWN",
+      "rationale": "No current entitlement evidence proves equivalence to Bloomberg data rights.",
+      "evidence_refs": []
+    },
+    "asset_coverage": {
+      "state": "PARTIAL",
+      "rationale": "The local observer covers selected crypto venues and assets, not Bloomberg's full universe.",
+      "evidence_refs": ["module:hl_observer.alerts.spine", "roadmap:V26-P0-006"]
+    },
+    "event_news_coverage": {
+      "state": "PARTIAL",
+      "rationale": "Public alert adapters can represent selected events but no complete newswire parity is proven.",
+      "evidence_refs": ["test:tests/test_alert_envelope_v26.py"]
+    },
+    "historical_depth": {
+      "state": "UNKNOWN",
+      "rationale": "No controlled depth comparison against Bloomberg is available.",
+      "evidence_refs": []
+    },
+    "real_time_latency": {
+      "state": "PARTIAL",
+      "rationale": "HyperSmart measures local alert latency but has no Bloomberg latency parity evidence.",
+      "evidence_refs": ["test:tests/test_alert_freshness_v26.py"]
+    },
+    "timestamp_quality": {
+      "state": "PARTIAL",
+      "rationale": "The canonical envelope separates source and local clocks, with source-dependent coverage.",
+      "evidence_refs": ["test:tests/test_alert_freshness_v26.py"]
+    },
+    "provenance": {
+      "state": "PARTIAL",
+      "rationale": "Local events carry source URI and content hash; upstream source completeness varies.",
+      "evidence_refs": ["test:tests/test_alert_envelope_v26.py"]
+    },
+    "corrections_retractions": {
+      "state": "PARTIAL",
+      "rationale": "The local ledger preserves corrections and retractions when supplied by adapters.",
+      "evidence_refs": ["test:tests/test_alert_envelope_v26.py"]
+    },
+    "analytics": {
+      "state": "PARTIAL",
+      "rationale": "Local deterministic scoring and monitoring exist for a narrow research scope.",
+      "evidence_refs": ["test:tests/test_alert_scoring_v26.py"]
+    },
+    "communications_network": {
+      "state": "ABSENT",
+      "rationale": "No Bloomberg messaging or professional communications network equivalent exists.",
+      "evidence_refs": []
+    },
+    "execution_capabilities": {
+      "state": "ABSENT",
+      "rationale": "HyperSmart is intentionally PAPER/READ-ONLY and cannot replace execution services.",
+      "evidence_refs": []
+    },
+    "reliability_sla": {
+      "state": "UNKNOWN",
+      "rationale": "No comparable commercial SLA is available.",
+      "evidence_refs": []
+    },
+    "compliance_audit": {
+      "state": "PARTIAL",
+      "rationale": "Local append-only evidence exists but no enterprise compliance parity is claimed.",
+      "evidence_refs": ["test:tests/test_alert_spine_v26.py"]
+    },
+    "entitlements_permissions": {
+      "state": "UNKNOWN",
+      "rationale": "Provider-specific entitlements are not proven equivalent.",
+      "evidence_refs": []
+    },
+    "export_api_capabilities": {
+      "state": "PARTIAL",
+      "rationale": "Canonical JSONL and projections are exportable within the local scope.",
+      "evidence_refs": ["test:tests/test_alert_idempotency_v26.py"]
+    },
+    "cost_tco": {
+      "state": "UNKNOWN",
+      "rationale": "A controlled total-cost comparison has not been performed.",
+      "evidence_refs": []
+    },
+    "privacy_security": {
+      "state": "PARTIAL",
+      "rationale": "Local read-only controls exist, without a full product security parity assessment.",
+      "evidence_refs": ["test:tests/test_alert_scoring_v26.py"]
+    },
+    "offline_local_path": {
+      "state": "PARTIAL",
+      "rationale": "Canonical replay and projections operate locally for already collected evidence.",
+      "evidence_refs": ["test:tests/test_alert_idempotency_v26.py"]
+    }
+  },
+  "paper_read_only": true,
+  "real_execution": false
+}

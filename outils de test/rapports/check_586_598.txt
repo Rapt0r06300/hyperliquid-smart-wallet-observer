@@ -1,0 +1,110 @@
+DEBUT 
+=== 1 sur 3 : H-181 -- le bug de SIGNE est-il verrouille ? === 
+.............                                                            [100%]
+13 passed in 0.71s
+ 
+=== 2 sur 3 : la MESURE rejouee avec le verdict corrige === 
+================================================================================
+ H-181 -- LE TOP-40 EST-IL DISCERNABLE DU HASARD ?
+================================================================================
+
+  candidats     :    6000   (train 4200 / test 1800)
+  scenarios     :     400   (echantillon de la grille de 20000)
+  >>> le VRAI moteur en teste 150 000 000. Tout effet montre ici est une BORNE
+      INFERIEURE : le maximum d'un bruit MONTE avec le nombre d'essais.
+
+--------------------------------------------------------------------------------
+ 1. LES DONNEES REELLES
+--------------------------------------------------------------------------------
+  scenarios retenus (>= 25 trades) : 400
+  trades evalues au total                : 207611
+  PnL MOYEN par trade                    : -3.0032 $
+  >>> MEILLEUR net de TRAIN              : -106.46 $
+
+--------------------------------------------------------------------------------
+ 2. LE NULL : les MEMES nombres de trades, la MEME distribution de PnL,
+              mais AUCUN lien entre la config et ce qu'elle attrape.
+--------------------------------------------------------------------------------
+  400 tirages du null.
+  hasard : moyenne -258.74 $  |  p95 -224.94 $
+  reel   : -106.46 $
+  ECART reel - p95 du hasard : +118.48 $   (signe-sur, contrairement a un ratio)
+
+  ⚠️ LIMITE DE CE NULL, DITE A VOIX HAUTE : il tire les PnL dans la distribution
+     MISE EN COMMUN de tous les scenarios. Il DETRUIT donc l'heterogeneite entre
+     coins et entre filtres. Un scenario qui ne trade qu'un seul coin herite ici
+     d'une distribution qui n'est pas la sienne. Ce null SOUS-ESTIME ce que le
+     hasard peut faire. Le null exact est la PERMUTATION DU SENS (voir le module).
+
+--------------------------------------------------------------------------------
+ 3. LES DEUX PROCEDURES DE SELECTION, SUR LES MEMES DONNEES
+--------------------------------------------------------------------------------
+  procedure                         n    net OOS moyen   positifs OOS
+  MAXIMUM (code actuel)            40          -40.02 $           0/40
+  PLATEAU (propose)                40          -41.66 $           0/40
+
+  configs communes aux deux top-40 : 23
+
+  ============================================================================
+   VERDICT
+  ============================================================================
+
+   >>> IL N'Y A AUCUN VAINQUEUR A MAUDIRE.
+
+       PnL MOYEN par trade                  : -3.0032 $
+       MEILLEUR net de TRAIN (sur 400 configs) : -106.46 $
+
+       Le MEILLEUR scenario PERD, et il perd EN ECHANTILLON -- la ou il a tous
+       les droits de sur-ajuster. Pas un seul n'est profitable, meme en trichant.
+
+       Et les DEUX procedures de selection donnent le meme resultat hors
+       echantillon : 0/40 positifs par MAXIMUM, 0/40 par PLATEAU.
+
+   >>> DONC : L'HYPOTHESE H-181 EST **REFUTEE COMME EXPLICATION**.
+
+       La malediction du vainqueur est REELLE (prouvee sur bruit pur, 9 tests).
+       Mais ce n'est PAS elle qui cause le « 0 config robuste ». Reparer la
+       selection ne fabriquera pas un gagnant qui n'existe pas.
+
+       C'est une PORTE QUI SE FERME -- et c'est utile : ca nous evite de
+       refondre scenario_search pour rien.
+
+  rapport : C:\Users\flo\Desktop\Projet invest\data\reports\h181_malediction_du_vainqueur.json
+ 
+=== 3 sur 3 : #598 -- QUI refuse ? === 
+
+==============================================================================
+  #598 — QUI REFUSE ? (motifs REELS, lus, pas devines)
+==============================================================================
+
+--- fresh_opportunities ---
+  (AUCUNE fresh_opportunity : le refus est encore PLUS EN AMONT)
+
+--- counts ---
+  {"leaders": 2, "target_leaders": 50, "leader_rows_sampled_before_dedupe": 2, "leader_sample_limit": 10000, "public_trade_wallets_seen": 0, "public_trade_promoted_wallets": 2, "positions": 0, "fills": 0, "closed_pnl_points": 0, "open_orders_context": 0, "deltas": 2, "live_simulation_deltas": 2, "old_deltas_ignored_fresh_only": 0, "entry_deltas": 2, "ignored_deltas": 0, "consensus_positions": 1, "fresh_opportunity_groups": 0, "fresh_opportunities_accepted": 0, "fresh_opportunity_replay_deltas": 0, "bot_decision_events": 2, "reproduced_entries": 0, "reproduced_exits": 0, "bot_refused": 2, "open_virtual_positions": 0, "follow_decisions": 0, "paper_simulations": 0, "magic_entries": 0, "magic_exits": 0, "magic_refusals": 2}
+
+--- prefilter_skips (le pre-filtre a-t-il jete le signal ?) ---
+  prefilter_skip_count = 0
+
+--- filter_diagnostics ---
+  {}
+
+--- events (motifs de NO_TRADE) ---
+    coin=ETH      reason=EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS
+    coin=ETH      reason=EXPECTED_NET_EDGE_TOO_SMALL_AFTER_COSTS
+
+--- refusal_reasons / no_trade ---
+
+--- open_positions ---
+  []
+==============================================================================
+
+.
+============================== warnings summary ===============================
+tests/test_diag_598_qui_refuse.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1 passed, 176 warnings in 1.69s
+FIN 

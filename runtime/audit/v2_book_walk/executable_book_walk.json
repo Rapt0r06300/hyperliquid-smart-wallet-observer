@@ -1,0 +1,102 @@
+{
+  "audit": "executable_book_walk",
+  "buy": {
+    "average_fill_price": 101.3333333333,
+    "fill_ratio": 1.0,
+    "filled_notional_usdc": 152.0,
+    "filled_quantity": 1.5,
+    "level_fills": [
+      {
+        "available_quantity": 1.0,
+        "filled_notional_usdc": 101.0,
+        "filled_quantity": 1.0,
+        "price": 101.0
+      },
+      {
+        "available_quantity": 1.0,
+        "filled_notional_usdc": 51.0,
+        "filled_quantity": 0.5,
+        "price": 102.0
+      }
+    ],
+    "levels_consumed": 2,
+    "missed": false,
+    "missed_notional_usdc": 0.0,
+    "partial": false,
+    "reason": "FILLED",
+    "requested_notional_usdc": 152.0,
+    "slippage_bps": 133.33333333
+  },
+  "checks": {
+    "buy_uses_asks": true,
+    "buy_vwap_exact": true,
+    "legacy_adapter_parity": true,
+    "partial_not_invented": true,
+    "sell_uses_bids": true
+  },
+  "legacy_adapter": {
+    "average_fill_price": 101.3333333333,
+    "fee_usdc": 0.0684,
+    "fill_ratio": 1.0,
+    "filled_notional_usdc": 152.0,
+    "latency_ms": 0,
+    "missed": false,
+    "missed_notional_usdc": 0.0,
+    "partial": false,
+    "reason": "FILLED",
+    "requested_notional_usdc": 152.0,
+    "side": "BUY",
+    "slippage_bps": 133.33333333
+  },
+  "paper_only": true,
+  "partial": {
+    "average_fill_price": 101.0,
+    "fill_ratio": 0.202,
+    "filled_notional_usdc": 101.0,
+    "filled_quantity": 1.0,
+    "level_fills": [
+      {
+        "available_quantity": 1.0,
+        "filled_notional_usdc": 101.0,
+        "filled_quantity": 1.0,
+        "price": 101.0
+      }
+    ],
+    "levels_consumed": 1,
+    "missed": false,
+    "missed_notional_usdc": 399.0,
+    "partial": true,
+    "reason": "PARTIAL_FILL",
+    "requested_notional_usdc": 500.0,
+    "slippage_bps": 100.0
+  },
+  "passed": true,
+  "real_execution": false,
+  "sell": {
+    "average_fill_price": 99.3333333333,
+    "fill_ratio": 1.0,
+    "filled_notional_usdc": 149.0,
+    "filled_quantity": 1.5,
+    "level_fills": [
+      {
+        "available_quantity": 0.5,
+        "filled_notional_usdc": 50.0,
+        "filled_quantity": 0.5,
+        "price": 100.0
+      },
+      {
+        "available_quantity": 1.0,
+        "filled_notional_usdc": 99.0,
+        "filled_quantity": 1.0,
+        "price": 99.0
+      }
+    ],
+    "levels_consumed": 2,
+    "missed": false,
+    "missed_notional_usdc": 0.0,
+    "partial": false,
+    "reason": "FILLED",
+    "requested_notional_usdc": 149.0,
+    "slippage_bps": 66.66666667
+  }
+}

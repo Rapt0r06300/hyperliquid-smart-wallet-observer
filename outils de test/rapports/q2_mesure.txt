@@ -1,0 +1,54 @@
+==============================================================================
+ Q2 -- LES JAMBES REELLES  (notionnel 500 $, 4 fichier(s))
+==============================================================================
+
+  snapshots lus            :     9543
+  illisibles               :        0
+  snapshots AVEC niveaux   :        0   <-- 0 = le trou de collecte
+
+------------------------------------------------------------------------------
+ 1. DE COMBIEN LE MID MENT-IL ?  (= demi-spread, PAR JAMBE. Exact, pas estime.)
+------------------------------------------------------------------------------
+  demi-spread median :    0.887 bps
+  demi-spread p75    :    2.145 bps
+  demi-spread p95    :    8.013 bps
+  demi-spread p99    :   24.623 bps
+
+  Un arbitrage cross-venue a DEUX jambes -> le mid surestime l'edge de la SOMME des
+  deux demi-spreads : ~1.77 bps au median, ~16.03 bps au p95.
+  A comparer au seuil du detecteur : min_spread_bps = 20 bps (defaut).
+
+  >>> Sur des marches LIQUIDES, le mensonge du mid reste sous le seuil : le vieux
+      detecteur ne fabriquait donc pas d'opportunites en masse ICI. Mais le meme
+      code, sur un marche a 60 bps de spread (il en existe : voir tableau 3),
+      aurait invente 60 bps d'edge a partir de rien.
+
+------------------------------------------------------------------------------
+ 2. LA PROFONDEUR : le carnet peut-il absorber 500 $ a l'achat ?
+------------------------------------------------------------------------------
+  carnets TROP MINCES        :      19  (0.20 %)
+  top-of-book suffit a lui seul :    6520  (68.32 %)
+
+  >>> 19 cas ou l'ancien code rendait un cout EXTRAPOLE -- donc faux,
+      et faux dans le sens optimiste. Ces entrees-la etaient validees a tort.
+
+------------------------------------------------------------------------------
+ 3. LES MARCHES OU LE MID MENTIRAIT LE PLUS (demi-spread median le plus large)
+------------------------------------------------------------------------------
+  marche           n   demi-spr   mid ment de    prof.med $  minces
+  HMSTR           17     24.21b        48.43b        36,119       0
+  PURR            14     21.13b        42.26b           535       6
+  CASHCAT        382     17.77b        35.54b         2,838       0
+  NOT             16     13.07b        26.14b        27,002       0
+  BOME            16     12.12b        24.24b        21,589       0
+  USUAL           11     10.11b        20.22b         6,739       0
+  MEME            18      9.00b        18.00b        30,909       0
+  RSR             15      8.01b        16.01b        25,454       0
+  TNSR            16      7.95b        15.91b         2,488       0
+  XAI             17      7.11b        14.21b        56,645       0
+  ACE             18      6.78b        13.56b        13,687       0
+  DYM             18      6.35b        12.69b         7,830       0
+
+  (173 marches vus au total)
+
+  rapport : C:\Users\flo\Desktop\Projet invest\data\reports\q2_jambes_reelles.json

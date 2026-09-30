@@ -1,0 +1,73 @@
+# File de commandes Alina self-hosted
+
+Ce dossier est le **plan de contrôle versionné** du laboratoire HyperSmart qui tourne sur le PC Windows self-hosted.
+
+## Principe
+
+Un nouveau fichier `*.json` commité sur `main` dans ce dossier déclenche `.github/workflows/alina-self-hosted.yml`.
+
+La chaîne est :
+
+`GitHub main -> commande JSON -> runner self-hosted Windows -> ALINA_RESEARCH_HOME -> worker autonome -> backtests/replays -> petits rapports GitHub`.
+
+Les données brutes, caches, workspaces et gros logs restent sur le PC dans `ALINA_RESEARCH_HOME`.
+
+## Sécurité
+
+Le JSON de contrôle ne peut pas activer le trading réel, le testnet, la collecte live ou changer de dépôt de données. `src/hl_observer/ops/self_hosted_control.py` reconstruit une requête canonique et impose :
+
+- `project_ref=main` ;
+- SHA exact du commit qui déclenche le workflow ;
+- `paper_only=true` ;
+- `real_execution=false` ;
+- `start_live_collection=false` ;
+- release et dépôt de datasets canoniques ;
+- cycle plafonné à 18 heures.
+
+La commande est ensuite transformée en `hypersmart.typed_control_event.v1` :
+cible et capacité sont allowlistées, le payload est borné, l'événement est lié
+au SHA de `main`, puis son nonce est réclamé dans un ledger append-only. Le
+texte de `note`, même s'il contient du JSON ou des mots de commande, reste une
+annotation sans autorité.
+
+Le workflow ne se déclenche **jamais sur une pull request**.
+
+## Politique : un seul meilleur prochain gros run
+
+La file versionnée conserve tout l'historique mais n'autorise qu'un seul meilleur prochain gros run :
+
+- le job déjà en cours n'est pas interrompu (`cancel-in-progress: false`) ;
+- parmi les commandes en attente, la plus récente sur `main` est la seule candidate encore admissible ;
+- juste avant tout preflight ou gros calcul, le workflow compare le SHA checkouté au HEAD distant courant de `main` avec `git ls-remote origin refs/heads/main` ;
+- si `main` a avancé, la commande en attente est **stale/superseded** et échoue avec `SELF_HOSTED_STALE_MAIN_REFUSED` avant de consommer le calcul ;
+- pour remplacer une commande, on ajoute un nouveau JSON dans un nouveau commit : l'ancien JSON reste immuable et n'est jamais supprimé, renommé ou réécrit.
+
+Cette politique évite le churn de gros runs tout en préservant la preuve Git complète de chaque demande.
+
+## Exemple de commande
+
+```json
+{
+  "schema": "alina.self_hosted_control.v1",
+  "job_id": "replay-canonique-001",
+  "suite": "economic-full",
+  "mode": "economic",
+  "download": true,
+  "max_download_gib": 20.0,
+  "stage_timeout_seconds": 3600,
+  "cross_budget_s": 20.0,
+  "lead_history_sources": 8,
+  "max_cycle_seconds": 64800,
+  "force": false,
+  "requested_by": "ChatGPT-GitHub",
+  "note": "Premier gros run self-hosted."
+}
+```
+
+Ne pas conserver un fichier d'exemple avec l'extension `.json` dans ce dossier : chaque `*.json` est une vraie demande de travail.
+
+## Gros runs
+
+Une fois le premier replay canonique validé, les commandes peuvent escalader vers les suites `copy-vault-full`, `lead-lag-full`, `cross-venue-full`, `microstructure-full`, `research-lab-full`, `sqlite-all-safe` puis `full-archive`, sous contrôle de l'espace disque et de la politique MAX DATA.
+
+L'objectif économique reste une preuve nette séparée pour chaque famille, sans compensation entre Copy-Vault, Lead-Lag et Cross-Venue et sans utiliser OOS/forward comme gradient de tuning.

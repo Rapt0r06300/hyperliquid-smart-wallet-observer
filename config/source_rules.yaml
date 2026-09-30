@@ -1,0 +1,18 @@
+schema_version: alina.source_rules.v1
+rules:
+  hyperliquid:
+    info_time_range_max_items: 500
+    pagination_cursor: last_returned_timestamp
+    user_history_weighted_by_returned_items: true
+    user_websocket_snapshot_field: isSnapshot
+    user_websocket_capacity_is_scarce: true
+    execution_endpoint_operational: false
+  github_actions:
+    hosted_job_max_seconds: 21600
+    successor_dispatch: workflow_dispatch_or_repository_dispatch
+    token_push_recursion_assumed: false
+  execution:
+    paper_only: true
+    read_only: true
+    real_execution: false
+    exchange_endpoint_operational: false

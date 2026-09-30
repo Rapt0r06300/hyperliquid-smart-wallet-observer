@@ -1,0 +1,37 @@
+# Snapshot trigger: exact-source debugging 2026-09-11
+name: repo-bundle-temporary
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/repo-bundle-temporary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Archive source and tests from exact HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files \
+            | grep -Ev '^(runtime/|data/|artifacts/|reports/|runs/|logs/|replays/|output/|outputs/|\.venv/|venv/)' \
+            | zip -q repo-source.zip -@
+          printf '%s\n' "$(git rev-parse HEAD)" > BUNDLE_HEAD_SHA.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: repo-source
+          path: |
+            repo-source.zip
+            BUNDLE_HEAD_SHA.txt
+          if-no-files-found: error
+          retention-days: 1

@@ -1,0 +1,36 @@
+DEBUT 
+=== 1 : QUI est le 304e mort === 
+Traceback (most recent call last):
+  File "C:\Users\flo\Desktop\Projet invest\tools\qui_est_le_304e_mort.py", line 17, in <module>
+    v = auditer_les_modules(RACINE)
+  File "C:\Users\flo\Desktop\Projet invest\src\hl_observer\audit\cablage.py", line 398, in auditer_les_modules
+    v.illisibles = _illisibles(fichiers)
+                   ~~~~~~~~~~~^^^^^^^^^^
+  File "C:\Users\flo\Desktop\Projet invest\src\hl_observer\audit\cablage.py", line 371, in _illisibles
+    for chemin, source in sorted(fichiers.items()):
+                                 ^^^^^^^^^^^^^^
+AttributeError: 'WindowsPath' object has no attribute 'items'. Did you mean: 'stem'?
+ 
+=== 2 : le defaut SL/TP est-il jouable ? === 
+...                                                                      [100%]
+3 passed in 0.54s
+ 
+=== 3 : les 2 tests UI + le cliquet de cablage === 
+................F.........................F....F............             [100%]
+================================== FAILURES ===================================
+C:\Users\flo\Desktop\Projet invest\tests\test_ui_simulation_persistence.py:1061: assert 0 >= 1
+C:\Users\flo\Desktop\Projet invest\tests\test_ui_simulation_v9_filters.py:328: assert []
+C:\Users\flo\Desktop\Projet invest\tests\test_risk_guards_no_limbo.py:200: AssertionError: REGRESSION DE CABLAGE : 304 modules testes-non-branches (plafond 303).
+============================== warnings summary ===============================
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_v9_filters.py: 1232 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_ui_simulation_persistence.py::test_ui_simulation_replays_accepted_cluster_when_raw_rows_were_already_processed
+FAILED tests/test_ui_simulation_v9_filters.py::test_accepted_fresh_opportunity_cluster_opens_virtual_position_with_v9_authoritative
+FAILED tests/test_risk_guards_no_limbo.py::test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter
+3 failed, 57 passed, 6688 warnings in 14.90s
+FIN 

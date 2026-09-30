@@ -1,0 +1,62 @@
+=== SUITE COMPLETE ===
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 25%]
+........................................................................ [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 37%]
+........................................................................ [ 39%]
+........................................................................ [ 41%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 48%]
+........................................................................ [ 50%]
+........................................................................ [ 52%]
+........................................................................ [ 54%]
+........................................................................ [ 56%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+tests/dydx_v4/test_dydx_refused_route.py: 22 warnings
+tests/dydx_v4/test_dydx_routes_truth_endpoint.py: 11 warnings
+tests/test_dashboard_v2_metagraph.py: 6 warnings
+tests/test_dashboard_v2_panels.py: 6 warnings
+tests/test_dashboard_v2_route.py: 4 warnings
+tests/test_hypersmart_simulation_diagnostic_logs.py: 176 warnings
+tests/test_loop_dashboard_route.py: 176 warnings
+tests/test_no_btc_only_hardcoded_scanner.py: 176 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! KeyboardInterrupt !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+C:\Python314\Lib\threading.py:369: KeyboardInterrupt
+(to show a full traceback on KeyboardInterrupt use --full-trace)
+2184 passed, 578 warnings in 126.86s (0:02:06)
+
+=== SECURITE : aucun ordre reel possible ===
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok

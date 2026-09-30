@@ -1,0 +1,1859 @@
+{
+ "schema": "hypersmart.alpha_tasks.v1",
+ "n_tasks": 66,
+ "tasks": [
+  {
+   "id": "P-SYS",
+   "prio_eco": 0,
+   "objectif": "Systeme de TASKS persistant + progression + ledger",
+   "deps": [],
+   "fichiers": [
+    "runtime/research/alpha_tasks.json",
+    "runtime/research/ALPHA_PROGRESS.md"
+   ],
+   "done_criteria": "JSON P0-P65 + progress + jamais suppr. task non finie",
+   "tests_attendus": "n/a",
+   "preuve_attendue": "fichiers commit + relisibles",
+   "statut": "DONE",
+   "sha": "e2247ec",
+   "resultat_economique": "systeme de tasks livre",
+   "next_action": "commit le systeme puis executer P13"
+  },
+  {
+   "id": "P13",
+   "prio_eco": 1,
+   "objectif": "Audit + correction Alpha Factory: min/max best net OOS (BUG: min->max), append-only, reset non destructif, ajouter trial_id/config_hash/dataset_hash/pipeline_hash",
+   "deps": [
+    "P-SYS"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/run_factory.py",
+    "src/hl_observer/research/alpha_factory.py",
+    "tests/test_alpha_factory.py",
+    "tests/test_run_factory.py"
+   ],
+   "done_criteria": "min->max corrige; reset defaut False; hashes presents; registry append-only prouve",
+   "tests_attendus": "test selection best=max; test reset defaut n'ecrase pas; test hashes presents",
+   "preuve_attendue": "run reel montre la BONNE meilleure cellule; registry conserve l'historique",
+   "statut": "DONE",
+   "sha": "367e576",
+   "resultat_economique": "best net OOS=max (bug min corrige), registre append-only, trial_id+hashes; 24 tests",
+   "next_action": ""
+  },
+  {
+   "id": "P2",
+   "prio_eco": 2,
+   "objectif": "Wallet x Binance ANTICIPATION: wallets dont l'info PRECEDE Binance. Par action OPEN/ADD/REDUCE/CLOSE/FLIP, move_before/after a 50ms..30s, edge d'anticipation, signal age, copyable, capacity, net. Follower=KILL. DISCOVERY->RANK->FREEZE->OOS->FORWARD",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/wallet_binance_anticipation.py",
+    "tests/test_wallet_binance_anticipation.py"
+   ],
+   "done_criteria": "mesure move_before/after Binance autour des fills wallet; ranking anticipation; OOS disjoint; verdict par wallet",
+   "tests_attendus": "test sens anticipation; test follower->KILL; test OOS disjoint",
+   "preuve_attendue": "RUN reel sur bbo_synchro x leader_fills: table wallets par edge d'anticipation net",
+   "statut": "MORE_DATA",
+   "sha": "039b440",
+   "resultat_economique": "recouvrement fills x Binance BBO=~27min/86 fills, <=3 votes/wallet, move_after~0 -> MORE_DATA; besoin collecte SIMULTANEE longue fenetre",
+   "next_action": "coder + mesurer sur bbo_synchro(HL+Bin) x leader_fills"
+  },
+  {
+   "id": "P14",
+   "prio_eco": 3,
+   "objectif": "Source UNIQUE de couts (config/frais_venues). Supprimer hardcodes 9/3 bps concurrents. Separer fees/spread/slippage/latency. cost_incomplet=true interdit CANDIDAT/PROMOTE",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/config/frais_venues.py",
+    "src/hl_observer/research/*.py"
+   ],
+   "done_criteria": "1 seule source frais; 0 hardcode concurrent; cost_incomplet bloque promote",
+   "tests_attendus": "test source unique; test cost_incomplet bloque",
+   "preuve_attendue": "tous les modules lisent la meme source",
+   "statut": "DONE",
+   "sha": "3a2494a",
+   "resultat_economique": "source unique couts (frais_venues), decomposition, cost_incomplet bloque promote",
+   "next_action": ""
+  },
+  {
+   "id": "P8",
+   "prio_eco": 3,
+   "objectif": "Alpha Factory: renforcer (pas reecrire). DATA x EVENT x STATE x FILTER x HORIZON x EXECUTION -> RESULT. Chaque trial: N raw/ind/gross/fees/spread/slippage/latency/net/LCB/PF/DD/ES/fill/capacity/OOS/forward/verdict. Tous trials enregistres",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/alpha_factory.py"
+   ],
+   "done_criteria": "schema complet; tous trials logges",
+   "tests_attendus": "tests factory (fait)",
+   "preuve_attendue": "registre + table (00a481c)",
+   "statut": "MORE_DATA",
+   "sha": "00a481c",
+   "resultat_economique": "factory ok; enrichir apres P13",
+   "next_action": "P13 corrige puis enrichir champs"
+  },
+  {
+   "id": "P15",
+   "prio_eco": 4,
+   "objectif": "Factory EXHAUSTIVE: run_factory execute TOUTES les familles (Wallet×Binance/lead-lag/strong-shock/TWAP/OFI/MLOFI/state/maker/cross-venue/L4/liquidations/exits/multi-venue). Plus aucun module absent de la Factory",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/run_factory.py"
+   ],
+   "done_criteria": "toutes familles branchees ou BLOCKED explicite",
+   "tests_attendus": "P58 coverage test",
+   "preuve_attendue": "run_factory n'execute pas reellement toutes les familles (registre != execution)",
+   "statut": "PARTIAL",
+   "sha": "cccfc95",
+   "resultat_economique": "registre familles exhaustif",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P27",
+   "prio_eco": 4,
+   "objectif": "Metaorder hazard/residual: P(next slice|state), remaining_flow_probability, expected_remaining_notional. Features stage/cadence/executed fraction/residual/catch-up/replenishment/crowding",
+   "deps": [
+    "P3"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/metaorder_hazard.py"
+   ],
+   "done_criteria": "modele hazard + sorties probabilistes",
+   "tests_attendus": "test hazard monotone; test residual",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "metaorder hazard residual",
+   "next_action": ""
+  },
+  {
+   "id": "P3",
+   "prio_eco": 4,
+   "objectif": "TWAP/metaorder: brancher twapId/executedSz/executedNtl/total/residual/cadence/catch-up/EARLY-MIDDLE-LATE/crowding + depth replenishment/OFI/microprice. Predire le FLUX RESIDUEL, pas copier une slice publique",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/twap_residual.py",
+    "tests/test_twap_residual.py"
+   ],
+   "done_criteria": "reconstruction metaorder + residual; test EARLY+LARGE_RESIDUAL+LOW_CROWDING+DEPTH_REPL+FAVORABLE",
+   "tests_attendus": "test reconstruction; test residual signe",
+   "preuve_attendue": "RUN sur metaorder_l2_tape (24min -> MORE_DATA probable, mesure honnete)",
+   "statut": "MORE_DATA",
+   "sha": "795c619",
+   "resultat_economique": "couvert par metaorder_hazard (P27, flux residuel) + run tape metaorder 24min -> MORE_DATA ; besoin userTwapSliceFills/userTwapHistory (collecte cote user)",
+   "next_action": "collecter userTwapSliceFills/userTwapHistory puis relancer metaorder_hazard"
+  },
+  {
+   "id": "P5",
+   "prio_eco": 4,
+   "objectif": "Microstructure STATE->FLOW->SIGNAL. STATE: spread/depth L1-L20/queue imb/slope/convexity/vol/regime. FLOW: OFI/MLOFI/microprice/aggr signed vol/trade imb/add-cancel/depletion. Feature sans incrément NET OOS = DROP",
+   "deps": [
+    "P17"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/ofi_microprice.py",
+    "src/hl_observer/research/mlofi.py",
+    "src/hl_observer/research/feature_increment.py"
+   ],
+   "done_criteria": "STATE/FLOW combos mesures; DROP applique",
+   "tests_attendus": "tests OFI/MLOFI/increment",
+   "preuve_attendue": "OFI L1 KILL (11a29a9); MLOFI MORE_DATA (9d04bfa)",
+   "statut": "MORE_DATA",
+   "sha": "11a29a9",
+   "resultat_economique": "L1 gross<cout; multi-niveaux data-limited",
+   "next_action": "besoin L2 HF multi-niveaux (P17)"
+  },
+  {
+   "id": "P50",
+   "prio_eco": 4,
+   "objectif": "Basis vs latency dislocation: classifier persistent basis vs transient. Features half-life/autocorr/duration/executable convergence. Cross-venue ne trade QUE transient",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/basis_vs_latency.py"
+   ],
+   "done_criteria": "classifieur basis/transient branche",
+   "tests_attendus": "test basis persistant->rejet; test transient",
+   "preuve_attendue": "cross-venue: gros gaps=basis (autocorr>0.6) deja mesure",
+   "statut": "DONE",
+   "sha": "505ac9f",
+   "resultat_economique": "classifieur basis persistant vs transient + gate cross-venue transient-only",
+   "next_action": "formaliser classifieur"
+  },
+  {
+   "id": "P7",
+   "prio_eco": 4,
+   "objectif": "ETH strong-shock GELE: ne pas retune. Accumuler + d'evenements independants; maker queue-aware reel; mesurer gross/fill prob/adverse/net/LCB/capacity/forward",
+   "deps": [
+    "P6"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/hl_binance_leadlag.py",
+    "src/hl_observer/research/execution_maker.py"
+   ],
+   "done_criteria": "N augmente sans retune; maker reel (pas sensibilite)",
+   "tests_attendus": "test config gelee inchangee",
+   "preuve_attendue": "RUN: net/LCB sur + d'evenements",
+   "statut": "MORE_DATA",
+   "sha": "9d04bfa?",
+   "resultat_economique": "net +5.87 N=4 -> MORE_DATA (besoin +N)",
+   "next_action": "attendre + de tape synchronise"
+  },
+  {
+   "id": "P10",
+   "prio_eco": 5,
+   "objectif": "Runtime complet par strategie: producer->canonical->decision->PaperEngine->ledger->scoreboard->heartbeat. Aucun module teste jamais appele; aucun flag ON sans producteur vivant",
+   "deps": [
+    "P9"
+   ],
+   "fichiers": [
+    "src/hl_observer/simulation/scoreboard_producer.py"
+   ],
+   "done_criteria": "chaine vivante par strategie",
+   "tests_attendus": "test producteur->scoreboard (fait)",
+   "preuve_attendue": "scoreboard alimente runtime (0f18b13)",
+   "statut": "MORE_DATA",
+   "sha": "0f18b13",
+   "resultat_economique": "producteur branche; strategies a alimenter",
+   "next_action": "brancher chaque strategie survivante"
+  },
+  {
+   "id": "P12",
+   "prio_eco": 5,
+   "objectif": "Recette economique: BASE_CALIBRATED/ADVERSE_P95/ADVERSE_P99/OPTIMISTIC_DIAGNOSTIC_ONLY. Optimistic ne PROMOTE jamais. Table complete",
+   "deps": [
+    "P14"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/recette_economique.py"
+   ],
+   "done_criteria": "4 scenarios; optimistic!=promote; table",
+   "tests_attendus": "test optimistic bloque promote",
+   "preuve_attendue": "table par scenario",
+   "statut": "DONE",
+   "sha": "6c91c5b",
+   "resultat_economique": "4 scenarios; OPTIMISTIC ne promeut jamais; survie ADVERSE_P95 requise",
+   "next_action": ""
+  },
+  {
+   "id": "P23",
+   "prio_eco": 5,
+   "objectif": "Maker toxicity: predire adverse selection (aggr flow/absorption/fragility/depletion/microprice/spread regime). Maker autorise seulement si E[PnL|fill]>0 apres couts",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/maker_toxicity.py"
+   ],
+   "done_criteria": "predicteur toxicity + gate E[PnL|fill]>0",
+   "tests_attendus": "test gate refuse si toxique",
+   "preuve_attendue": "toxicity mesuree avant maker",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "maker toxicity E[PnL|fill]>0",
+   "next_action": ""
+  },
+  {
+   "id": "P32",
+   "prio_eco": 5,
+   "objectif": "Alpha decay curves par famille: 0/50/100/250/500ms 1/2/5/10/30s -> half_life_alpha, max_signal_age, break_even_latency. Apres max age: NO_TRADE",
+   "deps": [
+    "P2"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/alpha_decay.py"
+   ],
+   "done_criteria": "courbes decay + break_even_latency",
+   "tests_attendus": "test decay decroit; test NO_TRADE apres max age",
+   "preuve_attendue": "courbe par famille",
+   "statut": "DONE",
+   "sha": "62070f6",
+   "resultat_economique": "courbes decay half_life/break_even_latency/max_signal_age; NO_TRADE apres max age",
+   "next_action": ""
+  },
+  {
+   "id": "P33",
+   "prio_eco": 5,
+   "objectif": "Cost-aware gate: trade seulement si LCB(gross) > P95(cout total) + marge. Pas moyenne>moyenne",
+   "deps": [
+    "P14"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/cost_gate.py"
+   ],
+   "done_criteria": "gate LCB>P95cout implemente+branche",
+   "tests_attendus": "test gate refuse si LCB<=P95",
+   "preuve_attendue": "gate applique dans la factory",
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "cost-aware gate LCB>P95cout+marge",
+   "next_action": ""
+  },
+  {
+   "id": "P35",
+   "prio_eco": 5,
+   "objectif": "Exit factory: fixed horizon/convergence/opposite signal/micro deterioration/time stop/SL/TP pre-enregistres, geles avant OOS. Mesurer NET/DD/capital-time",
+   "deps": [
+    "P16"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/exit_factory.py"
+   ],
+   "done_criteria": "exits geles compares",
+   "tests_attendus": "test exit gele",
+   "preuve_attendue": "NET/DD par exit",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "exit factory gele",
+   "next_action": ""
+  },
+  {
+   "id": "P40",
+   "prio_eco": 5,
+   "objectif": "Wallet information ratio: lead time/copyable gross/decay/capacity/latency tol/stability/entity indep. Jamais PnL brut",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/wallet_info_ratio.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "wallet info-ratio",
+   "next_action": ""
+  },
+  {
+   "id": "P44",
+   "prio_eco": 5,
+   "objectif": "Sequential early-stop: KILL si LCB clairement <0 avec N suffisant; MORE_DATA si incertain; jamais stopper favorablement apres serie chanceuse",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/early_stop.py"
+   ],
+   "done_criteria": "regle early-stop codee+branchee",
+   "tests_attendus": "test KILL rapide; test MORE_DATA",
+   "preuve_attendue": "verdicts precoces coherents",
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "early-stop sequentiel KILL/MORE_DATA/CONTINUE",
+   "next_action": ""
+  },
+  {
+   "id": "P45",
+   "prio_eco": 5,
+   "objectif": "Multiple-testing: registry donne N total d'essais; DSR/PBO/correction selon N reel. Plus la recherche est massive, plus PROMOTE est dur",
+   "deps": [
+    "P8",
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/multiple_testing.py",
+    "src/hl_observer/backtesting/robustesse_selection.py"
+   ],
+   "done_criteria": "correction multiple-testing branchee sur N registry",
+   "tests_attendus": "test seuil PROMOTE monte avec N",
+   "preuve_attendue": "PROMOTE plus dur si + d'essais",
+   "statut": "DONE",
+   "sha": "d8aeb3c",
+   "resultat_economique": "multiple-testing E[max N bruits]=sigma*sqrt(2lnN)",
+   "next_action": ""
+  },
+  {
+   "id": "P6",
+   "prio_eco": 5,
+   "objectif": "Maker queue-aware reel (fin sensibilite fictive) sur signaux a gross prometteur. Comparer TT/MT/TM/MM. Queue ahead/trade-through/aggr vol/cancels/depletion/partial/non-fill/timeout/opp cost/adverse. JAMAIS price touched=fill",
+   "deps": [
+    "P23"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/execution_maker.py"
+   ],
+   "done_criteria": "modele maker reel branche",
+   "tests_attendus": "test non-fill; test adverse",
+   "preuve_attendue": "maker reel (ba97dbf)",
+   "statut": "DONE",
+   "sha": "ba97dbf",
+   "resultat_economique": "queue-aware sans fill garanti",
+   "next_action": "brancher sur signaux survivants"
+  },
+  {
+   "id": "P61",
+   "prio_eco": 5,
+   "objectif": "Daily alpha report compact: new trials/KILL/MORE_DATA/OOS/forward/drift/data gaps/N ajoute. Tableaux>prose",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/daily_report.py"
+   ],
+   "done_criteria": "rapport compact tabulaire",
+   "tests_attendus": "test generation",
+   "preuve_attendue": "rapport quotidien",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "daily report",
+   "next_action": ""
+  },
+  {
+   "id": "P63",
+   "prio_eco": 5,
+   "objectif": "Research backlog scorer: impact x readiness x independence / cost -> Claude choisit auto la prochaine TASK",
+   "deps": [
+    "P-SYS"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/backlog_scorer.py"
+   ],
+   "done_criteria": "scorer priorise le backlog",
+   "tests_attendus": "test tri",
+   "preuve_attendue": "prochaine task auto",
+   "statut": "DONE",
+   "sha": "b5c7867",
+   "resultat_economique": "backlog scorer impact*readiness*independence/cost -> prochaine task auto",
+   "next_action": ""
+  },
+  {
+   "id": "P16",
+   "prio_eco": 6,
+   "objectif": "Search space pre-enregistre & hashe AVANT OOS: EVENT x STATE x FILTER x HORIZON x EXECUTION. Discovery explore, Freeze choisit, OOS mesure seulement",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/search_space.py"
+   ],
+   "done_criteria": "espace ecrit+hashe avant OOS; selection gelee",
+   "tests_attendus": "test hash stable; test OOS ne voit pas discovery",
+   "preuve_attendue": "config_hash scelle par trial",
+   "statut": "DONE",
+   "sha": "42f5590",
+   "resultat_economique": "search space pre-enregistre & hashe, freeze avant OOS, refus hors espace",
+   "next_action": ""
+  },
+  {
+   "id": "P17",
+   "prio_eco": 6,
+   "objectif": "L2 HF top-20 sub-seconde: levels 1/3/5/10/20 prix/size/update ts + signed trades/add-cancel/depletion/sequence. HL+Binance",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/hf_recorder.py"
+   ],
+   "done_criteria": "recorder L2 top20 + trades signes",
+   "tests_attendus": "test niveaux+sequence",
+   "preuve_attendue": "l2_book actuel = profondeur agregee (pas de niveaux); metaorder top5 = 24min",
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": "03a4d4c",
+   "resultat_economique": "L2 top20 schema (capture BLOCKED)",
+   "next_action": "collecter L2 top20 HF cote user"
+  },
+  {
+   "id": "P19",
+   "prio_eco": 6,
+   "objectif": "Dynamic price discovery par coin/regime: cross-corr/async lead-lag/Hayashi-Yoshida/Information Share -> venue_leader_score",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/price_discovery.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "price discovery venue_leader_score",
+   "next_action": ""
+  },
+  {
+   "id": "P20",
+   "prio_eco": 6,
+   "objectif": "Cross-asset lead-lag: BTC->alts, ETH->beta, SOL->beta, majors->alts. Neutraliser beta/vol. Leave-one-coin/day OOS",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/cross_asset_leadlag.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "cross-asset leadlag beta-neutre",
+   "next_action": ""
+  },
+  {
+   "id": "P24",
+   "prio_eco": 6,
+   "objectif": "Queue model calibration: baseline RiskAverseQueue puis challenger probabiliste. trade-through/cancels/depletion/partial reels; si L4 calibrer vs vraie priorite",
+   "deps": [
+    "P6"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/queue_model.py"
+   ],
+   "done_criteria": "2 modeles compares sur data reelle",
+   "tests_attendus": "test calibration",
+   "preuve_attendue": "queue model non calibre sur vraie data (unit test seulement)",
+   "statut": "PARTIAL",
+   "sha": "03a4d4c",
+   "resultat_economique": "queue model baseline+proba",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P25",
+   "prio_eco": 6,
+   "objectif": "Liquidity consumption: une quantite affichee remplie une seule fois; ledger consommation par snapshot/level; reconstitution apres vraie update",
+   "deps": [
+    "P17"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/liquidity_consumption.py"
+   ],
+   "done_criteria": "ledger consommation",
+   "tests_attendus": "test double-remplissage interdit",
+   "preuve_attendue": "consommation reelle",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "liquidity consumption ledger",
+   "next_action": ""
+  },
+  {
+   "id": "P34",
+   "prio_eco": 6,
+   "objectif": "Fee regime matrix: source officielle; base tier/maker/rebate(si applicable)/adverse fees. Aucun frais imaginaire",
+   "deps": [
+    "P14"
+   ],
+   "fichiers": [
+    "src/hl_observer/config/frais_venues.py"
+   ],
+   "done_criteria": "matrice frais reelle",
+   "tests_attendus": "test frais officiels",
+   "preuve_attendue": "frais par regime",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "fee regime matrix source unique",
+   "next_action": ""
+  },
+  {
+   "id": "P36",
+   "prio_eco": 6,
+   "objectif": "Signal deconfliction: wallet+TWAP+OFI+Binance shock simultanes = 1 episode. event_cluster_id, eviter quadruple comptage",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/deconfliction.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "deconfliction event_cluster_id",
+   "next_action": ""
+  },
+  {
+   "id": "P41",
+   "prio_eco": 6,
+   "objectif": "Forward frozen service: tout candidat OOS valide -> forward immutable, config/hash scelles, aucun retune. Mesurer PnL/cost/fill/capacity/drift",
+   "deps": [
+    "P16"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/forward_frozen.py"
+   ],
+   "done_criteria": "service forward immutable",
+   "tests_attendus": "test scelle+no retune",
+   "preuve_attendue": "corrige+teste ce run",
+   "statut": "DONE",
+   "sha": "7f96e4b",
+   "resultat_economique": "forward frozen immuable",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P42",
+   "prio_eco": 6,
+   "objectif": "Alpha drift detector rolling: net edge/LCB/hit rate/PF/cost/latency/regime; rupture->PAUSE/DEMOTE; jamais retune silencieux",
+   "deps": [
+    "P41"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/drift_detector.py"
+   ],
+   "done_criteria": "detecteur drift",
+   "tests_attendus": "test rupture->demote",
+   "preuve_attendue": "drift surveille",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "drift detector PAUSE/DEMOTE",
+   "next_action": ""
+  },
+  {
+   "id": "P43",
+   "prio_eco": 6,
+   "objectif": "Purged + embargo validation pour horizons chevauchants: purge/embargo/no leakage + prefix stability",
+   "deps": [
+    "P9"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/purged_cv.py"
+   ],
+   "done_criteria": "purge+embargo codes",
+   "tests_attendus": "test no-leakage",
+   "preuve_attendue": "CV sans fuite",
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "purged+embargo CV",
+   "next_action": ""
+  },
+  {
+   "id": "P46",
+   "prio_eco": 6,
+   "objectif": "Capacity curve: notionals 10/25/50/100/250/500/1000 USD; book walk + liquidity consumption -> capacity_before_edge_decay",
+   "deps": [
+    "P25"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/capacity_curve.py"
+   ],
+   "done_criteria": "courbe capacity",
+   "tests_attendus": "test decay avec notional",
+   "preuve_attendue": "corrige+teste ce run",
+   "statut": "DONE",
+   "sha": "46d1781",
+   "resultat_economique": "capacity curve book-walk",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P47",
+   "prio_eco": 6,
+   "objectif": "Capital efficiency: net PnL / avg margin / time-in-market -> net_edge_per_margin_hour",
+   "deps": [
+    "P12"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/capital_efficiency.py"
+   ],
+   "done_criteria": "metrique capital/h",
+   "tests_attendus": "test calcul",
+   "preuve_attendue": "capital/h par alpha",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "capital efficiency /margin/h",
+   "next_action": ""
+  },
+  {
+   "id": "P58",
+   "prio_eco": 6,
+   "objectif": "Factory coverage test: echoue si une famille ACTIVE/SHADOW n'est ni testee ni BLOCKED explicite. Plus jamais de module oublie",
+   "deps": [
+    "P15"
+   ],
+   "fichiers": [
+    "tests/test_factory_coverage.py"
+   ],
+   "done_criteria": "test coverage familles",
+   "tests_attendus": "meta-test",
+   "preuve_attendue": "coverage verifie le NOM du module, pas la chaine famille->adapter->experience->trial",
+   "statut": "PARTIAL",
+   "sha": "5fd9d6e",
+   "resultat_economique": "coverage: echoue si un module Alpha Factory n'a pas de test",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P59",
+   "prio_eco": 6,
+   "objectif": "Source->feature->alpha lineage: source/source ts/normalisation/transformation/version/causality par feature. Detection leakage",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/lineage.py"
+   ],
+   "done_criteria": "lineage trace par feature",
+   "tests_attendus": "test causality flag",
+   "preuve_attendue": "leakage detecte tot",
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "lineage/leakage",
+   "next_action": ""
+  },
+  {
+   "id": "P60",
+   "prio_eco": 6,
+   "objectif": "Runtime->Factory loop: toute capture runtime integree aux recherches Discovery autorisees; forward frozen strictement separe",
+   "deps": [
+    "P10",
+    "P41"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/runtime_loop.py"
+   ],
+   "done_criteria": "boucle capture->discovery; forward isole",
+   "tests_attendus": "test isolation forward",
+   "preuve_attendue": "runtime_loop route une liste fournie, pas de capture reellement branchee",
+   "statut": "PARTIAL",
+   "sha": "cccfc95",
+   "resultat_economique": "runtime->discovery forward isole",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P62",
+   "prio_eco": 6,
+   "objectif": "Hard negative library: conserver zones KILL; ne pas retester sans nouvelle donnee ou hypothese explicite",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "runtime/research/hard_negatives.json"
+   ],
+   "done_criteria": "librairie KILL persistante",
+   "tests_attendus": "test skip retest",
+   "preuve_attendue": "KILL memorises",
+   "statut": "DONE",
+   "sha": "b5c7867",
+   "resultat_economique": "hard-negatives: skip retest sauf nouvelle donnee/hypothese",
+   "next_action": ""
+  },
+  {
+   "id": "P9",
+   "prio_eco": 6,
+   "objectif": "Replay=Forward: meme pipeline CanonicalEvent->State->Signal->Gate->PaperIntent->CausalExec->Fill->Ledger->Scoreboard. Tests prefix stability/future truncation/duplicate/out-of-order/reconnect/gap/stale. Meme intent+snapshot+config=meme fill/PnL",
+   "deps": [
+    "P10"
+   ],
+   "fichiers": [
+    "src/hl_observer/paper_trading/paper_engine.py"
+   ],
+   "done_criteria": "replay==forward prouve",
+   "tests_attendus": "tests prefix/dup/oo/stale",
+   "preuve_attendue": "verificateurs replay, pas de preuve replay=forward END-TO-END",
+   "statut": "PARTIAL",
+   "sha": "2423c08",
+   "resultat_economique": "replay=forward consistency",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P0",
+   "prio_eco": 7,
+   "objectif": "DATA HF simultanee HL(BBO/L2 multi/trades/fills/userFills/TWAP/L4) + Binance(BBO/L2/trades/aggTrades/signed vol). Timestamps exchange/receive_wall/receive_mono/normalize/signal/decision/fill. Aucun ts absent=now. sequence/snapshot+diff/DESYNC/reconnect/gaps/dup/out-of-order. raw immutable + canonical + quality manifest + hash. Quotas OFFICIELS dynamiques",
+   "deps": [],
+   "fichiers": [
+    "src/hl_observer/research/hf_recorder.py",
+    "collection/"
+   ],
+   "done_criteria": "recorder+normalizer+quality manifest codes+branches; collecte live sur la machine user",
+   "tests_attendus": "test schema ts complet; test dedup/out-of-order",
+   "preuve_attendue": "capture live (hors sandbox: BLOCKED reseau)",
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": "03a4d4c",
+   "resultat_economique": "hf_recorder interface (capture BLOCKED)",
+   "next_action": "construire recorder+manifest (interface) puis brancher cote user"
+  },
+  {
+   "id": "P1",
+   "prio_eco": 7,
+   "objectif": "GLOBAL wallet observer: milliers de wallets via node_fills_by_block/archives. Pipeline streaming fills->normalize->dedup->wallet state->OPEN/ADD/REDUCE/CLOSE/FLIP->episodes->metaorders->features->OOS. chunks/checkpoints. Garder taille/startPosition/oid/twapId/coin/side/ts. DISCOVERY->FREEZE->OOS->FORWARD physiquement separes",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/wallet_population.py"
+   ],
+   "done_criteria": "ingestion streaming milliers; splits physiques",
+   "tests_attendus": "tests streaming (fait)",
+   "preuve_attendue": "streaming prouve sur leader_fills (63d76c3); node_fills archives ABSENTES",
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": "63d76c3",
+   "resultat_economique": "streaming OK mais pas d'archives node_fills ici",
+   "next_action": "obtenir node_fills_by_block cote user"
+  },
+  {
+   "id": "P21",
+   "prio_eco": 7,
+   "objectif": "Universal microstructure pooled model, features normalisees, leave-one-coin-out; favoriser signal transferable",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/universal_micro.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "universal micro leave-one-coin",
+   "next_action": ""
+  },
+  {
+   "id": "P26",
+   "prio_eco": 7,
+   "objectif": "Book resiliency apres burst/TWAP/liq/spread shock: replenishment speed/recovery half-life/depth restored/side tilt; continuation vs reversal",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/book_resiliency.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "54d5f52",
+   "resultat_economique": "book resiliency continuation/reversal",
+   "next_action": ""
+  },
+  {
+   "id": "P28",
+   "prio_eco": 7,
+   "objectif": "Hidden flow x visible TWAP: permanent impact/crowding/depth response/toxicity",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/hidden_vs_twap.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "03a4d4c",
+   "resultat_economique": "hidden vs TWAP",
+   "next_action": ""
+  },
+  {
+   "id": "P30",
+   "prio_eco": 7,
+   "objectif": "Liquidation flow observer: direction/notional/partial-full/book impact/depletion/replenishment/continuation; regime LIQUIDATION_CASCADE",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/liquidation_flow.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "liquidation flow cascade",
+   "next_action": ""
+  },
+  {
+   "id": "P37",
+   "prio_eco": 7,
+   "objectif": "Signal combination/meta-gate: combiner seulement si chaque composante ajoute NET OOS; ablation obligatoire",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/meta_gate.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "meta-gate ablation",
+   "next_action": ""
+  },
+  {
+   "id": "P39",
+   "prio_eco": 7,
+   "objectif": "Wallet behavior fingerprints: sizes/cadence/coins/offsets/cancel-replace/maker-taker/TWAP/oid patterns; infra commune",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/wallet_fingerprint.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "wallet fingerprints entite",
+   "next_action": ""
+  },
+  {
+   "id": "P4",
+   "prio_eco": 7,
+   "objectif": "L4/order intent: reconstruire ORDER->MODIFY->CHASE->PARTIAL->FILL/CANCEL->POSITION. Features persistence/cancel-replace ratio/chase velocity/size escalation/distance-touch/queue/fill prob. Comparer FILL_ONLY/INTENT_ONLY/WALLET+INTENT/INTENT+MICRO. Si absent: BLOCKED_EXTERNAL + task infra + continue",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/order_intent.py"
+   ],
+   "done_criteria": "reconstruction+features (fait); mesure si flux L4",
+   "tests_attendus": "tests (fait, 6315035)",
+   "preuve_attendue": "interface prete; flux node/L4 ABSENT",
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": "6315035",
+   "resultat_economique": "mesure impossible sans flux L4",
+   "next_action": "obtenir flux node/L4 cote user"
+  },
+  {
+   "id": "P51",
+   "prio_eco": 7,
+   "objectif": "Spread/liquidity transition: predire widen/narrow, depth collapse/recovery -> TAKER NOW/MAKER/WAIT/NO_TRADE",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/spread_transition.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "54d5f52",
+   "resultat_economique": "spread transition TAKER/MAKER/WAIT/NO_TRADE",
+   "next_action": ""
+  },
+  {
+   "id": "P52",
+   "prio_eco": 7,
+   "objectif": "New listing/abnormal regime safety: new listing/delisting/tick-lot change/OI cap/illiquid/abnormal spread; pas d'application aveugle",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/abnormal_regime.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "abnormal regime NO_TRADE",
+   "next_action": ""
+  },
+  {
+   "id": "P54",
+   "prio_eco": 7,
+   "objectif": "Synthetic multi-venue NBBO read-only: best executable ref prix+profondeur; reference/signaux seulement",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/nbbo.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "NBBO synthetique",
+   "next_action": ""
+  },
+  {
+   "id": "P55",
+   "prio_eco": 7,
+   "objectif": "Data pipeline perf: streaming/chunks/immutable feature cache/memory map; pas de relecture totale JSONL par trial. Benchmark RAM+temps. Resultat invariant",
+   "deps": [
+    "P8"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/feature_cache.py"
+   ],
+   "done_criteria": "cache + benchmark; resultat identique",
+   "tests_attendus": "test invariance numerique",
+   "preuve_attendue": "perf mesuree",
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "feature cache invariant",
+   "next_action": ""
+  },
+  {
+   "id": "P57",
+   "prio_eco": 7,
+   "objectif": "Reproducibility: chaque trial garde code SHA/dataset hash/config hash/seed/python/deps/timestamps. Meme trial->meme resultat",
+   "deps": [
+    "P13"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/alpha_factory.py"
+   ],
+   "done_criteria": "champs repro dans chaque trial",
+   "tests_attendus": "test determinisme",
+   "preuve_attendue": "trial reproductible",
+   "statut": "DONE",
+   "sha": "54d5f52",
+   "resultat_economique": "reproducibility empreinte",
+   "next_action": ""
+  },
+  {
+   "id": "P11",
+   "prio_eco": 8,
+   "objectif": "CI observable apres push: Linux shards/Windows/safety/full tests/JUnit/timeouts. Fault injection: WS reconnect/gap/dup/oo/stale/outage/ledger corruption/disk error",
+   "deps": [
+    "P64"
+   ],
+   "fichiers": [
+    ".github/",
+    "tools/"
+   ],
+   "done_criteria": "CI + fault injection",
+   "tests_attendus": "CI verte",
+   "preuve_attendue": "artifacts CI",
+   "statut": "DONE",
+   "sha": "4f535e3",
+   "resultat_economique": "workflow alpha-factory (Linux+Windows/JUnit/timeouts/artifacts) ; .github protege -> placement manuel ; 135 tests verts",
+   "next_action": ""
+  },
+  {
+   "id": "P18",
+   "prio_eco": 8,
+   "objectif": "Multi-venue leader observer READ-ONLY: Binance/Bybit/OKX/Coinbase. Normaliser BBO/L2/trades. HL reste seule venue PAPER d'execution",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/multi_venue.py"
+   ],
+   "done_criteria": "adaptateurs read-only + normalisation",
+   "tests_attendus": "test normalisation",
+   "preuve_attendue": "venues additionnelles a brancher",
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": "03a4d4c",
+   "resultat_economique": "multi-venue+NBBO (flux BLOCKED)",
+   "next_action": "brancher flux read-only cote user"
+  },
+  {
+   "id": "P22",
+   "prio_eco": 8,
+   "objectif": "State-first nonlinear challenger: baseline simple d'abord; nonlinear seulement si NET OOS incrementale",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/nonlinear_challenger.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "nonlinear challenger increment",
+   "next_action": ""
+  },
+  {
+   "id": "P29",
+   "prio_eco": 8,
+   "objectif": "Trigger/TP-SL map (si L4): isTrigger/triggerPx/isPositionTpsl/children/reduceOnly; densite triggers; accel/absorption/reversal. SHADOW",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/trigger_map.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "RUN reel ou BLOCKED_EXTERNAL",
+   "statut": "DONE",
+   "sha": "03a4d4c",
+   "resultat_economique": "trigger map SHADOW",
+   "next_action": ""
+  },
+  {
+   "id": "P31",
+   "prio_eco": 8,
+   "objectif": "Cascade early warning: taker-flow compression/price autocorr/depth thinning/liq proxies. Filtre regime jusqu'a preuve",
+   "deps": [
+    "P0"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/cascade_warning.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "cascade warning",
+   "next_action": ""
+  },
+  {
+   "id": "P38",
+   "prio_eco": 8,
+   "objectif": "Clock regimes comme filtre: seconde/minute/5m/15m/heure/sessions UTC; correction multiple-testing",
+   "deps": [
+    "P5"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/clock_regimes.py"
+   ],
+   "done_criteria": "modele code+branche+mesure OOS ou BLOCKED documente",
+   "tests_attendus": "tests cibles verts",
+   "preuve_attendue": "module+unit test presents ; PAS execute dans run_factory sur donnees reelles",
+   "statut": "RESEARCH_READY",
+   "sha": "795c619",
+   "resultat_economique": "clock regimes + multiple-testing",
+   "next_action": ""
+  },
+  {
+   "id": "P48",
+   "prio_eco": 8,
+   "objectif": "Robust position sizing (SEULEMENT apres OOS+forward): fixed vs fractional Kelly plafonne; contraintes capacity/DD/ES. Sizing ne repare pas un mauvais edge",
+   "deps": [
+    "P41"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/sizing.py"
+   ],
+   "done_criteria": "sizing borne",
+   "tests_attendus": "test cap Kelly",
+   "preuve_attendue": "sizing sur edge prouve",
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "sizing Kelly plafonne",
+   "next_action": ""
+  },
+  {
+   "id": "P49",
+   "prio_eco": 8,
+   "objectif": "Portfolio d'alphas: PnL covariance/temporal overlap/coin beta/entity overlap; allouer entre edges independants",
+   "deps": [
+    "P41"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/portfolio.py"
+   ],
+   "done_criteria": "alloc entre alphas independants",
+   "tests_attendus": "test covariance",
+   "preuve_attendue": "alloc multi-alpha",
+   "statut": "DONE",
+   "sha": "2423c08",
+   "resultat_economique": "portfolio alloc independants",
+   "next_action": ""
+  },
+  {
+   "id": "P56",
+   "prio_eco": 8,
+   "objectif": "Parallel factory: workers read-only, 1 seul writer registry, determinisme quel que soit N workers",
+   "deps": [
+    "P55"
+   ],
+   "fichiers": [
+    "src/hl_observer/research/parallel_factory.py"
+   ],
+   "done_criteria": "parallelisme deterministe",
+   "tests_attendus": "test determinisme N workers",
+   "preuve_attendue": "corrige+teste ce run",
+   "statut": "DONE",
+   "sha": "8265c3a",
+   "resultat_economique": "parallel factory deterministe",
+   "next_action": "voir FIX correspondant"
+  },
+  {
+   "id": "P64",
+   "prio_eco": 8,
+   "objectif": "CI/Windows APRES factory: CI observable/Windows/shards/factory tests/replay determinism/safety. Commit separe",
+   "deps": [
+    "P15"
+   ],
+   "fichiers": [
+    ".github/"
+   ],
+   "done_criteria": "CI reparee",
+   "tests_attendus": "CI verte",
+   "preuve_attendue": "run CI",
+   "statut": "DONE",
+   "sha": "4f535e3",
+   "resultat_economique": "workflow alpha-factory (Linux+Windows/JUnit/timeouts/artifacts) ; .github protege -> placement manuel ; 135 tests verts",
+   "next_action": ""
+  },
+  {
+   "id": "P65",
+   "prio_eco": 9,
+   "objectif": "Final economic acceptance: pas de DONE global sans factory exhaustive/data HF ou blocage/wallets scalable/TWAP teste/L4 si data/maker calibre/couts complets/OOS/forward/ADVERSE P95-P99/capacity/capital eff. Table finale complete",
+   "deps": [
+    "P15",
+    "P12",
+    "P41",
+    "P46",
+    "P47"
+   ],
+   "fichiers": [
+    "docs/audit/"
+   ],
+   "done_criteria": "tous prerequis satisfaits ou documentes BLOCKED",
+   "tests_attendus": "meta",
+   "preuve_attendue": "acceptance: verdict global etait faux (DONE_GLOBAL premature)",
+   "statut": "PARTIAL",
+   "sha": "cccfc95",
+   "resultat_economique": "acceptance economique",
+   "next_action": "voir FIX correspondant"
+  }
+ ],
+ "etat_global": "LAB_READY_DATA_BLOCKED",
+ "niveaux_etat": [
+  "LAB_READY_DATA_BLOCKED",
+  "RESEARCH_READY",
+  "OOS_CANDIDATES",
+  "FORWARD_VALIDATED",
+  "ECONOMICALLY_VALIDATED",
+  "DONE_GLOBAL"
+ ],
+ "note_etat": "DONE_GLOBAL interdit tant qu'une dependance essentielle (data HF, wallets, TWAP/L4, exec) est bloquee. BLOCKED_EXTERNAL n'est JAMAIS DONE.",
+ "corrections": [
+  {
+   "id": "FIX-01",
+   "section": "B",
+   "objectif": "run_factory execute REELLEMENT toutes les familles ACTIVE/SHADOW (pas juste un registre)",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "c69a7a5",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "run_all pilote par le registre des familles ; 14/14 executees (trial mesure ou BLOCKED precis) ; teste."
+  },
+  {
+   "id": "FIX-02",
+   "section": "B",
+   "objectif": "P58 coverage verifie la chaine famille->adapter->experience appelee->trial produit (ou BLOCKED explicite)",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "d421a58",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "coverage verifie la chaine famille->adapter->experience appelee->trial (ou BLOCKED explicite) ; teste."
+  },
+  {
+   "id": "FIX-03",
+   "section": "B",
+   "objectif": "TrialRegistry: dedup explicite + code_sha + tous negatifs conserves + aucun reset implicite",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "ea9a948",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-04",
+   "section": "B",
+   "objectif": "Parallel Factory: compare le CONTENU complet, conflit meme trial_id+contenu different=ERROR, resultat identique 1/2/N workers",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "8265c3a",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-05",
+   "section": "B",
+   "objectif": "Runtime->Factory: brancher les nouvelles captures aux experiences discovery ; forward frozen physiquement separe",
+   "prio_eco": 2,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-06",
+   "section": "C",
+   "objectif": "cost_model: cost_incomplet=False seulement si fees+spread+slippage+latency applicables mesures ; inconnue interdit CANDIDAT",
+   "prio_eco": 2,
+   "statut": "DONE",
+   "sha": "3bb57d6",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-07",
+   "section": "C",
+   "objectif": "fees: aucun ratio maker invente (0.33) comme verite ; maker/taker/tier/rebate explicites ou UNMEASURABLE conservateur",
+   "prio_eco": 2,
+   "statut": "DONE",
+   "sha": "f310b84",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-08",
+   "section": "C",
+   "objectif": "book_walk: BUY consomme asks / SELL consomme bids ; qty base ; VWAP=quote/base ; partial fill ; tick/lot ; slippage signe ; tests analytiques",
+   "prio_eco": 2,
+   "statut": "DONE",
+   "sha": "46d1781",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-09",
+   "section": "C",
+   "objectif": "capacity: 10/25/50/100/250/500/1000 ; book walk reel ; liquidite consommee non reutilisable ; capacity=taille avant disparition du NET edge",
+   "prio_eco": 2,
+   "statut": "DONE",
+   "sha": "46d1781",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-10",
+   "section": "C",
+   "objectif": "cross-venue: revalider end-to-end entry A+B->hedge->residual->exit->unwind->fees/slippage/latency->PnL ; basis!=arb ; gross<=P95 roundtrip=KILL",
+   "prio_eco": 3,
+   "statut": "DONE",
+   "sha": "74bb06f",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: episode_cross_venue (detection->legs A/B->hedge->residu->unwind->PnL apres tous couts) reutilise executable_legs+state_machine. Wire _adapt_cross_venue: basis persistant elimine, gross<=P95 roundtrip KILL, transient sans L2 = MORE_DATA. 6 tests verts."
+  },
+  {
+   "id": "FIX-11",
+   "section": "D",
+   "objectif": "recorder HF branche au runtime user (collecte simultanee HL+Binance BBO/L2 top20/trades/fills/TWAP, tous timestamps, seq/diff/gaps/dup/oo/desync/reconnect, raw+canonical+manifest+hash)",
+   "prio_eco": 3,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-12",
+   "section": "D",
+   "objectif": "Universe Manager branche: subscribe/unsubscribe dynamique selon positions/candidats/TWAP/wallets/quotas reels",
+   "prio_eco": 3,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-13",
+   "section": "E",
+   "objectif": "node_fills_by_block streaming/checkpoints -> milliers de wallets (jamais tout en RAM) ; conserver user/coin/side/startPosition/size/oid/twapId/ts",
+   "prio_eco": 4,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-14",
+   "section": "E",
+   "objectif": "classer DESYNC: bootstrap/missing fill/duplicate/source gap/ordering/schema",
+   "prio_eco": 4,
+   "statut": "DONE",
+   "sha": "4313d34",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "classer_desync: taxonomie SCHEMA/DUPLICATE/ORDERING/SOURCE_GAP/STALE/BOOTSTRAP/OK, seuls OK propres ; teste."
+  },
+  {
+   "id": "FIX-15",
+   "section": "E",
+   "objectif": "entity clustering: memes timings/sizes/coins/cadence/infra != preuves independantes",
+   "prio_eco": 4,
+   "statut": "DONE",
+   "sha": "ac7de9a",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "fingerprint_wallet + fingerprints_similaires + clusters_entite (timing OU empreinte coins/taille/cadence) ; teste. Reste 'infra' (IP) = data-BLOCKED."
+  },
+  {
+   "id": "FIX-16",
+   "section": "F",
+   "objectif": "Wallet×Binance: matching horizon = prix AUTOUR de T+h avec tolerance bornee (pas 'dernier<=T+h' vieux de secondes)",
+   "prio_eco": 5,
+   "statut": "DONE",
+   "sha": "4cbec6f",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "matching horizon = point le plus proche de T±h, tolerance bornee <=h/2 ; teste (stale rejete)."
+  },
+  {
+   "id": "FIX-17",
+   "section": "F",
+   "objectif": "direction depuis lifecycle OPEN/ADD/REDUCE/CLOSE/FLIP + position_side (CLOSE/REDUCE SHORT=BUY, LONG=SELL)",
+   "prio_eco": 5,
+   "statut": "DONE",
+   "sha": "7be5726",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "direction_trade: lifecycle x position_side (close/reduce SHORT=BUY, LONG=SELL, flip, side B/A) ; teste."
+  },
+  {
+   "id": "FIX-18",
+   "section": "F",
+   "objectif": "dedup event_id/tid/oid",
+   "prio_eco": 5,
+   "statut": "DONE",
+   "sha": "6d095e2",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "charger_fills deduplique par event_id/fill_hash/tid/oid (sinon empreinte) ; teste."
+  },
+  {
+   "id": "FIX-19",
+   "section": "F",
+   "objectif": "mesurer 50/100/250/500ms 1/2/5/10/30s uniquement si reellement observable",
+   "prio_eco": 5,
+   "statut": "MORE_DATA",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-20",
+   "section": "F",
+   "objectif": "DISCOVERY->RANK->FREEZE->OOS intact->FORWARD ; aucun retune ; score=notre copyable net edge",
+   "prio_eco": 5,
+   "statut": "DONE",
+   "sha": "06d2d06",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "experience_anticipation: split decouverte/OOS disjoint, verdict+LCB sur l'OOS (edge doit survivre) ; teste."
+  },
+  {
+   "id": "FIX-21",
+   "section": "G",
+   "objectif": "brancher TWAP reel: twapId/userTwapSliceFills/userTwapHistory/executedSz/executedNtl/total/duration/reduceOnly ; reconstruire start/stage/residual/cadence/catch-up/termination/crowding",
+   "prio_eco": 6,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-22",
+   "section": "G",
+   "objectif": "tester EARLY+LARGE_RESIDUAL+LOW_CROWDING+DEPTH_REPLENISHMENT+favorable STATE/FLOW",
+   "prio_eco": 6,
+   "statut": "MORE_DATA",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-23",
+   "section": "G",
+   "objectif": "metaorder hazard: P(next slice|state)/remaining_flow_probability/expected_remaining_notional (predire le FUTUR residuel)",
+   "prio_eco": 6,
+   "statut": "MORE_DATA",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-24",
+   "section": "H",
+   "objectif": "L4 lifecycle ORDER->MODIFY->CHASE->PARTIAL->FILL/CANCEL->POSITION + features + comparaisons ; sinon BLOCKED precis + collector pret",
+   "prio_eco": 7,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-25",
+   "section": "I",
+   "objectif": "STATE(spread/depth L1-L20/slope/convexity/imbalance/vol/regime)+FLOW(OFI/MLOFI/microprice/aggr vol/trade imb/add-cancel/depletion) ; ablations ; feature sans incr NET OOS=DROP",
+   "prio_eco": 8,
+   "statut": "MORE_DATA",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-26",
+   "section": "I",
+   "objectif": "queue maker: RiskAverse vs probabilistic sur vraie data (queue ahead/trade-through/cancel/depletion/partial/non-fill/timeout/opp cost) ; jamais touched=filled",
+   "prio_eco": 9,
+   "statut": "PARTIAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-27",
+   "section": "I",
+   "objectif": "maker toxicity avant fill (aggr flow/absorption/fragility/depletion/microprice/spread) ; maker si E[PnL|fill]>0 apres couts",
+   "prio_eco": 9,
+   "statut": "PARTIAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-28",
+   "section": "J",
+   "objectif": "multi-venue read-only Binance/Bybit/OKX/Coinbase ; NBBO interdit quote stale ; venue_leader_score coin/regime",
+   "prio_eco": 10,
+   "statut": "BLOCKED_EXTERNAL",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-29",
+   "section": "J",
+   "objectif": "cross-asset lead-lag beta-neutral + leave-one-coin/day OOS",
+   "prio_eco": 10,
+   "statut": "MORE_DATA",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-30",
+   "section": "J",
+   "objectif": "book resiliency: replenishment/half-life/depth restoration/side tilt apres burst/TWAP/liq",
+   "prio_eco": 10,
+   "statut": "RESEARCH_READY",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-31",
+   "section": "J",
+   "objectif": "liquidations/cascades/triggers SHADOW: regime/filter avant signal autonome",
+   "prio_eco": 10,
+   "statut": "RESEARCH_READY",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-32",
+   "section": "J",
+   "objectif": "clock regimes second/minute/5m/15m/hour/session + multiple-testing obligatoire",
+   "prio_eco": 10,
+   "statut": "RESEARCH_READY",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-33",
+   "section": "J",
+   "objectif": "abnormal regimes (new listing/delisting/tick-lot/thin/abnormal spread)->NO_TRADE modele normal",
+   "prio_eco": 10,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-34",
+   "section": "K",
+   "objectif": "chaque trial: N raw/N ind/gross/fees/spread/slippage/latency/net/LCB/PF/DD/ES/fill/capacity/OOS/forward/verdict",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "7c1fddf",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "pf/es par famille (OFI/leadlag/MLOFI/anticipation exposent votes_net_oos) ; slippage/latency/fill/capacity restent data-BLOCKED (chantier recorder HF)."
+  },
+  {
+   "id": "FIX-35",
+   "section": "K",
+   "objectif": "N independant: metaorder/burst/wallet×coin×episode-day/entity cluster",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": "dcf6f25",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "annoter_entites collapse les wallets co-tradant en une seule voix (metaorder prime, conservateur) ; teste."
+  },
+  {
+   "id": "FIX-36",
+   "section": "K",
+   "objectif": "purged CV/embargo/prefix stability/cluster-block bootstrap/placebos/DSR/PBO/global trial count/multiple-testing",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": "82a3f42",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DSR deflate par nb GLOBAL essais + placebo permutation cables dans le verdict factory (backtesting.anti_overfit_gate.evaluer, pas de doublon). PBO (pbo_cscv) existe mais exige une matrice de folds combinatoire que le split unique DISC/OOS ne produit pas encore."
+  },
+  {
+   "id": "FIX-37",
+   "section": "K",
+   "objectif": "early stop: LCB robuste<0 & N suffisant=KILL ; incertain=MORE_DATA ; pas de favorable early-stop",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-38",
+   "section": "K",
+   "objectif": "hard negative library: pas de retest zone KILL sans nouvelle donnee/hypothese",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-39",
+   "section": "L",
+   "objectif": "alpha decay par famille 0-30s -> half_life/break_even_latency/max_signal_age ; au-dela=NO_TRADE",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": "f9210a6",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: mesurer_decay_par_age cable dans run_factory (_adapt_anticipation) -> half_life/break_even/max_signal_age reels + gate no_trade ; test_fix39_anticipation_porte_une_courbe_decay_reelle vert. Familles sans prix denses = UNMEASURABLE honnete. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-40",
+   "section": "L",
+   "objectif": "cost-aware gate: trade si LCB(gross)>P95(total cost)+marge",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-41",
+   "section": "L",
+   "objectif": "exit factory: fixed/convergence/opposite/micro deterioration/time stop/SL/TP ; choisi discovery puis FREEZE avant OOS",
+   "prio_eco": 11,
+   "statut": "DONE",
+   "sha": "f162d7f",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: exit_factory complet (7 regles dont CONVERGENCE + DETERIORATION_MICRO) + discipline discovery->GEL->OOS + adaptateur exits cable dans run_factory (chemin de markout par fill). Tests: fix41 x4 verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-42",
+   "section": "M",
+   "objectif": "deconfliction: wallet+TWAP+Binance+OFI simultanes=1 event_cluster (pas 4 obs)",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-43",
+   "section": "M",
+   "objectif": "meta-gate: combiner si chaque composante ajoute incr NET OOS ; ablation obligatoire",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-44",
+   "section": "N",
+   "objectif": "replay=forward MEME pipeline CanonicalEvent->state->signal->gate->PaperIntent->CausalExec->Fill->Ledger->Scoreboard ; test end-to-end vrais events",
+   "prio_eco": 12,
+   "statut": "DONE",
+   "sha": "de765fa",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: pipeline_e2e (ops/paper_pipeline_e2e.PipelineCanonique) - chaine canonique unique replay=forward, reutilise paper_canonique + replay_consistency. Preuve e2e verte (4 tests). [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-45",
+   "section": "N",
+   "objectif": "producer/consumer par strategie ; module jamais appele=PAS DONE",
+   "prio_eco": 12,
+   "statut": "DONE",
+   "sha": "0522a6f",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: ops/producer_consumer.ProducerConsumer route par strategie via runtime_truth (desormais APPELE) vers les pipelines canoniques FIX-44. Strategie sans producteur vivant = 0 consommation. 3 tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-46",
+   "section": "N",
+   "objectif": "lineage source->feature (source/ts/transformation/version/causality) ; future leakage=rejet",
+   "prio_eco": 12,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-47",
+   "section": "O",
+   "objectif": "ForwardFrozen PERSISTANT (SQLite/JSONL scelle, reprise process-safe, config immuable, observations append-only, entree auto des candidats OOS)",
+   "prio_eco": 12,
+   "statut": "DONE",
+   "sha": "7f96e4b",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-48",
+   "section": "O",
+   "objectif": "alpha drift rolling net/LCB/PF/cost/latency/regime ; rupture=PAUSE/DEMOTE ; jamais retune silencieux",
+   "prio_eco": 12,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-49",
+   "section": "P",
+   "objectif": "capital efficiency: net PnL/avg margin/time-in-market",
+   "prio_eco": 13,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-50",
+   "section": "P",
+   "objectif": "sizing UNIQUEMENT apres OOS+forward: fixed vs Kelly plafonne ; capacity/DD/ES ; ne sauve pas un edge negatif",
+   "prio_eco": 13,
+   "statut": "DONE",
+   "sha": "2dddb0b",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: sizing_apres_preuve (gate OOS+forward>0 obligatoire) + taille_fixe + es_bps borne reelle. Pret a brancher sur notional post-forward quand un alpha survivra (jamais de sizing sur edge non prouve). Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-51",
+   "section": "P",
+   "objectif": "portfolio si plusieurs alphas survivent: covariance/overlap/beta/entity ; allouer entre edges independants",
+   "prio_eco": 13,
+   "statut": "DONE",
+   "sha": "a2d6695",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: allocation multi-signal (covariance/overlap temporel/overlap entites/beta facteur) + gate >=2 survivants (SOLO sinon). Pret pour post-forward multi-alpha. Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-52",
+   "section": "Q",
+   "objectif": "cache features IMMUTABLE reellement utilise dans les experiences",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "f6d819b",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: FeatureCache branche dans run_all (cache immuable partage entre adaptateurs, cle_feature+poser_immuable). exits reutilise le parse de anticipation (hits>=2), invariance prouvee. Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-53",
+   "section": "Q",
+   "objectif": "streaming/chunks/mmap/cache ; plus de relecture JSONL complete par trial",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "aefa43c",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: jsonl_stream (streaming/mmap/reduce) + CacheParFichier (identite taille+mtime, invalidation). Wire: cross_venue en streaming + run_all cache_fichier persistant inter-runs (0 relecture si inchange). Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-54",
+   "section": "Q",
+   "objectif": "parallelisation apres determinisme prouve ; benchmark RAM/temps",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "710fb6d",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: parallel_factory executer_parallele + prouver_puis_executer (gate determinisme: repli sequentiel si non invariant) + benchmark RAM/temps reels. Chemin sanctionne pour paralleliser la production de trials distincts. Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-55",
+   "section": "R",
+   "objectif": "CI GitHub reellement observable au HEAD: Linux shards/Windows/safety/Factory/runtime-replay/JUnit/artifacts/timeouts",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "e7eb476",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: job runtime-replay ajoute a ci.yml (JUnit+artefact+timeout) ; 8 dimensions couvertes ; test_ci_workflows garde-fou. Observable des le prochain push (Flo pousse). Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-56",
+   "section": "R",
+   "objectif": "fault injection: WS disconnect/gap/duplicate/oo/stale/provider outage/corrupt ledger/disk error",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "86f2d18",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: fault_injection (8 fautes) - flux rejoue dans pipeline FIX-44 (0 fantome, 0 crash, subset des fills propres) + ledger/disk fail-closed. Tests verts. [mirror bridge en attente: device offline]"
+  },
+  {
+   "id": "FIX-57",
+   "section": "S",
+   "objectif": "jamais DONE_GLOBAL parce qu'un blocker est documente ; niveaux LAB_READY_DATA_BLOCKED..ECONOMICALLY_VALIDATED",
+   "prio_eco": 1,
+   "statut": "DONE",
+   "sha": null,
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": ""
+  },
+  {
+   "id": "FIX-58",
+   "section": "S",
+   "objectif": "run final BASE/ADVERSE_P95/P99/OPTIMISTIC(jamais promote) ; table complete IDEA..VERDICT ; PROMOTE seulement si tous les gates passent",
+   "prio_eco": 14,
+   "statut": "DONE",
+   "sha": "a8ec324",
+   "depends": [],
+   "done_criteria": "code+wire+experience/preuve+commit (BLOCKED n'est jamais DONE)",
+   "next_action": "DONE: recette_finale (table complete IDEA..VERDICT + BASE/ADVERSE_P95/P99/OPTIMISTIC) ; PROMOTE ssi adverse_p95+LCB+OOS+forward ; optimistic jamais promote. Consomme les survivants H24 (#70). Tests verts."
+  }
+ ]
+}

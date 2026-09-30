@@ -1,0 +1,21 @@
+=== [1/4] Le noyau : 4 questions, et il REFUSE l'edge de l'appelant ===
+.................                                                        [100%]
+17 passed in 1.64s
+
+=== [2/4] Le CABLAGE : LocalDecisionEngine passe-t-il vraiment par le noyau ? ===
+.............                                                            [100%]
+============================== warnings summary ===============================
+src\hl_observer\testnet\models.py:13
+  C:\Users\flo\Desktop\Projet invest\src\hl_observer\testnet\models.py:13: PytestCollectionWarning: cannot collect test class 'TestnetAction' because it has a __new__ constructor (from: tests/test_loop_candidate_factory.py)
+    class TestnetAction(str, Enum):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+13 passed, 1 warning in 1.18s
+
+=== [3/4] Le cliquet de cablage + l'invariant des interrupteurs ===
+.........................................................                [100%]
+57 passed in 6.10s
+
+=== [4/4] Non-regression Q1/Q2/Q3/G1/H-181 ===
+...........................................................              [100%]
+59 passed in 2.51s

@@ -1,0 +1,97 @@
+DEBUT 
+perimetre : 1896 fichiers de code, 70 lanceurs, 55 outils
+
+--- OUTILS reellement demarres par un lanceur (`python tools\x.py`) : 35 ---
+    tools/analysis/_mechanism_scan.py
+    tools/analysis/_predictor_experiment.py
+    tools/analysis/_seg_analysis.py
+    tools/audit_report.py
+    tools/auditer_cablage.py
+    tools/construire_table_edge.py
+    tools/consulter_memoire.py
+    tools/couverture_de_lignes.py
+    tools/diag_bornes.py
+    tools/diff_cablage.py
+    tools/etat_112_145.py
+    tools/falsifier_carry.py
+    tools/falsifier_cashcat.py
+    tools/g1_lookahead_differentiel.py
+    tools/gen_config_flags.py
+    tools/grouper_echecs.py
+    tools/h181_malediction_du_vainqueur.py
+    tools/measure_funding_gate.py
+    tools/megatest.py
+    tools/mesurer_cablage_597.py
+    tools/mesurer_carry_neutre.py
+    tools/mesurer_flux_market_making.py
+    tools/mesurer_jambes_reelles.py
+    tools/mesurer_spread_carnet.py
+    tools/moissonner_github.py
+    tools/page_kaito.py
+    tools/poser_baseline_couverture.py
+    tools/pourquoi_illisible.py
+    tools/pourquoi_zero_position.py
+    tools/prouver_hot_path.py
+    tools/q3_avant_apres_le_signal.py
+    tools/qui_est_le_304e_mort.py
+    tools/suivre_megatest.py
+    tools/verifier_ecoute.py
+    tools/verifier_tasklist.py
+
+--- GRAINES : modules hl_observer.* importes par ces outils : 128 ---
+    hl_observer.agent.dead_zones_hypersmart
+    hl_observer.agent.dead_zones_hypersmart.registre_officiel
+    hl_observer.audit.cablage
+    hl_observer.audit.cablage._points_d_entree
+    hl_observer.audit.cablage.auditer_les_interrupteurs
+    hl_observer.audit.cablage.auditer_les_modules
+    hl_observer.audit.cablage.graphe_des_imports
+    hl_observer.audit.cablage.modules_atteignables
+    hl_observer.audit.cablage.outils_demarres_par_les_lanceurs
+    hl_observer.audit.cablage.portes_ouvertes_par_les_outils
+    hl_observer.audit.couverture
+    hl_observer.audit.couverture.auditer
+    hl_observer.audit.couverture.ecrire_baseline
+    hl_observer.audit.couverture.lire_baseline
+    hl_observer.backtesting
+    hl_observer.backtesting.ab_flag_replay
+    hl_observer.backtesting.ab_flag_replay.load_jsonl
+    hl_observer.backtesting.ab_flag_replay.marks_by_coin
+    hl_observer.backtesting.cost_model
+    hl_observer.backtesting.cost_model.apply_latency
+    hl_observer.backtesting.cost_model.cost_bps_for
+    hl_observer.backtesting.cross_validation
+    hl_observer.backtesting.cross_validation.purged_walk_forward_splits
+    hl_observer.backtesting.edge_predictor
+    hl_observer.backtesting.execution_models
+    ... (+103)
+
+=================== LE CHIFFRE ===================
+                         AVANT (#597)   APRES
+  testes-non-branches :     304             273   (plafond actuel 303)
+  orphelins           :     103             103   (plafond actuel 104)
+  OUTILLES (recherche):       0              31
+  fiable              :    True            True
+
+--- LA PREUVE QUE LE CORRECTIF N'EST PAS COSMETIQUE ---
+  hl_observer.backtesting.scenario_search : MORT  ->  OUTILLE
+
+--- les 3 modules AJOUTES le 13/07 (ceux qui ont fait rougir le cliquet) ---
+  regime_label                                  OUTILLE (porte de recherche)
+  regime_wiring                                 OUTILLE (porte de recherche)
+  couverture                                    OUTILLE (porte de recherche)
+
+--- garde-fous de PRODUCTION qui ne survivraient que par un OUTIL : 0 ---
+  (aucun -- le correctif ne blanchit AUCUN garde-fou du chemin de production)
+
+--- NOUVEAUX PLAFONDS A POSER (une seule fois, avec la raison ecrite) ---
+  PLAFOND_MORTS_GLOBAL     = 273
+  PLAFOND_ORPHELINS_GLOBAL = 103
+  (les OUTILLES ne sont pas plafonnes : ajouter de la CAPACITE DE RECHERCHE qu'on
+   LANCE vraiment est legitime. Ce qui ne doit pas croitre, c'est le code que
+   PERSONNE n'atteint.)
+ 
+=== tests unitaires de l'audit de cablage === 
+..............................                                           [100%]
+30 passed in 0.28s
+FIN 

@@ -1,0 +1,30 @@
+@echo off
+chcp 65001 >nul
+REM Diagnostic LECTURE SEULE de la tache planifiee + 1 execution manuelle (schtasks /Run).
+set "TN=HyperSmart_VerifOOS"
+set "DIR=%~dp0runtime\rapports\checkpoint_oos_shadow"
+set "OUT=%DIR%\diag_planif.txt"
+if not exist "%DIR%" mkdir "%DIR%"
+> "%OUT%" echo ===== DIAG PLANIF HyperSmart_VerifOOS =====
+>> "%OUT%" echo.
+>> "%OUT%" echo [1] QUERY /V /FO LIST (etat / prochaine exec / derniere exec / resultat / commande)
+schtasks /Query /TN "%TN%" /V /FO LIST >> "%OUT%" 2>&1
+>> "%OUT%" echo.
+>> "%OUT%" echo [2] QUERY /XML (commande + arguments exacts enregistres)
+schtasks /Query /TN "%TN%" /XML >> "%OUT%" 2>&1
+>> "%OUT%" echo.
+>> "%OUT%" echo [3] RUN NOW ^(schtasks /Run^)
+schtasks /Run /TN "%TN%" >> "%OUT%" 2>&1
+timeout /t 12 /nobreak >nul
+>> "%OUT%" echo.
+>> "%OUT%" echo [4] QUERY APRES RUN (Last Run Time / Last Result doivent avoir bouge)
+schtasks /Query /TN "%TN%" /V /FO LIST >> "%OUT%" 2>&1
+>> "%OUT%" echo.
+>> "%OUT%" echo [5] STATUS.JSON APRES RUN
+type "%DIR%\status.json" >> "%OUT%" 2>&1
+>> "%OUT%" echo.
+>> "%OUT%" echo [6] VERIF.LOG (dernieres lignes)
+powershell -NoProfile -Command "Get-Content -Tail 12 -Path '%DIR%\verif.log'" >> "%OUT%" 2>&1
+>> "%OUT%" echo ===== FIN =====
+echo Diagnostic termine. Fichier : %OUT%
+timeout /t 4 /nobreak >nul

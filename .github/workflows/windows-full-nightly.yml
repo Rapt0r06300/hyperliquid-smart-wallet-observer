@@ -1,0 +1,37 @@
+name: WINDOWS_FULL_NIGHTLY
+# [Bloc 11] Suite Windows nocturne + E2E du CMD double-clic. S'execute sur runner Windows GitHub.
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+      - name: Install editable + test runner (BLOQUANT)
+        run: python -m pip install -e ".[dev]"
+      - name: Install requirements-recherche (BLOQUANT)
+        run: python -m pip install -r requirements-recherche.txt
+      - name: Suite hyperlab (Windows)
+        shell: pwsh
+        run: |
+          $tests = @(Get-ChildItem -LiteralPath tests -Filter 'test_hyperlab_*.py' -File |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName })
+          if ($tests.Count -eq 0) {
+            throw 'Aucun test HyperLab trouve sous tests/test_hyperlab_*.py'
+          }
+          python -m pytest @tests -q
+      - name: E2E CMD double-clic
+        shell: cmd
+        run: cmd /c LANCER_HYPERLAB.cmd

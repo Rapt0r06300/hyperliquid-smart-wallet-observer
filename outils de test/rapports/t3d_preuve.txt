@@ -1,0 +1,91 @@
+==============================================================================
+ T3d -- LE HOT PATH P4/P5 EST-IL VRAIMENT MORT ?
+ On ne suppose pas : on cherche les 4 chemins invisibles a l'AST, puis on EXECUTE.
+==============================================================================
+
+  (perimetre fouille : 1242 fichiers -- code du bot + lanceurs + configs.
+   Le dossier runtime/research/github_repos_v24/ (5 617 repos clones) est EXCLU.)
+
+[1/3] IMPORTS DYNAMIQUES dans le code de production (invisibles a l'AST)
+      src/hl_observer/backtesting/scenario_db.py:35  _spec = importlib.util.spec_from_file_location("_scenario_grid_standalone", _GRID_PATH)
+      src/hl_observer/simulation/live_filters.py:35  return float(__import__("os").environ.get(name, ""))
+      src/hl_observer/simulation/live_filters.py:41  raw = __import__("os").environ.get(name)
+      src/hl_observer/ui/routes.py:3633  now_ms = int(__import__("time").time() * 1000)
+      src/hl_observer/ui/routes.py:5284  allowed = set(__import__("hl_observer.ui.safe_actions", fromlist=["ALLOWED_ACTIONS"]).ALLOWED_ACTIONS)
+      hyper_smart_observer/app/main.py:248  spec = importlib.util.spec_from_file_location("github_fusion_intake", tool_path)
+      hyper_smart_observer/dydx_v4/mega_audit.py:89  importlib.import_module(module_name)
+      /!\ A LIRE : si l'un vise un suspect, l'audit s'est trompe.
+
+[2/3] IMPORTS / LANCEMENTS par chaine (python -m, config, lanceur...)
+      On separe un LANCEMENT (import / python -m : ca ressuscite) d'une simple
+      MENTION (une chaine de texte : inoffensif).
+
+      hot_path                                   0 lancement, 10 mention(s) inoffensive(s) :
+            (texte) src/hl_observer/agent/dead_zones_hypersmart.py:69  mots_cles=("latence", "latency", "hot_path", "fraicheur", "freshness", "horizon",
+            (texte) src/hl_observer/analysis/v19_repo_matrix.py:43  ("multi-trader monitoring", "hot_path/research_path split", "dedupe", "CSV logging", "conflicting leaders"),
+            (texte) src/hl_observer/research/local_llm_explainer.py:151  "hot_path": False,
+      event_driven_decider                       RIEN. Pas meme son nom.
+      persistent_poll_runner                     /!\ 1 LANCEMENT(S) :
+            tools/hypersmart_simulation_poll_loop.ps1:298  $runnerArgs = "-u -m hl_observer.runtime.persistent_poll_runner --root `"$Root`" --interval-seconds $IntervalS
+      bounded_event_queue                        RIEN. Pas meme son nom.
+      detailed_logger                            RIEN. Pas meme son nom.
+      detailed_report                            RIEN. Pas meme son nom.
+      graceful_shutdown                          RIEN. Pas meme son nom.
+      safe_mode                                  RIEN. Pas meme son nom.
+      research_path                              0 lancement, 1 mention(s) inoffensive(s) :
+            (texte) src/hl_observer/analysis/v19_repo_matrix.py:43  ("multi-trader monitoring", "hot_path/research_path split", "dedupe", "CSV logging", "conflicting leaders"),
+      clean_archive                              RIEN. Pas meme son nom.
+
+[3/3] PREUVE PAR EXECUTION -- on importe les VRAIS points d'entree
+      import hl_observer.__main__
+      import hl_observer.cli
+      import hl_observer.ui
+      import hl_observer.ui.action_catalog
+      import hl_observer.ui.app
+      import hl_observer.ui.authoritative_snapshot
+      import hl_observer.ui.dashboard_v2
+      import hl_observer.ui.dydx_routes
+      import hl_observer.ui.event_bus
+      import hl_observer.ui.full_refresh_fallback
+      import hl_observer.ui.fusion_persistent_adapter
+      import hl_observer.ui.fusion_status_provider
+      import hl_observer.ui.local_commands
+      import hl_observer.ui.persistent_state
+      import hl_observer.ui.quiet_logging
+      import hl_observer.ui.refusal_live
+      import hl_observer.ui.routes
+      import hl_observer.ui.safe_actions
+      import hl_observer.ui.schemas
+      import hl_observer.ui.simulation_log_export
+      import hl_observer.ui.sse_events
+      import hl_observer.ui.stale_policy
+      import hl_observer.ui.state
+      import hl_observer.ui.status_delta
+      import hl_observer.ui.status_routes
+      import hl_observer.ui.v12_extended_panels
+      import hl_observer.ui.v12_panels
+      import hl_observer.ui.v12_status_provider
+      import hl_observer.ui.wallet_mirror_panel
+      import hl_observer.ui.wallet_panels
+
+      -> 368 module(s) hl_observer.* effectivement charges par Python.
+
+==============================================================================
+ VERDICT
+==============================================================================
+
+  AUCUN des 10 suspects n'est charge par la production.
+
+  MORTS -- PROUVE PAR EXECUTION (Python ne les charge JAMAIS) :
+      hl_observer.runtime.hot_path
+      hl_observer.runtime.event_driven_decider
+      hl_observer.runtime.persistent_poll_runner
+      hl_observer.runtime.bounded_event_queue
+      hl_observer.runtime.detailed_logger
+      hl_observer.runtime.detailed_report
+      hl_observer.runtime.graceful_shutdown
+      hl_observer.runtime.safe_mode
+      hl_observer.runtime.research_path
+      hl_observer.release.clean_archive
+
+  /!\ Au moins un controle n'est pas concluant -> lire ci-dessus AVANT de trancher.

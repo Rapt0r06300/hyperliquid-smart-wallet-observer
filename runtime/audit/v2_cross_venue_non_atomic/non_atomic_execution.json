@@ -1,0 +1,2135 @@
+{
+  "verdict": "PASS",
+  "generated_at_ms": 1785366396247,
+  "scope": "PUBLIC_READ_ONLY_TO_LOCAL_PAPER_ONLY",
+  "sources": {
+    "hyperliquid": "https://api.hyperliquid.xyz/info",
+    "binance": "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=20"
+  },
+  "checks": {
+    "both_leg_orders_tested": true,
+    "measured_latency_distribution": true,
+    "leg2_uses_delayed_distinct_snapshot": true,
+    "residual_is_unwound_or_explicit": true,
+    "p50_p95_p99_reported": true,
+    "paper_only": true,
+    "real_execution": false
+  },
+  "orders": {
+    "HL_BUY_BIN_SELL": {
+      "report": {
+        "request_id": "runtime-hl-buy-bin-sell",
+        "leg_order": [
+          "HYPERLIQUID",
+          "BINANCE"
+        ],
+        "latency_distribution": {
+          "source": "live_sequential_public_book_reads",
+          "sample_count": 5,
+          "p50_ms": 241.0,
+          "p95_ms": 251.8,
+          "p99_ms": 251.96,
+          "min_ms": 226.0,
+          "max_ms": 252.0
+        },
+        "base": {
+          "label": "BASE",
+          "latency_ms": 273.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366389267,
+              "detail": "HYPERLIQUID->BINANCE"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366389267,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366389540,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "EXITING",
+              "timestamp_ms": 1785366389796,
+              "detail": "unwind residual 0.03910351 USDC"
+            },
+            {
+              "state": "RESIDUAL_UNWIND_FILLED",
+              "timestamp_ms": 1785366389796,
+              "detail": "realized=-0.0000357886; remaining=0.0000000000"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366389796,
+              "detail": "matched=100.00589646 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:8b94697d3ee7a92690821af098e6e2baedf49c2302241cdf7bba4af5db8fda8e",
+              "intent_id": "paper-intent:e4d0bf6952126697e8e5a918895f2e78e90be6b1040d328663f71e387e3e6882",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366389267,
+              "snapshot_id": "book:204aea94bd85d6400e41fb087f7ff3726b1a45c692882927016b3f705a0bdc5f",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63939.75995,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.57826961,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:204aea94bd85d6400e41fb087f7ff3726b1a45c692882927016b3f705a0bdc5f",
+              "filled_quantity": 0.001564675877,
+              "level_fills": [
+                {
+                  "price": 63911.0,
+                  "available_quantity": 0.16569,
+                  "filled_quantity": 0.001564675877,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564675877,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63939.75995,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:cb51bf90a07bdaa0ad2c958d28e587d18d58661d8034e5d8301cc7acfdd34fa8",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:8b94697d3ee7a92690821af098e6e2baedf49c2302241cdf7bba4af5db8fda8e",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63939.75995,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:204aea94bd85d6400e41fb087f7ff3726b1a45c692882927016b3f705a0bdc5f",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:fee9fc10ea51f1c8d6f33e10c67c7a4c42f1013861bd9d00d672b71477ad9948",
+              "plan_id": "paper-plan:8b94697d3ee7a92690821af098e6e2baedf49c2302241cdf7bba4af5db8fda8e",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:8b94697d3ee7a92690821af098e6e2baedf49c2302241cdf7bba4af5db8fda8e",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:204aea94bd85d6400e41fb087f7ff3726b1a45c692882927016b3f705a0bdc5f",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:204aea94bd85d6400e41fb087f7ff3726b1a45c692882927016b3f705a0bdc5f",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63911.0,
+                  "consumed_quantity": 0.001564675877
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:c72c016eb71b774b6353892035d300d6e8ae13e5dcc5ecd26ebaa4dccfb8316c",
+              "intent_id": "paper-intent:3479dcf65a1ca7e9aebeaf927f3237db05f8efc18adb574fa0636f75089e0e4b",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366389540,
+              "snapshot_id": "book:3250e0c9151e7bc5c542e03c4378c784cdbda80f403d58004871c04fe9b59298",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63907.2188045,
+              "slippage_bps": 0.00078203,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078168,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:3250e0c9151e7bc5c542e03c4378c784cdbda80f403d58004871c04fe9b59298",
+              "filled_quantity": 0.001564064309,
+              "level_fills": [
+                {
+                  "price": 63935.99,
+                  "available_quantity": 6.36234,
+                  "filled_quantity": 0.001564064309,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564064309,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63907.2188045,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:08663ee470b3b7549a7824c26554bf6c906466e503b3a1185f15a3a6d4bd971e",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:c72c016eb71b774b6353892035d300d6e8ae13e5dcc5ecd26ebaa4dccfb8316c",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63907.2188045,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078203,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:3250e0c9151e7bc5c542e03c4378c784cdbda80f403d58004871c04fe9b59298",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:868219a862ed1c19206d284944b9cbfb26fd75e55645e5d174b22ff71b967dbc",
+              "plan_id": "paper-plan:c72c016eb71b774b6353892035d300d6e8ae13e5dcc5ecd26ebaa4dccfb8316c",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:c72c016eb71b774b6353892035d300d6e8ae13e5dcc5ecd26ebaa4dccfb8316c",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:3250e0c9151e7bc5c542e03c4378c784cdbda80f403d58004871c04fe9b59298",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:3250e0c9151e7bc5c542e03c4378c784cdbda80f403d58004871c04fe9b59298",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63935.99,
+                  "consumed_quantity": 0.001564064309
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:caf490b220bf3360959b21787d47580491ae47393e6cdc56966e3b6334bda3ed",
+              "intent_id": "paper-intent:41111c63d8df33261c3cab0e2e86d54c3f14f5626023da23371e357f48e4847d",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908561666399168,
+              "decision_ts_ms": 1785366389796,
+              "snapshot_id": "book:057736c29542dff1cf7b3df0f97e7704f015afe75bb66640b6d582ad4be1efbc",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 0.03908562,
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:057736c29542dff1cf7b3df0f97e7704f015afe75bb66640b6d582ad4be1efbc",
+              "filled_quantity": 6.11573e-07,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 2.96531,
+                  "filled_quantity": 6.11573e-07,
+                  "filled_notional_usdc": 0.03908562
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "quantity_delta": -6.11573e-07,
+              "filled_notional_usdc": 0.03908562,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:48929c274d30155e017f175946fe5277bc4e8b03395ab184959ca02b4e9bba07",
+              "event_type": "CLOSE",
+              "plan_id": "paper-plan:caf490b220bf3360959b21787d47580491ae47393e6cdc56966e3b6334bda3ed",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:BASE:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:057736c29542dff1cf7b3df0f97e7704f015afe75bb66640b6d582ad4be1efbc",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:c6b69e2a9ffe7521668bdfc39106df7550aff74e60f087a53764e1a84397325f",
+              "plan_id": "paper-plan:caf490b220bf3360959b21787d47580491ae47393e6cdc56966e3b6334bda3ed",
+              "filled_notional_usdc": 0.03908562,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:caf490b220bf3360959b21787d47580491ae47393e6cdc56966e3b6334bda3ed",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:057736c29542dff1cf7b3df0f97e7704f015afe75bb66640b6d582ad4be1efbc",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:057736c29542dff1cf7b3df0f97e7704f015afe75bb66640b6d582ad4be1efbc",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 6.11573e-07
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "matched_quantity": 0.001564064309,
+          "matched_notional_usdc": 100.0058964638,
+          "paired_entry_edge_usdc": -0.0508964443,
+          "initial_residual_notional_usdc": 0.0391035111,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": -3.57886e-05,
+          "equity_usdc": 999.9084360283,
+          "realized_pnl_usdc": -3.57886e-05,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-hl-buy-bin-sell:BASE:BINANCE:SELL",
+            "cross-venue:runtime-hl-buy-bin-sell:BASE:HYPERLIQUID:BUY"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "stress_p95": {
+          "label": "P95",
+          "latency_ms": 252.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366389267,
+              "detail": "HYPERLIQUID->BINANCE"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366390039,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366390291,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "EXITING",
+              "timestamp_ms": 1785366390519,
+              "detail": "unwind residual 0.03910351 USDC"
+            },
+            {
+              "state": "RESIDUAL_UNWIND_FILLED",
+              "timestamp_ms": 1785366390519,
+              "detail": "realized=-0.0000357886; remaining=0.0000000000"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366390519,
+              "detail": "matched=100.00589646 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:8b2689ca0fd4e63955f45dbcc425a94fe242212960452bd1e175c21d1ca77f39",
+              "intent_id": "paper-intent:4034f55abf51683ec4be9510d4de3f905956f912b0bd8da39029ad15a5baea2e",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366390039,
+              "snapshot_id": "book:384cb3d65db8f4ecd58a140840732eaa8ab8e6233fd5d5dd0bb167d92e2b21a9",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63939.75995,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.57826961,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:384cb3d65db8f4ecd58a140840732eaa8ab8e6233fd5d5dd0bb167d92e2b21a9",
+              "filled_quantity": 0.001564675877,
+              "level_fills": [
+                {
+                  "price": 63911.0,
+                  "available_quantity": 2.82436,
+                  "filled_quantity": 0.001564675877,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564675877,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63939.75995,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:2c50f71d3e72c6d1835648e5284936e962c1099e1f908d389ee0a2101ea2b29b",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:8b2689ca0fd4e63955f45dbcc425a94fe242212960452bd1e175c21d1ca77f39",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63939.75995,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:384cb3d65db8f4ecd58a140840732eaa8ab8e6233fd5d5dd0bb167d92e2b21a9",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:140131ed673617e4d3327fc12963495efc5496e49234a49a98aa255168546868",
+              "plan_id": "paper-plan:8b2689ca0fd4e63955f45dbcc425a94fe242212960452bd1e175c21d1ca77f39",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:8b2689ca0fd4e63955f45dbcc425a94fe242212960452bd1e175c21d1ca77f39",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:384cb3d65db8f4ecd58a140840732eaa8ab8e6233fd5d5dd0bb167d92e2b21a9",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:384cb3d65db8f4ecd58a140840732eaa8ab8e6233fd5d5dd0bb167d92e2b21a9",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63911.0,
+                  "consumed_quantity": 0.001564675877
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:4cc95894db533596d80e5a63a93ee4871a851126e281dc2c52f39b4ffb3c51e4",
+              "intent_id": "paper-intent:a9e73bc508a47247df8312a25019665a544e061bfadd0fdd4184943faf19165f",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366390291,
+              "snapshot_id": "book:77a52bde2bb289fd645f84d48e33efba14c48c5184931c9842aefb291216f85b",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63907.2188045,
+              "slippage_bps": 0.00078203,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078168,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:77a52bde2bb289fd645f84d48e33efba14c48c5184931c9842aefb291216f85b",
+              "filled_quantity": 0.001564064309,
+              "level_fills": [
+                {
+                  "price": 63935.99,
+                  "available_quantity": 6.36051,
+                  "filled_quantity": 0.001564064309,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564064309,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63907.2188045,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:ef3215530391103afff9096bff0df3d20260badc925151cbb9461d9361966f3f",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:4cc95894db533596d80e5a63a93ee4871a851126e281dc2c52f39b4ffb3c51e4",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63907.2188045,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078203,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:77a52bde2bb289fd645f84d48e33efba14c48c5184931c9842aefb291216f85b",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:b232f383d45e4e8166aabe3be56d7c78bd645ceb7a4039743d149326fd2df7a2",
+              "plan_id": "paper-plan:4cc95894db533596d80e5a63a93ee4871a851126e281dc2c52f39b4ffb3c51e4",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:4cc95894db533596d80e5a63a93ee4871a851126e281dc2c52f39b4ffb3c51e4",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:77a52bde2bb289fd645f84d48e33efba14c48c5184931c9842aefb291216f85b",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:77a52bde2bb289fd645f84d48e33efba14c48c5184931c9842aefb291216f85b",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63935.99,
+                  "consumed_quantity": 0.001564064309
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:5b6fb847c267c5df9c782464ad47bae5d298aa4e25baa194d0992b91697ca6d4",
+              "intent_id": "paper-intent:e0993436b1667b0ff4786d41234bda3b2da2526bfe2b1744582e0a2408f6ff22",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908561666399168,
+              "decision_ts_ms": 1785366390519,
+              "snapshot_id": "book:b20bf5199f799f3fd5e57bc045e90fa80f10a2aabd450b55a11bff4cbcee2e3f",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 0.03908562,
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:b20bf5199f799f3fd5e57bc045e90fa80f10a2aabd450b55a11bff4cbcee2e3f",
+              "filled_quantity": 6.11573e-07,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 8.92966,
+                  "filled_quantity": 6.11573e-07,
+                  "filled_notional_usdc": 0.03908562
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "quantity_delta": -6.11573e-07,
+              "filled_notional_usdc": 0.03908562,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:b322fb7134fb17a40e8ee9ec85b2254f569e23db3a2d5e8a8cc95892a4b2da38",
+              "event_type": "CLOSE",
+              "plan_id": "paper-plan:5b6fb847c267c5df9c782464ad47bae5d298aa4e25baa194d0992b91697ca6d4",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P95:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:b20bf5199f799f3fd5e57bc045e90fa80f10a2aabd450b55a11bff4cbcee2e3f",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:fe184a9708b7e0b3241e13c75d336f7d8bce666828c699ee1f42cf668dcd2ac5",
+              "plan_id": "paper-plan:5b6fb847c267c5df9c782464ad47bae5d298aa4e25baa194d0992b91697ca6d4",
+              "filled_notional_usdc": 0.03908562,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:5b6fb847c267c5df9c782464ad47bae5d298aa4e25baa194d0992b91697ca6d4",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:b20bf5199f799f3fd5e57bc045e90fa80f10a2aabd450b55a11bff4cbcee2e3f",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:b20bf5199f799f3fd5e57bc045e90fa80f10a2aabd450b55a11bff4cbcee2e3f",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 6.11573e-07
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "matched_quantity": 0.001564064309,
+          "matched_notional_usdc": 100.0058964638,
+          "paired_entry_edge_usdc": -0.0508964443,
+          "initial_residual_notional_usdc": 0.0391035111,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": -3.57886e-05,
+          "equity_usdc": 999.9084360283,
+          "realized_pnl_usdc": -3.57886e-05,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-hl-buy-bin-sell:P95:BINANCE:SELL",
+            "cross-venue:runtime-hl-buy-bin-sell:P95:HYPERLIQUID:BUY"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "stress_p99": {
+          "label": "P99",
+          "latency_ms": 253.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366389267,
+              "detail": "HYPERLIQUID->BINANCE"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366390752,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366391005,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "EXITING",
+              "timestamp_ms": 1785366391239,
+              "detail": "unwind residual 0.03910351 USDC"
+            },
+            {
+              "state": "RESIDUAL_UNWIND_FILLED",
+              "timestamp_ms": 1785366391239,
+              "detail": "realized=-0.0000357886; remaining=0.0000000000"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366391239,
+              "detail": "matched=100.00589646 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:d643b0950a6326f186ffbae1b10e38c27759aecaa26beb6feaf7b54d1b93b257",
+              "intent_id": "paper-intent:f0c52e875b8e4f64b5bdd224ffd8f3fcb6f64162cf7319284d8de63447e3ae6b",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366390752,
+              "snapshot_id": "book:741fbf15446050fedce7aa3cfdd1a68686c7d09ebf052717e095c26e1700945f",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63939.75995,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.57826961,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:741fbf15446050fedce7aa3cfdd1a68686c7d09ebf052717e095c26e1700945f",
+              "filled_quantity": 0.001564675877,
+              "level_fills": [
+                {
+                  "price": 63911.0,
+                  "available_quantity": 1.11523,
+                  "filled_quantity": 0.001564675877,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564675877,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63939.75995,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:492006ae0f42ecf6170a81fbca4e770b3713e56856df2fc1e95c72bde101a883",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:d643b0950a6326f186ffbae1b10e38c27759aecaa26beb6feaf7b54d1b93b257",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63939.75995,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:741fbf15446050fedce7aa3cfdd1a68686c7d09ebf052717e095c26e1700945f",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:4ff58c475e1479533ca88d70bf201f89957e16651dbc103008b0b9f5a6044e1d",
+              "plan_id": "paper-plan:d643b0950a6326f186ffbae1b10e38c27759aecaa26beb6feaf7b54d1b93b257",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:d643b0950a6326f186ffbae1b10e38c27759aecaa26beb6feaf7b54d1b93b257",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:741fbf15446050fedce7aa3cfdd1a68686c7d09ebf052717e095c26e1700945f",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:741fbf15446050fedce7aa3cfdd1a68686c7d09ebf052717e095c26e1700945f",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63911.0,
+                  "consumed_quantity": 0.001564675877
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:c7e78ba60fd581dd227692fba190e5e0e819cc66412fac50218c7b362fa58aca",
+              "intent_id": "paper-intent:51701cd20c24160825b23e02716059b9f7013643363dd8b399c23ad101d2805b",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366391005,
+              "snapshot_id": "book:49e10a8e2002cad95c2ded5e2a8f8e62b4f3cb7e3dd0962684cf402e3f8d1f1c",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63907.2188045,
+              "slippage_bps": 0.00078203,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078168,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:49e10a8e2002cad95c2ded5e2a8f8e62b4f3cb7e3dd0962684cf402e3f8d1f1c",
+              "filled_quantity": 0.001564064309,
+              "level_fills": [
+                {
+                  "price": 63935.99,
+                  "available_quantity": 6.36051,
+                  "filled_quantity": 0.001564064309,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564064309,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63907.2188045,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:ac70ddde23a5a4b1c1ff310b99d189e6b841160cbde7b7a684ec5dda7c2cd45c",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:c7e78ba60fd581dd227692fba190e5e0e819cc66412fac50218c7b362fa58aca",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63907.2188045,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078203,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:49e10a8e2002cad95c2ded5e2a8f8e62b4f3cb7e3dd0962684cf402e3f8d1f1c",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:9ec02a8c6aac66aea863324b8b901d6713f5752d1505e4251a5fd08b3800ff6c",
+              "plan_id": "paper-plan:c7e78ba60fd581dd227692fba190e5e0e819cc66412fac50218c7b362fa58aca",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:c7e78ba60fd581dd227692fba190e5e0e819cc66412fac50218c7b362fa58aca",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:49e10a8e2002cad95c2ded5e2a8f8e62b4f3cb7e3dd0962684cf402e3f8d1f1c",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:49e10a8e2002cad95c2ded5e2a8f8e62b4f3cb7e3dd0962684cf402e3f8d1f1c",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63935.99,
+                  "consumed_quantity": 0.001564064309
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:355baacb0bd46c6a9ac89ba39529894913ad51fca6a0fea49a13b21ecb629ded",
+              "intent_id": "paper-intent:d361040faa26da8025f690f89c4029689618e7467d0ce10f8df9b12c93449d0e",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908561666399168,
+              "decision_ts_ms": 1785366391239,
+              "snapshot_id": "book:0639d4d7465ce41187833cecdfbe7e9789e0467b5a0fec27166f911be6a30f94",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 0.03908562,
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:0639d4d7465ce41187833cecdfbe7e9789e0467b5a0fec27166f911be6a30f94",
+              "filled_quantity": 6.11573e-07,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 8.88426,
+                  "filled_quantity": 6.11573e-07,
+                  "filled_notional_usdc": 0.03908562
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "CLOSE",
+              "position_side": "LONG",
+              "quantity_delta": -6.11573e-07,
+              "filled_notional_usdc": 0.03908562,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:bebc48462fbb1064f0dd98141c93b7cb9d0885ae40345fb47c1c7d2c93119cb9",
+              "event_type": "CLOSE",
+              "plan_id": "paper-plan:355baacb0bd46c6a9ac89ba39529894913ad51fca6a0fea49a13b21ecb629ded",
+              "strategy_id": "cross_venue:runtime-hl-buy-bin-sell:P99:RESIDUAL_UNWIND",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 0.03908562,
+              "filled_notional_usdc": 0.03908562,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:0639d4d7465ce41187833cecdfbe7e9789e0467b5a0fec27166f911be6a30f94",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:5d2e4c0604463319dbe9367e4334ab97d919cfd15baf2a96980bf48ba9d6a238",
+              "plan_id": "paper-plan:355baacb0bd46c6a9ac89ba39529894913ad51fca6a0fea49a13b21ecb629ded",
+              "filled_notional_usdc": 0.03908562,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:355baacb0bd46c6a9ac89ba39529894913ad51fca6a0fea49a13b21ecb629ded",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:0639d4d7465ce41187833cecdfbe7e9789e0467b5a0fec27166f911be6a30f94",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:0639d4d7465ce41187833cecdfbe7e9789e0467b5a0fec27166f911be6a30f94",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 6.11573e-07
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "matched_quantity": 0.001564064309,
+          "matched_notional_usdc": 100.0058964638,
+          "paired_entry_edge_usdc": -0.0508964443,
+          "initial_residual_notional_usdc": 0.0391035111,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": -3.57886e-05,
+          "equity_usdc": 999.9084360283,
+          "realized_pnl_usdc": -3.57886e-05,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-hl-buy-bin-sell:P99:BINANCE:SELL",
+            "cross-venue:runtime-hl-buy-bin-sell:P99:HYPERLIQUID:BUY"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "paper_only": true,
+        "real_execution": false
+      },
+      "ledger": {
+        "starting_balance_usdc": 1000.0,
+        "cash_balance_usdc": 999.9999642114,
+        "realized_pnl_usdc": -3.57886e-05,
+        "unrealized_pnl_usdc": -0.0915281831,
+        "fees_paid_usdc": 0.0,
+        "funding_net_usdc": 0.0,
+        "equity_usdc": 999.9084360283,
+        "drawdown_usdc": 0.0915639717,
+        "turnover_usdc": 200.0390859225,
+        "positions": {
+          "cross-venue:runtime-hl-buy-bin-sell:BASE:BINANCE:SELL": {
+            "coin": "BTC@BINANCE",
+            "position_id": "cross-venue:runtime-hl-buy-bin-sell:BASE:BINANCE:SELL",
+            "side": "SHORT",
+            "quantity": 0.0015640643,
+            "average_entry_price": 63907.2188045,
+            "last_mark_price": 63907.2188045,
+            "unrealized_pnl_usdc": 0.0,
+            "liquidatable_pnl_usdc": null,
+            "leverage_effective": 1.0,
+            "leg_notional_usd": [
+              100.0
+            ],
+            "leg_direction": [
+              -1
+            ],
+            "liquidation_buffer_bps": null
+          },
+          "cross-venue:runtime-hl-buy-bin-sell:BASE:HYPERLIQUID:BUY": {
+            "coin": "BTC@HYPERLIQUID",
+            "position_id": "cross-venue:runtime-hl-buy-bin-sell:BASE:HYPERLIQUID:BUY",
+            "side": "LONG",
+            "quantity": 0.0015640643,
+            "average_entry_price": 63939.75995,
+            "last_mark_price": 63881.2405,
+            "unrealized_pnl_usdc": -0.0915281831,
+            "liquidatable_pnl_usdc": null,
+            "leverage_effective": 1.0,
+            "leg_notional_usd": [
+              99.9609140775
+            ],
+            "leg_direction": [
+              1
+            ],
+            "liquidation_buffer_bps": null
+          }
+        },
+        "event_count": 7,
+        "session_id": "runtime-cross-venue:runtime-hl-buy-bin-sell",
+        "last_event_seq": 7,
+        "last_event_hash": "02659c96a46cad842c0c1d6fd4ca71ed21457cea66784a2a9416b97f1c4dba5e",
+        "roi": {
+          "pnl_usdc": -0.09156397169999764,
+          "roi_on_initial_capital_pct": -0.0091563972,
+          "roi_on_peak_margin_pct": null,
+          "roi_on_average_capital_at_risk_pct": null,
+          "initial_capital_usdc": 1000.0,
+          "peak_margin_usdc": null,
+          "average_capital_at_risk_usdc": null
+        },
+        "reconciliation": {
+          "ok": true,
+          "expected_equity_usdc": 999.9084360283,
+          "actual_equity_usdc": 999.9084360283,
+          "diff_usdc": 0.0,
+          "warnings": []
+        },
+        "capital_accounting": {
+          "starting_equity_usd": 1000.0,
+          "free_cash_usd": 800.0390501339,
+          "margin_locked_usd": 199.9609140775,
+          "gross_exposure_usd": 199.9609140775,
+          "net_directional_exposure_usd": -0.0390859225,
+          "leg_notional_usd": [
+            99.9609140775,
+            100.0
+          ],
+          "leverage_effective": 1.0,
+          "liquidation_buffer_bps": null,
+          "realized_pnl_usd": -3.57886e-05,
+          "unrealized_mid_pnl_usd": -0.0915281831,
+          "liquidatable_pnl_usd": null,
+          "mid_equity_usd": 999.9084360283,
+          "liquidatable_equity_usd": null,
+          "turnover_usd": 200.0390859225,
+          "avg_margin_locked_usd": 166.6536380258,
+          "peak_margin_locked_usd": 200.0,
+          "ROI_starting_equity": null,
+          "ROI_avg_margin_locked": null,
+          "ROI_peak_margin_locked": null,
+          "return_on_gross_exposure": null,
+          "roi_status": "UNMEASURABLE_NO_EXECUTABLE_EXIT"
+        },
+        "pnl_audit": {
+          "status": "TRUSTED",
+          "pnl_valid": true,
+          "events_checked": 7,
+          "realized_pnl_usdc": -3.57886e-05,
+          "fees_paid_usdc": 0.0,
+          "funding_net_usdc": 0.0,
+          "unrealized_pnl_usdc": -0.0915281831,
+          "recalculated_equity_usdc": 999.9084360283,
+          "recalculated_net_pnl_usdc": -0.0915639717,
+          "open_positions": {
+            "cross-venue:runtime-hl-buy-bin-sell:BASE:BINANCE:SELL": 0.001564064309,
+            "cross-venue:runtime-hl-buy-bin-sell:BASE:HYPERLIQUID:BUY": 0.001564064309
+          },
+          "issues": []
+        },
+        "authoritative_equity_usdc": null,
+        "strict_pnl_allowed": true,
+        "strict_roi_allowed": false
+      },
+      "event_chain_valid": true,
+      "event_types": [
+        "PaperFeeCharged",
+        "PaperPositionOpened",
+        "PaperFeeCharged",
+        "PaperPositionOpened",
+        "PaperFeeCharged",
+        "PaperPositionReduced",
+        "PaperEquityUpdated"
+      ]
+    },
+    "BIN_BUY_HL_SELL": {
+      "report": {
+        "request_id": "runtime-bin-buy-hl-sell",
+        "leg_order": [
+          "BINANCE",
+          "HYPERLIQUID"
+        ],
+        "latency_distribution": {
+          "source": "live_sequential_public_book_reads",
+          "sample_count": 5,
+          "p50_ms": 240.0,
+          "p95_ms": 251.6,
+          "p99_ms": 252.72,
+          "min_ms": 225.0,
+          "max_ms": 253.0
+        },
+        "base": {
+          "label": "BASE",
+          "latency_ms": 252.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366394002,
+              "detail": "BINANCE->HYPERLIQUID"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366394002,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366394254,
+              "detail": "99.95770873 USDC"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366394499,
+              "detail": "matched=100.04500000 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:6b4865dcff6864cbfb53af81365e7d19c9ddd4f11e066d43d7cc52db940a2bc2",
+              "intent_id": "paper-intent:0443325ac98ad4553a36708f92367ed009908638fe61a4d938d10da1ba14defa",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:BASE:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366394002,
+              "snapshot_id": "book:615b7edee593a23879c87e4e357b90dc2e36234152027272a17089151dff85ad",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63966.311893,
+              "slippage_bps": 0.00078201,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078237,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:615b7edee593a23879c87e4e357b90dc2e36234152027272a17089151dff85ad",
+              "filled_quantity": 0.001564026392,
+              "level_fills": [
+                {
+                  "price": 63937.54,
+                  "available_quantity": 0.14887,
+                  "filled_quantity": 0.001564026392,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564026392,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63966.311893,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:6396ca2719f9abfba05c4153ab859325a5076011e71e91a85abded6f08457c85",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:6b4865dcff6864cbfb53af81365e7d19c9ddd4f11e066d43d7cc52db940a2bc2",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:BASE:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63966.311893,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078201,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:615b7edee593a23879c87e4e357b90dc2e36234152027272a17089151dff85ad",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:0931d579191b287a4978f5ed844d2125d4c05fac31466f9968fde1607b9ddd67",
+              "plan_id": "paper-plan:6b4865dcff6864cbfb53af81365e7d19c9ddd4f11e066d43d7cc52db940a2bc2",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:6b4865dcff6864cbfb53af81365e7d19c9ddd4f11e066d43d7cc52db940a2bc2",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:615b7edee593a23879c87e4e357b90dc2e36234152027272a17089151dff85ad",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:615b7edee593a23879c87e4e357b90dc2e36234152027272a17089151dff85ad",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63937.54,
+                  "consumed_quantity": 0.001564026392
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:f5a4ea9177c1ff3d68ba7576425b350b0a9b98b689228c564db4c97596208387",
+              "intent_id": "paper-intent:a7ef0ed733682812912afa7e9934d68252e1ec68fc2cd0bf3faacfed9bc350a3",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:BASE:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.957708725916,
+              "decision_ts_ms": 1785366394254,
+              "snapshot_id": "book:6f5d8c2f5173bd8f777ee664e81d9a3dad939485c262667894d9198123771595",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 99.95770873,
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:6f5d8c2f5173bd8f777ee664e81d9a3dad939485c262667894d9198123771595",
+              "filled_quantity": 0.001564038628,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 23.1506,
+                  "filled_quantity": 0.001564038628,
+                  "filled_notional_usdc": 99.95770873
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564038628,
+              "filled_notional_usdc": 99.95770873,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:940fa744186b7a226c07559bceee47da930f0138bfadb63d1831c69e79975bf6",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:f5a4ea9177c1ff3d68ba7576425b350b0a9b98b689228c564db4c97596208387",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:BASE:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:6f5d8c2f5173bd8f777ee664e81d9a3dad939485c262667894d9198123771595",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:0d22a1cad25d4e2fbdcd4b40573cac4b1b66eb8a11f2a0811634dc5ac3086aab",
+              "plan_id": "paper-plan:f5a4ea9177c1ff3d68ba7576425b350b0a9b98b689228c564db4c97596208387",
+              "filled_notional_usdc": 99.95770873,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:f5a4ea9177c1ff3d68ba7576425b350b0a9b98b689228c564db4c97596208387",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:6f5d8c2f5173bd8f777ee664e81d9a3dad939485c262667894d9198123771595",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:6f5d8c2f5173bd8f777ee664e81d9a3dad939485c262667894d9198123771595",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 0.001564038628
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": null,
+          "matched_quantity": 0.001564026392,
+          "matched_notional_usdc": 100.0449999996,
+          "paired_entry_edge_usdc": -0.1330539039,
+          "initial_residual_notional_usdc": 0.0,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": 0.0,
+          "equity_usdc": 1000.0,
+          "realized_pnl_usdc": 0.0,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-bin-buy-hl-sell:BASE:BINANCE:BUY",
+            "cross-venue:runtime-bin-buy-hl-sell:BASE:HYPERLIQUID:SELL"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "stress_p95": {
+          "label": "P95",
+          "latency_ms": 252.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366394002,
+              "detail": "BINANCE->HYPERLIQUID"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366394748,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366395000,
+              "detail": "99.95770873 USDC"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366395253,
+              "detail": "matched=100.04500000 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:a3ca6e8293cc36ae5bfbe75de7d3d3b2c9d9d38d13f45c31ebc56cc4dac8dfa9",
+              "intent_id": "paper-intent:64ed1a5332ab42d39cb8f27dbcf5eb215b80d862688ce169e2538c57794967a0",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P95:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366394748,
+              "snapshot_id": "book:d6c355ff315b3e705ef3024a8eac76e4e9aaad82798edf97242ac70cdbe3b8b1",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63966.311893,
+              "slippage_bps": 0.00078201,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078237,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:d6c355ff315b3e705ef3024a8eac76e4e9aaad82798edf97242ac70cdbe3b8b1",
+              "filled_quantity": 0.001564026392,
+              "level_fills": [
+                {
+                  "price": 63937.54,
+                  "available_quantity": 0.87966,
+                  "filled_quantity": 0.001564026392,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564026392,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63966.311893,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:b635d06c7da58e457ad24301df8930f29b51e629ea2206026a0bd2a562354c4e",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:a3ca6e8293cc36ae5bfbe75de7d3d3b2c9d9d38d13f45c31ebc56cc4dac8dfa9",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P95:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63966.311893,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078201,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:d6c355ff315b3e705ef3024a8eac76e4e9aaad82798edf97242ac70cdbe3b8b1",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:d223c195649a4bab04f723700c4bd82d01aa867a19d9a31ca98061e76d103920",
+              "plan_id": "paper-plan:a3ca6e8293cc36ae5bfbe75de7d3d3b2c9d9d38d13f45c31ebc56cc4dac8dfa9",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:a3ca6e8293cc36ae5bfbe75de7d3d3b2c9d9d38d13f45c31ebc56cc4dac8dfa9",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:d6c355ff315b3e705ef3024a8eac76e4e9aaad82798edf97242ac70cdbe3b8b1",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:d6c355ff315b3e705ef3024a8eac76e4e9aaad82798edf97242ac70cdbe3b8b1",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63937.54,
+                  "consumed_quantity": 0.001564026392
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:39b7ff157e3255d5153daba1a3377ab6e734d8997096d879e2ba335393082a33",
+              "intent_id": "paper-intent:fbadbefa30667af2d03eea9cf91c87296509ef65d18465c1854b9c6026cf837b",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P95:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.957708725916,
+              "decision_ts_ms": 1785366395000,
+              "snapshot_id": "book:537e09651ef73d07e7d2ac88006c61a768cd71e1cb346ae1c4790919eeb51e88",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 99.95770873,
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:537e09651ef73d07e7d2ac88006c61a768cd71e1cb346ae1c4790919eeb51e88",
+              "filled_quantity": 0.001564038628,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 17.1643,
+                  "filled_quantity": 0.001564038628,
+                  "filled_notional_usdc": 99.95770873
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564038628,
+              "filled_notional_usdc": 99.95770873,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:93b28aaa2b7b2005d187a1ef882e1413469531d2aef28a1b4c10bb608c5e3489",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:39b7ff157e3255d5153daba1a3377ab6e734d8997096d879e2ba335393082a33",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P95:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:537e09651ef73d07e7d2ac88006c61a768cd71e1cb346ae1c4790919eeb51e88",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:b67a08978913bc3fb0afe322a0e6faf6ffa0282c99534a206a23f7777d051a00",
+              "plan_id": "paper-plan:39b7ff157e3255d5153daba1a3377ab6e734d8997096d879e2ba335393082a33",
+              "filled_notional_usdc": 99.95770873,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:39b7ff157e3255d5153daba1a3377ab6e734d8997096d879e2ba335393082a33",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:537e09651ef73d07e7d2ac88006c61a768cd71e1cb346ae1c4790919eeb51e88",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:537e09651ef73d07e7d2ac88006c61a768cd71e1cb346ae1c4790919eeb51e88",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 0.001564038628
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": null,
+          "matched_quantity": 0.001564026392,
+          "matched_notional_usdc": 100.0449999996,
+          "paired_entry_edge_usdc": -0.1330539039,
+          "initial_residual_notional_usdc": 0.0,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": 0.0,
+          "equity_usdc": 1000.0,
+          "realized_pnl_usdc": 0.0,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-bin-buy-hl-sell:P95:BINANCE:BUY",
+            "cross-venue:runtime-bin-buy-hl-sell:P95:HYPERLIQUID:SELL"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "stress_p99": {
+          "label": "P99",
+          "latency_ms": 253.0,
+          "transitions": [
+            {
+              "state": "DETECTED",
+              "timestamp_ms": 1785366394002,
+              "detail": "BINANCE->HYPERLIQUID"
+            },
+            {
+              "state": "LEG1_FILLED",
+              "timestamp_ms": 1785366395506,
+              "detail": "100.00000000 USDC"
+            },
+            {
+              "state": "LEG2_FILLED",
+              "timestamp_ms": 1785366395759,
+              "detail": "99.95770873 USDC"
+            },
+            {
+              "state": "MATCHED",
+              "timestamp_ms": 1785366396004,
+              "detail": "matched=100.04500000 USDC"
+            }
+          ],
+          "leg1_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:6f40068a5c66f5e0c82f2acd58d70d608dc706aa71f11d4a3397b6d1e284c443",
+              "intent_id": "paper-intent:af8df922dc8af9e97ba3240009513f044d06d7f0ab6b91e92e88773303c07462",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P99:LEG1",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "decision_ts_ms": 1785366395506,
+              "snapshot_id": "book:a5665e43eca4cf528c14b67d1d5b757d47d6c24ef1f9a8aaa93954b6cf6359d5",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63966.311893,
+              "slippage_bps": 0.00078201,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.50078237,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 100.0,
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:a5665e43eca4cf528c14b67d1d5b757d47d6c24ef1f9a8aaa93954b6cf6359d5",
+              "filled_quantity": 0.001564026392,
+              "level_fills": [
+                {
+                  "price": 63937.54,
+                  "available_quantity": 0.87983,
+                  "filled_quantity": 0.001564026392,
+                  "filled_notional_usdc": 100.0
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "LONG",
+              "quantity_delta": 0.001564026392,
+              "filled_notional_usdc": 100.0,
+              "fill_price": 63966.311893,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:5fa2499e7def8896f763d2ef001d94d8ef7480a02a6139d7815cf846be7f2992",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:6f40068a5c66f5e0c82f2acd58d70d608dc706aa71f11d4a3397b6d1e284c443",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P99:LEG1",
+              "coin": "BTC",
+              "position_side": "LONG",
+              "execution_side": "BUY",
+              "requested_notional_usdc": 100.0,
+              "filled_notional_usdc": 100.0,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63966.311893,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.00078201,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:a5665e43eca4cf528c14b67d1d5b757d47d6c24ef1f9a8aaa93954b6cf6359d5",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:d7b76c65421c39b1413490ee26fd1839aee3903d36d679b68f66986d7ffc21b0",
+              "plan_id": "paper-plan:6f40068a5c66f5e0c82f2acd58d70d608dc706aa71f11d4a3397b6d1e284c443",
+              "filled_notional_usdc": 100.0,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:6f40068a5c66f5e0c82f2acd58d70d608dc706aa71f11d4a3397b6d1e284c443",
+              "venue": "binance_public_depth_read_only",
+              "snapshot_id": "book:a5665e43eca4cf528c14b67d1d5b757d47d6c24ef1f9a8aaa93954b6cf6359d5",
+              "coin": "BTC",
+              "execution_side": "BUY",
+              "levels": [
+                {
+                  "venue": "binance_public_depth_read_only",
+                  "snapshot_id": "book:a5665e43eca4cf528c14b67d1d5b757d47d6c24ef1f9a8aaa93954b6cf6359d5",
+                  "coin": "BTC",
+                  "execution_side": "BUY",
+                  "price": 63937.54,
+                  "consumed_quantity": 0.001564026392
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "leg2_execution": {
+            "accepted": true,
+            "plan": {
+              "plan_id": "paper-plan:433532fe9d97949549e1fbcf19cd5b242b6b9f0ae0cfc44711f6d2671ffdf307",
+              "intent_id": "paper-intent:f1e6f1b6fa1481b1779701ed741038e113bee7ad744229671cadaccb0ba02088",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P99:LEG2",
+              "coin": "BTC",
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.957708725916,
+              "decision_ts_ms": 1785366395759,
+              "snapshot_id": "book:9c3f672006db1a7117da8a62cbad5016ecd5fe77fdeead2bde8042f66525e0d5",
+              "strict_book": true,
+              "paper_only": true,
+              "real_execution": false
+            },
+            "execution": {
+              "fill_price": 63881.2405,
+              "slippage_bps": 0.07823441,
+              "fee_bps": 4.5,
+              "latency_bps": 0.0,
+              "net_cost_bps": 4.5781992,
+              "queue_ratio": null,
+              "is_maker": false,
+              "notional_usdc": 99.95770873,
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_ratio": 1.0,
+              "partial": false,
+              "missed": false,
+              "reason": "FILLED",
+              "cost_status": "MEASURED",
+              "adverse_selection_bps": null,
+              "execution_snapshot_id": "book:9c3f672006db1a7117da8a62cbad5016ecd5fe77fdeead2bde8042f66525e0d5",
+              "filled_quantity": 0.001564038628,
+              "level_fills": [
+                {
+                  "price": 63910.0,
+                  "available_quantity": 16.65275,
+                  "filled_quantity": 0.001564038628,
+                  "filled_notional_usdc": 99.95770873
+                }
+              ]
+            },
+            "position_mutation": {
+              "action": "OPEN",
+              "position_side": "SHORT",
+              "quantity_delta": 0.001564038628,
+              "filled_notional_usdc": 99.95770873,
+              "fill_price": 63881.2405,
+              "status": "APPLY"
+            },
+            "ledger_event": {
+              "event_id": "paper-ledger:671be96df2ecb5c174bf5469843372cb5285bfcfeda907f347e60ca69074d13a",
+              "event_type": "OPEN",
+              "plan_id": "paper-plan:433532fe9d97949549e1fbcf19cd5b242b6b9f0ae0cfc44711f6d2671ffdf307",
+              "strategy_id": "cross_venue:runtime-bin-buy-hl-sell:P99:LEG2",
+              "coin": "BTC",
+              "position_side": "SHORT",
+              "execution_side": "SELL",
+              "requested_notional_usdc": 99.95770873,
+              "filled_notional_usdc": 99.95770873,
+              "missed_notional_usdc": 0.0,
+              "fill_price": 63881.2405,
+              "fee_bps": 4.5,
+              "slippage_bps": 0.07823441,
+              "latency_bps": 0.0,
+              "execution_snapshot_id": "book:9c3f672006db1a7117da8a62cbad5016ecd5fe77fdeead2bde8042f66525e0d5",
+              "cost_status": "MEASURED",
+              "reason": "FILLED",
+              "paper_only": true,
+              "real_execution": false
+            },
+            "equity_event": {
+              "event_id": "paper-equity:2037cb51856b2a56294c115e829db50ecab757b125256c3b2a44b2ce584ea773",
+              "plan_id": "paper-plan:433532fe9d97949549e1fbcf19cd5b242b6b9f0ae0cfc44711f6d2671ffdf307",
+              "filled_notional_usdc": 99.95770873,
+              "realized_pnl_delta_usdc": null,
+              "accounting_status": "PENDING_POSITION_ACCOUNTING"
+            },
+            "liquidity_reservation": {
+              "plan_id": "paper-plan:433532fe9d97949549e1fbcf19cd5b242b6b9f0ae0cfc44711f6d2671ffdf307",
+              "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+              "snapshot_id": "book:9c3f672006db1a7117da8a62cbad5016ecd5fe77fdeead2bde8042f66525e0d5",
+              "coin": "BTC",
+              "execution_side": "SELL",
+              "levels": [
+                {
+                  "venue": "hyperliquid_mainnet_info_l2Book_read_only",
+                  "snapshot_id": "book:9c3f672006db1a7117da8a62cbad5016ecd5fe77fdeead2bde8042f66525e0d5",
+                  "coin": "BTC",
+                  "execution_side": "SELL",
+                  "price": 63910.0,
+                  "consumed_quantity": 0.001564038628
+                }
+              ],
+              "replayed": false
+            },
+            "paper_only": true,
+            "real_execution": false
+          },
+          "unwind_execution": null,
+          "matched_quantity": 0.001564026392,
+          "matched_notional_usdc": 100.0449999996,
+          "paired_entry_edge_usdc": -0.1330539039,
+          "initial_residual_notional_usdc": 0.0,
+          "remaining_residual_notional_usdc": 0.0,
+          "residual_realized_pnl_usdc": 0.0,
+          "equity_usdc": 1000.0,
+          "realized_pnl_usdc": 0.0,
+          "fees_paid_usdc": 0.0,
+          "open_position_ids": [
+            "cross-venue:runtime-bin-buy-hl-sell:P99:BINANCE:BUY",
+            "cross-venue:runtime-bin-buy-hl-sell:P99:HYPERLIQUID:SELL"
+          ],
+          "strict_result": true,
+          "paper_only": true,
+          "real_execution": false
+        },
+        "paper_only": true,
+        "real_execution": false
+      },
+      "ledger": {
+        "starting_balance_usdc": 1000.0,
+        "cash_balance_usdc": 1000.0,
+        "realized_pnl_usdc": 0.0,
+        "unrealized_pnl_usdc": 0.0,
+        "fees_paid_usdc": 0.0,
+        "funding_net_usdc": 0.0,
+        "equity_usdc": 1000.0,
+        "drawdown_usdc": 0.0,
+        "turnover_usdc": 199.95770873,
+        "positions": {
+          "cross-venue:runtime-bin-buy-hl-sell:BASE:BINANCE:BUY": {
+            "coin": "BTC@BINANCE",
+            "position_id": "cross-venue:runtime-bin-buy-hl-sell:BASE:BINANCE:BUY",
+            "side": "LONG",
+            "quantity": 0.0015640264,
+            "average_entry_price": 63966.311893,
+            "last_mark_price": 63966.311893,
+            "unrealized_pnl_usdc": 0.0,
+            "liquidatable_pnl_usdc": null,
+            "leverage_effective": 1.0,
+            "leg_notional_usd": [
+              100.0
+            ],
+            "leg_direction": [
+              1
+            ],
+            "liquidation_buffer_bps": null
+          },
+          "cross-venue:runtime-bin-buy-hl-sell:BASE:HYPERLIQUID:SELL": {
+            "coin": "BTC@HYPERLIQUID",
+            "position_id": "cross-venue:runtime-bin-buy-hl-sell:BASE:HYPERLIQUID:SELL",
+            "side": "SHORT",
+            "quantity": 0.0015640386,
+            "average_entry_price": 63881.2405,
+            "last_mark_price": 63881.2405,
+            "unrealized_pnl_usdc": 0.0,
+            "liquidatable_pnl_usdc": null,
+            "leverage_effective": 1.0,
+            "leg_notional_usd": [
+              99.95770873
+            ],
+            "leg_direction": [
+              -1
+            ],
+            "liquidation_buffer_bps": null
+          }
+        },
+        "event_count": 4,
+        "session_id": "runtime-cross-venue:runtime-bin-buy-hl-sell",
+        "last_event_seq": 4,
+        "last_event_hash": "d0ba6e98b30f7492d8775172e9966e2175bc90b76f543a8c70638523b0acce19",
+        "roi": {
+          "pnl_usdc": 0.0,
+          "roi_on_initial_capital_pct": 0.0,
+          "roi_on_peak_margin_pct": null,
+          "roi_on_average_capital_at_risk_pct": null,
+          "initial_capital_usdc": 1000.0,
+          "peak_margin_usdc": null,
+          "average_capital_at_risk_usdc": null
+        },
+        "reconciliation": {
+          "ok": true,
+          "expected_equity_usdc": 1000.0,
+          "actual_equity_usdc": 1000.0,
+          "diff_usdc": 0.0,
+          "warnings": []
+        },
+        "capital_accounting": {
+          "starting_equity_usd": 1000.0,
+          "free_cash_usd": 800.04229127,
+          "margin_locked_usd": 199.95770873,
+          "gross_exposure_usd": 199.95770873,
+          "net_directional_exposure_usd": 0.04229127,
+          "leg_notional_usd": [
+            100.0,
+            99.95770873
+          ],
+          "leverage_effective": 1.0,
+          "liquidation_buffer_bps": null,
+          "realized_pnl_usd": 0.0,
+          "unrealized_mid_pnl_usd": 0.0,
+          "liquidatable_pnl_usd": null,
+          "mid_equity_usd": 1000.0,
+          "liquidatable_equity_usd": null,
+          "turnover_usd": 199.95770873,
+          "avg_margin_locked_usd": 149.978854365,
+          "peak_margin_locked_usd": 199.95770873,
+          "ROI_starting_equity": null,
+          "ROI_avg_margin_locked": null,
+          "ROI_peak_margin_locked": null,
+          "return_on_gross_exposure": null,
+          "roi_status": "UNMEASURABLE_NO_EXECUTABLE_EXIT"
+        },
+        "pnl_audit": {
+          "status": "TRUSTED",
+          "pnl_valid": true,
+          "events_checked": 4,
+          "realized_pnl_usdc": 0.0,
+          "fees_paid_usdc": 0.0,
+          "funding_net_usdc": 0.0,
+          "unrealized_pnl_usdc": 0.0,
+          "recalculated_equity_usdc": 1000.0,
+          "recalculated_net_pnl_usdc": 0.0,
+          "open_positions": {
+            "cross-venue:runtime-bin-buy-hl-sell:BASE:BINANCE:BUY": 0.001564026392,
+            "cross-venue:runtime-bin-buy-hl-sell:BASE:HYPERLIQUID:SELL": 0.001564038628
+          },
+          "issues": []
+        },
+        "authoritative_equity_usdc": null,
+        "strict_pnl_allowed": true,
+        "strict_roi_allowed": false
+      },
+      "event_chain_valid": true,
+      "event_types": [
+        "PaperFeeCharged",
+        "PaperPositionOpened",
+        "PaperFeeCharged",
+        "PaperPositionOpened"
+      ]
+    }
+  }
+}

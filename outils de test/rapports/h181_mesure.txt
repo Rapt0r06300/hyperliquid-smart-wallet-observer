@@ -1,0 +1,58 @@
+DEBUT 
+================================================================================
+ H-181 -- LE TOP-40 EST-IL DISCERNABLE DU HASARD ?
+================================================================================
+
+  candidats     :    6000   (train 4200 / test 1800)
+  scenarios     :     400   (echantillon de la grille de 20000)
+  >>> le VRAI moteur en teste 150 000 000. Tout effet montre ici est une BORNE
+      INFERIEURE : le maximum d'un bruit MONTE avec le nombre d'essais.
+
+--------------------------------------------------------------------------------
+ 1. LES DONNEES REELLES
+--------------------------------------------------------------------------------
+  scenarios retenus (>= 25 trades) : 400
+  trades evalues au total                : 207611
+  PnL MOYEN par trade                    : -3.0032 $
+  >>> MEILLEUR net de TRAIN              : -106.46 $
+
+--------------------------------------------------------------------------------
+ 2. LE NULL : les MEMES nombres de trades, la MEME distribution de PnL,
+              mais AUCUN lien entre la config et ce qu'elle attrape.
+--------------------------------------------------------------------------------
+  400 tirages du null.
+  hasard : moyenne -258.74 $  |  p95 -224.94 $
+  reel   : -106.46 $
+  ratio reel / p95 du hasard : 0.0
+
+--------------------------------------------------------------------------------
+ 3. LES DEUX PROCEDURES DE SELECTION, SUR LES MEMES DONNEES
+--------------------------------------------------------------------------------
+  procedure                         n    net OOS moyen   positifs OOS
+  MAXIMUM (code actuel)            40          -40.02 $           0/40
+  PLATEAU (propose)                40          -41.66 $           0/40
+
+  configs communes aux deux top-40 : 23
+
+  ============================================================================
+   VERDICT
+  ============================================================================
+
+   >>> LE TOP DE LA RECHERCHE EST INDISCERNABLE DU HASARD.
+
+       Sous l'hypothese « aucune config n'a d'edge », le meilleur des
+       400 scenarios affiche deja -224.94 $ de train (p95).
+       Sur les vraies donnees : -106.46 $. Meme ordre de grandeur.
+
+       Les 40 finalistes ne sont donc PAS les 40 meilleures configs.
+       Ce sont les 40 plus CHANCEUSES -- et une chance ne se reproduit pas.
+
+       « 0 config robuste sur 150 M » n'est PAS un resultat sur le marche.
+       C'est un resultat sur NOTRE PROPRE PROCEDURE DE SELECTION.
+
+       ET C'EST PIRE A L'ECHELLE REELLE : le maximum d'un bruit MONTE avec le
+       nombre d'essais. A 150 000 000 de configs, le gagnant du train est
+       quasi CERTAINEMENT un pic de chance.
+
+  rapport : C:\Users\flo\Desktop\Projet invest\data\reports\h181_malediction_du_vainqueur.json
+FIN 

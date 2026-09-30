@@ -1,0 +1,190 @@
+"""AUDIT DEUX JAMBES du cross-venue EXPERIMENTAL_PAPER.
+
+Construit les deux jambes aux bid/ask exécutables, avec profondeur, spread,
+frais et slippage séparés par venue. Lecture seule, aucun ordre réel.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from hl_observer.arbitrage.cross_venue_contract import (
+    CrossVenueDirection,
+    direction_from_hyperliquid_sens,
+    executable_price,
+)
+
+CARNET_RELPATH = Path("runtime") / "data" / "carnet_venues.jsonl"
+# Fallback fail-conservative uniquement si config/frais_venues.json est absent/illisible.
+# Hyperliquid perp base tier-0 taker = 4.5 bps (0.045%).
+FRAIS_TAKER_HL_BPS = 4.5
+FRAIS_TAKER_BIN_BPS = 4.5
+CARNET_AGE_MAX_S = 120.0
+NOTIONAL_MIN_UTILE_USD = 20.0
+LATENCE_MS = 700.0
+LATENCE_COUT_BPS = 1.0
+
+
+def dimensionner_notional(depth_usd: float, cible_usd: float) -> float:
+    n = min(float(cible_usd), float(depth_usd or 0.0))
+    return n if n >= NOTIONAL_MIN_UTILE_USD else 0.0
+
+
+def frais_venues(root: str | Path = ".") -> tuple[float, float, str]:
+    """Retourne les frais configurés; fallback conservateur si config invalide."""
+    try:
+        d = json.loads((Path(root) / "config" / "frais_venues.json").read_text(encoding="utf-8"))
+        return float(d["hl_taker_bps"]), float(d["bin_taker_bps"]), str(d.get("source") or "config")
+    except (OSError, ValueError, KeyError, TypeError):
+        return FRAIS_TAKER_HL_BPS, FRAIS_TAKER_BIN_BPS, "DEFAUT CONSERVATEUR (config absente/illisible)"
+
+
+def carnet_par_coin(root: str | Path = ".", *, max_lignes: int = 60000) -> dict[str, dict]:
+    p = Path(root) / CARNET_RELPATH
+    if not p.exists():
+        return {}
+    out: dict[str, dict] = {}
+    for l in p.read_text(encoding="utf-8", errors="ignore").splitlines()[-max_lignes:]:
+        try:
+            d = json.loads(l)
+        except ValueError:
+            continue
+        c = str(d.get("coin") or "").upper()
+        if c and d.get("hl_bid") and d.get("bin_bid"):
+            out[c] = d
+    return out
+
+
+def _slippage_bps(notional: float, profondeur_usd: float, demi_spread_bps: float) -> float:
+    prof = float(profondeur_usd or 0.0)
+    if prof <= 0:
+        return demi_spread_bps * 4.0
+    if notional <= prof:
+        return 0.0
+    return (notional / prof - 1.0) * demi_spread_bps * 2.0
+
+
+def construire_jambes(
+    coin: str,
+    direction: CrossVenueDirection,
+    notional: float,
+    carnet: dict,
+    *,
+    frais_hl: float | None = None,
+    frais_bin: float | None = None,
+) -> dict[str, Any]:
+    if not isinstance(direction, CrossVenueDirection):
+        raise TypeError("direction must be a CrossVenueDirection, not an ambiguous integer")
+    fhl = FRAIS_TAKER_HL_BPS if frais_hl is None else float(frais_hl)
+    fbin = FRAIS_TAKER_BIN_BPS if frais_bin is None else float(frais_bin)
+    hl_bid, hl_ask = float(carnet["hl_bid"]), float(carnet["hl_ask"])
+    bin_bid, bin_ask = float(carnet["bin_bid"]), float(carnet["bin_ask"])
+    hl_mid, bin_mid = (hl_bid + hl_ask) / 2, (bin_bid + bin_ask) / 2
+    hl_dspr = float(carnet.get("hl_demi_spread_bps") or 0.0)
+    bin_dspr = float(carnet.get("bin_demi_spread_bps") or 0.0)
+    prof = float(carnet.get("taille_min_usd") or 0.0)
+    ts_ms = float(carnet.get("collecte_ts") or 0.0) * 1000.0
+    hl_px = executable_price(direction.hyperliquid, bid=hl_bid, ask=hl_ask)
+    bin_px = executable_price(direction.binance, bid=bin_bid, ask=bin_ask)
+    hl_slip = _slippage_bps(notional, prof, hl_dspr)
+    bin_slip = _slippage_bps(notional, prof, bin_dspr)
+    jambe_hl = {
+        "venue": "HL",
+        "sens": direction.hyperliquid_sens,
+        "sens_txt": "LONG" if direction.hyperliquid_sens > 0 else "SHORT",
+        "qty": round(notional / hl_mid, 6),
+        "prix_exec": hl_px,
+        "bid": hl_bid,
+        "ask": hl_ask,
+        "profondeur_usd": prof,
+        "demi_spread_bps": round(hl_dspr, 3),
+        "frais_bps": fhl,
+        "slippage_bps": round(hl_slip, 3),
+        "ts_ms": int(ts_ms),
+    }
+    jambe_bin = {
+        "venue": "BINANCE",
+        "sens": direction.binance_sens,
+        "sens_txt": "LONG" if direction.binance_sens > 0 else "SHORT",
+        "qty": round(notional / bin_mid, 6),
+        "prix_exec": bin_px,
+        "bid": bin_bid,
+        "ask": bin_ask,
+        "profondeur_usd": prof,
+        "demi_spread_bps": round(bin_dspr, 3),
+        "frais_bps": fbin,
+        "slippage_bps": round(bin_slip, 3),
+        "ts_ms": int(ts_ms),
+    }
+    frais_entree_bps = hl_dspr + bin_dspr + fhl + fbin + hl_slip + bin_slip
+    hedge_ratio = round((jambe_hl["qty"] * hl_mid) / (jambe_bin["qty"] * bin_mid), 4) if bin_mid else 0.0
+    return {
+        "jambes": {"hl": jambe_hl, "bin": jambe_bin},
+        "direction": direction.as_dict(),
+        "hedge_ratio": hedge_ratio,
+        "frais_entree_reels_bps": round(frais_entree_bps, 3),
+        "cout_sortie_estime_bps": round(frais_entree_bps, 3),
+        "profondeur_usd": prof,
+        "liquidite_ok": bool(prof >= notional),
+        "hl_mid": hl_mid,
+        "bin_mid": bin_mid,
+        "base_bps": round(1e4 * (hl_mid - bin_mid) / bin_mid, 3) if bin_mid else 0.0,
+    }
+
+
+def decomposer(
+    pos: dict,
+    *,
+    carnet_courant: dict | None,
+    d_courant: float | None,
+    base_courant_bps: float | None,
+    now_ms: float,
+) -> dict[str, Any]:
+    notional = float(pos.get("notional_usd") or 0.0)
+    sens = int(pos.get("sens") or 1)
+    d = float(pos.get("d_bps_h") or 0.0)
+    ts_ouv = pos.get("ts_ouverture_ms")
+    ts_ouv = float(ts_ouv) if ts_ouv is not None else now_ms
+    age_h = max(0.0, (now_ms - ts_ouv) / 3.6e6)
+    heures_pleines = int(age_h)
+    direction = direction_from_hyperliquid_sens(sens)
+    aud = construire_jambes(pos["coin"], direction, notional, carnet_courant) if carnet_courant else None
+    frais_entree_bps = aud["frais_entree_reels_bps"] if aud else float(pos.get("cout_entree_bps") or 0.0) * 2
+    cout_sortie_bps = aud["cout_sortie_estime_bps"] if aud else float(pos.get("cout_entree_bps") or 0.0) * 2
+    frais_entree_usd = frais_entree_bps / 1e4 * notional
+    cout_sortie_usd = cout_sortie_bps / 1e4 * notional
+    funding_settled_usd = abs(d) * heures_pleines / 1e4 * notional
+    funding_accru_usd = abs(d) * (age_h - heures_pleines) / 1e4 * notional
+    base_ent = float(pos.get("base_entree_bps") or 0.0)
+    base_cur = float(base_courant_bps if base_courant_bps is not None else base_ent)
+    pnl_basis_usd = sens * (base_cur - base_ent) / 1e4 * notional
+    pnl_liquidable = funding_settled_usd + pnl_basis_usd - frais_entree_usd - cout_sortie_usd
+    return {
+        "frais_entree_payes_usd": round(frais_entree_usd, 6),
+        "frais_entree_reels_bps": round(frais_entree_bps, 3),
+        "cout_sortie_estime_usd": round(cout_sortie_usd, 6),
+        "funding_settled_usd": round(funding_settled_usd, 6),
+        "heures_settled": heures_pleines,
+        "funding_accru_estime_usd": round(funding_accru_usd, 6),
+        "pnl_basis_usd": round(pnl_basis_usd, 6),
+        "base_entree_bps": round(base_ent, 3),
+        "base_courant_bps": round(base_cur, 3),
+        "pnl_liquidable_maintenant_usd": round(pnl_liquidable, 6),
+        "pnl_avec_accru_usd": round(pnl_liquidable + funding_accru_usd, 6),
+        "jambes": aud["jambes"] if aud else None,
+        "hedge_ratio": aud["hedge_ratio"] if aud else None,
+        "profondeur_usd": aud["profondeur_usd"] if aud else None,
+        "liquidite_ok": aud["liquidite_ok"] if aud else None,
+        "d_courant_bps_h": round(float(d_courant), 4) if d_courant is not None else None,
+    }
+
+
+__all__ = [
+    "carnet_par_coin",
+    "construire_jambes",
+    "decomposer",
+    "FRAIS_TAKER_HL_BPS",
+    "FRAIS_TAKER_BIN_BPS",
+    "CARNET_AGE_MAX_S",
+]

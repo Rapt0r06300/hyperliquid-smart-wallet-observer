@@ -1,0 +1,612 @@
+"""Evidence-driven validation of an extracted HyperSmart portable release.
+
+Hermetic checks use only the embedded interpreter.  The separate network
+smoke is restricted to documented, read-only market-data endpoints and never
+sends credentials, signatures or execution payloads.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+import urllib.request
+import zipfile
+from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+from hl_observer.ops.archive_portable import (
+    NOM_MANIFESTE,
+    extraire_et_reverifier,
+    extraire_zip_surement,
+)
+
+SCHEMA = "hypersmart.portable_validation.v1"
+CI_SCHEMA = "hypersmart.ci_head_proof.v1"
+NETWORK_ENDPOINTS = (
+    ("hyperliquid", "POST", "https://api.hyperliquid.xyz/info", {"type": "allMids"}, True),
+    ("binance", "GET", "https://data-api.binance.vision/api/v3/time", None, True),
+    ("dydx", "GET", "https://indexer.dydx.trade/v4/time", None, False),
+)
+FATAL_OUTPUT_MARKERS = (
+    "fatal python error",
+    "failed to import encodings module",
+    "modulenotfounderror:",
+)
+VALIDATION_WORKSPACE_NAME = "_validation_workspace"
+
+
+def _sha256(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _manifest_from_archive(archive: Path) -> dict[str, Any]:
+    with zipfile.ZipFile(archive, "r") as bundle:
+        return json.loads(bundle.read(NOM_MANIFESTE).decode("utf-8"))
+
+
+def _hermetic_environment(root: Path, guard_dir: Path) -> dict[str, str]:
+    python_dir = root / "tools" / "python"
+    system_root_value = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+    if not system_root_value:
+        raise RuntimeError("SystemRoot/WINDIR absent: environnement Windows incomplet")
+    system_root = Path(system_root_value)
+    writable = root / VALIDATION_WORKSPACE_NAME / "environment"
+    for name in ("tmp", "home", "appdata", "localappdata"):
+        (writable / name).mkdir(parents=True, exist_ok=True)
+    path_entries = [
+        python_dir,
+        python_dir / "Scripts",
+        system_root / "System32",
+        system_root / "System32" / "WindowsPowerShell" / "v1.0",
+    ]
+    python_path = [guard_dir, root / "src", root, root / "tools"]
+    env = {
+        "PATH": os.pathsep.join(str(path) for path in path_entries),
+        "PYTHONPATH": os.pathsep.join(str(path) for path in python_path),
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONUTF8": "1",
+        "PYTHONIOENCODING": "utf-8",
+        "PIP_NO_INDEX": "1",
+        "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        "TEMP": str(writable / "tmp"),
+        "TMP": str(writable / "tmp"),
+        "HOME": str(writable / "home"),
+        "USERPROFILE": str(writable / "home"),
+        "APPDATA": str(writable / "appdata"),
+        "LOCALAPPDATA": str(writable / "localappdata"),
+        "HYPERSMART_PORTABLE_AUDIT_ROOT": str(root),
+        "HYPERSMART_PORTABLE_AUDIT_LOG": str(
+            root / VALIDATION_WORKSPACE_NAME / "audit_violations.jsonl"
+        ),
+        "HL_ENABLE_MAINNET_EXECUTION": "0",
+        "HL_ENABLE_TESTNET_EXECUTION": "0",
+        "REAL_MAINNET_TRADING": "false",
+        "TESTNET_EXECUTION_ENABLED": "false",
+        "HYPERSMART_RUNTIME_ROOT": str(root),
+    }
+    for name in ("SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "PROCESSOR_ARCHITECTURE"):
+        if os.environ.get(name):
+            env[name] = os.environ[name]
+    return env
+
+
+def _pytest_environment(env: Mapping[str, str]) -> dict[str, str]:
+    """Run the test harness in the extracted tree without product audit hooks.
+
+    The complete suite intentionally opens loopback sockets, mocks DNS and
+    verifies rejected writes.  Applying the product runtime audit hook to the
+    test runner changes those tests instead of validating the shipped code.
+    Product commands before and after pytest still use the guarded environment;
+    pytest keeps the embedded interpreter, offline pip policy and workspace-
+    local HOME/TEMP paths.
+    """
+    isolated = dict(env)
+    isolated.pop("HYPERSMART_PORTABLE_AUDIT_ROOT", None)
+    isolated.pop("HYPERSMART_PORTABLE_AUDIT_LOG", None)
+    return isolated
+
+
+def _install_sitecustomize(root: Path, guard_dir: Path) -> dict[str, Any]:
+    """Enable the audit hook in every extracted Python child process.
+
+    The shipped interpreter deliberately keeps ``import site`` disabled in its
+    ``._pth`` file so a normal portable run can never absorb a machine user
+    site.  Validation works on a disposable extracted copy: it enables
+    ``site`` there only, with ``PYTHONNOUSERSITE=1``, and installs a local
+    ``sitecustomize``.  Descendant Python processes therefore inherit the
+    network/write guard without changing one byte of the release archive.
+    """
+    guard_dir.mkdir(parents=True, exist_ok=True)
+    (guard_dir / "sitecustomize.py").write_text(
+        "from hl_observer.ops.portable_audit_guard import install_from_environment\n"
+        "install_from_environment()\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    python_dir = root / "tools" / "python"
+    pth_files = sorted(python_dir.glob("python*._pth"))
+    if len(pth_files) != 1:
+        raise RuntimeError(
+            "one embedded python*._pth is required for the hermetic audit bootstrap"
+        )
+    pth = pth_files[0]
+    lines = [
+        line for line in pth.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip().casefold() != "import site"
+    ]
+    if not any(line.strip().casefold() == "lib\\site-packages" for line in lines):
+        raise RuntimeError("embedded _pth does not expose Lib\\site-packages")
+    lines.append("import site")
+    pth.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+    return {
+        "ok": True,
+        "pth": pth.relative_to(root).as_posix(),
+        "sitecustomize": (guard_dir / "sitecustomize.py").relative_to(root).as_posix(),
+        "archive_modified": False,
+        "extracted_copy_only": True,
+    }
+
+
+def _run(
+    name: str,
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    env: Mapping[str, str],
+    timeout: int,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            list(command), cwd=str(cwd), env=dict(env), capture_output=True,
+            text=True, encoding="utf-8", errors="replace", timeout=timeout,
+            stdin=subprocess.DEVNULL, check=False,
+        )
+        code = completed.returncode
+        stdout, stderr = completed.stdout, completed.stderr
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        code = 124
+        stdout = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        stderr = (exc.stderr or "") if isinstance(exc.stderr, str) else ""
+        timed_out = True
+    diagnostic = "\n".join((stdout, stderr)).casefold()
+    fatal_markers = [marker for marker in FATAL_OUTPUT_MARKERS if marker in diagnostic]
+    return {
+        "name": name,
+        "ok": code == 0 and not fatal_markers,
+        "returncode": code,
+        "timed_out": timed_out,
+        "fatal_output_detected": bool(fatal_markers),
+        "fatal_output_markers": fatal_markers,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "command": list(command),
+        "stdout_tail": stdout[-12000:],
+        "stderr_tail": stderr[-12000:],
+    }
+
+
+def _module_import_script(root: Path) -> str:
+    return (
+        "import importlib, json, pathlib\n"
+        "root=pathlib.Path(" + repr(str(root)) + ")\n"
+        "mods=[]\n"
+        "for base,prefix in ((root/'src'/'hl_observer','hl_observer'),"
+        "(root/'hyper_smart_observer','hyper_smart_observer')):\n"
+        "  if not base.is_dir(): continue\n"
+        "  for p in base.rglob('*.py'):\n"
+        "    rel=p.relative_to(base)\n"
+        "    if '__pycache__' in rel.parts: continue\n"
+        "    parts=list(rel.with_suffix('').parts)\n"
+        "    if parts[-1]=='__init__': parts=parts[:-1]\n"
+        "    mod='.'.join([prefix]+parts)\n"
+        "    if mod and mod not in mods: mods.append(mod)\n"
+        "fail=[]\n"
+        "for mod in sorted(mods):\n"
+        "  try: importlib.import_module(mod)\n"
+        "  except BaseException as exc: fail.append({'module':mod,'error':repr(exc)})\n"
+        "print(json.dumps({'count':len(mods),'failures':fail},sort_keys=True))\n"
+        "raise SystemExit(1 if fail else 0)\n"
+    )
+
+
+def _processes_for_root(root: Path) -> set[int]:
+    try:
+        import psutil
+    except ImportError:
+        return set()
+    needle = str(root).casefold()
+    found: set[int] = set()
+    for process in psutil.process_iter(("pid", "cmdline")):
+        try:
+            cmdline = " ".join(process.info.get("cmdline") or []).casefold()
+        except (psutil.AccessDenied, psutil.NoSuchProcess):
+            continue
+        if needle in cmdline:
+            found.add(int(process.info["pid"]))
+    return found
+
+
+def _process_scanner_available() -> bool:
+    try:
+        import psutil  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _consume_audit_log(path: Path) -> list[str]:
+    """Return and clear one validation phase's denied audit events."""
+    if not path.is_file():
+        return []
+    events = path.read_text(encoding="utf-8").splitlines()
+    path.unlink(missing_ok=True)
+    return events
+
+
+def _short_execution_root() -> Path:
+    """Choose a real short Windows path while retaining spaces and accents."""
+    if os.name == "nt":
+        drive = os.environ.get("SYSTEMDRIVE", "").strip()
+        if not drive:
+            system_drive = os.environ.get("SYSTEMDRIVE", "C:")
+            system_root = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR")
+            system_root = system_root or str(Path(system_drive + "\\") / "Windows")
+            drive = Path(system_root).drive or "C:"
+        suffix = f"{os.getpid()}-{time.time_ns() % 100_000_000:08d}"
+        return (Path(drive + "\\") / ("hspv éà " + suffix)).resolve()
+    return (Path(tempfile.gettempdir()) / f"hspv-run-{os.getpid()}-{time.time_ns()}").resolve()
+
+
+def _ci_gate(manifest: Mapping[str, Any], proof: str | Path | None = None) -> dict[str, Any]:
+    expected = str(manifest.get("git_sha", ""))
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        actual = os.environ.get("GITHUB_SHA", "")
+        return {
+            "ok": bool(expected and actual == expected),
+            "provider": "github-actions-current-run",
+            "git_sha": actual,
+            "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+        }
+    if proof:
+        try:
+            payload = _json(Path(proof))
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "detail": f"CI proof unreadable: {exc}"}
+        ok = (
+            payload.get("schema") == CI_SCHEMA
+            and payload.get("provider") == "github-actions"
+            and payload.get("conclusion") == "success"
+            and payload.get("git_sha") == expected
+            and bool(payload.get("run_id"))
+        )
+        return {"ok": ok, **payload}
+    return {"ok": False, "detail": "exact-head GitHub Actions proof absent"}
+
+
+def smoke_reseau_readonly(
+    *,
+    opener: Callable[..., Any] = urllib.request.urlopen,
+    timeout: float = 10.0,
+) -> dict[str, Any]:
+    results = []
+    for venue, method, url, payload, required in NETWORK_ENDPOINTS:
+        if "/exchange" in url.casefold() or not url.startswith("https://"):
+            results.append({
+                "venue": venue, "required": required, "ok": False,
+                "detail": "unsafe URL refused",
+            })
+            continue
+        body = None if payload is None else json.dumps(payload).encode("ascii")
+        headers = {"Content-Type": "application/json", "User-Agent": "HyperSmart-Portable-Smoke/1"}
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)
+        started = time.monotonic()
+        try:
+            with opener(request, timeout=timeout) as response:
+                raw = response.read(1024 * 1024)
+                status = int(getattr(response, "status", 200))
+            parsed = json.loads(raw.decode("utf-8"))
+            valid = isinstance(parsed, dict) and bool(parsed)
+            results.append({
+                "venue": venue, "required": required,
+                "ok": 200 <= status < 300 and valid,
+                "status": status, "bytes": len(raw),
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "url": url, "method": method,
+            })
+        except Exception as exc:  # noqa: BLE001 - evidence records bounded network failure
+            results.append({
+                "venue": venue, "required": required, "ok": False,
+                "url": url, "method": method, "detail": repr(exc),
+            })
+    required_results = [row for row in results if row["required"]]
+    return {
+        "ok": bool(required_results) and all(row["ok"] for row in required_results),
+        "read_only": True,
+        "credentials_sent": False,
+        "exchange_endpoint_used": False,
+        "results": results,
+    }
+
+
+def valider_archive_portable(
+    archive: str | Path,
+    *,
+    archive_repetition: str | Path | None = None,
+    ci_proof: str | Path | None = None,
+    network_opener: Callable[..., Any] = urllib.request.urlopen,
+    extraction_parent: str | Path | None = None,
+    pytest_timeout: int = 3600,
+) -> dict[str, Any]:
+    archive = Path(archive).resolve()
+    manifest = _manifest_from_archive(archive)
+    archive_sha, archive_size = _sha256(archive)
+    repetition = Path(archive_repetition).resolve() if archive_repetition else None
+    repeat_sha = _sha256(repetition)[0] if repetition and repetition.is_file() else ""
+    reproducible = bool(repetition and repeat_sha == archive_sha)
+
+    owned_parent = extraction_parent is None
+    parent = Path(extraction_parent).resolve() if extraction_parent else Path(
+        tempfile.mkdtemp(prefix="hspv-")
+    ).resolve()
+    extractions: list[dict[str, Any]] = []
+    commands: list[dict[str, Any]] = []
+    primary: Path | None = None
+    primary_owned = False
+    orphaned: list[int] = []
+    try:
+        names = ("simple", "avec espaces et accents éà", "chemin-long-" + "x" * 24)
+        for name in names:
+            destination = parent / name
+            with zipfile.ZipFile(archive, "r") as bundle:
+                security = extraire_zip_surement(bundle, destination)
+            disk = extraire_et_reverifier(archive, dossier_extraction=destination)
+            result = {"path_kind": name, "ok": bool(disk.get("ok")),
+                      "security": security, "disk": disk}
+            extractions.append(result)
+        # Keep all manifest witnesses byte-for-byte identical. Execute from a
+        # fourth real extraction close to the drive root: GitHub runner TEMP
+        # paths plus the longest archive member can otherwise cross MAX_PATH,
+        # even though the documented C:\HyperSmart target is supported.
+        primary = _short_execution_root()
+        if primary.exists():
+            raise RuntimeError(f"short portable execution root already exists: {primary}")
+        # Own the path before extraction so a partial unzip is also removed.
+        primary_owned = True
+        with zipfile.ZipFile(archive, "r") as bundle:
+            security = extraire_zip_surement(bundle, primary)
+        disk = extraire_et_reverifier(archive, dossier_extraction=primary)
+        extractions.append({
+            "path_kind": "execution-short-spaces-accents",
+            "ok": bool(disk.get("ok")), "security": security, "disk": disk,
+        })
+        assert primary is not None
+        # Plusieurs tests auditent/nettoient volontairement ``runtime``. Le
+        # basetemp de pytest ne peut donc pas y vivre : une suppression
+        # concurrente faisait disparaître ses fichiers atomiques et pouvait
+        # transformer une validation bornée en attente infinie.
+        validation_dir = primary / VALIDATION_WORKSPACE_NAME
+        guard_dir = primary / "tools" / "python" / "Lib" / "site-packages"
+        validation_dir.mkdir(parents=True, exist_ok=True)
+        audit_bootstrap = _install_sitecustomize(primary, guard_dir)
+        env = _hermetic_environment(primary, guard_dir)
+        python = primary / "tools" / "python" / "python.exe"
+        if not python.is_file():
+            raise RuntimeError("embedded tools/python/python.exe missing after extraction")
+        process_scanner_available = _process_scanner_available()
+        before = _processes_for_root(primary)
+        forbidden_probe = parent / "portable-validation-forbidden-write.txt"
+        forbidden_probe.unlink(missing_ok=True)
+        guard_probe = (
+            "from pathlib import Path\n"
+            f"target=Path({str(forbidden_probe)!r})\n"
+            "try:\n"
+            "  target.write_text('forbidden', encoding='utf-8')\n"
+            "except PermissionError:\n"
+            "  print('PORTABLE_AUDIT_GUARD_OK')\n"
+            "  raise SystemExit(0)\n"
+            "raise SystemExit(91)\n"
+        )
+        commands.append(_run(
+            "audit_guard", [str(python), "-c", guard_probe],
+            cwd=primary, env=env, timeout=60,
+        ))
+        audit_log = Path(env["HYPERSMART_PORTABLE_AUDIT_LOG"])
+        if audit_log.is_file():
+            commands[-1]["probe_events"] = audit_log.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        if forbidden_probe.exists():
+            forbidden_probe.unlink(missing_ok=True)
+            commands[-1]["ok"] = False
+            commands[-1]["external_probe_written"] = True
+        # The denied probe is evidence that the guard works, not an external
+        # mutation by the product.  Start the product/test observation log
+        # empty so only subsequent unexpected attempts fail the release.
+        _consume_audit_log(audit_log)
+        commands.append(_run(
+            "portable_runtime", [str(python), "tools/portable_runtime.py", "--root", str(primary),
+                                 "check", "--require-embedded", "--json"],
+            cwd=primary, env=env, timeout=180,
+        ))
+        commands.append(_run(
+            "wheelhouse_lock", [str(python), "tools/wheelhouse_lock.py", "--wheelhouse",
+                                "tools/wheelhouse", "--verifier", "tools/wheelhouse/WHEELHOUSE_LOCK.json",
+                                "--requirements", "requirements-portable.txt"],
+            cwd=primary, env=env, timeout=180,
+        ))
+        commands.append(_run(
+            "imports", [str(python), "-c", _module_import_script(primary)],
+            cwd=primary, env=env, timeout=900,
+        ))
+        pretest_violations = _consume_audit_log(audit_log)
+        pytest_env = _pytest_environment(env)
+        commands.append(_run(
+            "pytest_full", [str(python), "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                            "--timeout=120", "--timeout-method=thread",
+                            "--basetemp", str(validation_dir / "pytest-temp")],
+            cwd=primary, env=pytest_env, timeout=pytest_timeout,
+        ))
+        commands[-1]["product_audit_guard_applied"] = False
+        commands[-1]["workspace_isolated"] = True
+        commands.append(_run(
+            "safety_check", [str(python), "-m", "hyper_smart_observer.app.main", "--safety-check"],
+            cwd=primary, env=env, timeout=300,
+        ))
+        commands.append(_run(
+            "audit_safety", [str(python), "-m", "hyper_smart_observer.app.main", "--audit-safety"],
+            cwd=primary, env=env, timeout=300,
+        ))
+        comspec = env.get("COMSPEC", "cmd.exe")
+        commands.append(_run(
+            "launcher", [comspec, "/d", "/c", "LANCER_HYPERSMART.cmd", "portable-check"],
+            cwd=primary, env=env, timeout=300,
+        ))
+        report = primary / "runtime" / "reports" / "backtest_replay" / "RAPPORT_PORTABLE_SMOKE.json"
+        previous_mtime = report.stat().st_mtime_ns if report.exists() else 0
+        commands.append(_run(
+            "analyser", [comspec, "/d", "/c", "ANALYSER_BACKTESTS_REPLAYS.cmd", "portable-smoke"],
+            cwd=primary, env=env, timeout=300,
+        ))
+        smoke = _json(report) if report.is_file() and report.stat().st_mtime_ns > previous_mtime else {}
+        time.sleep(0.2)
+        after = _processes_for_root(primary)
+        orphaned = sorted(after - before)
+        runtime_violations = _consume_audit_log(audit_log)
+        violations = pretest_violations + runtime_violations
+        network = smoke_reseau_readonly(opener=network_opener)
+        analyser_command = next(row for row in commands if row["name"] == "analyser")
+        analyser_ok = bool(
+            analyser_command["ok"] and smoke
+            and smoke.get("ledger_reconciliation", {}).get("ok")
+            and smoke.get("session_closure", {}).get("statut") == "COMPLETE"
+        )
+        launcher_command = next(row for row in commands if row["name"] == "launcher")
+        launcher_marker = "PORTABLE_LAUNCHER_CHECK_OK"
+        launcher_ok = bool(
+            launcher_command["ok"]
+            and launcher_marker in launcher_command.get("stdout_tail", "")
+        )
+        checks = {
+            "hashes_extraits": {"ok": all(row["ok"] for row in extractions), "runs": extractions},
+            "audit_bootstrap": audit_bootstrap,
+            "audit_guard_actif": next(row for row in commands if row["name"] == "audit_guard"),
+            "runtime_python": next(row for row in commands if row["name"] == "portable_runtime"),
+            "wheelhouse_exact": next(row for row in commands if row["name"] == "wheelhouse_lock"),
+            "modules_collecteurs": next(row for row in commands if row["name"] == "imports"),
+            "tests_archive_extraite": next(row for row in commands if row["name"] == "pytest_full"),
+            "audits_paper_only": {
+                "ok": all(row["ok"] for row in commands if row["name"] in {"safety_check", "audit_safety"}),
+                "commands": [row for row in commands if row["name"] in {"safety_check", "audit_safety"}],
+            },
+            "lanceur_hypersmart": {
+                **launcher_command,
+                "ok": launcher_ok,
+                "success_marker": launcher_marker,
+                "success_marker_seen": launcher_ok,
+            },
+            "analyseur_backtests": {
+                **analyser_command,
+                "ok": analyser_ok,
+                "report_fresh": bool(smoke),
+                "ledger_reconciled": bool(smoke.get("ledger_reconciliation", {}).get("ok")),
+                "session_complete": smoke.get("session_closure", {}).get("statut") == "COMPLETE",
+            },
+            "test_hermetique_windows": {"ok": os.name == "nt" and all(row["ok"] for row in commands)},
+            "zero_ecriture_externe": {"ok": not violations, "violations": violations},
+            "zero_processus_orphelin": {
+                "ok": process_scanner_available and not orphaned,
+                "scanner_available": process_scanner_available,
+                "pids": orphaned,
+            },
+            "smoke_reseau_readonly": network,
+            "build_reproductible": {
+                "ok": reproducible, "archive_sha256": archive_sha,
+                "repetition_sha256": repeat_sha,
+            },
+            "ci_head_verte": _ci_gate(manifest, ci_proof),
+        }
+        ok = all(bool(value.get("ok")) for value in checks.values())
+        return {
+            "schema": SCHEMA,
+            "ok": ok,
+            "archive": archive.name,
+            "archive_sha256": archive_sha,
+            "archive_size": archive_size,
+            "git_sha": manifest.get("git_sha", ""),
+            "manifest_fingerprint": manifest.get("empreinte_globale", ""),
+            "checks": checks,
+            "commands": commands,
+            "paper_read_only": True,
+            "real_execution": False,
+        }
+    finally:
+        if primary_owned and primary is not None:
+            shutil.rmtree(primary, ignore_errors=True)
+        if owned_parent:
+            shutil.rmtree(parent, ignore_errors=True)
+
+
+def write_evidence(path: str | Path, payload: Mapping[str, Any]) -> Path:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8", newline="\n",
+    )
+    os.replace(temporary, destination)
+    return destination
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Validate one extracted portable archive")
+    parser.add_argument("--archive", required=True)
+    parser.add_argument("--archive-repetition", default="")
+    parser.add_argument("--ci-proof", default="")
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--pytest-timeout", type=int, default=3600)
+    args = parser.parse_args(argv)
+    try:
+        result = valider_archive_portable(
+            args.archive,
+            archive_repetition=args.archive_repetition or None,
+            ci_proof=args.ci_proof or None,
+            pytest_timeout=args.pytest_timeout,
+        )
+        write_evidence(args.output, result)
+    except Exception as exc:  # noqa: BLE001 - CLI reports a bounded validation failure
+        failure = {"schema": SCHEMA, "ok": False, "error": repr(exc)}
+        write_evidence(args.output, failure)
+        print(json.dumps(failure, ensure_ascii=False, indent=2))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result["ok"] else 1
+
+
+__all__ = [
+    "CI_SCHEMA", "NETWORK_ENDPOINTS", "SCHEMA", "VALIDATION_WORKSPACE_NAME",
+    "smoke_reseau_readonly",
+    "valider_archive_portable", "write_evidence",
+]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

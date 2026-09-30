@@ -1,0 +1,73 @@
+# COPIE VERSIONNEE — a DEPLACER dans .github/workflows/ (chemin protege, placement manuel requis).
+# Identique au workflow livre ; GitHub n'active la CI que depuis .github/workflows/.
+
+name: alpha-factory-ci
+
+# CI DÉDIÉE Alpha Factory (P11/P64) — paper/read-only, AUCUN secret, aucune exécution réelle.
+# Complète (ne remplace pas) hypersmart-ci : une barrière RAPIDE et OBSERVABLE pour la couche recherche
+# (discipline + familles + validation), avec rapport JUnit + artefacts, sur Linux ET Windows.
+# La CI complète (shards) reste dans ci.yml ; ici on garantit que le LABO reste vert à chaque commit.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: alpha-factory-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONPATH: src
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  # Verrous de sécurité : aucune exécution possible, même si un test l'oubliait.
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+
+jobs:
+  alpha:
+    name: Alpha Factory (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest
+      - name: Suite recherche Alpha Factory (JUnit + timeout)
+        shell: bash
+        run: |
+          python -m pytest -q --junitxml=alpha-junit-${{ matrix.os }}.xml \
+            tests/test_batch_*.py \
+            tests/test_factory_coverage.py \
+            tests/test_research_cost_model.py tests/test_validation_gates_research.py \
+            tests/test_basis_vs_latency.py tests/test_recette_economique.py \
+            tests/test_search_space.py tests/test_alpha_decay.py tests/test_research_backlog.py \
+            tests/test_ofi_microprice.py tests/test_mlofi.py tests/test_wallet_copy_edge.py \
+            tests/test_wallet_population.py tests/test_wallet_binance_anticipation.py \
+            tests/test_order_intent.py tests/test_alpha_factory.py tests/test_run_factory.py \
+            tests/test_execution_maker.py tests/test_alpha_inputs.py tests/test_feature_increment.py \
+            tests/test_hl_binance_leadlag.py
+      - name: Couverture des familles (P58 — plus jamais de module oublié)
+        shell: bash
+        run: |
+          python -m pytest -q tests/test_factory_coverage.py
+      - name: Artefacts JUnit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha-junit-${{ matrix.os }}
+          path: alpha-junit-${{ matrix.os }}.xml
+          if-no-files-found: ignore

@@ -1,0 +1,31 @@
+{
+  "measured_at": "2026-07-11T20:53:30+00:00",
+  "source": "runtime/replay/_archive/run_20260709_152414",
+  "horizon_ms": 30000,
+  "min_sample_size": 200,
+  "bands": [
+    {
+      "age_min_ms": 5000,
+      "age_max_ms": 15000,
+      "edge_bps": -2.1707,
+      "sample_size": 302,
+      "horizon_ms": 30000
+    },
+    {
+      "age_min_ms": 15000,
+      "age_max_ms": 60000,
+      "edge_bps": -0.5626,
+      "sample_size": 1582,
+      "horizon_ms": 30000
+    },
+    {
+      "age_min_ms": 60000,
+      "age_max_ms": 300000,
+      "edge_bps": -0.2325,
+      "sample_size": 1688,
+      "horizon_ms": 30000
+    }
+  ],
+  "note": "Releve, pas reglage. Un edge median proche de zero pour un cout de 13 bps signifie qu'il n'y a rien a copier -- le refus qui en decoule est CORRECT, pas une panne.",
+  "real_execution": false
+}

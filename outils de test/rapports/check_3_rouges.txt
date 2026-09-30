@@ -1,0 +1,55 @@
+DEBUT 
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________ test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter ___________
+
+verdict = Verdict(orphelins=['hl_observer.analysis.copy_delay_model', 'hl_observer.analysis.entry_edge', 'hl_observer.analysis.e...server.wallets.user_fills_multiplex', 'hl_observer.watchlists.smart_money_watchlist'], interrupteurs=[], illisibles=[])
+
+    def test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter(verdict):
+        """UN CLIQUET, PAS UN NETTOYAGE.
+    
+        L'invariant ci-dessus ne juge que 3 paquets. Le reste du depot compte encore ~300 modules
+        import-inatteignables. On ne peut pas tous les trancher ce soir. Mais on peut EMPECHER LE
+        NOMBRE D'AUGMENTER : c'est un cliquet, il ne tourne que dans un sens.
+    
+        Sans lui, le 301e module mort arriverait exactement comme les 300 autres : en silence.
+    
+        Ce test tourne dans MEGATEST (audit_report.py lance toute la suite pytest) -- donc le
+        cliquet est SERRE a chaque audit, sans rien ajouter au gros fichier d'audit.
+        """
+        morts = len(verdict.testes_non_branches)
+        orphelins = len(verdict.orphelins)
+    
+>       assert morts <= PLAFOND_MORTS_GLOBAL, (
+            "REGRESSION DE CABLAGE : %d modules testes-non-branches (plafond %d).\n"
+            "Un module de plus a ete ajoute sans etre appele par la production.\n"
+            "Soit tu le branches, soit tu l'enterres -- mais le nombre ne remonte pas."
+            % (morts, PLAFOND_MORTS_GLOBAL)
+        )
+E       AssertionError: REGRESSION DE CABLAGE : 304 modules testes-non-branches (plafond 303).
+E         Un module de plus a ete ajoute sans etre appele par la production.
+E         Soit tu le branches, soit tu l'enterres -- mais le nombre ne remonte pas.
+E       assert 304 <= 303
+
+tests\test_risk_guards_no_limbo.py:200: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_risk_guards_no_limbo.py::test_le_nombre_de_modules_MORTS_ne_doit_JAMAIS_remonter
+1 failed in 4.42s
+ 
+=== les 2 tests UI === 
+................F.........................F                              [100%]
+================================== FAILURES ===================================
+C:\Users\flo\Desktop\Projet invest\tests\test_ui_simulation_persistence.py:1061: assert 0 >= 1
+C:\Users\flo\Desktop\Projet invest\tests\test_ui_simulation_v9_filters.py:328: assert []
+============================== warnings summary ===============================
+tests/test_ui_simulation_persistence.py: 5456 warnings
+tests/test_ui_simulation_v9_filters.py: 1232 warnings
+  C:\Users\flo\AppData\Roaming\Python\Python314\site-packages\fastapi\routing.py:233: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+    is_coroutine = asyncio.iscoroutinefunction(dependant.call)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_ui_simulation_persistence.py::test_ui_simulation_replays_accepted_cluster_when_raw_rows_were_already_processed
+FAILED tests/test_ui_simulation_v9_filters.py::test_accepted_fresh_opportunity_cluster_opens_virtual_position_with_v9_authoritative
+2 failed, 41 passed, 6688 warnings in 10.15s
+FIN 

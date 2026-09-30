@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>HyperSmart — Maquette dashboard v2 (thème hacker) — DONNÉES FICTIVES</title>
+<style>
+body{background:#050805;margin:0;padding:20px;font-family:ui-monospace,Consolas,monospace}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes draw{from{stroke-dashoffset:900}to{stroke-dashoffset:0}}
+@keyframes sweep{0%{transform:translateX(0)}100%{transform:translateX(600px)}}
+@keyframes grow{from{width:0}}
+@keyframes fadein{from{opacity:0;transform:translateY(-2px)}to{opacity:1;transform:none}}
+.hk-num{font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hk-dot{animation:pulse 2s infinite}
+.hk-bar{height:5px;background:#fbbf24;animation:grow 1.2s ease-out}
+.hk-ev{animation:fadein .5s ease-out}
+.panel{background:#0c140c;padding:10px}
+.lbl{font-size:10px;color:#5c705c;letter-spacing:1px;margin-bottom:6px}
+</style>
+</head>
+<body>
+<!-- MAQUETTE UI-1 (tâche T48) — spec visuelle pour le dashboard v2 (T49).
+     RÈGLES D'IMPLÉMENTATION:
+     - données 100% ledger canonique (T51), états vides honnêtes, read-only
+     - badges fraîcheur par source: vert <5s / orange <30s / rouge
+     - anti-débordement: font-variant-numeric tabular-nums + minmax(0,1fr) + table-layout:fixed
+     - animations sobres: curseur, tracé metagraphe (draw), balayage (sweep),
+       dots wiring pulsés en cascade, flux ledger fadein, barres refus grow
+     - PAS de gradient/glow lourd; néon = couleurs plates #4ade80/#fbbf24/#22d3ee/#f87171
+     - module séparé, ne pas toucher routes.py (T49) -->
+<div style="background:#070b07;border:1px solid #1c2a1c;border-radius:8px;padding:14px 16px;max-width:960px;margin:auto">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #162216;padding-bottom:8px;margin-bottom:10px;flex-wrap:wrap;gap:4px">
+    <div style="color:#4ade80;font-size:14px;letter-spacing:1px">┌─[ <span style="color:#a7f3d0">HYPERSMART</span><span style="color:#365936">::observer_v2</span> ]<span style="animation:blink 1.1s infinite">▮</span></div>
+    <div style="font-size:11px;color:#5c705c" class="hk-num">MAQUETTE·fictif │ <span style="color:#4ade80">PAPER_ONLY</span> │ ws <span class="hk-dot" style="color:#4ade80">●</span> <span id="ws">0.42</span>s │ <span id="clk">14:32:07</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px;margin-bottom:10px">
+    <div class="panel" style="border-left:2px solid #4ade80;min-width:0"><div class="lbl">PNL_NET</div><div class="hk-num" id="pnl" style="font-size:17px;color:#4ade80">+2.41</div></div>
+    <div class="panel" style="border-left:2px solid #365936;min-width:0"><div class="lbl">EQUITY</div><div class="hk-num" style="font-size:17px;color:#d1e7d1">1 002.4</div></div>
+    <div class="panel" style="border-left:2px solid #fbbf24;min-width:0"><div class="lbl">PF_NET</div><div class="hk-num" style="font-size:17px;color:#fbbf24">1.18</div></div>
+    <div class="panel" style="border-left:2px solid #365936;min-width:0"><div class="lbl">POS</div><div class="hk-num" style="font-size:17px;color:#d1e7d1">7<span style="color:#5c705c;font-size:11px">/12</span></div></div>
+    <div class="panel" style="border-left:2px solid #4ade80;min-width:0"><div class="lbl">FRESH</div><div class="hk-num" id="fresh" style="font-size:17px;color:#4ade80">1.2s</div></div>
+    <div class="panel" style="border-left:2px solid #22d3ee;min-width:0"><div class="lbl">FUNDING/h</div><div class="hk-num" id="fund" style="font-size:17px;color:#22d3ee">+0.012</div></div>
+  </div>
+  <div class="panel" style="margin-bottom:10px;position:relative;overflow:hidden">
+    <div class="lbl">┌ METAGRAPHE <span style="color:#365936">equity·6h</span></div>
+    <svg viewBox="0 0 620 84" width="100%">
+      <line x1="0" y1="64" x2="620" y2="64" stroke="#162216"/>
+      <line x1="0" y1="32" x2="620" y2="32" stroke="#101a10"/>
+      <polygon points="0,66 40,64 80,67 120,60 160,62 200,54 240,56 280,48 320,51 360,44 400,46 440,38 480,41 520,34 560,36 620,28 620,84 0,84" fill="#4ade80" fill-opacity="0.07"/>
+      <polyline points="0,66 40,64 80,67 120,60 160,62 200,54 240,56 280,48 320,51 360,44 400,46 440,38 480,41 520,34 560,36 620,28" fill="none" stroke="#4ade80" stroke-width="2" stroke-dasharray="900" style="animation:draw 2.2s ease-out forwards"/>
+      <g style="animation:sweep 7s linear infinite"><line x1="10" y1="6" x2="10" y2="78" stroke="#a7f3d0" opacity="0.25"/></g>
+      <text x="4" y="12" fill="#365936" font-size="10">+3.0</text>
+      <text x="592" y="24" fill="#4ade80" font-size="10" class="hk-num">+2.41</text>
+    </svg>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-bottom:10px">
+    <div class="panel" style="min-width:0">
+      <div class="lbl">┌ POSITIONS <span style="color:#365936">7 ouvertes</span></div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse;table-layout:fixed;color:#d1e7d1">
+        <tr style="color:#5c705c;text-align:left"><th style="font-weight:400;width:26%">coin</th><th style="font-weight:400;width:30%">mode</th><th style="font-weight:400;width:20%">âge</th><th style="font-weight:400;width:24%;text-align:right">pnl</th></tr>
+        <tr><td style="padding:3px 0">HYPE·L</td><td style="color:#fbbf24">SNIPER</td><td>12m</td><td class="hk-num" style="text-align:right;color:#4ade80">+0.82</td></tr>
+        <tr><td style="padding:3px 0">BTC·Δn</td><td style="color:#22d3ee">GRINDER</td><td>3h02</td><td class="hk-num" style="text-align:right;color:#4ade80">+0.31</td></tr>
+        <tr><td style="padding:3px 0">SOL·Δn</td><td style="color:#22d3ee">GRINDER</td><td>1h11</td><td class="hk-num" style="text-align:right;color:#f87171">−0.04</td></tr>
+        <tr><td style="padding:3px 0">FART·L</td><td style="color:#fbbf24">SNIPER</td><td>4m</td><td class="hk-num" style="text-align:right;color:#4ade80">+0.11</td></tr>
+      </table>
+    </div>
+    <div class="panel" style="min-width:0">
+      <div class="lbl">┌ REFUS <span style="color:#365936">gates·session</span></div>
+      <div style="font-size:11px;color:#8fa58f">
+        <div style="display:flex;justify-content:space-between"><span>EDGE_TOO_SMALL</span><span class="hk-num" style="color:#fbbf24">41</span></div><div class="hk-bar" style="width:92%;margin:2px 0 6px"></div>
+        <div style="display:flex;justify-content:space-between"><span>SIGNAL_TOO_OLD</span><span class="hk-num" style="color:#fbbf24">17</span></div><div class="hk-bar" style="width:38%;margin:2px 0 6px"></div>
+        <div style="display:flex;justify-content:space-between"><span>NOTIONAL_BELOW_MIN</span><span class="hk-num" style="color:#fbbf24">9</span></div><div class="hk-bar" style="width:20%;margin:2px 0 6px"></div>
+        <div style="display:flex;justify-content:space-between"><span>FUNDING_SPIKE</span><span class="hk-num" style="color:#fbbf24">4</span></div><div class="hk-bar" style="width:9%;margin:2px 0"></div>
+      </div>
+    </div>
+  </div>
+  <div class="panel" style="margin-bottom:10px">
+    <div class="lbl">┌ LEDGER <span style="color:#365936">flux temps réel</span></div>
+    <div id="feed" style="font-size:11px;color:#8fa58f;line-height:1.85;min-height:92px">
+      <div class="hk-ev"><span style="color:#365936">14:32:07</span> <span style="color:#22d3ee">FUNDING_ARB_ACCRUAL</span> BTC <span class="hk-num" style="color:#4ade80">+0.0125</span> <span style="color:#365936">5.1bps/h</span></div>
+      <div class="hk-ev"><span style="color:#365936">14:31:52</span> <span style="color:#4ade80">OPEN</span> HYPE LONG <span class="hk-num">40.00</span> <span style="color:#365936">4w·46bps</span></div>
+      <div class="hk-ev"><span style="color:#365936">14:31:40</span> <span style="color:#f87171">NO_TRADE</span> MON <span style="color:#365936">EDGE 12&lt;28bps</span></div>
+      <div class="hk-ev"><span style="color:#365936">14:30:11</span> <span style="color:#4ade80">CLOSE</span> FART <span class="hk-num" style="color:#4ade80">+0.44</span> <span style="color:#365936">TP·38m</span></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="lbl">┌ WIRING <span style="color:#365936">source→ledger</span></div>
+    <div style="font-size:11px;color:#d1e7d1;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <span class="hk-dot" style="color:#4ade80">●</span>ws_fills <span class="hk-num" style="color:#365936" id="wf">1842</span>
+      <span style="color:#365936">━▶</span> <span class="hk-dot" style="color:#4ade80;animation-delay:.3s">●</span>détecteurs <span class="hk-num" style="color:#365936">312</span>
+      <span style="color:#365936">━▶</span> <span class="hk-dot" style="color:#4ade80;animation-delay:.6s">●</span>gates <span class="hk-num" style="color:#365936">71✓</span>
+      <span style="color:#365936">━▶</span> <span class="hk-dot" style="color:#4ade80;animation-delay:.9s">●</span>paper_engine <span class="hk-num" style="color:#365936">11</span>
+      <span style="color:#365936">━▶</span> <span class="hk-dot" style="color:#4ade80;animation-delay:1.2s">●</span>ledger <span class="hk-num" style="color:#365936">0.2s</span>
+      <span style="margin-left:auto;color:#fbbf24"><span class="hk-dot">●</span> funding_poller 42s</span>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  var t=[14,32,7], pnl=2.41, wf=1842;
+  var pool=[
+    ['FUNDING_ARB_ACCRUAL','#22d3ee','ETH','+0.0087','4.2bps/h'],
+    ['NO_TRADE','#f87171','KBONK','','LIQUIDITY_TOO_LOW'],
+    ['OPEN','#4ade80','SOL LONG','25.00','3w·38bps'],
+    ['NO_TRADE','#f87171','LIT','','SIGNAL_TOO_OLD 9.2s'],
+    ['CLOSE','#4ade80','BTC·Δn','+0.19','EDGE_COLLAPSED·2h'],
+    ['FUNDING_ARB_ACCRUAL','#22d3ee','HYPE','+0.0110','5.5bps/h']
+  ];
+  function pad(n){return (n<10?'0':'')+n}
+  function clock(){t[2]++; if(t[2]>59){t[2]=0;t[1]++;} if(t[1]>59){t[1]=0;t[0]=(t[0]+1)%24;} return pad(t[0])+':'+pad(t[1])+':'+pad(t[2])}
+  setInterval(function(){
+    document.getElementById('clk').textContent=clock();
+    document.getElementById('ws').textContent=(0.3+Math.random()*0.35).toFixed(2);
+    document.getElementById('fresh').textContent=(0.8+Math.random()*1.6).toFixed(1)+'s';
+  },1000);
+  setInterval(function(){
+    pnl+=(Math.random()-0.42)*0.02; wf+=Math.floor(Math.random()*5);
+    var p=document.getElementById('pnl'); p.textContent=(pnl>=0?'+':'')+pnl.toFixed(2); p.style.color=pnl>=0?'#4ade80':'#f87171';
+    document.getElementById('wf').textContent=wf;
+    document.getElementById('fund').textContent='+0.0'+(10+Math.floor(Math.random()*4));
+  },1800);
+  setInterval(function(){
+    var feed=document.getElementById('feed');
+    var e=pool[Math.floor(Math.random()*pool.length)];
+    var d=document.createElement('div'); d.className='hk-ev';
+    d.innerHTML='<span style="color:#365936">'+clock()+'</span> <span style="color:'+e[1]+'">'+e[0]+'</span> '+e[2]+(e[3]?' <span class="hk-num" style="color:#4ade80">'+e[3]+'</span>':'')+' <span style="color:#365936">'+e[4]+'</span>';
+    feed.insertBefore(d, feed.firstChild);
+    while(feed.children.length>5) feed.removeChild(feed.lastChild);
+  },4000);
+})();
+</script>
+</body>
+</html>

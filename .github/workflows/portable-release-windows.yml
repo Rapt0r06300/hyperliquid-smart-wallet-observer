@@ -1,0 +1,155 @@
+name: portable-release-windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: portable-release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+  PYTHONNOUSERSITE: "1"
+  PIP_NO_INDEX: "1"
+  # L'archive extraite possède son propre contrat pytest. Les 10k+ tests de
+  # développement restent exécutés par hypersmart-ci dans le checkout Git.
+  PYTEST_ADDOPTS: "tests/test_extracted_portable_contract.py"
+  HL_ENABLE_MAINNET_EXECUTION: "0"
+  HL_ENABLE_TESTNET_EXECUTION: "0"
+  REAL_MAINNET_TRADING: "false"
+  TESTNET_EXECUTION_ENABLED: "false"
+
+jobs:
+  portable-release:
+    name: Build and validate extracted Windows release
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Clean checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          lfs: true
+          persist-credentials: false
+
+      - name: Assert exact clean HEAD
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD).Trim() -ne $env:GITHUB_SHA) {
+            throw "Checkout HEAD does not match GITHUB_SHA"
+          }
+          if (git status --porcelain) {
+            throw "Portable release requires a clean checkout"
+          }
+
+      - name: Build exact embedded Python and Git from audited inputs
+        shell: pwsh
+        run: |
+          & .\tools\install_portable_git.ps1 -ProjectRoot $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\git\cmd\git.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\install_portable_runtime.ps1 -ProjectRoot $PWD.Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\tools\python\python.exe .\tools\wheelhouse_lock.py `
+            --wheelhouse .\tools\wheelhouse `
+            --verifier .\tools\wheelhouse\WHEELHOUSE_LOCK.json `
+            --requirements .\requirements-portable.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Materialize fail-closed writer proof
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force runtime\data | Out-Null
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "runtime\data\lanceur_pids.json"),
+            '{"composants":{},"collecteurs":{}}',
+            $utf8NoBom
+          )
+
+      - name: Build twice and validate the extracted ZIP
+        id: release
+        shell: pwsh
+        env:
+          # Le test du contrat portable ne doit s'activer que dans cette chaîne
+          # qui construit puis extrait réellement le runtime Windows embarqué.
+          HYPERSMART_EXTRACTED_PORTABLE_TEST: "1"
+        run: |
+          # The space is deliberate: this is a real regression gate for CMD/PowerShell path quoting.
+          $releaseDir = Join-Path $env:RUNNER_TEMP "hypersmart portable release"
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
+          & .\CREER_ARCHIVE_PORTABLE.cmd --sortie-dir $releaseDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $zip = @(Get-ChildItem -LiteralPath $releaseDir -Filter "hypersmart_portable_*.zip")
+          if ($zip.Count -ne 1) { throw "Expected exactly one final portable ZIP" }
+          $reportPath = Join-Path $releaseDir "RELEASE_REPORT.json"
+          $validationPath = Join-Path $releaseDir "PORTABLE_VALIDATION.json"
+          $sbomPath = Join-Path $releaseDir "SBOM.cyclonedx.json"
+          foreach ($required in @($reportPath, $validationPath, $sbomPath)) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Missing release artifact: $required"
+            }
+          }
+          $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+          if (-not [bool]$report.RELEASE_READY) { throw "RELEASE_READY is not true" }
+          $validation = Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
+          if ($validation.git_sha -ne $env:GITHUB_SHA) {
+            throw "Validation evidence is not bound to GITHUB_SHA"
+          }
+          if (-not [bool]$validation.paper_read_only -or [bool]$validation.real_execution) {
+            throw "Paper/read-only safety evidence failed"
+          }
+
+          "zip=$($zip[0].FullName)" >> $env:GITHUB_OUTPUT
+          "sbom=$sbomPath" >> $env:GITHUB_OUTPUT
+          "directory=$releaseDir" >> $env:GITHUB_OUTPUT
+
+      - name: Emit exact-head CI proof
+        shell: pwsh
+        run: |
+          $proof = [ordered]@{
+            schema = "hypersmart.ci_head_proof.v1"
+            provider = "github-actions"
+            conclusion = "success"
+            git_sha = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+          }
+          $proof | ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath "${{ steps.release.outputs.directory }}\CI_HEAD_PROOF.json" -Encoding utf8
+
+      - name: Attest ZIP and SBOM provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: |
+            ${{ steps.release.outputs.zip }}
+            ${{ steps.release.outputs.sbom }}
+
+      - name: Publish verified portable release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hypersmart-portable-${{ github.sha }}
+          path: ${{ steps.release.outputs.directory }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish portable failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hypersmart-portable-failure-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/hypersmart portable release/RELEASE_FAILED.json
+            ${{ runner.temp }}/hypersmart portable release/PORTABLE_VALIDATION.json
+          if-no-files-found: ignore
+          retention-days: 7

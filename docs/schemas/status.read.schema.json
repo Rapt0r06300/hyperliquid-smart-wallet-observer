@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "status.read",
+  "description": "Read local scanner and runtime status.",
+  "x-read-only": true,
+  "x-data-sources": [
+    "local_runtime",
+    "source_health"
+  ],
+  "input": {
+    "type": "object",
+    "additionalProperties": false
+  },
+  "output": {
+    "type": "object"
+  }
+}

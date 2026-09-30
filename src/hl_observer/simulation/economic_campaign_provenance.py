@@ -1,0 +1,229 @@
+"""Immutable dataset provenance and parameter-freeze helpers."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import time
+from collections.abc import Iterable, Mapping
+from pathlib import Path
+from typing import Any
+
+from .economic_objective import canonical_family
+
+REPORT_DIR = Path("runtime") / "reports" / "economic_campaigns"
+
+
+def _sha256(path: Path, *, full_limit_bytes: int = 128 * 1024 * 1024) -> tuple[str, str]:
+    """Hash a complete small file or both edges of a large append-only tape."""
+    size = path.stat().st_size
+    digest = hashlib.sha256()
+    if size <= full_limit_bytes:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest(), "FULL_SHA256"
+    edge = 1024 * 1024
+    with path.open("rb") as handle:
+        digest.update(handle.read(edge))
+        handle.seek(max(0, size - edge))
+        digest.update(handle.read(edge))
+    digest.update(str(size).encode("ascii"))
+    return digest.hexdigest(), "EDGE_SHA256_WITH_SIZE"
+
+
+def dataset_provenance(root: str | Path, paths: Iterable[str | Path]) -> dict[str, Any]:
+    """Describe exact local inputs without pretending a partial hash is full."""
+    project_root = Path(root).resolve()
+    files: list[dict[str, Any]] = []
+    for value in paths:
+        path = Path(value)
+        if not path.is_absolute():
+            path = project_root / path
+        if not path.is_file():
+            files.append({"path": str(value).replace("\\", "/"), "exists": False})
+            continue
+        digest, method = _sha256(path)
+        try:
+            display = path.relative_to(project_root).as_posix()
+        except ValueError:
+            display = str(path)
+        stat = path.stat()
+        files.append({
+            "path": display,
+            "exists": True,
+            "size_bytes": stat.st_size,
+            "mtime_ns": stat.st_mtime_ns,
+            "fingerprint": digest,
+            "fingerprint_method": method,
+        })
+    material = json.dumps(files, sort_keys=True, separators=(",", ":"))
+    return {
+        "files": files,
+        "dataset_fingerprint": hashlib.sha256(material.encode("utf-8")).hexdigest(),
+    }
+
+
+def freeze_parameters(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+    *,
+    campaign_id: str | None = None,
+    frozen_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Write an immutable parameter selection before final evaluation."""
+    project_root = Path(root).resolve()
+    normalized = canonical_family(family)
+    timestamp = int(frozen_at_ms if frozen_at_ms is not None else time.time() * 1000)
+    parameter_hash = hashlib.sha256(
+        json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    identifier = campaign_id or f"{timestamp}-{parameter_hash[:12]}"
+    relative = REPORT_DIR / "freezes" / normalized / f"{identifier}.json"
+    target = project_root / relative
+    payload: dict[str, Any] = {
+        "schema_version": "hypersmart.economic_parameter_freeze.v1",
+        "campaign_id": identifier,
+        "family": normalized,
+        "frozen_at_ms": timestamp,
+        "selected_before_final_evaluation": True,
+        "parameters": dict(parameters),
+        "parameters_sha256": parameter_hash,
+        "dataset_provenance": dict(datasets),
+        "path": relative.as_posix(),
+    }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with target.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        existing = json.loads(target.read_text(encoding="utf-8"))
+        if existing != payload:
+            raise RuntimeError(f"immutable freeze collision: {target}") from None
+    return payload
+
+
+def freeze_train_selected_parameters(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+    *,
+    selection_eligible: bool,
+) -> dict[str, Any] | None:
+    """Freeze only a train-selected hypothesis that passed its economic gate."""
+    if not selection_eligible:
+        return None
+    declared = parameters.get("training_selection_eligible")
+    if declared is not True:
+        raise ValueError(
+            "refusing parameter freeze: training_selection_eligible must be true"
+        )
+    return freeze_parameters(root, family, parameters, datasets)
+
+
+def freeze_or_reuse_parameters(
+    root: str | Path,
+    family: str,
+    parameters: Mapping[str, Any],
+    datasets: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reuse the oldest physical freeze for identical parameters."""
+    project_root = Path(root).resolve()
+    normalized = canonical_family(family)
+    parameter_hash = hashlib.sha256(
+        json.dumps(dict(parameters), sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    directory = project_root / REPORT_DIR / "freezes" / normalized
+    if directory.is_dir():
+        reusable: list[dict[str, Any]] = []
+        for path in sorted(directory.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (
+                payload.get("family") == normalized
+                and payload.get("parameters_sha256") == parameter_hash
+                and payload.get("selected_before_final_evaluation") is True
+            ):
+                reusable.append(payload)
+        if reusable:
+            return min(
+                reusable,
+                key=lambda payload: int(payload.get("frozen_at_ms") or 0),
+            )
+    return freeze_parameters(project_root, normalized, parameters, datasets)
+
+
+def find_oldest_parameter_freeze(
+    root: str | Path,
+    family: str,
+    *,
+    required_parameters: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return the oldest immutable freeze matching a protocol signature."""
+    project_root = Path(root).resolve()
+    normalized = canonical_family(family)
+    directory = project_root / REPORT_DIR / "freezes" / normalized
+    if not directory.is_dir():
+        return None
+    matches: list[dict[str, Any]] = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        parameters = payload.get("parameters")
+        if not isinstance(parameters, Mapping):
+            continue
+        if (
+            payload.get("family") == normalized
+            and payload.get("selected_before_final_evaluation") is True
+            and all(
+                parameters.get(key) == value
+                for key, value in required_parameters.items()
+            )
+        ):
+            matches.append(payload)
+    if not matches:
+        return None
+    return min(matches, key=lambda payload: int(payload.get("frozen_at_ms") or 0))
+
+
+def merge_sources_with_frozen_provenance(
+    root: str | Path,
+    selected_sources: Iterable[str | Path],
+    freeze: Mapping[str, Any] | None,
+) -> list[Path]:
+    """Preserve frozen input files while append-only datasets grow."""
+    project_root = Path(root).resolve()
+    candidates: list[Path] = [Path(value) for value in selected_sources]
+    provenance = (
+        freeze.get("dataset_provenance") if isinstance(freeze, Mapping) else None
+    )
+    files = provenance.get("files") if isinstance(provenance, Mapping) else None
+    if isinstance(files, list):
+        for item in files:
+            path_text = item.get("path") if isinstance(item, Mapping) else None
+            if isinstance(path_text, str) and path_text.strip():
+                candidates.append(Path(path_text))
+    merged: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        absolute = candidate if candidate.is_absolute() else project_root / candidate
+        try:
+            resolved = absolute.resolve()
+            resolved.relative_to(project_root)
+        except (OSError, ValueError):
+            continue
+        key = str(resolved).casefold()
+        if key in seen or not resolved.is_file():
+            continue
+        seen.add(key)
+        merged.append(resolved)
+    return merged

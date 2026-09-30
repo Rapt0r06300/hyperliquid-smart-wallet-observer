@@ -1,0 +1,60 @@
+=== [1/2] Le detecteur sait-il attraper un TRICHEUR ? ===
+..........                                                               [100%]
+10 passed in 0.70s
+
+=== [2/2] La VRAIE recherche, sur les VRAIES donnees ===
+==============================================================================
+ G1 -- LA RECHERCHE LIT-ELLE LE FUTUR ? (test DIFFERENTIEL, pas une lecture de code)
+==============================================================================
+
+  candidats testes :    4000
+  marches marques  :    1011
+
+  scenarios de la VRAIE grille : 12
+
+------------------------------------------------------------------------------
+  scenario    candidats  acceptes  FUTUR_BROUILLE  FUTUR_EFFACE  FUTUR_INVERSE
+------------------------------------------------------------------------------
+  #0               4000       378              OK           322             OK   survivance 85%
+  #1               4000       397              OK           341             OK   survivance 86%
+  #2               4000       647              OK           544             OK   survivance 84%
+  #3               4000      3255              OK          2715             OK   survivance 83%
+  #4               4000       570              OK           469             OK   survivance 82%
+  #5               4000      3255              OK          2715             OK   survivance 83%
+  #6               4000       101              OK            82             OK   survivance 81%
+  #7               4000       504              OK           429             OK   survivance 85%
+  #8               4000       219              OK           181             OK   survivance 83%
+  #9               4000      3551              OK          2999             OK   survivance 84%
+  #10              4000      2906              OK          2408             OK   survivance 83%
+  #11              4000       490              OK           393             OK   survivance 80%
+------------------------------------------------------------------------------
+
+  ==========================================================================
+   VERDICT -- DEUX QUESTIONS DIFFERENTES, DEUX REPONSES
+  ==========================================================================
+
+   1) LOOKAHEAD : la selection LIT-ELLE le futur ?
+      >>> NON. Sur les 12 scenarios reels, on peut BROUILLER le futur (bruit)
+          ou l'INVERSER (le prix fait exactement le contraire) : la recherche
+          accepte EXACTEMENT les memes candidats. Elle ne le lit pas.
+
+          Le garde-fou par timestamps (`assert_no_lookahead`) aurait passe
+          TRIVIALEMENT ici (data_ts == decision_ts par construction) -- il
+          n'aurait rien prouve. Le brancher aurait ete du THEATRE.
+
+          CONSEQUENCE : « 0 config robuste sur 150 M » n'est PAS un artefact de
+          lookahead. Ce resultat TIENT. La cause est ailleurs (voir H-181 :
+          on teste les configs qui sur-ajustent le plus).
+
+   2) SURVIVANCE : combien de trades ne sont evaluables QUE parce qu'un mark futur
+      a ete enregistre ?
+      >>> 84 % des candidats acceptes disparaissent si on efface le futur.
+
+          Ce n'est PAS du lookahead : sans prix futur, il n'y a pas de PnL a mesurer.
+          Mais c'est un BIAIS REEL, et il faut le dire : la recherche ne juge que les
+          signaux qui ont EU la chance d'etre suivis par un mark. Les marches peu
+          marques sont silencieusement absents.
+          Attenuation : le filtre est SCENARIO-INDEPENDANT et s'applique a l'identique
+          au train ET au test -- il ne peut donc pas fabriquer un faux gagnant OOS.
+
+  rapport : C:\Users\flo\Desktop\Projet invest\data\reports\g1_lookahead_differentiel.json

@@ -1,0 +1,224 @@
+============ 1. LE TEST QUI VERROUILLE LA CORRECTION ============ 
+.............                                                            [100%]
+13 passed in 0.85s
+ 
+============ 2. NON-REGRESSION : le noyau + les branchements ============ 
+ERROR: file or directory not found: tests\test_side_lock.py
+
+
+no tests ran in 0.00s
+ 
+============ 3. TOUS LES LEVIERS (calcules, pas opines) ============ 
+====================================================================================================
+  TOUS LES LEVIERS — *« trouve tous les moyens possibles »*
+  Chaque levier est CALCULE, puis compare au benchmark : **un depot passif dans HLP**.
+====================================================================================================
+
+  coins mesures : 19 · spot HL : 8 (AZTEC, BERA, HYPE, MON, PUMP, PURR, STABLE, TRUMP)
+  cout TAKER : 23.0 bps (4 executions) · cout MAKER : 11.0 bps
+  benchmark HLP : 10 a 30 % APR (on retient la borne BASSE, la plus genereuse pour nous)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 1 — exempter le CARRY de `only_per_side`     ✅ **LEGITIME — c'etait MON bug**
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    short PERP + long SPOT = exposition nette **ZERO**. La jambe perp n'est pas un pari.
+    Compter un carry dans le desequilibre de cote refusait PUMP et HYPE **a tort**.
+    -> **+2 ouvertures** (1 -> 3). *Un garde-fou applique au mauvais objet MUTILE.*
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 2 — executer en MAKER (23 bps -> 11 bps)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  coin         fund/h      APR taker      APR maker   gain
+  HYPE        +0.1341          4.48%          5.21%   
+  MON         +0.0303           nan%          0.66%     🆕 DEBLOQUE
+  PUMP        +0.1513          5.23%          5.96%   
+  PURR        +0.2902         11.31%         12.04%   
+
+    ⚠️ **MAIS** : maker = on n'est **pas sur d'etre rempli**. Et un post-only qui
+       croiserait est **REJETE** (`BadAloPx`), pas execute en taker.
+       *Le maker n'est pas un rabais : c'est une FILE D'ATTENTE.* -> c'est exactement
+       ce qui a tue le market-making (T1b : 0/29 meme a **100 %% de fill**).
+    -> gain **REEL mais modeste** sur les carrys deja retenus. Coins debloques : MON
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 3 — allonger l'horizon de detention (le cout des 4 executions est FIXE)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  coin         fund/h     APR 30 j     APR 60 j     APR 90 j   verdict vs HLP (>=10 %)
+  HYPE        +0.1341        4.48%        5.18%        5.41%   **DOMINE PAR HLP**
+  MON         +0.0303         nan%        0.63%        0.86%   🆕 DEBLOQUE mais **0.86 % < 10 % -> DOMINE PAR HLP**
+  PUMP        +0.1513        5.23%        5.93%        6.16%   **DOMINE PAR HLP**
+  PURR        +0.2902       11.31%       12.01%       12.25%   bat HLP
+
+    🔴 **LE PIEGE** : allonger l'horizon fait passer la porte des COUTS, mais l'APR
+       **BAISSE** (on immobilise le capital plus longtemps pour le meme cout amorti).
+       ***Un coin qui n'ouvre qu'a 90 jours ouvre a un APR qui perd contre HLP.***
+       *Ce n'est pas une opportunite : c'est une position qui remplace un depot.*
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 4 — les coins SANS marche spot HL (11 sur nos 19 mesures)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    ARB, AVAX, BNB, BTC, DOGE, ETH, LTC, NEAR, OP, SOL, SUI
+
+    Un carry = long SPOT + short PERP **sur le MEME actif**. Sans spot, il ne reste
+    que 3 options, et **les 3 sont MESUREES et MORTES** :
+      1. couvrir avec un AUTRE actif   -> X-04 : **0/120**. *Une couverture ne vaut
+         que si c'est le MEME actif.* (trouve 2 fois independamment)
+      2. couvrir sur Binance           -> **on ne peut pas y trader** (et ce serait
+         de l'execution reelle : interdit).
+      3. rester short le perp **A NU** -> ce n'est plus un carry, c'est un **PARI
+         DIRECTIONNEL**. Et le directionnel, on l'a mesure : **-7,97 bps**.
+
+    🔴 **CE N'EST PAS UNE LIMITE DE NOTRE CODE. C'EST HYPERLIQUID.**
+       *Aucune ligne de Python ne peut creer un marche spot qui n'existe pas.*
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 5 — les coins a funding NEGATIF (4)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+      AZTEC      -0.8367 bps/h
+      BERA       -0.8328 bps/h
+      STABLE     -0.9936 bps/h
+      TRUMP      -0.2812 bps/h
+
+    Funding negatif = **les shorts PAIENT les longs**. Pour l'encaisser il faudrait
+    etre **LONG le perp** et **SHORT le spot**. ***Shorter le spot est impossible sur
+    HL*** (aucun emprunt de titres). -> **mort**.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 6 — baisser les planchers (edge net 30 bps · stabilite 80 %% · frais 9 bps)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    🚨 **REFUS CATEGORIQUE.** Ce levier ouvrirait les 18 coins. Il ouvrirait aussi
+       **des pertes**, et c'est *exactement* le bug que je viens de reparer :
+         - le chemin LIVE passait `plancher_edge_net_bps=0.0` **explicitement** ;
+         - les frais par defaut valaient **0.0** ;
+         - -> un edge net de **+0,01 bps** franchissait la porte.
+    🔴 Et la porte de STABILITE a 80 %% est celle qui a tue **AZTEC** :
+         83 %% d'heures positives, moyenne **-0,84 bps/h**. Sur 120 j il paraissait a
+         **+5,7 %% APR**. *Sur 365 j, il PERD.* ***Ton idee des 365 jours a tue un faux
+         positif que j'allais t'annoncer.***
+
+    ***Baisser un plancher n'ouvre pas des opportunites. Ca ouvre des pertes.***
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  LEVIER 7 — de NOUVELLES familles de trades     🎯 **la seule voie honnete vers PLUS**
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    Toutes les familles deja MESUREES sont mortes :
+      copy-trading      -> **-7,97 bps** meme a cout ZERO (24 133 signaux OOS)
+      market-making     -> **0/29** meme a **100 %% de fill** (borne haute)
+      funding perp/perp -> **0/120**
+      lead-lag BTC->alt -> **0/66** (les alts bougent AVEC BTC, ils ne le SUIVENT pas)
+      cointegration     -> **0** viable sur 208 jours
+      MM sur HIP-3      -> ratio d'inventaire **0,20** (il faut >= 1,0)
+      l'oracle          -> une **course de vitesse qu'on perd**
+
+    🎯 **IL EN RESTE UNE, NON MESUREE : #530 — LES LIQUIDATIONS.**
+       *Le liquide ne CHOISIT pas de vendre. Il est VENDU.* C'est le seul flux du
+       marche dont le sens est **connu d'avance** et **non discretionnaire**.
+       Le recorder est **branche**. Il lui faut du **temps de collecte**, pas du code.
+       ⚠️ Et il peut tres bien finir a **0**, comme les 6 autres.
+
+====================================================================================================
+  VERDICT
+====================================================================================================
+
+  levier                                     debloque                     legitime ?
+  exempter le carry de only_per_side         +2 coins (PUMP, HYPE)        ✅ OUI
+  execution maker                            +1 coin(s)                   ✅ OUI
+  allonger l'horizon                         +1 coin(s) mais DOMINES par  🔴 NON
+  les 224 perps sans spot                    0 — **impossible**           🔴 NON
+  funding negatif                            0 — **impossible**           🔴 NON
+  baisser les planchers                      +18 coins... et des PERTES   🔴 NON
+  nouvelles familles (#530 liquidations)     inconnu — **a mesurer**      ✅ OUI
+
+  🔑 **LE MAXIMUM HONNETE AUJOURD'HUI : 3 OUVERTURES** (PURR, PUMP, HYPE).
+     Pas 18. Et ce n'est **pas** parce que notre code est timide :
+       - 11 coins n'ont **pas de marche spot sur HL** -> carry physiquement impossible ;
+       - 4 coins ont un **funding negatif** -> il faudrait shorter le spot : impossible ;
+       - 1 coin (MON) a un funding **trop faible** pour amortir 23 bps sans tomber
+         sous le rendement d'un simple depot HLP.
+
+  ***Aller de 3 a 18 exigerait d'INVENTER un edge.*** C'est precisement ce que ce
+  projet punit depuis deux jours. Je ne le ferai pas.
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\tous_les_leviers.json
+ 
+============ 4. CE QUE LE BOT OUVRE MAINTENANT ============ 
+================================================================================================
+  LE SCANNER CARRY — **ce que le bot va réellement ouvrir**
+  funding 365 j (mesuré) -> SCANNER (4 portes) -> **NOYAU** (7 portes) -> PaperIntent
+================================================================================================
+
+  spot carryables (MESURÉS via `spotMeta`, jamais supposés) : AZTEC, BERA, HYPE, MON, PUMP, PURR, STABLE, TRUMP
+  coins avec du funding backfillé : 19
+
+------------------------------------------------------------------------------------------------
+  ÉTAPE 1 — LE SCANNER (4 portes)
+------------------------------------------------------------------------------------------------
+
+  coin         fund/h    %h>0       APR   retenu  motif
+  PURR        +0.2902     98%   +12.71%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  PUMP        +0.1513     93%    +6.63%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  HYPE        +0.1341     92%    +5.87%        ✅  CARRY_RETENU_A_SOUMETTRE_AU_NOYAU
+  ARB         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  AVAX        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  AZTEC       -0.8367     83%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  BERA        -0.8328     40%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  BNB         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  BTC         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  DOGE        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  ETH         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  LTC         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  MON         +0.0303     81%    +0.00%        🔴  FUNDING_TROP_FAIBLE_POUR_AMORTIR_4_EXECUTION
+  NEAR        +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  OP          +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  SOL         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  STABLE      -0.9936     37%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+  SUI         +0.0000      0%    +0.00%        🔴  PAS_DE_SPOT_HL_UN_CARRY_SANS_SPOT_EST_UN_SHO
+  TRUMP       -0.2812     37%    +0.00%        🔴  FUNDING_NEGATIF_IL_FAUDRAIT_SHORTER_LE_SPOT_
+
+------------------------------------------------------------------------------------------------
+  ÉTAPE 2 — **LE NOYAU** (il rejuge TOUT : frais, plancher, session, VPIN, exchange)
+------------------------------------------------------------------------------------------------
+
+  PURR     ✅ ENTREE
+      raison  : NOYAU_EDGE_NET_MESURE_ET_EXECUTABLE
+      signaux : ETAT_SESSION_NON_FOURNI
+
+  PUMP     ✅ ENTREE
+      raison  : NOYAU_EDGE_NET_MESURE_ET_EXECUTABLE
+      signaux : ETAT_SESSION_NON_FOURNI
+
+  HYPE     ✅ ENTREE
+      raison  : NOYAU_EDGE_NET_MESURE_ET_EXECUTABLE
+      signaux : ETAT_SESSION_NON_FOURNI
+
+================================================================================================
+  RÉSULTAT
+================================================================================================
+
+  scannés  : 19 coins
+  retenus par le SCANNER : 3
+  **AUTORISÉS PAR LE NOYAU : 3**
+     ✅ PURR     CARRY SHORT  +12.71 % APR  (funding +0.2902 bps/h)
+     ✅ PUMP     CARRY SHORT  +6.63 % APR  (funding +0.1513 bps/h)
+     ✅ HYPE     CARRY SHORT  +5.87 % APR  (funding +0.1341 bps/h)
+
+  🚩 **CE QUE CES CHIFFRES NE SONT PAS** :
+     - une promesse. Le funding **peut s'inverser** (BERA : -0,83 · TRUMP : -0,28).
+     - un chèque. **La profondeur du carnet reste à vérifier** : *un edge sur un
+       carnet de 3 $ n'existe pas.*
+     - sans risque. **La jambe perp peut être LIQUIDÉE** (X-08).
+     - un vainqueur. **Il doit encore battre un dépôt passif dans HLP.**
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\carry_propositions.json
+ 
+============ 5. SECURITE : 0 ordre reel ============ 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok

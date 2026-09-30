@@ -1,0 +1,67 @@
+{
+ "genere_ts": 1784644916.50915,
+ "real_execution": false,
+ "couts_actuels_bps": {
+  "aller_retour_2_jambes_forfait": 8.0,
+  "seuil_ouverture": 15.0,
+  "seuil_sortie": 3.0,
+  "marge_de_securite_implicite": 7.0
+ },
+ "decomposition_manquante": [
+  "frais_HL",
+  "frais_Binance",
+  "spread_HL",
+  "spread_Binance",
+  "slippage_HL",
+  "slippage_Binance",
+  "profondeur",
+  "risque_de_jambe",
+  "partial_fill",
+  "age_des_quotes",
+  "latence_inter_flux",
+  "difference_de_funding",
+  "marge_incertitude"
+ ],
+ "distribution_ecarts_bps": {
+  "n": 1254,
+  "p50": 3.262,
+  "p75": 5.545,
+  "p90": 8.65,
+  "p95": 11.75,
+  "p99": 71.443,
+  "max": 71.443
+ },
+ "part_au_dessus_des_couts_pct": 12.68,
+ "part_au_dessus_du_seuil_pct": 2.39,
+ "convergence": {
+  "seuil_bps": 8.0,
+  "observations": 1254,
+  "coins": 38,
+  "horizons": {
+   "0.5h": {
+    "n": 125,
+    "delta_moyen_bps": -2.046,
+    "part_reduite_pct": 63.2
+   },
+   "1.0h": {
+    "n": 96,
+    "delta_moyen_bps": -2.308,
+    "part_reduite_pct": 64.6
+   },
+   "2.0h": {
+    "n": 30,
+    "delta_moyen_bps": -2.515,
+    "part_reduite_pct": 73.3
+   },
+   "4.0h": {
+    "n": 0
+   },
+   "8.0h": {
+    "n": 0
+   }
+  },
+  "insuffisant": false,
+  "verdict": "ça converge, mais MOINS que les 8.0 bps de coûts : l'edge net est négatif en moyenne — seuls les écarts EXTRÊMES peuvent payer"
+ },
+ "avertissement": "ecarts calcules sur DEUX MIDS, pas sur des prix executables. Aucune taille, aucun age de quote. Tant que P4-1 n'est pas fait, ces opportunites sont THEORIQUES."
+}

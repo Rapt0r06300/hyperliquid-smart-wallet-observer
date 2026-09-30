@@ -1,0 +1,9 @@
+DIAGNOSTIC_LANCEUR.txt n'est plus un rapport runtime versionne.
+
+Lance DIAGNOSTIC_LANCEUR.cmd pour regenerer le diagnostic localement.
+Le rapport est maintenant ecrit sous :
+
+runtime\reports\DIAGNOSTIC_LANCEUR.txt
+
+Ce deplacement evite d'embarquer dans une release portable des chemins absolus,
+des informations propres a une machine ou des sorties de diagnostic perimees.

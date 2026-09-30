@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "record_id": "R-CV-COPY-V18-DEPTH-SIZED-DISC-9AAA88B",
+  "hypothesis_id": "H-CV-COPY-V18-DEPTH-SIZED-ALIGNMENT",
+  "parent_hypothesis_id": "H-CV-COPY-V17-BALANCED-ALIGNMENT",
+  "family": "copy_vault",
+  "stage": "DISCOVERY",
+  "verdict": "PREDECLARED",
+  "baseline": false,
+  "change_class": "EXECUTION",
+  "controller_action": "PIVOT",
+  "base_sha": "9aaa88b81d55dda478e2394553451d71e584b42d",
+  "created_at_utc": "2026-09-14T06:10:00Z",
+  "mechanism": "Copy a causal ADD aligned with the observed five-level Hyperliquid book, sizing each paper position from 5 or 10 percent of the smaller visible bid/ask capacity at signal time, floored at 75 USD and capped at 600 USD.",
+  "temporal_operator": "At each TRAIN ADD, read the first causal five-level book no later than the fixed reference lag, compute two-sided executable capacity without future data, enter after the canonical delay, and exit after one hour. Daily admission counters use only earlier entries.",
+  "conditioning": [
+    "ADD action only",
+    "signed five-level depth imbalance minimum 0, 0.20, or 0.50",
+    "size 5 or 10 percent of entry-observable two-sided depth",
+    "minimum paper notional 75 USD and maximum 600 USD",
+    "fixed 60 minute horizon",
+    "maximum one admitted entry per vault per UTC day",
+    "maximum one admitted entry per coin per UTC day",
+    "maximum ten simultaneous positions",
+    "canonical taker costs and exact observed five-level VWAP",
+    "direction-flip placebo uses the same causal size and admitted identity",
+    "only complete actual and placebo episodes enter aggregation"
+  ],
+  "data_surfaces": [
+    "causal live non-snapshot vault fills",
+    "continuous causal Hyperliquid five-level L2"
+  ],
+  "execution_translation": "Paper-only taker entry and exit using a size fixed from the signal-time book before any outcome is known. Spread, slippage, adverse latency, and canonical fees are reconciled. No order, collection, future feature, or invented liquidity is allowed.",
+  "prediction_target": "At least 4 USD net per TRAIN day with eight trades across three days, profit factor above one, direction placebo beaten, positive 424-trial-adjusted total lower bound, top positive trade share and largest vault and coin shares at most 60 percent, and complete counted episodes.",
+  "falsification_test": "Reject if none of the six fixed depth-threshold and capacity-fraction variants passes every TRAIN gate. Heldout and forward remain unopened before freeze.",
+  "experiment_ids": ["copy-v18-depth-sized-alignment-train-predeclaration"],
+  "trial_count": 0,
+  "economic_progress": {
+    "prior_family_trial_count": 418,
+    "new_trial_count": 6,
+    "bonferroni_trial_count": 424,
+    "target_net_usd_per_day": 4.0
+  },
+  "source_refs": [
+    "runtime/reports/economic_campaigns/research_vnext/copy_vault_v17_balanced_alignment_train.json",
+    "runtime/data/copy_vault_l2_tape.jsonl",
+    "src/hl_observer/backtesting/copy_vault_executable.py"
+  ],
+  "scientific_signatures": [],
+  "notes": "Six TRAIN variants are fixed before outcomes. The run is finite, local, below-normal priority, without collectors or GPU.",
+  "rationale": "V17 passed economics, costs, placebo, liquidatability, and concentration but produced only six 600 USD trades. Causal depth sizing admits smaller executable positions from additional vaults while bounding exposure and preserving the profitable aligned ADD mechanism."
+}

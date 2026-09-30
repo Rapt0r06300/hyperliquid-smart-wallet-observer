@@ -1,0 +1,302 @@
+"""Jalon 1 — le SCOREBOARD alimenté par le ledger SCELLÉ (vérité PnL réalisée, PAR stratégie).
+
+`audit_paper_ledger` prouve qu'un ledger est cohérent et rend un PnL réalisé **scalaire** global.
+Le scoreboard, lui, exige la **distribution** des PnL de round-trips CLOS par stratégie — pour
+`profit_factor`/`max_drawdown`/`expected_shortfall`/`hit_rate` — et un **N indépendant** = nombre
+d'épisodes clos (un cycle OPEN→CLOSE = **une** observation), jamais « 1 fill = 1 obs ». Ce module
+est le pont honnête entre les deux, et il CÂBLE `scoreboard_metrics` (sinon assembleur orphelin) :
+
+  * il refuse tout si l'audit n'est pas `TRUSTED` (deny-by-default : un ledger douteux ne produit
+    AUCUN PnL de stratégie, seulement des lignes UNMEASURABLE / `MORE_DATA`) ;
+  * sur un ledger `TRUSTED`, il reconstruit chaque cycle OPEN→CLOSE comme UNE observation
+    indépendante (remise à zéro de la clé à la clôture : deux round-trips successifs sur le même
+    coin ne se confondent pas), regroupée par `refs["strategy"]` ;
+  * il n'affirme QUE le mesuré : PnL réalisé par épisode = mesuré ; edge brut bps, spread/slippage/
+    latence bps, OOS, forward = ABSENTS du ledger ⇒ `UNMEASURABLE`. Donc, tel quel, **aucun**
+    `net_bps` n'est calculable et **aucun** verdict `PROMOTE` n'est possible : c'est la vérité du
+    moment, et `manques_globaux` liste exactement ce que le pipeline doit se mettre à émettre.
+
+Pur, 0 réseau, 0 ordre réel. `depuis_fichier_ledger` branche la lecture sur le ledger scellé réel.
+"""
+from __future__ import annotations
+
+import math
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from hl_observer.simulation.pnl_ledger_audit import TRUSTED, audit_paper_ledger
+from hl_observer.simulation.scoreboard_metrics import ScoreboardRow, assembler_ligne
+
+SCHEMA_VERSION = "hypersmart.scoreboard_feeder.v1"
+
+#: Événements qui RÉALISENT du PnL de round-trip (REDUCE réalise le partiel, CLOSE le solde).
+_REALISANTS = ("PAPERPOSITIONREDUCED", "PAPERPOSITIONCLOSED")
+_OUVRANTS = ("PAPERPOSITIONOPENED", "PAPERPOSITIONINCREASED")
+_CLOTURANT = "PAPERPOSITIONCLOSED"
+
+#: Stratégies « fourre-tout » : rendre visible l'absence/l'ambiguïté d'un tag stratégie au lieu de la cacher.
+STRAT_ABSENTE = "STRATEGIE_ABSENTE"
+STRAT_AMBIGUE = "STRATEGIE_AMBIGUE"
+
+
+def _token(value: object) -> str:
+    return "".join(c for c in str(value or "").upper() if c.isalnum())
+
+
+def _finite(value: object) -> float | None:
+    try:
+        n = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return n if math.isfinite(n) else None
+
+
+def _refs(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    r = row.get("refs")
+    return r if isinstance(r, Mapping) else {}
+
+
+def _strategie(refs: Mapping[str, Any]) -> str | None:
+    s = refs.get("strategy")
+    if s in (None, ""):
+        s = refs.get("strategie")
+    s = str(s).strip() if s not in (None, "") else ""
+    return s or None
+
+
+def _cle_position(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:
+    """Même convention d'identité que l'audit : `refs.position_id`, sinon `COIN:SIDE`."""
+    pid = refs.get("position_id")
+    if pid not in (None, ""):
+        return str(pid)
+    return f"{str(row.get('coin') or '').upper()}:{str(row.get('side') or '').upper()}"
+
+
+def _cle_episode(row: Mapping[str, Any], refs: Mapping[str, Any]) -> str:
+    """Clé d'épisode : `refs.episode_id` (identité RÉELLE stampée par economic_identity, P1C) prioritaire,
+    sinon la position (`position_id`, sinon `COIN:SIDE`). Aligne le feeder sur `EconomicIdentity.episode_key`."""
+    ep = refs.get("episode_id")
+    if ep not in (None, ""):
+        return str(ep)
+    return _cle_position(row, refs)
+
+
+def _niveau_identite(refs: Mapping[str, Any]) -> str:
+    """Niveau d'identité d'un épisode : `episode_id` réel > `position_id` > repli ambigu `coin_side`."""
+    if refs.get("episode_id") not in (None, ""):
+        return "episode_id"
+    if refs.get("position_id") not in (None, ""):
+        return "position_id"
+    return "coin_side"
+
+
+def _resoudre_strategie(strats: set[str]) -> str:
+    """Une seule stratégie observée sur l'épisode → elle ; plusieurs → AMBIGUE ; aucune → ABSENTE."""
+    nettoyees = {s for s in strats if s}
+    if not nettoyees:
+        return STRAT_ABSENTE
+    if len(nettoyees) > 1:
+        return STRAT_AMBIGUE
+    return next(iter(nettoyees))
+
+
+def _familles_actives() -> tuple[str, ...]:
+    try:
+        from hl_observer.strategies.active_scope import active_strategy_families
+        return tuple(sorted(active_strategy_families()))
+    except Exception:  # pragma: no cover - l'autorité reste active_scope, mais on ne casse pas si absente
+        return ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResultatScoreboard:
+    status: str                       # TRUSTED | CONTAMINATED | UNMEASURABLE (repris de l'audit)
+    rows: tuple[ScoreboardRow, ...]
+    n_episodes_clos: int
+    manques_globaux: tuple[str, ...]  # union des champs UNMEASURABLE sur toutes les lignes
+    raison: str | None = None
+    identite_couverture: dict[str, Any] = field(default_factory=dict)
+    promotions: dict[str, Any] = field(default_factory=dict)   # verdict de promotion par stratégie (si evidence fournie)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "status": self.status,
+            "n_episodes_clos": self.n_episodes_clos,
+            "rows": [r.to_dict() for r in self.rows],
+            "manques_globaux": list(self.manques_globaux),
+            "identite_couverture": dict(self.identite_couverture),
+            "promotions": dict(self.promotions),
+            "raison": self.raison,
+            "paper_only": True,
+            "real_execution": False,
+        }
+
+
+def _union_manques(rows: Sequence[ScoreboardRow]) -> tuple[str, ...]:
+    vus: list[str] = []
+    for r in rows:
+        for champ in r.unmeasured:
+            if champ not in vus:
+                vus.append(champ)
+    return tuple(vus)
+
+
+_CHAMPS_MESURE = (
+    "gross_edge_bps", "fees_bps", "spread_bps", "slippage_bps", "latency_bps",
+    "capacity_usd", "fill_ratios", "latency_p50_ms", "latency_p95_ms",
+    "oos_net_bps", "forward_net_bps",
+)
+
+
+def _ligne_alimentee(strategy, pnls_par_strat, roi_denom, mesures):
+    """Assemble une ligne : PnL/N depuis le ledger, coûts/capacité/latence/OOS/forward depuis les mesures."""
+    kw = {k: mesures.get(k) for k in _CHAMPS_MESURE if mesures.get(k) is not None}
+    denom = mesures.get("roi_denominator_usd")
+    return assembler_ligne(
+        strategy,
+        closed_pnls=pnls_par_strat.get(strategy) or None,
+        n_independent=(len(pnls_par_strat[strategy]) if strategy in pnls_par_strat else None),
+        roi_denominator_usd=(denom if denom is not None else roi_denom),
+        **kw,
+    )
+
+
+def _promotions(rows, evidence_par_strategie):
+    """Évalue la porte de promotion deny-by-default par stratégie, si une evidence est fournie."""
+    if not evidence_par_strategie:
+        return {}
+    from hl_observer.simulation.scoreboard_promotion import evaluer_promotion_scoreboard
+    out: dict[str, Any] = {}
+    for row in rows:
+        ev = evidence_par_strategie.get(row.strategy)
+        if ev is not None:
+            out[row.strategy] = evaluer_promotion_scoreboard(row, ev).to_dict()
+    return out
+
+
+def lignes_depuis_ledger(
+    events: Iterable[Mapping[str, Any]],
+    *,
+    snapshot: Mapping[str, Any] | None = None,
+    roi_denominateurs: Mapping[str, float] | None = None,
+    strategies_attendues: Sequence[str] | None = None,
+    mesures_par_strategie: Mapping[str, Mapping[str, Any]] | None = None,
+    evidence_par_strategie: Mapping[str, Any] | None = None,
+) -> ResultatScoreboard:
+    """Assemble les lignes de scoreboard depuis un ledger canonique. `TRUSTED` obligatoire pour un PnL.
+
+    `mesures_par_strategie` — alimente RÉELLEMENT chaque ligne : gross_edge_bps, fees/spread/slippage/
+    latency_bps, capacity_usd, fill_ratios, latency_p50/p95_ms, oos/forward_net_bps, roi_denominator_usd.
+    Sans mesure, le champ reste UNMEASURABLE (le PnL réalisé, lui, vient toujours du ledger). §4.3 :
+    un scoreboard positif obtenu sur ledger SYNTHÉTIQUE est une preuve de PLOMBERIE, jamais un PnL réel.
+    `evidence_par_strategie` — si fournie, la porte de promotion deny-by-default est évaluée par stratégie."""
+    rows_in = [dict(r) for r in events]
+    attendues = tuple(strategies_attendues) if strategies_attendues is not None else _familles_actives()
+    roi_denominateurs = dict(roi_denominateurs or {})
+    mesures = dict(mesures_par_strategie or {})
+
+    audit = audit_paper_ledger(rows_in, snapshot=snapshot)
+    if audit.status != TRUSTED:
+        # Deny-by-default : un ledger non fiable ne matérialise AUCUN PnL de stratégie.
+        rows = tuple(assembler_ligne(s) for s in attendues)
+        return ResultatScoreboard(
+            status=audit.status, rows=rows, n_episodes_clos=0,
+            manques_globaux=_union_manques(rows),
+            raison=f"ledger {audit.status}: PnL par stratégie non calculable (deny-by-default)",
+            promotions=_promotions(rows, evidence_par_strategie),
+        )
+
+    # Ledger TRUSTED : reconstruire les épisodes (OPEN→CLOSE) dans l'ordre, un par cycle.
+    ouvertes: dict[str, dict[str, Any]] = {}
+    episodes: list[tuple[str, float]] = []          # (stratégie résolue, PnL réalisé du cycle)
+    niveaux: list[str] = []                         # niveau d'identité par épisode clos (P1C/P1D)
+    for row in rows_in:
+        et = _token(row.get("event_type"))
+        refs = _refs(row)
+        strat = _strategie(refs)
+        if et in _OUVRANTS:
+            cle = _cle_episode(row, refs)
+            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set(), "niveau": _niveau_identite(refs)})
+            if strat:
+                ep["strats"].add(strat)
+            continue
+        if et in _REALISANTS:
+            cle = _cle_episode(row, refs)
+            ep = ouvertes.setdefault(cle, {"realized": 0.0, "strats": set(), "niveau": _niveau_identite(refs)})
+            if strat:
+                ep["strats"].add(strat)
+            p = _finite(row.get("realized_pnl_usdc"))
+            if p is not None:
+                ep["realized"] += p
+            if et == _CLOTURANT:
+                episodes.append((_resoudre_strategie(ep["strats"]), round(ep["realized"], 10)))
+                niveaux.append(str(ep["niveau"]))
+                ouvertes.pop(cle, None)
+            continue
+
+    # §3.5 — rendre VISIBLE la qualité d'identité (episode_id réel vs repli ambigu coin:side).
+    identite_couverture = {
+        "n_episodes": len(episodes),
+        "n_episode_id": niveaux.count("episode_id"),
+        "n_position_id": niveaux.count("position_id"),
+        "n_coin_side_fallback": niveaux.count("coin_side"),
+    }
+
+    pnls_par_strat: dict[str, list[float]] = {}
+    for strat, pnl in episodes:
+        pnls_par_strat.setdefault(strat, []).append(pnl)
+
+    # Une ligne par stratégie ATTENDUE (même vide → MORE_DATA explicite) + toute stratégie vue.
+    strategies = list(dict.fromkeys([*attendues, *sorted(pnls_par_strat)]))
+    rows = tuple(
+        _ligne_alimentee(s, pnls_par_strat, roi_denominateurs.get(s), mesures.get(s) or {})
+        for s in strategies
+    )
+    promotions = _promotions(rows, evidence_par_strategie)
+    return ResultatScoreboard(
+        status=TRUSTED, rows=rows, n_episodes_clos=len(episodes),
+        manques_globaux=_union_manques(rows), raison=None,
+        identite_couverture=identite_couverture, promotions=promotions,
+    )
+
+
+def depuis_fichier_ledger(
+    path: str | Path,
+    *,
+    snapshot: Mapping[str, Any] | None = None,
+    roi_denominateurs: Mapping[str, float] | None = None,
+    strategies_attendues: Sequence[str] | None = None,
+    mesures_par_strategie: Mapping[str, Mapping[str, Any]] | None = None,
+    evidence_par_strategie: Mapping[str, Any] | None = None,
+) -> ResultatScoreboard:
+    """Câblage réel : lit le ledger SCELLÉ (`ledger_integrity.read_chain`) puis assemble le scoreboard.
+
+    Un fichier illisible ou une chaîne de hash rompue ⇒ `strict_pnl_allowed` faux ⇒ on ne calcule
+    aucun PnL (statut du lecteur remonté tel quel). On ne devine jamais un ledger cassé.
+    """
+    from hl_observer.simulation.ledger_integrity import read_chain
+
+    lecture = read_chain(Path(path))
+    if not lecture.strict_pnl_allowed:
+        attendues = tuple(strategies_attendues) if strategies_attendues is not None else _familles_actives()
+        rows = tuple(assembler_ligne(s) for s in attendues)
+        return ResultatScoreboard(
+            status=lecture.status, rows=rows, n_episodes_clos=0,
+            manques_globaux=_union_manques(rows),
+            raison=f"ledger illisible/rompu ({lecture.status}): PnL non calculable",
+            promotions=_promotions(rows, evidence_par_strategie),
+        )
+    return lignes_depuis_ledger(
+        lecture.events, snapshot=snapshot,
+        roi_denominateurs=roi_denominateurs, strategies_attendues=strategies_attendues,
+        mesures_par_strategie=mesures_par_strategie, evidence_par_strategie=evidence_par_strategie,
+    )
+
+
+__all__ = [
+    "SCHEMA_VERSION", "STRAT_ABSENTE", "STRAT_AMBIGUE",
+    "ResultatScoreboard", "lignes_depuis_ledger", "depuis_fichier_ledger",
+]

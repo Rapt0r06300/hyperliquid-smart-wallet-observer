@@ -1,0 +1,317 @@
+{
+  "bounds": {
+    "train_start_ms": 1786637370177,
+    "train_end_ms": 1788099340901,
+    "validation_start_ms": 1788102971901,
+    "validation_end_ms": 1789158997999,
+    "oos_start_ms": 1789162628999,
+    "oos_end_ms": 1789319825220,
+    "purge_ms": 3631000,
+    "validation_empty_after_purge": false
+  },
+  "candidate_count": 205,
+  "audit": {
+    "ACTUAL_PROVENANCE_REFUSAL_STALE_OR_MISSING_ENTRY_BOOK": 16,
+    "PLACEBO_PROVENANCE_REFUSAL_STALE_OR_MISSING_ENTRY_BOOK": 16,
+    "INCOMPLETE_EPISODE_REJECTED": 135,
+    "ACTUAL_PROVENANCE_REFUSAL_STALE_OR_MISSING_EXIT_BOOK": 77,
+    "PLACEBO_PROVENANCE_REFUSAL_STALE_OR_MISSING_EXIT_BOOK": 77,
+    "COMPLETE_CAUSAL_EPISODE": 70,
+    "ACTUAL_PROVENANCE_REFUSAL_OBSERVED_TOP_CAPACITY_TOO_LOW": 42,
+    "PLACEBO_PROVENANCE_REFUSAL_OBSERVED_TOP_CAPACITY_TOO_LOW": 42,
+    "ADMITTED_CLOSED_POSITION": 15,
+    "VAULT_DAILY_BUDGET_REJECTED": 52,
+    "COIN_DAILY_BUDGET_REJECTED": 3
+  },
+  "by_vault": {
+    "0x07fd993f0fa3a185f7207adccd29f7a87404689d": {
+      "trades": 11,
+      "net_pnl_usd": 47.68112456305087,
+      "days": {
+        "20678": 2,
+        "20689": 3,
+        "20694": 3,
+        "20695": 3
+      },
+      "coins": {
+        "ETHFI": 1,
+        "CRV": 1,
+        "MINA": 1,
+        "UNI": 1,
+        "LDO": 1,
+        "NEAR": 1,
+        "STBL": 1,
+        "MELANIA": 2,
+        "WLD": 1,
+        "TRUMP": 1
+      }
+    },
+    "0xbbf7d7a9d0eaeab4115f022a6863450296112422": {
+      "trades": 1,
+      "net_pnl_usd": 15.11326888403911,
+      "days": {
+        "20695": 1
+      },
+      "coins": {
+        "UNI": 1
+      }
+    },
+    "0xca230e816bdb34a46960c2f978a30a563d1ae9e0": {
+      "trades": 1,
+      "net_pnl_usd": 5.140906096148251,
+      "days": {
+        "20695": 1
+      },
+      "coins": {
+        "HYPE": 1
+      }
+    },
+    "0xc179e03922afe8fa9533d3f896338b9fb87ce0c8": {
+      "trades": 1,
+      "net_pnl_usd": 2.673878449663676,
+      "days": {
+        "20695": 1
+      },
+      "coins": {
+        "XMR": 1
+      }
+    },
+    "0x654016a8c9fcf0c4cb7ed6078aba21f7f399f7b7": {
+      "trades": 1,
+      "net_pnl_usd": 0.9049749051350022,
+      "days": {
+        "20689": 1
+      },
+      "coins": {
+        "NEAR": 1
+      }
+    }
+  },
+  "trades": [
+    {
+      "trade_id": "f6e05a38e1030dd0a01914f1017a6027d0dffae74735fdf298e794bef04dabe7",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "ETHFI",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1786646824565,
+      "exit_ts_ms": 1786650426164,
+      "net_pnl_usd": 4.5171810681942315,
+      "first_fill_leader_notional_usd": 1969.81,
+      "signed_reference_depth_imbalance": 0.09540110186985373,
+      "entry_capacity_usd": 1072.640559,
+      "entry_price": 0.43004757680086236,
+      "exit_price": 0.4264244930821689,
+      "direction": -1
+    },
+    {
+      "trade_id": "16d169f7a6ac84179b30d8350dad32ad52326a6c5beadac9e41ad6f227701203",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "CRV",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1786650070484,
+      "exit_ts_ms": 1786653677153,
+      "net_pnl_usd": -6.690223620038583,
+      "first_fill_leader_notional_usd": 1394.46,
+      "signed_reference_depth_imbalance": 0.17322587863147718,
+      "entry_capacity_usd": 1640.990604,
+      "entry_price": 0.25281666677550285,
+      "exit_price": 0.2554069661999987,
+      "direction": -1
+    },
+    {
+      "trade_id": "14d298c0196a159b836a78ca9626af74b535bb4a63b787f4f1cbc9494ed70def",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "MINA",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1787577293312,
+      "exit_ts_ms": 1787580896354,
+      "net_pnl_usd": 4.444903201722956,
+      "first_fill_leader_notional_usd": 102.44,
+      "signed_reference_depth_imbalance": 0.5523376544325802,
+      "entry_capacity_usd": 1686.7915560000001,
+      "entry_price": 0.05854517710328646,
+      "exit_price": 0.05805899248505198,
+      "direction": -1
+    },
+    {
+      "trade_id": "4659a1aff93b359ff4f43720cec6c7488f44fd41e42d128ac41660f096d7070b",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "UNI",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1787578442170,
+      "exit_ts_ms": 1787582042214,
+      "net_pnl_usd": 5.379504936216989,
+      "first_fill_leader_notional_usd": 43.77,
+      "signed_reference_depth_imbalance": 0.5123821975646273,
+      "entry_capacity_usd": 2541.46831,
+      "entry_price": 4.374126136335231,
+      "exit_price": 4.4173,
+      "direction": 1
+    },
+    {
+      "trade_id": "1aeb3ec95108a5b630ba3c459bc1e90b0e08fb4f7d2050eb5445a9cd3db128d5",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "LDO",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1787578458669,
+      "exit_ts_ms": 1787582063430,
+      "net_pnl_usd": 7.888655894966066,
+      "first_fill_leader_notional_usd": 7224.48,
+      "signed_reference_depth_imbalance": 0.8907490187401212,
+      "entry_capacity_usd": 2879.7758949999998,
+      "entry_price": 0.3874433333917101,
+      "exit_price": 0.39288849460751946,
+      "direction": 1
+    },
+    {
+      "trade_id": "44161972071309f43b5838766b9fdfb4c55804a3da4973ead4835530de68d6b4",
+      "vault": "0x654016a8c9fcf0c4cb7ed6078aba21f7f399f7b7",
+      "coin": "NEAR",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1787583769733,
+      "exit_ts_ms": 1787587375927,
+      "net_pnl_usd": 0.9049749051350022,
+      "first_fill_leader_notional_usd": 715.3,
+      "signed_reference_depth_imbalance": 0.07218697307577054,
+      "entry_capacity_usd": 12561.37875,
+      "entry_price": 1.9939000000000002,
+      "exit_price": 1.9987040542633332,
+      "direction": 1
+    },
+    {
+      "trade_id": "020a09f981a462c5f27192f14debc36c9476845477b994bfbf6cbb1f5c6352e9",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "NEAR",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788028721691,
+      "exit_ts_ms": 1788032322260,
+      "net_pnl_usd": -2.6708044851278716,
+      "first_fill_leader_notional_usd": 91.15,
+      "signed_reference_depth_imbalance": 0.16896424506229973,
+      "entry_capacity_usd": 5019.04192,
+      "entry_price": 1.8565000000000003,
+      "exit_price": 1.8630900986666667,
+      "direction": -1
+    },
+    {
+      "trade_id": "144a97a6ee9b49708bb32b03289c842d0e2bd30f66c40d434305e7ec2f5d26cf",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "STBL",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788029414633,
+      "exit_ts_ms": 1788033019516,
+      "net_pnl_usd": 8.220864072717335,
+      "first_fill_leader_notional_usd": 2355.36,
+      "signed_reference_depth_imbalance": 0.7697630247317411,
+      "entry_capacity_usd": 618.44725,
+      "entry_price": 0.02899125763845888,
+      "exit_price": 0.02856813393168082,
+      "direction": -1
+    },
+    {
+      "trade_id": "913bdcf1a3fc003dcba8b1c92cf3137bab73bf9b139d5f27b9d36887f9ac986a",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "MELANIA",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788030768026,
+      "exit_ts_ms": 1788034372876,
+      "net_pnl_usd": 3.623097464117425,
+      "first_fill_leader_notional_usd": 41.75,
+      "signed_reference_depth_imbalance": 0.5351601078513696,
+      "entry_capacity_usd": 2231.200342,
+      "entry_price": 0.11438660060397046,
+      "exit_price": 0.11359328665041056,
+      "direction": -1
+    },
+    {
+      "trade_id": "dc5449acf6fc2179a6e6987337eecfa72dc0bcedfa182b9b6718526993f8e4ba",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "WLD",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788049113547,
+      "exit_ts_ms": 1788052714476,
+      "net_pnl_usd": 11.006658597532416,
+      "first_fill_leader_notional_usd": 453.02,
+      "signed_reference_depth_imbalance": 0.6513785580039955,
+      "entry_capacity_usd": 2713.089076,
+      "entry_price": 0.38418,
+      "exit_price": 0.37679,
+      "direction": -1
+    },
+    {
+      "trade_id": "7ae287d5a7d886d426c4cb463aee3731b0057bccd0726a7b297326293082c846",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "TRUMP",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788049262995,
+      "exit_ts_ms": 1788052865590,
+      "net_pnl_usd": 10.599739322694548,
+      "first_fill_leader_notional_usd": 380.48,
+      "signed_reference_depth_imbalance": 0.8216887870738478,
+      "entry_capacity_usd": 2319.18899,
+      "entry_price": 2.6985107288902417,
+      "exit_price": 2.64843208747999,
+      "direction": -1
+    },
+    {
+      "trade_id": "4b27a7b05b4f814d411f339356b04dbc620eb98cbca935088e480c21b6f20f81",
+      "vault": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
+      "coin": "MELANIA",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788049332852,
+      "exit_ts_ms": 1788052935669,
+      "net_pnl_usd": 1.3615481100553593,
+      "first_fill_leader_notional_usd": 195.86,
+      "signed_reference_depth_imbalance": 0.009627690596914706,
+      "entry_capacity_usd": 865.059938,
+      "entry_price": 0.11502666656217173,
+      "exit_price": 0.11466228263426051,
+      "direction": -1
+    },
+    {
+      "trade_id": "fedfba40071ca486ce0b401a9b4113be392006f65a8ff27e0e425e67bea70cd0",
+      "vault": "0xca230e816bdb34a46960c2f978a30a563d1ae9e0",
+      "coin": "HYPE",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788075896335,
+      "exit_ts_ms": 1788079501184,
+      "net_pnl_usd": 5.140906096148251,
+      "first_fill_leader_notional_usd": 4396.98,
+      "signed_reference_depth_imbalance": 0.5134110477035748,
+      "entry_capacity_usd": 87015.4521,
+      "entry_price": 82.872,
+      "exit_price": 83.657,
+      "direction": 1
+    },
+    {
+      "trade_id": "16cf5f61d9668cf65a130c8443850c83ff103ea3089f0719b1b9dd083402e240",
+      "vault": "0xc179e03922afe8fa9533d3f896338b9fb87ce0c8",
+      "coin": "XMR",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788080157390,
+      "exit_ts_ms": 1788083757534,
+      "net_pnl_usd": 2.673878449663676,
+      "first_fill_leader_notional_usd": 383.23,
+      "signed_reference_depth_imbalance": 0.9889328254713413,
+      "entry_capacity_usd": 11390.59625,
+      "entry_price": 478.95000000000005,
+      "exit_price": 481.51663345749995,
+      "direction": 1
+    },
+    {
+      "trade_id": "0d00b257a34f7cce81379f20e929e8364f5e7e7134acc0d6ca5b9fd30cf0c345",
+      "vault": "0xbbf7d7a9d0eaeab4115f022a6863450296112422",
+      "coin": "UNI",
+      "signal_action": "ADD",
+      "entry_ts_ms": 1788091420799,
+      "exit_ts_ms": 1788095021058,
+      "net_pnl_usd": 15.11326888403911,
+      "first_fill_leader_notional_usd": 1202.69,
+      "signed_reference_depth_imbalance": 0.24259485846057782,
+      "entry_capacity_usd": 6311.34019,
+      "entry_price": 5.150275107003649,
+      "exit_price": 5.2847,
+      "direction": 1
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+
+  Lecture des marches PERP et SPOT d'Hyperliquid (public, lecture seule)...
+  232 perps - 296 marches spot - **8 coins ont LES DEUX**
+
+  Coins couvrables : AZTEC, BERA, HYPE, MON, PUMP, PURR, STABLE, TRUMP
+
+  Cout des DEUX jambes : 6 bps en maker, 18 bps en taker
+  Plancher protocolaire Hyperliquid : 0,125 bps/h PERMANENT (11,6 %% APR au short).
+  Il ne s'eteint pas. Les 6 bps sont rembourses en 48 h, puis c'est du portage pur.
+
+  coin        funding/h      base    spot 24h  cout ent.     net 24h  verdict
+  ---------- ---------- --------- ----------- ---------- -----------  ----------------------------------
+  HYPE          +0.125b     +2.6b       31.7M      +3.4b      +86.7b  VIABLE -- rembourse en 27 h (1.1 j), puis portage pur -- 86.7 bps nets sur 30 jours
+  AZTEC         +0.125b     +7.2b          0k      +0.0b          --  SPOT_TROP_MINCE_POUR_MONTER_LA_JAMBE
+  PURR          +0.125b    +78.2b        215k      +0.0b          --  SPOT_TROP_MINCE_POUR_MONTER_LA_JAMBE
+  STABLE        +0.125b    -40.1b          0k      +0.0b          --  SPOT_TROP_MINCE_POUR_MONTER_LA_JAMBE
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  MAPPING PERP<->SPOT CASSE sur 4 coin(s) — ECARTE, PAS INTERPRETE :
+      BERA       base = +2383875 bps  (impossible : > 2000 bps)
+      MON        base = +38524 bps  (impossible : > 2000 bps)
+      PUMP       base = +148163 bps  (impossible : > 2000 bps)
+      TRUMP      base = +84935946 bps  (impossible : > 2000 bps)
+  Ce n'est PAS une opportunite d'arbitrage : c'est un bug de lecture.
+  Diagnostic : python tools/diagnostic_spot_hyperliquid.py
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  >>> 1 carry(s) delta-neutre(s) VIABLE(S). Gain cumule : 86.7 bps / 24 h.
+      Sur 500 $ par paire : 4.33 $ / jour / paire en moyenne.
+      ⚠️  ESTIMATION. Le spot Hyperliquid est MINCE : la liquidite affichee est
+      une fraction du volume 24 h, pas une profondeur de carnet mesuree.
+      Prochaine etape : lire le CARNET spot, pas seulement son volume.
+
+  rapport : data\reports\carry_delta_neutre.json
+

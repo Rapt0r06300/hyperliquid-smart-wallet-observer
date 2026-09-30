@@ -1,0 +1,17 @@
+Optimiser le PnL paper de hyper_smart_observer/dydx_v4/. Bot copy-trading dYdX v4, SIMULATION ONLY.
+
+RÈGLES: tests après chaque modif (python -m pytest tests/dydx_v4/ -x -q, 316 pass). Zéro ordre réel, paper_only=True. Pour fichiers >500 lignes, utiliser python -c "open/read/replace/write", JAMAIS Edit (troncature silencieuse). Git commit après chaque tâche.
+
+1. EXITS (adaptive_exits.py): Le trailing stop ne se resserre jamais. Fix: resserrer à 1.0 ATR quand profit > 2x ATR. Ajouter sortie partielle (fermer 50% à 1.5x ATR, trailer le reste). Ajouter exit momentum (recul 0.5 ATR du pic → fermer). Tests pour chaque cas.
+
+2. FILTRE RÉGIME (edge_calculator.py): market_regime.py existe avec analyze_market_context() → MarketContext(regime). Dans calculate_edge(): edge × 0.0 si RANGING, × 1.2 si TRENDING. Test.
+
+3. VOLUME (edge_calculator.py): volume_zscore existe dans MarketContext. Si >1.0 → edge × 1.2. Si <-1.0 → edge × 0.5. Test.
+
+4. SCORING LEADER/MARCHÉ (signal_quality.py): Dict leader_market_stats[wallet][market]={wins,total}. Winrate <40% sur ce marché → score -50%. Méthode update_leader_stats(). Tests.
+
+5. SIZING CONFIANCE (live_observer.py, 2068 lignes — SCRIPT PYTHON): Dans _open_paper_position, notional × confidence: HIGH (wallets≥2 + TRENDING + age<5s) = 100%, MEDIUM = 60%, LOW = 30%.
+
+6. WEBSOCKET LIVE (ws_client.py existe, 420 lignes, inutilisé): Au démarrage subscribe trades top 5 marchés. Détecter gros trades >$50k comme boost signal dans tremor_engine. Test avec WS mocké.
+
+Ordre: 1→6. Vérif finale: grep "place_order\|private_key\|mnemonic" = zéro match.

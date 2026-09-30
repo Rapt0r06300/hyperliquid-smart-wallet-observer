@@ -1,0 +1,68 @@
+============ 1. LES TESTS DU CARNET ============ 
+...........                                                              [100%]
+11 passed in 0.31s
+ 
+============ 2. LA PROFONDEUR REELLE (spot + perp, 4 jambes) ============ 
+====================================================================================================
+  LA PROFONDEUR DU CARNET SPOT — *un edge sur un carnet de 3 $ n'existe pas.*
+  On MARCHE dans le carnet, niveau par niveau. **On ne suppose aucun prix.**
+====================================================================================================
+
+  paires spot resolues (via `spotMeta`, jamais devinees) :
+     HYPE     -> @107
+     PUMP     -> @20
+     PURR     -> PURR/USDC
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  PURR   (APR net mesure : +11.31 %)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    SPOT achat  : slippage **  0.12 bps**  ·  profondeur dispo      20809 $
+    SPOT vente  : slippage ** 47.49 bps**  ·  profondeur dispo      13921 $
+    PERP vente : slippage ** 14.30 bps**  ·  profondeur dispo       8038 $
+    PERP achat : slippage ** 10.34 bps**  ·  profondeur dispo       5414 $
+
+    slippage total (4 jambes) : **72.25 bps**
+    APR net APRES slippage    : **+6.91 %**  (avant : +11.31 %)
+    -> ✅ l'edge survit au carnet reel : **+6.91 % APR** apres 72.25 bps de slippage. ⚠️ *Mesure sur un instantane du carnet -- il peut etre plus mince au moment d'entrer.*
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  PUMP   (APR net mesure : +5.23 %)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    SPOT achat  : 🔴 **CARNET TROP MINCE** — seulement 473 $ dispo pour 500 $ voulus
+    SPOT vente  : 🔴 **CARNET TROP MINCE** — seulement 449 $ dispo pour 500 $ voulus
+    PERP vente : slippage **  0.00 bps**  ·  profondeur dispo     715246 $
+    PERP achat : slippage **  0.00 bps**  ·  profondeur dispo     656219 $
+
+    slippage total (4 jambes) : **0.00 bps**
+    APR net APRES slippage    : **+0.00 %**  (avant : +5.23 %)
+    -> 🔴 **CARNET TROP MINCE POUR NOTRE TAILLE.** *Un edge sur un carnet de 3 $ n'existe pas.* -> **NO_TRADE**, et ce n'est pas une panne : c'est le systeme qui refuse.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  HYPE   (APR net mesure : +4.48 %)
+────────────────────────────────────────────────────────────────────────────────────────────────────
+    SPOT achat  : slippage **  0.00 bps**  ·  profondeur dispo     189294 $
+    SPOT vente  : slippage **  0.00 bps**  ·  profondeur dispo     244595 $
+    PERP vente : slippage **  0.59 bps**  ·  profondeur dispo      48229 $
+    PERP achat : slippage **  0.00 bps**  ·  profondeur dispo     339609 $
+
+    slippage total (4 jambes) : **0.59 bps**
+    APR net APRES slippage    : **+4.44 %**  (avant : +4.48 %)
+    -> ✅ l'edge survit au carnet reel : **+4.44 % APR** apres 0.59 bps de slippage. ⚠️ *Mesure sur un instantane du carnet -- il peut etre plus mince au moment d'entrer.*
+
+====================================================================================================
+  VERDICT FINAL
+====================================================================================================
+
+  survivent au carnet REEL : PURR (+6.91 %), HYPE (+4.44 %)
+
+  -> C:\Users\flo\Desktop\Projet invest\data\reports\profondeur_spot.json
+ 
+============ 3. SECURITE ============ 
+no_secret_patterns: ok
+env_not_committed: ok
+no_forbidden_mainnet_order_method: ok
+no_exchange_endpoint_in_runtime_source: ok
+live_executor_disabled_exists: ok
+mainnet_disabled_in_env_example: ok
+security_tests_present: ok
+no_real_execution_capable_package: ok

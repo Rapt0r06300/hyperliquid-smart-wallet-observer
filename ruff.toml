@@ -1,0 +1,27 @@
+# Configuration ruff (IMPROVE-16) — linting rapide.
+# Usage : pip install ruff && ruff check src tests
+# NB : ruff n'est pas installé dans l'environnement de dev de Claude ; cette config est prête
+# à l'emploi sur ta machine.
+
+line-length = 110
+target-version = "py310"
+
+[lint]
+select = [
+    "E",    # pycodestyle erreurs
+    "F",    # pyflakes (variables inutilisées, imports morts, bugs)
+    "I",    # isort (ordre des imports)
+    "UP",   # pyupgrade (syntaxe moderne)
+    "B",    # bugbear (pièges classiques)
+    "SIM",  # simplifications
+]
+ignore = [
+    "E501",  # longueur gérée par line-length
+    "B008",  # appels dans les defaults (typer/fastapi)
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]
+
+[format]
+quote-style = "double"

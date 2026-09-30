@@ -1,0 +1,409 @@
+from __future__ import annotations
+
+import hashlib
+import subprocess
+import sys
+import time
+
+import pytest
+
+from hl_observer.control_plane.campaign_adapters import (
+    AdapterContext,
+    build_command,
+    run_one_unit,
+)
+
+
+def context(kind: str, **partition):
+    return AdapterContext(
+        campaign_id="c1",
+        kind=kind,
+        unit_id="u1",
+        soft_deadline_epoch=time.time() + 60,
+        partition={"code_sha": "a" * 40, **partition},
+    )
+
+
+def test_market_command_uses_real_collector_cli(tmp_path):
+    cmd, output = build_command(
+        context("market_collection", output_root=str(tmp_path), duration_s=10, coins="BTC")
+    )
+    assert cmd[0] == sys.executable
+    assert cmd[1].endswith("tools/collect_cloud_window.py")
+    assert "--output" in cmd
+    assert "--duration-s" in cmd
+    assert "--campaign-unit-json" not in cmd
+    assert output is not None
+
+
+def test_official_archive_uses_existing_backfill_tool(tmp_path):
+    cmd, output = build_command(
+        context(
+            "official_archive_collection",
+            output_root=str(tmp_path),
+            venue="binance",
+            coin="BTC",
+            symbol="BTCUSDT",
+            start_date="2026-09-24",
+        )
+    )
+    assert cmd[1].endswith("tools/collect_official_archive_backfill.py")
+    assert output is not None and output.name == "bundle"
+
+
+def test_replay_materializes_only_v2_safe_workspace(tmp_path):
+    cmd, output = build_command(
+        context("replay", workspace_root=str(tmp_path), families="trades,bbo")
+    )
+    assert "hl_observer.ops.v2_dataset_bridge" in cmd
+    assert "materialize" in cmd
+    assert "--families" in cmd
+    assert "trades,bbo" in cmd
+    assert output == tmp_path
+
+
+def test_backtest_command_targets_economic_runner(tmp_path):
+    cmd, output = build_command(
+        context("backtest", workspace_root=str(tmp_path))
+    )
+    assert cmd[1].endswith("tools/run_economic_objective_campaigns.py")
+    assert "--no-start-collection" in cmd
+    assert output == tmp_path
+
+
+def test_soft_deadline_refuses_work():
+    ctx = AdapterContext("c1", "market_collection", "u1", time.time() - 1, {})
+    out = run_one_unit(ctx)
+    assert out.status == "CONTINUATION_REQUIRED"
+    assert out.progressed is False
+
+
+def test_subprocess_failure_is_honest(tmp_path):
+    class Result:
+        returncode = 2
+        stdout = ""
+        stderr = "quality mismatch"
+
+    out = run_one_unit(
+        context("market_collection", output_root=str(tmp_path), duration_s=1),
+        runner=lambda *args, **kwargs: Result(),
+    )
+    assert out.status == "FAILED"
+    assert out.payload["failure_category"] == "QUALITY"
+
+
+def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    out = run_one_unit(
+        context(
+            "backtest",
+            workspace_root=str(tmp_path),
+            start_ts_ms=1,
+            end_ts_ms=2,
+        ),
+        runner=runner,
+    )
+    assert out.status == "COMPLETE"
+    assert out.progressed is True
+    assert len(calls) == 2
+    assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
+    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert out.payload["safe_workspace"] == str(tmp_path)
+
+
+def test_no_safe_materialization_is_honestly_unavailable(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 2
+        stdout = ""
+        stderr = "DATASET_V2_NO_GO: no SAFE shards match the selection"
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path)),
+        runner=runner,
+    )
+    assert out.status == "UNAVAILABLE"
+    assert out.payload["reason"] == "no_safe_dataset_v2"
+    assert out.payload["failure_category"] == "DATA_AVAILABILITY"
+    assert len(calls) == 1
+
+
+
+
+def test_module_pnl_proof_runs_strict_audit_after_campaign(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path), max_shards=2),
+        runner=runner,
+    )
+    assert out.status == "COMPLETE"
+    assert len(calls) == 3
+    assert "hl_observer.ops.v2_dataset_bridge" in calls[0]
+    assert calls[1][1].endswith("tools/run_economic_objective_campaigns.py")
+    assert calls[2][1].endswith("tools/audit_economic_objectives.py")
+    assert [phase["name"] for phase in out.payload["phases"]] == [
+        "materialize_safe_v2",
+        "economic_campaign",
+        "module_pnl_audit",
+    ]
+
+
+
+
+def _write_economic_audit(tmp_path, *, all_ledgers_valid, all_objectives_met, classifications):
+    target = (
+        tmp_path
+        / "runtime"
+        / "reports"
+        / "economic_campaigns"
+        / "HYPERSMART_ECONOMIC_PROOF_AUDIT.json"
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        __import__("json").dumps(
+            {
+                "schema_version": "hypersmart.economic_proof_audit.v1",
+                "paper_read_only": True,
+                "real_execution": False,
+                "missing_families": [],
+                "all_ledgers_valid": all_ledgers_valid,
+                "all_objectives_met": all_objectives_met,
+                "families": [
+                    {"classification": value} for value in classifications
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_module_pnl_unmeasurable_is_complete_stage_not_technical_failure(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    class AuditResult:
+        returncode = 2
+        stdout = "audit written"
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            _write_economic_audit(
+                tmp_path,
+                all_ledgers_valid=False,
+                all_objectives_met=False,
+                classifications=["INVALID"],
+            )
+            return AuditResult()
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path)),
+        runner=runner,
+    )
+
+    assert out.status == "COMPLETE"
+    assert out.payload["economic_proof_status"] == "UNMEASURABLE"
+    assert out.payload["economic_proof_certifying"] is False
+    assert out.payload["phases"][-1]["semantic_status"] == "UNMEASURABLE"
+    assert out.payload["phases"][-1]["certifying"] is False
+
+
+def test_module_pnl_audit_exit_two_without_receipt_remains_technical_failure(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "ok"
+        stderr = ""
+
+    class AuditResult:
+        returncode = 2
+        stdout = ""
+        stderr = "audit failed before receipt"
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[1].endswith("tools/audit_economic_objectives.py"):
+            return AuditResult()
+        return Result()
+
+    out = run_one_unit(
+        context("module_pnl_proof", workspace_root=str(tmp_path)),
+        runner=runner,
+    )
+
+    assert out.status == "FAILED"
+    assert out.payload["phase"] == "module_pnl_audit"
+
+
+def test_module_pnl_more_data_and_kill_are_semantic_not_crashes(tmp_path):
+    for classifications, expected in [
+        (["INCOMPLETE"], "MORE_DATA"),
+        (["VALID_NON_TARGET"], "KILL"),
+    ]:
+        calls = []
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def runner(cmd, **kwargs):
+            calls.append(list(cmd))
+            if cmd[1].endswith("tools/audit_economic_objectives.py"):
+                _write_economic_audit(
+                    tmp_path,
+                    all_ledgers_valid=True,
+                    all_objectives_met=False,
+                    classifications=classifications,
+                )
+            return Result()
+
+        out = run_one_unit(
+            context("module_pnl_proof", workspace_root=str(tmp_path)),
+            runner=runner,
+        )
+        assert out.status == "COMPLETE"
+        assert out.payload["economic_proof_status"] == expected
+        assert out.payload["economic_proof_certifying"] is False
+
+
+def test_copy_vault_default_respects_hyperliquid_user_limit(tmp_path):
+    cmd, _ = build_command(
+        context("copy_vault_collection", output_root=str(tmp_path), duration_s=1)
+    )
+    pos = cmd.index("--max-vaults")
+    assert cmd[pos + 1] == "10"
+
+
+def test_copy_vault_dynamic_shards_cover_full_frozen_universe(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text('{"vaults":[]}', encoding="utf-8")
+    digest = hashlib.sha256(selection.read_bytes()).hexdigest()
+    cmd, _ = build_command(
+        context(
+            "copy_vault_collection",
+            output_root=str(tmp_path / "out"),
+            duration_s=1,
+            max_vaults=47,
+            vault_shard_count=5,
+            vault_shard_index=4,
+            selection_file=str(selection),
+            selection_sha256=digest,
+        )
+    )
+    assert cmd[cmd.index("--max-vaults") + 1] == "47"
+    assert cmd[cmd.index("--vault-shard-count") + 1] == "5"
+    assert cmd[cmd.index("--vault-shard-index") + 1] == "4"
+    assert cmd[cmd.index("--selection-file") + 1] == str(selection)
+
+
+def test_copy_vault_rejects_partition_above_ten_users_per_lane(tmp_path):
+    with pytest.raises(ValueError, match="10 unique users per IP"):
+        build_command(
+            context(
+                "copy_vault_collection",
+                output_root=str(tmp_path),
+                duration_s=1,
+                max_vaults=47,
+                vault_shard_count=4,
+                vault_shard_index=0,
+            )
+        )
+
+
+
+def test_resume_proof_replay_unit_zero_plans_without_materializing(tmp_path):
+    cmd, output = build_command(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=0,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        )
+    )
+    assert "hl_observer.ops.v2_dataset_bridge" in cmd
+    assert "plan" in cmd
+    assert "materialize" not in cmd
+    assert output == tmp_path
+
+
+def test_resume_proof_replay_unit_zero_checkpoints_then_unit_one_materializes(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"safe_shards":2,"dataset_ids":["a","b"]}'
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    first = run_one_unit(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=0,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        ),
+        runner=runner,
+    )
+    assert first.status == "CONTINUATION_REQUIRED"
+    assert first.progressed is True
+    assert first.payload["reason"] == "resume_proof_selection_checkpoint"
+    assert "plan" in calls[0]
+
+    calls.clear()
+    second = run_one_unit(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=1,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        ),
+        runner=runner,
+    )
+    assert second.status == "COMPLETE"
+    assert second.progressed is True
+    assert "materialize" in calls[0]

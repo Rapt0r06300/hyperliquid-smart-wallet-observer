@@ -1,0 +1,38 @@
+============ 1. LES TESTS (scan + tri + dossier + graphe) ============ 
+........................................................................ [ 16%]
+........................................................................ [ 33%]
+........................................................................ [ 50%]
+........................................................................ [ 67%]
+........................................................................ [ 84%]
+.................................................................        [100%]
+425 passed in 25.33s
+ 
+============ 2. TOUT COMPILE (Windows = la verite, le mount tronque) ============ 
+  OK - les 25 fichiers compilent 
+ 
+============ 3. LES DEFAUTS SONT-ILS CORRIGES ? ============ 
+================================================================================================
+  VERIFIER LE MOISSONNEUR v3 — les 3 defauts MESURES sont-ils corriges ?
+================================================================================================
+
+  [1] LE BUG DES README — 235 repos perdus, dont hftbacktest (4270 etoiles)
+  OK    l'API /repos/{o}/{r}/readme est utilisee (elle resout nom+ext+branche)
+  OK    le repli tente d'autres EXTENSIONS (.rst, .txt...)
+  OK    le repli tente d'autres BRANCHES (develop, dev, trunk)
+  OK    l'ancienne URL en dur (README.md seulement) a DISPARU
+
+  [2] LE TRI — il recompensait celui qui CITE le plus de mots
+  OK    le README SUBSTANTIEL (60.6) passe devant le BAVARD (-24.2)
+  OK    l'AVEU DE LIMITE reste le signal le plus fort (la seule chose qu'un menteur ne peut pas simuler)
+  OK    20 000 etoiles sans substance (49.5) ne battent pas 3 etoiles avec (60.6)
+
+  [3] LIRE LE CODE — il s'arretait au README (= la page de vente)
+  OK    il ouvre l'ARBRE du repo (sans cloner)
+  OK    il produit une LISTE DE LECTURE (repo / fichier / LIGNE / pourquoi)
+  OK    aucun exec / clone / subprocess : **on LIT du texte, on ne lance RIEN**
+
+================================================================================================
+  ✅ **LES 3 DEFAUTS SONT CORRIGES.**
+     🚩 Rappel : *trier ne remplacera jamais lire.* 8 passes de tri sur 5 617
+        repos -> 3 idees. 20 min a lire UN repo -> 5 bugs dans notre simu.
+================================================================================================

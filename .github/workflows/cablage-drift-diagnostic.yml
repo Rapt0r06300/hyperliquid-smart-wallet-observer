@@ -1,0 +1,51 @@
+name: cablage-drift-diagnostic
+
+on:
+  push:
+    paths:
+      - "*.cmd"
+      - "*.ps1"
+      - "*.sh"
+      - "src/**/*.py"
+      - "tests/test_risk_guards_no_limbo.py"
+      - "tools/**/*.ps1"
+      - "tools/**/*.cmd"
+      - "tools/diagnose_cablage_drift.py"
+      - ".github/workflows/cablage-drift-diagnostic.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+      HISTORICAL_REFERENCE_SHA: 1e4ee809e80b2851dc4dd7cd941380dc7e63248a
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Mesurer le câblage courant et le delta historique
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT="$RUNNER_TEMP/current-cablage.txt"
+          BASE="$RUNNER_TEMP/base-cablage.txt"
+          git worktree add --detach "$RUNNER_TEMP/cablage-baseline" "$HISTORICAL_REFERENCE_SHA"
+          python tools/diagnose_cablage_drift.py "$GITHUB_WORKSPACE" --names-only | sort -u > "$CURRENT"
+          python tools/diagnose_cablage_drift.py "$RUNNER_TEMP/cablage-baseline" --names-only | sort -u > "$BASE"
+          echo "CURRENT_COUNT=$(wc -l < "$CURRENT")"
+          echo "HISTORICAL_REFERENCE_COUNT=$(wc -l < "$BASE")"
+          echo "BEGIN_ADDED_SINCE_HISTORICAL_REFERENCE"
+          comm -13 "$BASE" "$CURRENT"
+          echo "END_ADDED_SINCE_HISTORICAL_REFERENCE"
+          echo "BEGIN_REMOVED_SINCE_HISTORICAL_REFERENCE"
+          comm -23 "$BASE" "$CURRENT"
+          echo "END_REMOVED_SINCE_HISTORICAL_REFERENCE"

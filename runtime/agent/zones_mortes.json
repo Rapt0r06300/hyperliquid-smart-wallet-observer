@@ -1,0 +1,169 @@
+{
+  "zones_mortes": [
+    {
+      "id": "COPY_TRADING_NO_EDGE",
+      "hypothese": "Copier les fills des whales rapporte, si on filtre/regle assez bien.",
+      "verdict": "Le copy-trading n'a AUCUN edge, a AUCUN horizon.",
+      "mesure": "edge net median apres un fill de leader, hors echantillon",
+      "valeur": -7.97,
+      "unite": "bps",
+      "echantillon": 24133,
+      "date": "2026-07-11",
+      "lecon": "Un score de wallet n'est pas un edge en bps. Un consensus n'est pas une preuve de rentabilite. MEME A COUT ZERO l'esperance reste negative : aucun reglage de seuil, de SL/TP, de filtre ou de hedge ne peut sauver un signal qui ne predit rien.",
+      "condition_de_reouverture": "un mecanisme STRUCTURELLEMENT different (ex. acces au flux d'ordres AVANT execution, pas apres), ou une source de signal qui n'est pas le fill public d'un leader",
+      "mots_cles": [
+        "copy",
+        "copytrading",
+        "leader",
+        "whale",
+        "consensus",
+        "sniper",
+        "min_edge",
+        "dominance",
+        "wallet_score"
+      ],
+      "source": "docs/audit/PREUVE_ABSENCE_EDGE_COPYTRADING.md"
+    },
+    {
+      "id": "LATENCE_NEST_PAS_LE_PROBLEME",
+      "hypothese": "Si on decidait plus vite (sub-seconde), l'edge de copie apparaitrait.",
+      "verdict": "La courbe edge/horizon est PLATE. Le probleme n'a jamais ete la latence.",
+      "mesure": "edge median a 500 ms apres le fill du leader",
+      "valeur": -3.74,
+      "unite": "bps",
+      "echantillon": 15571,
+      "date": "2026-07-11",
+      "lecon": "Aller plus vite vers un signal qui ne dit rien fait perdre de l'argent plus vite. Un gain de fraicheur est un gain TECHNIQUE ; il ne devient economique que si la courbe edge/horizon montre un edge a ces horizons. Ici elle n'en montre a AUCUN.",
+      "condition_de_reouverture": "des donnees a resolution < 100 ms sur un signal DIFFERENT du fill public",
+      "mots_cles": [
+        "latence",
+        "latency",
+        "hot_path",
+        "fraicheur",
+        "freshness",
+        "horizon",
+        "subseconde",
+        "rust",
+        "colocation"
+      ],
+      "source": "docs/research/EDGE_HORIZON_ET_CARRY_FUNDING.md"
+    },
+    {
+      "id": "FUNDING_JAMBE_NUE",
+      "hypothese": "Encaisser un funding eleve rapporte, meme sans jambe de couverture.",
+      "verdict": "Le prix noie le funding d'un facteur ~281. Une jambe nue est un pari, pas un carry.",
+      "mesure": "ratio median funding / bruit de prix, sur 232 marches",
+      "valeur": 0.0036,
+      "unite": "ratio",
+      "echantillon": 9512,
+      "date": "2026-07-11",
+      "lecon": "PIEGE CONTRE-INTUITIF : monter le seuil de funding ne filtre PAS le risque, il le CONCENTRE. Le funding est eleve PRECISEMENT la ou le marche est dangereux. Le gate a 2,5 bps/h ne laissait passer que CASHCAT... qui bouge de 219 bps/h.",
+      "condition_de_reouverture": "une VRAIE jambe de couverture (spot ou perp oppose) qui annule le risque de prix -- un frais forfaitaire n'est PAS une couverture",
+      "mots_cles": [
+        "funding",
+        "carry",
+        "grinder",
+        "arb",
+        "delta_neutre",
+        "cashcat"
+      ],
+      "source": "src/hl_observer/funding/funding_carry_economics.py"
+    },
+    {
+      "id": "EDGE_FABRIQUE",
+      "hypothese": "On peut deriver un edge en bps d'un score de consensus.",
+      "verdict": "`dominance x 45 + bonus` n'a JAMAIS touche un prix. C'etait une fiction.",
+      "mesure": "constantes inventees dans la formule d'edge (45, 9, 0.55, 10, 25000)",
+      "valeur": 45.0,
+      "unite": "constante sans source",
+      "echantillon": 24133,
+      "date": "2026-07-11",
+      "lecon": "UN EDGE EST UN MOUVEMENT DE PRIX ATTENDU, MESURE. Pas un score de vote converti en bps par une constante. J'ai optimise un seuil, recalibre des SL/TP et lance un replay de 150 millions de scenarios SUR CE CHIFFRE -- sans jamais ouvrir la fonction qui le produisait. On optimise une fiction avec une grande rigueur.",
+      "condition_de_reouverture": "jamais pour une formule inventee ; un edge doit venir d'une table MESUREE (runtime/calibration/empirical_edge.json)",
+      "mots_cles": [
+        "edge",
+        "consensus",
+        "vote",
+        "score",
+        "dominance",
+        "bonus",
+        "proxy"
+      ],
+      "source": "src/hl_observer/edge/empirical_edge.py"
+    },
+    {
+      "id": "BUS_GITHUB_EXTERNE",
+      "hypothese": "Lancer des profils de strategies GitHub comme moteurs donne un edge.",
+      "verdict": "PF net 0,61. Ecarte -- mais reste ALLUME dans le code pendant des semaines.",
+      "mesure": "profit factor net des 38 profils externes",
+      "valeur": 0.61,
+      "unite": "PF",
+      "echantillon": 810,
+      "date": "2026-07-12",
+      "lecon": "Un moteur abandonne doit etre eteint DANS LE CODE, pas dans les tetes. Son defaut etait `priority` : personne ne l'avait rallume, il n'avait jamais ete eteint. 810 evaluations pour 21 entrees reelles, dans le hot path.",
+      "condition_de_reouverture": "une idee distillee A LA MAIN dans un module HyperSmart teste -- jamais du code upstream lance comme moteur autonome",
+      "mots_cles": [
+        "github",
+        "bus",
+        "external",
+        "profil",
+        "repo",
+        "upstream",
+        "distillation"
+      ],
+      "source": "src/hl_observer/strategies/external_simulation_bus.py"
+    },
+    {
+      "id": "MM_SUR_LES_MAJORS",
+      "hypothese": "On peut faire du market making sur BTC/ETH/SOL.",
+      "verdict": "Les frais maker sont 10 a 20x le spread. Arithmetiquement mort.",
+      "mesure": "spread median BTC contre cout aller-retour maker/maker (3,0 bps)",
+      "valeur": 0.16,
+      "unite": "bps de spread",
+      "echantillon": 1363,
+      "date": "2026-07-12",
+      "lecon": "Chez Hyperliquid le maker PAIE 1,5 bps (pas de rebate avant les tiers institutionnels). Sur un carnet parfait, l'espace est nul : c'est le metier de gens avec des rebates et de la colocation. Le spread ne se capture pas la ou tout le monde le voit.",
+      "condition_de_reouverture": "un tier de frais avec rebate maker negatif (>500 M$ de volume / 14 j) -- hors de portee ; ou un marche FIN avec du flux reel (mesure en cours)",
+      "mots_cles": [
+        "market_making",
+        "mm",
+        "spread",
+        "maker",
+        "majors",
+        "btc",
+        "eth",
+        "sol"
+      ],
+      "source": "tools/mesurer_spread_carnet.py"
+    },
+    {
+      "id": "CALIBRAGE_SLTP_OOS",
+      "hypothese": "Un meilleur reglage SL/TP peut rendre le PnL positif.",
+      "verdict": "Aucun calibrage n'est positif hors echantillon. Le meilleur choix = NE PAS TRADER.",
+      "mesure": "nombre de configurations robustes sur holdout, sur 150 millions de scenarios",
+      "valeur": 0.0,
+      "unite": "configurations robustes",
+      "echantillon": 150000000,
+      "date": "2026-07-09",
+      "lecon": "La boucle generer/tester/selectionner a PARFAITEMENT fonctionne : elle a correctement rapporte que rien ne survit hors echantillon. Une boucle de recherche ne PEUT PAS creer un edge qui n'existe pas. Il ne manquait pas la recherche, il manquait quelque chose qui vaille la peine d'etre cherche.",
+      "condition_de_reouverture": "un SIGNAL d'entree different (pas un reglage de sortie) dont l'edge est mesure positif",
+      "mots_cles": [
+        "sltp",
+        "calibrage",
+        "calibration",
+        "stop",
+        "takeprofit",
+        "trailing",
+        "replay",
+        "grid",
+        "seuil",
+        "threshold",
+        "tuning"
+      ],
+      "source": "docs/ANALYSE_REPLAY_LEVIER_REEL.md"
+    }
+  ],
+  "n": 7,
+  "note": "Chaque entree est une hypothese TUEE PAR UNE MESURE, avec son echantillon et la condition qui la rouvrirait. Ce n'est pas une liste d'opinions.",
+  "real_execution": false
+}

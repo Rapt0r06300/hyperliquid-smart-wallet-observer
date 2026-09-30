@@ -1,0 +1,55 @@
+name: data-vault-ci
+
+on:
+  push:
+    branches:
+      - feature/github-data-vault
+    paths:
+      - 'tools/data_vault_core.py'
+      - 'tools/build_data_vault_snapshot.py'
+      - 'tools/publish_data_vault_snapshot.py'
+      - 'tools/restore_data_vault_snapshot.py'
+      - 'tools/update_data_vault_pointer.py'
+      - 'tests/test_data_vault.py'
+      - '.github/workflows/data-vault-ci.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tools/data_vault_core.py'
+      - 'tools/build_data_vault_snapshot.py'
+      - 'tools/publish_data_vault_snapshot.py'
+      - 'tools/restore_data_vault_snapshot.py'
+      - 'tools/update_data_vault_pointer.py'
+      - 'tests/test_data_vault.py'
+      - '.github/workflows/data-vault-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.11'
+
+      - name: Compile vault tools
+        run: |
+          python -m py_compile \
+            tools/data_vault_core.py \
+            tools/build_data_vault_snapshot.py \
+            tools/publish_data_vault_snapshot.py \
+            tools/restore_data_vault_snapshot.py \
+            tools/update_data_vault_pointer.py
+
+      - name: Run isolated vault tests
+        env:
+          PYTHONPATH: tools
+        run: python -m unittest discover -s tests -p 'test_data_vault.py' -v
