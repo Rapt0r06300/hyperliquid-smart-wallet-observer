@@ -226,8 +226,12 @@ def run_campaigns(
         dataset_manifest_path = write_family_source_manifest(root)
         dataset_sources = source_manifest_summary(root)
 
-    copy_tool = _tool("hypersmart_copy_pipeline", root / "tools" / "pipeline_copie_reel.py")
-    cross_tool = _tool("hypersmart_cross_campaign", root / "tools" / "backtest_dislocation_2jambes.py")
+    # The data root may be an isolated materialized Dataset V2 workspace. Tool
+    # modules belong to the checked-out Alina code repository, not to that data
+    # workspace. Loading them from `root/tools` made GitHub-hosted backtest/OOS
+    # campaigns fail with FileNotFoundError after materialization.
+    copy_tool = _tool("hypersmart_copy_pipeline", ROOT / "tools" / "pipeline_copie_reel.py")
+    cross_tool = _tool("hypersmart_cross_campaign", ROOT / "tools" / "backtest_dislocation_2jambes.py")
 
     copy_data = dataset_provenance(
         root,
