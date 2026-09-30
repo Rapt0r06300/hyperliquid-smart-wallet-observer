@@ -167,9 +167,11 @@ def _raw_trade(
     direction: int = 1,
     native_id: str = "native",
 ) -> dict:
+    source_lineage_id = f"{coin}|{direction}|{entry_ms}|{exit_ms}"
     if family == "lead_lag":
         return {
             "trade_id": native_id,
+            "source_lineage_id": source_lineage_id,
             "coin": coin,
             "direction": "LONG" if direction > 0 else "SHORT",
             "entry_ts_ns": entry_ms * 1_000_000,
@@ -179,6 +181,7 @@ def _raw_trade(
     if family == "cross_venue_dislocation_v2":
         return {
             "trade_id": native_id,
+            "source_lineage_id": source_lineage_id,
             "coin": coin,
             "basis_in_bps": 10.0 if direction > 0 else -10.0,
             "ts_in": float(entry_ms),
@@ -187,6 +190,7 @@ def _raw_trade(
         }
     return {
         "trade_id": native_id,
+        "source_lineage_id": source_lineage_id,
         "coin": coin,
         "direction": direction,
         "entry_ts_ms": entry_ms,
