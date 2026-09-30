@@ -167,9 +167,13 @@ def select_safe_shards(
             continue
         if symbol_set and shard.symbol.upper() not in symbol_set:
             continue
-        if start_ts_ms is not None and shard.end_ts_ms < int(start_ts_ms):
+        # Materialization copies whole immutable shards; it does not trim
+        # records at a requested temporal boundary. Therefore overlap semantics
+        # would leak observations from outside the frozen analysis window.
+        # Only shards fully contained in the requested interval are eligible.
+        if start_ts_ms is not None and shard.start_ts_ms < int(start_ts_ms):
             continue
-        if end_ts_ms is not None and shard.start_ts_ms > int(end_ts_ms):
+        if end_ts_ms is not None and shard.end_ts_ms > int(end_ts_ms):
             continue
         selected.append(shard)
     return sorted(
