@@ -1,4 +1,5 @@
 """Unit tests for Campaign Manifest Schema V2 and Dispatch Receipts (Block 3 & 4 of spec)."""
+import json
 import pytest
 
 from hl_observer.control_plane.resumable_campaign import (
@@ -9,6 +10,8 @@ from hl_observer.control_plane.resumable_campaign import (
     SCHEMA_VERSION_V1,
     SCHEMA_VERSION_V2,
 )
+from tools.resumable_campaign import save
+
 from hl_observer.control_plane.dispatch_receipt import (
     generate_request_id,
     DispatchReceipt,
@@ -205,3 +208,35 @@ def test_v2_manifest_refuses_self_supersession():
     }
     with pytest.raises(ValueError, match="cannot supersede itself"):
         CampaignManifest.from_dict(raw)
+
+def test_save_expected_digest_normalizes_new_optional_fields(tmp_path):
+    path = tmp_path / "campaign.json"
+    raw = {
+        "campaign_id": "legacy-shape",
+        "kind": "market_collection",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_generation": "V2_FRESH",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "COLLECT",
+        "phase_epoch": 3,
+    }
+    # Simulate a durable manifest written before the optional supersedes field
+    # existed in the schema.
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    manifest = CampaignManifest.from_dict(raw)
+    expected = __import__(
+        "hl_observer.control_plane.resumable_campaign",
+        fromlist=["sha256_json"],
+    ).sha256_json(manifest.to_dict())
+
+    save(path, manifest, expected)
+
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert "supersedes" in persisted
+    assert persisted["supersedes"] is None
+
