@@ -23,7 +23,7 @@ REQUIRED = {
     "two_segment_resume_status", "event_intelligence_wiring_complete",
     "scoreboard_artifact", "paper_read_only", "self_hosted_used",
     "real_execution_reachable", "remaining_blockers", "operator_status",
-    "execution_ledger", "data_exploitability",
+    "execution_ledger", "data_exploitability", "global_closure_provenance",
 }
 VALID_STATUSES = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
 
@@ -93,6 +93,11 @@ def main() -> int:
         raise SystemExit("operator_status count mismatch")
     if not isinstance(receipt["remaining_blockers"], list):
         raise SystemExit("remaining_blockers must be a list")
+    global_closure = receipt["global_closure_provenance"]
+    if not isinstance(global_closure, dict) or not isinstance(global_closure.get("valid"), bool):
+        raise SystemExit("global_closure_provenance is invalid")
+    if not receipt["remaining_blockers"] and global_closure.get("valid") is not True:
+        raise SystemExit("terminal closure requires valid dataset global closure")
     exploitability = receipt["data_exploitability"]
     if not isinstance(exploitability, dict):
         raise SystemExit("data_exploitability must be an object")

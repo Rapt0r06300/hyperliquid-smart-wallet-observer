@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from tools.build_closure_report import _validated_current_scoreboard, digest
+from tools.build_closure_report import (
+    _validated_current_scoreboard,
+    _validated_global_closure,
+    digest,
+)
 
 
 def _phase():
@@ -104,3 +108,64 @@ def test_closure_rejects_stale_or_tampered_scoreboard_receipt(tmp_path):
         "CURRENT_SCOREBOARD_RECEIPT_DIGEST_INVALID",
         "CURRENT_SCOREBOARD_HASH_MISMATCH",
     }
+
+
+def _write_global_closure(root):
+    phase = {
+        "phase": "ANALYZE",
+        "epoch": 3,
+        "source_collection_epoch": 2,
+        "analysis_stage": "DONE",
+        "collection_cutoff_at_utc": "2026-09-29T10:56:59Z",
+    }
+    body = {
+        "schema": "alina.global_implementation_closure.v1",
+        "phase": phase,
+        "cloud_only": True,
+        "implementation_complete": True,
+        "final_validation_complete": True,
+        "coverage_provenance": {
+            "valid": True,
+            "phase_epoch": 3,
+            "source_collection_epoch": 2,
+            "dataset_selection_id": "phase-2-cutoff",
+            "coverage": {
+                "valid_record_count_exact": True,
+                "unique_record_count_exact": True,
+                "trade_count_exact": True,
+                "unique_trade_count_exact": True,
+                "uncompressed_bytes_exact": True,
+            },
+        },
+    }
+    body["receipt_digest"] = digest(body)
+    (root / "catalog").mkdir(parents=True, exist_ok=True)
+    (root / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json").write_text(
+        json.dumps(body), encoding="utf-8"
+    )
+    return phase, body
+
+
+def test_global_closure_binds_terminal_phase_and_frozen_selection(tmp_path):
+    phase, receipt = _write_global_closure(tmp_path)
+    valid, loaded, reason = _validated_global_closure(
+        tmp_path, phase, "phase-2-cutoff"
+    )
+    assert valid is True
+    assert reason == "GLOBAL_CLOSURE_RECEIPT_VALID"
+    assert loaded["receipt_digest"] == receipt["receipt_digest"]
+
+
+def test_global_closure_rejects_tampered_or_stale_frozen_coverage(tmp_path):
+    phase, receipt = _write_global_closure(tmp_path)
+    receipt["coverage_provenance"]["coverage"]["unique_trade_count_exact"] = False
+    receipt.pop("receipt_digest")
+    receipt["receipt_digest"] = digest(receipt)
+    (tmp_path / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json").write_text(
+        json.dumps(receipt), encoding="utf-8"
+    )
+    valid, _, reason = _validated_global_closure(
+        tmp_path, phase, "phase-2-cutoff"
+    )
+    assert valid is False
+    assert reason == "GLOBAL_CLOSURE_FROZEN_COVERAGE_NOT_EXACT"

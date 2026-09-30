@@ -98,6 +98,45 @@ def _validated_current_scoreboard(root, phase, current_campaigns):
     return True, scoreboard, receipt, "CURRENT_SCOREBOARD_RECEIPT_VALID"
 
 
+def _validated_global_closure(root, phase, expected_selection_id):
+    receipt = load(root / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json", {})
+    if not isinstance(receipt, dict) or receipt.get("schema") != "alina.global_implementation_closure.v1":
+        return False, receipt if isinstance(receipt, dict) else {}, "GLOBAL_CLOSURE_RECEIPT_MISSING"
+    supplied = str(receipt.get("receipt_digest") or "")
+    body = dict(receipt)
+    body.pop("receipt_digest", None)
+    if len(supplied) != 64 or digest(body) != supplied:
+        return False, receipt, "GLOBAL_CLOSURE_RECEIPT_DIGEST_INVALID"
+    if receipt.get("implementation_complete") is not True or receipt.get("final_validation_complete") is not True:
+        return False, receipt, "GLOBAL_CLOSURE_NOT_COMPLETE"
+    if receipt.get("cloud_only") is not True:
+        return False, receipt, "GLOBAL_CLOSURE_NOT_CLOUD_ONLY"
+    bound_phase = receipt.get("phase")
+    for key in ("phase", "epoch", "source_collection_epoch", "analysis_stage", "collection_cutoff_at_utc"):
+        if not isinstance(bound_phase, dict) or bound_phase.get(key) != phase.get(key):
+            return False, receipt, f"GLOBAL_CLOSURE_PHASE_MISMATCH:{key}"
+    provenance = receipt.get("coverage_provenance")
+    if not isinstance(provenance, dict) or provenance.get("valid") is not True:
+        return False, receipt, "GLOBAL_CLOSURE_FROZEN_COVERAGE_INVALID"
+    if provenance.get("phase_epoch") != phase.get("epoch"):
+        return False, receipt, "GLOBAL_CLOSURE_COVERAGE_EPOCH_STALE"
+    if provenance.get("source_collection_epoch") != phase.get("source_collection_epoch"):
+        return False, receipt, "GLOBAL_CLOSURE_COVERAGE_SOURCE_EPOCH_STALE"
+    if provenance.get("dataset_selection_id") != expected_selection_id:
+        return False, receipt, "GLOBAL_CLOSURE_COVERAGE_SELECTION_MISMATCH"
+    coverage = provenance.get("coverage")
+    exact_keys = (
+        "valid_record_count_exact",
+        "unique_record_count_exact",
+        "trade_count_exact",
+        "unique_trade_count_exact",
+        "uncompressed_bytes_exact",
+    )
+    if not isinstance(coverage, dict) or not all(coverage.get(key) is True for key in exact_keys):
+        return False, receipt, "GLOBAL_CLOSURE_FROZEN_COVERAGE_NOT_EXACT"
+    return True, receipt, "GLOBAL_CLOSURE_RECEIPT_VALID"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", required=True)
@@ -134,6 +173,7 @@ def main() -> int:
             "updated_at_utc": row.get("updated_at_utc"),
         })
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
+    global_closure = load(root / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json", {})
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     replay_patch = load(root / "catalog/REPLAY_COMPAT_PATCH.json", {})
     resilience = load(root / "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json", {})
@@ -221,6 +261,25 @@ def main() -> int:
         for row in current_analysis_campaigns
         if row.get("dataset_selection_id")
     })
+    expected_selection_id = analyze_selections[0] if len(analyze_selections) == 1 else None
+    global_closure_valid, global_closure, global_closure_reason = (
+        _validated_global_closure(root, phase, expected_selection_id)
+    )
+    frozen_coverage_provenance = (
+        global_closure.get("coverage_provenance", {})
+        if global_closure_valid
+        else {}
+    )
+    frozen_coverage = (
+        frozen_coverage_provenance.get("coverage", {})
+        if isinstance(frozen_coverage_provenance, dict)
+        else {}
+    )
+    trade_count_exact = frozen_coverage.get("trade_count_exact") is True
+    unique_trade_count_exact = frozen_coverage.get("unique_trade_count_exact") is True
+    uncompressed_size_exact = frozen_coverage.get("uncompressed_bytes_exact") is True
+    uncompressed_size_coverage = uncompressed_size_exact
+
     workflow_run_ids = sorted({
         str((row.get("cursor") or {}).get("last_run_id"))
         for row in campaigns
@@ -317,8 +376,8 @@ def main() -> int:
         "dataset_selection_id": (
             analyze_selections[0] if len(analyze_selections) == 1 else None
         ),
-        "trade_count_exact": bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")),
-        "unique_trade_count_exact": bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")),
+        "trade_count_exact": trade_count_exact,
+        "unique_trade_count_exact": unique_trade_count_exact,
         "safe_count": int(totals.get("SAFE_SHARDS") or 0),
         "partial_count": int(totals.get("PARTIAL_SHARDS") or 0),
         "rejected_count": int(totals.get("REJECTED_SHARDS") or 0),
@@ -332,8 +391,8 @@ def main() -> int:
         "trade_count_failure_reason_count": int(totals.get("TRADE_COUNT_FAILURE_REASON_COUNT") or 0),
         "global_unique_failure_reason_count": int(totals.get("GLOBAL_UNIQUE_FAILURE_REASON_COUNT") or 0),
         "cross_shard_overlap_trade_count": int(totals.get("TOTAL_CROSS_SHARD_OVERLAP_TRADES") or 0),
-        "uncompressed_size_coverage": (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") if isinstance(health, dict) else False,
-        "uncompressed_size_exact": (health.get("coverage") or {}).get("uncompressed_bytes_exact") if isinstance(health, dict) else False,
+        "uncompressed_size_coverage": uncompressed_size_coverage,
+        "uncompressed_size_exact": uncompressed_size_exact,
         "uncompressed_size_exact_assets": (health.get("coverage") or {}).get("uncompressed_size_exact_assets", 0) if isinstance(health, dict) else 0,
         "uncompressed_size_unavailable_assets": (health.get("coverage") or {}).get("uncompressed_size_unavailable_assets", 0) if isinstance(health, dict) else 0,
         "copy_vault_status": modules["copy_vault"]["status"],
@@ -352,6 +411,13 @@ def main() -> int:
         "source_degraded_capabilities": source_degraded,
         "event_intelligence_wiring_complete": event_wired,
         "scoreboard_artifact": scoreboard_artifact,
+        "global_closure_provenance": {
+            "valid": global_closure_valid,
+            "reason": global_closure_reason,
+            "receipt_digest": global_closure.get("receipt_digest") if isinstance(global_closure, dict) else None,
+            "dataset_v2_head": global_closure.get("dataset_v2_head") if isinstance(global_closure, dict) else None,
+            "coverage": frozen_coverage_provenance,
+        },
         "scoreboard_provenance": {
             "valid": current_scoreboard_valid,
             "reason": current_scoreboard_reason,
@@ -373,15 +439,16 @@ def main() -> int:
         "real_execution_reachable": False,
         "remaining_blockers": [
             f"current-epoch economic scoreboard evidence is invalid: {current_scoreboard_reason}" if not economic_evidence_loaded else None,
-            "exact trade count coverage is incomplete" if not bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")) else None,
-            "global unique trade count coverage is incomplete" if not bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")) else None,
+            f"dataset global closure evidence is invalid: {global_closure_reason}" if not global_closure_valid else None,
+            "exact trade count coverage is incomplete" if not trade_count_exact else None,
+            "global unique trade count coverage is incomplete" if not unique_trade_count_exact else None,
             f"SAFE to replay-compatible migration has {replay_remaining} unclassified candidates" if replay_remaining > 0 else None,
             "campaign resilience receipt is not READY" if not isinstance(resilience, dict) or resilience.get("status") != "READY" else None,
             "fresh-runner two-segment resume proof is unavailable" if not resume_proven else None,
             f"source capability matrix has {len(source_unvalidated)} unvalidated capabilities" if source_unvalidated else None,
             "event intelligence contains non-wired or partial rows" if not event_wired else None,
             "analysis campaigns are not all terminal COMPLETE" if not complete_analysis else None,
-            "uncompressed size coverage is incomplete" if (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") is not True else None,
+            "uncompressed size coverage is incomplete" if not uncompressed_size_coverage else None,
             "normative gate registry is unavailable" if not gate_registry else None,
             "operator status receipt is invalid" if operator_status_invalid else None,
             "current-epoch environment provenance is unavailable" if complete_analysis and not current_environment_provenance else None,
@@ -417,8 +484,9 @@ def main() -> int:
             event_wired,
             not source_unvalidated,
             replay_remaining == 0,
-            bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")),
-            (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") is True,
+            trade_count_exact,
+            uncompressed_size_coverage,
+            global_closure_valid,
             isinstance(resilience, dict) and resilience.get("status") == "READY",
         )
     )
@@ -436,12 +504,12 @@ def main() -> int:
             "id": "global-unique-trade-identity",
             "state": (
                 "DONE"
-                if bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"))
+                if unique_trade_count_exact
                 else "IN_PROGRESS"
             ),
             "reason": (
                 "global unique trade identity coverage is exact"
-                if bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"))
+                if unique_trade_count_exact
                 else "global unique trade identity backfill/reconciliation remains incomplete"
             ),
         },
