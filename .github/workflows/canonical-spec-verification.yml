@@ -95,12 +95,16 @@ jobs:
           from pathlib import Path
           name,rc,log=sys.argv[1],int(sys.argv[2]),Path(sys.argv[3])
           raw=log.read_bytes() if log.exists() else b""
+          tail=raw.decode("utf-8",errors="replace")[-4000:]
+          tail=tail.replace(str(Path.cwd()), "<workspace>")
+          tail=tail.replace("/home/runner/work/", "<github-workspace>/")
+          tail=tail.replace("/opt/hostedtoolcache/", "<hostedtoolcache>/")
           row={
               "name":name,
               "returncode":rc,
               "status":"PASS" if rc==0 else "FAIL",
               "output_sha256":hashlib.sha256(raw).hexdigest(),
-              "output_tail":raw.decode("utf-8",errors="replace")[-4000:],
+              "output_tail":tail,
           }
           Path(log.with_suffix(".json")).write_text(json.dumps(row,sort_keys=True,indent=2)+"\n",encoding="utf-8")
           PY
