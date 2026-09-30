@@ -1,7 +1,16 @@
 {
-  "matrix_digest": "96fb7503d90c3ecac12d11c6d035ce8776489bc3306665287a39e6769e645698",
+  "matrix_digest": "f23a3e7fc9f2ce2959a94a00a4ca4134e310f7335b6497a14444d9ae23aa9b8e",
   "policy": "FILE_PRESENT and registry.wired are not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
-  "schema_version": "alina.source_capability_matrix.v3",
+  "runtime_evidence": {
+    "github_run_id": "36711530264",
+    "github_sha": "b6f72db34c511e43f26ce82f79137257b59736bd",
+    "paper_read_only": true,
+    "path": "docs/source-capability-runtime.json",
+    "real_execution": false,
+    "receipt_digest": "7f8533581febaceebac1dc2d72504c56efd95661210e80c8782be1ee05b843ba",
+    "runner_kind": "github-hosted"
+  },
+  "schema_version": "alina.source_capability_matrix.v4",
   "source_root": "src/hl_observer",
   "source_rules": {
     "path": "config/source_rules.yaml",
@@ -33,7 +42,8 @@
             "src/hl_observer/experimental/copy_edge_forward.py",
             "src/hl_observer/experimental/metaorder_shadow.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -59,7 +69,8 @@
             "src/hl_observer/data_sources/historical_backfill_engine.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -85,7 +96,8 @@
             "src/hl_observer/collection/archive_s3.py",
             "src/hl_observer/collection/candle_backfill.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -107,7 +119,8 @@
             "src/hl_observer/datasets/economic_multi_source.py",
             "src/hl_observer/experimental/copy_edge_forward.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -133,7 +146,8 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/experimental/copy_edge_forward.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -159,7 +173,8 @@
             "src/hl_observer/backtesting/lead_lag_queue_replay.py",
             "src/hl_observer/backtesting/lead_lag_shadow.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -185,7 +200,8 @@
             "src/hl_observer/backtesting/lead_lag_source_alignment.py",
             "src/hl_observer/backtesting/liquidation_cascade.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -211,7 +227,8 @@
             "src/hl_observer/backtesting/lead_lag_queue_costs.py",
             "src/hl_observer/backtesting/lead_lag_queue_replay.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -237,7 +254,8 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/collection/weight_budgeter.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "HYPERLIQUID_META_OK:234",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
@@ -357,7 +375,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "HYPERLIQUID_META_OK:234",
+      "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "hyperliquid"
     },
@@ -386,7 +406,8 @@
             "src/hl_observer/datasets/catalog_profiler.py",
             "src/hl_observer/datasets/strategy_data_contracts.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -412,7 +433,8 @@
             "src/hl_observer/ops/pre_run_cross_venue_466_545.py",
             "src/hl_observer/ops/preflight_lanceur.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -438,7 +460,8 @@
             "src/hl_observer/datasets/strategy_data_contracts.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -464,7 +487,8 @@
             "src/hl_observer/research/lois_mesurees.py",
             "src/hl_observer/simulation/lead_lag_campaign_adapter.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -490,7 +514,8 @@
             "src/hl_observer/ops/lecons_du_ledger.py",
             "src/hl_observer/ops/preuve_de_vie.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -516,7 +541,8 @@
             "src/hl_observer/control_plane/campaign_adapters.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -542,7 +568,8 @@
             "src/hl_observer/collection/binance_market_context.py",
             "src/hl_observer/collection/hf_recorder_multiplex.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -568,7 +595,8 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/data_sources/official_archive_backfill.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -594,7 +622,8 @@
             "src/hl_observer/data_sources/official_archive_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         }
       },
@@ -712,7 +741,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
+      "runtime_status": "DEGRADED",
       "status": "FILE_PRESENT",
       "venue": "binance"
     },
@@ -734,7 +765,8 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -751,7 +783,8 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -775,7 +808,8 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -788,7 +822,8 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -805,7 +840,8 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -828,7 +864,8 @@
             "src/hl_observer/venues/bybit.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -853,7 +890,8 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -879,7 +917,8 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -901,7 +940,8 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+          "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         }
       },
@@ -959,7 +999,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+      "runtime_status": "DEGRADED",
       "status": "FILE_PRESENT",
       "venue": "bybit"
     },
@@ -981,7 +1023,8 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -994,7 +1037,8 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -1015,7 +1059,8 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -1024,7 +1069,8 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -1037,7 +1083,8 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -1057,7 +1104,8 @@
             "src/hl_observer/venues/okx.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -1078,7 +1126,8 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -1101,7 +1150,8 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -1118,7 +1168,8 @@
             "src/hl_observer/markets/venues/okx.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
@@ -1166,7 +1217,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769386066",
+      "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "okx"
     },
@@ -1185,7 +1238,8 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -1211,7 +1265,8 @@
             "src/hl_observer/data_sources/historical_backfill_engine.py",
             "src/hl_observer/data_sources/official_archive_backfill.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -1237,7 +1292,8 @@
             "src/hl_observer/collection/coin_universe.py",
             "src/hl_observer/collection/gate_market_data.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -1263,7 +1319,8 @@
             "src/hl_observer/datasets/max_data_policy.py",
             "src/hl_observer/datasets/release_gateway.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -1289,7 +1346,8 @@
             "src/hl_observer/datasets/research_lab_stream_safe.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -1315,7 +1373,8 @@
             "src/hl_observer/backtesting/lead_lag_queue_replay.py",
             "src/hl_observer/backtesting/lead_lag_shadow.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -1341,7 +1400,8 @@
             "src/hl_observer/backtesting/lead_lag_multiasset_tape.py",
             "src/hl_observer/backtesting/lead_lag_queue_replay.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -1367,7 +1427,8 @@
             "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
             "src/hl_observer/backtesting/lead_lag_causal_diagnostic.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -1393,7 +1454,8 @@
             "src/hl_observer/collection/native_funding_history.py",
             "src/hl_observer/collection/native_market_tape.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
@@ -1512,7 +1574,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769377755",
+      "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "gate"
     },
@@ -1527,7 +1591,8 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -1536,7 +1601,8 @@
             "src/hl_observer/collection/native_venue_coordinator.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -1548,7 +1614,8 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -1556,7 +1623,8 @@
             "src/hl_observer/config/settings.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -1566,7 +1634,8 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -1578,7 +1647,8 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -1589,7 +1659,8 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -1602,7 +1673,8 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -1615,7 +1687,8 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_status": "UNVALIDATED",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
@@ -1644,7 +1717,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_status": "UNVALIDATED",
+      "runtime_observed_at_utc": "2026-09-30T11:56:27.182800Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1790769384833",
+      "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bitget"
     }
