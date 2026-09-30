@@ -863,6 +863,28 @@ def _l2_coverage_report(
     }
 
 
+def _l2_gate_failure_reason(
+    coverage: Mapping[str, Any],
+    *,
+    required: bool,
+) -> str | None:
+    """Fail globally only when required L2 collection produced no usable L2 at all.
+
+    Per-venue/per-symbol misses remain explicit in the coverage receipt and are
+    blocked downstream by dependency closure instead of stopping unrelated healthy
+    collection streams.
+    """
+    if not required:
+        return None
+    expected = int(coverage.get("expected_symbol_count") or 0)
+    observed = int(coverage.get("observed_symbol_count") or 0)
+    if expected <= 0:
+        return "L2_EXPECTATION_EMPTY"
+    if observed <= 0:
+        return "L2_COLLECTION_EMPTY"
+    return None
+
+
 async def collect(
     output: Path,
     *,
@@ -1139,6 +1161,10 @@ async def collect(
         collection_run_id=run_id,
         queue_drops=sink.drops,
     )
+    bundle_index["l2_coverage"] = {
+        **l2_coverage,
+        "required": bool(require_l2),
+    }
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
 
     summary = {
@@ -1206,10 +1232,10 @@ async def collect(
         json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    if require_l2 and not l2_coverage["complete"]:
+    l2_failure = _l2_gate_failure_reason(l2_coverage, required=bool(require_l2))
+    if l2_failure is not None:
         raise RuntimeError(
-            "L2_COVERAGE_INCOMPLETE:"
-            + json.dumps(l2_coverage["missing_symbols"], sort_keys=True)
+            l2_failure + ":" + json.dumps(l2_coverage["missing_symbols"], sort_keys=True)
         )
     return summary
 
