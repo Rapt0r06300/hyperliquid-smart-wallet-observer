@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 from hl_observer.datasets.github_release_bridge import ReleaseAsset
 from hl_observer.datasets.progress_downloader import cache_transfer_plan
 from hl_observer.ops.dataset_bridge import snapshot_fingerprint
+from hl_observer.control_plane.resumable_campaign import CampaignManifest, sha256_json
 
 
 def _asset(name: str, payload: bytes, asset_id: int = 1) -> ReleaseAsset:
@@ -77,3 +81,37 @@ def test_snapshot_fingerprint_change_si_manifeste_ou_asset_change(tmp_path: Path
     )
     assert len(first) == 64
     assert first != second
+
+
+def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path: Path) -> None:
+    manifest = CampaignManifest(
+        campaign_id="analysis-e3-pnl-proof-v2",
+        kind="module_pnl_proof",
+        code_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        code_sha="a" * 40,
+        dataset_repo="Rapt0r06300/alina-smartflow-datasets-v2",
+        dataset_generation="V2_FRESH",
+        config_sha256="b" * 64,
+        work_plan_sha256="c" * 64,
+        expires_at="2026-10-07T00:00:00+00:00",
+        schema_version="alina.resumable_campaign.v2",
+        creation_phase="ANALYZE",
+        phase_epoch=3,
+        source_collection_epoch=2,
+        collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        dataset_selection_id="d" * 64,
+        analysis_stage="PNL_PROOF",
+    )
+    raw = manifest.to_dict()
+    raw.pop("supersedes")
+    path = tmp_path / "campaign.json"
+    path.write_text(json.dumps(raw, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+
+    completed = subprocess.run(
+        [sys.executable, "tools/resumable_campaign.py", "validate", str(path)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout.strip() == sha256_json(raw)
