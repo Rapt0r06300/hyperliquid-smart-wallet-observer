@@ -68,6 +68,7 @@ def main() -> int:
     source_matrix = load(Path("docs/source-capability-matrix.json"), {})
     gate_registry = load(Path("docs/normative-gate-registry.json"), {})
     environment_receipt = load(Path("runtime/reports/analysis_stages/scoreboard.json"), {})
+    family_scoreboard = load(Path("runtime/reports/economic_family_scoreboards.json"), {})
     spec = Path("docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md")
     spec_text = spec.read_text(encoding="utf-8") if spec.exists() else ""
     declared_requirements = []
@@ -87,8 +88,11 @@ def main() -> int:
             campaigns.append(row)
     totals = health.get("totals") if isinstance(health, dict) else {}
     items = event.get("items") if isinstance(event, dict) else []
-    event_wired = bool(items) and all(
-        row.get("status") == "IMPLEMENTED_AND_WIRED" for row in items
+    event_terminal_statuses = {"IMPLEMENTED_AND_WIRED", "NOT_APPLICABLE"}
+    event_wired = (
+        len(items) == 120
+        and [row.get("id") for row in items] == list(range(1, 121))
+        and all(row.get("status") in event_terminal_statuses for row in items)
     )
     replayable = int(totals.get("REPLAYABLE_SHARDS") or 0)
     replay_remaining = int((replay_patch or {}).get("remaining_candidates_for_filter") or 0)
@@ -155,14 +159,48 @@ def main() -> int:
                 if scoreboard_artifact:
                     break
     family_names = ("copy_vault", "lead_lag", "cross_venue_dislocation")
-    modules = {
-        name: {
-            "status": "UNMEASURABLE",
-            "reason": "no independent final certificate loaded",
-            "certificate_digest": None,
-        }
-        for name in family_names
+    scoreboard_families = (
+        family_scoreboard.get("families")
+        if isinstance(family_scoreboard, dict) and isinstance(family_scoreboard.get("families"), dict)
+        else {}
+    )
+    family_aliases = {
+        "copy_vault": ("copy_vault",),
+        "lead_lag": ("lead_lag",),
+        "cross_venue_dislocation": ("cross_venue_dislocation", "cross_venue_dislocation_v2"),
     }
+    valid_module_statuses = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
+    modules = {}
+    for name in family_names:
+        row = next(
+            (
+                scoreboard_families.get(alias)
+                for alias in family_aliases[name]
+                if isinstance(scoreboard_families.get(alias), dict)
+            ),
+            None,
+        )
+        if not isinstance(row, dict):
+            modules[name] = {
+                "status": "UNMEASURABLE",
+                "reason": "no independent economic scoreboard evidence loaded",
+                "certificate_digest": None,
+            }
+            continue
+        verdict = str(row.get("verdict") or "UNMEASURABLE").upper()
+        if verdict == "PASS":
+            verdict = "PROVEN"
+        if verdict not in valid_module_statuses:
+            verdict = "UNMEASURABLE"
+        reasons = row.get("verdict_reasons") or row.get("objective_reasons") or []
+        modules[name] = {
+            "status": verdict,
+            "reason": "; ".join(str(value) for value in reasons[:8]) or "economic scoreboard evidence loaded",
+            "certificate_digest": digest(row),
+        }
+    economic_evidence_loaded = all(
+        modules[name]["certificate_digest"] is not None for name in family_names
+    )
     report = {
         "schema_version": "alina.final_closure_receipt.v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -226,7 +264,7 @@ def main() -> int:
         "self_hosted_used": False,
         "real_execution_reachable": False,
         "remaining_blockers": [
-            "economic certificates are not loaded",
+            "independent economic scoreboard evidence is not loaded" if not economic_evidence_loaded else None,
             "exact trade count coverage is incomplete" if not bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")) else None,
             "global unique trade count coverage is incomplete" if not bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE")) else None,
             f"SAFE to replay-compatible migration has {replay_remaining} unclassified candidates" if replay_remaining > 0 else None,
