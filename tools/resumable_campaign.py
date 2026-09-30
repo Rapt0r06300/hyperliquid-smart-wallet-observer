@@ -32,7 +32,11 @@ def load(path: str | Path) -> CampaignManifest:
 def save(path: str | Path, manifest: CampaignManifest, expected: str | None = None) -> None:
     target = Path(path)
     if target.exists() and expected:
-        current = sha256_json(json.loads(target.read_text(encoding="utf-8")))
+        # Compare the normalized schema, not the raw JSON shape. Older durable
+        # manifests may legitimately omit newly-added optional fields (for
+        # example `supersedes`) that from_dict() restores with a null default.
+        current_raw = json.loads(target.read_text(encoding="utf-8"))
+        current = sha256_json(CampaignManifest.from_dict(current_raw).to_dict())
         if current != expected:
             raise SystemExit("manifest changed")
     target.parent.mkdir(parents=True, exist_ok=True)
