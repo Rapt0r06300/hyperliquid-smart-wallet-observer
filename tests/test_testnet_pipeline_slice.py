@@ -7,6 +7,7 @@ from hl_observer.config.settings import Settings
 from hl_observer.decision_engine.local_engine import DecisionAction, LocalDecisionEngine
 from hl_observer.hyperliquid.schemas import SignalCandidate
 from hl_observer.mainnet_readonly_observer.observer import MainnetReadOnlyObserver
+from hl_observer.risk.session_gate import EtatSession, publier_etat_session, reinitialiser
 from hl_observer.testnet.models import TestnetAction as Action
 from hl_observer.testnet.models import TestnetSide as Side
 
@@ -80,6 +81,7 @@ def test_G2_le_noyau_REFUSE_le_candidat_qui_apporte_son_propre_edge(monkeypatch)
     le certifiait.
     """
     monkeypatch.setenv("HYPERSMART_NOYAU_AUTORITAIRE", "1")
+    publier_etat_session(EtatSession())
 
     decision = LocalDecisionEngine(Settings()).decide_from_candidate(
         _candidat_qui_s_auto_autorise(),
@@ -96,6 +98,7 @@ def test_G2_le_noyau_REFUSE_le_candidat_qui_apporte_son_propre_edge(monkeypatch)
     assert noyau["autoritaire"] is True
     assert noyau["edge_brut_bps"] is None, "le noyau n'a meme pas eu a calculer un edge"
     assert noyau["real_execution"] is False
+    reinitialiser()
 
 
 def test_boucle_runtime_refuse_si_la_preuve_de_qualite_est_absente(
