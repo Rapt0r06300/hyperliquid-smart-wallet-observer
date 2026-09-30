@@ -93,6 +93,24 @@ def test_subprocess_failure_is_honest(tmp_path):
     assert out.payload["failure_category"] == "QUALITY"
 
 
+def test_dataset_materialization_transient_http_failure_is_retryable(tmp_path):
+    class Result:
+        returncode = 2
+        stdout = (
+            "DATASET_V2_NO_GO: temporary external SAFE shard download "
+            "failure: HTTP 503"
+        )
+        stderr = ""
+
+    out = run_one_unit(
+        context("replay", workspace_root=str(tmp_path)),
+        runner=lambda *args, **kwargs: Result(),
+    )
+    assert out.status == "FAILED"
+    assert out.payload["reason"] == "adapter_failed"
+    assert out.payload["failure_category"] == "TEMPORARY_EXTERNAL"
+
+
 def test_economic_run_materializes_then_backtests_in_same_unit(tmp_path):
     calls = []
 
