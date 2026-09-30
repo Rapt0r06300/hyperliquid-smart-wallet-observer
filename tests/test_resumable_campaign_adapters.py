@@ -215,3 +215,69 @@ def test_copy_vault_rejects_partition_above_ten_users_per_lane(tmp_path):
                 vault_shard_index=0,
             )
         )
+
+
+
+def test_resume_proof_replay_unit_zero_plans_without_materializing(tmp_path):
+    cmd, output = build_command(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=0,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        )
+    )
+    assert "hl_observer.ops.v2_dataset_bridge" in cmd
+    assert "plan" in cmd
+    assert "materialize" not in cmd
+    assert output == tmp_path
+
+
+def test_resume_proof_replay_unit_zero_checkpoints_then_unit_one_materializes(tmp_path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = '{"safe_shards":2,"dataset_ids":["a","b"]}'
+        stderr = ""
+
+    def runner(cmd, **kwargs):
+        calls.append(list(cmd))
+        return Result()
+
+    first = run_one_unit(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=0,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        ),
+        runner=runner,
+    )
+    assert first.status == "CONTINUATION_REQUIRED"
+    assert first.progressed is True
+    assert first.payload["reason"] == "resume_proof_selection_checkpoint"
+    assert "plan" in calls[0]
+
+    calls.clear()
+    second = run_one_unit(
+        context(
+            "replay",
+            workspace_root=str(tmp_path),
+            resume_proof=True,
+            chunk_index=1,
+            dataset_selection_id="b" * 64,
+            source_collection_epoch=2,
+            collection_cutoff_at_utc="2026-09-29T10:56:59Z",
+        ),
+        runner=runner,
+    )
+    assert second.status == "COMPLETE"
+    assert second.progressed is True
+    assert "materialize" in calls[0]
