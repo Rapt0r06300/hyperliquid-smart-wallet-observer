@@ -28,19 +28,14 @@ def test_pre_run_coverage_witness_has_big_run_wait_budget_without_weakening_proo
     assert "COVERAGE_PROBE_TIMEOUT" in workflow
 
 
-def test_final_v1_waits_long_enough_for_same_sha_technical_gates() -> None:
+def test_final_v1_is_hard_disabled_as_a_historical_self_hosted_tombstone() -> None:
     workflow = _text(FINAL_V1)
+    preamble = workflow.split("jobs:", 1)[0]
+    assert "workflow_dispatch:" in preamble
+    assert "push:" not in preamble
+    assert "schedule:" not in preamble
+    assert "runs-on: ubuntu-latest" in workflow
+    assert "exit 1" in workflow
+    assert "GitHub-hosted Alina SmartFlow workflows" in workflow
+    assert "runs-on: [self-hosted" not in workflow.lower()
 
-    assert "timeout-minutes: 1100" in workflow
-    assert "$deadline = [DateTimeOffset]::UtcNow.AddMinutes(240)" in workflow
-    assert "hypersmart/pre-run-775" in workflow
-    assert "hypersmart/technical-perfect" in workflow
-    assert "hypersmart/security-quality" in workflow
-    assert "TECHNICAL_STATUS_NOT_GREEN" in workflow
-    assert "SELF_HOSTED_STALE_SHA_REFUSED_DURING_WAIT" in workflow
-
-    # Safety/read-only invariants remain explicit while long jobs wait.
-    assert "HL_ENABLE_MAINNET_EXECUTION: '0'" in workflow
-    assert "HL_ENABLE_TESTNET_EXECUTION: '0'" in workflow
-    assert "HYPERSMART_ENABLE_REAL_ORDERS: '0'" in workflow
-    assert "ENABLE_REAL_ORDERS: '0'" in workflow
