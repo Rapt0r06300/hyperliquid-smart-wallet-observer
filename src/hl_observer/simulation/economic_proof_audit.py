@@ -426,6 +426,8 @@ def audit_reports(
         "real_execution": False,
         "target_net_usd_per_family": TARGET_NET_USD,
         "target_net_usd_per_day": TARGET_NET_USD_PER_DAY,
+        "fixed_target_promotion_gate": False,
+        "comparison_policy": "BEST_SO_FAR_PER_FAMILY",
         "families": families,
         "missing_families": missing,
         "all_ledgers_valid": (
@@ -461,7 +463,7 @@ def render_markdown(audit: Mapping[str, Any]) -> str:
             [
                 f"## {row.get('family')} - {row.get('classification')}",
                 "",
-                f"- Objectif +4 USD nets / jour: **{row.get('objective_status')}**",
+                f"- Ancien indicateur +4 USD/jour (diagnostic non bloquant): **{row.get('objective_status')}**",
                 f"- Preuve journaliere recalculee: jours={((row.get('daily_evidence') or {}).get('sample_count'))} moyenne={((row.get('daily_evidence') or {}).get('mean_daily_net_pnl_usd'))} minimum={((row.get('daily_evidence') or {}).get('min_daily_net_pnl_usd'))} tous_jours>=4={((row.get('daily_evidence') or {}).get('all_days_at_or_above_target'))}",
                 f"- PnL net diagnostic recalcule: {row.get('diagnostic_net_pnl_usd')}",
                 f"- PnL net de preuve OOS + forward: {row.get('proof_net_pnl_usd')}",
@@ -491,7 +493,8 @@ def render_markdown(audit: Mapping[str, Any]) -> str:
             "",
             f"- Ledgers tous valides: {audit.get('all_ledgers_valid')}",
             f"- Audit economique independant global: {global_independent.get('ready')}",
-            f"- Trois objectifs atteints separement: {audit.get('all_objectives_met')}",
+            f"- Ancien indicateur fixe atteint separement (diagnostic): {audit.get('all_objectives_met')}",
+            f"- Politique de comparaison active: {audit.get('comparison_policy')}",
             "- Agregation des PnL entre familles: interdite",
             "",
         ]
