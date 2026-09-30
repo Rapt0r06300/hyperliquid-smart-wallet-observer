@@ -18,6 +18,7 @@ from hl_observer.ops.final_economic_certification import (
     certify_workspace,
 )
 from hl_observer.simulation.economic_objective import evaluate_objective
+from hl_observer.simulation.vnext_promotion_protocol import build_freeze_manifest
 
 FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 
@@ -37,6 +38,7 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
         "trade_ids_sha256": hash_char * 64,
         "post_freeze": post_freeze,
         "no_lookahead": no_lookahead,
+        "anti_lookahead_receipt_valid": no_lookahead,
     }
 
 
@@ -86,7 +88,7 @@ def _certified_campaign(family: str) -> dict:
         "trade_ids_count": 2,
         "trade_ids_sha256": "a" * 64,
         "oos": _segment(net=2.1, hash_char="b", no_lookahead=True),
-        "forward": _segment(net=2.1, hash_char="c", post_freeze=True),
+        "forward": _segment(net=2.1, hash_char="c", post_freeze=True, no_lookahead=True),
         "placebos": {"beaten": True},
     }
     if family == "copy_vault":
@@ -116,6 +118,40 @@ def _certified_campaign(family: str) -> dict:
                 "four_fill_contract_version": FOUR_FILL_CONTRACT_VERSION,
             }
         }
+    freeze_manifest = build_freeze_manifest(
+        family=family,
+        freeze_candidate={"fixture": family},
+        dataset_fingerprint="d" * 64,
+        config={"fixture": True, "family": family},
+        frozen_at_ms=1_799_999_999_999,
+    )
+    row["vnext_promotion"] = {
+        "certification_status": "CERTIFICATION_READY",
+        "freeze_hash": freeze_manifest["freeze_hash"],
+        "freeze_manifest": freeze_manifest,
+        "observed_dataset_sha256": freeze_manifest["dataset_sha256"],
+        "observed_config_sha256": freeze_manifest["config_sha256"],
+        "consumed_freeze_hash": freeze_manifest["freeze_hash"],
+        "post_freeze_oos_consumed": True,
+        "paper_read_only": True,
+        "real_execution": False,
+        "frozen_at_ms": freeze_manifest["frozen_at_ms"],
+        "temporal_windows": {
+            "validation": {"start_ms": 1_800_000_000_000, "end_ms": 1_800_000_000_100},
+            "oos": {"start_ms": 1_800_000_000_100, "end_ms": 1_800_000_000_200},
+            "forward": {"start_ms": 1_800_000_000_200, "end_ms": 1_800_000_000_300},
+            "placebo": {"start_ms": 1_800_000_000_300, "end_ms": 1_800_000_000_400},
+        },
+        "costs_complete": True,
+        "liquidability_complete": True,
+        "provenance_complete": True,
+        "positions_flat": True,
+        "economic_reconciliation_ok": True,
+        "validation_without_recalibration": True,
+        "temporal_disjointness_ok": True,
+        "forward_post_freeze_complete": True,
+        "placebo_complete": True,
+    }
     row.update(evaluate_objective(row))
     assert row["objective_status"] == "ATTEINT"
     return row
