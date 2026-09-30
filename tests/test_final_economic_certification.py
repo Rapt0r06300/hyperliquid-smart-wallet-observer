@@ -370,11 +370,12 @@ def _assert_pair_collision(tmp_path: Path, left: str, right: str) -> None:
     _write_raw_proof(tmp_path, right, first_entry_ms=2, shared=shared)
     result = certify_workspace(tmp_path)
     assert result["all_families_certified"] is False
-    assert "CROSS_FAMILY_TRADE_REUSE" in result["families"][left]["reasons"]
-    assert "CROSS_FAMILY_TRADE_REUSE" in result["families"][right]["reasons"]
+    assert "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][left]["reasons"]
+    assert "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][right]["reasons"]
     pair = result["cross_family_trade_reuse_audit"]["pairwise"]
     key = "__".join(sorted((left, right)))
-    assert pair[key]["collision_count"] == 1
+    assert pair[key]["collision_count"] == 0
+    assert pair[key]["source_lineage_collision_count"] == 1
 
 
 def test_workspace_refuse_collision_copy_lead_meme_si_ids_natifs_different(tmp_path: Path) -> None:
@@ -396,8 +397,12 @@ def test_workspace_refuse_collision_trois_familles(tmp_path: Path) -> None:
         _write_raw_proof(tmp_path, family, first_entry_ms=10 + index, shared=shared)
     result = certify_workspace(tmp_path)
     assert result["all_families_certified"] is False
-    assert result["cross_family_trade_reuse_audit"]["total_cross_family_collisions"] == 3
-    assert all("CROSS_FAMILY_TRADE_REUSE" in result["families"][family]["reasons"] for family in FAMILIES)
+    assert result["cross_family_trade_reuse_audit"]["total_cross_family_collisions"] == 0
+    assert result["cross_family_trade_reuse_audit"]["total_cross_family_source_lineage_collisions"] == 3
+    assert all(
+        "CROSS_FAMILY_SOURCE_LINEAGE_REUSE" in result["families"][family]["reasons"]
+        for family in FAMILIES
+    )
 
 
 def test_workspace_refuse_reutilisation_oos_forward_dans_une_meme_famille(tmp_path: Path) -> None:
@@ -411,5 +416,6 @@ def test_workspace_refuse_reutilisation_oos_forward_dans_une_meme_famille(tmp_pa
     result = certify_workspace(tmp_path)
     assert result["all_families_certified"] is False
     assert "GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE" in result["families"]["copy_vault"]["reasons"]
-    assert "GLOBAL_TRADE_IDENTITY_DUPLICATE" in result["families"]["copy_vault"]["reasons"]
-    assert result["cross_family_trade_reuse_audit"]["intra_family_duplicate_global_events"]["copy_vault"] == 1
+    assert "GLOBAL_SOURCE_LINEAGE_DUPLICATE" in result["families"]["copy_vault"]["reasons"]
+    assert result["cross_family_trade_reuse_audit"]["intra_family_duplicate_global_events"]["copy_vault"] == 0
+    assert result["cross_family_trade_reuse_audit"]["intra_family_duplicate_source_lineages"]["copy_vault"] == 1
