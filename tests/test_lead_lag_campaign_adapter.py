@@ -94,7 +94,8 @@ def test_campaign_adapter_can_reconcile_closed_is_oos_forward(tmp_path: Path):
     assert campaign["forward"]["post_freeze"] is True
     assert campaign["placebos"]["beaten"] is True
     assert campaign["net_pnl_usd"] >= 4.0
-    assert campaign["objective_status"] == "ATTEINT"
+    assert campaign["objective_status"] == "NON_ATTEINT"
+    assert "GLOBAL_TRADE_IDENTITY_PROOF_INCOMPLETE" in campaign["objective_reasons"]
 
 
 def test_historical_forward_before_physical_freeze_is_rejected(tmp_path: Path):
