@@ -197,7 +197,15 @@ def execute_metaorder(
         reference, entry, exit_book, reference_lag, entry_lag, exit_lag = checkpoint_triplet
         book_binding_method = "EXACT_METAORDER_CHECKPOINTS"
     else:
-        continuous_books = [row for row in books if not row.get("checkpoint_id")]
+        continuous_books = [
+            row
+            for row in books
+            if not row.get("checkpoint_id")
+            and (
+                not require_causal_books
+                or row.get("causal_observation") is True
+            )
+        ]
         if not continuous_books:
             return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
         reference, reference_lag = _first_at_or_after(
@@ -506,6 +514,9 @@ def replay_metaorders(
         if trade is None:
             counters[reason] = counters.get(reason, 0) + 1
             continue
+        if trade["trade_id"] in seen:
+            counters["DUPLICATE_TRADE_ID_REJECTED"] = counters.get("DUPLICATE_TRADE_ID_REJECTED", 0) + 1
+            continue
         current_entry = int(trade["entry_ts_ms"])
         still_open = [
             (exit_ts, notional)
@@ -520,9 +531,6 @@ def replay_metaorders(
             continue
         if len(active_exit_times) >= MAX_OPEN_POSITIONS:
             counters["portfolio_capacity_rejected"] += 1
-            continue
-        if trade["trade_id"] in seen:
-            counters["DUPLICATE_TRADE_ID_REJECTED"] = counters.get("DUPLICATE_TRADE_ID_REJECTED", 0) + 1
             continue
         seen.add(trade["trade_id"])
         active_exit_times.append(int(trade["exit_ts_ms"]))
