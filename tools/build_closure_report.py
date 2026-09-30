@@ -24,6 +24,24 @@ def digest(value):
     ).hexdigest()
 
 
+def _current_analysis_campaigns(campaigns, phase):
+    """Return only campaigns bound to the canonical current ANALYZE epoch."""
+    if not isinstance(phase, dict) or phase.get("phase") != "ANALYZE":
+        return []
+    epoch = phase.get("epoch")
+    source_epoch = phase.get("source_collection_epoch")
+    if isinstance(epoch, bool) or not isinstance(epoch, int):
+        return []
+    return [
+        row
+        for row in campaigns
+        if isinstance(row, dict)
+        and row.get("creation_phase") == "ANALYZE"
+        and row.get("phase_epoch") == epoch
+        and row.get("source_collection_epoch") == source_epoch
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset-root", required=True)
@@ -128,9 +146,10 @@ def main() -> int:
         "module_pnl_proof",
         "scoreboard",
     )
+    current_analysis_campaigns = _current_analysis_campaigns(campaigns, phase)
     analysis_status = {
         str(row.get("kind")): str(row.get("status"))
-        for row in campaigns
+        for row in current_analysis_campaigns
         if row.get("kind") in set(analysis_kinds)
     }
     complete_analysis = all(
@@ -139,9 +158,8 @@ def main() -> int:
     )
     analyze_selections = sorted({
         str(row.get("dataset_selection_id"))
-        for row in campaigns
-        if row.get("creation_phase") == "ANALYZE"
-        and row.get("dataset_selection_id")
+        for row in current_analysis_campaigns
+        if row.get("dataset_selection_id")
     })
     workflow_run_ids = sorted({
         str((row.get("cursor") or {}).get("last_run_id"))
@@ -150,7 +168,7 @@ def main() -> int:
         and (row.get("cursor") or {}).get("last_run_id")
     })
     scoreboard_artifact = None
-    for row in campaigns:
+    for row in current_analysis_campaigns:
         if row.get("kind") != "scoreboard":
             continue
         for unit in (row.get("completed_units") or {}).values():
