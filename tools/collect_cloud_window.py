@@ -64,6 +64,7 @@ WS_HYPERLIQUID = "wss://api.hyperliquid.xyz/ws"
 INFO_HYPERLIQUID = "https://api.hyperliquid.xyz/info"
 WS_BINANCE_PUBLIC = "wss://fstream.binance.com/public/stream"
 WS_BINANCE_MARKET = "wss://fstream.binance.com/market/stream"
+L2_REQUIRED_VENUES = frozenset({"hyperliquid", "binance", "bybit", "okx", "gate", "bitget"})
 
 
 class AsyncPartitionSink:
@@ -823,6 +824,45 @@ def _venue_lists(
     return result
 
 
+def _l2_coverage_report(
+    manifests: list[dict[str, Any]],
+    venue_lists: Mapping[str, list[str]],
+) -> dict[str, Any]:
+    """Require one non-empty L2 shard for every expected venue/symbol."""
+    expected = {
+        venue: {str(symbol).upper() for symbol in symbols if str(symbol).strip()}
+        for venue, symbols in venue_lists.items()
+        if venue in L2_REQUIRED_VENUES and symbols
+    }
+    observed: dict[str, set[str]] = defaultdict(set)
+    event_counts: dict[str, int] = defaultdict(int)
+    for manifest in manifests:
+        if str(manifest.get("family") or "") != "l2Book":
+            continue
+        venue = str(manifest.get("venue") or "").lower()
+        symbol = str(manifest.get("symbol") or "").upper()
+        events = int(manifest.get("event_count") or 0)
+        if venue in expected and symbol and events > 0:
+            observed[venue].add(symbol)
+            event_counts[venue] += events
+
+    missing = {
+        venue: sorted(symbols - observed.get(venue, set()))
+        for venue, symbols in expected.items()
+        if symbols - observed.get(venue, set())
+    }
+    return {
+        "required_venues": sorted(expected),
+        "expected_symbol_count": sum(len(symbols) for symbols in expected.values()),
+        "observed_symbol_count": sum(len(observed.get(venue, set())) for venue in expected),
+        "event_count_by_venue": {
+            venue: int(event_counts.get(venue, 0)) for venue in sorted(expected)
+        },
+        "missing_symbols": missing,
+        "complete": not missing and bool(expected),
+    }
+
+
 async def collect(
     output: Path,
     *,
@@ -833,6 +873,7 @@ async def collect(
     plan_rows: list[dict[str, Any]] | None = None,
     collection_run_id: str | None = None,
     min_free_disk_bytes: int = 2 * 1024 * 1024 * 1024,
+    require_l2: bool = False,
 ) -> dict[str, Any]:
     raw_root = output / "raw"
     assets_root = output / "assets"
@@ -1090,6 +1131,8 @@ async def collect(
         write_manifest(manifest, manifest_path)
         manifests.append(manifest)
 
+    l2_coverage = _l2_coverage_report(manifests, venue_lists)
+
     bundle_index = _bundle_index(
         manifests,
         collector_version=collector_version,
@@ -1116,6 +1159,10 @@ async def collect(
             "|".join(key): value for key, value in sorted(sink.drops.items())
         },
         "asset_count": len(manifests),
+        "l2_coverage": {
+            **l2_coverage,
+            "required": bool(require_l2),
+        },
         "bundle_index": {
             "schema": bundle_index["schema"],
             "shard_count": bundle_index["shard_count"],
@@ -1159,6 +1206,11 @@ async def collect(
         json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    if require_l2 and not l2_coverage["complete"]:
+        raise RuntimeError(
+            "L2_COVERAGE_INCOMPLETE:"
+            + json.dumps(l2_coverage["missing_symbols"], sort_keys=True)
+        )
     return summary
 
 
@@ -1185,6 +1237,11 @@ def main() -> int:
     parser.add_argument("--collector-version", required=True)
     parser.add_argument("--collection-run-id")
     parser.add_argument("--rotate-mb", type=int, default=64)
+    parser.add_argument(
+        "--require-l2",
+        action="store_true",
+        help="Fail closed unless every expected venue/symbol produced non-empty l2Book data.",
+    )
     parser.add_argument(
         "--min-free-disk-gb",
         type=float,
@@ -1226,6 +1283,7 @@ def main() -> int:
             plan_rows=plan_rows,
             collection_run_id=args.collection_run_id,
             min_free_disk_bytes=max(0, int(float(args.min_free_disk_gb) * 1024**3)),
+            require_l2=bool(args.require_l2),
         )
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
