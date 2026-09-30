@@ -127,6 +127,7 @@ def signals_from_tape(
             round(float(statistics.median(spread_samples)), 6) if spread_samples else None
         ),
         "anti_lookahead_receipt": _anti_lookahead_receipt(signals),
+        "no_lookahead": True,
         "read_only": True,
         "real_execution": False,
     }
@@ -226,6 +227,19 @@ def campaign_from_replay(
         and min(forward_signal_times) > frozen_at_ms
     )
 
+    anti_lookahead = (
+        raw.get("signals_meta", {}).get("anti_lookahead_receipt")
+        if isinstance(raw.get("signals_meta"), Mapping)
+        else None
+    )
+    anti_lookahead_ok = bool(
+        isinstance(anti_lookahead, Mapping)
+        and anti_lookahead.get("schema_version") == ANTI_LOOKAHEAD_SCHEMA
+        and anti_lookahead.get("future_exit_excluded_from_entry") is True
+        and anti_lookahead.get("paper_read_only") is True
+        and anti_lookahead.get("real_execution") is False
+    )
+
     row: dict[str, Any] = {
         "schema_version": "hypersmart.economic_campaign_evidence.v1",
         "family": "lead_lag",
@@ -268,11 +282,8 @@ def campaign_from_replay(
             "trade_ids_sha256": oos.get("trade_ids_sha256"),
             "duplicate_trade_ids": oos.get("duplicate_trade_ids"),
             "liquidatable_net": oos.get("LIQUIDATABLE_NET") is True,
-            "anti_lookahead_receipt": (
-                raw.get("signals_meta", {}).get("anti_lookahead_receipt")
-                if isinstance(raw.get("signals_meta"), Mapping)
-                else None
-            ),
+            "anti_lookahead_receipt": dict(anti_lookahead) if isinstance(anti_lookahead, Mapping) else None,
+            "no_lookahead": anti_lookahead_ok,
         },
         "forward": {
             "gross_pnl_usd": forward.get("gross_pnl_usd"),
