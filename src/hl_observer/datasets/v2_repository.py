@@ -12,6 +12,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from urllib.parse import quote
 
 import requests
 
@@ -189,33 +190,19 @@ def select_safe_shards(
 
 
 def _release_asset_url(shard: SafeShard) -> str:
-    url = (
-        f"{API_ROOT}/repos/{shard.release_repository}/releases/tags/"
-        f"{shard.release_tag}"
+    """Build the immutable public release-asset URL without an API lookup.
+
+    The Dataset V2 index already pins repository, release tag, asset name, byte
+    count, and SHA-256. Going through the GitHub Releases API once per shard
+    adds a rate-limit/transient-failure dependency without strengthening the
+    integrity contract: the downloaded bytes are still verified below.
+    """
+    tag = quote(shard.release_tag, safe="")
+    asset = quote(shard.release_asset, safe="")
+    return (
+        f"https://github.com/{shard.release_repository}/releases/download/"
+        f"{tag}/{asset}"
     )
-    response = requests.get(url, headers=_headers(), timeout=TIMEOUT)
-    try:
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise DatasetV2Error(
-            f"release lookup failed for {shard.release_tag}: {type(exc).__name__}"
-        ) from exc
-    payload = response.json()
-    assets = payload.get("assets") if isinstance(payload, dict) else None
-    if not isinstance(assets, list):
-        raise DatasetV2Error("release assets missing")
-    matches = [
-        row for row in assets
-        if isinstance(row, Mapping) and str(row.get("name") or "") == shard.release_asset
-    ]
-    if len(matches) != 1:
-        raise DatasetV2Error(
-            f"release asset resolution is not unique for {shard.release_asset}"
-        )
-    url = str(matches[0].get("browser_download_url") or "")
-    if not url.startswith("https://"):
-        raise DatasetV2Error("release asset download URL missing")
-    return url
 
 
 def download_safe_shard(
@@ -249,10 +236,25 @@ def download_safe_shard(
                         handle.write(chunk)
                 handle.flush()
                 os.fsync(handle.fileno())
-    except (requests.RequestException, OSError) as exc:
+    except requests.HTTPError as exc:
+        temporary.unlink(missing_ok=True)
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in {408, 425, 429, 500, 502, 503, 504}:
+            raise DatasetV2Error(
+                f"temporary external SAFE shard download failure: HTTP {status}"
+            ) from exc
+        raise DatasetV2Error(
+            f"SAFE shard download failed: HTTP {status if status is not None else 'error'}"
+        ) from exc
+    except requests.RequestException as exc:
         temporary.unlink(missing_ok=True)
         raise DatasetV2Error(
-            f"SAFE shard download failed: {type(exc).__name__}"
+            f"temporary external SAFE shard download failure: {type(exc).__name__}"
+        ) from exc
+    except OSError as exc:
+        temporary.unlink(missing_ok=True)
+        raise DatasetV2Error(
+            f"SAFE shard local write failed: {type(exc).__name__}"
         ) from exc
 
     if temporary.stat().st_size != shard.bytes:
