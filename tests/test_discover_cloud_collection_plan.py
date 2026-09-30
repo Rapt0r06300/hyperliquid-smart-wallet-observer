@@ -51,3 +51,17 @@ def test_cloud_plan_joins_six_native_venues(monkeypatch) -> None:
         "gate",
         "bitget",
     }
+
+
+def test_partial_discovery_errors_do_not_stop_healthy_collection() -> None:
+    module = _module()
+    plan = {
+        "selected_coin_count": 12,
+        "errors": {"binance": "HTTPStatusError", "bybit": "HTTPStatusError"},
+    }
+    assert module._plan_exit_code(plan) == 0
+
+
+def test_discovery_still_fails_when_no_collectable_universe_exists() -> None:
+    module = _module()
+    assert module._plan_exit_code({"selected_coin_count": 0, "errors": {"binance": "HTTPStatusError"}}) == 2
