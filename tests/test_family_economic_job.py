@@ -73,6 +73,7 @@ def _segment(*, net: float, hash_char: str, post_freeze: bool = False, no_lookah
         "trade_ids_sha256": hash_char * 64,
         "post_freeze": post_freeze,
         "no_lookahead": no_lookahead,
+        "anti_lookahead_receipt_valid": no_lookahead,
     }
 
 
@@ -106,7 +107,7 @@ def _valid_copy_campaign() -> dict:
         "trade_ids_count": 2,
         "trade_ids_sha256": "a" * 64,
         "oos": _segment(net=2.1, hash_char="b", no_lookahead=True),
-        "forward": _segment(net=2.1, hash_char="c", post_freeze=True),
+        "forward": _segment(net=2.1, hash_char="c", post_freeze=True, no_lookahead=True),
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 1.0},
         "copy_checkpoint_integrity": {
