@@ -100,7 +100,6 @@ class CampaignManifest:
     operator_request_id: str | None = None
     checkpoint_lineage: list[dict[str, Any]] = field(default_factory=list)
     terminal_evidence_digest: str | None = None
-    supersedes: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -128,11 +127,6 @@ def validate_manifest(m: CampaignManifest) -> None:
         raise ValueError("invalid operator_request_id")
     if m.status not in ALL_STATES:
         raise ValueError("invalid status")
-    if m.supersedes is not None:
-        if not isinstance(m.supersedes, str) or not m.supersedes.strip():
-            raise ValueError("invalid supersedes campaign id")
-        if m.supersedes == m.campaign_id:
-            raise ValueError("campaign cannot supersede itself")
     if not m.paper_only or not m.read_only or m.real_execution:
         raise ValueError("unsafe execution flags")
     for name in ("code_sha", "config_sha256", "work_plan_sha256"):
