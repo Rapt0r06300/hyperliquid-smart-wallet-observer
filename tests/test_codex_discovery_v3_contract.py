@@ -71,17 +71,14 @@ def test_runbook_treats_recent_head_mechanisms_as_existing_baselines() -> None:
     assert "delta git" in text
 
 
-def test_agents_routes_through_v32_compact_context_and_max_quota_saving() -> None:
+def test_agents_routes_through_canonical_manual_phase_spec() -> None:
     text = _text("AGENTS.md")
     assert len(text) < 6500
-    assert "discovery v3.2" in text
-    assert "python tools/codex_research_context.py --auto" in text
-    assert "process_memory" in text
-    assert "codex_semantic_discovery.py" in text
-    assert "historique git complet" in text and "interdit" in text
-    assert "775" in text and "interdit" in text
-    assert "sous-agents ia" in text and "interdits" in text
-    assert "+4.00 usd net" in text
+    assert "2026-09-25-manual-phase-orchestrator-design.md" in text
+    assert "github-hosted" in text
+    assert "self-hosted" in text
+    assert "paper" in text and "read-only" in text
+    assert "+4 usd net/jour" in text
 
 
 def test_v32_runbook_and_skill_make_context_first_and_model_turns_sparse() -> None:
