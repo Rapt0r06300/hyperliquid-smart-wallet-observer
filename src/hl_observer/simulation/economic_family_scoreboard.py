@@ -125,6 +125,20 @@ def _finalize(row: dict[str, Any]) -> dict[str, Any]:
             )
         )
     row.update(objective)
+    proof_net = _number(row.get("proof_net_pnl_usd"))
+    observed_net = _number(row.get("net_pnl_usd"))
+    if proof_net is not None:
+        row["comparison_metric_usd"] = proof_net
+        row["comparison_metric_source"] = "proof_net_pnl_usd"
+        row["measurement_status"] = "MEASURED"
+    elif observed_net is not None and (_number(row.get("closed_positions")) or 0) > 0:
+        row["comparison_metric_usd"] = observed_net
+        row["comparison_metric_source"] = "net_pnl_usd"
+        row["measurement_status"] = "MEASURED"
+    else:
+        row["comparison_metric_usd"] = None
+        row["comparison_metric_source"] = None
+        row["measurement_status"] = "NON_MESURABLE"
     return row
 
 
