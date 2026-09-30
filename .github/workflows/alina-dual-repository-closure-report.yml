@@ -8,6 +8,7 @@ on:
     paths:
       - ".github/workflows/alina-dual-repository-closure-report.yml"
       - "tools/build_closure_report.py"
+      - "tools/enrich_closure_data_exploitability.py"
       - "tools/generate_gate_registry.py"
       - "tools/validate_closure_receipt.py"
       - "tools/validate_gate_registry.py"
@@ -57,6 +58,7 @@ jobs:
             --main-head "$(git rev-parse HEAD)" \
             --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
             --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
+          python tools/enrich_closure_data_exploitability.py
       - name: Validate gate and closure receipts
         run: |
           python tools/validate_gate_registry.py
@@ -83,6 +85,7 @@ jobs:
               --main-head "$(git rev-parse HEAD)" \
               --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
               --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
+            python tools/enrich_closure_data_exploitability.py
             python tools/validate_gate_registry.py
             python tools/validate_closure_receipt.py
 
