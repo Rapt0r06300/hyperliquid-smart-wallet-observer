@@ -124,13 +124,10 @@ def test_le_carry_N_EST_PAS_bloque_par_la_cote() -> None:
     )
 
 
-def test_la_preuve_du_carry_dit_POURQUOI_la_porte_ne_s_applique_pas() -> None:
-    """*Un refus (ou une exemption) muet est un refus qu'on ne peut pas auditer.*"""
+def test_carry_historique_ne_peut_pas_devenir_une_autorisation_active() -> None:
+    """Funding/carry est hors scope canonique : aucune preuve legacy ne doit le promouvoir."""
     d = decider(_ctx("CARRY"))
-    sl = str((d.preuve or {}).get("side_lock", ""))
-    assert "NON_APPLICABLE" in sl and "DELTA_NEUTRE" in sl, (
-        "l'exemption doit s'EXPLIQUER dans la preuve, sinon elle est indistinguable d'un oubli"
-    )
+    assert d.autorise is False
 
 
 @pytest.mark.parametrize("strategie", ["CARRY", "FUNDING", "BASIS"])
