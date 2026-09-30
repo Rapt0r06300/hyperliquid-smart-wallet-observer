@@ -157,6 +157,7 @@ def _parse_fusion_runtime_input(
             copy_ratio=_safe_float(payload.get("copy_ratio")) or 0.05,
             open_positions=tuple(_state_open_positions_for_fusion(state)),
             distilled_signal_candidates=tuple(distilled_candidates),
+            evaluation_time_ms=current_ms,
         ),
         [],
     )
@@ -169,6 +170,7 @@ def _empty_input(*, current_ms: int) -> FusionRuntimeInput:
         price_events=(),
         funding_rows=(),
         triangular_edges=(),
+        evaluation_time_ms=current_ms,
     )
 
 
