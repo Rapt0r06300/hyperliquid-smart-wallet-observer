@@ -23,7 +23,7 @@ REQUIRED = {
     "two_segment_resume_status", "event_intelligence_wiring_complete",
     "scoreboard_artifact", "paper_read_only", "self_hosted_used",
     "real_execution_reachable", "remaining_blockers", "operator_status",
-    "execution_ledger",
+    "execution_ledger", "data_exploitability",
 }
 VALID_STATUSES = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
 
@@ -93,6 +93,26 @@ def main() -> int:
         raise SystemExit("operator_status count mismatch")
     if not isinstance(receipt["remaining_blockers"], list):
         raise SystemExit("remaining_blockers must be a list")
+    exploitability = receipt["data_exploitability"]
+    if not isinstance(exploitability, dict):
+        raise SystemExit("data_exploitability must be an object")
+    if exploitability.get("status") not in {"ANALYSIS_ELIGIBLE", "NOT_ANALYSIS_ELIGIBLE"}:
+        raise SystemExit("invalid data exploitability status")
+    if not isinstance(exploitability.get("analysis_eligible"), bool):
+        raise SystemExit("data exploitability eligibility must be boolean")
+    if exploitability.get("profitability_claimed") is not False:
+        raise SystemExit("data exploitability must not claim profitability")
+    if not isinstance(exploitability.get("blockers"), list):
+        raise SystemExit("data exploitability blockers must be a list")
+    expected_eligible = not exploitability["blockers"]
+    if exploitability["analysis_eligible"] is not expected_eligible:
+        raise SystemExit("data exploitability eligibility/blocker mismatch")
+    expected_status = "ANALYSIS_ELIGIBLE" if expected_eligible else "NOT_ANALYSIS_ELIGIBLE"
+    if exploitability["status"] != expected_status:
+        raise SystemExit("data exploitability status/blocker mismatch")
+    economic_proof = exploitability.get("economic_proof")
+    if not isinstance(economic_proof, dict) or not isinstance(economic_proof.get("current"), bool):
+        raise SystemExit("data exploitability economic proof block is invalid")
     ledger = receipt["execution_ledger"]
     if not isinstance(ledger, list) or not ledger:
         raise SystemExit("execution_ledger must be a non-empty list")
