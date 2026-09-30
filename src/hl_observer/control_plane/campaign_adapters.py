@@ -390,6 +390,7 @@ def _failure_payload(cmd: list[str], cp: Any) -> dict[str, Any]:
                 "502",
                 "connection reset",
                 "rate limit",
+                "temporary external",
             )
         )
         else "QUALITY"
