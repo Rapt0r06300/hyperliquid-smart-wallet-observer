@@ -14,6 +14,7 @@ from hl_observer.decision_engine.noyau_unique import (
     Contexte,
     decider,
 )
+from hl_observer.risk.session_gate import EtatSession
 
 _PERP_ASKS = [(1.0 + 0.0001 * i, 100_000.0) for i in range(10)]
 _PERP_BIDS = [(1.0 - 0.0001 * i, 100_000.0) for i in range(10)]
@@ -33,6 +34,7 @@ def _ctx(**kw) -> Contexte:
         niveaux_vente=_PERP_BIDS,
         niveaux_spot_achat=_SPOT_PROFOND_ASKS,
         niveaux_spot_vente=_SPOT_PROFOND_BIDS,
+        etat_session=EtatSession(),
     )
     base.update(kw)
     return Contexte(**base)
