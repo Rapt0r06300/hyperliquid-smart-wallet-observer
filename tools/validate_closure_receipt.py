@@ -23,6 +23,7 @@ REQUIRED = {
     "two_segment_resume_status", "event_intelligence_wiring_complete",
     "scoreboard_artifact", "paper_read_only", "self_hosted_used",
     "real_execution_reachable", "remaining_blockers", "operator_status",
+    "execution_ledger",
 }
 VALID_STATUSES = {"PROVEN", "MORE_DATA", "UNMEASURABLE", "KILL"}
 
@@ -92,6 +93,17 @@ def main() -> int:
         raise SystemExit("operator_status count mismatch")
     if not isinstance(receipt["remaining_blockers"], list):
         raise SystemExit("remaining_blockers must be a list")
+    ledger = receipt["execution_ledger"]
+    if not isinstance(ledger, list) or not ledger:
+        raise SystemExit("execution_ledger must be a non-empty list")
+    valid_ledger_states = {"DONE", "IN_PROGRESS", "BLOCKED", "TODO"}
+    ledger_ids = set()
+    for row in ledger:
+        if not isinstance(row, dict) or not row.get("id") or row.get("state") not in valid_ledger_states:
+            raise SystemExit("execution_ledger row is invalid")
+        if row["id"] in ledger_ids:
+            raise SystemExit("execution_ledger ids must be unique")
+        ledger_ids.add(row["id"])
     print(json.dumps({
         "schema": receipt["schema_version"],
         "receipt_digest": supplied,
