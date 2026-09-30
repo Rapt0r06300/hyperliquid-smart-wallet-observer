@@ -1,1 +1,0 @@
-"""Local paper trading simulator."""

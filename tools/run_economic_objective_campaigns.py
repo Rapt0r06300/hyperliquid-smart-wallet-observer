@@ -884,7 +884,7 @@ def run_campaigns(
         "report_artifact": str(report_path),
     }
     stage_receipt_path = (
-        root / REPORT_DIR / "analysis_stages" / f"{analysis_stage.lower()}.json"
+        root / "runtime" / "reports" / "analysis_stages" / f"{analysis_stage.lower()}.json"
     )
     stage_receipt_path.parent.mkdir(parents=True, exist_ok=True)
     stage_receipt["artifact_digest"] = _stable_json_sha256(stage_receipt)

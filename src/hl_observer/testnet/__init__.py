@@ -1,1 +1,0 @@
-"""Locked Hyperliquid testnet scaffolding."""

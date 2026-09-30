@@ -41,3 +41,10 @@ def test_canonical_runner_loads_tools_from_code_checkout_not_data_workspace() ->
     assert 'root / "tools" / "pipeline_copie_reel.py"' not in text
     assert 'root / "tools" / "backtest_dislocation_2jambes.py"' not in text
 
+def test_analysis_stage_receipt_uses_canonical_closure_path() -> None:
+    text = (ROOT / "tools" / "run_economic_objective_campaigns.py").read_text(
+        encoding="utf-8", errors="replace"
+    )
+    assert 'root / "runtime" / "reports" / "analysis_stages"' in text
+    assert 'root / REPORT_DIR / "analysis_stages"' not in text
+

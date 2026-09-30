@@ -1,1 +1,0 @@
-"""Research-only pattern detection."""
