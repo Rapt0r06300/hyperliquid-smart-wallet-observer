@@ -113,15 +113,17 @@ def test_un_etat_NON_FOURNI_est_SIGNALE_pas_suppose_sain() -> None:
     """*On ne pretend PAS que la session va bien. On le DIT.*"""
     v = evaluer_session(None)
     assert v.motif == MOTIF_ETAT_NON_FOURNI
-    assert "n'est pas un etat sain" in v.detail
-    assert not v.bloque, "on ne bloque pas tout, mais on laisse une trace INDELEBILE"
+    assert "bloquees" in v.detail
+    assert v.bloque, "un etat de risque absent doit echouer ferme avant toute nouvelle entree"
 
 
-def test_le_noyau_SIGNALE_quand_l_etat_manque() -> None:
+def test_le_noyau_REFUSE_et_SIGNALE_quand_l_etat_manque() -> None:
     d = decider(Contexte(strategie="COPY", coin="BTC", direction="LONG", notional_usd=500.0))
     assert ETAT_SESSION_NON_FOURNI in d.signalements, (
         "le noyau doit LAISSER UNE TRACE quand l'etat de session n'est pas fourni"
     )
+    assert d.verdict == NO_TRADE
+    assert d.raison == REFUS_SESSION_EN_HALTE
 
 
 # ════════════════════════════════════════════════════════════════════════════════════════════
