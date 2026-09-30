@@ -147,10 +147,11 @@ def test_the_guard_never_crashes_the_loop():
         assert directional_refusal(book or {}, coin="BTC", side="SHORT",
                                    new_notional_usdt=500, equity_usdt=CAPITAL) in {
             "", "NET_DIRECTIONAL_EXPOSURE_TOO_HIGH", "COIN_CONCENTRATION_TOO_HIGH"}
-    # entrees degenerees : on ne juge pas, les autres gates s'en chargent
-    assert directional_refusal({}, coin="BTC", side="SHORT", new_notional_usdt=0, equity_usdt=1000) == ""
-    assert directional_refusal({}, coin="BTC", side="SHORT", new_notional_usdt=500, equity_usdt=0) == ""
-    assert directional_refusal({}, coin="BTC", side="???", new_notional_usdt=500, equity_usdt=1000) == ""
+    # Entrees degenerees : fail-closed. Un garde de risque ne doit ni lever
+    # d'exception ni transformer une entree invalide en autorisation.
+    assert directional_refusal({}, coin="BTC", side="SHORT", new_notional_usdt=0, equity_usdt=1000) == "INVALID_EXPOSURE_INPUT"
+    assert directional_refusal({}, coin="BTC", side="SHORT", new_notional_usdt=500, equity_usdt=0) == "INVALID_EXPOSURE_INPUT"
+    assert directional_refusal({}, coin="BTC", side="???", new_notional_usdt=500, equity_usdt=1000) == "INVALID_EXPOSURE_SIDE"
 
 
 def test_an_empty_book_accepts_a_first_position(monkeypatch):
