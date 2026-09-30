@@ -1,7 +1,8 @@
 """Ordered pre-FULL rehearsal and final GO evidence contract.
 
-This module does not install a runner and never turns GO on by itself. It only
-validates evidence supplied by CI/runtime. Missing evidence fails closed.
+The final gate is GitHub-hosted-only.  It never installs or authorizes a local
+runner and fails closed if either self-hosted execution or a user-PC dependency
+is reachable.
 """
 from __future__ import annotations
 
@@ -97,13 +98,21 @@ def evaluate_final_go(payload: Mapping[str, Any]) -> dict[str, Any]:
     for flag in FINAL_GO_FLAGS:
         if final.get(flag) is not True:
             issues.append(f"FINAL_GO_MISSING:{flag}")
-    explicit = final.get("GO_SELF_HOSTED") == "TRUE"
-    if not explicit:
-        issues.append("GO_SELF_HOSTED_NOT_EXPLICIT_TRUE")
+    github_hosted_only = final.get("github_hosted_only") is True
+    self_hosted_reachable = final.get("self_hosted_reachable") is not False
+    user_pc_dependency = final.get("user_pc_dependency") is not False
+    if not github_hosted_only:
+        issues.append("GITHUB_HOSTED_ONLY_NOT_PROVEN")
+    if self_hosted_reachable:
+        issues.append("SELF_HOSTED_PATH_REACHABLE")
+    if user_pc_dependency:
+        issues.append("USER_PC_DEPENDENCY_REACHABLE")
     return {
         "go": not issues,
         "issues": issues,
-        "go_self_hosted": explicit,
+        "github_hosted_only": github_hosted_only,
+        "self_hosted_reachable": self_hosted_reachable,
+        "user_pc_dependency": user_pc_dependency,
         "rehearsals": rehearsals,
         "paper_only": True,
         "real_execution": False,
@@ -120,7 +129,12 @@ def blank_evidence(project_sha: str) -> dict[str, Any]:
             {"name": name, "status": "PENDING", "evidence_sha256": None}
             for name in ORDERED_STAGES
         ],
-        "final_go": {**{flag: False for flag in FINAL_GO_FLAGS}, "GO_SELF_HOSTED": "FALSE"},
+        "final_go": {
+            **{flag: False for flag in FINAL_GO_FLAGS},
+            "github_hosted_only": False,
+            "self_hosted_reachable": False,
+            "user_pc_dependency": False,
+        },
     }
 
 

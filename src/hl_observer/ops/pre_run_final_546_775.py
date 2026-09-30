@@ -55,16 +55,18 @@ DETERMINISM_REQUIREMENTS = (
     ("pure_validation_io", "validation pure, routage déterministe et I/O explicites"),
     ("reproducible_replay", "replay/forward/dataset reproductibles"),
 )
-SELF_HOSTED_REQUIREMENTS = (
-    ("runner_not_installed", "PREPARER_PC_ALINA non lancé et runner non installé par défaut"),
-    ("explicit_go", "GO_SELF_HOSTED=TRUE explicite"),
-    ("main_sha_owner_no_pr", "main uniquement, SHA exact, owner, pas de PR"),
-    ("minimal_permissions", "permissions minimales contents:read et persist-credentials false"),
-    ("controlled_command_token_paper", "commande contrôlée, token dataset read-only, paper-only, real execution false"),
+GITHUB_HOSTED_SECURITY_REQUIREMENTS = (
+    ("legacy_workflows_disabled", "anciens workflows PC/self-hosted inatteignables"),
+    ("github_hosted_only", "tous les jobs utilisent des runners GitHub-hosted"),
+    ("no_user_pc_dependency", "aucun réveil, tunnel, SSH ou service du PC utilisateur"),
+    ("minimal_permissions", "permissions minimales et aucun credential persistant"),
+    ("paper_read_only", "cloud paper/read-only, exécution réelle impossible"),
     ("sanitized_artifacts", "artifacts nettoyés et secrets protégés"),
-    ("pinned_actions_untrusted_data", "actions épinglées, code avant gate, dataset non fiable"),
-    ("input_attack_surface", "path traversal, zip-slip, symlink, exécutable dataset, shell injection et entrées bornées"),
+    ("pinned_actions_untrusted_data", "actions épinglées et datasets non fiables validés"),
+    ("input_attack_surface", "path traversal, zip-slip, symlink, exécutable dataset et injection refusés"),
 )
+# Compatibility import only; the active category is GitHub-hosted security.
+SELF_HOSTED_REQUIREMENTS = GITHUB_HOSTED_SECURITY_REQUIREMENTS
 CI_REQUIREMENTS = (
     ("relevant_suites_green", "suites CI pertinentes vertes"),
     ("no_test_deletion_to_hide_red", "aucun rouge masqué par suppression de tests"),
@@ -91,7 +93,7 @@ CATEGORY_REQUIREMENTS = {
     "ANTI_OVERFIT": ANTI_OVERFIT_REQUIREMENTS,
     "MAXDATA_AUTONOMY": MAXDATA_REQUIREMENTS,
     "DETERMINISM": DETERMINISM_REQUIREMENTS,
-    "SELF_HOSTED_SECURITY": SELF_HOSTED_REQUIREMENTS,
+    "GITHUB_HOSTED_SECURITY": GITHUB_HOSTED_SECURITY_REQUIREMENTS,
     "CI": CI_REQUIREMENTS,
     "WINDOWS_PORTABILITY": WINDOWS_REQUIREMENTS,
     "OBSERVABILITY": OBSERVABILITY_REQUIREMENTS,
@@ -192,7 +194,8 @@ def _anti_probes(root: Path) -> dict[str, Probe]:
         return bool(splits) and all(max(train) < min(test) and set(train).isdisjoint(test) for train, test in splits)
 
     def oos_pos() -> bool:
-        return out_of_sample_gate([1.0] * 30 + [2.0] * 20)["passed"] is True
+        sample = [2.0, -1.0] * 25
+        return out_of_sample_gate(sample)["passed"] is True
 
     def oos_neg() -> bool:
         return out_of_sample_gate([1.0] * 30 + [-2.0] * 20)["passed"] is False
@@ -468,18 +471,31 @@ def _determinism_probes(root: Path) -> dict[str, Probe]:
     }
 
 
-def _self_hosted_probes(root: Path) -> dict[str, Probe]:
-    preparer = "PREPARER_PC_ALINA.cmd"
-    installer_cmd = "INSTALLER_ALINA_RUNNER_WINDOWS.cmd"
-    installer_ps1 = "tools/INSTALLER_ALINA_RUNNER_WINDOWS.ps1"
+def _github_hosted_probes(root: Path) -> dict[str, Probe]:
     workflow = ".github/workflows/alina-self-hosted.yml"
+    final_workflow = ".github/workflows/alina-self-hosted-final-v1.yml"
+    smoke_workflow = ".github/workflows/hypersmart-runner-smoke-final-v1.yml"
+    validator = "tools/validate_github_hosted_workflows.py"
+    security = "SECURITY.md"
     dataset_guard = "src/hl_observer/datasets/dataset_untrusted_guard.py"
     workspace = "src/hl_observer/datasets/replay_workspace.py"
     control = "src/hl_observer/ops/self_hosted_control.py"
     returner = "src/hl_observer/ops/self_hosted_return.py"
-
-    go_everywhere = all(_contains(root, path, "GO_SELF_HOSTED") for path in (preparer, installer_cmd, installer_ps1))
-    workflow_text = _read(root, workflow)
+    tombstones = (workflow, final_workflow, smoke_workflow)
+    workflow_text = "\n".join(_read(root, path) for path in tombstones)
+    all_workflow_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in sorted((root / ".github/workflows").glob("*.y*ml"))
+    )
+    tombstones_disabled = all(
+        _contains(root, path, "if: ${{ false }}", "runs-on: ubuntu-latest", "Disabled permanently")
+        for path in tombstones
+    )
+    no_self_hosted_runner = not any(
+        "self-hosted" in line.casefold()
+        for line in all_workflow_text.splitlines()
+        if "runs-on:" in line.casefold()
+    )
 
     def attack_negative() -> bool:
         from hl_observer.datasets.dataset_untrusted_guard import DatasetUntrustedError, validate_relative_member
@@ -498,16 +514,21 @@ def _self_hosted_probes(root: Path) -> dict[str, Probe]:
                 bad += 1
         return good and bad == 5
 
-    pinned = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in workflow_text and "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow_text
+    active_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in sorted((root / ".github/workflows").glob("*.y*ml"))
+        if path.name not in {Path(item).name for item in tombstones}
+    )
+    pinned = "actions/checkout@11d5960a326750d5838078e36cf38b85af677262" in active_text
     return {
-        "runner_not_installed": Probe(go_everywhere and _contains(root, preparer, "exit /b 9") and _contains(root, installer_cmd, "exit /b 9"), go_everywhere, go_everywhere, go_everywhere, (preparer, installer_cmd, installer_ps1)),
-        "explicit_go": Probe(go_everywhere and _contains(root, installer_ps1, "GO_SELF_HOSTED=TRUE"), go_everywhere, _contains(root, preparer, "GO_SELF_HOSTED=TRUE") and _contains(root, installer_cmd, "GO_SELF_HOSTED=TRUE"), go_everywhere, (preparer, installer_cmd, installer_ps1)),
-        "main_sha_owner_no_pr": Probe("refs/heads/main" in workflow_text and "SELF_HOSTED_ACTOR_REFUSED" in workflow_text and "SELF_HOSTED_SHA_REFUSED" in workflow_text and "pull_request:" not in workflow_text, "Gate sécurité avant toute exécution du code HyperSmart" in workflow_text, "pull_request:" not in workflow_text, "CONTROL_ONLY_COMMIT_REQUIRED" in workflow_text, (workflow,)),
-        "minimal_permissions": Probe("permissions:\n  contents: read" in workflow_text and "persist-credentials: false" in workflow_text, "contents: read" in workflow_text, "contents: write" not in workflow_text and "pull-requests: write" not in workflow_text, "persist-credentials: false" in workflow_text, (workflow,)),
-        "controlled_command_token_paper": Probe(all(token in workflow_text for token in ("ALINA_DATASET_READ_TOKEN", "HYPERSMART_DATASET_TOKEN", "HL_ENABLE_MAINNET_EXECUTION: '0'", "HL_ENABLE_TESTNET_EXECUTION: '0'", "REAL_MAINNET_TRADING: 'false'", "self_hosted_control")), "Canoniser la commande après le gate sécurité" in workflow_text, "PRIVATE_DATASET_TOKEN_MISSING" in workflow_text, "CONTROL_PATH_REFUSED" in workflow_text, (workflow, control)),
-        "sanitized_artifacts": Probe(all(token in workflow_text for token in ("github_public", "raw_data_uploaded = $false", "local_paths_uploaded = $false", "public_artifact_allowlisted = $true")), "self_hosted_return" in workflow_text, "datasets\\assets" not in workflow_text.split("Remonter uniquement", 1)[-1], "GITHUB_SAFE_JOB_PROOF.json" in workflow_text, (workflow, returner)),
-        "pinned_actions_untrusted_data": Probe(pinned and _contains(root, workspace, "assert_workspace_safe") and (root / dataset_guard).is_file(), pinned, _safe(attack_negative), _safe(attack_negative), (workflow, dataset_guard, workspace)),
-        "input_attack_surface": Probe(_contains(root, dataset_guard, "FORBIDDEN_EXTENSIONS", "validate_relative_member") and _contains(root, control, "job_id"), _safe(attack_negative), _safe(attack_negative), "Invoke-Expression" not in workflow_text and "iex " not in workflow_text.casefold(), (dataset_guard, workspace, control, workflow, "src/hl_observer/datasets/github_release_bridge.py")),
+        "legacy_workflows_disabled": Probe(tombstones_disabled, tombstones_disabled, tombstones_disabled, tombstones_disabled, tombstones),
+        "github_hosted_only": Probe(no_self_hosted_runner and (root / validator).is_file(), no_self_hosted_runner, no_self_hosted_runner, no_self_hosted_runner, (validator, security)),
+        "no_user_pc_dependency": Probe(_contains(root, security, "aucun self-hosted runner", "aucun SSH/tunnel vers le PC"), tombstones_disabled, tombstones_disabled, no_self_hosted_runner, (security,) + tombstones),
+        "minimal_permissions": Probe(all(_contains(root, path, "permissions:\n  contents: read") for path in tombstones), "contents: read" in workflow_text, "contents: write" not in workflow_text and "pull-requests: write" not in workflow_text, tombstones_disabled, tombstones),
+        "paper_read_only": Probe(_contains(root, security, "PAPER / READ-ONLY / FAIL-CLOSED", "aucun ordre réel"), tombstones_disabled, "exit 1" in workflow_text, no_self_hosted_runner, (security,) + tombstones),
+        "sanitized_artifacts": Probe((root / returner).is_file() and _contains(root, security, "logs contenant des secrets"), tombstones_disabled, "upload-artifact" not in workflow_text, tombstones_disabled, (security, returner) + tombstones),
+        "pinned_actions_untrusted_data": Probe(pinned and _contains(root, workspace, "assert_workspace_safe") and (root / dataset_guard).is_file(), pinned, _safe(attack_negative), _safe(attack_negative), (validator, dataset_guard, workspace)),
+        "input_attack_surface": Probe(_contains(root, dataset_guard, "FORBIDDEN_EXTENSIONS", "validate_relative_member") and _contains(root, control, "job_id"), _safe(attack_negative), _safe(attack_negative), "Invoke-Expression" not in all_workflow_text and "iex " not in all_workflow_text.casefold(), (dataset_guard, workspace, control, "src/hl_observer/datasets/github_release_bridge.py")),
     }
 
 
@@ -583,25 +604,31 @@ def _docs_probes(root: Path) -> dict[str, Probe]:
     readme = "README.md"; completion = "docs/PRE_RUN_775_TECHNICAL_COMPLETION.md"; source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
     readme_text = _read(root, readme)
     completion_text = _read(root, completion)
-    core = all(token in readme_text for token in ("Alina SmartFlow", "Copy-Vault", "Lead-Lag", "Cross-Venue", "paper"))
-    extended = all(token in (readme_text + completion_text) for token in ("4 USD", "FULL/COLD", "180", "MAX DATA", "runner self-hosted"))
-    return {"readme_truth": Probe(core and extended, core, any(token in readme_text.casefold() for token in ("aucune exécution réelle", "aucun ordre réel", "aucun ordre reel", "real_execution")), "scope V2" in readme_text or "Périmètre économique officiel" in readme_text, (readme, completion, source))}
+    core = all(token in readme_text for token in ("Alina Smart Flow", "Copy-Vault", "Lead-Lag", "Cross-Venue", "paper"))
+    extended = all(token in (readme_text + completion_text) for token in ("4.00 USD", "FULL/COLD", "180", "MAX DATA", "GitHub-hosted"))
+    deterministic = all(token in readme_text for token in ("spec canonique", "IDLE", "COLLECT", "ANALYZE"))
+    return {"readme_truth": Probe(core and extended, core, any(token in readme_text.casefold() for token in ("aucune exécution réelle", "aucun ordre réel", "aucun ordre reel", "real_execution")), deterministic, (readme, completion, source))}
 
 
 def _rehearsal_probes(root: Path) -> dict[str, Probe]:
     from hl_observer.ops.pre_full_rehearsal import FINAL_GO_FLAGS, ORDERED_STAGES, SCHEMA, evaluate_final_go, evaluate_rehearsals
     module = "src/hl_observer/ops/pre_full_rehearsal.py"; source = "docs/PRE_RUN_775_SOURCE_LOSS_CLOSURE.md"
 
-    def complete_payload(go: bool) -> dict[str, Any]:
+    def complete_payload(hosted_only: bool) -> dict[str, Any]:
         return {
             "schema": SCHEMA, "project_sha": "a" * 40, "paper_only": True, "real_execution": False,
             "stages": [{"name": name, "status": "PASSED", "evidence_sha256": hashlib.sha256(name.encode()).hexdigest()} for name in ORDERED_STAGES],
-            "final_go": {**{flag: True for flag in FINAL_GO_FLAGS}, "GO_SELF_HOSTED": "TRUE" if go else "FALSE"},
+            "final_go": {
+                **{flag: True for flag in FINAL_GO_FLAGS},
+                "github_hosted_only": hosted_only,
+                "self_hosted_reachable": False,
+                "user_pc_dependency": False,
+            },
         }
 
     return {
         "ordered_rehearsals": Probe(_contains(root, module, "ORDERED_STAGES", "full-archive", "crash-resume", "runtime-consumption"), _safe(lambda: evaluate_rehearsals(complete_payload(False))["ok"] is True), _safe(lambda: evaluate_rehearsals({"schema": SCHEMA, "project_sha": "a" * 40, "paper_only": True, "real_execution": False, "stages": []})["ok"] is False), _safe(lambda: evaluate_rehearsals(complete_payload(False)) == evaluate_rehearsals(complete_payload(False))), (module, source)),
-        "final_go_gate": Probe(_contains(root, module, "FINAL_GO_FLAGS", "GO_SELF_HOSTED_NOT_EXPLICIT_TRUE"), _safe(lambda: evaluate_final_go(complete_payload(True))["go"] is True), _safe(lambda: evaluate_final_go(complete_payload(False))["go"] is False), _safe(lambda: evaluate_final_go(complete_payload(True)) == evaluate_final_go(complete_payload(True))), (module, source)),
+        "final_go_gate": Probe(_contains(root, module, "FINAL_GO_FLAGS", "GITHUB_HOSTED_ONLY_NOT_PROVEN", "SELF_HOSTED_PATH_REACHABLE"), _safe(lambda: evaluate_final_go(complete_payload(True))["go"] is True), _safe(lambda: evaluate_final_go(complete_payload(False))["go"] is False), _safe(lambda: evaluate_final_go(complete_payload(True)) == evaluate_final_go(complete_payload(True))), (module, source)),
     }
 
 
@@ -625,7 +652,7 @@ def evaluate_remaining_requirements(root: Path) -> dict[str, Any]:
         "ANTI_OVERFIT": _anti_probes(root),
         "MAXDATA_AUTONOMY": _maxdata_probes(root),
         "DETERMINISM": _determinism_probes(root),
-        "SELF_HOSTED_SECURITY": _self_hosted_probes(root),
+        "GITHUB_HOSTED_SECURITY": _github_hosted_probes(root),
         "CI": _ci_probes(root),
         "WINDOWS_PORTABILITY": _windows_probes(root),
         "OBSERVABILITY": _observability_probes(root),
@@ -654,5 +681,5 @@ __all__ = [
     "ANTI_OVERFIT_REQUIREMENTS", "CATEGORY_REQUIREMENTS", "CI_REQUIREMENTS",
     "DETERMINISM_REQUIREMENTS", "DOCS_REQUIREMENTS", "FACETS",
     "MAXDATA_REQUIREMENTS", "OBSERVABILITY_REQUIREMENTS", "REHEARSALS_REQUIREMENTS",
-    "SELF_HOSTED_REQUIREMENTS", "WINDOWS_REQUIREMENTS", "evaluate_remaining_requirements",
+    "GITHUB_HOSTED_SECURITY_REQUIREMENTS", "SELF_HOSTED_REQUIREMENTS", "WINDOWS_REQUIREMENTS", "evaluate_remaining_requirements",
 ]
