@@ -36,6 +36,7 @@ from hl_observer.decision_engine.noyau_unique import (
     famille_de_la_strategie,
 )
 from hl_observer.edge.edge_source import SOURCE_FORMULE, SOURCE_TABLE, vider_le_cache
+from hl_observer.risk.session_gate import EtatSession
 from hl_observer.edge.measured_edge_table import Features, Observation, construire
 from hl_observer.signals.signal_taxonomy import (
     CARRY_STRUCTUREL,
@@ -73,6 +74,7 @@ def _ctx(**kw):
         signal_ms=9_999_999.0, signal_age_ms=500.0, leader_score=70.0, consensus_wallets=2.0,
         niveaux_achat=[(100.0, 1_000.0)], niveaux_vente=[(99.9, 1_000.0)],
         frais_bps=12.0, plancher_edge_net_bps=0.0,
+        etat_session=EtatSession(),
     )
     base.update(kw)
     return Contexte(**base)  # type: ignore[arg-type]
