@@ -94,10 +94,25 @@ def audit_family(
 
     raw_rows = _raw_trades(family, raw)
     liquidatable_rows = [row for row in raw_rows if _is_liquidatable(row)]
+
+    # Missing observations are an evidence-coverage problem, not ledger
+    # corruption, provided the public campaign is equally honest and does not
+    # claim measured PnL.  This lets ANALYZE persist a valid "NON_MESURABLE"
+    # baseline while still failing closed if a measured claim has no raw proof.
+    published_claim = bool(
+        any(_number(campaign.get(key)) is not None for key in _ECONOMIC_KEYS)
+        or (_number(campaign.get("closed_positions")) or 0) > 0
+        or campaign.get("liquidatable_net") is True
+        or campaign.get("LIQUIDATABLE_NET") is True
+    )
     if not raw_rows:
-        issues.append("RAW_TRADES_MISSING")
-    if not liquidatable_rows:
-        issues.append("LIQUIDATABLE_TRADES_MISSING")
+        warnings.append("RAW_TRADES_MISSING")
+        if published_claim:
+            issues.append("RAW_TRADES_REQUIRED_FOR_MEASURED_CLAIM")
+    if raw_rows and not liquidatable_rows:
+        warnings.append("LIQUIDATABLE_TRADES_MISSING")
+        if published_claim:
+            issues.append("LIQUIDATABLE_TRADES_REQUIRED_FOR_MEASURED_CLAIM")
 
     audited_rows: list[dict[str, Any]] = []
     all_ids: list[str] = []
@@ -280,7 +295,7 @@ def audit_family(
     objective_status = str(recomputed_objective["objective_status"])
     if issues:
         classification = "INVALID"
-    elif forward_count == 0 or oos_count == 0:
+    elif not raw_rows or not liquidatable_rows or forward_count == 0 or oos_count == 0:
         classification = "INCOMPLETE"
     elif objective_status == "ATTEINT":
         classification = "VALID_POSITIVE"
