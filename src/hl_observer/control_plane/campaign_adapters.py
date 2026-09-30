@@ -125,16 +125,27 @@ def _selection_args(ctx: AdapterContext) -> list[str]:
     return args
 
 
-def _materialize_command(ctx: AdapterContext, workspace: Path) -> list[str]:
+def _dataset_bridge_command(
+    ctx: AdapterContext,
+    workspace: Path,
+    *,
+    action: str,
+) -> list[str]:
+    if action not in {"plan", "materialize"}:
+        raise ValueError("dataset bridge action must be plan or materialize")
     return [
         sys.executable,
         "-m",
         "hl_observer.ops.v2_dataset_bridge",
-        "materialize",
+        action,
         "--output",
         str(workspace),
         *_selection_args(ctx),
     ]
+
+
+def _materialize_command(ctx: AdapterContext, workspace: Path) -> list[str]:
+    return _dataset_bridge_command(ctx, workspace, action="materialize")
 
 
 def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
@@ -279,6 +290,13 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
 
     workspace = _workspace(ctx)
     if ctx.kind == "replay":
+        # The dedicated resume-proof replay campaign deliberately splits one
+        # canonical replay into two useful fresh-runner units: unit 0 freezes and
+        # verifies the exact SAFE selection without materializing it; unit 1
+        # restores from durable Dataset V2 and materializes that same selection.
+        # No completed replay/materialization work is repeated across segments.
+        if ctx.partition.get("resume_proof") is True and int(ctx.partition.get("chunk_index") or 0) == 0:
+            return _dataset_bridge_command(ctx, workspace, action="plan"), workspace
         return _materialize_command(ctx, workspace), workspace
 
     if ctx.kind in ECONOMIC_KINDS:
@@ -474,6 +492,29 @@ def run_one_unit(
             payload["phase"] = phase_name
             payload["phases"] = phases
             return AdapterResult("FAILED", _digest(payload), payload, False)
+
+    if (
+        ctx.kind == "replay"
+        and ctx.partition.get("resume_proof") is True
+        and int(ctx.partition.get("chunk_index") or 0) == 0
+    ):
+        plan_stdout = phases[-1]["stdout"] if phases else ""
+        payload = {
+            "status": "CONTINUATION_REQUIRED",
+            "reason": "resume_proof_selection_checkpoint",
+            "analysis_stage": "REPLAY",
+            "selection_plan_sha256": hashlib.sha256(plan_stdout.encode()).hexdigest(),
+            "phase": "dataset_selection_plan",
+            "phases": phases,
+            "resume_proof": True,
+            "next_unit": 1,
+        }
+        return AdapterResult(
+            "CONTINUATION_REQUIRED",
+            _digest(payload),
+            payload,
+            True,
+        )
 
     last_cmd, output_root, _ = commands[-1]
     collection_plan_sha256 = None
