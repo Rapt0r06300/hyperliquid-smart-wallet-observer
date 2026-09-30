@@ -178,7 +178,13 @@ def main() -> int:
     manifest = load(path)
     if args.command == "validate":
         validate_manifest(manifest)
-        print(sha256_json(manifest.to_dict()))
+        # Optimistic-concurrency tokens must describe the exact on-disk JSON.
+        # Normalizing through CampaignManifest.to_dict() can add newly introduced
+        # optional fields (for example supersedes=None) that were absent from an
+        # older but still valid manifest, producing an immediate false conflict
+        # when save() compares against the raw file.
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        print(sha256_json(raw))
         return 0
 
     if args.command in {"start", "acquire-lease"}:
