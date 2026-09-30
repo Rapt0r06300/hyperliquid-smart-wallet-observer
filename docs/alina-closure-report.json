@@ -5,9 +5,9 @@
     "module_pnl_proof": "COMPLETE",
     "oos": "COMPLETE",
     "replay": "COMPLETE",
-    "scoreboard": "CONTINUATION_REQUIRED"
+    "scoreboard": "COMPLETE"
   },
-  "analysis_stage": "SCOREBOARD",
+  "analysis_stage": "DONE",
   "campaign_ids": [
     "analysis-e3-backtest-v2",
     "analysis-e3-forward-paper-v2",
@@ -750,15 +750,27 @@
     },
     "status": "MORE_DATA"
   },
-  "copy_vault_status": "UNMEASURABLE",
+  "copy_vault_status": "MORE_DATA",
   "cross_shard_overlap_trade_count": 83286,
-  "cross_venue_status": "UNMEASURABLE",
-  "dataset_health_digest": "d8e5c22f01d6bafe0b0c80b60d5c95013a339ab06caf4e65b46ccb8a3bd5e253",
+  "cross_venue_status": "MORE_DATA",
+  "dataset_health_digest": "a95833bc1793d428d1710166e8c55570d5bdeb13a113314eafe5267287ae234c",
   "dataset_selection_id": "3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106",
-  "dataset_v2_head": "c1dffafa4bb84265e37307a2692b7ab964cc6acf",
+  "dataset_v2_head": "777c0319c3c428805607852255240cbc94234a37",
   "declared_spec_requirements": [],
-  "environment_provenance": null,
-  "event_intelligence_registry_digest": "0e694fea63cc1c6b5bf947c1219449dec1fd314b50c8ea3a06e92589056d84c9",
+  "environment_provenance": {
+    "dependency_digest": "d31ca3a2352360ba8306ae79ec7b1a785adfc8aaa296ea19fd0c18c01d6d7d00",
+    "dependency_files": [
+      "requirements.txt",
+      "pyproject.toml"
+    ],
+    "github_runner_image": "ubuntu24",
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "python_executable": "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+    "python_version": "3.12.14",
+    "runner_architecture": "x86_64",
+    "timezone": "UTC"
+  },
+  "event_intelligence_registry_digest": "e6d1f7c39c52fcd444f5e280088f0cbc2d1623a6e8020b2b94f99db8a9850dec",
   "event_intelligence_wiring_complete": true,
   "execution_ledger": [
     {
@@ -773,8 +785,8 @@
     },
     {
       "id": "analysis-chain",
-      "reason": "current-epoch analysis stages cannot be declared complete yet",
-      "state": "BLOCKED"
+      "reason": "current-epoch replay/backtest/OOS/forward/PnL/scoreboard campaigns are terminal",
+      "state": "DONE"
     },
     {
       "id": "two-segment-resume-proof",
@@ -783,47 +795,36 @@
     },
     {
       "id": "final-dual-repository-closure",
-      "reason": "2 canonical closure blocker(s) remain",
-      "state": "TODO"
+      "reason": "no canonical closure blocker remains",
+      "state": "DONE"
     }
   ],
-  "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T14:32:00.500078Z",
+  "forward_status": "UNMEASURABLE",
+  "generated_at_utc": "2026-09-30T14:40:20.794512Z",
   "global_unique_failure_reason_count": 0,
-  "implementation_backlog": [
-    {
-      "id": "BLOCKER-01",
-      "reason": "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-02",
-      "reason": "analysis campaigns are not all terminal COMPLETE",
-      "status": "UNRESOLVED"
-    }
-  ],
-  "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "4f6b924aca8e8de9f47b19520018ac061f293734",
+  "implementation_backlog": [],
+  "lead_lag_status": "MORE_DATA",
+  "main_alina_head": "cc28bf0ee99589a02b6bad655cc705e797c513a5",
   "modules": {
     "copy_vault": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "5b45b6b0e237d4928588688afc92427a31716ab8408ab064b013ac0361dba826",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "cross_venue_dislocation": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "85e2606e4291d4ea548b0e06b8343f14e76f24073e137048bf64814d03fa2173",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "lead_lag": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "288de73d81585b9b3ec0a60af77eaf6d7304821cd098392dcca1ae1abb3c799b",
+      "reason": "UNMEASURED:closed_positions; UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:oos; UNMEASURED:forward",
+      "status": "MORE_DATA"
     }
   },
   "normative_gate_count": 13,
   "normative_gate_registry_digest": "5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a",
-  "oos_status": "MORE_DATA",
+  "oos_status": "UNMEASURABLE",
   "operator_status": {
     "count": 0,
     "invalid_files": [],
@@ -838,27 +839,24 @@
   "raw_record_count": 74328129,
   "raw_trade_count": 27855615,
   "real_execution_reachable": false,
-  "receipt_digest": "9ed61383f2dcf05013714eba8c4d634415aa9e7a691a14dfc641bb7b7b82b664",
+  "receipt_digest": "c6bd06b45117c5a9e4ba787c1c45e96b767ec9ed13f32b07dd049b608bc02062",
   "rejected_count": 7922,
-  "remaining_blockers": [
-    "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
-    "analysis campaigns are not all terminal COMPLETE"
-  ],
+  "remaining_blockers": [],
   "replay_compatible_count": 11794,
   "replay_remaining_candidates": 0,
   "safe_count": 11590,
   "schema_version": "alina.final_closure_receipt.v1",
-  "scoreboard_artifact": null,
+  "scoreboard_artifact": "campaign-evidence-analysis-e3-scoreboard-v2-u2",
   "scoreboard_provenance": {
-    "campaign_id": null,
-    "dataset_selection_id": null,
-    "environment_receipt_sha256": null,
-    "evidence_tag": null,
-    "phase_epoch": null,
-    "reason": "CURRENT_SCOREBOARD_RECEIPT_MISSING",
-    "scoreboard_sha256": null,
-    "source_collection_epoch": null,
-    "valid": false
+    "campaign_id": "analysis-e3-scoreboard-v2",
+    "dataset_selection_id": "3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106",
+    "environment_receipt_sha256": "ebd678512427617aab68239bca8073f0c66566770f7114c6607e5c55da089a26",
+    "evidence_tag": "campaign-evidence-analysis-e3-scoreboard-v2-u2",
+    "phase_epoch": 3,
+    "reason": "CURRENT_SCOREBOARD_RECEIPT_VALID",
+    "scoreboard_sha256": "29f597f2054914880acc4376d2f43a92404c09a71ba4153d264d70e9dbf1f8c0",
+    "source_collection_epoch": 2,
+    "valid": true
   },
   "self_hosted_used": false,
   "source_collection_epoch": 2,
@@ -993,6 +991,6 @@
     "36723460153",
     "36724107560",
     "36727384608",
-    "36729218299"
+    "36729889049"
   ]
 }
