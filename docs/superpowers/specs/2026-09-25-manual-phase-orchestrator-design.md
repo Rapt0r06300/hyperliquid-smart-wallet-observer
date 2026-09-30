@@ -1001,6 +1001,31 @@ The collection phase must publish a compact scoreboard for every epoch, includin
 
 Economic replay/backtest metrics must never obscure poor collection quality.
 
+### Canonical data-exploitability receipt
+
+The dual-repository closure report must expose a machine-readable `data_exploitability` block derived only from canonical Dataset V2 quality evidence. It is a projection of the existing quality ledger, never a second source of truth.
+
+Its purpose is to answer a narrow operational question before heavy analysis: **are the collected observations technically eligible to enter replay/analysis?** This verdict is distinct from economic profitability.
+
+At minimum the block records:
+
+- raw, valid and unique record counts and their ratios;
+- raw trade count and exact global unique-trade count;
+- exact trade-count and global-identity coverage flags;
+- SAFE/PARTIAL/REJECT shard counts and quarantined-record count;
+- replay-compatible shard count and remaining unclassified replay candidates;
+- trade-count and global-identity failure counts;
+- cross-shard overlap count;
+- explicit fail-closed blockers;
+- current phase/epoch;
+- a separate current-epoch economic-proof status.
+
+`ANALYSIS_ELIGIBLE` may be emitted only when exact trade counting and global unique identity are complete, no identity/count failure remains, at least one valid trade population exists, at least one replay-compatible shard exists, and no replay-compatibility candidate remains unclassified.
+
+`ANALYSIS_ELIGIBLE` **must never** be interpreted as `PROVEN`, positive PnL, or permission to promote a strategy. During `COLLECT`, economic proof is normally `PENDING_ANALYZE`. Current cost/latency/PnL evidence may be claimed only from a current-epoch validated scoreboard produced by the canonical ANALYZE chain.
+
+The closure validator fails if the exploitability block is absent, internally inconsistent, or claims profitability.
+
 ### Resource policy for GitHub Actions
 
 The collector is designed around ephemeral standard GitHub-hosted runners.
