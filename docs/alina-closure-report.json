@@ -945,7 +945,7 @@
   "event_intelligence_registry_digest": "94940aadfe196e594e2b13ae9516964ca187587c0de211a56e3980aeb92aa5fd",
   "event_intelligence_wiring_complete": true,
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T11:59:20.769576Z",
+  "generated_at_utc": "2026-09-30T12:00:13.261266Z",
   "global_unique_failure_reason_count": 11250,
   "implementation_backlog": [
     {
@@ -960,17 +960,12 @@
     },
     {
       "id": "BLOCKER-03",
-      "reason": "source capability matrix has 18 unvalidated capabilities",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-04",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "MORE_DATA",
-  "main_alina_head": "681a325af4a0a31c96ea7539934abd9e626e032c",
+  "main_alina_head": "b603a2c98e769bbec2061894a77d945a18d511c2",
   "modules": {
     "copy_vault": {
       "certificate_digest": "b6f2ff08a8fe9b42bbf6e4d4aaa9da40348b551ae42f9572cc5b86061b90df08",
@@ -1005,12 +1000,11 @@
   "raw_record_count": 74328129,
   "raw_trade_count": 27855615,
   "real_execution_reachable": false,
-  "receipt_digest": "09a37a620a71d75392e838efd201b4a83b28a06713dfed06e459789db4487897",
+  "receipt_digest": "a7f89507b1cef72a20a84c41a8369a9386e6138dd57d209d5ee02d05f9d95de3",
   "rejected_count": 7922,
   "remaining_blockers": [
     "global unique trade count coverage is incomplete",
     "fresh-runner two-segment resume proof is unavailable",
-    "source capability matrix has 18 unvalidated capabilities",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 11794,
@@ -1020,99 +1014,119 @@
   "scoreboard_artifact": null,
   "self_hosted_used": false,
   "source_collection_epoch": 2,
-  "source_unvalidated_capabilities": [
+  "source_degraded_capabilities": [
     {
       "capability": "bbo",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "clock_sync",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "l2",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "official_archive",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "recovery",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "replay_adapter",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "sequence_integrity",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "trades",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "venue_status",
+      "runtime_reason": "BINANCE_UNAVAILABLE:HTTPError",
       "runtime_status": "DEGRADED",
       "venue": "binance"
     },
     {
       "capability": "bbo",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "clock_sync",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "l2",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "official_archive",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "recovery",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "replay_adapter",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "sequence_integrity",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "trades",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     },
     {
       "capability": "venue_status",
+      "runtime_reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
       "runtime_status": "DEGRADED",
       "venue": "bybit"
     }
   ],
-  "source_unvalidated_capability_count": 18,
+  "source_degraded_capability_count": 18,
+  "source_unvalidated_capabilities": [],
+  "source_unvalidated_capability_count": 0,
   "trade_count_exact": true,
   "trade_count_failure_reason_count": 0,
   "two_segment_resume_status": "UNMEASURABLE",
