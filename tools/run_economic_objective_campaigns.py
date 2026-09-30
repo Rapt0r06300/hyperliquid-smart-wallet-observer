@@ -208,12 +208,16 @@ def run_campaigns(
     cross_budget_s: float = 20.0,
     cross_current_only: bool = False,
     lead_history_sources: int = lead_lag_shadow.DEFAULT_HISTORY_SOURCES,
-    start_collection: bool = True,
+    start_collection: bool = False,
     collection_duration_s: float = 24 * 60 * 60,
     collection_startup_wait_s: float = 3.0,
     analysis_stage: str | None = None,
 ) -> dict[str, Any]:
     assert_execution_disabled()
+    if start_collection:
+        raise RuntimeError(
+            "ANALYZE cannot start collectors; run COLLECT first, freeze the cutoff, then analyze"
+        )
     environment_provenance = _environment_provenance(root)
     analysis_stage = str(analysis_stage or os.environ.get("ALINA_ANALYSIS_STAGE") or "BACKTEST").upper()
     allowed_stages = {"BACKTEST", "OOS", "FORWARD_PAPER", "PNL_PROOF", "SCOREBOARD"}
@@ -893,13 +897,6 @@ def run_campaigns(
     )
     preliminary_plan = build_collection_plan(campaigns, raw_reports)
     collector_state = inspect_bounded_collectors(root)
-    if start_collection and any(row["objective_status"] != "ATTEINT" for row in campaigns):
-        collector_state = ensure_bounded_collectors(
-            root,
-            preliminary_plan["required_collectors"],
-            duration_s=collection_duration_s,
-            startup_wait_s=collection_startup_wait_s,
-        )
     collection_plan = build_collection_plan(
         campaigns,
         raw_reports,
@@ -960,9 +957,10 @@ def main(argv: list[str] | None = None) -> int:
         daily = row.get("daily_evidence")
         daily = daily if isinstance(daily, dict) else {}
         print(
-            f"{row['family']}: OBJECTIF +4 USD/JOUR {row['objective_status']} "
-            f"| net={exact} | daily_mean={daily.get('mean_daily_net_pnl_usd')} "
-            f"| daily_min={daily.get('min_daily_net_pnl_usd')}",
+            f"{row['family']}: RESULTAT PAPER net={exact} "
+            f"| daily_mean={daily.get('mean_daily_net_pnl_usd')} "
+            f"| daily_min={daily.get('min_daily_net_pnl_usd')} "
+            f"| objectif_fixe_non_bloquant={row.get('objective_status')}",
             flush=True,
         )
     print(f"report={result['report_path']}", flush=True)
