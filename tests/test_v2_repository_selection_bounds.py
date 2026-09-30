@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from hl_observer.datasets.v2_repository import select_safe_shards
+from hl_observer.datasets.v2_repository import SafeShard, _release_asset_url, select_safe_shards
 
 
 def _row(dataset_id: str, start: int, end: int) -> dict:
@@ -48,3 +48,21 @@ def test_frozen_start_boundary_rejects_shard_beginning_before_window() -> None:
     selected = select_safe_shards(index, start_ts_ms=100, end_ts_ms=200)
 
     assert [row.dataset_id for row in selected] == ["contained"]
+
+
+def test_release_asset_url_is_direct_and_api_independent() -> None:
+    shard = SafeShard.from_index_row(
+        _row("dataset", 100, 180)
+        | {
+            "release_tag": "data-v2-test tag",
+            "release_asset": "asset name.jsonl.gz",
+        }
+    )
+
+    url = _release_asset_url(shard)
+
+    assert url == (
+        "https://github.com/Rapt0r06300/alina-smartflow-datasets-v2/"
+        "releases/download/data-v2-test%20tag/asset%20name.jsonl.gz"
+    )
+    assert "api.github.com" not in url
