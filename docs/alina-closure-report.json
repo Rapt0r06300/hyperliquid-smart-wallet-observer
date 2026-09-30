@@ -1,7 +1,21 @@
 {
-  "analysis_campaign_status": {},
-  "analysis_stage": "DRAIN",
+  "analysis_campaign_status": {
+    "backtest": "COMPLETE",
+    "forward_paper": "COMPLETE",
+    "module_pnl_proof": "COMPLETE",
+    "oos": "COMPLETE",
+    "replay": "COMPLETE",
+    "scoreboard": "CONTINUATION_REQUIRED"
+  },
+  "analysis_stage": "SCOREBOARD",
   "campaign_ids": [
+    "analysis-e3-backtest-v2",
+    "analysis-e3-forward-paper-v2",
+    "analysis-e3-oos-v2",
+    "analysis-e3-pnl-proof-v2",
+    "analysis-e3-replay-v2",
+    "analysis-e3-resume-proof-v1",
+    "analysis-e3-scoreboard-v2",
     "archives-binance-btc-20260927-v4",
     "archives-bybit-btc-20260927-v4",
     "backtest-20260925-s3-v4",
@@ -722,7 +736,7 @@
     "replay-2026092717-v5"
   ],
   "campaign_resilience_status": "READY",
-  "canonical_spec_blob": "2891365668498daaf59b5e68d630dce3320230d7",
+  "canonical_spec_blob": "348c3e4507ec30a1f225e23639307d567d0efaee",
   "copy_vault_coverage_receipt": {
     "digest": "e5097a2344762c0b2fb60793ba92e2cb433388f92fe9908908a4300dc8c98622",
     "reconciliation": {
@@ -739,206 +753,10 @@
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 83286,
   "cross_venue_status": "UNMEASURABLE",
-  "dataset_health_digest": "32d76dc45f9f694589a8a0f721e17c49a3ef95adc8966a3691cda3089150630e",
-  "dataset_selection_id": null,
-  "dataset_v2_head": "4185caf4393ddebc2f7ebe6a07e6c42b8a143079",
-  "declared_spec_requirements": [
-    {
-      "id": "OPEN-1",
-      "status": "DECLARED",
-      "title": "Canonical operator surface must exist in the main Alina repository"
-    },
-    {
-      "id": "OPEN-2",
-      "status": "DECLARED",
-      "title": "Implement the actual IDLE / COLLECT / ANALYZE phase controller"
-    },
-    {
-      "id": "OPEN-3",
-      "status": "DECLARED",
-      "title": "Campaign schema migration for phase/epoch identity"
-    },
-    {
-      "id": "OPEN-4",
-      "status": "DECLARED",
-      "title": "Prevent split-brain between Alina and Dataset V2"
-    },
-    {
-      "id": "OPEN-5",
-      "status": "DECLARED",
-      "title": "Finish exact trade-count coverage"
-    },
-    {
-      "id": "OPEN-6",
-      "status": "DECLARED",
-      "title": "Finish SAFE => replay-compatible migration over the whole eligible corpus"
-    },
-    {
-      "id": "OPEN-7",
-      "status": "DECLARED",
-      "title": "Close Dataset V2 proof-of-PnL readiness rather than relying on global SAFE status"
-    },
-    {
-      "id": "OPEN-8",
-      "status": "DECLARED",
-      "title": "Demonstrate the real two-segment E2E resume smoke promised by Work"
-    },
-    {
-      "id": "OPEN-9",
-      "status": "DECLARED",
-      "title": "Make OOS and forward/paper explicit orchestration stages"
-    },
-    {
-      "id": "OPEN-10",
-      "status": "DECLARED",
-      "title": "Close the 120 Event Intelligence/Data Expansion items by wiring status, not registry presence"
-    },
-    {
-      "id": "OPEN-11",
-      "status": "DECLARED",
-      "title": "Re-verify native venue and cloud-source coverage under the current chain"
-    },
-    {
-      "id": "OPEN-12",
-      "status": "DECLARED",
-      "title": "GitHub-hosted scheduling must be treated as lossy, not as an exact clock"
-    },
-    {
-      "id": "OPEN-13",
-      "status": "DECLARED",
-      "title": "Final closure must verify both repositories, not only implementation files"
-    },
-    {
-      "id": "WKR-01",
-      "status": "DECLARED",
-      "title": "Implement the real manual phase authority"
-    },
-    {
-      "id": "WKR-02",
-      "status": "DECLARED",
-      "title": "Stop scheduled campaign creation from being an independent source of intent"
-    },
-    {
-      "id": "WKR-03",
-      "status": "DECLARED",
-      "title": "Add phase/epoch/cutoff identity to resumable campaign manifests"
-    },
-    {
-      "id": "WKR-04",
-      "status": "DECLARED",
-      "title": "Complete the Alina-main operator control surface"
-    },
-    {
-      "id": "WKR-05",
-      "status": "DECLARED",
-      "title": "Prove parity between Alina-direct and Dataset-V2-hosted execution"
-    },
-    {
-      "id": "WKR-06",
-      "status": "DECLARED",
-      "title": "Prevent cross-plane split-brain ownership"
-    },
-    {
-      "id": "WKR-07",
-      "status": "DECLARED",
-      "title": "Finish exact trade-count coverage"
-    },
-    {
-      "id": "WKR-08",
-      "status": "DECLARED",
-      "title": "Finish exact unique-trade coverage and cross-shard deduplication"
-    },
-    {
-      "id": "WKR-09",
-      "status": "DECLARED",
-      "title": "Complete uncompressed-size accounting"
-    },
-    {
-      "id": "WKR-10",
-      "status": "DECLARED",
-      "title": "Reconcile SAFE versus replayable count semantics"
-    },
-    {
-      "id": "WKR-11",
-      "status": "DECLARED",
-      "title": "Produce one authoritative Dataset V2 health receipt"
-    },
-    {
-      "id": "WKR-12",
-      "status": "DECLARED",
-      "title": "Replace the 120-item binary IMPLEMENTED registry with real wiring states"
-    },
-    {
-      "id": "WKR-13",
-      "status": "DECLARED",
-      "title": "Prove Event Intelligence data availability and incremental economic value"
-    },
-    {
-      "id": "WKR-14",
-      "status": "DECLARED",
-      "title": "Close Copy-Vault full-universe freshness and coverage proof"
-    },
-    {
-      "id": "WKR-15",
-      "status": "DECLARED",
-      "title": "Demonstrate Lead-Lag from SAFE Dataset V2 evidence to proof output"
-    },
-    {
-      "id": "WKR-16",
-      "status": "DECLARED",
-      "title": "Demonstrate Cross-Venue from synchronized executable evidence to proof output"
-    },
-    {
-      "id": "WKR-17",
-      "status": "DECLARED",
-      "title": "Revalidate Copy-Vault from leader lifecycle to follower PnL"
-    },
-    {
-      "id": "WKR-18",
-      "status": "DECLARED",
-      "title": "Finish independent per-module PnL proof"
-    },
-    {
-      "id": "WKR-19",
-      "status": "DECLARED",
-      "title": "Prove checkpoint/resume under real GitHub-hosted interruption"
-    },
-    {
-      "id": "WKR-20",
-      "status": "DECLARED",
-      "title": "Prove durable cross-repository publication consistency"
-    },
-    {
-      "id": "WKR-21",
-      "status": "DECLARED",
-      "title": "Run the Work-requested two-segment E2E smoke"
-    },
-    {
-      "id": "WKR-22",
-      "status": "DECLARED",
-      "title": "Make the final done-contract machine-verifiable"
-    },
-    {
-      "id": "WKR-23",
-      "status": "DECLARED",
-      "title": "Treat GitHub scheduling as lossy delivery, durable manifests as truth"
-    },
-    {
-      "id": "WKR-24",
-      "status": "DECLARED",
-      "title": "Final publication integrity check for every implementation wave"
-    },
-    {
-      "id": "WKR-25",
-      "status": "DECLARED",
-      "title": "Publish canonical campaign backlog and stuck-work health"
-    },
-    {
-      "id": "WKR-26",
-      "status": "DECLARED",
-      "title": "Expand interruption proof into a deterministic failure-boundary matrix"
-    }
-  ],
+  "dataset_health_digest": "d8e5c22f01d6bafe0b0c80b60d5c95013a339ab06caf4e65b46ccb8a3bd5e253",
+  "dataset_selection_id": "3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106",
+  "dataset_v2_head": "c1dffafa4bb84265e37307a2692b7ab964cc6acf",
+  "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "0e694fea63cc1c6b5bf947c1219449dec1fd314b50c8ea3a06e92589056d84c9",
   "event_intelligence_wiring_complete": true,
@@ -950,8 +768,8 @@
     },
     {
       "id": "global-unique-trade-identity",
-      "reason": "global unique trade identity backfill/reconciliation remains incomplete",
-      "state": "IN_PROGRESS"
+      "reason": "global unique trade identity coverage is exact",
+      "state": "DONE"
     },
     {
       "id": "analysis-chain",
@@ -960,18 +778,18 @@
     },
     {
       "id": "two-segment-resume-proof",
-      "reason": "fresh-runner two-segment resume proof is not durable yet",
-      "state": "BLOCKED"
+      "reason": "fresh-runner two-segment resume proof is durable",
+      "state": "DONE"
     },
     {
       "id": "final-dual-repository-closure",
-      "reason": "4 canonical closure blocker(s) remain",
+      "reason": "2 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-09-30T13:08:53.316752Z",
-  "global_unique_failure_reason_count": 385,
+  "generated_at_utc": "2026-09-30T14:32:00.500078Z",
+  "global_unique_failure_reason_count": 0,
   "implementation_backlog": [
     {
       "id": "BLOCKER-01",
@@ -980,22 +798,12 @@
     },
     {
       "id": "BLOCKER-02",
-      "reason": "global unique trade count coverage is incomplete",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-03",
-      "reason": "fresh-runner two-segment resume proof is unavailable",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-04",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "73286b7707669d66c6ecc981f9e059265b643e09",
+  "main_alina_head": "4f6b924aca8e8de9f47b19520018ac061f293734",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1030,12 +838,10 @@
   "raw_record_count": 74328129,
   "raw_trade_count": 27855615,
   "real_execution_reachable": false,
-  "receipt_digest": "a6ae592995eb07ece37d9b76914032b05717867fa037bc4b31c2083afc972385",
+  "receipt_digest": "9ed61383f2dcf05013714eba8c4d634415aa9e7a691a14dfc641bb7b7b82b664",
   "rejected_count": 7922,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
-    "global unique trade count coverage is incomplete",
-    "fresh-runner two-segment resume proof is unavailable",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 11794,
@@ -1171,14 +977,22 @@
   "source_unvalidated_capability_count": 0,
   "trade_count_exact": true,
   "trade_count_failure_reason_count": 0,
-  "two_segment_resume_status": "UNMEASURABLE",
+  "two_segment_resume_status": "PROVEN",
   "uncompressed_size_coverage": true,
   "uncompressed_size_exact": true,
   "uncompressed_size_exact_assets": 36134,
   "uncompressed_size_unavailable_assets": 0,
   "unique_record_count": 74328129,
-  "unique_trade_count_exact": false,
-  "unique_trade_count_global": null,
+  "unique_trade_count_exact": true,
+  "unique_trade_count_global": 21973554,
   "valid_record_count": 74328129,
-  "workflow_run_ids": []
+  "workflow_run_ids": [
+    "36721526671",
+    "36722235122",
+    "36722903858",
+    "36723460153",
+    "36724107560",
+    "36727384608",
+    "36729218299"
+  ]
 }
