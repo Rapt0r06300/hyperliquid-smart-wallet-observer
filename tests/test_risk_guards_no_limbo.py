@@ -549,11 +549,8 @@ def test_le_budget_de_trades_ne_compte_QUE_les_ouvertures_DU_JOUR(monkeypatch):
     assert raison == "", "les ouvertures d'avant-hier bloquent aujourd'hui : %r" % raison
 
 
-def test_un_sens_indechiffrable_ne_bloque_PAS_toutes_les_entrees(monkeypatch):
-    """`portfolio_correlation` rend CORR_INVALID_SIDE si le sens n'est pas LONG/SHORT.
-    Un simple desaccord de vocabulaire ("buy" au lieu de "long") aurait alors refuse TOUT.
-    On saute le garde-fou de correlation plutot que de tuer la session -- les autres gardes
-    (exposition, budget, halt) restent, eux, appliques."""
+def test_un_sens_indechiffrable_bloque_fail_closed(monkeypatch):
+    """Une direction inconnue ne peut jamais devenir une autorisation implicite."""
     fpa = _adapter()
     monkeypatch.setenv("HYPERSMART_MAX_OPEN_POSITIONS", "50")
     monkeypatch.setenv("HYPERSMART_MAX_TOTAL_EXPOSURE_USDT", "100000")
@@ -566,7 +563,7 @@ def test_un_sens_indechiffrable_ne_bloque_PAS_toutes_les_entrees(monkeypatch):
     raison = fpa._portfolio_open_refusal(
         etat, new_notional_usdt=500.0, coin="BTC", side="???", strategy_mode="",
     )
-    assert raison == "", "un sens inconnu a fait refuser l'entree : %r" % raison
+    assert raison == "INVALID_EXPOSURE_SIDE"
     assert fpa._normaliser_sens("buy") == "LONG"
     assert fpa._normaliser_sens("SELL") == "SHORT"
     assert fpa._normaliser_sens("???") == ""
