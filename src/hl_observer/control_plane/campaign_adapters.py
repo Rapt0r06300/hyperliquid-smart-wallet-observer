@@ -225,6 +225,7 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             run_id,
             "--rotate-mb",
             str(_bounded_int(ctx.partition.get("rotate_mb"), 64, 1, 512)),
+            "--require-l2",
         ], out
 
     if ctx.kind == "copy_vault_collection":
