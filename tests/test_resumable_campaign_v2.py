@@ -156,3 +156,52 @@ def test_dispatch_receipt_generation():
     )
     assert receipt.request_id == req_id1
     assert receipt.content_digest() is not None
+
+
+def test_v2_analysis_manifest_can_supersede_prior_terminal_campaign():
+    raw = {
+        "campaign_id": "analysis-e3-pnl-proof-v3",
+        "kind": "module_pnl_proof",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "d" * 40,
+        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_generation": "V2_FRESH",
+        "config_sha256": "e" * 64,
+        "work_plan_sha256": "f" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "ANALYZE",
+        "phase_epoch": 3,
+        "source_collection_epoch": 2,
+        "collection_cutoff_at_utc": "2026-09-29T10:56:59Z",
+        "dataset_selection_id": "selection-3",
+        "analysis_stage": "PNL_PROOF",
+        "supersedes": "analysis-e3-pnl-proof-v2",
+    }
+    manifest = CampaignManifest.from_dict(raw)
+    assert manifest.supersedes == "analysis-e3-pnl-proof-v2"
+    assert manifest.to_dict()["supersedes"] == "analysis-e3-pnl-proof-v2"
+
+
+def test_v2_manifest_refuses_self_supersession():
+    raw = {
+        "campaign_id": "same-id",
+        "kind": "replay",
+        "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "code_sha": "a" * 40,
+        "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "dataset_generation": "V2_FRESH",
+        "config_sha256": "b" * 64,
+        "work_plan_sha256": "c" * 64,
+        "expires_at": "2026-12-31T23:59:59Z",
+        "schema_version": SCHEMA_VERSION_V2,
+        "creation_phase": "ANALYZE",
+        "phase_epoch": 3,
+        "source_collection_epoch": 2,
+        "collection_cutoff_at_utc": "2026-09-29T10:56:59Z",
+        "dataset_selection_id": "selection-3",
+        "analysis_stage": "REPLAY",
+        "supersedes": "same-id",
+    }
+    with pytest.raises(ValueError, match="cannot supersede itself"):
+        CampaignManifest.from_dict(raw)
