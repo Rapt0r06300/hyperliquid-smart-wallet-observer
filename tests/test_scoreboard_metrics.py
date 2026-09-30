@@ -23,8 +23,8 @@ def test_profit_factor_sans_perte_est_unmeasurable_pas_un_grand_nombre():
     assert S.profit_factor([3.0, 1.0, 2.0]) is None
 
 
-def test_profit_factor_ignore_les_non_finis():
-    assert S.profit_factor([float("nan"), 10.0, -5.0]) == round(10.0 / 5.0, 6)
+def test_profit_factor_non_fini_est_unmeasurable_fail_closed():
+    assert S.profit_factor([float("nan"), 10.0, -5.0]) is None
 
 
 # --- max_drawdown ------------------------------------------------------------
@@ -114,6 +114,9 @@ def test_verdict_promote_seulement_si_net_oos_forward_positifs_et_n_suffisant():
         gross_edge_bps=20.0,
         fees_bps=1.0, spread_bps=2.0, slippage_bps=1.0, latency_bps=1.0,   # coûts=5 → net=15
         oos_net_bps=6.0, forward_net_bps=4.0,
+        capacity_usd=100.0,
+        fill_ratios=[1.0, 0.9],
+        latency_p95_ms=100.0,
     )
     assert row.net_bps == 15.0 and row.verdict == "PROMOTE"
 
