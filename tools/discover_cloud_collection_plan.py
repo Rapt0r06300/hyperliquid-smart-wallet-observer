@@ -233,6 +233,11 @@ def discover_cloud_universe(
     }
 
 
+def _plan_exit_code(plan: dict[str, Any]) -> int:
+    """Keep healthy venue collection alive when discovery is partially degraded."""
+    return 0 if int(plan.get("selected_coin_count") or 0) > 0 else 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output")
@@ -251,11 +256,7 @@ def main() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(rendered, encoding="utf-8")
     print(rendered, end="")
-    if plan["errors"]:
-        return 2
-    if plan["selected_coin_count"] <= 0:
-        return 2
-    return 0
+    return _plan_exit_code(plan)
 
 
 if __name__ == "__main__":
