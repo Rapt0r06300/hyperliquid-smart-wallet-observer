@@ -162,8 +162,6 @@ def _trade(family: str, *, segment: str, entry_ms: int, exit_ms: int, native_id:
         return {
             "trade_id": native_id,
             "source_lineage_id": source_lineage_id,
-            "source_lineage_id": source_lineage_id,
-            "source_lineage_id": source_lineage_id,
             "coin": "ETH",
             "direction": "LONG",
             "entry_ts_ns": entry_ms * 1_000_000,
@@ -173,6 +171,7 @@ def _trade(family: str, *, segment: str, entry_ms: int, exit_ms: int, native_id:
     if family == "cross_venue_dislocation_v2":
         return {
             "trade_id": native_id,
+            "source_lineage_id": source_lineage_id,
             "coin": "ETH",
             "basis_in_bps": 10.0,
             "ts_in": float(entry_ms),
@@ -181,6 +180,7 @@ def _trade(family: str, *, segment: str, entry_ms: int, exit_ms: int, native_id:
         }
     return {
         "trade_id": native_id,
+        "source_lineage_id": source_lineage_id,
         "coin": "ETH",
         "direction": 1,
         "entry_ts_ms": entry_ms,
