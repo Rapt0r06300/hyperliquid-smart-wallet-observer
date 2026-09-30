@@ -407,6 +407,72 @@ def main() -> int:
         }
         for index, reason in enumerate(report["remaining_blockers"], start=1)
     ]
+
+    # Canonical execution ledger required by the specification.  This is not a
+    # second source of truth: every state is derived from the same durable
+    # evidence already used by this receipt.
+    implementation_surface_done = all(
+        (
+            bool(gate_registry),
+            event_wired,
+            not source_unvalidated,
+            replay_remaining == 0,
+            bool(totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE")),
+            (health.get("coverage") or {}).get("uncompressed_bytes_coverage_complete") is True,
+            isinstance(resilience, dict) and resilience.get("status") == "READY",
+        )
+    )
+    report["execution_ledger"] = [
+        {
+            "id": "canonical-implementation-surface",
+            "state": "DONE" if implementation_surface_done else "BLOCKED",
+            "reason": (
+                "canonical control/data/gate surface is wired"
+                if implementation_surface_done
+                else "one or more implementation-surface gates remain unresolved"
+            ),
+        },
+        {
+            "id": "global-unique-trade-identity",
+            "state": (
+                "DONE"
+                if bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"))
+                else "IN_PROGRESS"
+            ),
+            "reason": (
+                "global unique trade identity coverage is exact"
+                if bool(totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"))
+                else "global unique trade identity backfill/reconciliation remains incomplete"
+            ),
+        },
+        {
+            "id": "analysis-chain",
+            "state": "DONE" if complete_analysis else "BLOCKED",
+            "reason": (
+                "current-epoch replay/backtest/OOS/forward/PnL/scoreboard campaigns are terminal"
+                if complete_analysis
+                else "current-epoch analysis stages cannot be declared complete yet"
+            ),
+        },
+        {
+            "id": "two-segment-resume-proof",
+            "state": "DONE" if resume_proven else "BLOCKED",
+            "reason": (
+                "fresh-runner two-segment resume proof is durable"
+                if resume_proven
+                else "fresh-runner two-segment resume proof is not durable yet"
+            ),
+        },
+        {
+            "id": "final-dual-repository-closure",
+            "state": "DONE" if not report["remaining_blockers"] else "TODO",
+            "reason": (
+                "no canonical closure blocker remains"
+                if not report["remaining_blockers"]
+                else f"{len(report['remaining_blockers'])} canonical closure blocker(s) remain"
+            ),
+        },
+    ]
     report["receipt_digest"] = digest(report)
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
