@@ -19,6 +19,7 @@ from hl_observer.arbitrage.cross_source_comparator import (
     CrossSourceDiscrepancy,
     compare_cross_source_prices,
 )
+from hl_observer.arbitrage.multi_venue_execution import executable_pair_rows
 from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
 from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
 from hl_observer.collection.coin_universe import note_coins
@@ -128,7 +129,7 @@ class NativeVenueCoordinator:
         client: Any,
         discovered_rows: Any,
     ) -> None:
-        if self.tick_writer is None or venue not in {"bybit", "okx"}:
+        if self.tick_writer is None or venue not in {"bybit", "okx", "gate", "bitget"}:
             return
         metadata = getattr(client, "last_instrument_metadata", None)
         if not isinstance(metadata, list) or not metadata:
@@ -152,9 +153,15 @@ class NativeVenueCoordinator:
         for row in metadata:
             if not isinstance(row, Mapping):
                 continue
-            symbol = str(
-                row.get("symbol") if venue == "bybit" else row.get("instId")
-            ).strip().upper()
+            if venue == "bybit":
+                symbol = str(row.get("symbol") or "")
+            elif venue == "okx":
+                symbol = str(row.get("instId") or "")
+            elif venue == "gate":
+                symbol = str(row.get("name") or row.get("contract") or "")
+            else:
+                symbol = str(row.get("symbol") or row.get("instId") or "")
+            symbol = symbol.strip().upper()
             if symbol not in allowed:
                 continue
             envelope = native_instrument_metadata_envelope(
@@ -358,19 +365,42 @@ class NativeVenueCoordinator:
         return snapshot
 
     def ingest_gate(self, payload: Mapping[str, object], *, receive_ts_ms: int | None = None, now_ms: int | None = None) -> NativeMarketSnapshot | None:
-        data = payload.get("result") if isinstance(payload.get("result"), Mapping) else payload
-        contract = str((data if isinstance(data, Mapping) else {}).get("contract") or (data if isinstance(data, Mapping) else {}).get("s") or "").upper()
-        if not contract: return None
-        state = self._gate_states.setdefault(contract, GateMarketState(contract=contract, stale_after_ms=self.stale_after_ms))
+        self._record_native_frame("gate", payload)
+        raw_data = payload.get("result") if isinstance(payload.get("result"), Mapping) else payload
+        data = dict(raw_data) if isinstance(raw_data, Mapping) else {}
+        transport = payload.get("_alina_transport")
+        if isinstance(transport, Mapping):
+            data["_alina_transport"] = dict(transport)
+        contract = str(data.get("contract") or data.get("s") or "").upper()
+        if not contract:
+            return None
+        state = self._gate_states.setdefault(
+            contract,
+            GateMarketState(contract=contract, stale_after_ms=self.stale_after_ms),
+        )
         channel = str(payload.get("channel") or payload.get("event") or "").lower()
-        (state.apply_ticker(dict(data)) if "ticker" in channel else state.apply_book(dict(data), receive_ts_ms=receive_ts_ms))
-        snapshot = state.snapshot(now_ms=now_ms); self.store.put(snapshot); return snapshot
+        if "ticker" in channel:
+            state.apply_ticker(data)
+        else:
+            state.apply_book(data, receive_ts_ms=receive_ts_ms)
+        snapshot = state.snapshot(now_ms=now_ms)
+        self.store.put(snapshot)
+        return snapshot
 
     def ingest_bitget(self, payload: Mapping[str, object], *, receive_ts_ms: int | None = None, now_ms: int | None = None) -> NativeMarketSnapshot | None:
-        arg = payload.get("arg") or {}; symbol = str(arg.get("instId") if isinstance(arg, Mapping) else "").upper()
-        if not symbol: return None
-        state = self._bitget_states.setdefault(symbol, BitgetMarketState(symbol=symbol, stale_after_ms=self.stale_after_ms))
-        state.apply(dict(payload), receive_ts_ms=receive_ts_ms); snapshot = state.snapshot(now_ms=now_ms); self.store.put(snapshot); return snapshot
+        self._record_native_frame("bitget", payload)
+        arg = payload.get("arg") or {}
+        symbol = str(arg.get("instId") if isinstance(arg, Mapping) else "").upper()
+        if not symbol:
+            return None
+        state = self._bitget_states.setdefault(
+            symbol,
+            BitgetMarketState(symbol=symbol, stale_after_ms=self.stale_after_ms),
+        )
+        state.apply(dict(payload), receive_ts_ms=receive_ts_ms)
+        snapshot = state.snapshot(now_ms=now_ms)
+        self.store.put(snapshot)
+        return snapshot
 
     def candidate_coins(self, *, now_ms: int, min_venues: int = 2) -> list[str]:
         return self.store.candidate_coins(now_ms=now_ms, min_venues=min_venues)
@@ -413,6 +443,32 @@ class NativeVenueCoordinator:
             for row in candidates
             if frozenset((row.source_achat, row.source_vente)) in allowed
         ]
+
+    def cross_venue_economic_rows(
+        self,
+        coin: str,
+        *,
+        now_ms: int,
+        notional_usd: float,
+        max_receive_skew_ms: float = 250.0,
+        max_exchange_skew_ms: float = 250.0,
+        require_clock_offsets: bool = False,
+        minimum_round_trip_edge_bps: float = 0.0,
+    ) -> list[dict[str, Any]]:
+        """Fee-aware exact-L2 prefilter; never a closed-cycle profit claim."""
+        pairs = self.store.synchronized_pairs(
+            coin,
+            now_ms=now_ms,
+            max_receive_skew_ms=max_receive_skew_ms,
+            max_exchange_skew_ms=max_exchange_skew_ms,
+            require_clock_offsets=require_clock_offsets,
+            require_l2=True,
+        )
+        return executable_pair_rows(
+            pairs,
+            notional_usd=notional_usd,
+            minimum_round_trip_edge_bps=minimum_round_trip_edge_bps,
+        )
 
     def lead_lag_rows(self, coin: str, *, now_ms: int) -> list[dict[str, float | int | str]]:
         return self.store.lead_lag_rows(coin, now_ms=now_ms)
@@ -483,7 +539,7 @@ class NativeVenueCoordinator:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
                     now = int(time.time() * 1000)
-                    self.ingest_gate(payload, receive_ts_ms=now, now_ms=now)
+                    self.ingest_gate(payload, now_ms=now)
         except TimeoutError:
             return
         finally:
@@ -498,7 +554,7 @@ class NativeVenueCoordinator:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bitget_client.messages(symbols):
                     now = int(time.time() * 1000)
-                    self.ingest_bitget(payload, receive_ts_ms=now, now_ms=now)
+                    self.ingest_bitget(payload, now_ms=now)
         except TimeoutError:
             return
         finally:
