@@ -151,6 +151,32 @@ def test_preserves_collect_campaign_with_productive_completed_unit(tmp_path) -> 
     assert json.loads(manifest.read_text(encoding="utf-8")) == original
 
 
+def test_refreshes_failed_nonproductive_terminal_campaign_after_code_fix(tmp_path) -> None:
+    module = _module()
+    manifest = tmp_path / "market.json"
+    history = tmp_path / "history"
+    original = _manifest(
+        status="FAILED",
+        completed_units={
+            "0": {
+                "sha256": "d" * 64,
+                "result": {"status": "FAILED", "reason": "adapter_failed"},
+            }
+        },
+    )
+    original["terminal_evidence_digest"] = "e" * 64
+    _write(manifest, original)
+
+    result = _refresh(module, manifest, history)
+    row = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert result["refreshed"] is True
+    assert row["status"] == "PENDING"
+    assert row["completed_units"] == {}
+    assert row["terminal_evidence_digest"] is None
+    assert Path(result["archive_path"]).is_file()
+
+
 def test_rejects_phase_epoch_mismatch(tmp_path) -> None:
     module = _module()
     manifest = tmp_path / "market.json"
