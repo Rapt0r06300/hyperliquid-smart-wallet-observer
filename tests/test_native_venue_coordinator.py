@@ -350,3 +350,80 @@ def test_discovery_persists_bybit_instrument_rules() -> None:
     assert row["channel"] == "instrument_metadata"
     assert row["instrument"] == "BTCUSDT"
     assert row["parsed_summary"]["tick_size"] == "0.1"
+
+
+def test_cross_venue_economic_rows_charge_actual_venue_fees() -> None:
+    from hl_observer.collection.native_venue_market import MarketLevel
+
+    coordinator = NativeVenueCoordinator(stale_after_ms=2_000)
+    for venue, bid, ask in (
+        ("hyperliquid", 99.9, 100.0),
+        ("okx", 101.5, 101.6),
+    ):
+        coordinator.ingest_external_bbo(
+            venue=venue,
+            coin="BTC",
+            exchange_symbol="BTC",
+            bid=bid,
+            ask=ask,
+            exchange_ts_ms=1_000,
+            receive_ts_ms=1_010,
+            now_ms=1_020,
+            bids=(MarketLevel(bid, 10.0),),
+            asks=(MarketLevel(ask, 10.0),),
+        )
+    rows = coordinator.cross_venue_economic_rows(
+        "BTC",
+        now_ms=1_020,
+        notional_usd=100.0,
+    )
+    assert len(rows) == 1
+    assert rows[0]["buy_venue"] == "hyperliquid"
+    assert rows[0]["sell_venue"] == "okx"
+    assert rows[0]["taker_taker_round_trip_fee_floor_bps"] == 19.0
+
+
+class _MetadataGateDiscovery:
+    last_instrument_metadata = [
+        {
+            "name": "BTC_USDT",
+            "order_price_round": "0.1",
+            "quanto_multiplier": "0.001",
+            "order_size_min": "1",
+        }
+    ]
+
+    def discover_usdt_perpetuals(self):
+        return [("BTC", "BTC_USDT")]
+
+
+class _MetadataBitgetDiscovery:
+    last_instrument_metadata = [
+        {
+            "symbol": "ETHUSDT",
+            "priceEndStep": "1",
+            "sizeMultiplier": "0.001",
+            "minTradeNum": "0.001",
+            "minTradeUSDT": "5",
+        }
+    ]
+
+    def discover_usdt_perpetuals(self):
+        return [("ETH", "ETHUSDT")]
+
+
+def test_discovery_persists_gate_and_bitget_instrument_rules() -> None:
+    writer = _CaptureWriter()
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_EmptyDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_MetadataGateDiscovery(),
+        bitget_client=_MetadataBitgetDiscovery(),
+        tick_writer=writer,
+    )
+    coordinator.discover(now_s=100.0)
+    rows = [row.as_record(written_ts_ms=1_700_000_000_100) for row in writer.rows]
+    assert {(row["source_id"], row["instrument"]) for row in rows} == {
+        ("gate_public_rest", "BTC_USDT"),
+        ("bitget_public_rest", "ETHUSDT"),
+    }
