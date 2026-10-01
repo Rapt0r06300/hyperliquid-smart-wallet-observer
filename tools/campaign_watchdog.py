@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -131,13 +132,38 @@ def _dispatch_successor(row: dict, repository: str, now: datetime) -> tuple[bool
         "-f", f"predecessor_run_id={predecessor or 'unknown'}",
         "-f", f"requested_handoff_at_utc={now.isoformat().replace('+00:00', 'Z')}",
     ]
-    cp = subprocess.run(command, text=True, capture_output=True, check=False)
-    if cp.returncode != 0:
-        return False, (cp.stderr or cp.stdout or "dispatch_failed").strip()[-500:]
-    cursor["successor_dispatch_at_utc"] = now.isoformat().replace("+00:00", "Z")
-    row["cursor"] = cursor
-    row["updated_at"] = now.isoformat().replace("+00:00", "Z")
-    return True, "dispatched"
+    last_detail = "dispatch_failed"
+    for attempt in range(1, 7):
+        cp = subprocess.run(command, text=True, capture_output=True, check=False)
+        if cp.returncode == 0:
+            cursor["successor_dispatch_at_utc"] = now.isoformat().replace("+00:00", "Z")
+            row["cursor"] = cursor
+            row["updated_at"] = now.isoformat().replace("+00:00", "Z")
+            return True, "dispatched"
+
+        last_detail = (cp.stderr or cp.stdout or "dispatch_failed").strip()[-500:]
+        transient = any(
+            marker in last_detail.lower()
+            for marker in (
+                "rate limit",
+                "http 403",
+                "http 429",
+                "secondary rate",
+                "temporar",
+                "timeout",
+                "timed out",
+                "connection reset",
+                "502",
+                "503",
+                "504",
+            )
+        )
+        if not transient:
+            return False, last_detail
+        if attempt < 6:
+            time.sleep(min(5 * attempt * attempt, 60))
+
+    return False, f"bounded transient dispatch retry exhausted: {last_detail}"
 
 
 
