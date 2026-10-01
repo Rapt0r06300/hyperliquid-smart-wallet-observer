@@ -1,0 +1,52 @@
+{
+  "campaign_count": 0,
+  "campaigns": [],
+  "failure_matrix": {
+    "after_checkpoint_before_lease_release": {
+      "convergence_rule": "same_unit_digest_is_idempotent",
+      "observed": false,
+      "required_evidence": "checkpoint_lineage_and_lease_validation"
+    },
+    "after_publish_before_terminal_manifest": {
+      "convergence_rule": "published_artifact_adopted_without_duplicate",
+      "observed": false,
+      "required_evidence": "terminal_artifact_and_manifest_reconciliation"
+    },
+    "before_checkpoint_write": {
+      "convergence_rule": "resume_from_last_durable_cursor",
+      "observed": false,
+      "required_evidence": "durable_v2_campaign_manifest"
+    },
+    "duplicate_worker_wakeup": {
+      "convergence_rule": "duplicate_unit_wakeup_no_duplicate_publication",
+      "observed": false,
+      "required_evidence": "completed_unit_digest"
+    },
+    "during_publish": {
+      "convergence_rule": "receipt_identity_conflict_refuses_publish",
+      "observed": false,
+      "required_evidence": "publication_receipt"
+    },
+    "lease_expiry": {
+      "convergence_rule": "stale_lease_refused",
+      "observed": false,
+      "required_evidence": "lease_token_and_expiry"
+    }
+  },
+  "failure_matrix_status": "BLOCKED",
+  "generated_at_utc": "2026-10-01T03:47:59.704647Z",
+  "historical_v1_campaigns": [],
+  "historical_v1_count": 0,
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "receipt_digest": "fec5b68903f09b6e2eee1b6af3881ccc5b84f74ec32a7acc88ef59cde9393266",
+  "schema": "alina.campaign_resilience_receipt.v2",
+  "status": "BLOCKED",
+  "v2_campaign_count": 0,
+  "violations": [
+    {
+      "code": "NO_V2_RESILIENCE_EVIDENCE"
+    }
+  ]
+}
