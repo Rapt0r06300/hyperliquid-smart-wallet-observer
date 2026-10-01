@@ -7,6 +7,8 @@ on:
       - 'catalog/RECORD_COUNT_PATCH.json'
       - 'catalog/UNCOMPRESSED_SIZE_PATCH.json'
       - 'tools/build_catalog_metrics.py'
+      - 'tools/build_collection_metrics.py'
+      - 'tests/test_collection_metrics.py'
       - '.github/workflows/dataset-metrics-v2.yml'
   schedule:
     - cron: '53 * * * *'
@@ -29,16 +31,18 @@ jobs:
         run: python tools/build_replay_compatibility_reasons.py
       - name: Build exact catalog metrics
         run: python tools/build_catalog_metrics.py
+      - name: Build instant collection metrics
+        run: python tools/build_collection_metrics.py
       - name: Validate dataset policy
         run: |
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py
+          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py
       - name: Publish metrics
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json
+          git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json
           git diff --cached --quiet && exit 0
           git commit -m "data: refresh exact dataset metrics"
           for i in 1 2 3 4 5; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep $((i*2)); done
