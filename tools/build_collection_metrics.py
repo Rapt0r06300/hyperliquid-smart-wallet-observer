@@ -58,6 +58,7 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     assets = summary.get("assets")
     trade_count = 0
     record_count = 0
+    trade_assets_seen = False
     if isinstance(assets, list):
         for row in assets:
             if not isinstance(row, Mapping):
@@ -65,6 +66,7 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
             events = _int(row.get("event_count"))
             record_count += events
             if str(row.get("family") or "").lower() in TRADE_FAMILIES:
+                trade_assets_seen = True
                 trade_count += events
 
     reconciliation = summary.get("reconciliation")
@@ -97,8 +99,15 @@ def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     if isinstance(drops, Mapping):
         drops = sum(_int(v) for v in drops.values())
 
+    fallback_trade_coverage = (
+        reconciliation_complete
+        if isinstance(reconciliation, Mapping)
+        else not trade_assets_seen
+    )
+
     return {
         "trade_count_observed": trade_count,
+        "trade_count_coverage_complete": fallback_trade_coverage,
         "record_count_observed": record_count,
         "accepted_frames": _int(summary.get("accepted_frames")),
         "persisted_frames": _int(summary.get("persisted_frames")),
@@ -132,6 +141,7 @@ def _empty_bucket() -> dict[str, int]:
         "rejected_shards": 0,
         "compressed_bytes": 0,
         "units_missing_compact_metrics": 0,
+        "units_trade_count_coverage_incomplete": 0,
     }
 
 
@@ -180,6 +190,10 @@ def build() -> dict[str, Any]:
                 totals["units_missing_compact_metrics"] += 1
                 bucket["units_missing_compact_metrics"] += 1
                 continue
+
+            if compact.get("trade_count_coverage_complete") is not True:
+                totals["units_trade_count_coverage_incomplete"] += 1
+                bucket["units_trade_count_coverage_incomplete"] += 1
 
             fields = {
                 "trades_observed": "trade_count_observed",
@@ -234,8 +248,14 @@ def build() -> dict[str, Any]:
             "persisted_frames": totals["persisted_frames"],
             "shards_published": totals["shards"],
             "compressed_bytes_known": totals["compressed_bytes"],
-            "coverage_complete": totals["units_missing_compact_metrics"] == 0,
+            "coverage_complete": (
+                totals["units_missing_compact_metrics"] == 0
+                and totals["units_trade_count_coverage_incomplete"] == 0
+            ),
             "units_missing_compact_metrics": totals["units_missing_compact_metrics"],
+            "units_trade_count_coverage_incomplete": (
+                totals["units_trade_count_coverage_incomplete"]
+            ),
         },
         "totals": totals,
         "by_kind": dict(sorted(by_kind.items())),
