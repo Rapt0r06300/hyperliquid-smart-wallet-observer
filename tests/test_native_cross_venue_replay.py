@@ -33,6 +33,7 @@ def _record(venue: str, bid: float, ask: float, ts: int) -> dict:
         "parsed_summary": {
             "venue": venue,
             "coin": "BTC",
+            "clock_domain_id": "runner-1",
             "exchange_symbol": "BTC",
             "bid": bid,
             "ask": ask,
