@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a conservative dual-repository closure receipt from durable evidence."""
+"""Build a conservative single-repository closure receipt from durable evidence."""
 from __future__ import annotations
 
 import argparse
@@ -157,7 +157,7 @@ def main() -> int:
             continue
         valid_states = {"DISPATCHED", "RUNNING", "COMPLETE", "FAILED", "BLOCKED", "CANCELLED"}
         if (
-            row.get("schema_version") != "alina.operator_status.v1"
+            row.get("schema_version") not in {"alina.operator_status.v1", "alina.operator_status.v2"}
             or not row.get("request_id")
             or row.get("state") not in valid_states
             or row.get("terminal") is not (row.get("state") in {"COMPLETE", "FAILED", "BLOCKED", "CANCELLED"})
@@ -198,7 +198,7 @@ def main() -> int:
         row = load(path)
         if isinstance(row, dict):
             campaigns.append(row)
-    totals = health.get("totals") if isinstance(health, dict) else {}
+    totals = (health.get("totals") or {}) if isinstance(health, dict) else {}
     items = event.get("items") if isinstance(event, dict) else []
     event_terminal_statuses = {"IMPLEMENTED_AND_WIRED", "NOT_APPLICABLE"}
     event_wired = (

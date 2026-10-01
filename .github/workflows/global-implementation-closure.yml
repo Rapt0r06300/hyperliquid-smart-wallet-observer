@@ -32,18 +32,25 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
-          ref: main
-          path: alina
-          fetch-depth: 0
+
+      - id: phase
+        name: Read canonical phase
+        shell: bash
+        run: |
+          set -euo pipefail
+          PHASE="$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')"
+          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
+          echo "phase=$PHASE"
+
       - name: Build fail-closed global closure receipt
+        if: steps.phase.outputs.phase == 'ANALYZE'
         run: |
           set -euo pipefail
           python tools/build_analysis_frozen_coverage_receipt.py
-          python tools/build_global_implementation_closure.py --alina-root alina
-      - name: Publish closure receipt from latest repository heads
+          python tools/build_global_implementation_closure.py --alina-root .
+
+      - name: Publish closure receipt from latest canonical head
+        if: steps.phase.outputs.phase == 'ANALYZE'
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
@@ -51,23 +58,19 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard origin/main
-            git -C alina fetch origin main
-            git -C alina reset --hard origin/main
             python tools/build_analysis_frozen_coverage_receipt.py
-            python tools/build_global_implementation_closure.py --alina-root alina
+            python tools/build_global_implementation_closure.py --alina-root .
             git add catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json
-            if git diff --cached --quiet; then
-              exit 0
-            fi
-            git commit -m "closure: publish cross-repo implementation receipt"
-            if git push origin HEAD:main; then
-              exit 0
-            fi
+            if git diff --cached --quiet; then exit 0; fi
+            git commit -m "closure: publish single-repository implementation receipt"
+            if git push origin HEAD:main; then exit 0; fi
             git reset --hard origin/main
             sleep "$((attempt * 2))"
           done
           exit 1
+
       - name: Dispatch analysis stage controller after closure
+        if: steps.phase.outputs.phase == 'ANALYZE'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -75,4 +78,3 @@ jobs:
           gh workflow run analysis-stage-controller.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main
-
