@@ -115,3 +115,33 @@ def test_native_replay_scans_predeclared_capacity_ladder_by_default(tmp_path: Pa
     assert tested == {50.0, 100.0, 250.0, 500.0}
     assert report["candidate_observations"] >= 4
     assert report["economic_claim_eligible"] is False
+
+
+def test_native_replay_applies_execution_and_latency_penalties(tmp_path: Path) -> None:
+    _write_pair(tmp_path)
+
+    baseline = scan_native_cross_venue_prefilter(
+        tmp_path,
+        notional_usd=100.0,
+        max_rows=100,
+        execution_buffer_bps=0.0,
+        latency_penalty_bps_per_ms=0.0,
+    )
+    penalized = scan_native_cross_venue_prefilter(
+        tmp_path,
+        notional_usd=100.0,
+        max_rows=100,
+        execution_buffer_bps=2.0,
+        latency_penalty_bps_per_ms=0.1,
+    )
+
+    assert penalized["execution_buffer_bps"] == 2.0
+    assert penalized["latency_penalty_bps_per_ms"] == 0.1
+    assert penalized["best_conservative_taker_round_trip_net_edge_bps"] < baseline[
+        "best_conservative_taker_round_trip_net_edge_bps"
+    ]
+    assert all(
+        float(row["conservative_taker_round_trip_net_edge_bps"])
+        <= float(row["taker_taker_round_trip_net_floor_bps"])
+        for row in penalized["top_candidates"]
+    )
