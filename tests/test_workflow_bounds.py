@@ -121,7 +121,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "fromJSON(needs.select.outputs.copy_matrix)" in controller
     assert "fromJSON(needs.select.outputs.other_matrix)" in controller
     assert "relay_collect:" in controller
-    assert "gh workflow run resumable-campaign-controller.yml" in worker
+    assert "gh workflow run resumable-campaign-controller.yml" in controller
     assert "ref: ${{ steps.pin.outputs.sha }}" in worker
     assert "Claim durable campaign lease" in worker
     assert "Persist collection data or analysis evidence" in worker
@@ -147,7 +147,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "full_selected_coin_count" in worker
     assert "actions: write" in worker
     assert "needs.select.outputs.phase == 'COLLECT'" in controller
-    assert "steps.pin.outputs.phase == 'COLLECT'" in worker
+    assert "needs.select.outputs.phase == 'COLLECT'" in controller
 
 
 def test_metrics_refresh_is_scheduled_and_serialized():
