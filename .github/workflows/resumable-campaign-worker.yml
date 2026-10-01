@@ -199,6 +199,8 @@ jobs:
           if kind=="market_collection":
               part.setdefault("duration_s",3500)
               part.setdefault("plan_file",os.path.join(os.environ["RUNNER_TEMP"],"collection-plan.json"))
+              if part.get("plan_file"):
+                  part["plan_file"]=os.path.abspath(str(part["plan_file"]))
               part.setdefault("max_coins",0)
               part.setdefault("rotate_mb",64)
               part.setdefault("market_shard_count",1)
