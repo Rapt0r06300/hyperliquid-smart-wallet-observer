@@ -23,16 +23,29 @@ from hl_observer.economics.assumptions import (
 DEFAUTS_TAKER_BPS: dict[str, float] = {
     "HYPERLIQUID": 4.5,
     "BINANCE": 5.0,
+    "BYBIT": 5.5,
+    "OKX": 5.0,
+    "GATE": 5.0,
+    "BITGET": 6.0,
 }
 
 #: Défauts maker (bps). Même règle de provenance que les frais taker.
 DEFAUTS_MAKER_BPS: dict[str, float] = {
     "HYPERLIQUID": 1.5,
+    "BINANCE": 2.0,
+    "BYBIT": 2.0,
+    "OKX": 2.0,
+    "GATE": 2.0,
+    "BITGET": 2.0,
 }
 
 _ALIAS = {
     "HL": "HYPERLIQUID", "HYPERLIQUID": "HYPERLIQUID", "HYPER": "HYPERLIQUID",
     "BIN": "BINANCE", "BINANCE": "BINANCE",
+    "BYBIT": "BYBIT",
+    "OKX": "OKX",
+    "GATE": "GATE", "GATEIO": "GATE", "GATE.IO": "GATE",
+    "BITGET": "BITGET",
 }
 
 _SOURCE_REF = {
@@ -44,12 +57,48 @@ _SOURCE_REF = {
         "https://www.binance.com/en-AU/support/faq/detail/360033544231"
         "#regular-user-usds-m-taker-read-2026-09-09"
     ),
+    "BYBIT": (
+        "https://www.bybit.com/en/help-center/article/Trading-Fee-Structure"
+        "#vip0-perpetual-futures-read-2026-10-01"
+    ),
+    "OKX": (
+        "https://www.okx.com/help/how-to-calculate-the-contract-transaction-fee"
+        "#lv1-futures-read-2026-10-01"
+    ),
+    "GATE": (
+        "https://www.gate.com/announcements/article/101365"
+        "#vip0-usdtm-effective-2026-09-01"
+    ),
+    "BITGET": (
+        "https://www.bitget.com/support/articles/12560603892733"
+        "#standard-futures-published-2026-08-20"
+    ),
 }
 
 _MAKER_SOURCE_REF = {
     "HYPERLIQUID": (
         "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees"
         "#perps-tier-0-maker-read-2026-09-09"
+    ),
+    "BINANCE": (
+        "https://www.binance.com/en-AU/support/faq/detail/360033544231"
+        "#regular-user-usds-m-maker-read-2026-09-09"
+    ),
+    "BYBIT": (
+        "https://www.bybit.com/en/help-center/article/Trading-Fee-Structure"
+        "#vip0-perpetual-futures-maker-read-2026-10-01"
+    ),
+    "OKX": (
+        "https://www.okx.com/help/how-to-calculate-the-contract-transaction-fee"
+        "#lv1-futures-maker-read-2026-10-01"
+    ),
+    "GATE": (
+        "https://www.gate.com/announcements/article/101365"
+        "#vip0-usdtm-maker-effective-2026-09-01"
+    ),
+    "BITGET": (
+        "https://www.bitget.com/support/articles/12560603892733"
+        "#standard-futures-maker-published-2026-08-20"
     ),
 }
 
@@ -65,6 +114,22 @@ _SOURCE_TEMPORAL = {
     "BINANCE": {
         "observed_at": "2026-09-09T00:00:00Z",
         "revalidate_after": "2026-12-09T00:00:00Z",
+    },
+    "BYBIT": {
+        "observed_at": "2026-10-01T00:00:00Z",
+        "revalidate_after": "2027-01-01T00:00:00Z",
+    },
+    "OKX": {
+        "observed_at": "2026-10-01T00:00:00Z",
+        "revalidate_after": "2027-01-01T00:00:00Z",
+    },
+    "GATE": {
+        "observed_at": "2026-09-01T00:00:00Z",
+        "revalidate_after": "2026-12-01T00:00:00Z",
+    },
+    "BITGET": {
+        "observed_at": "2026-08-20T00:00:00Z",
+        "revalidate_after": "2026-11-20T00:00:00Z",
     },
 }
 
@@ -268,6 +333,15 @@ def hypothese_frais_maker(
     )
 
 
+def frais_maker_bps(
+    venue: object,
+    *,
+    mode: EconomicRunMode | str = EconomicRunMode.EXPLORATORY,
+) -> float:
+    """Frais maker (bps) de la venue depuis la source unique et versionnée."""
+    return float(hypothese_frais_maker(venue, mode=mode).value)
+
+
 def frais_taker_bps(
     venue: object,
     *,
@@ -289,6 +363,7 @@ def frais_taker_bps(
 __all__ = [
     "DEFAUTS_MAKER_BPS",
     "DEFAUTS_TAKER_BPS",
+    "frais_maker_bps",
     "frais_taker_bps",
     "hypothese_frais_maker",
     "hypothese_frais_taker",

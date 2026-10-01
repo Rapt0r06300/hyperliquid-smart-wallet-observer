@@ -15,6 +15,16 @@ def test_frais_par_defaut_et_alias():
     assert F.frais_taker_bps("HL") == 4.5
     assert F.frais_taker_bps("BINANCE") == 5.0
     assert F.frais_taker_bps("BIN") == 5.0
+    assert F.frais_taker_bps("BYBIT") == 5.5
+    assert F.frais_taker_bps("OKX") == 5.0
+    assert F.frais_taker_bps("GATE.IO") == 5.0
+    assert F.frais_taker_bps("BITGET") == 6.0
+    assert F.frais_maker_bps("HYPERLIQUID") == 1.5
+    assert F.frais_maker_bps("BINANCE") == 2.0
+    assert F.frais_maker_bps("BYBIT") == 2.0
+    assert F.frais_maker_bps("OKX") == 2.0
+    assert F.frais_maker_bps("GATE") == 2.0
+    assert F.frais_maker_bps("BITGET") == 2.0
 
 
 def test_env_surcharge():
@@ -54,3 +64,15 @@ def test_binance_default_is_bound_to_official_regular_user_rate():
     assert assumption.value == 5.0
     assert assumption.source_ref.startswith("https://www.binance.com/")
     assert assumption.observed_at == "2026-09-09T00:00:00Z"
+
+
+def test_native_venue_fee_sources_are_versioned_and_certifiable():
+    for venue in ("BYBIT", "OKX", "GATE", "BITGET"):
+        taker = F.hypothese_frais_taker(venue)
+        maker = F.hypothese_frais_maker(venue)
+        assert taker.certification_eligible is True
+        assert maker.certification_eligible is True
+        assert taker.source_ref.startswith("https://")
+        assert maker.source_ref.startswith("https://")
+        assert taker.observed_at is not None
+        assert taker.revalidate_after is not None
