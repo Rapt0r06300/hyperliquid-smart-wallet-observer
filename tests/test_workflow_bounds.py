@@ -109,7 +109,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "copy_work:" in controller
     assert "other_work:" in controller
     assert "max-parallel: 1" in controller
-    assert "max-parallel: 12" in controller
+    assert "max-parallel: 16" in controller
     assert "head -n 128" in controller
     assert 'list-due catalog/campaigns             | head -n 128' not in controller
     assert 'all-due.txt' in controller
@@ -120,8 +120,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "other_capacity=max(0,16-active_other)" in controller
     assert "fromJSON(needs.select.outputs.copy_matrix)" in controller
     assert "fromJSON(needs.select.outputs.other_matrix)" in controller
-    assert "dispatch_collect:" in controller
-    assert "gh workflow run resumable-campaign-worker.yml" in controller
+    assert "relay_collect:" in controller
     assert "gh workflow run resumable-campaign-controller.yml" in worker
     assert "ref: ${{ steps.pin.outputs.sha }}" in worker
     assert "Claim durable campaign lease" in worker
@@ -147,7 +146,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "using frozen market shard plan" in worker
     assert "full_selected_coin_count" in worker
     assert "actions: write" in worker
-    assert "needs.select.outputs.phase != 'COLLECT'" in controller
+    assert "needs.select.outputs.phase == 'COLLECT'" in controller
     assert "steps.pin.outputs.phase == 'COLLECT'" in worker
 
 
