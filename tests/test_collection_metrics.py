@@ -127,3 +127,52 @@ def test_compact_checkpoint_metrics_do_not_depend_on_stdout(tmp_path, monkeypatc
     assert out["instant"]["trades_collected_observed"] == 1234
     assert out["instant"]["compressed_bytes_known"] == 500000
     assert out["instant"]["coverage_complete"] is True
+
+
+def test_safe_build_preserves_last_good_snapshot_on_failure(tmp_path, monkeypatch):
+    output = tmp_path / "COLLECTION_METRICS.json"
+    output.write_text(
+        json.dumps(
+            {
+                "schema": "alina.collection_metrics.v1",
+                "status": "OK",
+                "stale": False,
+                "instant": {
+                    "trades_collected_observed": 1234,
+                    "coverage_complete": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "OUTPUT", output)
+
+    def boom():
+        raise RuntimeError("simulated metrics failure")
+
+    monkeypatch.setattr(metrics, "build", boom)
+    out = metrics.safe_build()
+
+    assert out["status"] == "DEGRADED"
+    assert out["stale"] is True
+    assert out["instant"]["trades_collected_observed"] == 1234
+    assert out["source"] == "last_known_good_snapshot"
+    persisted = json.loads(output.read_text(encoding="utf-8"))
+    assert persisted["status"] == "DEGRADED"
+    assert persisted["instant"]["trades_collected_observed"] == 1234
+
+
+def test_safe_build_without_previous_uses_unknown_not_zero(tmp_path, monkeypatch):
+    output = tmp_path / "COLLECTION_METRICS.json"
+    monkeypatch.setattr(metrics, "OUTPUT", output)
+
+    def boom():
+        raise RuntimeError("simulated first-run failure")
+
+    monkeypatch.setattr(metrics, "build", boom)
+    out = metrics.safe_build()
+
+    assert out["status"] == "DEGRADED"
+    assert out["stale"] is True
+    assert out["instant"]["trades_collected_observed"] is None
+    assert out["instant"]["coverage_complete"] is False
