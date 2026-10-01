@@ -48,10 +48,12 @@ from hl_observer.backtesting.lead_lag_microstructure_confirmation import (
     HORIZONS_MS as MICRO_HORIZONS_MS,
     MAX_BOOK_AGE_MS as MICRO_MAX_BOOK_AGE_MS,
     MECHANISM as MICRO_MECHANISM,
+    ECONOMIC_TARGET_USD_DAY as MICRO_ECONOMIC_TARGET_USD_DAY,
     MIN_BOOK_IMBALANCE as MICRO_MIN_BOOK_IMBALANCE,
     MIN_FLOW_IMBALANCE as MICRO_MIN_FLOW_IMBALANCE,
     MIN_FLOW_TRADES as MICRO_MIN_FLOW_TRADES,
     MIN_TRAIN_FILLS as MICRO_MIN_TRAIN_FILLS,
+    NOTIONALS_USD as MICRO_NOTIONALS_USD,
     SHOCK_THRESHOLDS_BPS as MICRO_SHOCK_THRESHOLDS_BPS,
     SHOCK_WINDOWS_MS as MICRO_SHOCK_WINDOWS_MS,
     confirm_shocks_with_book_and_flow,
@@ -552,47 +554,72 @@ def explore_lead_lag_multiasset_train(
                     (selected_coin, float(threshold), float(shock_window_ms))
                 ] = (confirmed, diagnostics)
                 for horizon in MICRO_HORIZONS_MS:
-                    report = replay_measured_lead_lag(
-                        {selected_coin: streams},
-                        {selected_coin: follower_books},
-                        shock_threshold_bps=float(threshold),
-                        horizon_ms=int(horizon),
-                        latency_evidence=latency,
-                        notional_usd=NOTIONAL_USD,
-                        min_history=5,
-                        min_expected_net_bps=0.0,
-                        min_episodes=1,
-                        direction_multiplier=1,
-                        shock_window_ms=float(shock_window_ms),
-                        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
-                        precomputed_shocks={selected_coin: confirmed},
-                        inputs_sorted=True,
-                    )
-                    scored = _score_report(
-                        report,
-                        coin=selected_coin,
-                        threshold_bps=float(threshold),
-                        horizon_ms=int(horizon),
-                        trial_count=trial_count,
-                        mechanism=MICRO_MECHANISM,
-                        direction_multiplier=1,
-                        min_train_fills=MICRO_MIN_TRAIN_FILLS,
-                        shock_window_ms=float(shock_window_ms),
-                        admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
-                    )
-                    scored.update(
-                        {
-                            "direction_policy": "EXTERNAL_SHOCK_BOOK_AND_SIGNED_FLOW_AGREEMENT",
-                            "book_imbalance_threshold": MICRO_MIN_BOOK_IMBALANCE,
-                            "flow_imbalance_threshold": MICRO_MIN_FLOW_IMBALANCE,
-                            "flow_lookback_ms": MICRO_FLOW_LOOKBACK_MS,
-                            "minimum_flow_trades": MICRO_MIN_FLOW_TRADES,
-                            "max_confirmation_book_age_ms": MICRO_MAX_BOOK_AGE_MS,
-                            "microstructure_confirmation_diagnostics": dict(diagnostics),
-                            "aligned_source_ids": aligned_source_ids,
-                        }
-                    )
-                    variants.append(scored)
+                    for notional_usd in MICRO_NOTIONALS_USD:
+                        report = replay_measured_lead_lag(
+                            {selected_coin: streams},
+                            {selected_coin: follower_books},
+                            shock_threshold_bps=float(threshold),
+                            horizon_ms=int(horizon),
+                            latency_evidence=latency,
+                            notional_usd=float(notional_usd),
+                            min_history=5,
+                            min_expected_net_bps=0.0,
+                            min_episodes=1,
+                            direction_multiplier=1,
+                            shock_window_ms=float(shock_window_ms),
+                            admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                            precomputed_shocks={selected_coin: confirmed},
+                            inputs_sorted=True,
+                        )
+                        scored = _score_report(
+                            report,
+                            coin=selected_coin,
+                            threshold_bps=float(threshold),
+                            horizon_ms=int(horizon),
+                            trial_count=trial_count,
+                            mechanism=MICRO_MECHANISM,
+                            direction_multiplier=1,
+                            min_train_fills=MICRO_MIN_TRAIN_FILLS,
+                            shock_window_ms=float(shock_window_ms),
+                            admission_policy=ADMISSION_PREDECLARED_ALL_SIGNALS,
+                        )
+                        statistics = dict(scored.get("statistics") or {})
+                        daily_values = [
+                            float(value)
+                            for value in statistics.get("daily_net_pnl_usd") or ()
+                        ]
+                        daily_mean = (
+                            sum(daily_values) / len(daily_values)
+                            if daily_values
+                            else None
+                        )
+                        daily_lcb = statistics.get("daily_mean_lcb_usd")
+                        scored.update(
+                            {
+                                "direction_policy": "EXTERNAL_SHOCK_BOOK_AND_SIGNED_FLOW_AGREEMENT",
+                                "notional_usd": float(notional_usd),
+                                "economic_target_usd_day": MICRO_ECONOMIC_TARGET_USD_DAY,
+                                "daily_mean_net_pnl_usd": daily_mean,
+                                "daily_mean_lcb_usd": daily_lcb,
+                                "target_gap_usd_day": (
+                                    max(
+                                        0.0,
+                                        MICRO_ECONOMIC_TARGET_USD_DAY
+                                        - float(daily_lcb),
+                                    )
+                                    if daily_lcb is not None
+                                    else None
+                                ),
+                                "book_imbalance_threshold": MICRO_MIN_BOOK_IMBALANCE,
+                                "flow_imbalance_threshold": MICRO_MIN_FLOW_IMBALANCE,
+                                "flow_lookback_ms": MICRO_FLOW_LOOKBACK_MS,
+                                "minimum_flow_trades": MICRO_MIN_FLOW_TRADES,
+                                "max_confirmation_book_age_ms": MICRO_MAX_BOOK_AGE_MS,
+                                "microstructure_confirmation_diagnostics": dict(diagnostics),
+                                "aligned_source_ids": aligned_source_ids,
+                            }
+                        )
+                        variants.append(scored)
 
     for leader, follower in planned_cross_pairs:
         leader_streams, follower_streams = tape.get(leader), tape.get(follower)
@@ -775,7 +802,7 @@ def explore_lead_lag_multiasset_train(
             "horizon_ms": selected["horizon_ms"],
             "shock_window_ms": selected["shock_window_ms"],
             "admission_policy": selected["admission_policy"],
-            "notional_usd": NOTIONAL_USD,
+            "notional_usd": float(selected.get("notional_usd", NOTIONAL_USD)),
             "candidate_universe": list(DEFAULT_CANDIDATE_COINS),
             "research_family_trial_count": trial_count,
             "minimum_train_fills": selected["minimum_train_fills"],
@@ -848,6 +875,8 @@ def explore_lead_lag_multiasset_train(
                 "max_confirmation_book_age_ms": MICRO_MAX_BOOK_AGE_MS,
                 "admission_policy": ADMISSION_PREDECLARED_ALL_SIGNALS,
                 "minimum_train_fills": MICRO_MIN_TRAIN_FILLS,
+                "notionals_usd": list(MICRO_NOTIONALS_USD),
+                "economic_target_usd_day": MICRO_ECONOMIC_TARGET_USD_DAY,
                 "trial_count": microstructure_confirmation_trials,
                 "selection_scope": "TRAIN_ONLY_PRE_FREEZE",
             },
