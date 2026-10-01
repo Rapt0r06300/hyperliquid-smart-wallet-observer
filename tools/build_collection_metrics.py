@@ -189,6 +189,9 @@ def build() -> dict[str, Any]:
             if compact is None:
                 totals["units_missing_compact_metrics"] += 1
                 bucket["units_missing_compact_metrics"] += 1
+                if kind != "event_intelligence_collection":
+                    totals["units_trade_count_coverage_incomplete"] += 1
+                    bucket["units_trade_count_coverage_incomplete"] += 1
                 continue
 
             if compact.get("trade_count_coverage_complete") is not True:
@@ -248,10 +251,8 @@ def build() -> dict[str, Any]:
             "persisted_frames": totals["persisted_frames"],
             "shards_published": totals["shards"],
             "compressed_bytes_known": totals["compressed_bytes"],
-            "coverage_complete": (
-                totals["units_missing_compact_metrics"] == 0
-                and totals["units_trade_count_coverage_incomplete"] == 0
-            ),
+            "coverage_complete": totals["units_trade_count_coverage_incomplete"] == 0,
+            "all_collection_metrics_complete": totals["units_missing_compact_metrics"] == 0,
             "units_missing_compact_metrics": totals["units_missing_compact_metrics"],
             "units_trade_count_coverage_incomplete": (
                 totals["units_trade_count_coverage_incomplete"]
