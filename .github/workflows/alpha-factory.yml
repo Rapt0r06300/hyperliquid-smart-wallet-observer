@@ -3,6 +3,9 @@ name: alpha-factory
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   workflow_dispatch: {}
 
 concurrency:

@@ -3,6 +3,9 @@ name: pre-run-pnl-314-320
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   workflow_dispatch: {}
 
 permissions:
