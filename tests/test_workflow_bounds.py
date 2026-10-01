@@ -38,13 +38,14 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "TARGET_MARKET_SHARDS=16" in text
     assert "freeze_market_shards.py" in text
     assert "catalog/market_collection_plans" in text
+    assert 'MARKET_PLAN_DIR="catalog/market_collection_plans/e$PHASE_EPOCH/$BUCKET"' in text
     assert "MARKET_FULL_PLAN" in text
     assert "MARKET_SHARD_INDEX" in text
     assert "universe_digest" in text
     assert "plan_sha256" in text
     assert "MARKET_SHARD_INDEX" in text
     assert "market-shards.tsv" in text
-    assert "market-$MARKET_SHARD-$BUCKET-v7" in text
+    assert "market-e$PHASE_EPOCH-$MARKET_SHARD-$BUCKET-v7" in text
     assert "market-hourly-sharded-frozen-universe-v7" in text
     assert "market_shard_count" in text
     assert "market_shard_index" in text
@@ -61,10 +62,11 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert 'COPY_MAX_USERS_PER_LANE" -le 10' in text
     assert "supersede_copy_vault_fanout.py" in text
     assert "COPY_LANE<COPY_LANES" in text
-    assert "copy-vault-$COPY_LANE-$BUCKET-v7" in text
+    assert "copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7" in text
     assert "selection_file" in text
     assert "selection_sha256" in text
     assert "catalog/copy_vault_selections" in text
+    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
     assert "official_archive_collection" in text
     assert "event_intelligence_collection" in text
     for kind in ("replay", "backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"):

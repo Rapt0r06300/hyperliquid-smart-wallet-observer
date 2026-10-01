@@ -62,3 +62,16 @@ def test_collect_market_shards_scale_without_repartitioning_live_bucket() -> Non
     assert 'if [ -f "$MARKET_SHARD_INDEX" ]; then' in text
     assert 'preserving frozen current-bucket market_shard_count=$MARKET_SHARDS' in text
     assert '--shard-count "$MARKET_SHARDS"' in text
+
+
+def test_collect_campaign_identity_and_frozen_inputs_are_epoch_scoped() -> None:
+    text = _text()
+    assert 'MARKET_PLAN_DIR="catalog/market_collection_plans/e$PHASE_EPOCH/$BUCKET"' in text
+    assert '"market-e$PHASE_EPOCH-$MARKET_SHARD-$BUCKET-v7"' in text
+    assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
+    assert '"copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7"' in text
+    assert '"event-e$PHASE_EPOCH-$BUCKET-v5"' in text
+    assert '"archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"' in text
+    assert '"archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"' in text
+    assert 'row.get("creation_phase")=="COLLECT"' in text
+    assert 'int(row.get("phase_epoch") or 0)==epoch' in text

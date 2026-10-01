@@ -181,7 +181,7 @@ jobs:
             # comparisons remain meaningful across venues.
             TARGET_MARKET_SHARDS=16
             MARKET_SHARDS="$TARGET_MARKET_SHARDS"
-            MARKET_PLAN_DIR="catalog/market_collection_plans/$BUCKET"
+            MARKET_PLAN_DIR="catalog/market_collection_plans/e$PHASE_EPOCH/$BUCKET"
             MARKET_FULL_PLAN="$MARKET_PLAN_DIR/full.json"
             MARKET_SHARD_INDEX="$MARKET_PLAN_DIR/index.json"
             mkdir -p "$MARKET_PLAN_DIR"
@@ -221,18 +221,19 @@ jobs:
               MARKET_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":3500,"max_coins":0,"rotate_mb":64,"universe_mode":"native_discovery_full","require_all_native_venues":True,"market_shard_count":int(sys.argv[1]),"market_shard_index":int(sys.argv[2]),"plan_file":sys.argv[3],"plan_sha256":sys.argv[4],"universe_digest":sys.argv[5],"selected_coin_count":int(sys.argv[6])}, separators=(",",":")))' "$MARKET_SHARDS" "$MARKET_SHARD" "$MARKET_PLAN_FILE" "$MARKET_PLAN_SHA" "$UNIVERSE_DIGEST" "$MARKET_COIN_COUNT")"
               make_campaign \
                 market_collection \
-                "market-$MARKET_SHARD-$BUCKET-v7" \
+                "market-e$PHASE_EPOCH-$MARKET_SHARD-$BUCKET-v7" \
                 "market-hourly-sharded-frozen-universe-v7" \
                 "$MARKET_CURSOR"
             done < "$RUNNER_TEMP/market-shards.tsv"
 
             python tools/supersede_copy_vault_fanout.py
 
-            ACTIVE_COPY_CAMPAIGNS="$(python -c 'import glob,json; active={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}; rows=[]; [rows.append(str(json.load(open(path,encoding="utf-8")).get("status") or "")) for path in glob.glob("catalog/campaigns/copy-vault-*-v7.json")]; print(sum(status in active for status in rows))')"
+            ACTIVE_COPY_CAMPAIGNS="$(python -c 'import glob,json,sys; epoch=int(sys.argv[1]); active={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}; rows=[json.load(open(path,encoding="utf-8")) for path in glob.glob("catalog/campaigns/copy-vault-*-v7.json")]; print(sum(str(row.get("status") or "") in active and row.get("creation_phase")=="COLLECT" and int(row.get("phase_epoch") or 0)==epoch for row in rows))' "$PHASE_EPOCH")"
             if [ "$ACTIVE_COPY_CAMPAIGNS" -gt 0 ]; then
               echo "active Copy-Vault sweep already exists ($ACTIVE_COPY_CAMPAIGNS campaigns); skipping overlapping full-universe sweep"
             else
-              COPY_SELECTION="catalog/copy_vault_selections/$BUCKET.json"
+              COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"
+              mkdir -p "$(dirname "$COPY_SELECTION")"
               if [ ! -f "$COPY_SELECTION" ]; then
                 PYTHONPATH=alina/src python alina/tools/freeze_copy_vault_selection.py --output "$COPY_SELECTION"
               fi
@@ -245,15 +246,15 @@ jobs:
               test "$COPY_MAX_USERS_PER_LANE" -le 10
               for ((COPY_LANE=0; COPY_LANE<COPY_LANES; COPY_LANE++)); do
                 COPY_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":300,"max_vaults":int(sys.argv[1]),"vault_shard_count":int(sys.argv[2]),"vault_shard_index":int(sys.argv[3]),"rotate_mb":64,"selection_file":sys.argv[4],"selection_sha256":sys.argv[5]}, separators=(",",":")))' "$COPY_COUNT" "$COPY_LANES" "$COPY_LANE" "$COPY_SELECTION" "$COPY_SHA")"
-                make_campaign               copy_vault_collection               "copy-vault-$COPY_LANE-$BUCKET-v7"               "copy-vault-hourly-complete-universe-v7"               "$COPY_CURSOR"
+                make_campaign               copy_vault_collection               "copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7"               "copy-vault-hourly-complete-universe-v7"               "$COPY_CURSOR"
               done
             fi
 
-            make_campaign             event_intelligence_collection             "event-$BUCKET-v5"             "event-hourly-v5"             '{}'
+            make_campaign             event_intelligence_collection             "event-e$PHASE_EPOCH-$BUCKET-v5"             "event-hourly-v5"             '{}'
 
             if [ "$HOUR" = "06" ]; then
-              make_campaign               official_archive_collection               "archives-binance-btc-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"binance\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
-              make_campaign               official_archive_collection               "archives-bybit-btc-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"bybit\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
+              make_campaign               official_archive_collection               "archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"binance\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
+              make_campaign               official_archive_collection               "archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"bybit\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
             fi
           fi
 
