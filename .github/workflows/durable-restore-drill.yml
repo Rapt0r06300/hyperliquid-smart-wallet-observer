@@ -1,0 +1,26 @@
+name: durable-restore-drill
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: durable-restore-drill
+  cancel-in-progress: false
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          clean: true
+      - name: Reconstruct durable state without cache
+        run: python tools/restore_durable_state.py
+      - name: Upload durable restore receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: durable-restore-receipt-${{ github.run_id }}
+          path: catalog/DURABLE_RESTORE_RECEIPT.json
+          if-no-files-found: error
+          retention-days: 30

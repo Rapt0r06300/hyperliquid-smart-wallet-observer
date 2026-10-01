@@ -1,0 +1,135 @@
+name: cleanup-incomplete-v2-releases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/cleanup-incomplete-v2-releases.yml'
+  schedule:
+    - cron: '43 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Remove only stale incomplete V2 releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from datetime import datetime, timezone
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          api = "https://api.github.com"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "Alina-Dataset-V2-Cleanup",
+          }
+
+          def request(path, method="GET"):
+              req = urllib.request.Request(
+                  api + "/" + path.lstrip("/"),
+                  headers=headers,
+                  method=method,
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as response:
+                      raw = response.read()
+                  return json.loads(raw) if raw else None
+              except urllib.error.HTTPError as exc:
+                  if method == "DELETE" and exc.code == 404:
+                      return None
+                  raise
+
+          releases = []
+          for page in range(1, 21):
+              rows = request(
+                  f"repos/{repository}/releases?per_page=100&page={page}"
+              )
+              if not isinstance(rows, list):
+                  raise SystemExit("INVALID_RELEASE_LIST")
+              releases.extend(rows)
+              if len(rows) < 100:
+                  break
+
+          now = datetime.now(timezone.utc)
+          deleted = []
+          retained = []
+          for release in releases:
+              tag = str(release.get("tag_name") or "")
+              if not tag.startswith(("data-v2-", "copy-vault-v2-", "archive-v2-")):
+                  continue
+              assets = release.get("assets") or []
+              names = {
+                  str(asset.get("name") or "")
+                  for asset in assets
+                  if isinstance(asset, dict)
+              }
+              if "RUN_MANIFEST.json" in names:
+                  retained.append({"tag": tag, "reason": "verified-run-manifest"})
+                  continue
+              created_raw = str(
+                  release.get("created_at") or release.get("published_at") or ""
+              )
+              try:
+                  created = datetime.fromisoformat(
+                      created_raw.replace("Z", "+00:00")
+                  )
+              except ValueError:
+                  retained.append({"tag": tag, "reason": "invalid-created-at"})
+                  continue
+              age_hours = (now - created).total_seconds() / 3600.0
+              if age_hours < 3.0:
+                  retained.append({"tag": tag, "reason": "grace-period"})
+                  continue
+
+              release_id = int(release.get("id") or 0)
+              if release_id <= 0:
+                  continue
+              request(
+                  f"repos/{repository}/releases/{release_id}",
+                  method="DELETE",
+              )
+              encoded_tag = urllib.parse.quote(tag, safe="")
+              try:
+                  request(
+                      f"repos/{repository}/git/refs/tags/{encoded_tag}",
+                      method="DELETE",
+                  )
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 422:
+                      raise
+              deleted.append(
+                  {
+                      "release_id": release_id,
+                      "tag": tag,
+                      "asset_count": len(names),
+                      "age_hours": round(age_hours, 2),
+                  }
+              )
+
+          print(json.dumps(
+              {
+                  "deleted": deleted,
+                  "retained": retained,
+                  "policy": "delete only data-v2-*, copy-vault-v2-* or archive-v2-* without RUN_MANIFEST after 3h",
+              },
+              indent=2,
+              sort_keys=True,
+          ))
+          PY

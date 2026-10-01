@@ -1,0 +1,70 @@
+name: dataset-health-receipt
+# DATA_METRICS is the canonical exact-coverage trigger; receipt publication
+# must follow any exact-count recovery before ANALYZE quality gates advance.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */2 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "catalog/DATA_METRICS.json"
+      - "catalog/TRADE_UNIQUE_COUNT_PATCH.json"
+      - "catalog/DATA_INDEX.json"
+      - "catalog/campaigns/**"
+      - "control/alina-phase.json"
+      - "tools/generate_health_receipt.py"
+      - "tools/build_copy_vault_coverage_receipt.py"
+      - "tools/validate_campaign_resilience.py"
+      - "catalog/REPLAY_COMPATIBILITY_REASONS.json"
+      - ".github/workflows/dataset-health-receipt.yml"
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: dataset-v2-receipt-publish
+  cancel-in-progress: false
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Sync latest main before generating receipts
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+      - name: Generate Copy-Vault coverage
+        run: python tools/build_copy_vault_coverage_receipt.py
+      - name: Generate campaign resilience receipt
+        run: python tools/validate_campaign_resilience.py
+      - name: Generate receipt
+        run: |
+          set -euo pipefail
+          python tools/generate_health_receipt.py --dataset-commit "$(git rev-parse HEAD)"
+      - name: Publish receipts
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/DATASET_HEALTH_RECEIPT.json catalog/COPY_VAULT_COVERAGE_RECEIPT.json catalog/CAMPAIGN_RESILIENCE_RECEIPT.json
+          git diff --cached --quiet && exit 0
+          git commit -m "health: publish Dataset V2 receipt"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main
+          done
+          exit 1
+      - name: Dispatch analysis stage controller after durable health publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run analysis-stage-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+

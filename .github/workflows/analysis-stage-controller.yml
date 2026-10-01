@@ -1,0 +1,81 @@
+name: analysis-stage-controller
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - "control/alina-phase.json"
+      - "control/analysis-stage-gates.json"
+      - "catalog/campaigns/**"
+      - "catalog/DATASET_HEALTH_RECEIPT.json"
+      - "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json"
+      - "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json"
+      - "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json"
+      - "tools/advance_analysis_stage.py"
+      - "tools/auto_advance_analysis.py"
+      - "tools/finalize_analysis_drain.py"
+      - ".github/workflows/analysis-stage-controller.yml"
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: advance-analysis-stage
+  # Phase/campaign state is durable in main. A newer controller run reloads
+  # origin/main before advancing, so obsolete queued/running evaluations should
+  # be superseded instead of delaying the current canonical stage.
+  cancel-in-progress: true
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Sync latest durable state
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+      - id: drain
+        name: Finalize bounded source-epoch drain
+        run: |
+          set -euo pipefail
+          python tools/finalize_analysis_drain.py | tee "$RUNNER_TEMP/drain.json"
+          changed="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["changed"])' "$RUNNER_TEMP/drain.json")"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+      - id: advance
+        name: Advance one satisfied stage
+        run: |
+          set -euo pipefail
+          python tools/auto_advance_analysis.py | tee "$RUNNER_TEMP/advance.json"
+          status="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/advance.json")"
+          new_stage="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("new_stage", ""))' "$RUNNER_TEMP/advance.json")"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "new_stage=$new_stage" >> "$GITHUB_OUTPUT"
+      - name: Publish durable drain and stage authority
+        if: steps.advance.outputs.status == 'ADVANCED' && steps.advance.outputs.new_stage != 'DONE' || steps.drain.outputs.changed != '0'
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add control/alina-phase.json control/phase-receipts catalog/campaigns
+          git diff --cached --quiet && exit 0
+          git commit -m "analysis: persist bounded drain and verified stage"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main
+          done
+          exit 1
+      - name: Materialize next-stage work
+        if: steps.advance.outputs.status == 'ADVANCED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run create-resumable-campaigns.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run resumable-campaign-controller.yml --repo "$GITHUB_REPOSITORY" --ref main

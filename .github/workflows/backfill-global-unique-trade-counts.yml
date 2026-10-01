@@ -1,0 +1,72 @@
+name: backfill-global-unique-trade-counts
+on:
+  # Do not fan-in from high-frequency workflow_run completions here. GitHub
+  # concurrency keeps at most one pending run and replaces older pending runs,
+  # which can starve this long scan indefinitely while upstream workflows churn.
+  # Parser/catalog changes still trigger immediately; schedule/manual cover the
+  # steady-state reconciliation.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/backfill-global-unique-trade-counts.yml"
+      - "tools/backfill_global_unique_trade_counts.py"
+      - "tests/test_global_unique_trade_backfill.py"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum immutable trade assets to scan"
+        required: false
+        default: "12000"
+      workers:
+        description: "Parallel immutable asset scanners"
+        required: false
+        default: "24"
+  schedule:
+    - cron: "43 */2 * * *"
+permissions:
+  contents: write
+concurrency:
+  group: dataset-v2-global-unique-counts-v2
+  # A newer parser/catalog push may supersede stale code. A delayed schedule
+  # must never cancel useful work already running on the current code.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+jobs:
+  deduplicate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Sync latest main before scanning
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Scan immutable assets with global identity store
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          python tools/backfill_global_unique_trade_counts.py \
+            --limit "${{ inputs.limit || '12000' }}" \
+            --workers "${{ inputs.workers || '24' }}"
+          python tools/build_catalog_metrics.py
+          python tools/check_dataset_quality.py
+      - name: Publish deduplication patch
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/TRADE_UNIQUE_COUNT_PATCH.json catalog/DATA_INDEX.json catalog/DATA_METRICS.json catalog/DATA_CATALOG.json catalog/DATA_QUALITY_REGISTRY.json datasets
+          git diff --cached --quiet && exit 0
+          git commit -m "data: publish global unique trade count progress"
+          if git push origin HEAD:main; then
+            exit 0
+          fi
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main

@@ -1,0 +1,642 @@
+name: resumable-campaign-worker
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      max_units:
+        required: false
+        default: "0"
+        type: string
+      phase_epoch:
+        required: false
+        default: ""
+        type: string
+      generation:
+        required: false
+        default: ""
+        type: string
+      predecessor_run_id:
+        required: false
+        default: ""
+        type: string
+      requested_handoff_at_utc:
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      max_units:
+        required: false
+        default: 0
+        type: number
+      phase_epoch:
+        required: false
+        default: ""
+        type: string
+      generation:
+        required: false
+        default: ""
+        type: string
+      predecessor_run_id:
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: resumable-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    env:
+      CAMPAIGN_ID: "${{ inputs.campaign_id }}"
+      GH_TOKEN: "${{ github.token }}"
+      MAX_UNITS: "${{ inputs.max_units || '0' }}"
+      HANDOFF_PHASE_EPOCH: "${{ inputs.phase_epoch || '' }}"
+      HANDOFF_GENERATION: "${{ inputs.generation || '' }}"
+      PREDECESSOR_RUN_ID: "${{ inputs.predecessor_run_id || '' }}"
+      REQUESTED_HANDOFF_AT_UTC: "${{ inputs.requested_handoff_at_utc || '' }}"
+      REAL_MAINNET_TRADING: "false"
+      ENABLE_REAL_ORDERS: "0"
+    steps:
+      - name: Checkout Dataset V2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refresh Dataset V2 main before pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
+      - id: pin
+        name: Read pinned code SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          test -f "$M"
+          python tools/phase_gate.py manifest --manifest "$M"
+          PHASE_META="$(python tools/phase_gate.py read)"
+          PHASE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$PHASE_META")"
+          PHASE_EPOCH="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["epoch"])' "$PHASE_META")"
+          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
+          echo "phase_epoch=$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
+          python - <<'PY' "$M" >> "$GITHUB_OUTPUT"
+          import json,os,sys
+          m=json.load(open(sys.argv[1]))
+          handoff_epoch=os.environ.get("HANDOFF_PHASE_EPOCH") or ""
+          if handoff_epoch and int(handoff_epoch) != int(m.get("phase_epoch") or 0):
+              raise SystemExit("handoff phase epoch mismatch")
+          handoff_generation=os.environ.get("HANDOFF_GENERATION") or ""
+          if handoff_generation and int(handoff_generation) < int(m.get("chunk_index") or 0):
+              raise SystemExit("handoff generation is stale")
+          print("sha="+str(m["code_sha"]))
+          print("kind="+str(m["kind"]))
+          print("status="+str(m["status"]))
+          PY
+
+      - name: Checkout pinned Alina code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: ${{ steps.pin.outputs.sha }}
+          path: alina
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: alina/pyproject.toml
+
+      - name: Install pinned Alina runtime
+        run: python -m pip install --disable-pip-version-check -e ./alina
+
+      - id: claim
+        name: Claim durable campaign lease
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          git pull --rebase origin main
+          STATUS="$(python - <<'PY' "$M"
+          import json,sys
+          print(json.load(open(sys.argv[1]))["status"])
+          PY
+          )"
+          case "$STATUS" in
+            COMPLETE|FAILED|UNAVAILABLE|PARTIAL|REJECT)
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Campaign already terminal: $STATUS"
+              exit 0
+              ;;
+          esac
+          DIGEST="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py validate "$M")"
+          CLAIM="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "${{ steps.pin.outputs.phase }}"             --expected-epoch "${{ steps.pin.outputs.phase_epoch }}")"
+          TOKEN="$(printf '%s\n' "$CLAIM" | sed -n 's/^lease_token=//p' | tail -1)"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "lease_token=$TOKEN" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          gh auth setup-git
+          git add "$M"
+          git commit -m "campaign: claim $CAMPAIGN_ID run $GITHUB_RUN_ID"
+          STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
+          STAGGER="$((16#$STAGGER_HEX % 23))"
+          sleep "$STAGGER"
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            delay="$((3 + (STAGGER % 5) + i * 3))"
+            [ "$delay" -le 30 ] || delay=30
+            sleep "$delay"
+          done
+          exit 1
+
+      - id: unit
+        name: Run one bounded real unit
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          python - <<'PY' "$M" > "$RUNNER_TEMP/unit.env"
+          import json,os,shlex,sys
+          m=json.load(open(sys.argv[1]))
+          idx=int(m.get("chunk_index",0))
+          kind=str(m["kind"])
+          part=dict(m.get("cursor") or {})
+          part.update({
+              "chunk_index":idx,
+              "code_sha":m.get("code_sha"),
+              "creation_phase":m.get("creation_phase"),
+              "phase_epoch":m.get("phase_epoch"),
+              "source_collection_epoch":m.get("source_collection_epoch"),
+              "collection_cutoff_at_utc":m.get("collection_cutoff_at_utc"),
+              "dataset_selection_id":m.get("dataset_selection_id"),
+              "output_root":os.path.join(os.environ["RUNNER_TEMP"],"campaign-output"),
+          })
+          if kind=="market_collection":
+              part.setdefault("duration_s",3500)
+              part.setdefault("plan_file",os.path.join(os.environ["RUNNER_TEMP"],"collection-plan.json"))
+              part.setdefault("max_coins",0)
+              part.setdefault("rotate_mb",64)
+              part.setdefault("market_shard_count",1)
+              part.setdefault("market_shard_index",0)
+          elif kind=="copy_vault_collection":
+              COPY_VAULT_SWEEP_DURATION_CAP_S=300
+              part.setdefault("duration_s",3500)
+              part["duration_s"] = min(
+                  float(part["duration_s"]),
+                  float(COPY_VAULT_SWEEP_DURATION_CAP_S),
+              )
+              part.setdefault("max_vaults",10)
+              part.setdefault("vault_shard_count",1)
+              part.setdefault("vault_shard_index",0)
+              part.setdefault("rotate_mb",64)
+              if part.get("selection_file"):
+                  part["selection_file"]=os.path.abspath(str(part["selection_file"]))
+          elif kind=="official_archive_collection":
+              part.setdefault("max_days",1)
+          elif kind in {"replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard"}:
+              part["workspace_root"]=os.path.join(
+                  os.environ["RUNNER_TEMP"],
+                  "alina-replay-workspace",
+              )
+              part.setdefault("max_shards",64 if kind=="replay" else 128)
+          print("KIND="+shlex.quote(kind))
+          print("UNIT="+shlex.quote(str(idx)))
+          print("MARKET_SHARD_COUNT="+shlex.quote(str(part.get("market_shard_count",1))))
+          print("MARKET_SHARD_INDEX="+shlex.quote(str(part.get("market_shard_index",0))))
+          print("PART="+shlex.quote(json.dumps(part,separators=(",",":"))))
+          PY
+          source "$RUNNER_TEMP/unit.env"
+          if [ "$KIND" = "market_collection" ]; then
+            MARKET_PLAN_FILE="$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("plan_file") or "")' "$PART")"
+            MARKET_PLAN_SHA="$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("plan_sha256") or "")' "$PART")"
+            if [ -n "$MARKET_PLAN_FILE" ] && [ -f "$MARKET_PLAN_FILE" ] && [ -n "$MARKET_PLAN_SHA" ]; then
+              ACTUAL_MARKET_PLAN_SHA="$(sha256sum "$MARKET_PLAN_FILE" | cut -d' ' -f1)"
+              test "$ACTUAL_MARKET_PLAN_SHA" = "$MARKET_PLAN_SHA"
+              echo "using frozen market shard plan: $MARKET_PLAN_FILE sha256=$MARKET_PLAN_SHA"
+            else
+            python alina/tools/discover_cloud_collection_plan.py               --output "$RUNNER_TEMP/collection-plan.json"               --min-venues 2               --max-coins "${MAX_COINS:-0}"               --batch-size 8
+            python - <<'PY' "$RUNNER_TEMP/collection-plan.json" "$MARKET_SHARD_COUNT" "$MARKET_SHARD_INDEX"
+          import hashlib,json,sys
+          path,raw_count,raw_index=sys.argv[1:]
+          count=int(raw_count)
+          index=int(raw_index)
+          if count < 1 or index < 0 or index >= count:
+              raise SystemExit("invalid market shard coordinates")
+          plan=json.load(open(path,encoding="utf-8"))
+          selected=[row for row in plan.get("selected",[]) if isinstance(row,dict) and str(row.get("coin") or "").strip()]
+          full_count=len(selected)
+          def owner(row):
+              coin=str(row["coin"]).strip().upper().encode()
+              return int.from_bytes(hashlib.sha256(coin).digest()[:8],"big") % count
+          assigned=[row for row in selected if owner(row)==index]
+          if not assigned:
+              raise SystemExit(f"market shard {index}/{count} has no discovered coins")
+          plan["full_selected_coin_count"]=full_count
+          plan["selected_coin_count"]=len(assigned)
+          plan["selected"]=assigned
+          plan["market_shard_count"]=count
+          plan["market_shard_index"]=index
+          plan["market_shard_assignment"]="sha256_coin_mod"
+          size=max(1,int(plan.get("batch_size") or 8))
+          plan["batches"]=[
+              {"batch_id":f"batch-{n // size:03d}","coins":assigned[n:n+size]}
+              for n in range(0,len(assigned),size)
+          ]
+          open(path,"w",encoding="utf-8").write(json.dumps(plan,ensure_ascii=False,indent=2,sort_keys=True)+"\n")
+          print(json.dumps({
+              "market_shard_index":index,
+              "market_shard_count":count,
+              "full_selected_coin_count":full_count,
+              "selected_coin_count":len(assigned),
+              "coins":[row["coin"] for row in assigned],
+          },sort_keys=True))
+          PY
+            fi
+          elif [[ "$KIND" = "replay" || "$KIND" = "backtest" || "$KIND" = "oos" || "$KIND" = "forward_paper" || "$KIND" = "module_pnl_proof" || "$KIND" = "scoreboard" ]]; then
+            WORKSPACE="$RUNNER_TEMP/alina-replay-workspace"
+            mkdir -p "$WORKSPACE"
+            test -d alina/tools
+            test -d alina/src
+            cp -R alina/tools "$WORKSPACE/tools"
+            cp -R alina/src "$WORKSPACE/src"
+            cp alina/pyproject.toml "$WORKSPACE/pyproject.toml"
+            if [ -f alina/requirements.txt ]; then cp alina/requirements.txt "$WORKSPACE/requirements.txt"; fi
+            echo "prepared pinned Alina runtime in $WORKSPACE"
+          fi
+          echo "kind=$KIND" >> "$GITHUB_OUTPUT"
+          echo "unit=$UNIT" >> "$GITHUB_OUTPUT"
+          PYTHONPATH=alina/src python alina/tools/run_resumable_campaign.py             --campaign-id "$CAMPAIGN_ID"             --kind "$KIND"             --unit-id "$UNIT"             --partition-json "$PART"             --soft-deadline-s 18900             > "$RUNNER_TEMP/result.json"
+          test -s "$RUNNER_TEMP/result.json"
+          cat "$RUNNER_TEMP/result.json"
+
+      - name: Normalize missing unit result
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true' && always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if python -m json.tool "$RUNNER_TEMP/result.json" >/dev/null 2>&1; then
+            exit 0
+          fi
+          python - <<'PY' "$RUNNER_TEMP/result.json"
+          import hashlib,json,sys
+          path=sys.argv[1]
+          payload={
+              "status":"FAILED",
+              "reason":"worker_unit_crash",
+              "failure_category":"INFRASTRUCTURE",
+          }
+          raw=json.dumps(payload,sort_keys=True,separators=(",",":")).encode()
+          row={
+              "status":"FAILED",
+              "sha256":hashlib.sha256(raw).hexdigest(),
+              "payload":payload,
+              "progressed":False,
+          }
+          open(path,"w",encoding="utf-8").write(json.dumps(row,sort_keys=True)+"\n")
+          PY
+
+      - id: durable
+        name: Persist collection data or analysis evidence
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIND="${{ steps.unit.outputs.kind }}"
+          UNIT="${{ steps.unit.outputs.unit }}"
+          RESULT="$RUNNER_TEMP/result.json"
+          STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RESULT")"
+          if [ "$STATUS" != "COMPLETE" ]; then
+            echo "No durable publish required for status=$STATUS"
+            exit 0
+          fi
+
+          case "$KIND" in
+            market_collection|copy_vault_collection|official_archive_collection|event_intelligence_collection)
+              BUNDLE="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["payload"]["bundle_root"])' "$RESULT")"
+              test -n "$BUNDLE"
+              test -f "$BUNDLE/BUNDLE_INDEX.json"
+              TAG="data-v2-campaign-$CAMPAIGN_ID-u$UNIT"
+              PUBLISH_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
+              PUBLISH_JITTER="$((16#$PUBLISH_HEX % 11))"
+              PUBLISH_OK=0
+              for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                set +e
+                PUBLISH_OUTPUT="$(python alina/tools/publish_dataset_v2_release.py \
+                  "$BUNDLE" \
+                  --repository "$GITHUB_REPOSITORY" \
+                  --tag "$TAG" \
+                  --target main \
+                  --title "Alina Dataset V2 $CAMPAIGN_ID unit $UNIT" 2>&1)"
+                rc=$?
+                set -e
+                printf '%s\n' "$PUBLISH_OUTPUT"
+                if [ "$rc" -eq 0 ]; then
+                  PUBLISH_OK=1
+                  break
+                fi
+                if printf '%s' "$PUBLISH_OUTPUT" | grep -Eqi 'rate limit|HTTP 403|HTTP 429|502 bad gateway|503 service unavailable|timeout|timed out|connection reset|release not found|status 404'; then
+                  if [ "$attempt" -lt 12 ]; then
+                    sleep "$((5 + PUBLISH_JITTER + attempt * 5))"
+                    continue
+                  fi
+                fi
+                exit "$rc"
+              done
+              if [ "$PUBLISH_OK" -ne 1 ]; then
+                echo "Durable release publication exhausted bounded transient retries." >&2
+                exit 2
+              fi
+              test -f "$BUNDLE/RUN_MANIFEST.json"
+              python tools/augment_campaign_result.py collection                 --result "$RESULT"                 --run-manifest "$BUNDLE/RUN_MANIFEST.json"                 --tag "$TAG"                 --repository "$GITHUB_REPOSITORY"
+              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              ;;
+            replay|backtest|oos|forward_paper|module_pnl_proof|scoreboard)
+              WORKSPACE="$RUNNER_TEMP/alina-replay-workspace"
+              EVIDENCE_DIR="$RUNNER_TEMP/evidence"
+              EVIDENCE="$RUNNER_TEMP/$CAMPAIGN_ID-u$UNIT-evidence.tgz"
+              rm -rf "$EVIDENCE_DIR"
+              mkdir -p "$EVIDENCE_DIR"
+              cp "$RESULT" "$EVIDENCE_DIR/result.json"
+              if [ -d "$WORKSPACE/runtime/reports" ]; then
+                cp -R "$WORKSPACE/runtime/reports" "$EVIDENCE_DIR/reports"
+              fi
+              if [ -d "$WORKSPACE/runtime/scoreboards" ]; then
+                cp -R "$WORKSPACE/runtime/scoreboards" "$EVIDENCE_DIR/scoreboards"
+              fi
+              tar -C "$EVIDENCE_DIR" -czf "$EVIDENCE" .
+              TAG="campaign-evidence-$CAMPAIGN_ID-u$UNIT"
+              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                gh release upload "$TAG" "$EVIDENCE" --clobber --repo "$GITHUB_REPOSITORY"
+              else
+                gh release create "$TAG" "$EVIDENCE"                   --repo "$GITHUB_REPOSITORY"                   --target main                   --title "Alina campaign evidence $CAMPAIGN_ID unit $UNIT"                   --notes "Paper/read-only evidence. No real execution."
+              fi
+              python tools/augment_campaign_result.py evidence                 --result "$RESULT"                 --tag "$TAG"                 --repository "$GITHUB_REPOSITORY"
+              SCOREBOARD="$WORKSPACE/runtime/reports/economic_family_scoreboards.json"
+              if [[ "$KIND" = "backtest" || "$KIND" = "oos" || "$KIND" = "forward_paper" || "$KIND" = "module_pnl_proof" ]]; then
+                test -f "$SCOREBOARD"
+                PYTHONPATH=. python tools/persist_analysis_improvement.py \
+                  --campaign-manifest "catalog/campaigns/$CAMPAIGN_ID.json" \
+                  --scoreboard "$SCOREBOARD" \
+                  --evidence-tag "$TAG" \
+                  --repository "$GITHUB_REPOSITORY" \
+                  --unit-id "$UNIT"
+              fi
+              if [ "$KIND" = "scoreboard" ]; then
+                SCOREBOARD="$WORKSPACE/runtime/reports/economic_family_scoreboards.json"
+                ENV_RECEIPT="$WORKSPACE/runtime/reports/analysis_stages/scoreboard.json"
+                if [ ! -f "$ENV_RECEIPT" ]; then
+                  LEGACY_ENV_RECEIPT="$WORKSPACE/runtime/reports/economic_campaigns/analysis_stages/scoreboard.json"
+                  if [ -f "$LEGACY_ENV_RECEIPT" ]; then
+                    ENV_RECEIPT="$LEGACY_ENV_RECEIPT"
+                  fi
+                fi
+                test -f "$SCOREBOARD"
+                test -f "$ENV_RECEIPT"
+                PYTHONPATH=. python tools/persist_analysis_scoreboard.py \
+                  --campaign-manifest "catalog/campaigns/$CAMPAIGN_ID.json" \
+                  --scoreboard "$SCOREBOARD" \
+                  --environment-receipt "$ENV_RECEIPT" \
+                  --evidence-tag "$TAG" \
+                  --repository "$GITHUB_REPOSITORY" \
+                  --unit-id "$UNIT"
+              fi
+              echo "evidence_tag=$TAG" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown campaign kind: $KIND" >&2
+              exit 2
+              ;;
+          esac
+
+      - name: Record immutable publication receipt
+        if: ${{ false }}
+        shell: bash
+        env:
+          PHASE: "${{ steps.pin.outputs.phase }}"
+          PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
+          RELEASE_TAG: "${{ steps.durable.outputs.release_tag }}"
+          EVIDENCE_TAG: "${{ steps.durable.outputs.evidence_tag }}"
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          KIND="${{ steps.unit.outputs.kind }}"
+          UNIT="${{ steps.unit.outputs.unit }}"
+          CODE_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_sha"])' "$M")"
+          GENERATION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_generation"])' "$M")"
+          SOURCE_EPOCH="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_collection_epoch") or "")' "$M")"
+          CUTOFF="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("collection_cutoff_at_utc") or "")' "$M")"
+          SELECTION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("dataset_selection_id") or "")' "$M")"
+          CHECKPOINT="$(python -c 'import json,sys; print((json.load(open(sys.argv[1])).get("cursor") or {}).get("checkpoint_id") or "")' "$M")"
+          STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$M")"
+          DATASET_HEAD="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(sha256sum "$M" | cut -d' ' -f1)"
+          python tools/record_publication_receipt.py             --campaign-id "$CAMPAIGN_ID"             --unit-id "$UNIT"             --kind "$KIND"             --status "$STATUS"             --phase "$PHASE"             --phase-epoch "$PHASE_EPOCH"             --code-sha "$CODE_SHA"             --dataset-generation "$GENERATION"             --source-collection-epoch "$SOURCE_EPOCH"             --collection-cutoff-at-utc "$CUTOFF"             --dataset-selection-id "$SELECTION"             --checkpoint-id "$CHECKPOINT"             --alina-head "$CODE_SHA"             --dataset-head "$DATASET_HEAD"             --manifest-sha256 "$MANIFEST_SHA"             --release-tag "$RELEASE_TAG"             --evidence-tag "$EVIDENCE_TAG"             --result "$RUNNER_TEMP/result.json"
+
+      - name: Downgrade result when durability failed
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true' && steps.durable.outcome == 'failure' && always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/augment_campaign_result.py durability-failure             --result "$RUNNER_TEMP/result.json"
+
+      - name: Publish final campaign checkpoint
+        id: checkpoint
+        if: steps.pin.outcome == 'success' && steps.claim.outcome == 'success' && steps.claim.outputs.skip != 'true' && always()
+        env:
+          LEASE_TOKEN: "${{ steps.claim.outputs.lease_token }}"
+          PHASE: "${{ steps.pin.outputs.phase }}"
+          PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
+          RELEASE_TAG: "${{ steps.durable.outputs.release_tag }}"
+          EVIDENCE_TAG: "${{ steps.durable.outputs.evidence_tag }}"
+          UNIT_KIND: "${{ steps.unit.outputs.kind }}"
+          UNIT_ID: "${{ steps.unit.outputs.unit }}"
+          DURABLE_OUTCOME: "${{ steps.durable.outcome }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          test -s "$RUNNER_TEMP/result.json"
+          PYTHONPATH=alina/src python - <<'PY' "$M" "$RUNNER_TEMP/result.json"
+          import json,os,sys
+          from hl_observer.control_plane.resumable_campaign import (
+              CampaignManifest,
+              complete_work_unit,
+              mark_continuation,
+              mark_terminal,
+              verify_lease,
+          )
+          p,rp=sys.argv[1:]
+          m=CampaignManifest.from_dict(json.load(open(p)))
+          token=os.environ["LEASE_TOKEN"]
+          if not verify_lease(m,token):
+              raise SystemExit("stale lease: refusing checkpoint")
+          r=json.load(open(rp))
+          uid=str(m.chunk_index)
+          complete_work_unit(m,uid,r["sha256"],r["payload"])
+          m.cursor["checkpoint_id"] = r["sha256"]
+          if r["status"]=="COMPLETE":
+              mark_terminal(m,"COMPLETE","unit_complete",r["sha256"])
+          elif r["status"]=="CONTINUATION_REQUIRED":
+              mark_continuation(
+                  m,
+                  r.get("payload",{}).get("reason","continuation_required"),
+                  progressed=bool(r.get("progressed",False)),
+                  checkpoint={
+                      "unit_id": uid,
+                      "result_sha256": r["sha256"],
+                      "phase_epoch": m.phase_epoch,
+                      "source_collection_epoch": m.source_collection_epoch,
+                  },
+              )
+          elif r["status"] in {"UNAVAILABLE","PARTIAL","REJECT"}:
+              mark_terminal(
+                  m,
+                  r["status"],
+                  (r.get("payload") or {}).get("reason",r["status"].lower()),
+              )
+          else:
+              payload=r.get("payload") or {}
+              category=str(payload.get("failure_category") or "QUALITY")
+              if category in {"INFRASTRUCTURE","TEMPORARY_EXTERNAL"}:
+                  mark_continuation(
+                      m,
+                      payload.get("reason","adapter_failed"),
+                      progressed=False,
+                      failure=True,
+                  )
+              else:
+                  mark_terminal(m,"FAILED",payload.get("reason","adapter_failed"))
+          m.cursor["last_run_id"] = os.environ.get("GITHUB_RUN_ID")
+          m.cursor["generation"] = int(m.chunk_index)
+          m.cursor["handoff_phase_epoch"] = m.phase_epoch
+          m.cursor["predecessor_run_id"] = os.environ.get("PREDECESSOR_RUN_ID") or None
+          m.cursor["handoff_generation"] = os.environ.get("HANDOFF_GENERATION") or None
+          m.cursor["requested_handoff_at_utc"] = (
+              os.environ.get("REQUESTED_HANDOFF_AT_UTC") or None
+          )
+          open(p,"w").write(json.dumps(m.to_dict(),sort_keys=True,indent=2)+"\n")
+          PY
+
+          RESULT_STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$RUNNER_TEMP/result.json")"
+          if [ "$RESULT_STATUS" = "COMPLETE" ] && [ "$DURABLE_OUTCOME" = "success" ]; then
+            CODE_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_sha"])' "$M")"
+            GENERATION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_generation"])' "$M")"
+            SOURCE_EPOCH="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_collection_epoch") or "")' "$M")"
+            CUTOFF="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("collection_cutoff_at_utc") or "")' "$M")"
+            SELECTION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("dataset_selection_id") or "")' "$M")"
+            CHECKPOINT="$(python -c 'import json,sys; print((json.load(open(sys.argv[1])).get("cursor") or {}).get("checkpoint_id") or "")' "$M")"
+            STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$M")"
+            DATASET_HEAD="$(git rev-parse HEAD)"
+            MANIFEST_SHA="$(sha256sum "$M" | cut -d' ' -f1)"
+            python tools/record_publication_receipt.py \
+              --campaign-id "$CAMPAIGN_ID" --unit-id "$UNIT_ID" --kind "$UNIT_KIND" --status "$STATUS" \
+              --phase "$PHASE" --phase-epoch "$PHASE_EPOCH" --code-sha "$CODE_SHA" \
+              --dataset-generation "$GENERATION" --source-collection-epoch "$SOURCE_EPOCH" \
+              --collection-cutoff-at-utc "$CUTOFF" --dataset-selection-id "$SELECTION" \
+              --checkpoint-id "$CHECKPOINT" --alina-head "$CODE_SHA" --dataset-head "$DATASET_HEAD" \
+              --manifest-sha256 "$MANIFEST_SHA" --release-tag "$RELEASE_TAG" \
+              --evidence-tag "$EVIDENCE_TAG" --result "$RUNNER_TEMP/result.json"
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          gh auth setup-git
+          git add "$M"
+          if [ -d catalog/receipts ]; then
+            git add catalog/receipts
+          fi
+          if [ -f catalog/ANALYSIS_SCOREBOARD_RECEIPT.json ]; then
+            git add catalog/ANALYSIS_SCOREBOARD_RECEIPT.json
+          fi
+          if [ -f catalog/ECONOMIC_IMPROVEMENT_LEDGER.json ]; then
+            git add catalog/ECONOMIC_IMPROVEMENT_LEDGER.json
+          fi
+          git commit -m "campaign: checkpoint $CAMPAIGN_ID"
+          STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
+          STAGGER="$((16#$STAGGER_HEX % 23))"
+          sleep "$STAGGER"
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            delay="$((3 + (STAGGER % 5) + i * 3))"
+            [ "$delay" -le 30 ] || delay=30
+            sleep "$delay"
+          done
+          exit 1
+
+
+
+      - name: Record publication receipt after final checkpoint
+        # Publication receipt is now generated before the checkpoint commit so
+        # campaign state + receipt are pushed atomically.  Keep this legacy step
+        # disabled to make accidental two-commit publication impossible.
+        if: ${{ false }}
+        shell: bash
+        env:
+          PHASE: "${{ steps.pin.outputs.phase }}"
+          PHASE_EPOCH: "${{ steps.pin.outputs.phase_epoch }}"
+          RELEASE_TAG: "${{ steps.durable.outputs.release_tag }}"
+          EVIDENCE_TAG: "${{ steps.durable.outputs.evidence_tag }}"
+        run: |
+          set -euo pipefail
+          M="catalog/campaigns/$CAMPAIGN_ID.json"
+          KIND="${{ steps.unit.outputs.kind }}"
+          UNIT="${{ steps.unit.outputs.unit }}"
+          CODE_SHA="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["code_sha"])' "$M")"
+          GENERATION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["dataset_generation"])' "$M")"
+          SOURCE_EPOCH="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source_collection_epoch") or "")' "$M")"
+          CUTOFF="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("collection_cutoff_at_utc") or "")' "$M")"
+          SELECTION="$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("dataset_selection_id") or "")' "$M")"
+          CHECKPOINT="$(python -c 'import json,sys; print((json.load(open(sys.argv[1])).get("cursor") or {}).get("checkpoint_id") or "")' "$M")"
+          STATUS="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$M")"
+          DATASET_HEAD="$(git rev-parse HEAD)"
+          MANIFEST_SHA="$(sha256sum "$M" | cut -d' ' -f1)"
+          python tools/record_publication_receipt.py \\
+            --campaign-id "$CAMPAIGN_ID" --unit-id "$UNIT" --kind "$KIND" --status "$STATUS" \\
+            --phase "$PHASE" --phase-epoch "$PHASE_EPOCH" --code-sha "$CODE_SHA" \\
+            --dataset-generation "$GENERATION" --source-collection-epoch "$SOURCE_EPOCH" \\
+            --collection-cutoff-at-utc "$CUTOFF" --dataset-selection-id "$SELECTION" \\
+            --checkpoint-id "$CHECKPOINT" --alina-head "$CODE_SHA" --dataset-head "$DATASET_HEAD" \\
+            --manifest-sha256 "$MANIFEST_SHA" --release-tag "$RELEASE_TAG" \\
+            --evidence-tag "$EVIDENCE_TAG" --result "$RUNNER_TEMP/result.json"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          gh auth setup-git
+          git add catalog/receipts
+          git diff --cached --quiet && exit 0
+          git commit -m "campaign: publish receipt $CAMPAIGN_ID"
+          STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
+          STAGGER="$((16#$STAGGER_HEX % 7))"
+          sleep "$STAGGER"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if git pull --rebase origin main && git push origin HEAD:main; then exit 0; fi
+            sleep "$((2 + STAGGER + i * 2))"
+          done
+          exit 1

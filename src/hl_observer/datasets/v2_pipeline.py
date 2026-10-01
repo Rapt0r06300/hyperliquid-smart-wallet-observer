@@ -13,7 +13,7 @@ from hl_observer.datasets.v2_export import (
     write_manifest,
 )
 
-V2_REPOSITORY = "Rapt0r06300/alina-smartflow-datasets-v2"
+V2_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 V2_SCHEMA = "alina.dataset_bundle.v2"
 
 _WS_TRANSPORTS = {"websocket"}

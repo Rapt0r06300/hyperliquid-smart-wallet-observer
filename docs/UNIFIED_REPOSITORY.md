@@ -1,14 +1,18 @@
 # Unified Alina Smart Flow repository
 
-The active control plane, campaign catalog, collection workflows, tests,
-replay/backtest tooling, and future Dataset V2 releases live in this repository.
+The canonical repository is `Rapt0r06300/hyperliquid-smart-wallet-observer` on `main`.
 
-Manual phase contract:
-- IDLE: no new heavy work.
-- COLLECT: collection only; autonomous same-epoch relay is allowed.
-- ANALYZE: entered only by an explicit operator request; collection drains,
-  then replay/backtest/OOS/forward/PNL proof/scoreboard execute.
+It owns code, tests, GitHub Actions, phase control, campaign manifests, quality catalog,
+replay/backtest tooling and future collection metadata. Heavy trades/L2/BBO payloads
+are stored as immutable GitHub Release assets in this same repository, not as ordinary
+Git blobs.
 
-Heavy market-data shards are stored as GitHub Release assets, not committed
-as ordinary Git blobs. The former Dataset V2 repository is retained only as
-migration provenance until historical release mirroring is verified complete.
+The former `Rapt0r06300/alina-smartflow-datasets-v2` repository is legacy/inert.
+No new collection, analysis or control-plane authority may originate there.
+
+The post-migration dataset state is intentionally fresh. Historical collection runs and
+release assets were not required for cutover; new replay-grade data is collected again
+from Alina when the operator explicitly switches IDLE -> COLLECT.
+
+Safety invariants remain unchanged: GitHub-hosted only, paper/read-only, no user PC,
+no self-hosted runner, no real order, no private key.

@@ -32,7 +32,7 @@ Rules:
 
 ## Source of truth
 
-Dataset V2 owns the phase state because it already owns campaign manifests and durable collection metadata.
+The main Alina Smart Flow repository owns the phase state, campaign manifests, durable collection metadata, quality catalog and GitHub Actions control plane. Heavy immutable market-data assets are stored in GitHub Releases of this same repository so code, tests, orchestration and data provenance share one repository without committing raw L2/trade payloads into Git history.
 
 Create:
 
@@ -98,7 +98,7 @@ After the analysis pipeline reaches its terminal stage, the control plane may se
 
 ## Collection phase
 
-The collection phase reuses the existing native collectors and Dataset V2 publishing path rather than creating a competing data stack.
+The collection phase reuses the existing native collectors and the single-repository Dataset V2-format publishing path rather than creating a competing data stack.
 
 Collection work includes, where supported by the current repository:
 
@@ -110,7 +110,7 @@ Collection work includes, where supported by the current repository:
 
 Collection units remain bounded below the GitHub-hosted job maximum. A session is continuous at the orchestration level: after one bounded unit publishes, another current-epoch unit can be created or selected while the phase remains `COLLECT`.
 
-Every published bundle keeps the existing Dataset V2 integrity contract: immutable release assets, run manifest, source/code SHA, hashes, timestamps, quality state, and fail-closed publication.
+Every published bundle keeps the existing Dataset V2-format integrity contract: immutable GitHub Release assets in the Alina repository, run manifest, source/code SHA, hashes, timestamps, quality state, and fail-closed publication.
 
 ## Collector V4 Extreme Replay-Grade
 
@@ -657,7 +657,7 @@ Raw WAL segments are immutable after sealing.
 
 A runner must not hold an entire multi-hour collection window only on ephemeral disk.
 
-During a collection unit it periodically seals bounded raw/normalized segments, compresses them, computes hashes, writes a segment manifest, and publishes them durably to Dataset V2 release storage.
+During a collection unit it periodically seals bounded raw/normalized segments, compresses them, computes hashes, writes a segment manifest, and publishes them durably to GitHub Releases in the Alina repository.
 
 Each segment manifest records at least:
 
@@ -965,7 +965,7 @@ Replay never discovers quality problems opportunistically while simulating. It r
 
 Before replay starts, the `QUALITY` stage freezes:
 
-- the exact Dataset V2 asset hashes;
+- the exact Alina GitHub Release asset hashes;
 - stream/channel quality states;
 - allowed time intervals;
 - excluded gap intervals;
@@ -1003,7 +1003,7 @@ Economic replay/backtest metrics must never obscure poor collection quality.
 
 ### Canonical data-exploitability receipt
 
-The dual-repository closure report must expose a machine-readable `data_exploitability` block derived only from canonical Dataset V2 quality evidence. It is a projection of the existing quality ledger, never a second source of truth.
+The canonical closure report must expose a machine-readable `data_exploitability` block derived only from canonical single-repository data-quality evidence. It is a projection of the existing quality ledger, never a second source of truth.
 
 Its purpose is to answer a narrow operational question before heavy analysis: **are the collected observations technically eligible to enter replay/analysis?** This verdict is distinct from economic profitability.
 
@@ -3104,7 +3104,7 @@ This gives ANALYZE a pre-indexed opportunity catalog and dramatically reduces sc
 
 ### Opportunity catalog
 
-Dataset V2 maintains a hash-linked catalog, proposed path:
+The Alina repository maintains a hash-linked catalog, proposed path:
 
 `catalog/opportunities/<collection_epoch>/...`
 
@@ -11620,7 +11620,7 @@ The analysis phase is an ordered state machine:
 ### QUALITY
 
 - reconcile/index all published manifests from the source collection epoch;
-- validate hashes, timestamps, continuity/gaps, source/code SHA, exact-count checks where applicable, and Dataset V2 quality policy;
+- validate hashes, timestamps, continuity/gaps, source/code SHA, exact-count checks where applicable, and the single-repository data-quality policy;
 - label unusable data `PARTIAL`/`REJECT` rather than silently using it;
 - freeze the set of SAFE evidence eligible for the analysis run.
 
@@ -11681,25 +11681,26 @@ Existing historical campaign manifests are not deleted.
 
 ## Workflow changes
 
-Alina uses a **dual-plane control contract**.
+Alina uses a **single-repository control and data contract**.
 
-- The **main Alina repository is the canonical operator/control surface**. A user starting from Alina must be able to request every canonical phase and the complete research chain without manually operating Dataset V2 internals.
-- **Dataset V2 is the canonical durable data plane and the default heavy GitHub-hosted execution plane** when work is delegated to GitHub.
-- The two planes reuse the same campaign schema, campaign identity, phase/epoch metadata, SAFE/replay gates, economic engines, checkpoints and proof manifests. They must never grow independent economic logic.
-- Starting a campaign from Alina may execute an allowed bounded adapter directly in the Alina environment or dispatch the heavy unit to Dataset V2, but both paths must preserve the same immutable campaign identity and proof semantics.
-- Current autonomous cloud operation remains GitHub-hosted only. Nothing in this dual-plane contract authorizes a self-hosted runner, PC wake-up or dependency on the user's machine.
+- `Rapt0r06300/hyperliquid-smart-wallet-observer` on branch `main` is the canonical operator surface, code source, test source, phase/control plane, campaign/catalog plane and GitHub-hosted execution plane.
+- Heavy immutable trades/L2/BBO and other collection payloads are stored as GitHub Release assets in this same repository. Raw high-volume payloads must not be committed directly into Git history.
+- `control/alina-phase.json`, `catalog/`, campaign manifests, receipts, hashes and provenance live on `main`.
+- Collection/replay/backtest workers use the same repository SHA and the same campaign identity. No cross-repository synchronization, bridge token or second repository is required.
+- Existing Dataset V2 schemas and SAFE/PARTIAL/REJECT/UNMEASURABLE semantics are retained as data-format contracts; “Dataset V2” no longer implies a separate GitHub repository.
+- Current autonomous cloud operation remains GitHub-hosted only. Nothing authorizes a self-hosted runner, PC wake-up or dependency on the user's machine.
+- The former `Rapt0r06300/alina-smartflow-datasets-v2` repository is legacy/inert after migration and must not be used for new collection or analysis.
 
-Dataset V2 cloud changes are concentrated in:
+Canonical cloud orchestration is concentrated in:
 
 - `.github/workflows/create-resumable-campaigns.yml`
 - `.github/workflows/resumable-campaign-controller.yml`
 - `.github/workflows/resumable-campaign-worker.yml`
 - phase-control helper code/tests under `tools/` and `tests/`
 - `control/alina-phase.json`
+- `catalog/`
 
-The main Alina repository must additionally expose a complete operator-facing control surface for `IDLE`, `COLLECT`, `ANALYZE` and full-chain execution. That surface may delegate heavy work to Dataset V2 but may not require the operator to leave Alina or reproduce orchestration logic manually.
-
-Legacy manual diagnostic workflows may remain available, but they must not bypass the phase guard for normal operation.
+Legacy diagnostic workflows may remain available, but they must not bypass the phase guard for normal operation.
 
 ## Trigger model
 
@@ -12020,7 +12021,7 @@ Examples:
 
 - Binance BTC Tier-A L2 handoff budget;
 - Copy-Vault broad-sweep freshness budget;
-- Dataset V2 durable-publication latency budget.
+- Alina GitHub Release durable-publication latency budget.
 
 Budget exhaustion triggers the narrowest useful response:
 

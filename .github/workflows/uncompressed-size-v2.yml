@@ -1,0 +1,65 @@
+name: uncompressed-size-v2
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/uncompressed-size-v2.yml"
+      - "tools/measure_uncompressed_sizes.py"
+      - "tools/backfill_exact_trade_counts.py"
+      - "tools/build_catalog_metrics.py"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximum new assets to measure in this run"
+        required: false
+        default: "36055"
+  schedule:
+    - cron: "41 */3 * * *"
+permissions:
+  contents: write
+concurrency:
+  group: dataset-v2-uncompressed-record-counts
+  cancel-in-progress: false
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Sync latest main before processing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+      - name: Measure exact or unavailable sizes
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          MEASURE_LIMIT: ${{ inputs.limit || '36055' }}
+        run: python tools/measure_uncompressed_sizes.py --limit "${MEASURE_LIMIT}" --workers 24
+      - name: Rebuild catalog metrics
+        run: python tools/build_catalog_metrics.py
+      - name: Publish size patch and metrics
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json catalog/DATA_METRICS.json
+          git diff --cached --quiet && exit 0
+          git commit -m "data: advance uncompressed size coverage"
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            git fetch origin main
+            git rebase origin/main
+          done
+          echo "Unable to publish after five rebase attempts" >&2
+          exit 1

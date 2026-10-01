@@ -1,0 +1,44 @@
+name: campaign-resilience-receipt
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "catalog/campaigns/**"
+      - "tools/validate_campaign_resilience.py"
+      - ".github/workflows/campaign-resilience-receipt.yml"
+permissions:
+  contents: write
+concurrency:
+  group: dataset-v2-receipt-publish
+  cancel-in-progress: false
+jobs:
+  resilience:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Sync latest main before generating receipts
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+      - name: Build resilience receipt
+        run: python tools/validate_campaign_resilience.py
+      - name: Publish resilience receipt
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/CAMPAIGN_RESILIENCE_RECEIPT.json
+          git diff --cached --quiet && exit 0
+          git commit -m "recovery: publish campaign resilience receipt"
+          if ! git push origin HEAD:main; then
+            git fetch origin main
+            git rebase origin/main
+            git push origin HEAD:main
+          fi

@@ -1,0 +1,60 @@
+name: dataset-v2-smoke
+
+# Current collector integrity smoke: Hyperliquid/OKX reconciliation + receive-only snapshots.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dataset-v2-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      GH_TOKEN: ${{ github.token }}
+      HL_ENABLE_MAINNET_EXECUTION: "0"
+      REAL_MAINNET_TRADING: "false"
+      HYPERSMART_ENABLE_REAL_ORDERS: "0"
+      ENABLE_REAL_ORDERS: "0"
+
+    steps:
+      - name: Checkout Alina collector source
+        uses: actions/checkout@v4
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: alina
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install collector
+        run: python -m pip install --disable-pip-version-check -e ./alina
+
+      - name: Collect fresh BTC ETH window
+        env:
+          PYTHONPATH: alina/src:alina
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git -C alina rev-parse HEAD)"
+          python alina/tools/collect_cloud_window.py             --output "$RUNNER_TEMP/dataset-v2-smoke"             --coins "BTC,ETH"             --duration-s 120             --collector-version "$SOURCE_SHA"             --rotate-mb 32
+
+      - name: Publish verified smoke release
+        env:
+          PYTHONPATH: alina/src:alina
+        run: |
+          set -euo pipefail
+          TAG="smoke-v2-${GITHUB_RUN_ID}"
+          python alina/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/dataset-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Dataset V2 smoke ${GITHUB_RUN_ID}"

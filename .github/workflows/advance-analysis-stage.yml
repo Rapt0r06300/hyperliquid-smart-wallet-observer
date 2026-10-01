@@ -1,0 +1,79 @@
+name: advance-analysis-stage
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Next canonical ANALYZE stage"
+        required: true
+        type: choice
+        options:
+          - DRAIN
+          - QUALITY
+          - REPLAY
+          - BACKTEST
+          - OOS
+          - FORWARD_PAPER
+          - PNL_PROOF
+          - SCOREBOARD
+          - DONE
+      request_id:
+        description: "Idempotent operator request id"
+        required: true
+        type: string
+      expected_epoch:
+        description: "Expected ANALYZE phase epoch"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: advance-analysis-stage
+  cancel-in-progress: false
+
+jobs:
+  advance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Advance one fail-closed stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/advance_analysis_stage.py             --stage "${{ inputs.stage }}"             --request-id "${{ inputs.request_id }}"             --expected-epoch "${{ inputs.expected_epoch }}"
+          python tools/phase_gate.py read
+
+      - name: Persist stage state and receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add control/alina-phase.json control/phase-receipts
+          git diff --cached --quiet && exit 0
+          git commit -m "phase: advance analysis stage to ${{ inputs.stage }}"
+          for i in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((i*2))
+          done
+          exit 1
+      - name: Materialize next stage campaigns
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          gh workflow run create-resumable-campaigns.yml --repo "${{ github.repository }}" --ref main
+          gh workflow run resumable-campaign-controller.yml --repo "${{ github.repository }}" --ref main

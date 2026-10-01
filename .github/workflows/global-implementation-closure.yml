@@ -1,0 +1,78 @@
+name: global-implementation-closure
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "catalog/DATA_INDEX.json"
+      - "catalog/DATA_METRICS.json"
+      - "control/alina-phase.json"
+      - "control/phase-receipts/**"
+      - "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json"
+      - "catalog/campaigns/**"
+      - "catalog/DATASET_HEALTH_RECEIPT.json"
+      - "catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json"
+      - "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json"
+      - "tools/build_global_implementation_closure.py"
+      - "tools/build_analysis_frozen_coverage_receipt.py"
+      - ".github/workflows/global-implementation-closure.yml"
+  schedule:
+    - cron: '47 */6 * * *'
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: global-implementation-closure
+  cancel-in-progress: true
+jobs:
+  receipt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: alina
+          fetch-depth: 0
+      - name: Build fail-closed global closure receipt
+        run: |
+          set -euo pipefail
+          python tools/build_analysis_frozen_coverage_receipt.py
+          python tools/build_global_implementation_closure.py --alina-root alina
+      - name: Publish closure receipt from latest repository heads
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+            git -C alina fetch origin main
+            git -C alina reset --hard origin/main
+            python tools/build_analysis_frozen_coverage_receipt.py
+            python tools/build_global_implementation_closure.py --alina-root alina
+            git add catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json
+            if git diff --cached --quiet; then
+              exit 0
+            fi
+            git commit -m "closure: publish cross-repo implementation receipt"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            git reset --hard origin/main
+            sleep "$((attempt * 2))"
+          done
+          exit 1
+      - name: Dispatch analysis stage controller after closure
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run analysis-stage-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+

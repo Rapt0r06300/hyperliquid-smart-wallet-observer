@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 import requests
 
-DEFAULT_REPOSITORY = "Rapt0r06300/alina-smartflow-datasets-v2"
+DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 DEFAULT_REF = "main"
 RAW_ROOT = "https://raw.githubusercontent.com"
 API_ROOT = "https://api.github.com"

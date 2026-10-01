@@ -17,7 +17,7 @@ def _shard(dataset_id: str, start: int) -> SafeShard:
         sha256="a" * 64,
         bytes=100,
         event_count=10,
-        release_repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        release_repository="Rapt0r06300/alina-smartflow-datasets-v2",
         release_tag="data-v2-test",
         release_asset=f"{dataset_id}.jsonl.gz",
         manifest_path=f"datasets/safe/{dataset_id}.manifest.json",

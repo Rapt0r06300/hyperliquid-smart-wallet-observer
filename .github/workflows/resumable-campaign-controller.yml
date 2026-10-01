@@ -1,0 +1,224 @@
+name: resumable-campaign-controller
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/resumable-campaign-controller.yml'
+      - 'control/alina-phase.json'
+      - 'catalog/campaigns/analysis-*.json'
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  # v3 intentionally moves off the legacy v2 serialization group so a long
+  # pre-fix Copy-Vault fan-out cannot starve fresh market/L2 work.
+  group: resumable-campaign-controller-v4
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      copy_matrix: ${{ steps.due.outputs.copy_matrix }}
+      copy_count: ${{ steps.due.outputs.copy_count }}
+      other_matrix: ${{ steps.due.outputs.other_matrix }}
+      other_count: ${{ steps.due.outputs.other_count }}
+      phase: ${{ steps.due.outputs.phase }}
+      phase_epoch: ${{ steps.due.outputs.phase_epoch }}
+    steps:
+      - name: Checkout Dataset V2
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Refresh Dataset V2 main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+
+      - name: Checkout current campaign CLI
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: alina
+          persist-credentials: false
+
+      - id: due
+        name: Build bounded due-work matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p catalog/campaigns
+          PHASE_META="$(python tools/phase_gate.py read)"
+          PHASE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$PHASE_META")"
+          PHASE_EPOCH="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["epoch"])' "$PHASE_META")"
+          ANALYSIS_STAGE="$(python -c 'import json,sys; print(json.loads(sys.argv[1]).get("analysis_stage") or "")' "$PHASE_META")"
+          echo "phase=$PHASE epoch=$PHASE_EPOCH analysis_stage=$ANALYSIS_STAGE"
+          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
+          echo "phase_epoch=$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
+          PYTHONPATH=alina/src python alina/tools/resumable_campaign.py             list-due catalog/campaigns             --current-phase "$PHASE"             --current-epoch "$PHASE_EPOCH"             --current-analysis-stage "$ANALYSIS_STAGE"             > "$RUNNER_TEMP/all-due.txt"
+          head -n 128 "$RUNNER_TEMP/all-due.txt" > "$RUNNER_TEMP/due.txt"
+          python - <<'PY' "$RUNNER_TEMP/due.txt" "$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
+          import json,sys
+          from pathlib import Path
+          phase_epoch=int(sys.argv[2])
+          ids=[line.strip() for line in open(sys.argv[1],encoding="utf-8") if line.strip()]
+          copy_ids=[]
+          other_ids=[]
+          for campaign_id in ids:
+              path=Path("catalog/campaigns")/(campaign_id+".json")
+              try:
+                  row=json.load(open(path,encoding="utf-8"))
+                  kind=str(row.get("kind") or "")
+                  cursor=row.get("cursor") if isinstance(row.get("cursor"),dict) else {}
+              except (OSError,ValueError,TypeError):
+                  kind=""
+                  cursor={}
+              # Dedicated replay resume-proof campaigns are owned only by the
+              # two-segment fresh-runner workflow.  Excluding them here prevents
+              # the normal controller from racing the proof segments.
+              if cursor.get("resume_proof") is True:
+                  continue
+              (copy_ids if kind=="copy_vault_collection" else other_ids).append(campaign_id)
+          # Keep exactly one user-specific Copy-Vault lane active globally
+          # for the current epoch. GitHub-hosted jobs may share an egress IP,
+          # so separate runners must not be assumed to multiply Hyperliquid's
+          # per-IP unique-user subscription allowance.
+          active_copy=False
+          active_other=0
+          collection_other_kinds={
+              "market_collection",
+              "event_intelligence_collection",
+              "official_archive_collection",
+          }
+          for path in Path("catalog/campaigns").glob("*.json"):
+              try:
+                  row=json.load(open(path,encoding="utf-8"))
+              except (OSError,ValueError,TypeError):
+                  continue
+              if (
+                  row.get("creation_phase")!="COLLECT"
+                  or int(row.get("phase_epoch") or 0)!=phase_epoch
+                  or row.get("status")!="RUNNING"
+              ):
+                  continue
+              kind=str(row.get("kind") or "")
+              if kind=="copy_vault_collection":
+                  active_copy=True
+              elif kind in collection_other_kinds:
+                  active_other+=1
+          copy_ids=copy_ids[:1]
+          if active_copy:
+              copy_ids=[]
+          # Keep four hosted-runner slots free for Copy-Vault, watchdog, quality, and control jobs.
+          other_capacity=max(0,16-active_other)
+          other_ids=other_ids[:other_capacity]
+          print("copy_count="+str(len(copy_ids)))
+          print("copy_matrix="+json.dumps({"campaign_id":copy_ids},separators=(",",":")))
+          print("other_count="+str(len(other_ids)))
+          print("other_matrix="+json.dumps({"campaign_id":other_ids},separators=(",",":")))
+          PY
+
+
+  copy_work:
+    needs: select
+    if: ${{ needs.select.outputs.copy_count != '0' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix: ${{ fromJSON(needs.select.outputs.copy_matrix) }}
+    uses: ./.github/workflows/resumable-campaign-worker.yml
+    with:
+      campaign_id: ${{ matrix.campaign_id }}
+    permissions:
+      actions: write
+      contents: write
+
+  other_work:
+    needs: select
+    if: ${{ needs.select.outputs.other_count != '0' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix: ${{ fromJSON(needs.select.outputs.other_matrix) }}
+    uses: ./.github/workflows/resumable-campaign-worker.yml
+    with:
+      campaign_id: ${{ matrix.campaign_id }}
+    permissions:
+      actions: write
+      contents: write
+
+  relay_collect:
+    needs: [select, copy_work, other_work]
+    if: ${{ always() && needs.select.outputs.phase == 'COLLECT' && needs.select.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Relay one next COLLECT wave
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            set +e
+            output="$(gh workflow run resumable-campaign-controller.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main 2>&1)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            printf '%s\n' "$output" >&2
+            if printf '%s' "$output" | grep -Eqi 'rate limit|HTTP 403|secondary rate|temporar|timeout|502|503|504'; then
+              if [ "$attempt" -lt 6 ]; then
+                delay="$((5 * attempt * attempt))"
+                [ "$delay" -le 60 ] || delay=60
+                sleep "$delay"
+                continue
+              fi
+              echo "::warning::Immediate COLLECT relay deferred; the scheduled controller/watchdog is the durable fallback."
+              exit 0
+            fi
+            echo "::warning::COLLECT relay failed non-transiently; scheduled controller/watchdog will retry."
+            exit 0
+          done
+
+
+  advance_analysis:
+    needs: [select, copy_work, other_work]
+    if: ${{ always() && needs.select.outputs.phase == 'ANALYZE' && needs.select.result == 'success' && (needs.copy_work.result == 'success' || needs.copy_work.result == 'skipped') && (needs.other_work.result == 'success' || needs.other_work.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Refresh global closure after bounded work
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # GITHUB_TOKEN-authored checkpoint pushes do not recursively trigger
+          # push workflows. Rebuild the cross-repository closure explicitly.
+          # That workflow dispatches analysis-stage-controller only after the
+          # fresh closure receipt has been durably published, avoiding a race
+          # where SCOREBOARD -> DONE reads stale implementation flags.
+          gh workflow run global-implementation-closure.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+

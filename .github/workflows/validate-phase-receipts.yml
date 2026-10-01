@@ -1,0 +1,20 @@
+name: validate-phase-receipts
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "control/phase-receipts/**"
+      - "tools/validate_phase_receipts.py"
+      - "control/analysis-stage-gates.json"
+      - ".github/workflows/validate-phase-receipts.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: python -m json.tool control/analysis-stage-gates.json >/dev/null
+      - run: python tools/validate_phase_receipts.py

@@ -1,0 +1,58 @@
+name: copy-vault-v2-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/copy-vault-v2-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
+      GH_TOKEN: ${{ github.token }}
+      HL_ENABLE_MAINNET_EXECUTION: "0"
+      REAL_MAINNET_TRADING: "false"
+      HYPERSMART_ENABLE_REAL_ORDERS: "0"
+      ENABLE_REAL_ORDERS: "0"
+
+    steps:
+      - name: Checkout Alina collector source
+        uses: actions/checkout@v4
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: alina
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install collector
+        run: python -m pip install --disable-pip-version-check -e ./alina
+
+      - name: Collect fresh Copy-Vault forward window
+        env:
+          PYTHONPATH: alina/src:alina/tools:alina
+        run: |
+          set -euo pipefail
+          SOURCE_SHA="$(git -C alina rev-parse HEAD)"
+          python alina/tools/collect_cloud_copy_vault.py             --output "$RUNNER_TEMP/copy-vault-v2-smoke"             --duration-s 90             --collector-version "$SOURCE_SHA"             --max-vaults 5             --rotate-mb 16
+
+      - name: Publish verified Copy-Vault smoke release
+        env:
+          PYTHONPATH: alina/src:alina/tools:alina
+        run: |
+          set -euo pipefail
+          TAG="copy-vault-smoke-v2-${GITHUB_RUN_ID}"
+          python alina/tools/publish_dataset_v2_release.py             "$RUNNER_TEMP/copy-vault-v2-smoke"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina Copy-Vault V2 smoke ${GITHUB_RUN_ID}"

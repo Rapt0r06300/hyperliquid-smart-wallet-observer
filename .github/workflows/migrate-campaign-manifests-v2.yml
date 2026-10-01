@@ -1,0 +1,60 @@
+name: migrate-campaign-manifests-v2
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        required: true
+        type: choice
+        options: [COLLECT, ANALYZE]
+      phase_epoch:
+        required: true
+        type: string
+      source_collection_epoch:
+        required: false
+        type: string
+      collection_cutoff_at_utc:
+        required: false
+        type: string
+      dataset_selection_id:
+        required: false
+        type: string
+      apply:
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: write
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Migrate explicit manifests
+        env:
+          PHASE: "${{ inputs.phase }}"
+          EPOCH: "${{ inputs.phase_epoch }}"
+          SOURCE_EPOCH: "${{ inputs.source_collection_epoch }}"
+          CUTOFF: "${{ inputs.collection_cutoff_at_utc }}"
+          SELECTION: "${{ inputs.dataset_selection_id }}"
+          APPLY: "${{ inputs.apply }}"
+        run: |
+          set -euo pipefail
+          args=(--phase "$PHASE" --phase-epoch "$EPOCH")
+          if [ "$PHASE" = "ANALYZE" ]; then
+            args+=(--source-collection-epoch "$SOURCE_EPOCH" --collection-cutoff-at-utc "$CUTOFF" --dataset-selection-id "$SELECTION")
+          fi
+          if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+          python tools/migrate_campaign_manifests_v2.py "${args[@]}"
+      - name: Persist migration
+        if: inputs.apply
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/campaigns catalog/campaign-history
+          git diff --cached --quiet && exit 0
+          git commit -m "campaign: migrate manifests to schema v2"
+          git push origin HEAD:main

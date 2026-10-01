@@ -1,0 +1,29 @@
+name: collect-copy-vault-v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_s:
+        description: "Diagnostic seconds"
+        required: false
+        default: "600"
+      max_vaults:
+        description: "Diagnostic public vault universe size"
+        required: false
+        default: "20"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-copy-vault-collection
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Manual diagnostic only
+        run: |
+          echo "Scheduled Copy-Vault collection migrated to resumable campaigns."

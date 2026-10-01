@@ -1,4 +1,4 @@
-name: alina-dual-repository-closure-report
+name: alina-canonical-closure-report
 on:
   workflow_dispatch:
   schedule:
@@ -25,7 +25,7 @@ permissions:
   # contents: read is the baseline; publication jobs elevate only where required.
   contents: write
 concurrency:
-  group: alina-dual-repository-closure-report
+  group: alina-canonical-closure-report
   # The report is a snapshot of both current main branches. A newer run should
   # supersede an older snapshot rather than queue behind it and later fight the
   # branch tip with a stale generated receipt.
@@ -39,12 +39,6 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          repository: Rapt0r06300/alina-smartflow-datasets-v2
-          ref: main
-          path: dataset-v2
-          persist-credentials: false
       - name: Build conservative closure report
         env:
           ALINA_MAIN_HEAD: "${{ github.sha }}"
@@ -54,9 +48,9 @@ jobs:
           PYTHONPATH=src python tools/generate_gate_registry.py
           python tools/validate_gate_registry.py
           python tools/build_closure_report.py \
-            --dataset-root dataset-v2 \
+            --dataset-root . \
             --main-head "$(git rev-parse HEAD)" \
-            --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
+            --dataset-head "$(git rev-parse HEAD)" \
             --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
           python tools/enrich_closure_data_exploitability.py
       - name: Validate gate and closure receipts
@@ -71,19 +65,17 @@ jobs:
           gh auth setup-git
 
           for attempt in 1 2 3 4 5; do
-            # Both repositories may advance while this report is being built.
-            # Always rebuild from their latest durable main heads before push.
+            # The canonical repository may advance while this report is being built.
+            # Always rebuild from its latest durable main head before push.
             git fetch origin main
             git reset --hard origin/main
-            git -C dataset-v2 fetch origin main
-            git -C dataset-v2 reset --hard origin/main
-
+            
             PYTHONPATH=src python tools/generate_gate_registry.py
             python tools/validate_gate_registry.py
             python tools/build_closure_report.py \
-              --dataset-root dataset-v2 \
+              --dataset-root . \
               --main-head "$(git rev-parse HEAD)" \
-              --dataset-head "$(git -C dataset-v2 rev-parse HEAD)" \
+              --dataset-head "$(git rev-parse HEAD)" \
               --canonical-spec-blob "$(git rev-parse HEAD:docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md)"
             python tools/enrich_closure_data_exploitability.py
             python tools/validate_gate_registry.py
@@ -93,7 +85,7 @@ jobs:
             if git diff --cached --quiet; then
               exit 0
             fi
-            git commit -m "closure: publish dual-repository status report"
+            git commit -m "closure: publish canonical single-repository status report"
             if git push origin HEAD:main; then
               exit 0
             fi

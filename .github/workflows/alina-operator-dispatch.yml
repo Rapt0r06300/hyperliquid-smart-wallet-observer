@@ -1,0 +1,153 @@
+name: alina-operator-dispatch
+on:
+  repository_dispatch:
+    types: [alina_operator_intent]
+  workflow_dispatch:
+    inputs:
+      request_id:
+        required: true
+        type: string
+      main_code_sha:
+        required: true
+        type: string
+      phase:
+        required: true
+        type: choice
+        options: [COLLECT, ANALYZE]
+      phase_epoch:
+        required: true
+        type: string
+      source_collection_epoch:
+        required: false
+        type: string
+      collection_cutoff_at_utc:
+        required: false
+        type: string
+      analysis_stage:
+        required: false
+        type: string
+      intent:
+        required: true
+        type: string
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: alina-operator-dispatch-${{ github.event.client_payload.request_id || inputs.request_id }}
+  cancel-in-progress: false
+jobs:
+  receive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Validate and record durable receipt
+        env:
+          REQUEST_ID: ${{ github.event.client_payload.request_id || inputs.request_id }}
+          MAIN_CODE_SHA: ${{ github.event.client_payload.main_code_sha || inputs.main_code_sha }}
+          PHASE: ${{ github.event.client_payload.phase || inputs.phase }}
+          PHASE_EPOCH: ${{ github.event.client_payload.phase_epoch || inputs.phase_epoch }}
+          SOURCE_EPOCH: ${{ github.event.client_payload.source_collection_epoch || inputs.source_collection_epoch }}
+          CUTOFF: ${{ github.event.client_payload.collection_cutoff_at_utc || inputs.collection_cutoff_at_utc }}
+          ANALYSIS_STAGE: ${{ github.event.client_payload.analysis_stage || inputs.analysis_stage }}
+          INTENT: ${{ github.event.client_payload.intent || inputs.intent }}
+          STRATEGY_FAMILY: ${{ github.event.client_payload.strategy_family || inputs.strategy_family || 'all' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import datetime, json, os, pathlib, re
+          request_id=os.environ["REQUEST_ID"]
+          if not re.fullmatch(r"[0-9a-f]{64}", request_id):
+              raise SystemExit("request_id must be exactly 64 lowercase hex characters")
+          if not re.fullmatch(r"[0-9a-f]{40}", os.environ["MAIN_CODE_SHA"]):
+              raise SystemExit("main_code_sha must be a commit SHA")
+          phase=os.environ["PHASE"]
+          if phase not in {"COLLECT","ANALYZE"}:
+              raise SystemExit("unsupported phase")
+          try:
+              epoch=int(os.environ["PHASE_EPOCH"])
+          except ValueError:
+              raise SystemExit("phase_epoch must be an integer")
+          if epoch < 1:
+              raise SystemExit("phase_epoch must be positive")
+          authority_path=pathlib.Path("control/alina-phase.json")
+          if not authority_path.is_file():
+              raise SystemExit("canonical phase authority is missing")
+          authority=json.loads(authority_path.read_text(encoding="utf-8"))
+          required={"schema_version","phase","epoch","requested_at_utc","collection_started_at_utc","collection_cutoff_at_utc","source_collection_epoch","analysis_stage","requested_by","request_id"}
+          if required-set(authority):
+              raise SystemExit("canonical phase authority is incomplete")
+          if authority.get("phase") != phase or authority.get("epoch") != epoch:
+              raise SystemExit("operator dispatch conflicts with canonical phase authority")
+          payload_source_epoch=os.environ["SOURCE_EPOCH"] or None
+          payload_cutoff=os.environ["CUTOFF"] or None
+          payload_stage=os.environ["ANALYSIS_STAGE"] or None
+          if payload_source_epoch is not None:
+              try:
+                  payload_source_epoch=int(payload_source_epoch)
+              except ValueError:
+                  raise SystemExit("source_collection_epoch must be an integer")
+          if (
+              authority.get("source_collection_epoch") != payload_source_epoch
+              or authority.get("collection_cutoff_at_utc") != payload_cutoff
+              or authority.get("analysis_stage") != payload_stage
+          ):
+              raise SystemExit("operator dispatch metadata conflicts with canonical phase authority")
+          intent=os.environ["INTENT"]
+          allowed={"start_collection"} if phase=="COLLECT" else {"analyze","replay","backtest","oos","forward_paper","module_pnl_proof","scoreboard","full_cycle","drain"}
+          if intent not in allowed:
+              raise SystemExit("intent is incompatible with phase")
+          family=os.environ["STRATEGY_FAMILY"]
+          if family not in {"all","copy_vault","lead_lag","cross_venue_dislocation"}:
+              raise SystemExit("unsupported strategy family")
+          if phase=="ANALYZE" and not os.environ["ANALYSIS_STAGE"]:
+              raise SystemExit("analysis_stage is required for ANALYZE")
+          row={
+              "schema":"alina.operator_dispatch.v1",
+              "request_id":request_id,
+              "main_code_sha":os.environ["MAIN_CODE_SHA"],
+              "phase":phase,
+              "phase_epoch":epoch,
+              "source_collection_epoch":payload_source_epoch,
+              "collection_cutoff_at_utc":payload_cutoff,
+              "analysis_stage":payload_stage,
+              "intent":intent,
+              "strategy_family":family,
+              "paper_only":True,
+              "read_only":True,
+              "real_execution":False,
+              "received_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00","Z"),
+          }
+          target=pathlib.Path("catalog/operator-dispatches")/(request_id+".json")
+          target.parent.mkdir(parents=True,exist_ok=True)
+          if target.exists():
+              old=json.loads(target.read_text(encoding="utf-8"))
+              stable={k:v for k,v in row.items() if k!="received_at_utc"}
+              old_stable={k:v for k,v in old.items() if k!="received_at_utc"}
+              if stable != old_stable:
+                  raise SystemExit("operator dispatch identity conflict")
+          else:
+              target.write_text(json.dumps(row,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+          PY
+      - name: Publish dispatch receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/operator-dispatches
+          git diff --cached --quiet || git commit -m "orchestration: record operator dispatch"
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              echo "Unable to publish dispatch receipt after five attempts" >&2
+              exit 1
+            fi
+          done
+          gh workflow run create-resumable-campaigns.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run resumable-campaign-controller.yml --repo "$GITHUB_REPOSITORY" --ref main

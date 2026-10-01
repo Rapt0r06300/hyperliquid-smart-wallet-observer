@@ -1,0 +1,85 @@
+name: backfill-replay-compatibility
+on:
+  workflow_run:
+    workflows: [backfill-exact-trade-counts, backfill-global-unique-trade-counts]
+    types: [completed]
+  push:
+    branches: [main]
+    paths:
+      - 'tools/backfill_replay_compatibility.py'
+      - 'tools/enforce_safe_replay_invariant.py'
+      - 'tools/replay_compatibility.py'
+      - 'tools/build_replay_compatibility_reasons.py'
+      - 'tools/index_run_manifest.py'
+      - '.github/workflows/backfill-replay-compatibility.yml'
+  schedule:
+    - cron: '6,16,26,36,46,56 * * * *'
+  workflow_dispatch:
+    inputs:
+      per_family_limit:
+        description: "Maximum verified assets per priority family group"
+        required: false
+        default: "1000"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-control-plane-index
+  cancel-in-progress: false
+
+jobs:
+  verify-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Sync latest main before processing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git rebase origin/main
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Enforce SAFE implies replay-compatible
+        run: python tools/enforce_safe_replay_invariant.py
+
+      - name: Verify immutable legacy SAFE assets for replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          LIMIT="${{ inputs.per_family_limit || '1000' }}"
+          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "bbo"
+          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "l2book,l2,book"
+          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "trades,agg_trades,fills,userfills,user_fills"
+          python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
+          python tools/build_replay_compatibility_reasons.py
+          python tools/build_catalog_metrics.py
+          python tools/check_dataset_quality.py
+
+      - name: Publish replay-proof progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog datasets
+          git diff --cached --quiet && exit 0
+          git commit -m "data: backfill verified replay compatibility"
+          if git push origin HEAD:main; then
+            exit 0
+          fi
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main

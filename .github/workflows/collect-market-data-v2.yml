@@ -1,0 +1,30 @@
+name: collect-market-data-v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: "Diagnostic collection window (minutes)"
+        required: false
+        default: "30"
+      max_coins:
+        description: "Maximum multi-venue coins"
+        required: false
+        default: "16"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-market-collection
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Manual diagnostic only
+        run: |
+          echo "Scheduled market collection migrated to resumable campaigns."
+          echo "Use create-resumable-campaigns + controller/worker for automatic work."

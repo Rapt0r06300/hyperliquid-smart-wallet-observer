@@ -1,0 +1,46 @@
+name: promote-dataset-manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: Path to a committed incoming manifest
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-control-plane-index
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Qualify manifest
+        run: python tools/promote_manifest.py "${{ inputs.manifest_path }}"
+      - name: Validate policy
+        run: |
+          python tools/check_dataset_quality.py
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests
+      - name: Commit control-plane promotion
+        run: |
+          if git diff --quiet; then
+            echo "No promotion changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog datasets
+          git commit -m "data: qualify manifest ${{ inputs.manifest_path }}"
+          git push

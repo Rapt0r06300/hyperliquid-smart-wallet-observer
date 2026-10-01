@@ -1,0 +1,23 @@
+name: collect-event-intelligence-v2
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-event-intelligence-collection
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REAL_MAINNET_TRADING: "false"
+      ENABLE_REAL_ORDERS: "0"
+    steps:
+      - name: Manual diagnostic only
+        run: |
+          echo "Scheduled Event Intelligence collection migrated to resumable campaigns."

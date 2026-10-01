@@ -1,0 +1,25 @@
+name: collect-official-archives-v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      archive_date:
+        description: "Diagnostic UTC archive day (YYYY-MM-DD)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-official-archive-collection
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Manual diagnostic only
+        run: |
+          echo "Scheduled official archive collection migrated to resumable campaigns."

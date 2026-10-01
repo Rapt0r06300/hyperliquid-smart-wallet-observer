@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Mapping, Sequence
 
-DEFAULT_REPOSITORY = "Rapt0r06300/alina-smartflow-datasets-v2"
+DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 DEFAULT_RELEASE_ID: int | None = None
 LEGACY_REPOSITORY = "Rapt0r06300/hypersmart-datasets"
 LEGACY_RELEASE_ID = 371149058
@@ -42,7 +42,7 @@ def _validated_source(repository: str, release_id: int | None) -> tuple[str, int
         )
     if release_id is None or int(release_id) <= 0:
         raise DatasetBridgeError(
-            "EXPLICIT_V2_RELEASE_REQUIRED: select a verified release from alina-smartflow-datasets-v2."
+            "EXPLICIT_V2_RELEASE_REQUIRED: select a verified release from the Alina Smart Flow repository."
         )
     return repo, int(release_id)
 

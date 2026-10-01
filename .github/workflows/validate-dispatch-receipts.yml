@@ -1,0 +1,19 @@
+name: validate-dispatch-receipts
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "catalog/dispatch-receipts/**"
+      - "catalog/campaigns/**"
+      - "tools/validate_dispatch_receipts.py"
+      - ".github/workflows/validate-dispatch-receipts.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: python tools/validate_dispatch_receipts.py

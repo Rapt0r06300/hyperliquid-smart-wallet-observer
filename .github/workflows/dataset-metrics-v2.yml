@@ -1,0 +1,37 @@
+name: dataset-metrics-v2
+on:
+  schedule:
+    - cron: '53 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: dataset-v2-control-plane-index
+  cancel-in-progress: true
+jobs:
+  metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with: {fetch-depth: 0, persist-credentials: true}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.12'}
+      - name: Build replay compatibility reasons
+        run: python tools/build_replay_compatibility_reasons.py
+      - name: Build exact catalog metrics
+        run: python tools/build_catalog_metrics.py
+      - name: Validate dataset policy
+        run: |
+          python tools/check_dataset_quality.py
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py
+      - name: Publish metrics
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json
+          git diff --cached --quiet && exit 0
+          git commit -m "data: refresh exact dataset metrics"
+          for i in 1 2 3 4 5; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep $((i*2)); done
+          exit 1

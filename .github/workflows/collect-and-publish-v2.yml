@@ -1,0 +1,270 @@
+name: collect-and-publish-v2
+
+on:
+  # Manual fallback/diagnostic campaign only.
+  # The canonical scheduled collector is collect-market-data-v2.yml.
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Collection duration per lane'
+        required: false
+        default: '230'
+      max_native_symbols:
+        description: 'Max symbols per native venue'
+        required: false
+        default: '100'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset-v2-collection
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    name: collect-${{ matrix.collector }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        collector: [bbo, native-bybit-0, native-bybit-1, native-okx-0, native-okx-1]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: 'utf-8'
+      HL_ENABLE_MAINNET_EXECUTION: '0'
+      HL_ENABLE_TESTNET_EXECUTION: '0'
+      REAL_MAINNET_TRADING: 'false'
+      TESTNET_EXECUTION_ENABLED: 'false'
+      HYPERSMART_ENABLE_REAL_ORDERS: '0'
+      ENABLE_REAL_ORDERS: '0'
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout dataset control plane
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout Alina source snapshot
+        uses: actions/checkout@v4
+        with:
+          repository: Rapt0r06300/hyperliquid-smart-wallet-observer
+          ref: main
+          path: alina
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Pin collector source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="$(git -C alina rev-parse HEAD)"
+          echo "ALINA_COLLECTOR_VERSION=$SHA" >> "$GITHUB_ENV"
+
+      - name: Install Alina collector package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -e ./alina
+
+      - name: Resolve bounded collection window
+        shell: bash
+        run: |
+          set -euo pipefail
+          MINUTES="${{ github.event.inputs.duration_minutes || '230' }}"
+          case "$MINUTES" in
+            ''|*[!0-9]*) echo "invalid duration_minutes"; exit 2 ;;
+          esac
+          if [ "$MINUTES" -lt 5 ] || [ "$MINUTES" -gt 300 ]; then
+            echo "duration_minutes must be 5..300"
+            exit 2
+          fi
+          echo "COLLECT_SECONDS=$((MINUTES * 60))" >> "$GITHUB_ENV"
+          ROOT="$RUNNER_TEMP/alina-v2-${{ matrix.collector }}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$ROOT"
+          echo "COLLECT_ROOT=$ROOT" >> "$GITHUB_ENV"
+
+      - name: Collect public market data
+        id: collection
+        shell: bash
+        env:
+          PYTHONPATH: alina/src:alina/tools:alina
+        run: |
+          set +e
+          if [ "${{ matrix.collector }}" = "bbo" ]; then
+            python alina/tools/collecter_bbo.py \
+              --root "$COLLECT_ROOT" \
+              --coins AUTO \
+              --duration-s "$COLLECT_SECONDS"
+            STATUS=$?
+            BUNDLE="$COLLECT_ROOT/runtime/data/dataset_v2_bundle/bbo"
+          else
+            MAX_SYMBOLS="${{ github.event.inputs.max_native_symbols || '100' }}"
+            case "${{ matrix.collector }}" in
+              native-bybit-0) VENUE="bybit"; SHARD_INDEX=0 ;;
+              native-bybit-1) VENUE="bybit"; SHARD_INDEX=1 ;;
+              native-okx-0) VENUE="okx"; SHARD_INDEX=0 ;;
+              native-okx-1) VENUE="okx"; SHARD_INDEX=1 ;;
+              *) echo "unknown collector lane: ${{ matrix.collector }}"; exit 2 ;;
+            esac
+            python alina/tools/collecter_native_venues.py \
+              --root "$COLLECT_ROOT" \
+              --max-symbols "$MAX_SYMBOLS" \
+              --venues "$VENUE" \
+              --symbol-shard-count 2 \
+              --symbol-shard-index "$SHARD_INDEX" \
+              --universe-refresh-s 900 \
+              --duration-s "$COLLECT_SECONDS"
+            STATUS=$?
+            BUNDLE="$COLLECT_ROOT/runtime/data/dataset_v2_bundle/native_venues"
+          fi
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Validate local V2 bundle
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.collection.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          python - "$BUNDLE" <<'PY'
+          import json, os, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          index_path = root / "BUNDLE_INDEX.json"
+          if not index_path.is_file():
+              raise SystemExit("V2_BUNDLE_INDEX_MISSING")
+          payload = json.loads(index_path.read_text(encoding="utf-8"))
+          count = int(payload.get("shard_count") or 0)
+          if count <= 0:
+              raise SystemExit("V2_BUNDLE_HAS_NO_SHARDS")
+          assets = list((root / "assets").glob("*.jsonl.gz"))
+          manifests = list((root / "manifests").glob("*.json"))
+          if len(assets) != count or len(manifests) != count:
+              raise SystemExit(
+                  f"V2_BUNDLE_COUNT_MISMATCH shards={count} assets={len(assets)} manifests={len(manifests)}"
+              )
+          if payload.get("collector_version") != os.environ["ALINA_COLLECTOR_VERSION"]:
+              raise SystemExit("V2_COLLECTOR_SHA_MISMATCH")
+          print(json.dumps({
+              "shards": count,
+              "bytes": sum(path.stat().st_size for path in assets),
+              "collector_sha": payload.get("collector_version"),
+              "pre_publish_safe": int(payload.get("safe_count") or 0),
+              "partial": int(payload.get("partial_count") or 0),
+              "reject": int(payload.get("reject_count") or 0),
+          }, indent=2))
+          PY
+
+      - name: Publish and remotely verify immutable V2 release
+        shell: bash
+        env:
+          BUNDLE: ${{ steps.collection.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          TAG="data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.collector }}"
+          python alina/tools/publish_dataset_v2_release.py             "$BUNDLE"             --repository "$GITHUB_REPOSITORY"             --tag "$TAG"             --target main             --title "Alina dataset V2 ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT} ${{ matrix.collector }}"
+
+      - name: Fail closed if collector itself failed
+        if: always()
+        shell: bash
+        run: |
+          STATUS="${{ steps.collection.outputs.status }}"
+          if [ -n "$STATUS" ] && [ "$STATUS" != "0" ]; then
+            echo "Collector exited with status $STATUS after preserving any bundle it produced."
+            exit "$STATUS"
+          fi
+
+
+  index-control-plane:
+    name: index-published-v2
+    needs: collect
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: dataset-v2-control-plane-index
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout dataset control plane
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download published run manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          tags=()
+          for COLLECTOR in bbo native-bybit-0 native-bybit-1 native-okx-0 native-okx-1; do
+            tags+=("data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${COLLECTOR}")
+          done
+          python tools/download_release_manifests.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --destination "$RUNNER_TEMP/v2-run-manifests" \
+            --attempts 12 \
+            --poll-seconds 10 \
+            "${tags[@]}"
+          FOUND="$(find "$RUNNER_TEMP/v2-run-manifests" -name RUN_MANIFEST.json -type f | wc -l)"
+          echo "RUN_MANIFEST_COUNT=$FOUND" >> "$GITHUB_ENV"
+
+      - name: Index verified manifests
+        if: env.RUN_MANIFEST_COUNT != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t MANIFESTS < <(find "$RUNNER_TEMP/v2-run-manifests" -name RUN_MANIFEST.json -type f | sort)
+          if [ "${#MANIFESTS[@]}" -eq 0 ]; then
+            echo "No RUN_MANIFEST found after download."
+            exit 0
+          fi
+          python tools/index_run_manifest.py "${MANIFESTS[@]}"
+
+      - name: Validate control plane
+        if: env.RUN_MANIFEST_COUNT != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check_dataset_quality.py
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests
+
+      - name: Commit indexed control plane
+        if: env.RUN_MANIFEST_COUNT != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No index changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog datasets
+          git commit -m "data: index V2 run ${GITHUB_RUN_ID}/${GITHUB_RUN_ATTEMPT}"
+          for ATTEMPT in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "Index push raced with another run; rebasing (attempt $ATTEMPT)."
+            git fetch origin main
+            git rebase origin/main
+            sleep $((ATTEMPT * 2))
+          done
+          echo "Unable to publish indexed control plane after retries."
+          exit 1

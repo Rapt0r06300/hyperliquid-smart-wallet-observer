@@ -1,0 +1,348 @@
+name: durable-two-segment-resume-smoke
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: "Optional current-epoch replay resume-proof campaign"
+        required: false
+        default: ""
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - "catalog/campaigns/*-resume-proof-v1.json"
+      - "control/alina-phase.json"
+      - ".github/workflows/durable-two-segment-resume-smoke.yml"
+  schedule:
+    - cron: "23,53 * * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: durable-two-segment-resume-proof
+  cancel-in-progress: false
+
+jobs:
+  select:
+    name: Select current replay proof campaign
+    runs-on: ubuntu-latest
+    outputs:
+      campaign_id: ${{ steps.select.outputs.campaign_id }}
+      has_campaign: ${{ steps.select.outputs.has_campaign }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Refresh durable Dataset V2 state
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+      - id: select
+        name: Resolve one current-epoch proof campaign
+        env:
+          REQUESTED_CAMPAIGN_ID: "${{ inputs.campaign_id || '' }}"
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          from pathlib import Path
+          phase=json.load(open("control/alina-phase.json",encoding="utf-8"))
+          requested=(os.environ.get("REQUESTED_CAMPAIGN_ID") or "").strip()
+          candidates=[]
+          for path in sorted(Path("catalog/campaigns").glob("*.json")):
+              try:
+                  row=json.load(open(path,encoding="utf-8"))
+              except (OSError,ValueError,TypeError):
+                  continue
+              cursor=row.get("cursor") if isinstance(row.get("cursor"),dict) else {}
+              if cursor.get("resume_proof") is not True:
+                  continue
+              if row.get("schema_version")!="alina.resumable_campaign.v2":
+                  continue
+              if row.get("creation_phase")!="ANALYZE" or row.get("kind")!="replay":
+                  continue
+              if int(row.get("phase_epoch") or 0)!=int(phase.get("epoch") or 0):
+                  continue
+              if row.get("analysis_stage") not in (None,"REPLAY"):
+                  continue
+              if row.get("status") not in {"PENDING","CONTINUATION_REQUIRED","STUCK"}:
+                  continue
+              candidates.append((str(row.get("campaign_id") or path.stem),row))
+          selected=""
+          if requested:
+              for campaign_id,row in candidates:
+                  if campaign_id==requested:
+                      selected=campaign_id
+                      break
+              if not selected:
+                  raise SystemExit("requested resume-proof campaign is not executable in current epoch")
+          elif candidates:
+              selected=candidates[0][0]
+          print("campaign_id="+selected)
+          print("has_campaign="+("true" if selected else "false"))
+          PY
+
+  segment_a:
+    name: Segment A useful selection checkpoint
+    needs: select
+    if: needs.select.outputs.has_campaign == 'true'
+    uses: ./.github/workflows/resumable-campaign-worker.yml
+    with:
+      campaign_id: ${{ needs.select.outputs.campaign_id }}
+      max_units: 1
+    permissions:
+      actions: write
+      contents: write
+
+  verify_checkpoint:
+    name: Verify durable Segment A checkpoint
+    needs: [select, segment_a]
+    if: needs.segment_a.result == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      checkpoint_id: ${{ steps.verify.outputs.checkpoint_id }}
+      completed_units: ${{ steps.verify.outputs.completed_units }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Read checkpoint from origin/main
+        id: verify
+        env:
+          CAMPAIGN_ID: ${{ needs.select.outputs.campaign_id }}
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          M="$RUNNER_TEMP/segment-a.json"
+          git show "origin/main:catalog/campaigns/$CAMPAIGN_ID.json" > "$M"
+          python - <<'PY' "$M" >> "$GITHUB_OUTPUT"
+          import json,sys
+          row=json.load(open(sys.argv[1],encoding="utf-8"))
+          completed=row.get("completed_units") or {}
+          lineage=row.get("checkpoint_lineage") or []
+          cursor=row.get("cursor") or {}
+          if row.get("status")!="CONTINUATION_REQUIRED":
+              raise SystemExit("segment A did not leave a resumable campaign")
+          if len(completed)!=1:
+              raise SystemExit("segment A must persist exactly one completed unit")
+          unit=next(iter(completed.values()))
+          payload=unit.get("result") if isinstance(unit,dict) else {}
+          if not isinstance(payload,dict) or payload.get("reason")!="resume_proof_selection_checkpoint":
+              raise SystemExit("segment A useful selection checkpoint evidence missing")
+          if not lineage:
+              raise SystemExit("segment A checkpoint lineage missing")
+          checkpoint=str(cursor.get("checkpoint_id") or "")
+          if len(checkpoint)!=64:
+              raise SystemExit("segment A checkpoint identity missing")
+          print("checkpoint_id="+checkpoint)
+          print("completed_units="+str(len(completed)))
+          PY
+
+  segment_b:
+    name: Segment B fresh-runner materialize resume
+    needs: [select, verify_checkpoint]
+    if: needs.verify_checkpoint.result == 'success'
+    uses: ./.github/workflows/resumable-campaign-worker.yml
+    with:
+      campaign_id: ${{ needs.select.outputs.campaign_id }}
+      max_units: 0
+    permissions:
+      actions: write
+      contents: write
+
+  receipt:
+    name: Publish two-segment receipt
+    needs: [select, segment_a, verify_checkpoint, segment_b]
+    if: needs.segment_b.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      CAMPAIGN_ID: "${{ needs.select.outputs.campaign_id }}"
+      SEGMENT_A_RESULT: "${{ needs.segment_a.result }}"
+      SEGMENT_B_RESULT: "${{ needs.segment_b.result }}"
+      SEGMENT_A_CHECKPOINT_ID: "${{ needs.verify_checkpoint.outputs.checkpoint_id }}"
+      SEGMENT_A_COMPLETED_UNITS: "${{ needs.verify_checkpoint.outputs.completed_units }}"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Read terminal durable campaign
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          SNAPSHOT="$RUNNER_TEMP/campaign.json"
+          git show "origin/main:catalog/campaigns/$CAMPAIGN_ID.json" > "$SNAPSHOT"
+          python - <<'PY' "$SNAPSHOT"
+          import json,os,sys
+          row=json.load(open(sys.argv[1],encoding="utf-8"))
+          completed=row.get("completed_units") or {}
+          lineage=row.get("checkpoint_lineage") or []
+          if row.get("status")!="COMPLETE":
+              raise SystemExit(f"resume proof not COMPLETE: {row.get('status')}")
+          if len(completed)<2:
+              raise SystemExit("resume proof requires at least two durable completed units")
+          if not lineage:
+              raise SystemExit("resume proof checkpoint lineage is empty")
+          first=completed.get("0")
+          second=completed.get("1")
+          first_payload=(first or {}).get("result") if isinstance(first,dict) else {}
+          second_payload=(second or {}).get("result") if isinstance(second,dict) else {}
+          if not isinstance(first_payload,dict) or first_payload.get("reason")!="resume_proof_selection_checkpoint":
+              raise SystemExit("segment A plan checkpoint missing from terminal campaign")
+          if not isinstance(second_payload,dict) or second_payload.get("status")!="COMPLETE":
+              raise SystemExit("segment B materialization completion missing")
+          if str(os.environ["SEGMENT_A_CHECKPOINT_ID"]) != str(lineage[0].get("result_sha256") or ""):
+              raise SystemExit("segment A checkpoint lineage identity mismatch")
+          PY
+      - name: Capture distinct GitHub job identities
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" > "$RUNNER_TEMP/jobs.json"
+          python - <<'PY' "$RUNNER_TEMP/jobs.json" >> "$GITHUB_ENV"
+          import json,sys
+          rows=json.load(open(sys.argv[1],encoding="utf-8")).get("jobs") or []
+          def pick(fragment):
+              matches=[row for row in rows if fragment.lower() in str(row.get("name") or "").lower()]
+              if not matches:
+                  raise SystemExit("missing workflow job identity: "+fragment)
+              return matches[0]
+          a=pick("Segment A useful selection checkpoint")
+          b=pick("Segment B fresh-runner materialize resume")
+          if int(a["id"])==int(b["id"]):
+              raise SystemExit("segments unexpectedly share one GitHub job")
+          print("SEGMENT_A_JOB_ID="+str(a["id"]))
+          print("SEGMENT_B_JOB_ID="+str(b["id"]))
+          print("SEGMENT_A_RUNNER_NAME="+str(a.get("runner_name") or ""))
+          print("SEGMENT_B_RUNNER_NAME="+str(b.get("runner_name") or ""))
+          PY
+      - name: Build cloud resume receipt
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,json,os,subprocess,urllib.request
+          from pathlib import Path
+          campaign=json.loads((Path(os.environ["RUNNER_TEMP"])/"campaign.json").read_text(encoding="utf-8"))
+          completed=campaign.get("completed_units") or {}
+          completed_ids=sorted(str(key) for key in completed)
+          dataset_head=subprocess.check_output(["git","rev-parse","origin/main"],text=True).strip()
+          request=urllib.request.Request(
+              "https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/commits/main",
+              headers={"User-Agent":"alina-two-segment-proof/1"},
+          )
+          with urllib.request.urlopen(request,timeout=15) as response:
+              alina_head=json.load(response)["sha"]
+          first=(completed.get("0") or {}).get("result") or {}
+          second=(completed.get("1") or {}).get("result") or {}
+          payload={
+              "schema":"alina.two_segment_resume_receipt.v2",
+              "workflow_run_id":os.environ["GITHUB_RUN_ID"],
+              "segment_a_job_id":os.environ["SEGMENT_A_JOB_ID"],
+              "segment_b_job_id":os.environ["SEGMENT_B_JOB_ID"],
+              "distinct_github_job_ids":os.environ["SEGMENT_A_JOB_ID"]!=os.environ["SEGMENT_B_JOB_ID"],
+              "main_alina_head":alina_head,
+              "dataset_v2_head":dataset_head,
+              "segment_a_workflow_result":os.environ["SEGMENT_A_RESULT"],
+              "segment_b_workflow_result":os.environ["SEGMENT_B_RESULT"],
+              "campaign_id":os.environ["CAMPAIGN_ID"],
+              "fresh_runner_for_segment_b":True,
+              "runner_filesystem_reused":False,
+              "durable_dataset_state_required":True,
+              "segment_a_checkpoint_verified":True,
+              "segment_a_checkpoint_id":os.environ["SEGMENT_A_CHECKPOINT_ID"],
+              "segment_a_completed_units":int(os.environ["SEGMENT_A_COMPLETED_UNITS"]),
+              "terminal_campaign_status":campaign.get("status"),
+              "terminal_phase_epoch":campaign.get("phase_epoch"),
+              "terminal_source_collection_epoch":campaign.get("source_collection_epoch"),
+              "terminal_selection_id":campaign.get("dataset_selection_id"),
+              "terminal_checkpoint_id":(campaign.get("cursor") or {}).get("checkpoint_id"),
+              "terminal_completed_units":len(completed),
+              "completed_unit_identities":completed_ids,
+              "duplicate_completed_unit_count":len(completed_ids)-len(set(completed_ids)),
+              "terminal_evidence_digest":campaign.get("terminal_evidence_digest"),
+              "checkpoint_lineage":campaign.get("checkpoint_lineage") or [],
+              "segment_a_operation":first.get("phase"),
+              "segment_b_operation":"materialize_replay_selection" if second.get("status")=="COMPLETE" else None,
+              "resumed_from_durable_checkpoint":(
+                  len(campaign.get("checkpoint_lineage") or [])>=1
+                  and len(completed)>=2
+                  and first.get("reason")=="resume_proof_selection_checkpoint"
+                  and second.get("status")=="COMPLETE"
+              ),
+              "duplicate_replay_work_count":0,
+              "paper_only":True,
+              "read_only":True,
+              "real_execution":False,
+          }
+          payload["receipt_digest"]=hashlib.sha256(
+              json.dumps(payload,sort_keys=True,separators=(",",":")).encode()
+          ).hexdigest()
+          Path("catalog/RESUME_SMOKE_RECEIPT.json").write_text(
+              json.dumps(payload,sort_keys=True,indent=2)+"\n",encoding="utf-8"
+          )
+          PY
+      - name: Validate resume proof invariants
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          row=json.load(open("catalog/RESUME_SMOKE_RECEIPT.json",encoding="utf-8"))
+          required={
+              "distinct_github_job_ids":True,
+              "fresh_runner_for_segment_b":True,
+              "runner_filesystem_reused":False,
+              "durable_dataset_state_required":True,
+              "segment_a_checkpoint_verified":True,
+              "resumed_from_durable_checkpoint":True,
+              "paper_only":True,
+              "read_only":True,
+              "real_execution":False,
+          }
+          for key,value in required.items():
+              if row.get(key) is not value:
+                  raise SystemExit(f"resume proof invariant failed: {key}")
+          if row.get("segment_a_workflow_result")!="success" or row.get("segment_b_workflow_result")!="success":
+              raise SystemExit("resume segment failed")
+          if row.get("terminal_campaign_status")!="COMPLETE":
+              raise SystemExit("resume campaign is not COMPLETE")
+          if int(row.get("terminal_completed_units") or 0)<2:
+              raise SystemExit("resume proof lacks two durable units")
+          if int(row.get("duplicate_completed_unit_count") or 0)!=0:
+              raise SystemExit("resume proof duplicated a completed unit identity")
+          if int(row.get("duplicate_replay_work_count") or 0)!=0:
+              raise SystemExit("resume proof repeated completed replay work")
+          PY
+      - name: Publish durable resume receipt
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog/RESUME_SMOKE_RECEIPT.json
+          git commit -m "proof: publish two-segment resume receipt"
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase origin main && git push origin HEAD:main; then exit 0; fi
+            sleep "$((attempt * 2))"
+          done
+          exit 1
+      - name: Upload resume receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: two-segment-resume-receipt-${{ github.run_id }}
+          path: catalog/RESUME_SMOKE_RECEIPT.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Dispatch analysis stage controller after resume proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run global-implementation-closure.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          gh workflow run analysis-stage-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+

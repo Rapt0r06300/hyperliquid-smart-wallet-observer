@@ -42,13 +42,13 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - name: Fetch canonical Dataset V2 phase authority
+      - name: Fetch canonical Alina phase authority
         run: |
           set -euo pipefail
           curl --fail-with-body --retry 4 --retry-all-errors \
             -H "Accept: application/vnd.github.raw+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/Rapt0r06300/alina-smartflow-datasets-v2/contents/control/alina-phase.json \
+            https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/contents/control/alina-phase.json \
             -o "$RUNNER_TEMP/alina-phase.json"
       - name: Persist immutable operator intent
         env:
@@ -158,7 +158,7 @@ jobs:
             sleep $((i*2))
           done
           exit 1
-  dispatch-dataset:
+  dispatch-alina:
     needs: persist
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -175,11 +175,11 @@ jobs:
           curl --fail-with-body --retry 4 --retry-all-errors \
             -H "Accept: application/vnd.github.raw+json" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/Rapt0r06300/alina-smartflow-datasets-v2/contents/control/alina-phase.json \
+            https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/contents/control/alina-phase.json \
             -o "$RUNNER_TEMP/alina-phase.json"
-      - name: Dispatch immutable intent to Dataset V2
+      - name: Dispatch immutable intent to Alina
         env:
-          DISPATCH_TOKEN: ${{ secrets.ALINA_DATASET_DISPATCH_TOKEN }}
+          DISPATCH_TOKEN: ${{ github.token }}
           REQUEST_ID: ${{ inputs.request_id }}
           INTENT: ${{ inputs.intent }}
           FAMILY: ${{ inputs.family }}
@@ -187,10 +187,6 @@ jobs:
           CONFIG_JSON: ${{ inputs.config_json }}
         run: |
           set -euo pipefail
-          if [ -z "$DISPATCH_TOKEN" ]; then
-            echo "Dataset dispatch token is not configured; intent remains durably persisted."
-            exit 0
-          fi
           python - <<'PY' > "$RUNNER_TEMP/dispatch.json"
           import json, os
           config=json.loads(os.environ["CONFIG_JSON"])
@@ -217,5 +213,5 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $DISPATCH_TOKEN" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/Rapt0r06300/alina-smartflow-datasets-v2/dispatches \
+            https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/dispatches \
             --data-binary @"$RUNNER_TEMP/dispatch.json"

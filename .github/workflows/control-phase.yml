@@ -1,0 +1,57 @@
+name: control-phase
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "IDLE, COLLECT or ANALYZE"
+        required: true
+        type: choice
+        options: [IDLE, COLLECT, ANALYZE]
+      request_id:
+        description: "Idempotent operator request identity"
+        required: true
+        type: string
+      requested_by:
+        description: "Operator identity"
+        required: false
+        default: "github-operator"
+        type: string
+      cutoff_at_utc:
+        description: "Optional UTC cutoff; defaults to runner UTC now"
+        required: false
+        type: string
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: control-phase
+  cancel-in-progress: false
+jobs:
+  transition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Apply idempotent phase transition
+        run: |
+          set -euo pipefail
+          python tools/set_phase.py             --phase "${{ inputs.phase }}"             --request-id "${{ inputs.request_id }}"             --requested-by "${{ inputs.requested_by }}"             ${{ inputs.cutoff_at_utc != '' && format('--cutoff-at-utc {0}', inputs.cutoff_at_utc) || '' }}
+      - name: Publish phase authority
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add control/alina-phase.json control/phase-receipts
+          git diff --cached --quiet && exit 0
+          git commit -m "control: transition phase to ${{ inputs.phase }}"
+          git push origin HEAD:main
+      - name: Materialize phase-owned campaigns
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: gh workflow run create-resumable-campaigns.yml --repo "${{ github.repository }}" --ref main
+      - name: Wake bounded controller
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: gh workflow run resumable-campaign-controller.yml --repo "${{ github.repository }}" --ref main

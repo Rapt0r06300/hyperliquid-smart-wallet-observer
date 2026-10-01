@@ -14,7 +14,7 @@ def _row(dataset_id: str, start: int, end: int) -> dict:
         "sha256": "a" * 64,
         "bytes": 100,
         "event_count": 10,
-        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
         "release_tag": "tag",
         "release_asset": dataset_id + ".jsonl.gz",
         "manifest_path": "datasets/safe/" + dataset_id + ".manifest.json",
@@ -62,7 +62,7 @@ def test_release_asset_url_is_direct_and_api_independent() -> None:
     url = _release_asset_url(shard)
 
     assert url == (
-        "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer/"
+        "https://github.com/Rapt0r06300/alina-smartflow-datasets-v2/"
         "releases/download/data-v2-test%20tag/asset%20name.jsonl.gz"
     )
     assert "api.github.com" not in url
