@@ -8,7 +8,7 @@ on:
         type: choice
         options: [status, collect, analyze, idle]
       request_id:
-        description: "Lowercase SHA-256 idempotency identity; required for transitions"
+        description: "Optional lowercase SHA-256 idempotency identity; generated automatically when empty"
         required: false
         type: string
       requested_by:
@@ -30,9 +30,15 @@ jobs:
           REQUEST_ID: ${{ inputs.request_id }}
         run: |
           set -euo pipefail
-          if [ "$COMMAND" != "status" ] && ! [[ "$REQUEST_ID" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "request_id must be exactly 64 lowercase hexadecimal characters" >&2
-            exit 2
+          if [ "$COMMAND" != "status" ]; then
+            if [ -n "$REQUEST_ID" ] && ! [[ "$REQUEST_ID" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "request_id must be exactly 64 lowercase hexadecimal characters when provided" >&2
+              exit 2
+            fi
+            if [ -z "$REQUEST_ID" ]; then
+              REQUEST_ID="$(printf '%s' "$COMMAND:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" | sha256sum | cut -d' ' -f1)"
+              echo "REQUEST_ID=$REQUEST_ID" >> "$GITHUB_ENV"
+            fi
           fi
           curl --fail-with-body --retry 4 --retry-all-errors \
             -H "Accept: application/vnd.github.raw+json" \
@@ -40,7 +46,7 @@ jobs:
             https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/contents/control/alina-phase.json \
             -o "$RUNNER_TEMP/phase-before.json"
           python -m json.tool "$RUNNER_TEMP/phase-before.json"
-      - name: Dispatch canonical Dataset V2 transition
+      - name: Dispatch canonical single-repository transition
         if: inputs.command != 'status'
         env:
           GH_TOKEN: ${{ github.token }}
