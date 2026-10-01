@@ -128,27 +128,13 @@ jobs:
           done
           exit 1
 
-      - name: Wake unified COLLECT plane
+      - name: Confirm unified state is committed
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for wf in create-resumable-campaigns.yml resumable-campaign-controller.yml campaign-watchdog.yml dataset-quality-ci.yml; do
-            for attempt in 1 2 3 4 5; do
-              set +e
-              output="$(gh workflow run "$wf" --repo "$GITHUB_REPOSITORY" --ref main 2>&1)"
-              rc=$?
-              set -e
-              if [ "$rc" -eq 0 ]; then break; fi
-              printf '%s\n' "$output" >&2
-              if printf '%s' "$output" | grep -Eqi 'rate limit|HTTP 403|secondary rate|502|503|504|timeout'; then
-                sleep "$((attempt * attempt * 5))"
-                continue
-              fi
-              exit "$rc"
-            done
-          done
+          git fetch origin main
+          git show origin/main:control/alina-phase.json | python -m json.tool
+          test "$(git show origin/main:control/alina-phase.json | python -c 'import json,sys; print(json.load(sys.stdin)["phase"])')" = "COLLECT"
 
   mirror-releases:
     needs: import-state
