@@ -57,7 +57,7 @@ def _atomic_write(path: Path, content: str) -> None:
 
 
 def _has_productive_work(row: dict[str, Any]) -> bool:
-    if row.get("outputs") or row.get("terminal_evidence_digest"):
+    if row.get("outputs"):
         return True
     completed = row.get("completed_units") or {}
     if not isinstance(completed, dict):
@@ -68,6 +68,11 @@ def _has_productive_work(row: dict[str, Any]) -> bool:
             return True
         if str(result.get("status") or "") != "FAILED":
             return True
+    # A terminal digest on a FAILED campaign only certifies the failure itself.
+    # It must not freeze a retry when every completed unit is also FAILED and
+    # no durable output was produced.
+    if row.get("terminal_evidence_digest") and str(row.get("status") or "") != "FAILED":
+        return True
     return False
 
 
