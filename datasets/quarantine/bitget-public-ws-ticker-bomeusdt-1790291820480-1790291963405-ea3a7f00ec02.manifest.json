@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 122490,
+  "collection_run_id": "market-36071545657",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-bomeusdt-1790291820480-1790291963405-ea3a7f00ec02",
+  "end_ts_ms": 1790291963405,
+  "event_count": 1342,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587365467,
+    "asset_name": "bitget-public-ws-ticker-bomeusdt-1790291820480-1790291963405-ea3a7f00ec02.jsonl.gz",
+    "release_id": 396247759,
+    "remote_digest": "sha256:ea3a7f00ec025eae2353f173b9e12d5ac575bef2e6a57ed6cc694cbd195a24e0",
+    "remote_size": 122490,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36071545657-s5"
+  },
+  "release_asset": "bitget-public-ws-ticker-bomeusdt-1790291820480-1790291963405-ea3a7f00ec02.jsonl.gz",
+  "release_asset_id": 587365467,
+  "release_id": 396247759,
+  "release_remote_digest": "sha256:ea3a7f00ec025eae2353f173b9e12d5ac575bef2e6a57ed6cc694cbd195a24e0",
+  "release_remote_size": 122490,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36071545657-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ea3a7f00ec025eae2353f173b9e12d5ac575bef2e6a57ed6cc694cbd195a24e0",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790291820480,
+  "symbol": "BOMEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-0bda07e64eee4fbcafb34de215303ed0"
+    ],
+    "first_exchange_ts_ms": 1790291820241,
+    "last_exchange_ts_ms": 1790291963321,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1342,
+      "max": 239.0,
+      "min": 68.0,
+      "p50": 74.0,
+      "p95": 83.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

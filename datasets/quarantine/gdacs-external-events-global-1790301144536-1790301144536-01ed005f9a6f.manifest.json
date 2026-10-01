@@ -1,0 +1,130 @@
+{
+  "asset_verified": true,
+  "bytes": 10603,
+  "collection_run_id": "event-36083835652",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gdacs-external-events-global-1790301144536-1790301144536-01ed005f9a6f",
+  "end_ts_ms": 1790301144536,
+  "event_count": 87,
+  "event_intelligence": {
+    "coverage_complete": true,
+    "coverage_sha256": "f886d879da724eed34e47b23310dfd5a86abaaf56af6b0ab28cfdba610ddc9e9",
+    "dataset_families": [
+      "bbo",
+      "copy_vault_fills",
+      "copy_vault_l2",
+      "copy_vault_positions",
+      "external_events",
+      "funding_settlement",
+      "instrument_metadata",
+      "l2Book",
+      "open_interest",
+      "trades"
+    ],
+    "idea_count": 120,
+    "linked_strategy_families": [
+      "arbitrage",
+      "copy_vault",
+      "cross_venue_dislocation",
+      "lead_lag"
+    ],
+    "paper_only": true,
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "read_only": true,
+    "real_execution": false,
+    "schema": "alina.event_intelligence_integration.v1"
+  },
+  "family": "external_events",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "external_events"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "causal_event_availability"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNAVAILABLE"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "reason": "NO_INDEPENDENT_EXACT_REFERENCE",
+    "status": "UNAVAILABLE"
+  },
+  "release": {
+    "asset_id": 587288973,
+    "asset_name": "gdacs-external-events-global-1790301144536-1790301144536-01ed005f9a6f.jsonl.gz",
+    "release_id": 396215657,
+    "remote_digest": "sha256:01ed005f9a6fa3a33a2dca565a9e6a0b29683ac772d71b9f4af689aa1af2c222",
+    "remote_size": 10603,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "event-intelligence-v2-36083835652"
+  },
+  "release_asset": "gdacs-external-events-global-1790301144536-1790301144536-01ed005f9a6f.jsonl.gz",
+  "release_asset_id": 587288973,
+  "release_id": 396215657,
+  "release_remote_digest": "sha256:01ed005f9a6fa3a33a2dca565a9e6a0b29683ac772d71b9f4af689aa1af2c222",
+  "release_remote_size": 10603,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "event-intelligence-v2-36083835652",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "01ed005f9a6fa3a33a2dca565a9e6a0b29683ac772d71b9f4af689aa1af2c222",
+  "source": "gdacs",
+  "start_ts_ms": 1790301144536,
+  "symbol": "GLOBAL",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "event-36083835652:gdacs"
+    ],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "unknown"
+}

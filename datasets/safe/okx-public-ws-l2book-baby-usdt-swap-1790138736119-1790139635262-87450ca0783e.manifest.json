@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 288295,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-baby-usdt-swap-1790138736119-1790139635262-87450ca0783e",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790139635262,
+  "event_count": 2435,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 2435,
+  "release": {
+    "asset_id": 583317854,
+    "asset_name": "okx-public-ws-l2book-baby-usdt-swap-1790138736119-1790139635262-87450ca0783e.jsonl.gz",
+    "release_id": 394435259,
+    "remote_digest": "sha256:87450ca0783e71f859e937b9f8b3a138cb408cfae66b4bed3692ca654457b893",
+    "remote_size": 288295,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s6"
+  },
+  "release_asset": "okx-public-ws-l2book-baby-usdt-swap-1790138736119-1790139635262-87450ca0783e.jsonl.gz",
+  "release_asset_id": 583317854,
+  "release_id": 394435259,
+  "release_remote_digest": "sha256:87450ca0783e71f859e937b9f8b3a138cb408cfae66b4bed3692ca654457b893",
+  "release_remote_size": 288295,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "87450ca0783e71f859e937b9f8b3a138cb408cfae66b4bed3692ca654457b893",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790138736119,
+  "symbol": "BABY-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2435,
+      "max": 32.5,
+      "min": 10.0,
+      "p50": 18.5,
+      "p95": 32.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-0b8cd3ada6e040bf944aa26999ab612e"
+    ],
+    "first_exchange_ts_ms": 1790138736006,
+    "last_exchange_ts_ms": 1790139635206,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2435,
+      "max": 113.0,
+      "min": 54.0,
+      "p50": 56.0,
+      "p95": 58.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2435,
+      "max": 116.424414,
+      "min": 0.0,
+      "p50": 104.596981,
+      "p95": 110.509988
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

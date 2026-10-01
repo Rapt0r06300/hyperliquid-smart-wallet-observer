@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2550,
+  "collection_run_id": "market-36071545657",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-bigtime-usdt-swap-1790291827250-1790292681693-50b7001628b3",
+  "end_ts_ms": 1790292681693,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587367999,
+    "asset_name": "okx-public-ws-funding-bigtime-usdt-swap-1790291827250-1790292681693-50b7001628b3.jsonl.gz",
+    "release_id": 396247970,
+    "remote_digest": "sha256:50b7001628b33f7c7fb16450117f73bc67a144caf8725a33b3be01c5328afaf5",
+    "remote_size": 2550,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36071545657-s1"
+  },
+  "release_asset": "okx-public-ws-funding-bigtime-usdt-swap-1790291827250-1790292681693-50b7001628b3.jsonl.gz",
+  "release_asset_id": 587367999,
+  "release_id": 396247970,
+  "release_remote_digest": "sha256:50b7001628b33f7c7fb16450117f73bc67a144caf8725a33b3be01c5328afaf5",
+  "release_remote_size": 2550,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36071545657-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "50b7001628b33f7c7fb16450117f73bc67a144caf8725a33b3be01c5328afaf5",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790291827250,
+  "symbol": "BIGTIME-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 57.0,
+      "min": 18.0,
+      "p50": 23.0,
+      "p95": 49.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-6c3d771ac0fd4e44ba9e7bc5a03e867a"
+    ],
+    "first_exchange_ts_ms": 1790291766697,
+    "last_exchange_ts_ms": 1790292681628,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 60553.0,
+      "min": 65.0,
+      "p50": 75.0,
+      "p95": 78.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 124.116007,
+      "min": 0.0,
+      "p50": 119.044583,
+      "p95": 120.716611
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

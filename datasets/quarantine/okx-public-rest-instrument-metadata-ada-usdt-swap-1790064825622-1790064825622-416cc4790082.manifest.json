@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 1046,
+  "collection_run_id": "market-35696479968",
+  "collector_version": "de1cc284b76a0c11537bb7e9af8eb01f5dced1f9",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-instrument-metadata-ada-usdt-swap-1790064825622-1790064825622-416cc4790082",
+  "end_ts_ms": 1790064825622,
+  "event_count": 1,
+  "family": "instrument_metadata",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "instrument_metadata"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "server_observation_time"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 580916287,
+    "asset_name": "okx-public-rest-instrument-metadata-ada-usdt-swap-1790064825622-1790064825622-416cc4790082.jsonl.gz",
+    "release_id": 393554493,
+    "remote_digest": "sha256:416cc479008228f4fc02554f4b87a2e7cdbb7fce120996c7a1114808ce0cc4bd",
+    "remote_size": 1046,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696479968-s7"
+  },
+  "release_asset": "okx-public-rest-instrument-metadata-ada-usdt-swap-1790064825622-1790064825622-416cc4790082.jsonl.gz",
+  "release_asset_id": 580916287,
+  "release_id": 393554493,
+  "release_remote_digest": "sha256:416cc479008228f4fc02554f4b87a2e7cdbb7fce120996c7a1114808ce0cc4bd",
+  "release_remote_size": 1046,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696479968-s7",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "416cc479008228f4fc02554f4b87a2e7cdbb7fce120996c7a1114808ce0cc4bd",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790064825622,
+  "symbol": "ADA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790064825532,
+    "last_exchange_ts_ms": 1790064825532,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 90.0,
+      "min": 90.0,
+      "p50": 90.0,
+      "p95": 90.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

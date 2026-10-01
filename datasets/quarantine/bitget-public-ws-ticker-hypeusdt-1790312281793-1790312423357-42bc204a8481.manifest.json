@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 124625,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-hypeusdt-1790312281793-1790312423357-42bc204a8481",
+  "end_ts_ms": 1790312423357,
+  "event_count": 1327,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587903843,
+    "asset_name": "bitget-public-ws-ticker-hypeusdt-1790312281793-1790312423357-42bc204a8481.jsonl.gz",
+    "release_id": 396438019,
+    "remote_digest": "sha256:42bc204a848138ec5096f228191506235b591cbd317df3a3894d2836d7b9eba2",
+    "remote_size": 124625,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s3"
+  },
+  "release_asset": "bitget-public-ws-ticker-hypeusdt-1790312281793-1790312423357-42bc204a8481.jsonl.gz",
+  "release_asset_id": 587903843,
+  "release_id": 396438019,
+  "release_remote_digest": "sha256:42bc204a848138ec5096f228191506235b591cbd317df3a3894d2836d7b9eba2",
+  "release_remote_size": 124625,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s3",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "42bc204a848138ec5096f228191506235b591cbd317df3a3894d2836d7b9eba2",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790312281793,
+  "symbol": "HYPEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-26068cfbdcd74ede868f66a24ef2c470"
+    ],
+    "first_exchange_ts_ms": 1790312281457,
+    "last_exchange_ts_ms": 1790312423274,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1327,
+      "max": 336.0,
+      "min": 78.0,
+      "p50": 85.0,
+      "p95": 97.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

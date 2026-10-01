@@ -1,0 +1,107 @@
+{
+  "asset_verified": true,
+  "bytes": 2929,
+  "collection_run_id": "copy-vault-272-2026092518-v6-0",
+  "collector_version": "471784abf63b4b0bc97c080dd58c94dcf47e4aba",
+  "copy_vault_selection": {
+    "forward_only": true,
+    "observation_only": true,
+    "selected_at_ms": 1790362290212
+  },
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-userfills-copy-vault-snapshot-0x5e05de60e13b1309b8e1f77b0473db73d992959d-1790516833690-1790516833690-8ad786046796",
+  "end_ts_ms": 1790516833690,
+  "event_count": 1,
+  "family": "copy_vault_snapshot",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "copy_vault_snapshot"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1,
+  "release": {
+    "asset_id": 593026987,
+    "asset_name": "hyperliquid-public-userfills-copy-vault-snapshot-0x5e05de60e13b1309b8e1f77b0473db73d992959d-1790516833690-1790516833690-8ad786046796.jsonl.gz",
+    "release_id": 397668807,
+    "remote_digest": "sha256:8ad7860467963cde54d575b55f0bd8119abec164bee8a9f732e8a1042358b29a",
+    "remote_size": 2929,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-copy-vault-272-2026092518-v6-u0"
+  },
+  "release_asset": "hyperliquid-public-userfills-copy-vault-snapshot-0x5e05de60e13b1309b8e1f77b0473db73d992959d-1790516833690-1790516833690-8ad786046796.jsonl.gz",
+  "release_asset_id": 593026987,
+  "release_id": 397668807,
+  "release_remote_digest": "sha256:8ad7860467963cde54d575b55f0bd8119abec164bee8a9f732e8a1042358b29a",
+  "release_remote_size": 2929,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-copy-vault-272-2026092518-v6-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "8ad7860467963cde54d575b55f0bd8119abec164bee8a9f732e8a1042358b29a",
+  "source": "hyperliquid_public_userfills",
+  "start_ts_ms": 1790516833690,
+  "symbol": "0x5e05de60e13b1309b8e1f77b0473db73d992959d",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "copy-vault-4d570445804f4febb2de622c7697e517"
+    ],
+    "first_exchange_ts_ms": 1768408293825,
+    "last_exchange_ts_ms": 1768408293825,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 22108539865.0,
+      "min": 22108539865.0,
+      "p50": 22108539865.0,
+      "p95": 22108539865.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}

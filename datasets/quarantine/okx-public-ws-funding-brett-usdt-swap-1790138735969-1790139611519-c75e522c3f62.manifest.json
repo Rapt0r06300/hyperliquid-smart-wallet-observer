@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2547,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-brett-usdt-swap-1790138735969-1790139611519-c75e522c3f62",
+  "end_ts_ms": 1790139611519,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583317679,
+    "asset_name": "okx-public-ws-funding-brett-usdt-swap-1790138735969-1790139611519-c75e522c3f62.jsonl.gz",
+    "release_id": 394435259,
+    "remote_digest": "sha256:c75e522c3f62e8cc1d36e2ca0301bf27098f9db0c1ec2a4ee426250b975c4b75",
+    "remote_size": 2547,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s6"
+  },
+  "release_asset": "okx-public-ws-funding-brett-usdt-swap-1790138735969-1790139611519-c75e522c3f62.jsonl.gz",
+  "release_asset_id": 583317679,
+  "release_id": 394435259,
+  "release_remote_digest": "sha256:c75e522c3f62e8cc1d36e2ca0301bf27098f9db0c1ec2a4ee426250b975c4b75",
+  "release_remote_size": 2547,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s6",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c75e522c3f62e8cc1d36e2ca0301bf27098f9db0c1ec2a4ee426250b975c4b75",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790138735969,
+  "symbol": "BRETT-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 32.5,
+      "min": 10.0,
+      "p50": 18.5,
+      "p95": 29.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-0b8cd3ada6e040bf944aa26999ab612e"
+    ],
+    "first_exchange_ts_ms": 1790138714463,
+    "last_exchange_ts_ms": 1790139611446,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 21506.0,
+      "min": 64.0,
+      "p50": 72.0,
+      "p95": 76.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 110.509988,
+      "min": 0.0,
+      "p50": 104.918612,
+      "p95": 108.119996
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

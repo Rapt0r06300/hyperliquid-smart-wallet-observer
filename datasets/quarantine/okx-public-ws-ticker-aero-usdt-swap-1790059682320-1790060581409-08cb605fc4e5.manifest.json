@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 252450,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-aero-usdt-swap-1790059682320-1790060581409-08cb605fc4e5",
+  "end_ts_ms": 1790060581409,
+  "event_count": 2989,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581212494,
+    "asset_name": "okx-public-ws-ticker-aero-usdt-swap-1790059682320-1790060581409-08cb605fc4e5.jsonl.gz",
+    "release_id": 393656367,
+    "remote_digest": "sha256:08cb605fc4e5a1e66341493a53655e9f335a5b6ca2aa344f0993404b11280db3",
+    "remote_size": 252450,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696301919-s0"
+  },
+  "release_asset": "okx-public-ws-ticker-aero-usdt-swap-1790059682320-1790060581409-08cb605fc4e5.jsonl.gz",
+  "release_asset_id": 581212494,
+  "release_id": 393656367,
+  "release_remote_digest": "sha256:08cb605fc4e5a1e66341493a53655e9f335a5b6ca2aa344f0993404b11280db3",
+  "release_remote_size": 252450,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696301919-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "08cb605fc4e5a1e66341493a53655e9f335a5b6ca2aa344f0993404b11280db3",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790059682320,
+  "symbol": "AERO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2989,
+      "max": 77.5,
+      "min": 21.0,
+      "p50": 25.5,
+      "p95": 77.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-12be3910c2bb4c079b3408bf0333e14c"
+    ],
+    "first_exchange_ts_ms": 1790059681948,
+    "last_exchange_ts_ms": 1790060581250,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2989,
+      "max": 372.0,
+      "min": 75.0,
+      "p50": 133.0,
+      "p95": 177.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2989,
+      "max": 148.207591,
+      "min": 0.0,
+      "p50": 147.231651,
+      "p95": 147.943848
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

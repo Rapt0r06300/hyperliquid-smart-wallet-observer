@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 505581,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-doge-usdt-swap-1790312284107-1790313183153-105a2a805c36",
+  "end_ts_ms": 1790313183153,
+  "event_count": 5642,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587907492,
+    "asset_name": "okx-public-ws-ticker-doge-usdt-swap-1790312284107-1790313183153-105a2a805c36.jsonl.gz",
+    "release_id": 396438233,
+    "remote_digest": "sha256:105a2a805c36c81251cbaba35879c341cf523c54ffc870e09a4b91677af053e2",
+    "remote_size": 505581,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s6"
+  },
+  "release_asset": "okx-public-ws-ticker-doge-usdt-swap-1790312284107-1790313183153-105a2a805c36.jsonl.gz",
+  "release_asset_id": 587907492,
+  "release_id": 396438233,
+  "release_remote_digest": "sha256:105a2a805c36c81251cbaba35879c341cf523c54ffc870e09a4b91677af053e2",
+  "release_remote_size": 505581,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s6",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "105a2a805c36c81251cbaba35879c341cf523c54ffc870e09a4b91677af053e2",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790312284107,
+  "symbol": "DOGE-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 5642,
+      "max": 104.0,
+      "min": 17.0,
+      "p50": 24.0,
+      "p95": 104.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-f144a641f57c4802a8035efdeb7a46c9"
+    ],
+    "first_exchange_ts_ms": 1790312283959,
+    "last_exchange_ts_ms": 1790313183068,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5642,
+      "max": 193.0,
+      "min": 82.0,
+      "p50": 164.0,
+      "p95": 182.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 5642,
+      "max": 160.067975,
+      "min": 0.0,
+      "p50": 158.461607,
+      "p95": 159.088085
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

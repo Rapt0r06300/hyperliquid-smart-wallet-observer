@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 1043,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-instrument-metadata-bera-usdt-swap-1790059681283-1790059681283-69550d8f3b8a",
+  "end_ts_ms": 1790059681283,
+  "event_count": 1,
+  "family": "instrument_metadata",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "instrument_metadata"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "server_observation_time"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581211672,
+    "asset_name": "okx-public-rest-instrument-metadata-bera-usdt-swap-1790059681283-1790059681283-69550d8f3b8a.jsonl.gz",
+    "release_id": 393656367,
+    "remote_digest": "sha256:69550d8f3b8ac2b4d98252699bf094f69ca6709e7507cec8c370aed4631da4a9",
+    "remote_size": 1043,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696301919-s0"
+  },
+  "release_asset": "okx-public-rest-instrument-metadata-bera-usdt-swap-1790059681283-1790059681283-69550d8f3b8a.jsonl.gz",
+  "release_asset_id": 581211672,
+  "release_id": 393656367,
+  "release_remote_digest": "sha256:69550d8f3b8ac2b4d98252699bf094f69ca6709e7507cec8c370aed4631da4a9",
+  "release_remote_size": 1043,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696301919-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "69550d8f3b8ac2b4d98252699bf094f69ca6709e7507cec8c370aed4631da4a9",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790059681283,
+  "symbol": "BERA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790059681206,
+    "last_exchange_ts_ms": 1790059681206,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 77.0,
+      "min": 77.0,
+      "p50": 77.0,
+      "p95": 77.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2424,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-aixbt-usdt-swap-1790204475533-1790205316910-f91d330614b5",
+  "end_ts_ms": 1790205316910,
+  "event_count": 15,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 585001487,
+    "asset_name": "okx-public-ws-funding-aixbt-usdt-swap-1790204475533-1790205316910-f91d330614b5.jsonl.gz",
+    "release_id": 395258776,
+    "remote_digest": "sha256:f91d330614b5573e66af8cef88c23b2e3f6ee7507d679412da2b250b82298c0e",
+    "remote_size": 2424,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s1"
+  },
+  "release_asset": "okx-public-ws-funding-aixbt-usdt-swap-1790204475533-1790205316910-f91d330614b5.jsonl.gz",
+  "release_asset_id": 585001487,
+  "release_id": 395258776,
+  "release_remote_digest": "sha256:f91d330614b5573e66af8cef88c23b2e3f6ee7507d679412da2b250b82298c0e",
+  "release_remote_size": 2424,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f91d330614b5573e66af8cef88c23b2e3f6ee7507d679412da2b250b82298c0e",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790204475533,
+  "symbol": "AIXBT-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 15,
+      "max": 36.5,
+      "min": 17.5,
+      "p50": 22.5,
+      "p95": 36.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-d89465ff18434fca93f11ad12eb164d6"
+    ],
+    "first_exchange_ts_ms": 1790204469898,
+    "last_exchange_ts_ms": 1790205316842,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 15,
+      "max": 5635.0,
+      "min": 67.0,
+      "p50": 69.0,
+      "p95": 71.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 15,
+      "max": 106.691182,
+      "min": 0.0,
+      "p50": 104.100449,
+      "p95": 106.139128
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 11304,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-apt-usdt-swap-1790059727763-1790060622486-a5e9aaea2833",
+  "end_ts_ms": 1790060622486,
+  "event_count": 99,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581213036,
+    "asset_name": "okx-public-ws-open-interest-apt-usdt-swap-1790059727763-1790060622486-a5e9aaea2833.jsonl.gz",
+    "release_id": 393656586,
+    "remote_digest": "sha256:a5e9aaea2833cf656d1076316b61d216fae182557e547688b7dc743f6d5f5c87",
+    "remote_size": 11304,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696301919-s5"
+  },
+  "release_asset": "okx-public-ws-open-interest-apt-usdt-swap-1790059727763-1790060622486-a5e9aaea2833.jsonl.gz",
+  "release_asset_id": 581213036,
+  "release_id": 393656586,
+  "release_remote_digest": "sha256:a5e9aaea2833cf656d1076316b61d216fae182557e547688b7dc743f6d5f5c87",
+  "release_remote_size": 11304,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696301919-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "a5e9aaea2833cf656d1076316b61d216fae182557e547688b7dc743f6d5f5c87",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790059727763,
+  "symbol": "APT-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 99,
+      "max": 98.5,
+      "min": 20.0,
+      "p50": 27.5,
+      "p95": 36.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-04539ffac3bd4c9bb3eb1bbb764274c1"
+    ],
+    "first_exchange_ts_ms": 1790059721072,
+    "last_exchange_ts_ms": 1790060622384,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 99,
+      "max": 6691.0,
+      "min": 101.0,
+      "p50": 102.0,
+      "p95": 104.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 99,
+      "max": 161.188366,
+      "min": 0.0,
+      "p50": 159.090435,
+      "p95": 160.213728
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

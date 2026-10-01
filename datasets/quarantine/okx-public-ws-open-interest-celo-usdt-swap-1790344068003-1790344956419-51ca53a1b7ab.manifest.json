@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 12133,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-celo-usdt-swap-1790344068003-1790344956419-51ca53a1b7ab",
+  "end_ts_ms": 1790344956419,
+  "event_count": 119,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 588850312,
+    "asset_name": "okx-public-ws-open-interest-celo-usdt-swap-1790344068003-1790344956419-51ca53a1b7ab.jsonl.gz",
+    "release_id": 396793769,
+    "remote_digest": "sha256:51ca53a1b7ab53394f2689c1bdc7a4a9dd067a5a4db421e1d1de0714e8a4bcc1",
+    "remote_size": 12133,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s0"
+  },
+  "release_asset": "okx-public-ws-open-interest-celo-usdt-swap-1790344068003-1790344956419-51ca53a1b7ab.jsonl.gz",
+  "release_asset_id": 588850312,
+  "release_id": 396793769,
+  "release_remote_digest": "sha256:51ca53a1b7ab53394f2689c1bdc7a4a9dd067a5a4db421e1d1de0714e8a4bcc1",
+  "release_remote_size": 12133,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "51ca53a1b7ab53394f2689c1bdc7a4a9dd067a5a4db421e1d1de0714e8a4bcc1",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790344068003,
+  "symbol": "CELO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 119,
+      "max": 58.0,
+      "min": 9.0,
+      "p50": 28.0,
+      "p95": 58.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-50eb8c467f344597a626b330242211b6"
+    ],
+    "first_exchange_ts_ms": 1790344060350,
+    "last_exchange_ts_ms": 1790344956323,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 119,
+      "max": 7653.0,
+      "min": 93.0,
+      "p50": 95.0,
+      "p95": 97.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 119,
+      "max": 175.857924,
+      "min": 0.0,
+      "p50": 169.610992,
+      "p95": 172.543064
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

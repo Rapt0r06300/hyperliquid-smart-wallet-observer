@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 121707,
+  "collection_run_id": "market-35868451926",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-solusdt-1790170774600-1790170911077-729c299fd7f8",
+  "end_ts_ms": 1790170911077,
+  "event_count": 1268,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584231847,
+    "asset_name": "bitget-public-ws-ticker-solusdt-1790170774600-1790170911077-729c299fd7f8.jsonl.gz",
+    "release_id": 394886376,
+    "remote_digest": "sha256:729c299fd7f871fb63c19c30f632916bf095df5de7ae5ee2cd0f212fe913482e",
+    "remote_size": 121707,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35868451926-s2"
+  },
+  "release_asset": "bitget-public-ws-ticker-solusdt-1790170774600-1790170911077-729c299fd7f8.jsonl.gz",
+  "release_asset_id": 584231847,
+  "release_id": 394886376,
+  "release_remote_digest": "sha256:729c299fd7f871fb63c19c30f632916bf095df5de7ae5ee2cd0f212fe913482e",
+  "release_remote_size": 121707,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35868451926-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "729c299fd7f871fb63c19c30f632916bf095df5de7ae5ee2cd0f212fe913482e",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790170774600,
+  "symbol": "SOLUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-1eecd0ed8d1e4e45adedde97301093f6"
+    ],
+    "first_exchange_ts_ms": 1790170774297,
+    "last_exchange_ts_ms": 1790170910987,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1268,
+      "max": 1280.0,
+      "min": 64.0,
+      "p50": 76.0,
+      "p95": 116.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 21782559,
+  "collection_run_id": "market-35868451926",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-l2book-btc-usdt-1790170774534-1790183373834-4e7289b2e2aa",
+  "end_ts_ms": 1790183373834,
+  "event_count": 125986,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 1,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=1",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "release": {
+    "asset_id": 584231262,
+    "asset_name": "gate-public-ws-l2book-btc-usdt-1790170774534-1790183373834-4e7289b2e2aa.jsonl.gz",
+    "release_id": 394886058,
+    "remote_digest": "sha256:4e7289b2e2aaf0a5cfa2958d8f0aa33df89146686c83794a313439963f66d137",
+    "remote_size": 21782559,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35868451926-s0"
+  },
+  "release_asset": "gate-public-ws-l2book-btc-usdt-1790170774534-1790183373834-4e7289b2e2aa.jsonl.gz",
+  "release_asset_id": 584231262,
+  "release_id": 394886058,
+  "release_remote_digest": "sha256:4e7289b2e2aaf0a5cfa2958d8f0aa33df89146686c83794a313439963f66d137",
+  "release_remote_size": 21782559,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35868451926-s0",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4e7289b2e2aaf0a5cfa2958d8f0aa33df89146686c83794a313439963f66d137",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790170774534,
+  "symbol": "BTC_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-5cb7ef76a88c4de9ac35eb5c55b40a88"
+    ],
+    "first_exchange_ts_ms": 1790170774460,
+    "last_exchange_ts_ms": 1790183373765,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 125986,
+      "max": 1006.0,
+      "min": 67.0,
+      "p50": 71.0,
+      "p95": 81.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "gate"
+}

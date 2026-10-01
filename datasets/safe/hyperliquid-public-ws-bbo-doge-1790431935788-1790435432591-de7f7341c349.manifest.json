@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 649855,
+  "collection_run_id": "market-2026092600-v4-0",
+  "collector_version": "a96015e8340c481d754fd3ac48212b5dbff96341",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-doge-1790431935788-1790435432591-de7f7341c349",
+  "end_ts_ms": 1790435432591,
+  "event_count": 7243,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 7243,
+  "release": {
+    "asset_id": 590894354,
+    "asset_name": "hyperliquid-public-ws-bbo-doge-1790431935788-1790435432591-de7f7341c349.jsonl.gz",
+    "release_id": 397281551,
+    "remote_digest": "sha256:de7f7341c34900a3df914c18cec88796961d5b5317d7f56029f6643e8f062738",
+    "remote_size": 649855,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092600-v4-u0"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-doge-1790431935788-1790435432591-de7f7341c349.jsonl.gz",
+  "release_asset_id": 590894354,
+  "release_id": 397281551,
+  "release_remote_digest": "sha256:de7f7341c34900a3df914c18cec88796961d5b5317d7f56029f6643e8f062738",
+  "release_remote_size": 649855,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092600-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "de7f7341c34900a3df914c18cec88796961d5b5317d7f56029f6643e8f062738",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790431935788,
+  "symbol": "DOGE",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 7243,
+      "max": -229.0,
+      "min": -680.0,
+      "p50": -356.0,
+      "p95": -259.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-c591446ad58341da919cea9e77fbf26a"
+    ],
+    "first_exchange_ts_ms": 1790431935533,
+    "last_exchange_ts_ms": 1790435432321,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 7243,
+      "max": 1464.0,
+      "min": 221.0,
+      "p50": 284.0,
+      "p95": 475.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}

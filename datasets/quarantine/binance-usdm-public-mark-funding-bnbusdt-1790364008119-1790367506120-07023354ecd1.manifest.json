@@ -1,0 +1,104 @@
+{
+  "asset_verified": true,
+  "bytes": 388347,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-mark-funding-bnbusdt-1790364008119-1790367506120-07023354ecd1",
+  "end_ts_ms": 1790367506120,
+  "event_count": 3499,
+  "family": "mark_funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "mark_funding"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 3499,
+  "release": {
+    "asset_id": 589175772,
+    "asset_name": "binance-usdm-public-mark-funding-bnbusdt-1790364008119-1790367506120-07023354ecd1.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:07023354ecd108571b1d4d1b80ee85fd815909b23f86f3b02f2273668149f7cf",
+    "remote_size": 388347,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-mark-funding-bnbusdt-1790364008119-1790367506120-07023354ecd1.jsonl.gz",
+  "release_asset_id": 589175772,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:07023354ecd108571b1d4d1b80ee85fd815909b23f86f3b02f2273668149f7cf",
+  "release_remote_size": 388347,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "07023354ecd108571b1d4d1b80ee85fd815909b23f86f3b02f2273668149f7cf",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790364008119,
+  "symbol": "BNBUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-market-e731396580294476b8fa94eacddee044"
+    ],
+    "first_exchange_ts_ms": 1790364008000,
+    "last_exchange_ts_ms": 1790367506000,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3499,
+      "max": 1822.0,
+      "min": 117.0,
+      "p50": 130.0,
+      "p95": 143.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "binance"
+}

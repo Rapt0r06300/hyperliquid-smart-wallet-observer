@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 153218,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-l2book-brettusdt-1790117942639-1790118071384-7bbe6707242c",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790118071384,
+  "event_count": 1434,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1434,
+  "release": {
+    "asset_id": 582776292,
+    "asset_name": "bitget-public-ws-l2book-brettusdt-1790117942639-1790118071384-7bbe6707242c.jsonl.gz",
+    "release_id": 394256555,
+    "remote_digest": "sha256:7bbe6707242c4a8723348b40760c38fbe9f9b99712e225e11efabb2c7a6e0b64",
+    "remote_size": 153218,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s6"
+  },
+  "release_asset": "bitget-public-ws-l2book-brettusdt-1790117942639-1790118071384-7bbe6707242c.jsonl.gz",
+  "release_asset_id": 582776292,
+  "release_id": 394256555,
+  "release_remote_digest": "sha256:7bbe6707242c4a8723348b40760c38fbe9f9b99712e225e11efabb2c7a6e0b64",
+  "release_remote_size": 153218,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7bbe6707242c4a8723348b40760c38fbe9f9b99712e225e11efabb2c7a6e0b64",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790117942639,
+  "symbol": "BRETTUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-122b83e2b8514b0196bfc1a004437a2a"
+    ],
+    "first_exchange_ts_ms": 1790117942406,
+    "last_exchange_ts_ms": 1790118071304,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1434,
+      "max": 262.0,
+      "min": 78.0,
+      "p50": 80.0,
+      "p95": 98.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "unique_trade_count": 1434,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}

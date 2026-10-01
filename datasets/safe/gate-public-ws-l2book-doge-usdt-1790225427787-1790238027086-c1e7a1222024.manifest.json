@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 12866519,
+  "collection_run_id": "market-35957266010",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-l2book-doge-usdt-1790225427787-1790238027086-c1e7a1222024",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790238027086,
+  "event_count": 107692,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 107692,
+  "release": {
+    "asset_id": 585487285,
+    "asset_name": "gate-public-ws-l2book-doge-usdt-1790225427787-1790238027086-c1e7a1222024.jsonl.gz",
+    "release_id": 395474944,
+    "remote_digest": "sha256:c1e7a1222024f07ee5435afa86680720b1b46fd0cc138b2aef6f7b4eb73b65b8",
+    "remote_size": 12866519,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35957266010-s6"
+  },
+  "release_asset": "gate-public-ws-l2book-doge-usdt-1790225427787-1790238027086-c1e7a1222024.jsonl.gz",
+  "release_asset_id": 585487285,
+  "release_id": 395474944,
+  "release_remote_digest": "sha256:c1e7a1222024f07ee5435afa86680720b1b46fd0cc138b2aef6f7b4eb73b65b8",
+  "release_remote_size": 12866519,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35957266010-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c1e7a1222024f07ee5435afa86680720b1b46fd0cc138b2aef6f7b4eb73b65b8",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790225427787,
+  "symbol": "DOGE_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-7b057b17a5e7462b96d2fe48c4f86ede"
+    ],
+    "first_exchange_ts_ms": 1790225427697,
+    "last_exchange_ts_ms": 1790238027004,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 107692,
+      "max": 307.0,
+      "min": 78.0,
+      "p50": 94.0,
+      "p95": 162.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}

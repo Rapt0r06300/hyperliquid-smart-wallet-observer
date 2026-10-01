@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 104168,
+  "collection_run_id": "market-35868451926",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-ccusdt-1790170777177-1790170902125-cf0840fa16b0",
+  "end_ts_ms": 1790170902125,
+  "event_count": 1140,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584231270,
+    "asset_name": "bitget-public-ws-ticker-ccusdt-1790170777177-1790170902125-cf0840fa16b0.jsonl.gz",
+    "release_id": 394886172,
+    "remote_digest": "sha256:cf0840fa16b0aef55ec0014239320cb5efb1f8244df5d898dfb44480849a7554",
+    "remote_size": 104168,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35868451926-s7"
+  },
+  "release_asset": "bitget-public-ws-ticker-ccusdt-1790170777177-1790170902125-cf0840fa16b0.jsonl.gz",
+  "release_asset_id": 584231270,
+  "release_id": 394886172,
+  "release_remote_digest": "sha256:cf0840fa16b0aef55ec0014239320cb5efb1f8244df5d898dfb44480849a7554",
+  "release_remote_size": 104168,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35868451926-s7",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "cf0840fa16b0aef55ec0014239320cb5efb1f8244df5d898dfb44480849a7554",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790170777177,
+  "symbol": "CCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-84b1bf050c2e4194bf541ad104b04e06"
+    ],
+    "first_exchange_ts_ms": 1790170776936,
+    "last_exchange_ts_ms": 1790170902061,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1140,
+      "max": 1149.0,
+      "min": 57.0,
+      "p50": 66.0,
+      "p95": 90.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

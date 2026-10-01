@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 126156,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-aerousdt-1790204470096-1790204615285-c6d8e8bcd89a",
+  "end_ts_ms": 1790204615285,
+  "event_count": 1362,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584998666,
+    "asset_name": "bitget-public-ws-ticker-aerousdt-1790204470096-1790204615285-c6d8e8bcd89a.jsonl.gz",
+    "release_id": 395258662,
+    "remote_digest": "sha256:c6d8e8bcd89af946add18a74683da7a8aa2f3b31bcc72d9c2c0d73393f86950c",
+    "remote_size": 126156,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s0"
+  },
+  "release_asset": "bitget-public-ws-ticker-aerousdt-1790204470096-1790204615285-c6d8e8bcd89a.jsonl.gz",
+  "release_asset_id": 584998666,
+  "release_id": 395258662,
+  "release_remote_digest": "sha256:c6d8e8bcd89af946add18a74683da7a8aa2f3b31bcc72d9c2c0d73393f86950c",
+  "release_remote_size": 126156,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c6d8e8bcd89af946add18a74683da7a8aa2f3b31bcc72d9c2c0d73393f86950c",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790204470096,
+  "symbol": "AEROUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-2dd34e6318dd4d83bd7568d1438abb7d"
+    ],
+    "first_exchange_ts_ms": 1790204469840,
+    "last_exchange_ts_ms": 1790204615212,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1362,
+      "max": 297.0,
+      "min": 59.0,
+      "p50": 66.0,
+      "p95": 80.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 501919,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-public-ws-l2book-wifusdt-1790364008164-1790364906584-999784280cdd",
+  "end_ts_ms": 1790364906584,
+  "event_count": 3985,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 3985,
+  "release": {
+    "asset_id": 589177933,
+    "asset_name": "bybit-public-ws-l2book-wifusdt-1790364008164-1790364906584-999784280cdd.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:999784280cdd17faa0296d83453e2568b65b78bfce1e5f4666362782d1c4c60d",
+    "remote_size": 501919,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "bybit-public-ws-l2book-wifusdt-1790364008164-1790364906584-999784280cdd.jsonl.gz",
+  "release_asset_id": 589177933,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:999784280cdd17faa0296d83453e2568b65b78bfce1e5f4666362782d1c4c60d",
+  "release_remote_size": 501919,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "999784280cdd17faa0296d83453e2568b65b78bfce1e5f4666362782d1c4c60d",
+  "source": "bybit_public_ws",
+  "start_ts_ms": 1790364008164,
+  "symbol": "WIFUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bybit-8dbc13ce7f7643bf8fd8d69c766aac0a"
+    ],
+    "first_exchange_ts_ms": 1790364007400,
+    "last_exchange_ts_ms": 1790364906461,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3985,
+      "max": 1265.0,
+      "min": 106.0,
+      "p50": 143.0,
+      "p95": 205.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3985,
+      "max": 320.409626,
+      "min": 0.0,
+      "p50": 205.207491,
+      "p95": 211.480078
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "bybit"
+}

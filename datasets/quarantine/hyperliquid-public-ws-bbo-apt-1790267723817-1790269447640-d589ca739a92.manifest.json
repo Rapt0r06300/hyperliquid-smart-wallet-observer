@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 663906,
+  "collection_run_id": "market-36006392932",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-apt-1790267723817-1790269447640-d589ca739a92",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790269447640,
+  "event_count": 7288,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 7288,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 7288,
+  "release": {
+    "asset_id": 586415603,
+    "asset_name": "hyperliquid-public-ws-bbo-apt-1790267723817-1790269447640-d589ca739a92.jsonl.gz",
+    "release_id": 395896473,
+    "remote_digest": "sha256:d589ca739a92f7711df7dc06ef5d98f798a9b27ac9e3864502b646a08478d16e",
+    "remote_size": 663906,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36006392932-s5"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-apt-1790267723817-1790269447640-d589ca739a92.jsonl.gz",
+  "release_asset_id": 586415603,
+  "release_id": 395896473,
+  "release_remote_digest": "sha256:d589ca739a92f7711df7dc06ef5d98f798a9b27ac9e3864502b646a08478d16e",
+  "release_remote_size": 663906,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36006392932-s5",
+  "replay_compatible": false,
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d589ca739a92f7711df7dc06ef5d98f798a9b27ac9e3864502b646a08478d16e",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790267723817,
+  "symbol": "APT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 7288,
+      "max": -275.0,
+      "min": -616.0,
+      "p50": -505.5,
+      "p95": -295.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-0ff86bbe9a9148808aa2b915de89003a"
+    ],
+    "first_exchange_ts_ms": 1790267723396,
+    "last_exchange_ts_ms": 1790269447111,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 7288,
+      "max": 2589.0,
+      "min": 212.0,
+      "p50": 320.0,
+      "p95": 528.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

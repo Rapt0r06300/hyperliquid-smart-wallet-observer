@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 111514,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-fartcoinusdt-1790138736213-1790138864513-ed36a83f720c",
+  "end_ts_ms": 1790138864513,
+  "event_count": 1199,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583315166,
+    "asset_name": "bitget-public-ws-ticker-fartcoinusdt-1790138736213-1790138864513-ed36a83f720c.jsonl.gz",
+    "release_id": 394435259,
+    "remote_digest": "sha256:ed36a83f720ce14bd6d752b60589d996f8b6868251f91c734c6273191c13cc0d",
+    "remote_size": 111514,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s6"
+  },
+  "release_asset": "bitget-public-ws-ticker-fartcoinusdt-1790138736213-1790138864513-ed36a83f720c.jsonl.gz",
+  "release_asset_id": 583315166,
+  "release_id": 394435259,
+  "release_remote_digest": "sha256:ed36a83f720ce14bd6d752b60589d996f8b6868251f91c734c6273191c13cc0d",
+  "release_remote_size": 111514,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s6",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ed36a83f720ce14bd6d752b60589d996f8b6868251f91c734c6273191c13cc0d",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790138736213,
+  "symbol": "FARTCOINUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-13e6bf2127d5466a9530fe352778235b"
+    ],
+    "first_exchange_ts_ms": 1790138735997,
+    "last_exchange_ts_ms": 1790138864456,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1199,
+      "max": 216.0,
+      "min": 57.0,
+      "p50": 63.0,
+      "p95": 75.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

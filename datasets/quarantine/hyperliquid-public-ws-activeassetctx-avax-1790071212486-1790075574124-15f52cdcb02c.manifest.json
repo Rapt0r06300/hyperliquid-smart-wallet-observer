@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 402107,
+  "collection_run_id": "market-35696397454",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-activeassetctx-avax-1790071212486-1790075574124-15f52cdcb02c",
+  "end_ts_ms": 1790075574124,
+  "event_count": 4266,
+  "family": "activeAssetCtx",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 550,
+    "duplicates_deduped": false,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "activeAssetCtx"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "receive_observation_time_only"
+    ],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "DUPLICATES_NOT_DEDUPED:550"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581228248,
+    "asset_name": "hyperliquid-public-ws-activeassetctx-avax-1790071212486-1790075574124-15f52cdcb02c.jsonl.gz",
+    "release_id": 393662256,
+    "remote_digest": "sha256:15f52cdcb02c8270c46ced6966299eff10f335dbbb0c68b8ac0ff60953d49153",
+    "remote_size": 402107,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696397454-s2"
+  },
+  "release_asset": "hyperliquid-public-ws-activeassetctx-avax-1790071212486-1790075574124-15f52cdcb02c.jsonl.gz",
+  "release_asset_id": 581228248,
+  "release_id": 393662256,
+  "release_remote_digest": "sha256:15f52cdcb02c8270c46ced6966299eff10f335dbbb0c68b8ac0ff60953d49153",
+  "release_remote_size": 402107,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696397454-s2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "15f52cdcb02c8270c46ced6966299eff10f335dbbb0c68b8ac0ff60953d49153",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790071212486,
+  "symbol": "AVAX",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-3730701ec68a41baba11f82d2d9a4d18"
+    ],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 2,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

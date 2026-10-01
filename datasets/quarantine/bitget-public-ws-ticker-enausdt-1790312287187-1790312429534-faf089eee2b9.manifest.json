@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 123034,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-enausdt-1790312287187-1790312429534-faf089eee2b9",
+  "end_ts_ms": 1790312429534,
+  "event_count": 1308,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587905460,
+    "asset_name": "bitget-public-ws-ticker-enausdt-1790312287187-1790312429534-faf089eee2b9.jsonl.gz",
+    "release_id": 396438600,
+    "remote_digest": "sha256:faf089eee2b981fce45da30f7a9a57a53803d1321d84825b2936c444c84a9ec1",
+    "remote_size": 123034,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s2"
+  },
+  "release_asset": "bitget-public-ws-ticker-enausdt-1790312287187-1790312429534-faf089eee2b9.jsonl.gz",
+  "release_asset_id": 587905460,
+  "release_id": 396438600,
+  "release_remote_digest": "sha256:faf089eee2b981fce45da30f7a9a57a53803d1321d84825b2936c444c84a9ec1",
+  "release_remote_size": 123034,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "faf089eee2b981fce45da30f7a9a57a53803d1321d84825b2936c444c84a9ec1",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790312287187,
+  "symbol": "ENAUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-f9c56bc68342498082800d4efcdc7e63"
+    ],
+    "first_exchange_ts_ms": 1790312286890,
+    "last_exchange_ts_ms": 1790312429460,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1308,
+      "max": 1830.0,
+      "min": 65.0,
+      "p50": 73.0,
+      "p95": 96.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

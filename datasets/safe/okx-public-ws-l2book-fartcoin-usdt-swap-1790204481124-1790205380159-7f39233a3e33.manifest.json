@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 574766,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-fartcoin-usdt-swap-1790204481124-1790205380159-7f39233a3e33",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790205380159,
+  "event_count": 4495,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 4495,
+  "release": {
+    "asset_id": 585001874,
+    "asset_name": "okx-public-ws-l2book-fartcoin-usdt-swap-1790204481124-1790205380159-7f39233a3e33.jsonl.gz",
+    "release_id": 395258851,
+    "remote_digest": "sha256:7f39233a3e3392d6d5209ed2433764ac8777b635e80f8505a9d5796b4fb6823c",
+    "remote_size": 574766,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s6"
+  },
+  "release_asset": "okx-public-ws-l2book-fartcoin-usdt-swap-1790204481124-1790205380159-7f39233a3e33.jsonl.gz",
+  "release_asset_id": 585001874,
+  "release_id": 395258851,
+  "release_remote_digest": "sha256:7f39233a3e3392d6d5209ed2433764ac8777b635e80f8505a9d5796b4fb6823c",
+  "release_remote_size": 574766,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7f39233a3e3392d6d5209ed2433764ac8777b635e80f8505a9d5796b4fb6823c",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790204481124,
+  "symbol": "FARTCOIN-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 4495,
+      "max": 55.0,
+      "min": 16.0,
+      "p50": 19.0,
+      "p95": 55.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-caef398995874da1b2b342ea6b6e6eca"
+    ],
+    "first_exchange_ts_ms": 1790204481007,
+    "last_exchange_ts_ms": 1790205380101,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4495,
+      "max": 117.0,
+      "min": 54.0,
+      "p50": 55.0,
+      "p95": 57.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 4495,
+      "max": 107.48966,
+      "min": 0.0,
+      "p50": 103.548238,
+      "p95": 104.914041
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

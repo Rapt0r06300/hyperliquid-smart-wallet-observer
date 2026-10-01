@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 192952,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-l2book-bomeusdt-1790344083901-1790344220783-7fe180efbc3d",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790344220783,
+  "event_count": 1542,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1542,
+  "release": {
+    "asset_id": 588846744,
+    "asset_name": "bitget-public-ws-l2book-bomeusdt-1790344083901-1790344220783-7fe180efbc3d.jsonl.gz",
+    "release_id": 396793704,
+    "remote_digest": "sha256:7fe180efbc3dcff486a44a1d698f9cd14e7a377db3d7f049fa6a48f6ff7e2904",
+    "remote_size": 192952,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s5"
+  },
+  "release_asset": "bitget-public-ws-l2book-bomeusdt-1790344083901-1790344220783-7fe180efbc3d.jsonl.gz",
+  "release_asset_id": 588846744,
+  "release_id": 396793704,
+  "release_remote_digest": "sha256:7fe180efbc3dcff486a44a1d698f9cd14e7a377db3d7f049fa6a48f6ff7e2904",
+  "release_remote_size": 192952,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7fe180efbc3dcff486a44a1d698f9cd14e7a377db3d7f049fa6a48f6ff7e2904",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790344083901,
+  "symbol": "BOMEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-751d017f4c4e481d9b3cc850ab173ec8"
+    ],
+    "first_exchange_ts_ms": 1790344083610,
+    "last_exchange_ts_ms": 1790344220703,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1542,
+      "max": 291.0,
+      "min": 78.0,
+      "p50": 85.0,
+      "p95": 112.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "unique_trade_count": 1542,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}

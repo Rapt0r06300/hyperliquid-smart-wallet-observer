@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 112460,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-aixbtusdt-1790117942736-1790118076035-f9b43d750f89",
+  "end_ts_ms": 1790118076035,
+  "event_count": 1229,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582776436,
+    "asset_name": "bitget-public-ws-ticker-aixbtusdt-1790117942736-1790118076035-f9b43d750f89.jsonl.gz",
+    "release_id": 394256558,
+    "remote_digest": "sha256:f9b43d750f89058dbef592b58a9dca8386d43b03c4949e6f723167d3be1ce26d",
+    "remote_size": 112460,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s1"
+  },
+  "release_asset": "bitget-public-ws-ticker-aixbtusdt-1790117942736-1790118076035-f9b43d750f89.jsonl.gz",
+  "release_asset_id": 582776436,
+  "release_id": 394256558,
+  "release_remote_digest": "sha256:f9b43d750f89058dbef592b58a9dca8386d43b03c4949e6f723167d3be1ce26d",
+  "release_remote_size": 112460,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f9b43d750f89058dbef592b58a9dca8386d43b03c4949e6f723167d3be1ce26d",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790117942736,
+  "symbol": "AIXBTUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-32d340879881452898923ee3bb5d0d98"
+    ],
+    "first_exchange_ts_ms": 1790117942447,
+    "last_exchange_ts_ms": 1790118075957,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1229,
+      "max": 1905.0,
+      "min": 77.0,
+      "p50": 86.0,
+      "p95": 103.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

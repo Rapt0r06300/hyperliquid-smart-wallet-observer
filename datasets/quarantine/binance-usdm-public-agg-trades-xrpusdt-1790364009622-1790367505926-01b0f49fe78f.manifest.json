@@ -1,0 +1,114 @@
+{
+  "asset_verified": true,
+  "bytes": 1186621,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-agg-trades-xrpusdt-1790364009622-1790367505926-01b0f49fe78f",
+  "end_ts_ms": 1790367505926,
+  "event_count": 9785,
+  "family": "agg_trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "agg_trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "status": "UNAVAILABLE"
+  },
+  "record_count": 9785,
+  "release": {
+    "asset_id": 589174465,
+    "asset_name": "binance-usdm-public-agg-trades-xrpusdt-1790364009622-1790367505926-01b0f49fe78f.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:01b0f49fe78fb80157054d4cd9cda7101050ba4ed3175c41892e5261fb97f7e3",
+    "remote_size": 1186621,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-agg-trades-xrpusdt-1790364009622-1790367505926-01b0f49fe78f.jsonl.gz",
+  "release_asset_id": 589174465,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:01b0f49fe78fb80157054d4cd9cda7101050ba4ed3175c41892e5261fb97f7e3",
+  "release_remote_size": 1186621,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "01b0f49fe78fb80157054d4cd9cda7101050ba4ed3175c41892e5261fb97f7e3",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790364009622,
+  "symbol": "XRPUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-agg_trades-9eb9c8736b25435388cefffee29ea83e"
+    ],
+    "first_exchange_ts_ms": 1790364009402,
+    "last_exchange_ts_ms": 1790367505706,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 9785,
+      "max": 2044.0,
+      "min": 70.0,
+      "p50": 219.0,
+      "p95": 226.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 9785,
+  "trade_count_exact": true,
+  "unique_trade_count": 9785,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "binance"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 103513,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-cfxusdt-1790312278596-1790312399559-1648c2b9c838",
+  "end_ts_ms": 1790312399559,
+  "event_count": 1133,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587904475,
+    "asset_name": "bitget-public-ws-ticker-cfxusdt-1790312278596-1790312399559-1648c2b9c838.jsonl.gz",
+    "release_id": 396438297,
+    "remote_digest": "sha256:1648c2b9c838dbc6bf4acfae6866caaf32347ba583dd3da614336b2a6c79f42d",
+    "remote_size": 103513,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s1"
+  },
+  "release_asset": "bitget-public-ws-ticker-cfxusdt-1790312278596-1790312399559-1648c2b9c838.jsonl.gz",
+  "release_asset_id": 587904475,
+  "release_id": 396438297,
+  "release_remote_digest": "sha256:1648c2b9c838dbc6bf4acfae6866caaf32347ba583dd3da614336b2a6c79f42d",
+  "release_remote_size": 103513,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1648c2b9c838dbc6bf4acfae6866caaf32347ba583dd3da614336b2a6c79f42d",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790312278596,
+  "symbol": "CFXUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-42624d762d4b49e596ee18ce92b34638"
+    ],
+    "first_exchange_ts_ms": 1790312278222,
+    "last_exchange_ts_ms": 1790312399474,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1133,
+      "max": 374.0,
+      "min": 83.0,
+      "p50": 86.0,
+      "p95": 100.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 120136,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-animeusdt-1790312281793-1790312423356-5bb3fbc1ef12",
+  "end_ts_ms": 1790312423356,
+  "event_count": 1324,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587903743,
+    "asset_name": "bitget-public-ws-ticker-animeusdt-1790312281793-1790312423356-5bb3fbc1ef12.jsonl.gz",
+    "release_id": 396438019,
+    "remote_digest": "sha256:5bb3fbc1ef126b99e32521de648644ae884fc8e1e19e9138101594cfde6543ff",
+    "remote_size": 120136,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s3"
+  },
+  "release_asset": "bitget-public-ws-ticker-animeusdt-1790312281793-1790312423356-5bb3fbc1ef12.jsonl.gz",
+  "release_asset_id": 587903743,
+  "release_id": 396438019,
+  "release_remote_digest": "sha256:5bb3fbc1ef126b99e32521de648644ae884fc8e1e19e9138101594cfde6543ff",
+  "release_remote_size": 120136,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s3",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5bb3fbc1ef126b99e32521de648644ae884fc8e1e19e9138101594cfde6543ff",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790312281793,
+  "symbol": "ANIMEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-26068cfbdcd74ede868f66a24ef2c470"
+    ],
+    "first_exchange_ts_ms": 1790312281459,
+    "last_exchange_ts_ms": 1790312423274,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1324,
+      "max": 334.0,
+      "min": 78.0,
+      "p50": 86.0,
+      "p95": 97.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

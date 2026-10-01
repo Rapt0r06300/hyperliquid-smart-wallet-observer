@@ -1,0 +1,104 @@
+{
+  "asset_verified": true,
+  "bytes": 1584,
+  "collection_run_id": "market-2026092600-v4-0",
+  "collector_version": "a96015e8340c481d754fd3ac48212b5dbff96341",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-public-ws-liquidations-linkusdt-1790431993530-1790432114592-bb94a56d174c",
+  "end_ts_ms": 1790432114592,
+  "event_count": 9,
+  "family": "liquidations",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "liquidations"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 9,
+  "release": {
+    "asset_id": 590891679,
+    "asset_name": "bybit-public-ws-liquidations-linkusdt-1790431993530-1790432114592-bb94a56d174c.jsonl.gz",
+    "release_id": 397281551,
+    "remote_digest": "sha256:bb94a56d174c257a4bd8eb6299639d36f24c2f53ff78a04858bb5f8015547b2d",
+    "remote_size": 1584,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092600-v4-u0"
+  },
+  "release_asset": "bybit-public-ws-liquidations-linkusdt-1790431993530-1790432114592-bb94a56d174c.jsonl.gz",
+  "release_asset_id": 590891679,
+  "release_id": 397281551,
+  "release_remote_digest": "sha256:bb94a56d174c257a4bd8eb6299639d36f24c2f53ff78a04858bb5f8015547b2d",
+  "release_remote_size": 1584,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092600-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "bb94a56d174c257a4bd8eb6299639d36f24c2f53ff78a04858bb5f8015547b2d",
+  "source": "bybit_public_ws",
+  "start_ts_ms": 1790431993530,
+  "symbol": "LINKUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bybit-da773c67cccb42f5926f0f3c387718c3"
+    ],
+    "first_exchange_ts_ms": 1790431993098,
+    "last_exchange_ts_ms": 1790432114048,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 9,
+      "max": 602.0,
+      "min": 202.0,
+      "p50": 436.0,
+      "p95": 602.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 9,
+      "max": 235.073551,
+      "min": 234.212469,
+      "p50": 234.776601,
+      "p95": 235.073551
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

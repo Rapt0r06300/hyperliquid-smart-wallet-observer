@@ -1,0 +1,130 @@
+{
+  "asset_verified": true,
+  "bytes": 9210,
+  "collection_run_id": "event-36145426601",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "nasa-eonet-external-events-global-1790345312521-1790345312521-d4fdd7b2999f",
+  "end_ts_ms": 1790345312521,
+  "event_count": 100,
+  "event_intelligence": {
+    "coverage_complete": true,
+    "coverage_sha256": "f886d879da724eed34e47b23310dfd5a86abaaf56af6b0ab28cfdba610ddc9e9",
+    "dataset_families": [
+      "bbo",
+      "copy_vault_fills",
+      "copy_vault_l2",
+      "copy_vault_positions",
+      "external_events",
+      "funding_settlement",
+      "instrument_metadata",
+      "l2Book",
+      "open_interest",
+      "trades"
+    ],
+    "idea_count": 120,
+    "linked_strategy_families": [
+      "arbitrage",
+      "copy_vault",
+      "cross_venue_dislocation",
+      "lead_lag"
+    ],
+    "paper_only": true,
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "read_only": true,
+    "real_execution": false,
+    "schema": "alina.event_intelligence_integration.v1"
+  },
+  "family": "external_events",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "external_events"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "causal_event_availability"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNAVAILABLE"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "reason": "NO_INDEPENDENT_EXACT_REFERENCE",
+    "status": "UNAVAILABLE"
+  },
+  "release": {
+    "asset_id": 588496962,
+    "asset_name": "nasa-eonet-external-events-global-1790345312521-1790345312521-d4fdd7b2999f.jsonl.gz",
+    "release_id": 396662413,
+    "remote_digest": "sha256:d4fdd7b2999ffb748a837ffaafcd2112b84453550b9e753441800147a06602b9",
+    "remote_size": 9210,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "event-intelligence-v2-36145426601"
+  },
+  "release_asset": "nasa-eonet-external-events-global-1790345312521-1790345312521-d4fdd7b2999f.jsonl.gz",
+  "release_asset_id": 588496962,
+  "release_id": 396662413,
+  "release_remote_digest": "sha256:d4fdd7b2999ffb748a837ffaafcd2112b84453550b9e753441800147a06602b9",
+  "release_remote_size": 9210,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "event-intelligence-v2-36145426601",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d4fdd7b2999ffb748a837ffaafcd2112b84453550b9e753441800147a06602b9",
+  "source": "nasa.eonet",
+  "start_ts_ms": 1790345312521,
+  "symbol": "GLOBAL",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "event-36145426601:nasa-eonet"
+    ],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "unknown"
+}

@@ -1,0 +1,98 @@
+{
+  "asset_verified": true,
+  "bytes": 845,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-rest-funding-settlement-bome-1790217065741-1790217065741-7ae27bb1d8d4",
+  "end_ts_ms": 1790217065741,
+  "event_count": 3,
+  "family": "funding_settlement",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584998699,
+    "asset_name": "hyperliquid-public-rest-funding-settlement-bome-1790217065741-1790217065741-7ae27bb1d8d4.jsonl.gz",
+    "release_id": 395258568,
+    "remote_digest": "sha256:7ae27bb1d8d4f05796020e7f9218b65337ac1b2af3893b65f6feeff3439a62ad",
+    "remote_size": 845,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s5"
+  },
+  "release_asset": "hyperliquid-public-rest-funding-settlement-bome-1790217065741-1790217065741-7ae27bb1d8d4.jsonl.gz",
+  "release_asset_id": 584998699,
+  "release_id": 395258568,
+  "release_remote_digest": "sha256:7ae27bb1d8d4f05796020e7f9218b65337ac1b2af3893b65f6feeff3439a62ad",
+  "release_remote_size": 845,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7ae27bb1d8d4f05796020e7f9218b65337ac1b2af3893b65f6feeff3439a62ad",
+  "source": "hyperliquid_public_rest",
+  "start_ts_ms": 1790217065741,
+  "symbol": "BOME",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790208000045,
+    "last_exchange_ts_ms": 1790215200029,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3,
+      "max": 9065696.0,
+      "min": 1865712.0,
+      "p50": 5465716.0,
+      "p95": 9065696.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

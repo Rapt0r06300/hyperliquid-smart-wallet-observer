@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2837,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-crv-usdt-swap-1790204458109-1790205315608-4c57c8355c14",
+  "end_ts_ms": 1790205315608,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584999623,
+    "asset_name": "okx-public-ws-funding-crv-usdt-swap-1790204458109-1790205315608-4c57c8355c14.jsonl.gz",
+    "release_id": 395258448,
+    "remote_digest": "sha256:4c57c8355c147491057c373f106ac2c944d6fb6bbb304cd0da4a5697503646be",
+    "remote_size": 2837,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s4"
+  },
+  "release_asset": "okx-public-ws-funding-crv-usdt-swap-1790204458109-1790205315608-4c57c8355c14.jsonl.gz",
+  "release_asset_id": 584999623,
+  "release_id": 395258448,
+  "release_remote_digest": "sha256:4c57c8355c147491057c373f106ac2c944d6fb6bbb304cd0da4a5697503646be",
+  "release_remote_size": 2837,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s4",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4c57c8355c147491057c373f106ac2c944d6fb6bbb304cd0da4a5697503646be",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790204458109,
+  "symbol": "CRV-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 108.0,
+      "min": 17.5,
+      "p50": 26.5,
+      "p95": 56.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-73ddff3679a84b3e90e4acdec796377d"
+    ],
+    "first_exchange_ts_ms": 1790204409560,
+    "last_exchange_ts_ms": 1790205315498,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 48549.0,
+      "min": 105.0,
+      "p50": 107.0,
+      "p95": 110.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 184.950484,
+      "min": 0.0,
+      "p50": 181.901436,
+      "p95": 183.884378
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

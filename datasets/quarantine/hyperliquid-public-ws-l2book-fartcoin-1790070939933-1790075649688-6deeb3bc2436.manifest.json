@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 266697,
+  "collection_run_id": "market-35696397454",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-l2book-fartcoin-1790070939933-1790075649688-6deeb3bc2436",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790075649688,
+  "event_count": 878,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 878,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 878,
+  "release": {
+    "asset_id": 581231722,
+    "asset_name": "hyperliquid-public-ws-l2book-fartcoin-1790070939933-1790075649688-6deeb3bc2436.jsonl.gz",
+    "release_id": 393663705,
+    "remote_digest": "sha256:6deeb3bc2436bb6ea3b8cbbcdbda9885fde66a354e963b29d17d79f4f1a6befc",
+    "remote_size": 266697,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696397454-s7"
+  },
+  "release_asset": "hyperliquid-public-ws-l2book-fartcoin-1790070939933-1790075649688-6deeb3bc2436.jsonl.gz",
+  "release_asset_id": 581231722,
+  "release_id": 393663705,
+  "release_remote_digest": "sha256:6deeb3bc2436bb6ea3b8cbbcdbda9885fde66a354e963b29d17d79f4f1a6befc",
+  "release_remote_size": 266697,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696397454-s7",
+  "replay_compatible": false,
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6deeb3bc2436bb6ea3b8cbbcdbda9885fde66a354e963b29d17d79f4f1a6befc",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790070939933,
+  "symbol": "FARTCOIN",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-5ac02e9ca1c44297a9a7e44d1d5f4007"
+    ],
+    "first_exchange_ts_ms": 1790070939411,
+    "last_exchange_ts_ms": 1790075649324,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 878,
+      "max": 1817.0,
+      "min": 283.0,
+      "p50": 350.0,
+      "p95": 478.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

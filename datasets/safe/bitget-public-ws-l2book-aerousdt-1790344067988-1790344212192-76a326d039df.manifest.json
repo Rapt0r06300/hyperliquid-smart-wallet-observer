@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 192548,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-l2book-aerousdt-1790344067988-1790344212192-76a326d039df",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790344212192,
+  "event_count": 1582,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1582,
+  "release": {
+    "asset_id": 588846808,
+    "asset_name": "bitget-public-ws-l2book-aerousdt-1790344067988-1790344212192-76a326d039df.jsonl.gz",
+    "release_id": 396793769,
+    "remote_digest": "sha256:76a326d039df90a9adc259838e1fdedfa368922d2255f985f3fd30b7aa525458",
+    "remote_size": 192548,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s0"
+  },
+  "release_asset": "bitget-public-ws-l2book-aerousdt-1790344067988-1790344212192-76a326d039df.jsonl.gz",
+  "release_asset_id": 588846808,
+  "release_id": 396793769,
+  "release_remote_digest": "sha256:76a326d039df90a9adc259838e1fdedfa368922d2255f985f3fd30b7aa525458",
+  "release_remote_size": 192548,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s0",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "76a326d039df90a9adc259838e1fdedfa368922d2255f985f3fd30b7aa525458",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790344067988,
+  "symbol": "AEROUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-6f8abe804f1648019deaf4447811436e"
+    ],
+    "first_exchange_ts_ms": 1790344067604,
+    "last_exchange_ts_ms": 1790344212111,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1582,
+      "max": 384.0,
+      "min": 70.0,
+      "p50": 87.0,
+      "p95": 152.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "unique_trade_count": 1582,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}

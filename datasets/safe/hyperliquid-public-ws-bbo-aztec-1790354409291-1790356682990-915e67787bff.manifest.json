@@ -1,0 +1,105 @@
+{
+  "asset_verified": true,
+  "bytes": 462540,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-aztec-1790354409291-1790356682990-915e67787bff",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790356682990,
+  "event_count": 5158,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 5158,
+  "release": {
+    "asset_id": 588848460,
+    "asset_name": "hyperliquid-public-ws-bbo-aztec-1790354409291-1790356682990-915e67787bff.jsonl.gz",
+    "release_id": 396793704,
+    "remote_digest": "sha256:915e67787bfffe0eaa32c77bb139fa049dfbb317e9943035fc248d162734daa6",
+    "remote_size": 462540,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s5"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-aztec-1790354409291-1790356682990-915e67787bff.jsonl.gz",
+  "release_asset_id": 588848460,
+  "release_id": 396793704,
+  "release_remote_digest": "sha256:915e67787bfffe0eaa32c77bb139fa049dfbb317e9943035fc248d162734daa6",
+  "release_remote_size": 462540,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s5",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "915e67787bfffe0eaa32c77bb139fa049dfbb317e9943035fc248d162734daa6",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790354409291,
+  "symbol": "AZTEC",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 5158,
+      "max": -242.0,
+      "min": -680.5,
+      "p50": -353.0,
+      "p95": -253.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-335191c62e31436790ec0e6c1dce5bad"
+    ],
+    "first_exchange_ts_ms": 1790354408976,
+    "last_exchange_ts_ms": 1790356682690,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5158,
+      "max": 2110.0,
+      "min": 226.0,
+      "p50": 304.0,
+      "p95": 487.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2545,
+  "collection_run_id": "market-35733245157",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-dydx-usdt-swap-1790083556944-1790084426677-483ef26862c4",
+  "end_ts_ms": 1790084426677,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581835570,
+    "asset_name": "okx-public-ws-funding-dydx-usdt-swap-1790083556944-1790084426677-483ef26862c4.jsonl.gz",
+    "release_id": 393952628,
+    "remote_digest": "sha256:483ef26862c41df7e3513c1ddab7832db0e9a9547796b07dd3320be2a230a9c2",
+    "remote_size": 2545,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35733245157-s1"
+  },
+  "release_asset": "okx-public-ws-funding-dydx-usdt-swap-1790083556944-1790084426677-483ef26862c4.jsonl.gz",
+  "release_asset_id": 581835570,
+  "release_id": 393952628,
+  "release_remote_digest": "sha256:483ef26862c41df7e3513c1ddab7832db0e9a9547796b07dd3320be2a230a9c2",
+  "release_remote_size": 2545,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35733245157-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "483ef26862c41df7e3513c1ddab7832db0e9a9547796b07dd3320be2a230a9c2",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790083556944,
+  "symbol": "DYDX-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 50.0,
+      "min": 18.5,
+      "p50": 26.5,
+      "p95": 44.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-57a580f6caa34ad1841feea957bf7b36"
+    ],
+    "first_exchange_ts_ms": 1790083517313,
+    "last_exchange_ts_ms": 1790084426304,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 39631.0,
+      "min": 69.0,
+      "p50": 77.0,
+      "p95": 373.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 446.172727,
+      "min": 0.0,
+      "p50": 119.92539,
+      "p95": 291.068211
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

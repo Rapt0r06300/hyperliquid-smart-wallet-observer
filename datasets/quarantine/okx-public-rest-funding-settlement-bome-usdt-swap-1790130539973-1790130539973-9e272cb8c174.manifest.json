@@ -1,0 +1,98 @@
+{
+  "asset_verified": true,
+  "bytes": 706,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-funding-settlement-bome-usdt-swap-1790130539973-1790130539973-9e272cb8c174",
+  "end_ts_ms": 1790130539973,
+  "event_count": 1,
+  "family": "funding_settlement",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582777240,
+    "asset_name": "okx-public-rest-funding-settlement-bome-usdt-swap-1790130539973-1790130539973-9e272cb8c174.jsonl.gz",
+    "release_id": 394256137,
+    "remote_digest": "sha256:9e272cb8c1745c9098d6b4392f17832d09a522d94a54b11c80f4af325da92f2b",
+    "remote_size": 706,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s5"
+  },
+  "release_asset": "okx-public-rest-funding-settlement-bome-usdt-swap-1790130539973-1790130539973-9e272cb8c174.jsonl.gz",
+  "release_asset_id": 582777240,
+  "release_id": 394256137,
+  "release_remote_digest": "sha256:9e272cb8c1745c9098d6b4392f17832d09a522d94a54b11c80f4af325da92f2b",
+  "release_remote_size": 706,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9e272cb8c1745c9098d6b4392f17832d09a522d94a54b11c80f4af325da92f2b",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790130539973,
+  "symbol": "BOME-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790121600000,
+    "last_exchange_ts_ms": 1790121600000,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 8939973.0,
+      "min": 8939973.0,
+      "p50": 8939973.0,
+      "p95": 8939973.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

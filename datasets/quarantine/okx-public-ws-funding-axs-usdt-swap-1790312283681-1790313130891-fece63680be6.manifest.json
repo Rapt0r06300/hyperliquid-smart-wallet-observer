@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2647,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-axs-usdt-swap-1790312283681-1790313130891-fece63680be6",
+  "end_ts_ms": 1790313130891,
+  "event_count": 15,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587906154,
+    "asset_name": "okx-public-ws-funding-axs-usdt-swap-1790312283681-1790313130891-fece63680be6.jsonl.gz",
+    "release_id": 396438098,
+    "remote_digest": "sha256:fece63680be68b85e6cdd4f19b33d4acc739ae9c8807c4dff7eb75d64cca2168",
+    "remote_size": 2647,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s4"
+  },
+  "release_asset": "okx-public-ws-funding-axs-usdt-swap-1790312283681-1790313130891-fece63680be6.jsonl.gz",
+  "release_asset_id": 587906154,
+  "release_id": 396438098,
+  "release_remote_digest": "sha256:fece63680be68b85e6cdd4f19b33d4acc739ae9c8807c4dff7eb75d64cca2168",
+  "release_remote_size": 2647,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s4",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "fece63680be68b85e6cdd4f19b33d4acc739ae9c8807c4dff7eb75d64cca2168",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790312283681,
+  "symbol": "AXS-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 15,
+      "max": 73.5,
+      "min": 19.0,
+      "p50": 23.5,
+      "p95": 67.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-a5609ecb8402455d99969b2253ee3a18"
+    ],
+    "first_exchange_ts_ms": 1790312283382,
+    "last_exchange_ts_ms": 1790313130823,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 15,
+      "max": 299.0,
+      "min": 67.0,
+      "p50": 69.0,
+      "p95": 92.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 15,
+      "max": 98.901382,
+      "min": 0.0,
+      "p50": 97.324442,
+      "p95": 97.731636
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

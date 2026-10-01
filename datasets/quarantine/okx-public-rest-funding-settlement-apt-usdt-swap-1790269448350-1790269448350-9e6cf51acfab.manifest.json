@@ -1,0 +1,98 @@
+{
+  "asset_verified": true,
+  "bytes": 703,
+  "collection_run_id": "market-36006392932",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-funding-settlement-apt-usdt-swap-1790269448350-1790269448350-9e6cf51acfab",
+  "end_ts_ms": 1790269448350,
+  "event_count": 1,
+  "family": "funding_settlement",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 586416354,
+    "asset_name": "okx-public-rest-funding-settlement-apt-usdt-swap-1790269448350-1790269448350-9e6cf51acfab.jsonl.gz",
+    "release_id": 395896473,
+    "remote_digest": "sha256:9e6cf51acfab067d4cffc747ac9397bf0406ee7c38bc38a5fc5084212ad828cc",
+    "remote_size": 703,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36006392932-s5"
+  },
+  "release_asset": "okx-public-rest-funding-settlement-apt-usdt-swap-1790269448350-1790269448350-9e6cf51acfab.jsonl.gz",
+  "release_asset_id": 586416354,
+  "release_id": 395896473,
+  "release_remote_digest": "sha256:9e6cf51acfab067d4cffc747ac9397bf0406ee7c38bc38a5fc5084212ad828cc",
+  "release_remote_size": 703,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36006392932-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9e6cf51acfab067d4cffc747ac9397bf0406ee7c38bc38a5fc5084212ad828cc",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790269448350,
+  "symbol": "APT-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790265600000,
+    "last_exchange_ts_ms": 1790265600000,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 3848350.0,
+      "min": 3848350.0,
+      "p50": 3848350.0,
+      "p95": 3848350.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}
