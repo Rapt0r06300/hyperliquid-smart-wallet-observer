@@ -263,3 +263,15 @@ def test_analyze_phase_never_prepares_collection_inputs():
     assert "freeze_copy_vault_selection.py" not in analyze_block
     assert "official_archive_collection" not in analyze_block
 
+
+def test_single_repo_phase_control_propagates_generated_request_id():
+    text = _workflow("alina-phase-control.yml")
+    legacy = "Rapt0r06300/alina-smartflow-datasets-v2"
+    canonical = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    assert legacy not in text
+    assert canonical in text
+    assert 'echo "request_id=$REQUEST_ID" >> "$GITHUB_OUTPUT"' in text
+    assert text.count('REQUEST_ID: ${{ steps.request.outputs.request_id }}') >= 2
+    assert 'gh workflow run control-phase.yml' in text
+    assert '--repo "$GITHUB_REPOSITORY"' in text
+    assert '-f request_id="$REQUEST_ID"' in text
