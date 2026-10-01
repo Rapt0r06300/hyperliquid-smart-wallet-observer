@@ -532,7 +532,7 @@ def main() -> int:
             ),
         },
         {
-            "id": "final-dual-repository-closure",
+            "id": "final-single-repository-closure",
             "state": "DONE" if not report["remaining_blockers"] else "TODO",
             "reason": (
                 "no canonical closure blocker remains"
