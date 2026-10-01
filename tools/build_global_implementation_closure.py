@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the fail-closed cross-repository implementation closure receipt."""
+"""Build the fail-closed single-repository implementation closure receipt.\n\nLegacy Dataset V2 field names are retained in the JSON schema for compatibility,\nbut code, control/catalog metadata, campaign state and Release assets are owned by\nthe same Alina Smart Flow repository.\n"""
 from __future__ import annotations
 
 import argparse
@@ -328,6 +328,7 @@ def main() -> int:
     args = parser.parse_args()
     alina = Path(args.alina_root)
     dataset = Path(args.dataset_root)
+    single_repository = alina.resolve() == dataset.resolve()
     phase = load(dataset / "control/alina-phase.json", {})
     metrics = load(dataset / "catalog/DATA_METRICS.json", {})
     watchdog = load(dataset / "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json", {})
@@ -413,7 +414,8 @@ def main() -> int:
         )
     )
     implementation_complete = bool(
-        event_wiring_complete
+        single_repository
+        and event_wiring_complete
         and exact_coverage_complete
         and frozen_coverage_valid
         and watchdog.get("watchdog_status") == "HEALTHY"
@@ -440,6 +442,9 @@ def main() -> int:
     body = {
         "schema": "alina.global_implementation_closure.v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "repository_mode": "single_repository" if single_repository else "invalid_split_repository",
+        "single_repository": single_repository,
+        "repository_head": git_sha(alina),
         "alina_head": git_sha(alina),
         "dataset_v2_head": git_sha(dataset),
         "phase": phase,
