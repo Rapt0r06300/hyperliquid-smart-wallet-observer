@@ -9,7 +9,14 @@ from hl_observer.backtesting.native_cross_venue_replay import (
 )
 
 
-def _record(venue: str, bid: float, ask: float, ts: int) -> dict:
+def _record(
+    venue: str,
+    bid: float,
+    ask: float,
+    ts: int,
+    *,
+    transport_rtt_ms: float | None = None,
+) -> dict:
     return {
         "schema_version": "hypersmart.tick.v1",
         "source_id": f"{venue}_public_readonly",
@@ -43,6 +50,7 @@ def _record(venue: str, bid: float, ask: float, ts: int) -> dict:
             "sequence": 10,
             "connection_id": f"{venue}-1",
             "receive_mono_ns": ts * 1_000_000,
+            "transport_rtt_ms": transport_rtt_ms,
             "gap_count": 0,
             "duplicate_count": 0,
             "regression_count": 0,
@@ -54,10 +62,10 @@ def _record(venue: str, bid: float, ask: float, ts: int) -> dict:
     }
 
 
-def _write_pair(root: Path) -> None:
+def _write_pair(root: Path, *, transport_rtt_ms: float | None = None) -> None:
     rows = [
-        ("bybit", _record("bybit", 99.9, 100.0, 1_000)),
-        ("okx", _record("okx", 101.5, 101.6, 1_010)),
+        ("bybit", _record("bybit", 99.9, 100.0, 1_000, transport_rtt_ms=transport_rtt_ms)),
+        ("okx", _record("okx", 101.5, 101.6, 1_010, transport_rtt_ms=transport_rtt_ms)),
     ]
     for venue, row in rows:
         path = (
@@ -144,4 +152,25 @@ def test_native_replay_applies_execution_and_latency_penalties(tmp_path: Path) -
         float(row["conservative_taker_round_trip_net_edge_bps"])
         <= float(row["taker_taker_round_trip_net_floor_bps"])
         for row in penalized["top_candidates"]
+    )
+
+
+def test_native_replay_charges_recorded_transport_uncertainty(tmp_path: Path) -> None:
+    _write_pair(tmp_path, transport_rtt_ms=20.0)
+
+    report = scan_native_cross_venue_prefilter(
+        tmp_path,
+        notional_usd=100.0,
+        max_rows=100,
+        execution_buffer_bps=0.0,
+        latency_penalty_bps_per_ms=0.1,
+    )
+
+    row = report["top_candidates"][0]
+    assert row["receive_skew_ms"] == 10.0
+    assert row["transport_uncertainty_ms"] == 20.0
+    assert row["total_latency_uncertainty_ms"] == 30.0
+    assert row["latency_penalty_bps"] == 3.0
+    assert row["conservative_taker_round_trip_net_edge_bps"] == (
+        row["taker_taker_round_trip_net_floor_bps"] - 3.0
     )
