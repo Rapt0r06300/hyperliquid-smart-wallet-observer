@@ -1,18 +1,18 @@
 {
-  "dataset_v2_head": "4befae37627a5308bfd104016eef8448c55892b1",
-  "generated_at_utc": "2026-10-01T03:55:02.528806Z",
+  "dataset_v2_head": "508e362e30099a14b4119a1b8182955b8333400b",
+  "generated_at_utc": "2026-10-01T03:57:30.648825Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "801b07dbd43dfa2e3ef04cf5a6460e71ae8915dd0d165e98b6ba4752773cb38d",
-      "output_tail": "3.12/pathlib.py:1013: FileNotFoundError\n=========================== short test summary info ============================\nFAILED tests/test_analysis_stage_gates.py::test_create_resumable_workflow_analysis_block_is_well_formed - FileNotFoundError: [Errno 2] No such file or directory: '.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_legacy_long_collectors_are_manual_only - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/collect-market-data-v2.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_is_continuous_hosted_and_frozen - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_encodes_copy_vault_cursor_as_valid_json - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/resumable-campaign-controller.yml'\nFAILED tests/test_workflow_bounds.py::test_metrics_refresh_is_scheduled_and_serialized - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/dataset-metrics-v2.yml'\nFAILED tests/test_workflow_bounds.py::test_reconcile_covers_all_production_release_families_and_pins_actions - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/reconcile-v2-catalog.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_worker_preserves_frozen_cursor_and_retry_policy - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/resumable-campaign-worker.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_and_controller_track_current_main_for_new_work - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_bridge_and_exact_count_backfill_are_scheduled_hosted - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/main-dataset-v2-bridge-smoke.yml'\nFAILED tests/test_workflow_bounds.py::test_campaign_watchdog_recomputes_on_concurrent_receipt_writers - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/campaign-watchdog.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_structure_and_exact_analysis_selection_are_not_corrupted - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_analyze_phase_never_prepares_collection_inputs - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\n13 failed, 16 passed in 0.70s\n",
+      "output_sha256": "c4458dd518ccb8883f1b36165f15d74ed2317e151caa5ff57d998f708faf21ca",
+      "output_tail": "....................F........                                            [100%]\n=================================== FAILURES ===================================\n________ test_controller_worker_are_bounded_hosted_and_collect_relayed _________\n\n    def test_controller_worker_are_bounded_hosted_and_collect_relayed():\n        controller = _workflow(\"resumable-campaign-controller.yml\")\n        worker = _workflow(\"resumable-campaign-worker.yml\")\n        assert \"cron: '*/5 * * * *'\" in controller\n        assert \"push:\" in controller\n        assert \"resumable-campaign-controller.yml\" in controller\n        assert \"timeout-minutes: 10\" in controller\n        assert \"timeout-minutes: 345\" in worker\n        assert \"cancel-in-progress: false\" in controller\n        assert \"group: resumable-campaign-controller-v4\" in controller\n        assert \"cancel-in-progress: false\" in worker\n        assert \"self-hosted\" not in controller + worker\n        assert \"uses: ./.github/workflows/resumable-campaign-worker.yml\" in controller\n        assert \"copy_work:\" in controller\n        assert \"other_work:\" in controller\n        assert \"max-parallel: 1\" in controller\n        assert \"max-parallel: 16\" in controller\n        assert \"head -n 128\" in controller\n        assert 'list-due catalog/campaigns             | head -n 128' not in controller\n        assert 'all-due.txt' in controller\n        assert \"copy_matrix\" in controller\n        assert \"other_matrix\" in controller\n        assert \"active_copy=False\" in controller\n        assert \"active_other=0\" in controller\n        assert \"other_capacity=max(0,16-active_other)\" in controller\n        assert \"fromJSON(needs.select.outputs.copy_matrix)\" in controller\n        assert \"fromJSON(needs.select.outputs.other_matrix)\" in controller\n        assert \"relay_collect:\" in controller\n>       assert \"gh workflow run resumable-campaign-controller.yml\" in worker\nE       assert 'gh workflow run resumable-campaign-controller.yml' in 'name: resumable-campaign-worker\\non:\\n  workflow_dispatch:\\n    inputs:\\n      campaign_id:\\n        required: true\\n...sh origin HEAD:main; then exit 0; fi\\n            sleep \"$((2 + STAGGER + i * 2))\"\\n          done\\n          exit 1\\n'\n\ntests/test_workflow_bounds.py:124: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - assert 'gh workflow run resumable-campaign-controller.yml' in 'name: resumable-campaign-worker\\non:\\n  workflow_dispatch:\\n    inputs:\\n      campaign_id:\\n        required: true\\n...sh origin HEAD:main; then exit 0; fi\\n            sleep \"$((2 + STAGGER + i * 2))\"\\n          done\\n          exit 1\\n'\n1 failed, 28 passed in 2.45s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "b6ed5e95c99c83013d013faf04fcb7a89901ad930901e2e54d422c3ca01a8c88",
-      "output_tail": ".............................                                            [100%]\n29 passed in 0.18s\n",
+      "output_sha256": "5b9c34fdfc7997a310e7ef07f15a173171ad03bdc9d5b2f479b4bf82e87326eb",
+      "output_tail": ".............................                                            [100%]\n29 passed in 2.92s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -25,15 +25,15 @@
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "1209889faa6d82d12e3cba04bcd14e3e9c2e71029e8c95621284cf3a9e31ab98",
-      "output_tail": "..............................................                           [100%]\n46 passed in 3.26s\n",
+      "output_sha256": "080e051fd036704213925db6998c0d530b52a7bdb3c287a1b222ecc39258553e",
+      "output_tail": "..............................................                           [100%]\n46 passed in 3.24s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "4fe406b0aa745495daaec3b9a4ba454db1b66dba3d0dfe84e84c57a1192e9572",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.87s\n",
+      "output_sha256": "faf08347ccdf86151436ceee6c49f11872b866f8ba6443a43032287e9556bc04",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.91s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -45,17 +45,17 @@
       "status": "PASS"
     }
   ],
-  "main_alina_head": "ccaabbc7bd44aae5678ff8a7f62d5a15a436cdbf",
+  "main_alina_head": "508e362e30099a14b4119a1b8182955b8333400b",
   "paper_only": true,
   "python_version": "3.12.14",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "90a6291cc50b129459f062b33b39db5923815f77ccd94fbfb73e6c939d361e00",
+  "receipt_digest": "cb311e93f158bab329ee8107b51fc6ba9d2d85a29a72773a55dbca6e2551dd8b",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "36812604092"
+  "workflow_run_id": "36812810594"
 }
