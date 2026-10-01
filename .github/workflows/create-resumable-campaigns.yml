@@ -34,6 +34,8 @@ jobs:
   create:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      phase: ${{ steps.campaigns.outputs.phase }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -61,7 +63,8 @@ jobs:
       - name: Install current Alina runtime for deterministic discovery
         run: python -m pip install --disable-pip-version-check -e ./alina
 
-      - name: Create deterministic frozen campaigns
+      - id: campaigns
+        name: Create deterministic frozen campaigns
         shell: bash
         run: |
           set -euo pipefail
@@ -79,6 +82,7 @@ jobs:
           PYTHONPATH=alina/src python tools/apply_operator_controls.py --alina-root alina --phase-path control/alina-phase.json
           PHASE_META="$(python tools/phase_gate.py read)"
           PHASE="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$PHASE_META")"
+          echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
           PHASE_EPOCH="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["epoch"])' "$PHASE_META")"
           SOURCE_COLLECTION_EPOCH="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["source_collection_epoch"] or "")' "$PHASE_META")"
           COLLECTION_CUTOFF="$(python -c 'import json,sys; print(json.loads(sys.argv[1])["collection_cutoff_at_utc"] or "")' "$PHASE_META")"
@@ -299,6 +303,7 @@ jobs:
 
   launch:
     needs: create
+    if: ${{ needs.create.outputs.phase != 'IDLE' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -310,9 +315,51 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run resumable-campaign-controller.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          gh workflow run durable-two-segment-resume-smoke.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          for attempt in 1 2 3 4 5 6; do
+            set +e
+            output="$(gh workflow run resumable-campaign-controller.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main 2>&1)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            printf '%s\n' "$output" >&2
+            if printf '%s' "$output" | grep -Eqi 'rate limit|HTTP 403|secondary rate|temporar|timeout|502|503|504'; then
+              [ "$attempt" -lt 6 ] || exit 0
+              delay="$((5 * attempt * attempt))"
+              [ "$delay" -le 60 ] || delay=60
+              sleep "$delay"
+              continue
+            fi
+            exit "$rc"
+          done
+
+      - name: Dispatch resume smoke for ANALYZE only
+        if: ${{ needs.create.outputs.phase == 'ANALYZE' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            set +e
+            output="$(gh workflow run durable-two-segment-resume-smoke.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main 2>&1)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              exit 0
+            fi
+            printf '%s\n' "$output" >&2
+            if printf '%s' "$output" | grep -Eqi 'rate limit|HTTP 403|secondary rate|temporar|timeout|502|503|504'; then
+              [ "$attempt" -lt 6 ] || exit 0
+              delay="$((5 * attempt * attempt))"
+              [ "$delay" -le 60 ] || delay=60
+              sleep "$delay"
+              continue
+            fi
+            exit "$rc"
+          done
