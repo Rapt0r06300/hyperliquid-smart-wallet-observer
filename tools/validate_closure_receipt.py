@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the canonical dual-repository closure receipt structure."""
+"""Validate the canonical single-repository closure receipt structure."""
 from __future__ import annotations
 
 import argparse
