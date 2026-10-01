@@ -74,8 +74,8 @@ jobs:
           phase_epoch=int(sys.argv[2])
           ids=[line.strip() for line in open(sys.argv[1],encoding="utf-8") if line.strip()]
           copy_ids=[]
-          other_ids=[]
-          for campaign_id in ids:
+          other_rows=[]
+          for order,campaign_id in enumerate(ids):
               path=Path("catalog/campaigns")/(campaign_id+".json")
               try:
                   row=json.load(open(path,encoding="utf-8"))
@@ -89,7 +89,20 @@ jobs:
               # the normal controller from racing the proof segments.
               if cursor.get("resume_proof") is True:
                   continue
-              (copy_ids if kind=="copy_vault_collection" else other_ids).append(campaign_id)
+              if kind=="copy_vault_collection":
+                  copy_ids.append(campaign_id)
+              else:
+                  # During COLLECT, prioritize replay-grade market capture over
+                  # short secondary/event/archive work so L2/BBO/trades occupy
+                  # all available market lanes first. Preserve due order inside
+                  # each priority class and leave ANALYZE kinds deterministic.
+                  priority={
+                      "market_collection":0,
+                      "event_intelligence_collection":1,
+                      "official_archive_collection":2,
+                  }.get(kind,3)
+                  other_rows.append((priority,order,campaign_id))
+          other_ids=[campaign_id for _,_,campaign_id in sorted(other_rows)]
           # Keep exactly one user-specific Copy-Vault lane active globally
           # for the current epoch. GitHub-hosted jobs may share an egress IP,
           # so separate runners must not be assumed to multiply Hyperliquid's
