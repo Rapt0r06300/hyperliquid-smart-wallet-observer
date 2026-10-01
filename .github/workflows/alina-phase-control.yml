@@ -24,10 +24,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Validate request and read current authority
+      - id: request
+        name: Validate request and read current authority
         env:
           COMMAND: ${{ inputs.command }}
-          REQUEST_ID: ${{ inputs.request_id }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
         run: |
           set -euo pipefail
           if [ "$COMMAND" != "status" ]; then
@@ -39,6 +40,7 @@ jobs:
               REQUEST_ID="$(printf '%s' "$COMMAND:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" | sha256sum | cut -d' ' -f1)"
               echo "REQUEST_ID=$REQUEST_ID" >> "$GITHUB_ENV"
             fi
+            echo "request_id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
           fi
           curl --fail-with-body --retry 4 --retry-all-errors \
             -H "Accept: application/vnd.github.raw+json" \
@@ -51,7 +53,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMAND: ${{ inputs.command }}
-          REQUEST_ID: ${{ inputs.request_id }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
           REQUESTED_BY: ${{ inputs.requested_by }}
         run: |
           set -euo pipefail
