@@ -57,6 +57,7 @@ def test_recording_coordinator_emits_normalized_bybit_snapshot() -> None:
     captured = []
     coordinator = RecordingNativeVenueCoordinator(
         on_snapshot=captured.append,
+        clock_domain_id="test-clock-domain",
         ccxt_snapshot_path=None,
         stale_after_ms=1_000,
     )
@@ -84,6 +85,7 @@ def test_recording_coordinator_emits_normalized_bybit_snapshot() -> None:
     record = captured[0].as_record(written_ts_ms=1_700_000_000_020)
     assert record["parsed_summary"]["bid"] == 65000.0
     assert record["parsed_summary"]["ask"] == 65001.0
+    assert record["parsed_summary"]["clock_domain_id"] == "test-clock-domain"
 
 
 def test_native_collector_has_no_execution_surface() -> None:
