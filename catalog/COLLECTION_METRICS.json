@@ -1,0 +1,108 @@
+{
+  "by_kind": {
+    "copy_vault_collection": {
+      "accepted_frames": 2927,
+      "compressed_bytes": 427257,
+      "durable_units": 5,
+      "l2_frames": 2700,
+      "partial_shards": 221,
+      "persisted_frames": 2927,
+      "queue_drops": 0,
+      "records_observed": 1350,
+      "rejected_shards": 0,
+      "safe_shards": 32,
+      "shards": 253,
+      "trades_observed": 50,
+      "units_missing_compact_metrics": 0,
+      "units_trade_count_coverage_incomplete": 0
+    },
+    "event_intelligence_collection": {
+      "accepted_frames": 0,
+      "compressed_bytes": 0,
+      "durable_units": 3,
+      "l2_frames": 0,
+      "partial_shards": 0,
+      "persisted_frames": 0,
+      "queue_drops": 0,
+      "records_observed": 0,
+      "rejected_shards": 0,
+      "safe_shards": 0,
+      "shards": 0,
+      "trades_observed": 0,
+      "units_missing_compact_metrics": 3,
+      "units_trade_count_coverage_incomplete": 0
+    },
+    "market_collection": {
+      "accepted_frames": 0,
+      "compressed_bytes": 0,
+      "durable_units": 0,
+      "l2_frames": 0,
+      "partial_shards": 0,
+      "persisted_frames": 0,
+      "queue_drops": 0,
+      "records_observed": 0,
+      "rejected_shards": 0,
+      "safe_shards": 0,
+      "shards": 0,
+      "trades_observed": 0,
+      "units_missing_compact_metrics": 0,
+      "units_trade_count_coverage_incomplete": 0
+    }
+  },
+  "campaign_status_counts": {
+    "COMPLETE": 8,
+    "FAILED": 15,
+    "PENDING": 666,
+    "RUNNING": 16
+  },
+  "collection_campaign_count": 705,
+  "dataset_generation": "V2_FRESH",
+  "indexed_dataset": {
+    "global_unique_coverage_complete": false,
+    "global_unique_trades": null,
+    "indexed_shards": 0,
+    "trades_indexed_exact": 0,
+    "trades_replayable": 0,
+    "trades_safe": 0
+  },
+  "instant": {
+    "all_collection_metrics_complete": false,
+    "compressed_bytes_known": 427257,
+    "coverage_complete": true,
+    "persisted_frames": 2927,
+    "shards_published": 253,
+    "trades_collected_observed": 50,
+    "units_missing_compact_metrics": 3,
+    "units_trade_count_coverage_incomplete": 0
+  },
+  "latest_checkpoint_at_utc": "2026-10-01T15:55:23.399594Z",
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "schema": "alina.collection_metrics.v1",
+  "semantics": {
+    "global_unique_trades": "only populated after deterministic cross-shard identity deduplication",
+    "trades_collected_observed": "cumulative trade/fill events reported by durable collection checkpoints; may include cross-window overlap and is not a global-unique claim",
+    "trades_indexed_exact": "exact trade count from DATA_INDEX-backed Dataset V2 metrics"
+  },
+  "source": "durable_campaign_checkpoints_on_main",
+  "stale": false,
+  "status": "OK",
+  "totals": {
+    "accepted_frames": 2927,
+    "compressed_bytes": 427257,
+    "durable_units": 8,
+    "l2_frames": 2700,
+    "partial_shards": 221,
+    "persisted_frames": 2927,
+    "queue_drops": 0,
+    "records_observed": 1350,
+    "rejected_shards": 0,
+    "safe_shards": 32,
+    "shards": 253,
+    "trades_observed": 50,
+    "units_missing_compact_metrics": 3,
+    "units_trade_count_coverage_incomplete": 0
+  }
+}
