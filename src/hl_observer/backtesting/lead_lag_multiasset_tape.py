@@ -164,8 +164,18 @@ def load_multiasset_train_tape(
                 continue
             seen_trades.add(identity)
             tapes[coin].append((int(timestamp_ms) * 1_000_000, float(price), direction))
+            try:
+                quantity = float(row.get("sz"))
+            except (TypeError, ValueError, OverflowError):
+                quantity = 0.0
             trade_observations[coin].append(
-                {"observable_at_ms": int(timestamp_ms), "price": float(price), "source_id": source_id}
+                {
+                    "observable_at_ms": int(timestamp_ms),
+                    "price": float(price),
+                    "qty": float(quantity),
+                    "direction": float(direction),
+                    "source_id": source_id,
+                }
             )
             source_ids[coin]["TRADE"].add(source_id)
 
