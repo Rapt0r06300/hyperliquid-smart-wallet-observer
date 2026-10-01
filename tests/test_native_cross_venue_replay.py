@@ -126,7 +126,7 @@ def test_native_replay_scans_predeclared_capacity_ladder_by_default(tmp_path: Pa
 
 
 def test_native_replay_applies_execution_and_latency_penalties(tmp_path: Path) -> None:
-    _write_pair(tmp_path)
+    _write_pair(tmp_path, transport_rtt_ms=20.0)
 
     baseline = scan_native_cross_venue_prefilter(
         tmp_path,
@@ -174,3 +174,19 @@ def test_native_replay_charges_recorded_transport_uncertainty(tmp_path: Path) ->
     assert row["conservative_taker_round_trip_net_edge_bps"] == (
         row["taker_taker_round_trip_net_floor_bps"] - 3.0
     )
+
+
+def test_native_replay_fails_closed_without_transport_evidence_for_latency_penalty(
+    tmp_path: Path,
+) -> None:
+    _write_pair(tmp_path, transport_rtt_ms=None)
+
+    report = scan_native_cross_venue_prefilter(
+        tmp_path,
+        notional_usd=100.0,
+        max_rows=100,
+        latency_penalty_bps_per_ms=0.1,
+    )
+
+    assert report["candidate_observations"] == 0
+    assert report["status"] == "UNMEASURABLE"
