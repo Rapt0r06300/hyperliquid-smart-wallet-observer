@@ -11,6 +11,7 @@ on:
       - "tests/test_campaign_watchdog_drain.py"
       - ".github/workflows/campaign-watchdog.yml"
 permissions:
+  actions: write
   contents: write
 concurrency:
   group: campaign-watchdog
