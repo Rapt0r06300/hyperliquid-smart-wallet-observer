@@ -98,7 +98,11 @@ def test_native_replay_finds_fee_aware_cross_venue_candidate(tmp_path: Path) -> 
     assert report["candidate_observations"] >= 1
     assert report["taker_taker_positive_fee_floor"] >= 1
     assert report["economic_claim_eligible"] is False
+    assert report["closed_cycle_proven"] is False
     assert report["maker_fill_proven"] is False
+    assert report["carry_pnl_usd"] == 0.0
+    assert report["paper_read_only"] is True
+    assert report["real_execution"] is False
 
 
 def test_native_replay_scans_predeclared_capacity_ladder_by_default(tmp_path: Path) -> None:
