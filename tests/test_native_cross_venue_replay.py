@@ -54,20 +54,7 @@ def _record(venue: str, bid: float, ask: float, ts: int) -> dict:
     }
 
 
-def test_snapshot_from_record_requires_full_l2() -> None:
-    record = _record("okx", 101.5, 101.6, 1_010)
-    snapshot = snapshot_from_record(record)
-    assert snapshot is not None
-    assert snapshot.venue == "okx"
-    assert snapshot.bids[0].price == 101.5
-
-    broken = _record("okx", 101.5, 101.6, 1_010)
-    broken["parsed_summary"]["bids"] = []
-    assert snapshot_from_record(broken) is None
-
-
-def test_native_replay_finds_fee_aware_cross_venue_candidate(tmp_path: Path) -> None:
-    root = tmp_path
+def _write_pair(root: Path) -> None:
     rows = [
         ("bybit", _record("bybit", 99.9, 100.0, 1_000)),
         ("okx", _record("okx", 101.5, 101.6, 1_010)),
@@ -86,8 +73,24 @@ def test_native_replay_finds_fee_aware_cross_venue_candidate(tmp_path: Path) -> 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
+
+def test_snapshot_from_record_requires_full_l2() -> None:
+    record = _record("okx", 101.5, 101.6, 1_010)
+    snapshot = snapshot_from_record(record)
+    assert snapshot is not None
+    assert snapshot.venue == "okx"
+    assert snapshot.bids[0].price == 101.5
+
+    broken = _record("okx", 101.5, 101.6, 1_010)
+    broken["parsed_summary"]["bids"] = []
+    assert snapshot_from_record(broken) is None
+
+
+def test_native_replay_finds_fee_aware_cross_venue_candidate(tmp_path: Path) -> None:
+    _write_pair(tmp_path)
+
     report = scan_native_cross_venue_prefilter(
-        root,
+        tmp_path,
         notional_usd=100.0,
         max_rows=100,
     )
@@ -96,3 +99,15 @@ def test_native_replay_finds_fee_aware_cross_venue_candidate(tmp_path: Path) -> 
     assert report["taker_taker_positive_fee_floor"] >= 1
     assert report["economic_claim_eligible"] is False
     assert report["maker_fill_proven"] is False
+
+
+def test_native_replay_scans_predeclared_capacity_ladder_by_default(tmp_path: Path) -> None:
+    _write_pair(tmp_path)
+
+    report = scan_native_cross_venue_prefilter(tmp_path, max_rows=100)
+
+    assert report["notionals_usd"] == [50.0, 100.0, 250.0, 500.0]
+    tested = {float(row["tested_notional_usd"]) for row in report["top_candidates"]}
+    assert tested == {50.0, 100.0, 250.0, 500.0}
+    assert report["candidate_observations"] >= 4
+    assert report["economic_claim_eligible"] is False
