@@ -74,3 +74,31 @@ def test_depth_exhaustion_fails_closed():
         [(hl, okx, {"receive_skew_ms": 0.0, "corrected_exchange_skew_ms": None})],
         notional_usd=100.0,
     ) == []
+
+
+def test_cost_buffer_and_latency_penalty_are_deducted_before_candidate_selection():
+    hl = _snap("hyperliquid", 99.9, 100.0)
+    okx = _snap("okx", 101.5, 101.6)
+    rows = executable_pair_rows(
+        [(hl, okx, {"receive_skew_ms": 12.0, "corrected_exchange_skew_ms": 8.0})],
+        notional_usd=100.0,
+        execution_buffer_bps=5.0,
+        latency_penalty_bps_per_ms=0.25,
+    )
+    row = rows[0]
+    assert row["execution_buffer_bps"] == 5.0
+    assert row["latency_penalty_bps"] == 3.0
+    assert row["conservative_taker_round_trip_net_edge_bps"] == (
+        row["taker_taker_round_trip_net_floor_bps"] - 8.0
+    )
+
+
+def test_conservative_threshold_rejects_edge_destroyed_by_execution_costs():
+    hl = _snap("hyperliquid", 99.9, 100.0)
+    okx = _snap("okx", 101.5, 101.6)
+    assert executable_pair_rows(
+        [(hl, okx, {"receive_skew_ms": 100.0, "corrected_exchange_skew_ms": None})],
+        notional_usd=100.0,
+        execution_buffer_bps=20.0,
+        latency_penalty_bps_per_ms=2.0,
+    ) == []
