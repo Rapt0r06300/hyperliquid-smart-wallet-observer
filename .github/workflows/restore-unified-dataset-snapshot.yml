@@ -1,0 +1,87 @@
+name: restore-unified-dataset-snapshot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/restore-unified-dataset-snapshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-unified-dataset-snapshot
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout unified Alina repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Checkout current legacy Dataset V2 source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Rapt0r06300/alina-smartflow-datasets-v2
+          ref: main
+          path: legacy-dataset
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Restore replay metadata without workflow files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(python -c 'import json; print(json.load(open("legacy-dataset/control/alina-phase.json"))["phase"])')" = "COLLECT"
+          SOURCE_HEAD="$(git -C legacy-dataset rev-parse HEAD)"
+          mkdir -p catalog datasets control
+          cp -a legacy-dataset/catalog/. catalog/
+          cp -a legacy-dataset/datasets/. datasets/
+          cp -a legacy-dataset/control/. control/
+          python - <<'PY' "$SOURCE_HEAD"
+          import datetime as dt, json, pathlib, sys
+          p=pathlib.Path("control/unified-repository.json")
+          row=json.loads(p.read_text()) if p.exists() else {}
+          row.update({
+              "schema":"alina.unified_repository_migration.v1",
+              "source_repository":"Rapt0r06300/alina-smartflow-datasets-v2",
+              "source_head":sys.argv[1],
+              "target_repository":"Rapt0r06300/hyperliquid-smart-wallet-observer",
+              "mode":"single-active-repository-cutover",
+              "phase_authority":"control/alina-phase.json",
+              "heavy_data_storage":"github-releases",
+              "historical_catalog_provenance_preserved":True,
+              "snapshot_restored_at_utc":dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00","Z"),
+          })
+          p.write_text(json.dumps(row,indent=2,sort_keys=True)+"\n")
+          PY
+          rm -rf legacy-dataset
+          if git diff --name-only -- .github/workflows | grep -q .; then
+            echo "Refusing restore that changes workflows" >&2
+            exit 2
+          fi
+
+      - name: Commit restored snapshot
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog datasets control
+          git diff --cached --quiet && exit 0
+          git commit -m "data: restore unified Dataset V2 snapshot"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep "$((attempt * 3))"
+          done
+          exit 1
