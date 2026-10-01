@@ -33,6 +33,7 @@ _REPLAYABLE_CHANNELS = {
     "instrument_metadata",
     "l2Book",
     "mark_price",
+    "native_market",
     "open_interest",
     "ticker",
     "trades",
