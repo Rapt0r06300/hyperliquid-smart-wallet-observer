@@ -171,12 +171,10 @@ jobs:
           echo "::add-mask::$TOKEN"
           echo "lease_token=$TOKEN" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
-          python tools/build_collection_metrics.py
-
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           gh auth setup-git
-          git add "$M" catalog/COLLECTION_METRICS.json
+          git add "$M"
           git commit -m "campaign: claim $CAMPAIGN_ID run $GITHUB_RUN_ID"
           STAGGER_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
           STAGGER="$((16#$STAGGER_HEX % 23))"
@@ -585,10 +583,12 @@ jobs:
               --evidence-tag "$EVIDENCE_TAG" --result "$RUNNER_TEMP/result.json"
           fi
 
+          python tools/build_collection_metrics.py
+
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           gh auth setup-git
-          git add "$M"
+          git add "$M" catalog/COLLECTION_METRICS.json
           if [ -d catalog/receipts ]; then
             git add catalog/receipts
           fi
