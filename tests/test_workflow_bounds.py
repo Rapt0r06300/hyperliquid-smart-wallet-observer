@@ -187,10 +187,11 @@ def test_resumable_creator_and_controller_track_current_main_for_new_work():
     assert "777d329176ded9e9262c33a9411adc99c55caa02" not in creator + controller
 
 
-def test_bridge_and_exact_count_backfill_are_scheduled_hosted():
+def test_legacy_bridge_is_manual_only_and_exact_count_backfill_is_scheduled_hosted():
     bridge = _workflow("main-dataset-v2-bridge-smoke.yml")
     backfill = _workflow("backfill-exact-trade-counts.yml")
-    assert "schedule:" in bridge
+    assert "workflow_dispatch:" in bridge
+    assert "schedule:" not in bridge
     assert "schedule:" in backfill
     assert "push:" in backfill
     assert "backfill-exact-trade-counts.yml" in backfill
