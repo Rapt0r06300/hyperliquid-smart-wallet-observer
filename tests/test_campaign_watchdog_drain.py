@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-from tools.campaign_watchdog import _reconcile_drain_stuck, _reconcile_finished_owner
+from tools.campaign_watchdog import _dispatch_successor, _reconcile_drain_stuck, _reconcile_finished_owner
 
 
 def _phase():
@@ -118,4 +119,71 @@ def test_active_owner_run_keeps_live_lease():
     )
     assert row["status"] == "RUNNING"
     assert row["lease"]["owner_run_id"] == "999"
+
+def test_dispatch_successor_retries_transient_rate_limit(monkeypatch):
+    row = {
+        "campaign_id": "market-retry",
+        "phase_epoch": 7,
+        "chunk_index": 3,
+        "cursor": {"last_run_id": ""},
+    }
+    calls = []
+    responses = [
+        SimpleNamespace(returncode=1, stderr="HTTP 403: API rate limit exceeded for installation", stdout=""),
+        SimpleNamespace(returncode=0, stderr="", stdout=""),
+    ]
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return responses.pop(0)
+
+    sleeps = []
+    monkeypatch.setattr("tools.campaign_watchdog.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.campaign_watchdog.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    ok, detail = _dispatch_successor(
+        row,
+        "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        datetime(2026, 10, 1, 14, 0, tzinfo=timezone.utc),
+    )
+
+    assert ok is True
+    assert detail == "dispatched"
+    assert len(calls) == 2
+    assert sleeps == [5]
+    assert row["cursor"]["successor_dispatch_at_utc"] == "2026-10-01T14:00:00Z"
+
+
+def test_dispatch_successor_stops_after_bounded_transient_retries(monkeypatch):
+    row = {
+        "campaign_id": "market-retry-bounded",
+        "phase_epoch": 7,
+        "chunk_index": 4,
+        "cursor": {"last_run_id": ""},
+    }
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=1,
+            stderr="HTTP 403: API rate limit exceeded for installation",
+            stdout="",
+        )
+
+    sleeps = []
+    monkeypatch.setattr("tools.campaign_watchdog.subprocess.run", fake_run)
+    monkeypatch.setattr("tools.campaign_watchdog.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    ok, detail = _dispatch_successor(
+        row,
+        "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        datetime(2026, 10, 1, 14, 0, tzinfo=timezone.utc),
+    )
+
+    assert ok is False
+    assert "bounded transient dispatch retry exhausted" in detail
+    assert len(calls) == 6
+    assert sleeps == [5, 20, 45, 60, 60]
+    assert "successor_dispatch_at_utc" not in row["cursor"]
 
