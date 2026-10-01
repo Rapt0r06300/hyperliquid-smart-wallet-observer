@@ -132,14 +132,14 @@ def load_native_market_snapshots(
     root: str | Path,
     *,
     max_rows: int = DEFAULT_MAX_ROWS,
-) -> tuple[list[NativeMarketSnapshot], dict[str, Any]]:
+) -> tuple[list[tuple[str, NativeMarketSnapshot]], dict[str, Any]]:
     project_root = Path(root).resolve()
     sources = [
         path
         for path in load_family_source_paths(project_root, "market_ticks")
         if "native_market" in {part.casefold() for part in path.parts}
     ]
-    rows: list[NativeMarketSnapshot] = []
+    rows: list[tuple[str, NativeMarketSnapshot]] = []
     seen: set[tuple[str, str, int, int | None, str | None]] = set()
     lines_read = invalid = duplicates = 0
     truncated = False
@@ -158,7 +158,13 @@ def load_native_market_snapshots(
                 invalid += 1
                 continue
             snapshot = snapshot_from_record(record)
-            if snapshot is None:
+            summary = record.get("parsed_summary")
+            clock_domain_id = (
+                str(summary.get("clock_domain_id") or "").strip()
+                if isinstance(summary, Mapping)
+                else ""
+            )
+            if snapshot is None or not clock_domain_id:
                 invalid += 1
                 continue
             identity = (
@@ -172,7 +178,7 @@ def load_native_market_snapshots(
                 duplicates += 1
                 continue
             seen.add(identity)
-            rows.append(snapshot)
+            rows.append((clock_domain_id, snapshot))
             if limit > 0 and len(rows) > limit:
                 truncated = True
                 break
@@ -180,10 +186,11 @@ def load_native_market_snapshots(
             break
     rows.sort(
         key=lambda item: (
-            int(item.receive_ts_ms),
-            int(item.receive_mono_ns or 0),
-            item.venue,
-            item.coin,
+            item[0],
+            int(item[1].receive_ts_ms),
+            int(item[1].receive_mono_ns or 0),
+            item[1].venue,
+            item[1].coin,
         )
     )
     if truncated:
@@ -209,14 +216,18 @@ def scan_native_cross_venue_prefilter(
     max_rows: int = DEFAULT_MAX_ROWS,
 ) -> dict[str, Any]:
     snapshots, input_audit = load_native_market_snapshots(root, max_rows=max_rows)
-    store = MultiVenueMarketStore(stale_after_ms=1_000)
+    stores: dict[str, MultiVenueMarketStore] = {}
     seen_candidates: set[tuple[str, str, str, int]] = set()
     candidates: list[dict[str, Any]] = []
     pair_counts: Counter[str] = Counter()
     coin_counts: Counter[str] = Counter()
     taker_viable = buy_maker_viable = sell_maker_viable = both_maker_viable = 0
 
-    for snapshot in snapshots:
+    for clock_domain_id, snapshot in snapshots:
+        store = stores.setdefault(
+            clock_domain_id,
+            MultiVenueMarketStore(stale_after_ms=1_000),
+        )
         store.put(snapshot)
         pairs = store.synchronized_pairs(
             snapshot.coin,
@@ -293,6 +304,7 @@ def scan_native_cross_venue_prefilter(
         ),
         "notional_usd": float(notional_usd),
         "input_audit": input_audit,
+        "clock_domains": len(stores),
         "candidate_observations": len(ranked),
         "taker_taker_positive_fee_floor": taker_viable,
         "buy_maker_positive_fee_floor_unproven_fill": buy_maker_viable,
