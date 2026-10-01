@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from tools.campaign_watchdog import _dispatch_successor, _reconcile_drain_stuck, _reconcile_finished_owner
+from tools.campaign_watchdog import _dispatch_successor, _reconcile_drain_stuck, _reconcile_finished_owner, _terminalize_superseded_stuck
 
 
 def _phase():
@@ -186,4 +186,77 @@ def test_dispatch_successor_stops_after_bounded_transient_retries(monkeypatch):
     assert len(calls) == 6
     assert sleeps == [5, 20, 45, 60, 60]
     assert "successor_dispatch_at_utc" not in row["cursor"]
+
+def test_stuck_market_campaign_terminalizes_when_newer_equivalent_progresses():
+    old = {
+        "campaign_id": "market-e6-0-old",
+        "kind": "market_collection",
+        "status": "STUCK",
+        "status_reason": "durable_publication_failed",
+        "phase_epoch": 6,
+        "created_at": "2026-10-01T04:55:00+00:00",
+        "completed_units": {"0": {"sha256": "a" * 64}},
+        "cursor": {
+            "market_shard_index": 0,
+            "universe_digest": "u" * 64,
+            "plan_sha256": "p" * 64,
+        },
+        "history": [],
+    }
+    replacement = {
+        "campaign_id": "market-e6-0-new",
+        "kind": "market_collection",
+        "status": "RUNNING",
+        "attempts": 1,
+        "phase_epoch": 6,
+        "created_at": "2026-10-01T05:07:00+00:00",
+        "lease": {"owner_run_id": "123"},
+        "cursor": {
+            "market_shard_index": 0,
+            "universe_digest": "u" * 64,
+            "plan_sha256": "p" * 64,
+        },
+    }
+
+    assert _terminalize_superseded_stuck(
+        old, replacement, datetime(2026, 10, 1, 15, 10, tzinfo=timezone.utc)
+    )
+    assert old["status"] == "FAILED"
+    assert old["status_reason"] == "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN"
+    assert old["history"][-1]["replacement_campaign_id"] == "market-e6-0-new"
+    assert len(old["terminal_evidence_digest"]) == 64
+
+
+def test_stuck_market_campaign_not_hidden_by_unprogressed_replacement():
+    old = {
+        "campaign_id": "market-e6-0-old",
+        "kind": "market_collection",
+        "status": "STUCK",
+        "phase_epoch": 6,
+        "created_at": "2026-10-01T04:55:00+00:00",
+        "cursor": {
+            "market_shard_index": 0,
+            "universe_digest": "u" * 64,
+            "plan_sha256": "p" * 64,
+        },
+        "history": [],
+    }
+    replacement = {
+        "campaign_id": "market-e6-0-new",
+        "kind": "market_collection",
+        "status": "PENDING",
+        "attempts": 0,
+        "phase_epoch": 6,
+        "created_at": "2026-10-01T05:07:00+00:00",
+        "cursor": {
+            "market_shard_index": 0,
+            "universe_digest": "u" * 64,
+            "plan_sha256": "p" * 64,
+        },
+    }
+
+    assert not _terminalize_superseded_stuck(
+        old, replacement, datetime(2026, 10, 1, 15, 10, tzinfo=timezone.utc)
+    )
+    assert old["status"] == "STUCK"
 
