@@ -11,7 +11,7 @@ import gzip
 import json
 import math
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,7 @@ from hl_observer.datasets.source_discovery import load_family_source_paths
 
 SCHEMA_VERSION = "hypersmart.native_cross_venue_prefilter.v1"
 DEFAULT_NOTIONAL_USD = 100.0
+DEFAULT_NOTIONALS_USD = (50.0, 100.0, 250.0, 500.0)
 DEFAULT_MAX_ROWS = 250_000
 MAX_RECEIVE_SKEW_MS = 250.0
 MAX_EXCHANGE_SKEW_MS = 250.0
@@ -212,12 +213,22 @@ def load_native_market_snapshots(
 def scan_native_cross_venue_prefilter(
     root: str | Path,
     *,
-    notional_usd: float = DEFAULT_NOTIONAL_USD,
+    notional_usd: float | None = None,
+    notionals_usd: Sequence[float] | None = None,
     max_rows: int = DEFAULT_MAX_ROWS,
 ) -> dict[str, Any]:
     snapshots, input_audit = load_native_market_snapshots(root, max_rows=max_rows)
+    requested_notionals = (
+        (float(notional_usd),)
+        if notional_usd is not None
+        else tuple(float(value) for value in (notionals_usd or DEFAULT_NOTIONALS_USD))
+    )
+    if not requested_notionals or any(
+        not math.isfinite(value) or value <= 0.0 for value in requested_notionals
+    ):
+        raise ValueError("notionals_usd must contain finite positive values")
     stores: dict[str, MultiVenueMarketStore] = {}
-    seen_candidates: set[tuple[str, str, str, int]] = set()
+    seen_candidates: set[tuple[str, str, str, int, float]] = set()
     candidates: list[dict[str, Any]] = []
     pair_counts: Counter[str] = Counter()
     coin_counts: Counter[str] = Counter()
@@ -237,42 +248,56 @@ def scan_native_cross_venue_prefilter(
             require_clock_offsets=False,
             require_l2=True,
         )
-        rows = executable_pair_rows(
-            pairs,
-            notional_usd=float(notional_usd),
-            minimum_round_trip_edge_bps=-1_000_000.0,
-        )
-        for row in rows:
-            detected_at_ms = max(
-                int(
-                    store.get(str(row["buy_venue"]), snapshot.coin, now_ms=snapshot.receive_ts_ms).receive_ts_ms
-                ),
-                int(
-                    store.get(str(row["sell_venue"]), snapshot.coin, now_ms=snapshot.receive_ts_ms).receive_ts_ms
-                ),
+        for tested_notional in requested_notionals:
+            rows = executable_pair_rows(
+                pairs,
+                notional_usd=float(tested_notional),
+                minimum_round_trip_edge_bps=-1_000_000.0,
             )
-            identity = (
-                str(row["coin"]),
-                str(row["buy_venue"]),
-                str(row["sell_venue"]),
-                detected_at_ms,
-            )
-            if identity in seen_candidates:
-                continue
-            seen_candidates.add(identity)
-            enriched = {**row, "detected_at_ms": detected_at_ms}
-            candidates.append(enriched)
-            pair = f"{row['buy_venue']}->{row['sell_venue']}"
-            pair_counts[pair] += 1
-            coin_counts[str(row["coin"])] += 1
-            if float(row["taker_taker_round_trip_net_floor_bps"]) > 0.0:
-                taker_viable += 1
-            if float(row["buy_maker_round_trip_net_floor_bps"]) > 0.0:
-                buy_maker_viable += 1
-            if float(row["sell_maker_round_trip_net_floor_bps"]) > 0.0:
-                sell_maker_viable += 1
-            if float(row["both_maker_round_trip_net_floor_bps"]) > 0.0:
-                both_maker_viable += 1
+            for row in rows:
+                buy_snapshot = store.get(
+                    str(row["buy_venue"]),
+                    snapshot.coin,
+                    now_ms=snapshot.receive_ts_ms,
+                )
+                sell_snapshot = store.get(
+                    str(row["sell_venue"]),
+                    snapshot.coin,
+                    now_ms=snapshot.receive_ts_ms,
+                )
+                if buy_snapshot is None or sell_snapshot is None:
+                    continue
+                detected_at_ms = max(
+                    int(buy_snapshot.receive_ts_ms),
+                    int(sell_snapshot.receive_ts_ms),
+                )
+                identity = (
+                    str(row["coin"]),
+                    str(row["buy_venue"]),
+                    str(row["sell_venue"]),
+                    detected_at_ms,
+                    float(tested_notional),
+                )
+                if identity in seen_candidates:
+                    continue
+                seen_candidates.add(identity)
+                enriched = {
+                    **row,
+                    "detected_at_ms": detected_at_ms,
+                    "tested_notional_usd": float(tested_notional),
+                }
+                candidates.append(enriched)
+                pair = f"{row['buy_venue']}->{row['sell_venue']}"
+                pair_counts[pair] += 1
+                coin_counts[str(row["coin"])] += 1
+                if float(row["taker_taker_round_trip_net_floor_bps"]) > 0.0:
+                    taker_viable += 1
+                if float(row["buy_maker_round_trip_net_floor_bps"]) > 0.0:
+                    buy_maker_viable += 1
+                if float(row["sell_maker_round_trip_net_floor_bps"]) > 0.0:
+                    sell_maker_viable += 1
+                if float(row["both_maker_round_trip_net_floor_bps"]) > 0.0:
+                    both_maker_viable += 1
 
     ranked = sorted(
         candidates,
@@ -302,7 +327,7 @@ def scan_native_cross_venue_prefilter(
             if input_audit["truncated"]
             else "COMPLETE_PREFILTER"
         ),
-        "notional_usd": float(notional_usd),
+        "notionals_usd": list(requested_notionals),
         "input_audit": input_audit,
         "clock_domains": len(stores),
         "candidate_observations": len(ranked),
@@ -327,6 +352,7 @@ def scan_native_cross_venue_prefilter(
 __all__ = [
     "DEFAULT_MAX_ROWS",
     "DEFAULT_NOTIONAL_USD",
+    "DEFAULT_NOTIONALS_USD",
     "SCHEMA_VERSION",
     "load_native_market_snapshots",
     "scan_native_cross_venue_prefilter",
