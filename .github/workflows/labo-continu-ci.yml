@@ -8,6 +8,9 @@ name: labo-continu-ci
 on:
   push:
     branches: ["**"]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   pull_request:
     branches: ["**"]
   workflow_dispatch: {}

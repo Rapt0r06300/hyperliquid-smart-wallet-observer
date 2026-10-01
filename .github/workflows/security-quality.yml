@@ -3,6 +3,9 @@ name: security-quality
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   pull_request:
     branches: [main]
   schedule:
