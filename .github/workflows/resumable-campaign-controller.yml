@@ -32,12 +32,12 @@ jobs:
       phase: ${{ steps.due.outputs.phase }}
       phase_epoch: ${{ steps.due.outputs.phase_epoch }}
     steps:
-      - name: Checkout Dataset V2
+      - name: Checkout Alina repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
 
-      - name: Refresh Dataset V2 main
+      - name: Refresh Alina main
         shell: bash
         run: |
           set -euo pipefail
