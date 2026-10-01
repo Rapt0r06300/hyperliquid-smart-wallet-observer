@@ -2,8 +2,9 @@
 
 The scanner is an economic *prefilter*, never a PnL certification.  It searches
 the recorded same-runner market tape for synchronized exact-depth dislocations,
-charges venue-specific four-leg fee floors, and separately surfaces hypothetical
-maker economics without pretending passive fills occurred.
+charges venue-specific four-leg fee floors plus configurable execution/latency
+uncertainty, and separately surfaces hypothetical maker economics without
+pretending passive fills occurred.
 """
 from __future__ import annotations
 
@@ -29,6 +30,8 @@ SCHEMA_VERSION = "hypersmart.native_cross_venue_prefilter.v1"
 DEFAULT_NOTIONAL_USD = 100.0
 DEFAULT_NOTIONALS_USD = (50.0, 100.0, 250.0, 500.0)
 DEFAULT_MAX_ROWS = 250_000
+DEFAULT_EXECUTION_BUFFER_BPS = 1.0
+DEFAULT_LATENCY_PENALTY_BPS_PER_MS = 0.01
 MAX_RECEIVE_SKEW_MS = 250.0
 MAX_EXCHANGE_SKEW_MS = 250.0
 
@@ -216,6 +219,8 @@ def scan_native_cross_venue_prefilter(
     notional_usd: float | None = None,
     notionals_usd: Sequence[float] | None = None,
     max_rows: int = DEFAULT_MAX_ROWS,
+    execution_buffer_bps: float = DEFAULT_EXECUTION_BUFFER_BPS,
+    latency_penalty_bps_per_ms: float = DEFAULT_LATENCY_PENALTY_BPS_PER_MS,
 ) -> dict[str, Any]:
     snapshots, input_audit = load_native_market_snapshots(root, max_rows=max_rows)
     requested_notionals = (
@@ -227,12 +232,20 @@ def scan_native_cross_venue_prefilter(
         not math.isfinite(value) or value <= 0.0 for value in requested_notionals
     ):
         raise ValueError("notionals_usd must contain finite positive values")
+    buffer_bps = float(execution_buffer_bps)
+    latency_rate = float(latency_penalty_bps_per_ms)
+    if not math.isfinite(buffer_bps) or buffer_bps < 0.0:
+        raise ValueError("execution_buffer_bps must be finite and non-negative")
+    if not math.isfinite(latency_rate) or latency_rate < 0.0:
+        raise ValueError("latency_penalty_bps_per_ms must be finite and non-negative")
+
     stores: dict[str, MultiVenueMarketStore] = {}
     seen_candidates: set[tuple[str, str, str, int, float]] = set()
     candidates: list[dict[str, Any]] = []
     pair_counts: Counter[str] = Counter()
     coin_counts: Counter[str] = Counter()
     taker_viable = buy_maker_viable = sell_maker_viable = both_maker_viable = 0
+    conservative_taker_viable = 0
 
     for clock_domain_id, snapshot in snapshots:
         store = stores.setdefault(
@@ -253,6 +266,8 @@ def scan_native_cross_venue_prefilter(
                 pairs,
                 notional_usd=float(tested_notional),
                 minimum_round_trip_edge_bps=-1_000_000.0,
+                execution_buffer_bps=buffer_bps,
+                latency_penalty_bps_per_ms=latency_rate,
             )
             for row in rows:
                 buy_snapshot = store.get(
@@ -292,6 +307,8 @@ def scan_native_cross_venue_prefilter(
                 coin_counts[str(row["coin"])] += 1
                 if float(row["taker_taker_round_trip_net_floor_bps"]) > 0.0:
                     taker_viable += 1
+                if float(row["conservative_taker_round_trip_net_edge_bps"]) > 0.0:
+                    conservative_taker_viable += 1
                 if float(row["buy_maker_round_trip_net_floor_bps"]) > 0.0:
                     buy_maker_viable += 1
                 if float(row["sell_maker_round_trip_net_floor_bps"]) > 0.0:
@@ -302,10 +319,7 @@ def scan_native_cross_venue_prefilter(
     ranked = sorted(
         candidates,
         key=lambda row: (
-            max(
-                float(row["taker_taker_round_trip_net_floor_bps"]),
-                float(row["both_maker_round_trip_net_floor_bps"]),
-            ),
+            float(row["conservative_taker_round_trip_net_edge_bps"]),
             float(row["gross_executable_edge_bps"]),
         ),
         reverse=True,
@@ -313,6 +327,10 @@ def scan_native_cross_venue_prefilter(
     top = ranked[:100]
     best_taker = max(
         (float(row["taker_taker_round_trip_net_floor_bps"]) for row in ranked),
+        default=None,
+    )
+    best_conservative_taker = max(
+        (float(row["conservative_taker_round_trip_net_edge_bps"]) for row in ranked),
         default=None,
     )
     best_both_maker = max(
@@ -328,14 +346,18 @@ def scan_native_cross_venue_prefilter(
             else "COMPLETE_PREFILTER"
         ),
         "notionals_usd": list(requested_notionals),
+        "execution_buffer_bps": buffer_bps,
+        "latency_penalty_bps_per_ms": latency_rate,
         "input_audit": input_audit,
         "clock_domains": len(stores),
         "candidate_observations": len(ranked),
         "taker_taker_positive_fee_floor": taker_viable,
+        "conservative_taker_positive_after_uncertainty": conservative_taker_viable,
         "buy_maker_positive_fee_floor_unproven_fill": buy_maker_viable,
         "sell_maker_positive_fee_floor_unproven_fill": sell_maker_viable,
         "both_maker_positive_fee_floor_unproven_fill": both_maker_viable,
         "best_taker_taker_round_trip_net_floor_bps": best_taker,
+        "best_conservative_taker_round_trip_net_edge_bps": best_conservative_taker,
         "best_both_maker_round_trip_net_floor_bps": best_both_maker,
         "pair_counts": dict(sorted(pair_counts.items())),
         "coin_counts": dict(sorted(coin_counts.items())),
@@ -350,6 +372,8 @@ def scan_native_cross_venue_prefilter(
 
 
 __all__ = [
+    "DEFAULT_EXECUTION_BUFFER_BPS",
+    "DEFAULT_LATENCY_PENALTY_BPS_PER_MS",
     "DEFAULT_MAX_ROWS",
     "DEFAULT_NOTIONAL_USD",
     "DEFAULT_NOTIONALS_USD",
