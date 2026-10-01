@@ -1,6 +1,10 @@
 name: unify-dataset-v2-into-main
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/unify-dataset-v2-into-main.yml'
   workflow_dispatch:
     inputs:
       import_state:
@@ -24,7 +28,7 @@ concurrency:
 
 jobs:
   import-state:
-    if: ${{ inputs.import_state == true }}
+    if: ${{ github.event_name == 'push' || inputs.import_state == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -149,7 +153,7 @@ jobs:
 
   mirror-releases:
     needs: import-state
-    if: ${{ always() && inputs.migrate_releases == true && (needs.import-state.result == 'success' || needs.import-state.result == 'skipped') }}
+    if: ${{ always() && (github.event_name == 'push' || inputs.migrate_releases == true) && (needs.import-state.result == 'success' || needs.import-state.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
