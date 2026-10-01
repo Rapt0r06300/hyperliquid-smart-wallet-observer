@@ -147,6 +147,23 @@ jobs:
               exit 0
               ;;
           esac
+          while IFS= read -r DEPENDENCY; do
+            [ -n "$DEPENDENCY" ] || continue
+            if [ ! -f "$DEPENDENCY" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::warning::Campaign dependency not visible on main yet: $DEPENDENCY; deferring without terminal failure."
+              exit 0
+            fi
+          done < <(python - <<'PY' "$M"
+          import json,sys
+          row=json.load(open(sys.argv[1],encoding="utf-8"))
+          cursor=dict(row.get("cursor") or {})
+          for key in ("plan_file","selection_file"):
+              value=str(cursor.get(key) or "").strip()
+              if value:
+                  print(value)
+          PY
+          )
           DIGEST="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py validate "$M")"
           CLAIM="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "${{ steps.pin.outputs.phase }}"             --expected-epoch "${{ steps.pin.outputs.phase_epoch }}")"
           TOKEN="$(printf '%s\n' "$CLAIM" | sed -n 's/^lease_token=//p' | tail -1)"
