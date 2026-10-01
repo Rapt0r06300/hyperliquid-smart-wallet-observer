@@ -3,10 +3,7 @@ name: dataset-v2-smoke
 # Current collector integrity smoke: Hyperliquid/OKX reconciliation + receive-only snapshots.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/dataset-v2-smoke.yml'
+  # Explicit diagnostic only; never auto-collect on a code push.
   workflow_dispatch:
 
 permissions:

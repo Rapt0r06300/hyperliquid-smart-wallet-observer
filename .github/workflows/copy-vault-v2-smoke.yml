@@ -1,10 +1,7 @@
 name: copy-vault-v2-smoke
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/copy-vault-v2-smoke.yml'
+  # Explicit diagnostic only; never auto-collect on a code push.
   workflow_dispatch:
 
 permissions:
