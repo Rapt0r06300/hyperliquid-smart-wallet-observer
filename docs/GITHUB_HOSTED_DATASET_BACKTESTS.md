@@ -1,114 +1,103 @@
-# GitHub-hosted Dataset V2 backtests
+# GitHub-hosted Dataset V2 : collecte, replay et backtests
 
 ## Architecture canonique
 
-La seule source dataset autorisée pour les nouveaux replays/backtests est :
+La source de vérité unique pour Alina Smart Flow est :
 
-`Rapt0r06300/alina-smartflow-datasets-v2`
+`Rapt0r06300/hyperliquid-smart-wallet-observer`
 
-Le dépôt `Rapt0r06300/hypersmart-datasets` est LEGACY et ne doit jamais être
-importé automatiquement dans Dataset V2.
-
-Le dépôt principal Alina contient :
-- les collecteurs ;
+Le même dépôt contient :
+- le code des collecteurs ;
+- le control plane `IDLE / COLLECT / ANALYZE` ;
+- `catalog/DATA_INDEX.json`, les manifests, receipts et registres de qualité ;
+- les workflows GitHub Actions ;
 - les moteurs de replay/backtest ;
-- les contrôles de qualité ;
-- les lecteurs SAFE-only.
+- OOS, forward paper, PnL proof et scoreboard ;
+- les lecteurs/materializers SAFE-only.
 
-Le dépôt Dataset V2 contient :
-- le control plane (catalogue, index, manifests) sur `main` ;
-- les données lourdes dans des GitHub Releases immuables ;
-- uniquement des données nouvelles collectées après la création de V2.
+Les données lourdes sont publiées comme assets immuables de GitHub Releases **dans ce même dépôt**. Aucun nouveau workflow actif ne dépend d'un dépôt dataset séparé. Les anciens dépôts dataset restent uniquement des archives de provenance et ne sont jamais une autorité de phase, une source automatique de collecte ou une source implicite de replay/backtest.
 
 ## Collecte GitHub-hosted
 
-La campagne automatique canonique est :
+La collecte continue canonique est orchestrée par :
+- `.github/workflows/create-resumable-campaigns.yml` ;
+- `.github/workflows/resumable-campaign-controller.yml` ;
+- `.github/workflows/resumable-campaign-worker.yml` ;
+- `.github/workflows/campaign-watchdog.yml`.
 
-`.github/workflows/collect-market-data-v2.yml`
+Les workers sont GitHub-hosted uniquement. Ils ne doivent jamais dépendre du PC utilisateur ni d'un runner self-hosted.
 
-dans `alina-smartflow-datasets-v2`.
-
-Elle checkout le `main` courant d'Alina sur un runner GitHub-hosted, sans PC
-utilisateur et sans self-hosted runner.
-
-Sources principales :
+Sources principales, selon disponibilité publique et couverture courante :
 - Hyperliquid ;
 - Binance ;
 - Bybit ;
-- OKX.
+- OKX ;
+- Gate ;
+- Bitget ;
+- sources additionnelles déjà intégrées lorsqu'elles améliorent la couverture sans créer un collecteur concurrent inutile.
 
-Les fenêtres sont bornées, partitionnées par source/canal/instrument et peuvent
-se chevaucher légèrement entre campagnes afin de réduire le risque de trou.
-
-## Données collectées
-
-Selon la disponibilité publique de chaque venue :
-- BBO ;
-- L2 profond ;
-- trades ;
-- mark/index/oracle ;
-- funding courant et settlements historiques réels ;
-- open interest ;
-- liquidations ;
-- volume ;
-- métadonnées instrument (tick size, lot size, minimums, statut) ;
-- timestamps exchange/réception/monotone ;
-- IDs de connexion et séquences ;
-- RTT/offset d'horloge lorsque mesurables.
-
-Aucune valeur absente n'est remplacée par zéro.
+Les campagnes sont bornées et reprenables. Les captures visent un maximum de données **replay-grade** : trades, BBO, L2, séquences, timestamps exchange/réception, clock-sync, métadonnées instrument, profondeur, funding/mark/oracle et données Copy-Vault nécessaires aux modules actifs.
 
 ## Qualification
 
 Cycle logique :
 
-`INCOMING -> QUARANTINE -> SAFE | REJECT`
+`INCOMING -> QUARANTINE -> SAFE | PARTIAL | REJECT`
 
-Un shard ne peut devenir `SAFE` que si les preuves nécessaires sont présentes :
+Un shard ne peut devenir `SAFE` et `replay_compatible=true` que si les preuves nécessaires sont présentes :
 - SHA-256 et taille ;
 - provenance publique/read-only ;
-- intégrité (gaps/régressions/désynchronisation) ;
-- horodatage causal ;
+- intégrité et continuité vérifiables ;
+- détection des gaps, régressions, duplications et désynchronisations ;
+- horodatage causal suffisant ;
 - contraintes de synchronisation ;
 - réconciliation historique quand la famille l'exige ;
 - asset GitHub distant revalidé contre son digest.
 
-Les trades/fills ne deviennent pas SAFE sur la seule continuité WebSocket :
-ils exigent une réconciliation explicite quand une source de référence existe.
+Aucune valeur absente n'est remplacée silencieusement par zéro et aucun gap non prouvé n'est inventé/interpolé pour rendre un replay valide.
 
 ## Publication
 
-Les fichiers lourds sont publiés comme assets de GitHub Releases. Le publisher :
-1. construit les manifests depuis les octets réellement collectés ;
-2. upload les assets ;
-3. relit les métadonnées GitHub ;
-4. compare taille + SHA-256 ;
-5. seulement ensuite finalise le statut ;
-6. publie `RUN_MANIFEST.json`.
+Le publisher canonique est `tools/publish_dataset_v2_release.py`.
 
-Une Release incomplète sans `RUN_MANIFEST.json` n'est pas une source de validation.
+Il publie dans le repo Alina courant :
+1. les assets de données ;
+2. les manifests construits à partir des octets réellement collectés ;
+3. la taille et le SHA-256 ;
+4. la vérification des métadonnées distantes ;
+5. `RUN_MANIFEST.json` après vérification.
 
-## Replays/backtests
+Une Release incomplète ou non vérifiée ne devient jamais une source de validation.
 
-Les lecteurs V2 :
-- sélectionnent uniquement les entrées `SAFE` ;
-- refusent les dépôts étrangers ;
-- téléchargent seulement les shards utiles à la fenêtre demandée ;
+## Replays et backtests
+
+Quand l'utilisateur demandera explicitement le passage en `ANALYZE`, la chaîne reste :
+
+`REPLAY -> BACKTEST -> OOS -> FORWARD_PAPER -> PNL_PROOF -> SCOREBOARD -> DONE`
+
+Le passage en `ANALYZE` fige :
+- le `source_collection_epoch` ;
+- le `collection_cutoff_at_utc` ;
+- le `dataset_selection_id`.
+
+Les lecteurs V2 et `hl_observer.ops.v2_dataset_bridge` chargent `catalog/DATA_INDEX.json` depuis le repo Alina et :
+- sélectionnent uniquement les shards `SAFE` et explicitement replay-compatibles ;
+- refusent un `release_repository` étranger ;
+- téléchargent uniquement les shards contenus dans la fenêtre gelée ;
 - revérifient taille et SHA-256 ;
 - conservent la provenance de sélection.
 
-Les replays/backtests restent paper/read-only. Aucune collecte ou donnée ne doit
-autoriser implicitement une exécution réelle.
+Le replay matérialise le workspace SAFE. Les étapes économiques réutilisent ce workspace ; elles ne relancent pas la collecte et ne changent pas la sélection après observation.
 
-## GitHub-hosted uniquement
+## Sécurité
 
-Les workflows dataset doivent rester :
-- `runs-on: ubuntu-latest` ou autre runner GitHub-hosted ;
-- sans `self-hosted` ;
-- sans accès au PC utilisateur ;
-- sans clé de trading ;
-- sans endpoint d'ordre.
+Toute la chaîne reste :
+- GitHub-hosted uniquement ;
+- paper/read-only ;
+- sans clé privée ;
+- sans ordre réel ;
+- sans endpoint de trading réel ;
+- sans self-hosted runner ;
+- sans accès ou réveil du PC utilisateur.
 
-Les grosses campagnes doivent être découpées en fenêtres/jobs afin de rester
-bien sous la limite d'exécution d'un job et de pouvoir relancer seulement le
-morceau défaillant.
+Les grosses campagnes doivent rester bornées, résumables et fail-closed afin qu'un échec d'infrastructure ne puisse ni fabriquer une preuve ni invalider silencieusement des données correctes.
