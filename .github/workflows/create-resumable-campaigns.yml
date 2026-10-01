@@ -294,12 +294,22 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "campaign: create continuous resumable work"
           for i in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
+            set +e
+            git pull --rebase origin main
+            pull_rc=$?
+            set -e
+            if [ "$pull_rc" -ne 0 ]; then
+              git rebase --abort >/dev/null 2>&1 || true
+              echo "::warning::Campaign manifest refresh collided with concurrent worker updates; discarding this local batch so the next scheduled/push cycle recomputes from current main."
+              exit 0
+            fi
+            if git push origin HEAD:main; then
               exit 0
             fi
             sleep $((i*2))
           done
-          exit 1
+          echo "::warning::Campaign manifest push remained contended; deferring to the next controller cycle."
+          exit 0
 
 
 
