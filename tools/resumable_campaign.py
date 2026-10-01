@@ -123,7 +123,7 @@ def main() -> int:
             args.kind or "",
             "Rapt0r06300/hyperliquid-smart-wallet-observer",
             args.code_sha or "",
-            "Rapt0r06300/alina-smartflow-datasets-v2",
+            "Rapt0r06300/hyperliquid-smart-wallet-observer",
             args.dataset_generation,
             args.config_sha256,
             args.work_plan_sha256,
