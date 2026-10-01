@@ -1,61 +1,61 @@
 {
-  "dataset_v2_head": "483510a90891044277cd60853012d9d846b67d92",
-  "generated_at_utc": "2026-09-30T19:07:52.986538Z",
+  "dataset_v2_head": "4befae37627a5308bfd104016eef8448c55892b1",
+  "generated_at_utc": "2026-10-01T03:55:02.528806Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "5851eafcb168e30414eeefd996c2b92bbb8debffb6fa3d7992f601c24b4c11c7",
-      "output_tail": ".............................                                            [100%]\n29 passed in 0.26s\n",
-      "returncode": 0,
-      "status": "PASS"
+      "output_sha256": "801b07dbd43dfa2e3ef04cf5a6460e71ae8915dd0d165e98b6ba4752773cb38d",
+      "output_tail": "3.12/pathlib.py:1013: FileNotFoundError\n=========================== short test summary info ============================\nFAILED tests/test_analysis_stage_gates.py::test_create_resumable_workflow_analysis_block_is_well_formed - FileNotFoundError: [Errno 2] No such file or directory: '.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_legacy_long_collectors_are_manual_only - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/collect-market-data-v2.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_is_continuous_hosted_and_frozen - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_encodes_copy_vault_cursor_as_valid_json - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/resumable-campaign-controller.yml'\nFAILED tests/test_workflow_bounds.py::test_metrics_refresh_is_scheduled_and_serialized - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/dataset-metrics-v2.yml'\nFAILED tests/test_workflow_bounds.py::test_reconcile_covers_all_production_release_families_and_pins_actions - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/reconcile-v2-catalog.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_worker_preserves_frozen_cursor_and_retry_policy - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/resumable-campaign-worker.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_and_controller_track_current_main_for_new_work - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_bridge_and_exact_count_backfill_are_scheduled_hosted - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/main-dataset-v2-bridge-smoke.yml'\nFAILED tests/test_workflow_bounds.py::test_campaign_watchdog_recomputes_on_concurrent_receipt_writers - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/campaign-watchdog.yml'\nFAILED tests/test_workflow_bounds.py::test_resumable_creator_structure_and_exact_analysis_selection_are_not_corrupted - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\nFAILED tests/test_workflow_bounds.py::test_analyze_phase_never_prepares_collection_inputs - FileNotFoundError: [Errno 2] No such file or directory: '<workspace>/dataset-v2/.github/workflows/create-resumable-campaigns.yml'\n13 failed, 16 passed in 0.70s\n",
+      "returncode": 1,
+      "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "d86fe8623d1666f6742155d6c71fd3426a8ef269f441b5ffcca4d040b7c7469c",
-      "output_tail": ".............................                                            [100%]\n29 passed in 0.17s\n",
+      "output_sha256": "b6ed5e95c99c83013d013faf04fcb7a89901ad930901e2e54d422c3ca01a8c88",
+      "output_tail": ".............................                                            [100%]\n29 passed in 0.18s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "c1984e50a497955ad2ec6e06b4efc97843ea1db757602ce01378f51eb315e057",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.39s\n",
+      "output_sha256": "264b6e1ab67eaad01d79116c4685e0aad6f39f690e1cc20fc0ea759499fd712b",
+      "output_tail": ".........                                                                [100%]\n9 passed in 1.43s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "8f2d7a753ea944fda5b7e6cfe9f6aff4a38455ef9df12bdb9977a7df977cbd0d",
-      "output_tail": "..............................................                           [100%]\n46 passed in 3.18s\n",
+      "output_sha256": "1209889faa6d82d12e3cba04bcd14e3e9c2e71029e8c95621284cf3a9e31ab98",
+      "output_tail": "..............................................                           [100%]\n46 passed in 3.26s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "20abf20ae4fd76df1d84147ec48e920a572bc1fde3cd42e07a76c8813d4090f2",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.63s\n",
+      "output_sha256": "4fe406b0aa745495daaec3b9a4ba454db1b66dba3d0dfe84e84c57a1192e9572",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.87s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_validators",
-      "output_sha256": "3ccd7bb0c357dcff135596dc795c043507627317cbd4cee35d1f67f018777476",
-      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"e6d1f7c39c52fcd444f5e280088f0cbc2d1623a6e8020b2b94f99db8a9850dec\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=42\n",
+      "output_sha256": "de106ff6ccf74b029a7eb261f7d65993326446506629a56372e5b08490a1611f",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"2388e21593eb47d7f77872a6c36c9d0388523c7f07e16e248fa431d49f630713\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=77\n",
       "returncode": 0,
       "status": "PASS"
     }
   ],
-  "main_alina_head": "ac0e9368a913c604f35c0c2a39cf4cf5412c89bc",
+  "main_alina_head": "ccaabbc7bd44aae5678ff8a7f62d5a15a436cdbf",
   "paper_only": true,
   "python_version": "3.12.14",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "5245b7d20b2faf10e59d49c3ee08bd8ee80132d367626040ec4580d25b87d020",
+  "receipt_digest": "90a6291cc50b129459f062b33b39db5923815f77ccd94fbfb73e6c939d361e00",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
-  "status": "PASS",
+  "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "36763375154"
+  "workflow_run_id": "36812604092"
 }
