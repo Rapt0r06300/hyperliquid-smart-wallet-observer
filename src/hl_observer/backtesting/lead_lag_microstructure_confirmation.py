@@ -24,6 +24,8 @@ MIN_FLOW_IMBALANCE = 0.15
 MIN_FLOW_TRADES = 3
 MAX_BOOK_AGE_MS = 250
 MIN_TRAIN_FILLS = 30
+NOTIONALS_USD = (25.0, 75.0, 150.0, 300.0)
+ECONOMIC_TARGET_USD_DAY = 4.0
 
 
 def trial_count(coin_count: int) -> int:
@@ -31,6 +33,7 @@ def trial_count(coin_count: int) -> int:
         len(SHOCK_WINDOWS_MS)
         * len(SHOCK_THRESHOLDS_BPS)
         * len(HORIZONS_MS)
+        * len(NOTIONALS_USD)
     )
 
 
@@ -229,6 +232,8 @@ __all__ = [
     "MIN_FLOW_IMBALANCE",
     "MIN_FLOW_TRADES",
     "MIN_TRAIN_FILLS",
+    "NOTIONALS_USD",
+    "ECONOMIC_TARGET_USD_DAY",
     "SHOCK_THRESHOLDS_BPS",
     "SHOCK_WINDOWS_MS",
     "confirm_shocks_with_book_and_flow",
