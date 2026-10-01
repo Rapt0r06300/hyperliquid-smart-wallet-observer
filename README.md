@@ -699,7 +699,7 @@ python -m hl_observer.control_plane.phase_cli --help
 python -m hl_observer.control_plane.phase_cli status
 ~~~
 
-Cette surface est une **fondation de contrôle**. Le statut cloud final doit à terme refléter l'autorité durable Dataset V2 et le contrat cross-repo de la spec, pas une approximation locale.
+Cette surface est une **fondation de contrôle**. Le statut cloud final doit refléter l'autorité durable du repository Alina unique, ses manifests/receipts Dataset V2-format et la spec canonique, pas une approximation locale.
 
 ---
 
