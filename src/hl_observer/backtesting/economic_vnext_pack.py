@@ -41,6 +41,9 @@ from hl_observer.backtesting.cross_venue_v6_coverage_union_train import (
 from hl_observer.backtesting.lead_lag_bbo_repricing_train import (
     explore_lead_lag_bbo_repricing_train,
 )
+from hl_observer.backtesting.native_cross_venue_replay import (
+    scan_native_cross_venue_prefilter,
+)
 from hl_observer.backtesting.lead_lag_multiasset_train import explore_lead_lag_multiasset_train
 from hl_observer.backtesting.lead_lag_source_alignment import select_aligned_bbo_sources
 
@@ -122,6 +125,7 @@ def run_economic_vnext_pack(
         source_meta=union_meta,
     )
     cross_v6["certified_source_meta"] = union_meta
+    native_cross = scan_native_cross_venue_prefilter(project_root)
 
     copy_hypothesis = require_runnable_copy_vault_hypothesis(COPY_VAULT_VNEXT_MECHANISM)
     copy_raw = _load_copy_raw(project_root)
@@ -254,6 +258,11 @@ def run_economic_vnext_pack(
             "cross_venue_v6_coverage_union_train",
             cross_v6,
         ),
+        "cross_venue_native_multivenue": _write_json(
+            project_root,
+            "cross_venue_native_multivenue_prefilter",
+            native_cross,
+        ),
         "copy_vault": _write_json(project_root, "copy_vault_vnext_train", copy),
         "copy_vault_continuation_v4": _write_json(
             project_root, "copy_vault_v4_train", copy_v4
@@ -330,6 +339,27 @@ def run_economic_vnext_pack(
                 "physical_freeze_allowed": cross_v6.get("physical_freeze_allowed") is True,
                 "freeze_candidate_sha256": cross_v6.get("freeze_candidate_sha256"),
                 "heldout_evaluated": cross_v6.get("heldout_evaluated") is True,
+            },
+            "cross_venue_native_multivenue": {
+                "status": native_cross.get("status"),
+                "candidate_observations": native_cross.get("candidate_observations"),
+                "taker_taker_positive_fee_floor": native_cross.get(
+                    "taker_taker_positive_fee_floor"
+                ),
+                "both_maker_positive_fee_floor_unproven_fill": native_cross.get(
+                    "both_maker_positive_fee_floor_unproven_fill"
+                ),
+                "best_taker_taker_round_trip_net_floor_bps": native_cross.get(
+                    "best_taker_taker_round_trip_net_floor_bps"
+                ),
+                "best_both_maker_round_trip_net_floor_bps": native_cross.get(
+                    "best_both_maker_round_trip_net_floor_bps"
+                ),
+                "economic_claim_eligible": native_cross.get(
+                    "economic_claim_eligible"
+                ) is True,
+                "maker_fill_proven": native_cross.get("maker_fill_proven") is True,
+                "heldout_evaluated": False,
             },
             "copy_vault_continuation_v4": {
                 "status": copy_v4.get("status"),
