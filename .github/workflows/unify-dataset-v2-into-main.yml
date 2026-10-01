@@ -1,12 +1,13 @@
 name: unify-dataset-v2-into-main
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/unify-dataset-v2-into-main.yml'
   workflow_dispatch:
     inputs:
+      import_state:
+        description: "Re-import legacy Dataset V2 state (migration-only)"
+        required: false
+        default: false
+        type: boolean
       migrate_releases:
         description: "Mirror legacy Dataset V2 releases into this repository"
         required: false
@@ -23,6 +24,7 @@ concurrency:
 
 jobs:
   import-state:
+    if: ${{ inputs.import_state == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -138,7 +140,7 @@ jobs:
 
   mirror-releases:
     needs: import-state
-    if: ${{ github.event_name == 'push' || inputs.migrate_releases == true }}
+    if: ${{ always() && inputs.migrate_releases == true && (needs.import-state.result == 'success' || needs.import-state.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 330
     steps:
