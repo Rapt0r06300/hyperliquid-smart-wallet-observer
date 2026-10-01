@@ -43,6 +43,30 @@ def _walk_base(levels: tuple[MarketLevel, ...], base_qty: float) -> tuple[float,
     return quote / float(base_qty), quote
 
 
+def _non_negative_finite(value: float | None) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        return None
+    return parsed
+
+
+def _transport_uncertainty_ms(
+    buy: NativeMarketSnapshot,
+    sell: NativeMarketSnapshot,
+) -> float:
+    """Conservative one-way transport uncertainty from recorded RTT evidence.
+
+    Each feed's one-way uncertainty is approximated as half its measured RTT.
+    Missing/invalid RTT evidence contributes zero to this prefilter penalty; the
+    row remains non-certifiable and closed-cycle proof is still required.
+    """
+    buy_rtt = _non_negative_finite(buy.transport_rtt_ms)
+    sell_rtt = _non_negative_finite(sell.transport_rtt_ms)
+    return 0.5 * float(buy_rtt or 0.0) + 0.5 * float(sell_rtt or 0.0)
+
+
 def _orientation(
     buy: NativeMarketSnapshot,
     sell: NativeMarketSnapshot,
@@ -80,7 +104,9 @@ def _orientation(
 
     receive_skew = evidence.get("receive_skew_ms")
     skew_ms = max(0.0, float(receive_skew)) if receive_skew is not None else 0.0
-    latency_penalty = skew_ms * latency_penalty_bps_per_ms
+    transport_uncertainty_ms = _transport_uncertainty_ms(buy, sell)
+    total_latency_uncertainty_ms = skew_ms + transport_uncertainty_ms
+    latency_penalty = total_latency_uncertainty_ms * latency_penalty_bps_per_ms
     uncertainty_penalty = execution_buffer_bps + latency_penalty
     conservative_taker = gross_bps - taker_round_trip_floor - uncertainty_penalty
 
@@ -105,6 +131,8 @@ def _orientation(
         "both_maker_round_trip_fee_floor_bps": both_maker_round_trip_floor,
         "both_maker_round_trip_net_floor_bps": gross_bps - both_maker_round_trip_floor,
         "execution_buffer_bps": execution_buffer_bps,
+        "transport_uncertainty_ms": transport_uncertainty_ms,
+        "total_latency_uncertainty_ms": total_latency_uncertainty_ms,
         "latency_penalty_bps": latency_penalty,
         "conservative_taker_round_trip_net_edge_bps": conservative_taker,
         "receive_skew_ms": receive_skew,
