@@ -67,6 +67,10 @@ def snapshot_summary(snapshot: NativeMarketSnapshot) -> dict[str, Any]:
         "spread_bps": snapshot.spread_bps,
         "bid_size": bid_size,
         "ask_size": ask_size,
+        "bids": [[level.price, level.size] for level in snapshot.bids],
+        "asks": [[level.price, level.size] for level in snapshot.asks],
+        "depth_levels_bid": len(snapshot.bids),
+        "depth_levels_ask": len(snapshot.asks),
         "quality": snapshot.quality,
         "reason": snapshot.reason,
         "last": snapshot.last,
@@ -145,14 +149,13 @@ class RecordingNativeVenueCoordinator(NativeVenueCoordinator):
 
     def ingest_bybit(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
         snapshot = super().ingest_bybit(payload, **kwargs)
-        # When the canonical raw tape sink is configured, the parent already
-        # persisted this frame (including trade/liquidation frames that do not
-        # produce a market snapshot). Avoid duplicating the same Bybit frame.
-        return snapshot if self.tick_writer is not None else self._record(snapshot, payload)
+        # Preserve both the immutable raw frame and a normalized full-L2 snapshot.
+        # They are different replay channels, not duplicate economic evidence.
+        return self._record(snapshot, payload)
 
     def ingest_okx(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
         snapshot = super().ingest_okx(payload, **kwargs)
-        return snapshot if self.tick_writer is not None else self._record(snapshot, payload)
+        return self._record(snapshot, payload)
 
     def ingest_gate(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
         return self._record(super().ingest_gate(payload, **kwargs), payload)
