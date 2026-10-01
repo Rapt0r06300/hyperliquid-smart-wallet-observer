@@ -406,6 +406,91 @@ def _failure_payload(cmd: list[str], cp: Any) -> dict[str, Any]:
     }
 
 
+def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
+    """Read compact exact counters from one completed collection bundle."""
+    summary_path = output_root / "collection_summary.json"
+    index_path = output_root / "BUNDLE_INDEX.json"
+    summary: dict[str, Any] = {}
+    index: dict[str, Any] = {}
+    try:
+        loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            summary = loaded
+    except (OSError, ValueError, TypeError):
+        pass
+    try:
+        loaded = json.loads(index_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            index = loaded
+    except (OSError, ValueError, TypeError):
+        pass
+
+    trade_count = 0
+    record_count = 0
+    compressed_bytes = 0
+    trade_shards = 0
+    trade_shards_exact = 0
+    manifest_paths = index.get("manifests")
+    if isinstance(manifest_paths, list):
+        for rel in manifest_paths:
+            try:
+                row = json.loads((output_root / str(rel)).read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(row, dict):
+                continue
+            records = _bounded_int(
+                row.get("record_count") or row.get("event_count"), 0, 0, 2**63 - 1
+            )
+            record_count += records
+            compressed_bytes += _bounded_int(row.get("bytes"), 0, 0, 2**63 - 1)
+            family = str(row.get("family") or "").lower()
+            if family in {
+                "trades",
+                "agg_trades",
+                "fills",
+                "userfills",
+                "user_fills",
+                "copy_vault_fills",
+            }:
+                trade_shards += 1
+                if row.get("trade_count_exact") is True:
+                    trade_shards_exact += 1
+                    trade_count += _bounded_int(
+                        row.get("trade_count"), 0, 0, 2**63 - 1
+                    )
+
+    drops = summary.get("queue_drops")
+    if isinstance(drops, dict):
+        queue_drops = sum(_bounded_int(v, 0, 0, 2**63 - 1) for v in drops.values())
+    else:
+        queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
+
+    return {
+        "trade_count_observed": trade_count,
+        "trade_count_coverage_complete": trade_shards == trade_shards_exact,
+        "trade_shard_count": trade_shards,
+        "trade_shards_exact": trade_shards_exact,
+        "record_count_observed": record_count,
+        "accepted_frames": _bounded_int(
+            summary.get("accepted_frames"), 0, 0, 2**63 - 1
+        ),
+        "persisted_frames": _bounded_int(
+            summary.get("persisted_frames"), 0, 0, 2**63 - 1
+        ),
+        "l2_frames": _bounded_int(summary.get("l2_frames"), 0, 0, 2**63 - 1),
+        "queue_drops": queue_drops,
+        "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
+        "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
+        "partial_count": _bounded_int(
+            index.get("partial_count"), 0, 0, 2**63 - 1
+        ),
+        "reject_count": _bounded_int(index.get("reject_count"), 0, 0, 2**63 - 1),
+        "compressed_bytes": compressed_bytes,
+        "basis": "published_bundle_manifests",
+    }
+
+
 def run_one_unit(
     ctx: AdapterContext,
     runner: Callable[..., Any] = subprocess.run,
@@ -606,6 +691,16 @@ def run_one_unit(
         ),
         "phases": phases,
     }
+    if (
+        ctx.kind in {
+            "market_collection",
+            "copy_vault_collection",
+            "official_archive_collection",
+            "event_intelligence_collection",
+        }
+        and output_root is not None
+    ):
+        payload["collection_metrics"] = _collection_checkpoint_metrics(output_root)
     if ctx.kind == "module_pnl_proof":
         payload["economic_proof_status"] = economic_proof_status
         payload["economic_proof_certifying"] = economic_proof_status == "PASS"
