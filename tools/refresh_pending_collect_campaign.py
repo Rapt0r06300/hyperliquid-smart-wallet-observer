@@ -2,8 +2,8 @@
 """Refresh a stale, unleased COLLECT campaign after collector code changes.
 
 Only non-productive current-epoch collection manifests are eligible. Any lease,
-durable output, successful completed unit, terminal evidence, or phase mismatch
-makes the operation a no-op or hard refusal. The previous manifest is archived
+durable output, productive completed unit, terminal evidence for a non-FAILED
+outcome, or phase mismatch makes the operation a no-op or hard refusal. The previous manifest is archived
 byte-for-byte before mutation.
 """
 from __future__ import annotations
