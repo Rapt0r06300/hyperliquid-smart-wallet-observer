@@ -7,6 +7,9 @@ on:
       - '.github/workflows/dataset-quality-ci.yml'
       - 'tools/**'
       - 'tests/**'
+      - 'catalog/DATA_INDEX.json'
+      - 'catalog/DATA_QUALITY_REGISTRY.json'
+      - 'catalog/campaigns/**'
   pull_request:
   workflow_dispatch:
 
