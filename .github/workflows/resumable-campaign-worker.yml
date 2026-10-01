@@ -70,13 +70,13 @@ jobs:
       REAL_MAINNET_TRADING: "false"
       ENABLE_REAL_ORDERS: "0"
     steps:
-      - name: Checkout Dataset V2
+      - name: Checkout Alina repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Refresh Dataset V2 main before pin
+      - name: Refresh Alina main before pin
         shell: bash
         run: |
           set -euo pipefail
