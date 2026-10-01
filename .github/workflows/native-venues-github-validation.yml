@@ -22,6 +22,10 @@ on:
       - 'tests/test_native_venue_coordinator.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_native_market_tape.py'
+      - 'tests/test_multi_venue_execution.py'
+      - 'src/hl_observer/arbitrage/multi_venue_execution.py'
+      - 'src/hl_observer/config/frais_venues.py'
+      - 'tests/test_frais_venues.py'
       - 'tests/test_native_venue_transport_integrity.py'
       - 'tests/test_dataset_v2_pipeline.py'
       - 'tests/test_dataset_v2_export.py'
@@ -86,6 +90,8 @@ jobs:
             tests/test_native_venue_coordinator.py \
             tests/test_native_venue_market.py \
             tests/test_native_market_tape.py \
+            tests/test_multi_venue_execution.py \
+            tests/test_frais_venues.py \
             tests/test_native_venue_transport_integrity.py \
             tests/test_partitioned_tick_dataset.py \
             tests/test_dataset_v2_export.py \
