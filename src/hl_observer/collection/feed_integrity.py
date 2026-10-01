@@ -18,6 +18,7 @@ class ClockSyncSample:
     receive_wall_ts_ms: int
     rtt_ms: float
     offset_ms: float
+    uncertainty_ms: float
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -30,25 +31,59 @@ def estimate_clock_sync(
     send_wall_ts_ms: int,
     receive_wall_ts_ms: int,
 ) -> ClockSyncSample:
-    """Estimate server clock offset using the request midpoint.
+    """Estimate server clock offset and a conservative timing uncertainty.
 
-    The estimate includes network asymmetry, so it is evidence rather than a claim of
-    perfect clock synchronisation. Negative RTTs are rejected.
+    With no one-way-delay measurement, half the observed RTT is the minimum
+    defensible uncertainty around the midpoint offset estimate. The value is
+    preserved explicitly so latency-sensitive consumers can fail closed rather
+    than treating the offset estimate as exact.
     """
     sent = int(send_wall_ts_ms)
     received = int(receive_wall_ts_ms)
     if received < sent:
         raise ValueError("receive_wall_ts_ms cannot precede send_wall_ts_ms")
     server = int(server_ts_ms)
+    rtt_ms = float(received - sent)
     midpoint = (sent + received) / 2.0
     return ClockSyncSample(
         venue=str(venue).strip().lower(),
         server_ts_ms=server,
         send_wall_ts_ms=sent,
         receive_wall_ts_ms=received,
-        rtt_ms=float(received - sent),
+        rtt_ms=rtt_ms,
         offset_ms=float(server - midpoint),
+        uncertainty_ms=rtt_ms / 2.0,
     )
+
+
+def lead_lag_timing_admissible(
+    *,
+    observed_lag_ms: float,
+    leader_uncertainty_ms: float | None,
+    follower_uncertainty_ms: float | None,
+    same_runner_receive_order_proven: bool = False,
+) -> bool:
+    """Return whether a measured lead/lag has sufficient timing evidence.
+
+    Same-runner monotonic receive ordering can independently establish ordering.
+    Otherwise both clock uncertainties must be known and the observed absolute
+    lag must strictly exceed their conservative combined uncertainty. Missing or
+    non-finite evidence fails closed.
+    """
+    import math
+
+    lag = float(observed_lag_ms)
+    if not math.isfinite(lag) or lag == 0.0:
+        return False
+    if same_runner_receive_order_proven:
+        return True
+    if leader_uncertainty_ms is None or follower_uncertainty_ms is None:
+        return False
+    leader = float(leader_uncertainty_ms)
+    follower = float(follower_uncertainty_ms)
+    if not math.isfinite(leader) or not math.isfinite(follower) or leader < 0.0 or follower < 0.0:
+        return False
+    return abs(lag) > (leader + follower)
 
 
 @dataclass(slots=True)
@@ -108,10 +143,7 @@ class FeedIntegrityState:
             elif self.strict_consecutive_sequence and seq != self.last_sequence + 1:
                 self.gaps += max(1, seq - self.last_sequence - 1)
                 reasons.append("SEQUENCE_GAP")
-        elif prev is not None and self.last_sequence is not None and prev not in {
-            self.last_sequence,
-            -1,
-        }:
+        elif prev is not None and self.last_sequence is not None and prev not in {self.last_sequence, -1}:
             self.gaps += 1
             reasons.append("SEQUENCE_GAP")
 
@@ -164,18 +196,7 @@ class FeedIntegrityState:
 
     @property
     def clean(self) -> bool:
-        return not any(
-            (
-                self.gaps,
-                self.regressions,
-                self.exchange_time_regressions,
-                self.receive_time_regressions,
-                self.monotonic_regressions,
-                self.missing_exchange_ts,
-                self.missing_receive_ts,
-                self.future_skew_violations,
-            )
-        )
+        return not any((self.gaps, self.regressions, self.exchange_time_regressions, self.receive_time_regressions, self.monotonic_regressions, self.missing_exchange_ts, self.missing_receive_ts, self.future_skew_violations))
 
     def as_dict(self) -> dict[str, int | bool | None]:
         return {
@@ -197,8 +218,4 @@ class FeedIntegrityState:
         }
 
 
-__all__ = [
-    "ClockSyncSample",
-    "FeedIntegrityState",
-    "estimate_clock_sync",
-]
+__all__ = ["ClockSyncSample", "FeedIntegrityState", "estimate_clock_sync", "lead_lag_timing_admissible"]
