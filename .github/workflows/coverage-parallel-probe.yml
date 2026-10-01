@@ -3,6 +3,9 @@ name: coverage-parallel-probe
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   workflow_dispatch: {}
 
 permissions:

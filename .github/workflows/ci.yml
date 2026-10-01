@@ -4,6 +4,9 @@ name: hypersmart-ci
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   pull_request:
     branches: [main]
   workflow_dispatch: {}
