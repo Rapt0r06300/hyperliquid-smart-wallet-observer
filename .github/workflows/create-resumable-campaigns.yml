@@ -281,10 +281,7 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add catalog/campaigns catalog/copy_vault_selections
-          if [ -d catalog/market_collection_plans ]; then git add catalog/market_collection_plans; fi
-          if [ -d catalog/campaign-history ]; then git add catalog/campaign-history; fi
-          for optional in catalog/dispatch-receipts catalog/operator-acks control/phase-receipts; do
+          for optional in             catalog/campaigns             catalog/copy_vault_selections             catalog/market_collection_plans             catalog/campaign-history             catalog/dispatch-receipts             catalog/operator-acks             control/phase-receipts; do
             if [ -e "$optional" ]; then git add "$optional"; fi
           done
           git diff --cached --quiet && exit 0
