@@ -220,6 +220,15 @@ def test_multiasset_loader_conserve_le_bbo_hl_causal_du_meme_shard(tmp_path: Pat
     assert books[0]["real_execution"] is False
     assert tape["ETH"]["TRADE_SOURCE_IDS"] == ["aligned.jsonl"]
     assert tape["ETH"]["HL_BOOK_SOURCE_IDS"] == ["aligned.jsonl"]
+    assert tape["ETH"]["TRADE_OBS"] == [
+        {
+            "observable_at_ms": start + 1_000,
+            "price": 100.0,
+            "qty": 1.0,
+            "direction": 1.0,
+            "source_id": "aligned.jsonl",
+        }
+    ]
     assert meta["hl_book_rows"] == 1
     assert meta["hl_book_rows_outside_frozen_train"] == 1
     assert meta["heldout_loaded"] is False
@@ -301,7 +310,9 @@ def test_exploration_utilise_le_bbo_aligne_sans_relire_le_l2_sparse(tmp_path: Pa
         1_000.0,
     }
     assert report["fixed_grid"]["trial_count"] == (
-        expected_calls + module.book_confirmation_trial_count(1)
+        expected_calls
+        + module.book_confirmation_trial_count(1)
+        + module.microstructure_confirmation_trial_count(1)
     )
     assert {hypothesis["direction_policy"] for hypothesis in report["fixed_grid"]["hypotheses"]} == {
         "SHOCK_CONTINUATION",
@@ -435,6 +446,7 @@ def test_cross_asset_utilise_le_choc_du_leader_et_le_carnet_du_suiveur(tmp_path:
     assert report["fixed_grid"]["trial_count"] == (
         module.research_family_trial_count(1, 1)
         + module.book_confirmation_trial_count(2)
+        + module.microstructure_confirmation_trial_count(2)
     )
     assert report["fixed_grid"]["cross_asset_hypothesis"]["planned_pairs"] == [["BTC", "SOL"]]
     variant = report["variants"][0]
