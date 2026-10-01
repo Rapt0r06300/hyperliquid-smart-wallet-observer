@@ -1079,6 +1079,15 @@ This is a research target, not a guarantee, and it is **not an ANALYZE stage-com
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
+For the three active families, **carry/funding is not an alpha source**. Funding may be measured and deducted when a held position crosses a settlement, but Copy-Vault, Lead-Lag and Cross-Venue may not claim the +4 USD/day target from carry.
+
+Current implementation contract for the economic-acceleration path:
+
+- **Copy-Vault**: the physically frozen V21 policy is replayed without retuning and opens held-out evidence sequentially (`VALIDATION -> OOS -> FORWARD`). Failure of an earlier gate keeps later data unopened. The FULL/COLD dataset runner invokes this immutable evaluator directly, and the historical V21 reproducer is portable from the repository root rather than tied to a user PC.
+- **Lead-Lag**: TRAIN selection includes a predeclared same-source causal microstructure gate that requires the external shock direction to agree with both follower-book imbalance and signed aggressor notional over a fixed backward-looking window. Its hypotheses are included in the family multiplicity correction; it cannot consume held-out data during selection.
+- **Cross-Venue**: native Bybit/OKX/Gate/Bitget collection persists replayable full-L2 normalized snapshots plus instrument rules and receive-clock evidence. Venue-specific maker/taker fees come from one versioned source. The native replay path computes exact depth/VWAP and conservative four-leg fee floors across synchronized venue pairs. Maker fee scenarios remain diagnostic until passive fill probability, queue position and adverse-selection markout are causally proven; the prefilter can never certify closed-cycle profit by itself.
+- Existing certified Hyperliquid/Binance evidence remains valid and separate; the native multi-venue path extends rather than replaces it. A six-venue economic claim still requires compatible same-clock evidence for the exact legs used by that claim.
+
 After the +4 USD/day milestone, optimization continues to target the highest scalable daily net PnL compatible with the approved paper-capital, drawdown, capacity, causality, OOS and forward constraints.
 
 ### Speed-to-proof principle
