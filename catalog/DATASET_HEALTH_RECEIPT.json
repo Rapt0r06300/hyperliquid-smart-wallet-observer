@@ -48564,10 +48564,9 @@
   "campaign_counts": {
     "backtest:COMPLETE": 2,
     "backtest:FAILED": 7,
-    "copy_vault_collection:COMPLETE": 344,
+    "copy_vault_collection:COMPLETE": 345,
     "copy_vault_collection:FAILED": 316,
     "copy_vault_collection:PENDING": 291,
-    "copy_vault_collection:RUNNING": 1,
     "copy_vault_collection:UNAVAILABLE": 323,
     "event_intelligence_collection:COMPLETE": 21,
     "event_intelligence_collection:UNAVAILABLE": 1,
@@ -57359,26 +57358,21 @@
       "campaign_id": "copy-vault-18-2026093021-v7",
       "chunk_index": 0,
       "collection_cutoff_at_utc": null,
-      "completed_unit_count": 0,
+      "completed_unit_count": 1,
       "consecutive_failures": 0,
       "creation_phase": "COLLECT",
       "kind": "copy_vault_collection",
-      "last_checkpoint_id": null,
-      "lease": {
-        "acquired_at": "2026-10-01T03:40:26.783060Z",
-        "expires_at": "2026-10-01T09:25:26.783060Z",
-        "lease_token_sha256": "51e6431fb4f6ea0b23b6ba42c2ec7f543e880237d82388f241718bc1f04bb35f",
-        "owner_run_id": "36810630792"
-      },
-      "lease_expires_at": "2026-10-01T09:25:26.783060Z",
-      "lease_owner": "36810630792",
+      "last_checkpoint_id": "a8fd869d4291f310728af33b9c84853dbe4e7b27b9d4be4927543ff81e145e9f",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
       "next_due_at": null,
       "no_progress_count": 0,
       "phase_epoch": 7,
       "source_collection_epoch": null,
-      "status": "RUNNING",
-      "status_reason": "worker_started",
-      "updated_at": "2026-10-01T03:40:26.783127Z"
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-01T03:46:40.841116Z"
     },
     {
       "analysis_stage": null,
@@ -79728,7 +79722,7 @@
     "unique_trade_count_exact": true,
     "valid_record_count_exact": true
   },
-  "dataset_commit": "3a09205b998f69b61830ff19da18f4c04814fec2",
+  "dataset_commit": "5febe6272f4c7f992707b86ff30b52d06f681655",
   "metrics_digest": "a1995ee2c3d23c500b1494e24d7dcc545ede6ccc01df6a583ac5d5f5ef58277c",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
@@ -79739,11 +79733,11 @@
     "analysis_stage": null,
     "collection_cutoff_at_utc": null,
     "collection_started_at_utc": null,
-    "epoch": 8,
+    "epoch": 3,
     "phase": "IDLE",
-    "request_id": "0f2f81a6c4e3701f8c1e9ca9755690e111a804bf27492bd75e5f677b5b9cfcdf",
-    "requested_at_utc": "2026-10-01T03:43:34Z",
-    "requested_by": "single-repo-cutover",
+    "request_id": "626f2c0a46959a3c3811904c3932b719b6a4d51153c007ddffa02e1cfa08f7e7",
+    "requested_at_utc": "2026-10-01T03:58:00Z",
+    "requested_by": "chatgpt-github",
     "schema_version": 1,
     "source_collection_epoch": null
   },
@@ -80067,10 +80061,6 @@
       },
       {
         "campaign_id": "copy-vault-179-2026093021-v7",
-        "reason": "PHASE_EPOCH_MISMATCH"
-      },
-      {
-        "campaign_id": "copy-vault-18-2026093021-v7",
         "reason": "PHASE_EPOCH_MISMATCH"
       },
       {
@@ -81052,7 +81042,7 @@
     ],
     "status": "BLOCKED"
   },
-  "receipt_digest": "cea6329c071b3cea88d3a80ca0629b03134637e69f4dfc12df34fd1f203ed425",
+  "receipt_digest": "e0e80f0ea2ddc52fa5c448e927a3cd391c2875e89ac0f863c7040d0326e8b227",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "NOT_SAFE_OR_REPLAYABLE:PARTIAL:DUPLICATES_PRESENT": 55,
