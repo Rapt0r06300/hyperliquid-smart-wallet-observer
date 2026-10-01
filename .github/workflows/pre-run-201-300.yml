@@ -3,6 +3,9 @@ name: pre-run-201-300
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'catalog/**'
+      - 'control/**'
   workflow_dispatch: {}
 
 permissions:
