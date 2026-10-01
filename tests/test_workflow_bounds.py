@@ -199,6 +199,36 @@ def test_single_repo_exact_count_backfill_is_scheduled_hosted():
     assert "runs-on: ubuntu-latest" in backfill
     assert "self-hosted" not in backfill
 
+def test_single_repo_collect_and_analysis_chain_never_targets_legacy_dataset_repo():
+    legacy = "Rapt0r06300/alina-smartflow-datasets-v2"
+    canonical = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    active_paths = (
+        ".github/workflows/create-resumable-campaigns.yml",
+        ".github/workflows/resumable-campaign-controller.yml",
+        ".github/workflows/resumable-campaign-worker.yml",
+        ".github/workflows/analysis-stage-controller.yml",
+        ".github/workflows/advance-analysis-stage.yml",
+        "tools/resumable_campaign.py",
+        "src/hl_observer/datasets/v2_pipeline.py",
+        "src/hl_observer/datasets/v2_repository.py",
+        "src/hl_observer/ops/v2_dataset_bridge.py",
+    )
+    for relative in active_paths:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert legacy not in text, relative
+
+    creator = _workflow("create-resumable-campaigns.yml")
+    for kind in ("replay", "backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"):
+        assert kind in creator
+
+    pipeline = (ROOT / "src/hl_observer/datasets/v2_pipeline.py").read_text(encoding="utf-8")
+    repository = (ROOT / "src/hl_observer/datasets/v2_repository.py").read_text(encoding="utf-8")
+    campaign_cli = (ROOT / "tools/resumable_campaign.py").read_text(encoding="utf-8")
+    assert f'V2_REPOSITORY = "{canonical}"' in pipeline
+    assert f'DEFAULT_REPOSITORY = "{canonical}"' in repository
+    assert canonical in campaign_cli
+
+
 def test_campaign_watchdog_recomputes_on_concurrent_receipt_writers():
     text = _workflow("campaign-watchdog.yml")
     assert "git fetch origin main" in text
