@@ -56,16 +56,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p control catalog tools tests .github/workflows docs
+          mkdir -p control catalog datasets tools tests docs
           cp -a legacy-dataset/control/. control/
           cp -a legacy-dataset/catalog/. catalog/
           cp -a legacy-dataset/tools/. tools/
           cp -a legacy-dataset/tests/. tests/
-          cp -a legacy-dataset/.github/workflows/. .github/workflows/
+          cp -a legacy-dataset/datasets/. datasets/
 
           # Active automation now targets this single repository. Historical
           # catalog receipts remain byte-for-byte provenance and are not rewritten.
-          grep -RIl --exclude='unify-dataset-v2-into-main.yml'             'Rapt0r06300/alina-smartflow-datasets-v2'             .github/workflows tools tests 2>/dev/null | while read -r path; do
+          grep -RIl --exclude='unify-dataset-v2-into-main.yml'             'Rapt0r06300/alina-smartflow-datasets-v2'             tools tests 2>/dev/null | while read -r path; do
               sed -i 's#Rapt0r06300/alina-smartflow-datasets-v2#Rapt0r06300/hyperliquid-smart-wallet-observer#g' "$path"
           done
 
@@ -119,7 +119,16 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           gh auth setup-git
-          git add control catalog tools tests .github/workflows docs/UNIFIED_REPOSITORY.md
+          git add control catalog datasets tools tests docs/UNIFIED_REPOSITORY.md
+          git reset -- .github/workflows >/dev/null 2>&1 || true
+          if ! git diff --cached --name-only | grep -Ev '^\.github/workflows/' >/dev/null; then
+            echo "No non-workflow migration files staged" >&2
+            exit 2
+          fi
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo "Refusing migration commit containing workflow files" >&2
+            exit 3
+          fi
           git diff --cached --quiet && exit 0
           git commit -m "architecture: unify Dataset V2 into Alina repository"
           for attempt in 1 2 3 4 5 6 7 8; do
