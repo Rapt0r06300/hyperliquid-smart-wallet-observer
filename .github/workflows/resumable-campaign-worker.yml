@@ -583,12 +583,19 @@ jobs:
               --evidence-tag "$EVIDENCE_TAG" --result "$RUNNER_TEMP/result.json"
           fi
 
-          python tools/build_collection_metrics.py
+          if ! python tools/build_collection_metrics.py; then
+            echo "::warning::Collection metrics refresh failed unexpectedly; preserving collection checkpoint."
+          fi
 
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           gh auth setup-git
-          git add "$M" catalog/COLLECTION_METRICS.json
+          git add "$M"
+          if [ -f catalog/COLLECTION_METRICS.json ]; then
+            git add catalog/COLLECTION_METRICS.json
+          else
+            echo "::warning::COLLECTION_METRICS.json unavailable; collection checkpoint remains authoritative."
+          fi
           if [ -d catalog/receipts ]; then
             git add catalog/receipts
           fi
