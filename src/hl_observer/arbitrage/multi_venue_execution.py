@@ -49,6 +49,8 @@ def _orientation(
     *,
     evidence: dict[str, float | None],
     notional_usd: float,
+    execution_buffer_bps: float,
+    latency_penalty_bps_per_ms: float,
 ) -> dict[str, Any] | None:
     if buy.coin != sell.coin or not buy.asks or not sell.bids:
         return None
@@ -69,15 +71,18 @@ def _orientation(
     buy_maker = frais_maker_bps(buy.venue)
     sell_maker = frais_maker_bps(sell.venue)
 
-    entry_fee_usd = (
-        buy_cost * buy_taker / 10_000.0
-        + sell_proceeds * sell_taker / 10_000.0
-    )
+    entry_fee_usd = buy_cost * buy_taker / 10_000.0 + sell_proceeds * sell_taker / 10_000.0
     entry_net = gross_pnl - entry_fee_usd
     taker_round_trip_floor = 2.0 * (buy_taker + sell_taker)
     buy_maker_round_trip_floor = 2.0 * (buy_maker + sell_taker)
     sell_maker_round_trip_floor = 2.0 * (buy_taker + sell_maker)
     both_maker_round_trip_floor = 2.0 * (buy_maker + sell_maker)
+
+    receive_skew = evidence.get("receive_skew_ms")
+    skew_ms = max(0.0, float(receive_skew)) if receive_skew is not None else 0.0
+    latency_penalty = skew_ms * latency_penalty_bps_per_ms
+    uncertainty_penalty = execution_buffer_bps + latency_penalty
+    conservative_taker = gross_bps - taker_round_trip_floor - uncertainty_penalty
 
     return {
         "coin": buy.coin,
@@ -99,7 +104,10 @@ def _orientation(
         "sell_maker_round_trip_net_floor_bps": gross_bps - sell_maker_round_trip_floor,
         "both_maker_round_trip_fee_floor_bps": both_maker_round_trip_floor,
         "both_maker_round_trip_net_floor_bps": gross_bps - both_maker_round_trip_floor,
-        "receive_skew_ms": evidence.get("receive_skew_ms"),
+        "execution_buffer_bps": execution_buffer_bps,
+        "latency_penalty_bps": latency_penalty,
+        "conservative_taker_round_trip_net_edge_bps": conservative_taker,
+        "receive_skew_ms": receive_skew,
         "corrected_exchange_skew_ms": evidence.get("corrected_exchange_skew_ms"),
         "prefilter_only": True,
         "closed_cycle_proven": False,
@@ -111,33 +119,46 @@ def _orientation(
 
 
 def executable_pair_rows(
-    synchronized_pairs: Iterable[
-        tuple[NativeMarketSnapshot, NativeMarketSnapshot, dict[str, float | None]]
-    ],
+    synchronized_pairs: Iterable[tuple[NativeMarketSnapshot, NativeMarketSnapshot, dict[str, float | None]]],
     *,
     notional_usd: float,
     minimum_round_trip_edge_bps: float = 0.0,
+    execution_buffer_bps: float = 0.0,
+    latency_penalty_bps_per_ms: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Evaluate both orientations and retain positive conservative fee floors."""
     notional = float(notional_usd)
     threshold = float(minimum_round_trip_edge_bps)
+    buffer_bps = float(execution_buffer_bps)
+    latency_rate = float(latency_penalty_bps_per_ms)
     if not math.isfinite(notional) or notional <= 0.0:
         raise ValueError("notional_usd must be finite and positive")
     if not math.isfinite(threshold):
         raise ValueError("minimum_round_trip_edge_bps must be finite")
+    if not math.isfinite(buffer_bps) or buffer_bps < 0.0:
+        raise ValueError("execution_buffer_bps must be finite and non-negative")
+    if not math.isfinite(latency_rate) or latency_rate < 0.0:
+        raise ValueError("latency_penalty_bps_per_ms must be finite and non-negative")
 
     rows: list[dict[str, Any]] = []
     for left, right, evidence in synchronized_pairs:
         for buy, sell in ((left, right), (right, left)):
-            row = _orientation(buy, sell, evidence=dict(evidence), notional_usd=notional)
+            row = _orientation(
+                buy,
+                sell,
+                evidence=dict(evidence),
+                notional_usd=notional,
+                execution_buffer_bps=buffer_bps,
+                latency_penalty_bps_per_ms=latency_rate,
+            )
             if row is None:
                 continue
-            if float(row["taker_taker_round_trip_net_floor_bps"]) <= threshold:
+            if float(row["conservative_taker_round_trip_net_edge_bps"]) <= threshold:
                 continue
             rows.append(row)
     rows.sort(
         key=lambda row: (
-            float(row["taker_taker_round_trip_net_floor_bps"]),
+            float(row["conservative_taker_round_trip_net_edge_bps"]),
             float(row["gross_executable_edge_bps"]),
         ),
         reverse=True,
