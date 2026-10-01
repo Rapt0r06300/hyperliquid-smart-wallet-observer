@@ -240,6 +240,94 @@ def _reconcile_drain_stuck(row: dict, phase: dict, now: datetime) -> bool:
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return True
 
+def _market_replacement_key(row: dict) -> tuple | None:
+    if row.get("kind") != "market_collection":
+        return None
+    cursor = row.get("cursor") if isinstance(row.get("cursor"), dict) else {}
+    phase_epoch = row.get("phase_epoch")
+    shard_index = cursor.get("market_shard_index")
+    universe_digest = cursor.get("universe_digest")
+    plan_sha256 = cursor.get("plan_sha256")
+    if (
+        not isinstance(phase_epoch, int)
+        or shard_index is None
+        or not universe_digest
+        or not plan_sha256
+    ):
+        return None
+    return (phase_epoch, int(shard_index), str(universe_digest), str(plan_sha256))
+
+
+def _progressed_market_replacement(row: dict) -> bool:
+    status = str(row.get("status") or "")
+    if status not in {"RUNNING", "CONTINUATION_REQUIRED", "COMPLETE"}:
+        return False
+    return bool(
+        int(row.get("attempts") or 0) > 0
+        or row.get("completed_units")
+        or row.get("lease")
+    )
+
+
+def _terminalize_superseded_stuck(
+    row: dict, replacement: dict, now: datetime
+) -> bool:
+    """Preserve a failed campaign as terminal once a newer equivalent shard progresses."""
+    if str(row.get("status") or "") != "STUCK":
+        return False
+    if not _progressed_market_replacement(replacement):
+        return False
+    key = _market_replacement_key(row)
+    if key is None or key != _market_replacement_key(replacement):
+        return False
+    campaign_id = str(row.get("campaign_id") or "")
+    replacement_id = str(replacement.get("campaign_id") or "")
+    if not campaign_id or not replacement_id or campaign_id == replacement_id:
+        return False
+    try:
+        old_created = parse(row.get("created_at") or row.get("created_at_utc") or row.get("updated_at"))
+        new_created = parse(
+            replacement.get("created_at")
+            or replacement.get("created_at_utc")
+            or replacement.get("updated_at")
+        )
+    except (TypeError, ValueError):
+        return False
+    if new_created <= old_created:
+        return False
+
+    previous_reason = row.get("status_reason") or row.get("stuck_reason") or "STUCK"
+    timestamp = now.isoformat().replace("+00:00", "Z")
+    row["status"] = "FAILED"
+    row["status_reason"] = "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN"
+    row["stuck_reason"] = None
+    row["lease"] = None
+    row["updated_at"] = timestamp
+    row.setdefault("history", []).append({
+        "at_utc": timestamp,
+        "event": "WATCHDOG_STUCK_SUPERSEDED",
+        "previous_status": "STUCK",
+        "previous_reason": previous_reason,
+        "replacement_campaign_id": replacement_id,
+        "reason": row["status_reason"],
+    })
+    row["terminal_evidence_digest"] = hashlib.sha256(
+        json.dumps(
+            {
+                "campaign_id": campaign_id,
+                "terminal_status": "FAILED",
+                "reason": row["status_reason"],
+                "previous_reason": previous_reason,
+                "replacement_campaign_id": replacement_id,
+                "completed_units": row.get("completed_units") or {},
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return True
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--campaign-root", default="catalog/campaigns")
@@ -261,6 +349,36 @@ def main():
     expired_leases = []
     unsafe = []
     manifests = sorted(Path(a.campaign_root).glob("*.json"))
+    market_replacements = {}
+    for candidate_path in manifests:
+        try:
+            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(candidate, dict) or not _progressed_market_replacement(candidate):
+            continue
+        key = _market_replacement_key(candidate)
+        if key is None:
+            continue
+        current = market_replacements.get(key)
+        if current is None:
+            market_replacements[key] = candidate
+            continue
+        try:
+            candidate_created = parse(
+                candidate.get("created_at")
+                or candidate.get("created_at_utc")
+                or candidate.get("updated_at")
+            )
+            current_created = parse(
+                current.get("created_at")
+                or current.get("created_at_utc")
+                or current.get("updated_at")
+            )
+        except (TypeError, ValueError):
+            continue
+        if candidate_created > current_created:
+            market_replacements[key] = candidate
     dispatched = []
     dispatch_failures = []
     lease_repairs = []
@@ -338,6 +456,17 @@ def main():
             lease_repairs.append(campaign_id)
             _write_atomic(path, row)
         if _reconcile_finished_owner(row, now):
+            status = str(row.get("status") or "")
+            campaign_id = str(row.get("campaign_id") or path.stem)
+            lease_repairs.append(campaign_id)
+            _write_atomic(path, row)
+        replacement = market_replacements.get(_market_replacement_key(row))
+        if (
+            phase.get("phase") == "COLLECT"
+            and row.get("phase_epoch") == phase.get("epoch")
+            and replacement is not None
+            and _terminalize_superseded_stuck(row, replacement, now)
+        ):
             status = str(row.get("status") or "")
             campaign_id = str(row.get("campaign_id") or path.stem)
             lease_repairs.append(campaign_id)
