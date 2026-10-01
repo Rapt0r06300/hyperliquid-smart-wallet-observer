@@ -244,3 +244,31 @@ def test_bitget_trade_frame_is_taped() -> None:
     assert envelope.channel == "trades"
     assert envelope.instrument == "ETHUSDT"
     assert envelope.exchange_ts_ms == 1995
+
+
+def test_gate_instrument_metadata_snapshot_is_replayable() -> None:
+    envelope = native_instrument_metadata_envelope(
+        "gate",
+        {"name": "BTC_USDT", "order_price_round": "0.1", "quanto_multiplier": "0.001", "order_size_min": "1"},
+        received_ts_ms=1_700_000_000_010,
+        receive_mono_ns=123456,
+    )
+    assert envelope is not None
+    row = envelope.as_record(written_ts_ms=1_700_000_000_020)
+    assert row["instrument"] == "BTC_USDT"
+    assert row["parsed_summary"]["tick_size"] == "0.1"
+    assert row["parsed_summary"]["contract_multiplier"] == "0.001"
+
+
+def test_bitget_instrument_metadata_snapshot_is_replayable() -> None:
+    envelope = native_instrument_metadata_envelope(
+        "bitget",
+        {"symbol": "BTCUSDT", "priceEndStep": "1", "sizeMultiplier": "0.001", "minTradeNum": "0.001", "minTradeUSDT": "5"},
+        received_ts_ms=1_700_000_000_010,
+        receive_mono_ns=123456,
+    )
+    assert envelope is not None
+    row = envelope.as_record(written_ts_ms=1_700_000_000_020)
+    assert row["instrument"] == "BTCUSDT"
+    assert row["parsed_summary"]["lot_size"] == "0.001"
+    assert row["parsed_summary"]["min_notional"] == "5"

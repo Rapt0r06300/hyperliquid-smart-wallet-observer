@@ -30,6 +30,10 @@ def native_instrument_metadata_envelope(
         instrument = str(row.get("symbol") or "").upper()
     elif venue_key == "okx":
         instrument = str(row.get("instId") or "").upper()
+    elif venue_key == "gate":
+        instrument = str(row.get("name") or row.get("contract") or "").upper()
+    elif venue_key == "bitget":
+        instrument = str(row.get("symbol") or row.get("instId") or "").upper()
     else:
         return None
     if not instrument:
@@ -69,21 +73,34 @@ def native_instrument_metadata_envelope(
             "tick_size": (
                 price_filter.get("tickSize")
                 if venue_key == "bybit" and isinstance(price_filter, Mapping)
-                else row.get("tickSz")
+                else row.get("tickSz") if venue_key == "okx"
+                else row.get("order_price_round") if venue_key == "gate"
+                else row.get("priceEndStep", row.get("pricePlace"))
             ),
             "lot_size": (
                 lot_filter.get("qtyStep")
                 if venue_key == "bybit" and isinstance(lot_filter, Mapping)
-                else row.get("lotSz")
+                else row.get("lotSz") if venue_key == "okx"
+                else row.get("quanto_multiplier") if venue_key == "gate"
+                else row.get("sizeMultiplier")
             ),
             "min_size": (
                 lot_filter.get("minOrderQty")
                 if venue_key == "bybit" and isinstance(lot_filter, Mapping)
-                else row.get("minSz")
+                else row.get("minSz") if venue_key == "okx"
+                else row.get("order_size_min") if venue_key == "gate"
+                else row.get("minTradeNum")
             ),
             "min_notional": (
                 lot_filter.get("minNotionalValue")
                 if venue_key == "bybit" and isinstance(lot_filter, Mapping)
+                else row.get("minTradeUSDT") if venue_key == "bitget"
+                else None
+            ),
+            "contract_multiplier": (
+                row.get("ctVal") if venue_key == "okx"
+                else row.get("quanto_multiplier") if venue_key == "gate"
+                else row.get("sizeMultiplier") if venue_key == "bitget"
                 else None
             ),
             "data_gate_ready": False,
