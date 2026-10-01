@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 279863,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-cfx-usdt-swap-1790117942577-1790118841532-2b42e8c4326b",
+  "end_ts_ms": 1790118841532,
+  "event_count": 3274,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582779762,
+    "asset_name": "okx-public-ws-ticker-cfx-usdt-swap-1790117942577-1790118841532-2b42e8c4326b.jsonl.gz",
+    "release_id": 394256558,
+    "remote_digest": "sha256:2b42e8c4326bffdd308a8c1523ed24920b9ea8d9135965def18334a1c543f984",
+    "remote_size": 279863,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s1"
+  },
+  "release_asset": "okx-public-ws-ticker-cfx-usdt-swap-1790117942577-1790118841532-2b42e8c4326b.jsonl.gz",
+  "release_asset_id": 582779762,
+  "release_id": 394256558,
+  "release_remote_digest": "sha256:2b42e8c4326bffdd308a8c1523ed24920b9ea8d9135965def18334a1c543f984",
+  "release_remote_size": 279863,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "2b42e8c4326bffdd308a8c1523ed24920b9ea8d9135965def18334a1c543f984",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790117942577,
+  "symbol": "CFX-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3274,
+      "max": 83.5,
+      "min": 35.0,
+      "p50": 42.5,
+      "p95": 83.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-104cf986082c4d55a610f8b0c9c02f57"
+    ],
+    "first_exchange_ts_ms": 1790117942264,
+    "last_exchange_ts_ms": 1790118841367,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3274,
+      "max": 727.0,
+      "min": 85.0,
+      "p50": 139.0,
+      "p95": 186.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3274,
+      "max": 164.401834,
+      "min": 0.0,
+      "p50": 160.302696,
+      "p95": 163.778338
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

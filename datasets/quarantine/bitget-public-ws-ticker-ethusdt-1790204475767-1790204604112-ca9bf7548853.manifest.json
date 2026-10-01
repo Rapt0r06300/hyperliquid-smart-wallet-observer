@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 114216,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-ethusdt-1790204475767-1790204604112-ca9bf7548853",
+  "end_ts_ms": 1790204604112,
+  "event_count": 1204,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584999132,
+    "asset_name": "bitget-public-ws-ticker-ethusdt-1790204475767-1790204604112-ca9bf7548853.jsonl.gz",
+    "release_id": 395258776,
+    "remote_digest": "sha256:ca9bf7548853f2e95ff746348535cee6df2c6151e263344bdf5cdf93ca9c9f95",
+    "remote_size": 114216,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s1"
+  },
+  "release_asset": "bitget-public-ws-ticker-ethusdt-1790204475767-1790204604112-ca9bf7548853.jsonl.gz",
+  "release_asset_id": 584999132,
+  "release_id": 395258776,
+  "release_remote_digest": "sha256:ca9bf7548853f2e95ff746348535cee6df2c6151e263344bdf5cdf93ca9c9f95",
+  "release_remote_size": 114216,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ca9bf7548853f2e95ff746348535cee6df2c6151e263344bdf5cdf93ca9c9f95",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790204475767,
+  "symbol": "ETHUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-b335bcfbea7547d1bd48a6dbd603f37f"
+    ],
+    "first_exchange_ts_ms": 1790204475521,
+    "last_exchange_ts_ms": 1790204604052,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1204,
+      "max": 311.0,
+      "min": 54.0,
+      "p50": 60.0,
+      "p95": 73.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

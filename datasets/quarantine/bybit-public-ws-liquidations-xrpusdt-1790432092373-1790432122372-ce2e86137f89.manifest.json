@@ -1,0 +1,104 @@
+{
+  "asset_verified": true,
+  "bytes": 816,
+  "collection_run_id": "market-2026092600-v4-0",
+  "collector_version": "a96015e8340c481d754fd3ac48212b5dbff96341",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-public-ws-liquidations-xrpusdt-1790432092373-1790432122372-ce2e86137f89",
+  "end_ts_ms": 1790432122372,
+  "event_count": 2,
+  "family": "liquidations",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "liquidations"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 2,
+  "release": {
+    "asset_id": 590891712,
+    "asset_name": "bybit-public-ws-liquidations-xrpusdt-1790432092373-1790432122372-ce2e86137f89.jsonl.gz",
+    "release_id": 397281551,
+    "remote_digest": "sha256:ce2e86137f893bcdba0aba5c23c9aa7630d0a9835d6f660c786a1b86ae3dabc2",
+    "remote_size": 816,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092600-v4-u0"
+  },
+  "release_asset": "bybit-public-ws-liquidations-xrpusdt-1790432092373-1790432122372-ce2e86137f89.jsonl.gz",
+  "release_asset_id": 590891712,
+  "release_id": 397281551,
+  "release_remote_digest": "sha256:ce2e86137f893bcdba0aba5c23c9aa7630d0a9835d6f660c786a1b86ae3dabc2",
+  "release_remote_size": 816,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092600-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ce2e86137f893bcdba0aba5c23c9aa7630d0a9835d6f660c786a1b86ae3dabc2",
+  "source": "bybit_public_ws",
+  "start_ts_ms": 1790432092373,
+  "symbol": "XRPUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bybit-da773c67cccb42f5926f0f3c387718c3"
+    ],
+    "first_exchange_ts_ms": 1790432091815,
+    "last_exchange_ts_ms": 1790432121960,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2,
+      "max": 558.0,
+      "min": 412.0,
+      "p50": 412.0,
+      "p95": 558.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2,
+      "max": 235.906237,
+      "min": 234.836288,
+      "p50": 234.836288,
+      "p95": 235.906237
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

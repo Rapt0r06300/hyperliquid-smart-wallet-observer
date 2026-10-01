@@ -1,0 +1,120 @@
+{
+  "analysis_stage": "BACKTEST",
+  "attempts": 0,
+  "campaign_id": "analysis-e3-backtest-v2",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "1846cdc3202c3b25109f86bec0ee81c0b5b0bc3c",
+  "collection_cutoff_at_utc": "2026-09-29T10:56:59.390365Z",
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": "BACKTEST",
+        "bundle_root": null,
+        "collection_plan_sha256": null,
+        "durable_persisted": true,
+        "evidence_release_tag": "campaign-evidence-analysis-e3-backtest-v2-u0",
+        "evidence_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "output_root": "/home/runner/work/_temp/alina-replay-workspace",
+        "phases": [
+          {
+            "analysis_stage": "BACKTEST",
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "-m",
+              "hl_observer.ops.v2_dataset_bridge",
+              "materialize"
+            ],
+            "name": "materialize_safe_v2",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "6683-d9c27d59b847\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-crv-1790531791142-1790532086589-30b530ddef39\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dot-1790531791142-1790532086589-5a7d8e26db1b\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-usual-1790531791147-1790532086683-ced433b61cdf\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bigtime-1790531791158-1790532086589-a2d39d54dbe3\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trump-1790531791174-1790532086683-b02dbe237f29\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-om-1790531791180-1790532086682-12e89bdced28\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xlm-1790531791191-1790532086683-965a589a81eb\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-op-1790531791203-1790532086682-522f43871311\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-uni-1790531791217-1790532086683-909cc80b7a3a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-virtual-1790531791231-1790532086683-b9c471d19d0d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-jup-1790531791235-1790532086682-5b796d13e8b9\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hype-1790531791258-1790532086589-cd972fb9def4\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-tao-1790531791285-1790532086683-cca645b713d0\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-nxpc-1790531791286-1790532086682-41d4e1c3bcc4\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pnut-1790531791291-1790532086682-7458a3eb944a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-moodeng-1790531791302-1790532086682-1fac26c938e5\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ena-1790531791312-1790532086589-01834b28faa1\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xac713ebf0bef0e5b133558f5f484f475d19b0f6e-1790679152567-1790679152567-f613a357b256\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x90bf08cdcd6e15ce02065980901014ae399c6fc8-1790679152568-1790679152568-4083a6b798ae\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xf3aa3fd326c4177bb14df795f564c303d4a97d53-1790679152568-1790679152568-bd58dde4ec4d\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x2ade512264a009a66bbc2045836720f70fc32351-1790679152569-1790679152569-eab24333c875\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x9d7b5776bcc5e41cce53f75b92db28e7e7be2c8c-1790679152571-1790679152571-46de9372f53d\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x06f42a8e587930d534685e8224834343d8e483ba-1790679152578-1790679152578-9003640f034e\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc179e03922afe8fa9533d3f896338b9fb87ce0c8-1790679152578-1790679152578-a976f91d9d35\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x6386685efb81fb88046f877bd9c738997c4781c0-1790679152579-1790679152579-b4f741a1abaa\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x285492cbf10d66f5c3a95e314c0bb81fed2e3419-1790679152580-1790679152580-19d3f5ed7b02\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xd0fea59999cd64d336185c11dca1742da0438d69-1790679152584-1790679152584-d0a8855c323b\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-btc-1790679152745-1790679450246-a60d52d22f67\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-fartcoin-1790679152750-1790679450398-4d6ffdb5bea7\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pump-1790679152761-1790679450550-d047915c1d33\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-baby-1790679152897-1790679450246-37ad0a77a119\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-fogo-1790679152897-1790679450398-3cd8c8489af9\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-mavia-1790679152897-1790679450399-cb6f9da37584\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-mon-1790679152897-1790679450399-66e7e5f7e4b1\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-eth-1790679152902-1790679450397-6cd78daf38f0\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hemi-1790679152902-1790679450398-101338ef7bc7\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pandora-1790679152902-1790679450549-9c29ee8f91a8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sei-1790679152902-1790679450550-1c38c5fea529\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trump-1790679152902-1790679450551-91ffc427a4c3\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xrp-1790679152902-1790679450552-93769c3c283a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-grass-1790679152914-1790679450398-6a8f2e6fcd3e\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-inj-1790679152914-1790679450399-c4a39c4633a3\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sol-1790679152914-1790679450550-c76256449c2f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-op-1790679152923-1790679450549-922a82701869\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ltc-1790679152930-1790679450399-3cd381c69a45\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-arb-1790679153049-1790679450246-a80b171faa76\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bch-1790679153049-1790679450246-1bfe6599a61d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-doge-1790679153049-1790679450247-bd31ab423c99\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ldo-1790679153049-1790679450399-6b36a69fc840\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-link-1790679153049-1790679450399-be5a357e5c1a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sui-1790679153049-1790679450550-6ad226e344a0\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ada-1790679153079-1790679450246-1216f507703a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-apt-1790679153079-1790679450246-f31db8a04296\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dot-1790679153079-1790679450397-f8e96c15ed49\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trx-1790679153079-1790679450551-e0c1d2d2ec29\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wld-1790679153079-1790679450552-fa357aca2fa2\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pendle-1790679153080-1790679450549-6cf1b9cc3553\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ton-1790679153080-1790679450550-c131080ba61e\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-near-1790679153089-1790679450399-fb11baeaf81d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-neo-1790679153101-1790679450399-2fd6507fccfa\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-jto-1790679153121-1790679450399-7192a13e01bf\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wif-1790679153124-1790679450552-1ee792785703\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ondo-1790679153135-1790679450549-25300a18f876\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-tao-1790679153146-1790679450550-bd8e2f156df4\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-aster-1790679153200-1790679450246-9169a7cc0dc8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ena-1790679153200-1790679450397-62f91feef15e\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-goat-1790679153200-1790679450398-c7d2d74152b9\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hype-1790679153200-1790679450398-80c5f81b5407\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bnb-1790679153201-1790679450246-8249d24a48ba\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-virtual-1790679153212-1790679450552-bd0cf2bc9e21\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-jup-1790679153223-1790679450399-cc021ff86af9\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-uni-1790679153246-1790679450551-9dd31cdaf4f6\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-nxpc-1790679153248-1790679450549-d1f4194cf84c\"\n    ],\n    \"dataset_selection_id\": \"3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106\",\n    \"events\": 6148,\n    \"index_sha256\": \"19424e48be31d34546553f89e07ed80cd9c54e8999947a36b9d2a862eee80444\",\n    \"legacy_import\": false,\n    \"paper_only\": true,\n    \"provenance_complete\": true,\n    \"quality_status_required\": \"SAFE\",\n    \"real_execution\": false,\n    \"replay_compatible_required\": true,\n    \"safe_shards\": 128,\n    \"schema\": \"alina.dataset_v2_materialization_plan.v2\",\n    \"source_collection_epoch\": 2\n  }\n}\n"
+          },
+          {
+            "analysis_stage": "BACKTEST",
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py",
+              "--root",
+              "/home/runner/work/_temp/alina-replay-workspace"
+            ],
+            "name": "economic_campaign",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "copy_vault: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=NON_MESURABLE | daily_mean=None | daily_min=None\nlead_lag: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=NON_MESURABLE | daily_mean=None | daily_min=None\ncross_venue_dislocation_v2: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=+0.000000 USD | daily_mean=None | daily_min=None\nreport=/home/runner/work/_temp/alina-replay-workspace/runtime/reports/economic_campaigns/HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md\n"
+          }
+        ],
+        "returncode": 0,
+        "safe_workspace": "/home/runner/work/_temp/alina-replay-workspace",
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "copy_vault: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=NON_MESURABLE | daily_mean=None | daily_min=None\nlead_lag: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=NON_MESURABLE | daily_mean=None | daily_min=None\ncross_venue_dislocation_v2: OBJECTIF +4 USD/JOUR NON_ATTEINT | net=+0.000000 USD | daily_mean=None | daily_min=None\nreport=/home/runner/work/_temp/alina-replay-workspace/runtime/reports/economic_campaigns/HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md\n",
+        "universe_discovery_required": false
+      },
+      "sha256": "bb26c39557660fab50a3ec6aa05f2a00a3ea4d307892a29451ec417299e6a96c"
+    }
+  },
+  "config_sha256": "60092a533e322646bbc293f025058df6694cd50b38d65e4a5d3b98085a6df50b",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-30T13:36:38.205659+00:00",
+  "creation_phase": "ANALYZE",
+  "cursor": {
+    "checkpoint_id": "bb26c39557660fab50a3ec6aa05f2a00a3ea4d307892a29451ec417299e6a96c",
+    "end_ts_ms": 1790775397000,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 3,
+    "last_run_id": "36722903858",
+    "max_shards": 128,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
+    "start_ts_ms": 1790170597000
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "dataset_selection_id": "3b843b1c871e5e1ff63996d9ebd5b86669bd92e582cb9a9d2c5dafc328eb2106",
+  "expires_at": "2026-10-07T13:36:38.205659+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "80aa6c6b36376fd1598f39630f8bac0cc0276b67c33b96d68a4f17d3727dd7e5"
+    },
+    {
+      "at": "2026-09-30T13:38:00.362901Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-30T13:39:36.509455Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
+    }
+  ],
+  "kind": "backtest",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "80aa6c6b36376fd1598f39630f8bac0cc0276b67c33b96d68a4f17d3727dd7e5",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 3,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": 2,
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "bb26c39557660fab50a3ec6aa05f2a00a3ea4d307892a29451ec417299e6a96c",
+  "updated_at": "2026-09-30T13:39:36.509455Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

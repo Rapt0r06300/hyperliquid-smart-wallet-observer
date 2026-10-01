@@ -1,0 +1,105 @@
+{
+  "asset_verified": true,
+  "bytes": 302544,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-aixbt-1790323155400-1790324874773-49d6e52c2597",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790324874773,
+  "event_count": 3427,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 3427,
+  "release": {
+    "asset_id": 587905358,
+    "asset_name": "hyperliquid-public-ws-bbo-aixbt-1790323155400-1790324874773-49d6e52c2597.jsonl.gz",
+    "release_id": 396438297,
+    "remote_digest": "sha256:49d6e52c2597477f0009eb7cb1e4c0b142d9ba6c5c66d0340a0551e7f3260539",
+    "remote_size": 302544,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s1"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-aixbt-1790323155400-1790324874773-49d6e52c2597.jsonl.gz",
+  "release_asset_id": 587905358,
+  "release_id": 396438297,
+  "release_remote_digest": "sha256:49d6e52c2597477f0009eb7cb1e4c0b142d9ba6c5c66d0340a0551e7f3260539",
+  "release_remote_size": 302544,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s1",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "49d6e52c2597477f0009eb7cb1e4c0b142d9ba6c5c66d0340a0551e7f3260539",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790323155400,
+  "symbol": "AIXBT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3427,
+      "max": -266.0,
+      "min": -741.5,
+      "p50": -390.5,
+      "p95": -289.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-dc74365caadb449f9ced532298bee080"
+    ],
+    "first_exchange_ts_ms": 1790323155032,
+    "last_exchange_ts_ms": 1790324874365,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3427,
+      "max": 1113.0,
+      "min": 238.0,
+      "p50": 333.0,
+      "p95": 519.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}

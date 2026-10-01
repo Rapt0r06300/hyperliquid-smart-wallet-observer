@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 114534,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-dogeusdt-1790138736213-1790138864521-0a574ff1d235",
+  "end_ts_ms": 1790138864521,
+  "event_count": 1199,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583315128,
+    "asset_name": "bitget-public-ws-ticker-dogeusdt-1790138736213-1790138864521-0a574ff1d235.jsonl.gz",
+    "release_id": 394435259,
+    "remote_digest": "sha256:0a574ff1d2357b3131ef49b551af35c0961387459d25745a94a9d8ae41d28d0b",
+    "remote_size": 114534,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s6"
+  },
+  "release_asset": "bitget-public-ws-ticker-dogeusdt-1790138736213-1790138864521-0a574ff1d235.jsonl.gz",
+  "release_asset_id": 583315128,
+  "release_id": 394435259,
+  "release_remote_digest": "sha256:0a574ff1d2357b3131ef49b551af35c0961387459d25745a94a9d8ae41d28d0b",
+  "release_remote_size": 114534,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s6",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "0a574ff1d2357b3131ef49b551af35c0961387459d25745a94a9d8ae41d28d0b",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790138736213,
+  "symbol": "DOGEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-13e6bf2127d5466a9530fe352778235b"
+    ],
+    "first_exchange_ts_ms": 1790138735996,
+    "last_exchange_ts_ms": 1790138864456,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1199,
+      "max": 217.0,
+      "min": 57.0,
+      "p50": 60.0,
+      "p95": 72.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

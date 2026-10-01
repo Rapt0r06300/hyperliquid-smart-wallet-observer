@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 1049,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-instrument-metadata-aztec-usdt-swap-1790204464933-1790204464933-46210be5af6f",
+  "end_ts_ms": 1790204464933,
+  "event_count": 1,
+  "family": "instrument_metadata",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "instrument_metadata"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "server_observation_time"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584999535,
+    "asset_name": "okx-public-rest-instrument-metadata-aztec-usdt-swap-1790204464933-1790204464933-46210be5af6f.jsonl.gz",
+    "release_id": 395258568,
+    "remote_digest": "sha256:46210be5af6f17a6af5d09242e2422cc4c2c73e4986046e38c0d9145559a3999",
+    "remote_size": 1049,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s5"
+  },
+  "release_asset": "okx-public-rest-instrument-metadata-aztec-usdt-swap-1790204464933-1790204464933-46210be5af6f.jsonl.gz",
+  "release_asset_id": 584999535,
+  "release_id": 395258568,
+  "release_remote_digest": "sha256:46210be5af6f17a6af5d09242e2422cc4c2c73e4986046e38c0d9145559a3999",
+  "release_remote_size": 1049,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "46210be5af6f17a6af5d09242e2422cc4c2c73e4986046e38c0d9145559a3999",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790204464933,
+  "symbol": "AZTEC-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790204464852,
+    "last_exchange_ts_ms": 1790204464852,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 81.0,
+      "min": 81.0,
+      "p50": 81.0,
+      "p95": 81.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

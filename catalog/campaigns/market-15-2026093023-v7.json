@@ -1,0 +1,115 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "market-15-2026093023-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "ffb1b7b9c74b27b028cc1203f20dd6e5d620e7bd",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+          "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py",
+          "--output",
+          "/home/runner/work/_temp/campaign-output/market-15-2026093023-v7/0"
+        ],
+        "failure_category": "QUALITY",
+        "phase": "unit",
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-15-2026093023-v7/0"
+            ],
+            "name": "unit",
+            "returncode": 1,
+            "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 1320, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 1280, in main\n    plan_rows = _load_plan_rows(plan_path) if plan_path else None\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 767, in _load_plan_rows\n    payload = json.loads(path.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: 'catalog/market_collection_plans/2026093023/shard-15.json'\n",
+            "stdout": ""
+          }
+        ],
+        "reason": "adapter_failed",
+        "returncode": 1,
+        "status": "FAILED",
+        "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 1320, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 1280, in main\n    plan_rows = _load_plan_rows(plan_path) if plan_path else None\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_window.py\", line 767, in _load_plan_rows\n    payload = json.loads(path.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: 'catalog/market_collection_plans/2026093023/shard-15.json'\n",
+        "stdout": ""
+      },
+      "sha256": "d86f4692421428d8a9eee3db7c977a0f25f8e406c56ddd21d55d709d0f3354ce"
+    }
+  },
+  "config_sha256": "acf2096ace52ebf1f930f4c09b6278ef23ca8d0f9b2adf66c38de1ca7ae67f03",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-30T23:38:46.037439+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "checkpoint_id": "d86f4692421428d8a9eee3db7c977a0f25f8e406c56ddd21d55d709d0f3354ce",
+    "duration_s": 3500,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 7,
+    "last_run_id": "36809827358",
+    "market_shard_count": 16,
+    "market_shard_index": 15,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/2026093023/shard-15.json",
+    "plan_sha256": "d7ef2849b635925eb3d4ca6d0505e9ad22b9760ad8be3948262d528932e44623",
+    "predecessor_run_id": "36809758368",
+    "requested_handoff_at_utc": "2026-10-01T03:17:23Z",
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 43,
+    "universe_digest": "ea21095c62c340ecabf368bfab9d5e335b4484954723d6a3c1215d6687fbdc40",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-07T23:38:46.037439+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "fa48c61276aad55943196d88c998c320cb48855bf2c910ada4776fdd865c7a84"
+    },
+    {
+      "at": "2026-10-01T03:18:16.962910Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-01T03:18:31.341565Z",
+      "from": "RUNNING",
+      "reason": "adapter_failed",
+      "to": "FAILED"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "fa48c61276aad55943196d88c998c320cb48855bf2c910ada4776fdd865c7a84",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 7,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "FAILED",
+  "status_reason": "adapter_failed",
+  "terminal_evidence_digest": "c20d3f12fd34e8d1329d09220919ca94e5a9b6280bfffd6a75c14950c1f8bb6a",
+  "updated_at": "2026-10-01T03:18:31.341565Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

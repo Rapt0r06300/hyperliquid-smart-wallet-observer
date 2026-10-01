@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 15482,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-btc-usdt-swap-1790344068002-1790344956937-7c9af4087cab",
+  "end_ts_ms": 1790344956937,
+  "event_count": 119,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 588850264,
+    "asset_name": "okx-public-ws-open-interest-btc-usdt-swap-1790344068002-1790344956937-7c9af4087cab.jsonl.gz",
+    "release_id": 396793769,
+    "remote_digest": "sha256:7c9af4087cab6111a195a84687929572578048972a73cdef8b350fae3b90a70c",
+    "remote_size": 15482,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s0"
+  },
+  "release_asset": "okx-public-ws-open-interest-btc-usdt-swap-1790344068002-1790344956937-7c9af4087cab.jsonl.gz",
+  "release_asset_id": 588850264,
+  "release_id": 396793769,
+  "release_remote_digest": "sha256:7c9af4087cab6111a195a84687929572578048972a73cdef8b350fae3b90a70c",
+  "release_remote_size": 15482,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7c9af4087cab6111a195a84687929572578048972a73cdef8b350fae3b90a70c",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790344068002,
+  "symbol": "BTC-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 119,
+      "max": 58.0,
+      "min": 9.0,
+      "p50": 28.0,
+      "p95": 58.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-50eb8c467f344597a626b330242211b6"
+    ],
+    "first_exchange_ts_ms": 1790344060887,
+    "last_exchange_ts_ms": 1790344956846,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 119,
+      "max": 7115.0,
+      "min": 87.0,
+      "p50": 90.0,
+      "p95": 92.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 119,
+      "max": 175.857924,
+      "min": 0.0,
+      "p50": 169.610992,
+      "p95": 172.543064
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

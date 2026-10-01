@@ -20,7 +20,7 @@ def _manifest(status: str, *, verified: bool = True, symbol: str = "BTCUSDT"):
         "end_ts_ms": 2000,
         "sha256": "a" * 64,
         "release": {
-            "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "asset_id": 1,
             "asset_name": "x.jsonl.gz",
             "remote_size": 10,

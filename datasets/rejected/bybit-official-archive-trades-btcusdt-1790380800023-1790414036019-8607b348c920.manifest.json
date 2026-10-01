@@ -1,0 +1,110 @@
+{
+  "asset_sha256": "8607b348c920e01a44a89016cd6a97495a2bbf1d639f7b02b2c7c1cf63fe7687",
+  "asset_verified": true,
+  "bytes": 16707993,
+  "collection_run_id": "archives-bybit-btc-20260927-v4-0",
+  "collector_version": "4a7f9308acf861359547d7a03e0aca9c50b12795",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-official-archive-trades-btcusdt-1790380800023-1790414036019-8607b348c920",
+  "end_ts_ms": 1790414036019,
+  "event_count": 190000,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 190000,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:missing_monotonic_count=190000",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 190000,
+  "record_count_scanned": 190000,
+  "release": {
+    "asset_id": 593468874,
+    "asset_name": "bybit-official-archive-trades-btcusdt-1790380800023-1790414036019-8607b348c920.jsonl.gz",
+    "release_id": 397754142,
+    "remote_digest": "sha256:8607b348c920e01a44a89016cd6a97495a2bbf1d639f7b02b2c7c1cf63fe7687",
+    "remote_size": 16707993,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-archives-bybit-btc-20260927-v4-u0"
+  },
+  "release_asset": "bybit-official-archive-trades-btcusdt-1790380800023-1790414036019-8607b348c920.jsonl.gz",
+  "release_asset_id": 593468874,
+  "release_id": 397754142,
+  "release_remote_digest": "sha256:8607b348c920e01a44a89016cd6a97495a2bbf1d639f7b02b2c7c1cf63fe7687",
+  "release_remote_size": 16707993,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-archives-bybit-btc-20260927-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "MISSING_MONOTONIC_TIMESTAMP",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "8607b348c920e01a44a89016cd6a97495a2bbf1d639f7b02b2c7c1cf63fe7687",
+  "source": "bybit_official_archive",
+  "start_ts_ms": 1790380800023,
+  "symbol": "BTCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790380800023,
+    "last_exchange_ts_ms": 1790414036019,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 190000,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 190000,
+  "trade_count_exact": true,
+  "unique_trade_count": 140935,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

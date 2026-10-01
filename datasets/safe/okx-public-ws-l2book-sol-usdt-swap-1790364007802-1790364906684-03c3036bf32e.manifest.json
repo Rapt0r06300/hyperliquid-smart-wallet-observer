@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 2061791,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-sol-usdt-swap-1790364007802-1790364906684-03c3036bf32e",
+  "end_ts_ms": 1790364906684,
+  "event_count": 8918,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 8918,
+  "release": {
+    "asset_id": 589183129,
+    "asset_name": "okx-public-ws-l2book-sol-usdt-swap-1790364007802-1790364906684-03c3036bf32e.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:03c3036bf32ebb6688200fc601c00b9f9362cb3b5a8d14dff663b8fc3940daeb",
+    "remote_size": 2061791,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "okx-public-ws-l2book-sol-usdt-swap-1790364007802-1790364906684-03c3036bf32e.jsonl.gz",
+  "release_asset_id": 589183129,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:03c3036bf32ebb6688200fc601c00b9f9362cb3b5a8d14dff663b8fc3940daeb",
+  "release_remote_size": 2061791,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "03c3036bf32ebb6688200fc601c00b9f9362cb3b5a8d14dff663b8fc3940daeb",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790364007802,
+  "symbol": "SOL-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 8918,
+      "max": 53.0,
+      "min": 18.5,
+      "p50": 26.0,
+      "p95": 53.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-c64ddc2c95814f03b704bd4ce59afc6e"
+    ],
+    "first_exchange_ts_ms": 1790364007502,
+    "last_exchange_ts_ms": 1790364906602,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 8918,
+      "max": 1286.0,
+      "min": 79.0,
+      "p50": 82.0,
+      "p95": 94.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 8918,
+      "max": 733.028875,
+      "min": 0.0,
+      "p50": 147.083055,
+      "p95": 151.767666
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}

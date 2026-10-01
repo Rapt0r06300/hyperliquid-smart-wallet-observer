@@ -38,7 +38,7 @@ def test_legacy_dataset_job_points_only_to_canonical_v2() -> None:
     text = _text()
     assert "legacy hypersmart-datasets source has been deleted" in text
     assert "Alina Dataset V2 is the only permitted dataset source" in text
-    assert "Rapt0r06300/alina-smartflow-datasets-v2" in text
+    assert "Rapt0r06300/hyperliquid-smart-wallet-observer" in text
     assert "exit 1" in text
 
 

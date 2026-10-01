@@ -1,0 +1,90 @@
+{
+  "attempts": 0,
+  "campaign_id": "archives-binance-btc-20260927-v4",
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "4a7f9308acf861359547d7a03e0aca9c50b12795",
+  "completed_units": {
+    "0": {
+      "result": {
+        "bundle_root": "/home/runner/work/_temp/campaign-output/archives-binance-btc-20260927-v4/0/bundle",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/archives-binance-btc-20260927-v4/0/bundle",
+        "partial_count": 2,
+        "phases": [
+          {
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_official_archive_backfill.py",
+              "--venue",
+              "binance"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "{\n  \"archives\": [\n    {\n      \"checksum_verified\": true,\n      \"coin\": \"BTC\",\n      \"compressed_sha256\": \"466c12daf3ff16d91127bc224c84e646da42449ce4e7ecbc2e600fd0ffebb288\",\n      \"date\": \"2026-09-26\",\n      \"event_count\": 346286,\n      \"source_url\": \"https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-26.zip\",\n      \"symbol\": \"BTCUSDT\",\n      \"venue\": \"binance\"\n    }\n  ],\n  \"bundle_partial_count\": 2,\n  \"bundle_path\": \"/home/runner/work/_temp/campaign-output/archives-binance-btc-20260927-v4/0/bundle\",\n  \"bundle_safe_count\": 0,\n  \"bundle_shard_count\": 2,\n  \"coin\": \"BTC\",\n  \"end_date\": \"2026-09-26\",\n  \"event_count\": 346286,\n  \"raw_shard_count\": 1,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.official_archive_backfill.v1\",\n  \"start_date\": \"2026-09-26\",\n  \"symbol\": \"BTCUSDT\",\n  \"venue\": \"binance\"\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "release_tag": "data-v2-campaign-archives-binance-btc-20260927-v4-u0",
+        "returncode": 0,
+        "safe_count": 0,
+        "safe_workspace": null,
+        "shard_count": 2,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "{\n  \"archives\": [\n    {\n      \"checksum_verified\": true,\n      \"coin\": \"BTC\",\n      \"compressed_sha256\": \"466c12daf3ff16d91127bc224c84e646da42449ce4e7ecbc2e600fd0ffebb288\",\n      \"date\": \"2026-09-26\",\n      \"event_count\": 346286,\n      \"source_url\": \"https://data.binance.vision/data/futures/um/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-2026-09-26.zip\",\n      \"symbol\": \"BTCUSDT\",\n      \"venue\": \"binance\"\n    }\n  ],\n  \"bundle_partial_count\": 2,\n  \"bundle_path\": \"/home/runner/work/_temp/campaign-output/archives-binance-btc-20260927-v4/0/bundle\",\n  \"bundle_safe_count\": 0,\n  \"bundle_shard_count\": 2,\n  \"coin\": \"BTC\",\n  \"end_date\": \"2026-09-26\",\n  \"event_count\": 346286,\n  \"raw_shard_count\": 1,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.official_archive_backfill.v1\",\n  \"start_date\": \"2026-09-26\",\n  \"symbol\": \"BTCUSDT\",\n  \"venue\": \"binance\"\n}\n"
+      },
+      "sha256": "33d6eb9b359404d57ce6facaaa56be01ab8f42dc4a74413f782a32b42bd75789"
+    }
+  },
+  "config_sha256": "61af09213804c20fcff42ce21073c15bde8e0caaae5d6de4ba6b3262176c2758",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-27T06:20:48.691022+00:00",
+  "cursor": {
+    "coin": "BTC",
+    "end_date": "2026-09-26",
+    "max_days": 1,
+    "start_date": "2026-09-26",
+    "symbol": "BTCUSDT",
+    "venue": "binance"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "expires_at": "2026-10-04T06:20:48.691022+00:00",
+  "history": [
+    {
+      "at": "2026-09-27T18:04:14.743015Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-27T18:05:13.035060Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
+    }
+  ],
+  "kind": "official_archive_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "outputs": [],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v1",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "updated_at": "2026-09-27T18:05:13.035060Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

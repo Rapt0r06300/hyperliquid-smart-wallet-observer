@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 132307,
+  "collection_run_id": "market-36006392932",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-aptusdt-1790256848569-1790256995274-5d0d0cd635ed",
+  "end_ts_ms": 1790256995274,
+  "event_count": 1372,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 586414250,
+    "asset_name": "bitget-public-ws-ticker-aptusdt-1790256848569-1790256995274-5d0d0cd635ed.jsonl.gz",
+    "release_id": 395896473,
+    "remote_digest": "sha256:5d0d0cd635ed932bdaefa6587c839532f42dced4fc004ba0b5025c9883edeffa",
+    "remote_size": 132307,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36006392932-s5"
+  },
+  "release_asset": "bitget-public-ws-ticker-aptusdt-1790256848569-1790256995274-5d0d0cd635ed.jsonl.gz",
+  "release_asset_id": 586414250,
+  "release_id": 395896473,
+  "release_remote_digest": "sha256:5d0d0cd635ed932bdaefa6587c839532f42dced4fc004ba0b5025c9883edeffa",
+  "release_remote_size": 132307,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36006392932-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5d0d0cd635ed932bdaefa6587c839532f42dced4fc004ba0b5025c9883edeffa",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790256848569,
+  "symbol": "APTUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-968d691aa0f544a9a7e5fe05f985a9e1"
+    ],
+    "first_exchange_ts_ms": 1790256848317,
+    "last_exchange_ts_ms": 1790256995205,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1372,
+      "max": 252.0,
+      "min": 58.0,
+      "p50": 68.0,
+      "p95": 98.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

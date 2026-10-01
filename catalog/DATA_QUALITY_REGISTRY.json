@@ -1,0 +1,46 @@
+{
+  "active_dataset": {
+    "indexed_shards": 37371,
+    "partial_count": 16636,
+    "proof_of_pnl_allowed": false,
+    "reject_count": 8402,
+    "safe_count": 12333,
+    "stale_count": 0,
+    "status": "SAFE",
+    "validation_allowed": true
+  },
+  "generation": "V2_FRESH",
+  "policy": {
+    "legacy_import_allowed": false,
+    "missing_values_never_zero_imputed": true,
+    "public_data_only": true,
+    "replay_from_incoming": false,
+    "replay_from_quarantine": false,
+    "replay_from_rejected": false,
+    "require_continuity_audit": true,
+    "require_cost_model_when_applicable": true,
+    "require_duplicate_audit": true,
+    "require_provenance": true,
+    "require_sha256": true,
+    "require_sync_audit": true,
+    "require_timestamp": true,
+    "secrets_forbidden": true,
+    "self_hosted_forbidden": true,
+    "unknown_status": "REJECT",
+    "user_pc_forbidden": true,
+    "validation_root": "datasets/safe"
+  },
+  "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "schema": "alina.dataset_quality_registry.v2",
+  "status_vocabulary": [
+    "SAFE",
+    "PARTIAL",
+    "STALE",
+    "REJECT",
+    "NO_DATA"
+  ],
+  "validation_allowed_statuses": [
+    "SAFE"
+  ],
+  "visibility": "public"
+}

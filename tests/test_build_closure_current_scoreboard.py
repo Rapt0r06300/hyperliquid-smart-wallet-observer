@@ -57,7 +57,7 @@ def _write_receipt(root):
         "collection_cutoff_at_utc": campaign["collection_cutoff_at_utc"],
         "dataset_selection_id": campaign["dataset_selection_id"],
         "code_sha": campaign["code_sha"],
-        "evidence_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "evidence_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "evidence_tag": "campaign-evidence-analysis-e3-scoreboard-v2-u0",
         "scoreboard_sha256": digest(scoreboard),
         "scoreboard": scoreboard,

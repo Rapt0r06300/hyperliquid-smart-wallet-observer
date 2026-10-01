@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 116896,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-crvusdt-1790117941736-1790118078511-865499794f21",
+  "end_ts_ms": 1790118078511,
+  "event_count": 1267,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582775612,
+    "asset_name": "bitget-public-ws-ticker-crvusdt-1790117941736-1790118078511-865499794f21.jsonl.gz",
+    "release_id": 394255778,
+    "remote_digest": "sha256:865499794f21342d3cf42dd18d17e71996dd13fb5e88784a1d14f7d2795d6049",
+    "remote_size": 116896,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s4"
+  },
+  "release_asset": "bitget-public-ws-ticker-crvusdt-1790117941736-1790118078511-865499794f21.jsonl.gz",
+  "release_asset_id": 582775612,
+  "release_id": 394255778,
+  "release_remote_digest": "sha256:865499794f21342d3cf42dd18d17e71996dd13fb5e88784a1d14f7d2795d6049",
+  "release_remote_size": 116896,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s4",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "865499794f21342d3cf42dd18d17e71996dd13fb5e88784a1d14f7d2795d6049",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790117941736,
+  "symbol": "CRVUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-d8a6964eb5f446e2a90a4d66082ff354"
+    ],
+    "first_exchange_ts_ms": 1790117941372,
+    "last_exchange_ts_ms": 1790118078436,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1267,
+      "max": 1475.0,
+      "min": 72.0,
+      "p50": 84.0,
+      "p95": 107.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

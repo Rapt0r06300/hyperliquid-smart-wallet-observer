@@ -1,0 +1,118 @@
+{
+  "attempts": 1,
+  "campaign_id": "copy-vault-94-2026092518-v6",
+  "chunk_index": 1,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "471784abf63b4b0bc97c080dd58c94dcf47e4aba",
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+          "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_copy_vault.py",
+          "--output",
+          "/home/runner/work/_temp/campaign-output/copy-vault-94-2026092518-v6/0"
+        ],
+        "phase": "unit",
+        "phases": [],
+        "reason": "adapter_timeout",
+        "status": "CONTINUATION_REQUIRED"
+      },
+      "sha256": "9bdee5a242dca0926c4556a4a22649bb79e2e59dca49ebcc8f4726f066646b49"
+    },
+    "1": {
+      "result": {
+        "bundle_root": "/home/runner/work/_temp/campaign-output/copy-vault-94-2026092518-v6/1",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/copy-vault-94-2026092518-v6/1",
+        "partial_count": 20,
+        "phases": [
+          {
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/collect_cloud_copy_vault.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/copy-vault-94-2026092518-v6/1"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "{\n  \"accepted_frames\": 47,\n  \"bundle\": {\n    \"partial_count\": 37,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"shard_count\": 37\n  },\n  \"collection_launch_ts_ms\": 1790431987475,\n  \"collection_run_id\": \"copy-vault-94-2026092518-v6-1\",\n  \"collection_start_ts_ms\": 1790431987809,\n  \"duration_s\": 300.297,\n  \"end_ts_ms\": 1790432288106,\n  \"l2_coin_count\": 48,\n  \"l2_frames\": 7,\n  \"l2_heartbeats\": 0,\n  \"l2_reconnects\": 12,\n  \"live_fill_counts\": {},\n  \"persisted_frames\": 47,\n  \"position_snapshots_end\": 10,\n  \"position_snapshots_start\": 10,\n  \"queue_drops\": 0,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"reconciliation\": {\n    \"0x30248bc50830dceebe3eb4c1de773c91ea39a0a3\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988416,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x3124980fe3cd0a2566f60fb1ef6f9feb05212d58\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988416,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x5b2bdc0fc832c18ee74222a363ae8c1b42f9909d\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988264,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xae6b807ec47e0b7900d1fe2a53885b4602748b03\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987809,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xaea0c844737c6625092410b1d69311002d356091\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988113,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xbce6dc84a40a6cebc73f89f66c4809bbabdec40c\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987960,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xcb6a5b2518e69611ce17816cbc75e8fe5daf58a0\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988265,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xde923fd08477b3955c36837104aa4fdfee865eb8\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987809,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xe4fe5f3dd8489cbd4cc0a09152f50e000f05f35b\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987961,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xf5b47064b53a67255b472e5285549b6d890b537a\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988113,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    }\n  },\n  \"reconnect_counts\": {},\n  \"schema\": \"alina.copy_vault_cloud_window.v1\",\n  \"selection_ts_ms\": 1790362290212,\n  \"socket_groups\": 2,\n  \"vault_count\": 10,\n  \"vault_observation_start_ts_ms\": {\n    \"0x30248bc50830dceebe3eb4c1de773c91ea39a0a3\": 1790431988416,\n    \"0x3124980fe3cd0a2566f60fb1ef6f9feb05212d58\": 1790431988416,\n    \"0x5b2bdc0fc832c18ee74222a363ae8c1b42f9909d\": 1790431988264,\n    \"0xae6b807ec47e0b7900d1fe2a53885b4602748b03\": 1790431987809,\n    \"0xaea0c844737c6625092410b1d69311002d356091\": 1790431988113,\n    \"0xbce6dc84a40a6cebc73f89f66c4809bbabdec40c\": 1790431987960,\n    \"0xcb6a5b2518e69611ce17816cbc75e8fe5daf58a0\": 1790431988265,\n    \"0xde923fd08477b3955c36837104aa4fdfee865eb8\": 1790431987809,\n    \"0xe4fe5f3dd8489cbd4cc0a09152f50e000f05f35b\": 1790431987961,\n    \"0xf5b47064b53a67255b472e5285549b6d890b537a\": 1790431988113\n  },\n  \"vault_shard_count\": 310,\n  \"vault_shard_index\": 94,\n  \"vault_universe_count\": 3095\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "release_tag": "data-v2-campaign-copy-vault-94-2026092518-v6-u1",
+        "returncode": 0,
+        "safe_count": 17,
+        "safe_workspace": null,
+        "shard_count": 37,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "{\n  \"accepted_frames\": 47,\n  \"bundle\": {\n    \"partial_count\": 37,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"shard_count\": 37\n  },\n  \"collection_launch_ts_ms\": 1790431987475,\n  \"collection_run_id\": \"copy-vault-94-2026092518-v6-1\",\n  \"collection_start_ts_ms\": 1790431987809,\n  \"duration_s\": 300.297,\n  \"end_ts_ms\": 1790432288106,\n  \"l2_coin_count\": 48,\n  \"l2_frames\": 7,\n  \"l2_heartbeats\": 0,\n  \"l2_reconnects\": 12,\n  \"live_fill_counts\": {},\n  \"persisted_frames\": 47,\n  \"position_snapshots_end\": 10,\n  \"position_snapshots_start\": 10,\n  \"queue_drops\": 0,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"reconciliation\": {\n    \"0x30248bc50830dceebe3eb4c1de773c91ea39a0a3\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988416,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x3124980fe3cd0a2566f60fb1ef6f9feb05212d58\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988416,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x5b2bdc0fc832c18ee74222a363ae8c1b42f9909d\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988264,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xae6b807ec47e0b7900d1fe2a53885b4602748b03\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987809,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xaea0c844737c6625092410b1d69311002d356091\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988113,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xbce6dc84a40a6cebc73f89f66c4809bbabdec40c\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987960,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xcb6a5b2518e69611ce17816cbc75e8fe5daf58a0\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988265,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xde923fd08477b3955c36837104aa4fdfee865eb8\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987809,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xe4fe5f3dd8489cbd4cc0a09152f50e000f05f35b\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431987961,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xf5b47064b53a67255b472e5285549b6d890b537a\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1790432288106,\n        \"requested_start_ms\": 1790431988113,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    }\n  },\n  \"reconnect_counts\": {},\n  \"schema\": \"alina.copy_vault_cloud_window.v1\",\n  \"selection_ts_ms\": 1790362290212,\n  \"socket_groups\": 2,\n  \"vault_count\": 10,\n  \"vault_observation_start_ts_ms\": {\n    \"0x30248bc50830dceebe3eb4c1de773c91ea39a0a3\": 1790431988416,\n    \"0x3124980fe3cd0a2566f60fb1ef6f9feb05212d58\": 1790431988416,\n    \"0x5b2bdc0fc832c18ee74222a363ae8c1b42f9909d\": 1790431988264,\n    \"0xae6b807ec47e0b7900d1fe2a53885b4602748b03\": 1790431987809,\n    \"0xaea0c844737c6625092410b1d69311002d356091\": 1790431988113,\n    \"0xbce6dc84a40a6cebc73f89f66c4809bbabdec40c\": 1790431987960,\n    \"0xcb6a5b2518e69611ce17816cbc75e8fe5daf58a0\": 1790431988265,\n    \"0xde923fd08477b3955c36837104aa4fdfee865eb8\": 1790431987809,\n    \"0xe4fe5f3dd8489cbd4cc0a09152f50e000f05f35b\": 1790431987961,\n    \"0xf5b47064b53a67255b472e5285549b6d890b537a\": 1790431988113\n  },\n  \"vault_shard_count\": 310,\n  \"vault_shard_index\": 94,\n  \"vault_universe_count\": 3095\n}\n"
+      },
+      "sha256": "b49c1630ecbefbb3c7a734d4291b4aed23ae026de91d2672b66aaa2b7812f3a3"
+    }
+  },
+  "config_sha256": "983aa33df07ddbf5419c9ed8041cf89a38c9a77579ab582c49919868399450e5",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-25T18:51:38.512555+00:00",
+  "cursor": {
+    "duration_s": 3500,
+    "max_vaults": 3095,
+    "rotate_mb": 64,
+    "selection_file": "catalog/copy_vault_selections/2026092518.json",
+    "selection_sha256": "1f0d4107342c36d920bd010c4a62e5113dcfa4eddd3eac493454f864c3856edf",
+    "vault_shard_count": 310,
+    "vault_shard_index": 94
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "expires_at": "2026-10-02T18:51:38.512555+00:00",
+  "history": [
+    {
+      "at": "2026-09-26T06:06:10.973384Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-26T11:21:07.477248Z",
+      "from": "RUNNING",
+      "reason": "adapter_timeout",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-09-26T14:13:03.134072Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-26T14:18:52.990651Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
+    }
+  ],
+  "kind": "copy_vault_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 1,
+  "outputs": [],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v1",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "updated_at": "2026-09-26T14:18:52.990651Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

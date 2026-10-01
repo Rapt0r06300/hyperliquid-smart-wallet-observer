@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 12546,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-atom-usdt-swap-1790117942576-1790118835663-964105fc5396",
+  "end_ts_ms": 1790118835663,
+  "event_count": 114,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582778944,
+    "asset_name": "okx-public-ws-open-interest-atom-usdt-swap-1790117942576-1790118835663-964105fc5396.jsonl.gz",
+    "release_id": 394256558,
+    "remote_digest": "sha256:964105fc5396b9301e6be6cf00e29246f958f3b0c7e17b500a3cb2d2a92ce783",
+    "remote_size": 12546,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s1"
+  },
+  "release_asset": "okx-public-ws-open-interest-atom-usdt-swap-1790117942576-1790118835663-964105fc5396.jsonl.gz",
+  "release_asset_id": 582778944,
+  "release_id": 394256558,
+  "release_remote_digest": "sha256:964105fc5396b9301e6be6cf00e29246f958f3b0c7e17b500a3cb2d2a92ce783",
+  "release_remote_size": 12546,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "964105fc5396b9301e6be6cf00e29246f958f3b0c7e17b500a3cb2d2a92ce783",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790117942576,
+  "symbol": "ATOM-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 114,
+      "max": 83.5,
+      "min": 35.0,
+      "p50": 42.5,
+      "p95": 83.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-104cf986082c4d55a610f8b0c9c02f57"
+    ],
+    "first_exchange_ts_ms": 1790117939585,
+    "last_exchange_ts_ms": 1790118835567,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 114,
+      "max": 2991.0,
+      "min": 94.0,
+      "p50": 96.0,
+      "p95": 99.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 114,
+      "max": 164.401834,
+      "min": 0.0,
+      "p50": 160.187825,
+      "p95": 162.191806
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

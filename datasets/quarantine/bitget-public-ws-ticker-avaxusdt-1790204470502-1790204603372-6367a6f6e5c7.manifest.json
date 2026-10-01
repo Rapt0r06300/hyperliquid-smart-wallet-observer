@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 115895,
+  "collection_run_id": "market-35931073631",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-avaxusdt-1790204470502-1790204603372-6367a6f6e5c7",
+  "end_ts_ms": 1790204603372,
+  "event_count": 1246,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584998991,
+    "asset_name": "bitget-public-ws-ticker-avaxusdt-1790204470502-1790204603372-6367a6f6e5c7.jsonl.gz",
+    "release_id": 395258766,
+    "remote_digest": "sha256:6367a6f6e5c7043cecb1c40bc299623cad7cdd4afe549b0064b4849e907c818c",
+    "remote_size": 115895,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35931073631-s2"
+  },
+  "release_asset": "bitget-public-ws-ticker-avaxusdt-1790204470502-1790204603372-6367a6f6e5c7.jsonl.gz",
+  "release_asset_id": 584998991,
+  "release_id": 395258766,
+  "release_remote_digest": "sha256:6367a6f6e5c7043cecb1c40bc299623cad7cdd4afe549b0064b4849e907c818c",
+  "release_remote_size": 115895,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35931073631-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6367a6f6e5c7043cecb1c40bc299623cad7cdd4afe549b0064b4849e907c818c",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790204470502,
+  "symbol": "AVAXUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-573e86d9dff74c14a3428ea632dc08c7"
+    ],
+    "first_exchange_ts_ms": 1790204470274,
+    "last_exchange_ts_ms": 1790204603304,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1246,
+      "max": 228.0,
+      "min": 60.0,
+      "p50": 65.0,
+      "p95": 88.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

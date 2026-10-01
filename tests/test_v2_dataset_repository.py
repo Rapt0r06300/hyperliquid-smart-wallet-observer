@@ -24,7 +24,7 @@ def _safe_row(**overrides):
         "event_count": 10,
         "quality_status": "SAFE",
         "replay_compatible": True,
-        "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "release_tag": "v2-test",
         "release_asset": "x.jsonl.gz",
         "manifest_path": "datasets/safe/x.manifest.json",

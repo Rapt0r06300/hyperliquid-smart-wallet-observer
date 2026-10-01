@@ -1,0 +1,64 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+WORKFLOW = ROOT / ".github" / "workflows" / "create-resumable-campaigns.yml"
+
+
+def _text() -> str:
+    return WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_campaign_creation_workflow_has_single_canonical_structure() -> None:
+    text = _text()
+    assert text.count("\njobs:\n") == 1
+    assert text.count("\n  launch:\n") == 1
+    assert text.count("make_campaign() {") == 1
+    assert text.count("PHASE_ARGS+=(--operator-request-id") == 1
+
+
+def test_analysis_selection_identity_is_exact_sha256_binding() -> None:
+    text = _text()
+    assert "tools/resolve_analysis_selection.py" in text
+    assert '--source-collection-epoch "$SOURCE_COLLECTION_EPOCH"' in text
+    assert '--collection-cutoff-at-utc "$COLLECTION_CUTOFF"' in text
+    assert 'grep -Eq \'^[0-9a-f]{64}$\'' in text
+    assert '--dataset-selection-id "$DATASET_SELECTION_ID"' in text
+    assert '--dataset-selection-id "phase-' not in text
+
+
+def test_workflow_has_no_post_launch_duplicated_campaign_body() -> None:
+    text = _text()
+    launch = text.index("\n  launch:\n")
+    tail = text[launch:]
+    assert "make_campaign() {" not in tail
+    assert "PHASE_ARGS+=(--source-collection-epoch" not in tail
+
+
+def test_collect_campaigns_refresh_stale_code_pins_safely() -> None:
+    text = _text()
+    assert "tools/refresh_pending_collect_campaign.py" in text
+    assert 'if [ -f "$P" ] && [ "$PHASE" = "COLLECT" ]; then' in text
+    assert '--expected-phase-epoch "$PHASE_EPOCH"' in text
+    assert text.count("refresh_pending_collect_campaign.py") >= 2
+
+
+def test_controller_does_not_serialize_fresh_market_behind_copy_fanout() -> None:
+    controller = (ROOT / ".github" / "workflows" / "resumable-campaign-controller.yml").read_text(encoding="utf-8")
+    assert "group: resumable-campaign-controller-v4" in controller
+    assert "copy_ids=copy_ids[:1]" in controller
+    assert "active_other=0" in controller
+    assert "other_capacity=max(0,16-active_other)" in controller
+    assert "other_ids=other_ids[:other_capacity]" in controller
+    assert "dispatch_collect:" in controller
+    assert "gh workflow run resumable-campaign-worker.yml" in controller
+    assert "needs.select.outputs.phase != 'COLLECT'" in controller
+
+
+def test_collect_market_shards_scale_without_repartitioning_live_bucket() -> None:
+    text = _text()
+    assert "TARGET_MARKET_SHARDS=16" in text
+    assert 'if [ -f "$MARKET_SHARD_INDEX" ]; then' in text
+    assert 'preserving frozen current-bucket market_shard_count=$MARKET_SHARDS' in text
+    assert '--shard-count "$MARKET_SHARDS"' in text

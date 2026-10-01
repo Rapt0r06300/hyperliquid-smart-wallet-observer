@@ -1,0 +1,169 @@
+{
+  "asset_verified": true,
+  "bytes": 10171,
+  "collection_run_id": "event-2026093015-v5-0",
+  "collector_version": "1deec28bb0e07862c7c4a113e279162cad2ed14e",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gdacs-external-events-global-1790782239823-1790782239823-b529b84e229f",
+  "end_ts_ms": 1790782239823,
+  "event_count": 83,
+  "event_intelligence": {
+    "coverage_complete": true,
+    "coverage_sha256": "2c05ba9e2fefd9f768fa95db5453028ae9c56cfb9b8878d4320b28970302a72b",
+    "dataset_families": [
+      "bbo",
+      "copy_vault_fills",
+      "copy_vault_l2",
+      "copy_vault_positions",
+      "external_events",
+      "funding_settlement",
+      "instrument_metadata",
+      "l2book",
+      "open_interest",
+      "trades"
+    ],
+    "idea_count": 120,
+    "linked_strategy_families": [
+      "arbitrage",
+      "copy_vault",
+      "cross_venue_dislocation",
+      "lead_lag"
+    ],
+    "paper_only": true,
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "read_only": true,
+    "real_execution": false,
+    "schema": "alina.event_intelligence_integration.v1",
+    "wiring": {
+      "economic_proof_allowed": false,
+      "economic_proof_complete": true,
+      "idea_count": 120,
+      "paper_only": true,
+      "partial_proof_count": 0,
+      "read_only": true,
+      "real_execution": false,
+      "schema": "alina.event_intelligence_wiring.v1",
+      "status_registry_digest": "e6d1f7c39c52fcd444f5e280088f0cbc2d1623a6e8020b2b94f99db8a9850dec",
+      "summary": {
+        "BROKEN": 0,
+        "IMPLEMENTED_AND_WIRED": 117,
+        "IMPLEMENTED_BUT_NOT_WIRED": 0,
+        "IMPLEMENTED_BUT_PARTIAL": 0,
+        "MISSING": 0,
+        "NOT_APPLICABLE": 3
+      },
+      "wiring_complete": true
+    }
+  },
+  "event_intelligence_runtime": {
+    "accepted_event_count": 183,
+    "economic_research_sha256": "770fd24e4fef047d6ff5dde14f6836f9bd840f72d434646b148b21de2828ce4c",
+    "economic_research_state": "UNMEASURABLE",
+    "market_response_sha256": "b976f3155fbe61302b59f1a6fc88c6ef1f98273f640035ed73d1c8d5242545fd",
+    "market_response_state": "UNMEASURABLE",
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "research_protocol_sha256": "93a5b533c442cf1b0d732e65dbd29ac920f91d09fafc091430d6ea2499c23a9c",
+    "research_protocol_state": "UNMEASURABLE",
+    "runtime_evidence_sha256": "d7b80077777e2320bba5307251c6d98d2008071d9502ba52a89d3cb2443157fc",
+    "schema": "alina.event_intelligence_runtime_evidence.v1"
+  },
+  "family": "external_events",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "external_events"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "causal_event_availability"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNAVAILABLE"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "reason": "NO_INDEPENDENT_EXACT_REFERENCE",
+    "status": "UNAVAILABLE"
+  },
+  "record_count": 83,
+  "release": {
+    "asset_id": 601242516,
+    "asset_name": "gdacs-external-events-global-1790782239823-1790782239823-b529b84e229f.jsonl.gz",
+    "release_id": 400187691,
+    "remote_digest": "sha256:b529b84e229f7281f1f9b178bb21313a96c6064461ceb3cb86500e500e41cbd4",
+    "remote_size": 10171,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-event-2026093015-v5-u0"
+  },
+  "release_asset": "gdacs-external-events-global-1790782239823-1790782239823-b529b84e229f.jsonl.gz",
+  "release_asset_id": 601242516,
+  "release_id": 400187691,
+  "release_remote_digest": "sha256:b529b84e229f7281f1f9b178bb21313a96c6064461ceb3cb86500e500e41cbd4",
+  "release_remote_size": 10171,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-event-2026093015-v5-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b529b84e229f7281f1f9b178bb21313a96c6064461ceb3cb86500e500e41cbd4",
+  "source": "gdacs",
+  "start_ts_ms": 1790782239823,
+  "symbol": "GLOBAL",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "event-2026093015-v5-0:gdacs"
+    ],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}

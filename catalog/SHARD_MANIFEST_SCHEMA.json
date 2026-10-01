@@ -1,0 +1,37 @@
+{
+  "schema": "alina.shard_manifest.v2",
+  "required": [
+    "dataset_id",
+    "family",
+    "venue",
+    "symbol",
+    "start_ts_ms",
+    "end_ts_ms",
+    "sha256",
+    "bytes",
+    "event_count",
+    "collector_version",
+    "source",
+    "quality_status",
+    "provenance",
+    "integrity",
+    "reconciliation"
+  ],
+  "quality_statuses": ["SAFE", "PARTIAL", "STALE", "REJECT", "NO_DATA"],
+  "safe_contract": {
+    "asset_verified": true,
+    "reconciliation_status": "MATCHED",
+    "gap_count": 0,
+    "regression_count": 0,
+    "missing_timestamp_count": 0,
+    "missing_monotonic_count": 0,
+    "desync_count": 0,
+    "duplicates_must_be_deduped": true,
+    "all_required_channels_observed": true,
+    "cost_model_ready_when_applicable": true
+  },
+  "storage": {
+    "heavy_asset": "github_release_asset",
+    "control_manifest": "git_main"
+  }
+}

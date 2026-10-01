@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 1998141,
+  "collection_run_id": "market-35957266010",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-l2book-bera-usdt-1790225429418-1790238027319-e5e82e0c2d90",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790238027319,
+  "event_count": 17883,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 17883,
+  "release": {
+    "asset_id": 585487676,
+    "asset_name": "gate-public-ws-l2book-bera-usdt-1790225429418-1790238027319-e5e82e0c2d90.jsonl.gz",
+    "release_id": 395475107,
+    "remote_digest": "sha256:e5e82e0c2d903be25530e19a15503c1eec9e5a9f4258230523dbdc9937fd2bb4",
+    "remote_size": 1998141,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35957266010-s0"
+  },
+  "release_asset": "gate-public-ws-l2book-bera-usdt-1790225429418-1790238027319-e5e82e0c2d90.jsonl.gz",
+  "release_asset_id": 585487676,
+  "release_id": 395475107,
+  "release_remote_digest": "sha256:e5e82e0c2d903be25530e19a15503c1eec9e5a9f4258230523dbdc9937fd2bb4",
+  "release_remote_size": 1998141,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35957266010-s0",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e5e82e0c2d903be25530e19a15503c1eec9e5a9f4258230523dbdc9937fd2bb4",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790225429418,
+  "symbol": "BERA_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-858389b5bbad4653a33e31802aaee8c8"
+    ],
+    "first_exchange_ts_ms": 1790225429294,
+    "last_exchange_ts_ms": 1790238027165,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 17883,
+      "max": 338.0,
+      "min": 78.0,
+      "p50": 120.0,
+      "p95": 175.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}

@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 63651,
+  "collection_run_id": "market-35696397454",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-ethfi-1790071487876-1790075350452-1be6480d8089",
+  "end_ts_ms": 1790075350452,
+  "event_count": 260,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "status": "UNAVAILABLE"
+  },
+  "release": {
+    "asset_id": 581221732,
+    "asset_name": "hyperliquid-public-ws-trades-ethfi-1790071487876-1790075350452-1be6480d8089.jsonl.gz",
+    "release_id": 393659653,
+    "remote_digest": "sha256:1be6480d80896fdeebf2316e8e1f93951470c0384f3dc5a5c6ed8d78a992e9e4",
+    "remote_size": 63651,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696397454-s6"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-ethfi-1790071487876-1790075350452-1be6480d8089.jsonl.gz",
+  "release_asset_id": 581221732,
+  "release_id": 393659653,
+  "release_remote_digest": "sha256:1be6480d80896fdeebf2316e8e1f93951470c0384f3dc5a5c6ed8d78a992e9e4",
+  "release_remote_size": 63651,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696397454-s6",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1be6480d80896fdeebf2316e8e1f93951470c0384f3dc5a5c6ed8d78a992e9e4",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790071487876,
+  "symbol": "ETHFI",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-b72b9485b32c4d5fa5a1ccd5fb1bd42c"
+    ],
+    "first_exchange_ts_ms": 1790071470745,
+    "last_exchange_ts_ms": 1790075349955,
+    "max_reconnect_count": 2,
+    "receive_minus_exchange_ms": {
+      "count": 260,
+      "max": 17131.0,
+      "min": 232.0,
+      "p50": 307.0,
+      "p95": 543.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "unique_trade_count": 893,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

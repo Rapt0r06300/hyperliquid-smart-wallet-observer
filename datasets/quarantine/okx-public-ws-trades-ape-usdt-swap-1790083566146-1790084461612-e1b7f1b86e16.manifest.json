@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 82047,
+  "collection_run_id": "market-35733245157",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-ape-usdt-swap-1790083566146-1790084461612-e1b7f1b86e16",
+  "end_ts_ms": 1790084461612,
+  "event_count": 933,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 933,
+    "live_only": 11,
+    "matched_count": 922,
+    "missing_from_live": 457,
+    "reference_count": 1379,
+    "status": "PARTIAL"
+  },
+  "release": {
+    "asset_id": 581835131,
+    "asset_name": "okx-public-ws-trades-ape-usdt-swap-1790083566146-1790084461612-e1b7f1b86e16.jsonl.gz",
+    "release_id": 393952282,
+    "remote_digest": "sha256:e1b7f1b86e16a7ef15d1c68752dd44446b3f3e72aecf1a6da64d762db2e1d673",
+    "remote_size": 82047,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35733245157-s4"
+  },
+  "release_asset": "okx-public-ws-trades-ape-usdt-swap-1790083566146-1790084461612-e1b7f1b86e16.jsonl.gz",
+  "release_asset_id": 581835131,
+  "release_id": 393952282,
+  "release_remote_digest": "sha256:e1b7f1b86e16a7ef15d1c68752dd44446b3f3e72aecf1a6da64d762db2e1d673",
+  "release_remote_size": 82047,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35733245157-s4",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e1b7f1b86e16a7ef15d1c68752dd44446b3f3e72aecf1a6da64d762db2e1d673",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790083566146,
+  "symbol": "APE-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 933,
+      "max": 181.5,
+      "min": 33.0,
+      "p50": 36.5,
+      "p95": 181.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-3afd98899c4f45f58e27e96a697cade9"
+    ],
+    "first_exchange_ts_ms": 1790083566070,
+    "last_exchange_ts_ms": 1790084461534,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 933,
+      "max": 95.0,
+      "min": 76.0,
+      "p50": 77.0,
+      "p95": 81.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 933,
+      "max": 151.762019,
+      "min": 0.0,
+      "p50": 150.334224,
+      "p95": 151.762019
+    }
+  },
+  "unique_trade_count": 933,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "okx"
+}

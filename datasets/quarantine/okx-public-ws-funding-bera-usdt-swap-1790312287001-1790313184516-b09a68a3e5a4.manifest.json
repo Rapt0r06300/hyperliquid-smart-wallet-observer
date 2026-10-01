@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2799,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-bera-usdt-swap-1790312287001-1790313184516-b09a68a3e5a4",
+  "end_ts_ms": 1790313184516,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587906609,
+    "asset_name": "okx-public-ws-funding-bera-usdt-swap-1790312287001-1790313184516-b09a68a3e5a4.jsonl.gz",
+    "release_id": 396438274,
+    "remote_digest": "sha256:b09a68a3e5a41241370b78e7daae7fa42954ce0d33b2e6fa51d50d56737a13fa",
+    "remote_size": 2799,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s0"
+  },
+  "release_asset": "okx-public-ws-funding-bera-usdt-swap-1790312287001-1790313184516-b09a68a3e5a4.jsonl.gz",
+  "release_asset_id": 587906609,
+  "release_id": 396438274,
+  "release_remote_digest": "sha256:b09a68a3e5a41241370b78e7daae7fa42954ce0d33b2e6fa51d50d56737a13fa",
+  "release_remote_size": 2799,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b09a68a3e5a41241370b78e7daae7fa42954ce0d33b2e6fa51d50d56737a13fa",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790312287001,
+  "symbol": "BERA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 70.5,
+      "min": 20.5,
+      "p50": 24.5,
+      "p95": 65.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-6f7579a4c8234aaba80f9c65dc852612"
+    ],
+    "first_exchange_ts_ms": 1790312283858,
+    "last_exchange_ts_ms": 1790313184419,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 3143.0,
+      "min": 89.0,
+      "p50": 97.0,
+      "p95": 100.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 156.19585,
+      "min": 0.0,
+      "p50": 155.668446,
+      "p95": 156.034489
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

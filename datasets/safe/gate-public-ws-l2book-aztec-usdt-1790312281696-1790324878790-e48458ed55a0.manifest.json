@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 1273026,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-l2book-aztec-usdt-1790312281696-1790324878790-e48458ed55a0",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790324878790,
+  "event_count": 11962,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 11962,
+  "release": {
+    "asset_id": 587904302,
+    "asset_name": "gate-public-ws-l2book-aztec-usdt-1790312281696-1790324878790-e48458ed55a0.jsonl.gz",
+    "release_id": 396438123,
+    "remote_digest": "sha256:e48458ed55a0bfac5f7661cfa2d668c0e09a6927d0a3065828439f8cd037ec2a",
+    "remote_size": 1273026,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s5"
+  },
+  "release_asset": "gate-public-ws-l2book-aztec-usdt-1790312281696-1790324878790-e48458ed55a0.jsonl.gz",
+  "release_asset_id": 587904302,
+  "release_id": 396438123,
+  "release_remote_digest": "sha256:e48458ed55a0bfac5f7661cfa2d668c0e09a6927d0a3065828439f8cd037ec2a",
+  "release_remote_size": 1273026,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e48458ed55a0bfac5f7661cfa2d668c0e09a6927d0a3065828439f8cd037ec2a",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790312281696,
+  "symbol": "AZTEC_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-9b67f8adc0fa43e1b17cb3a0b3750611"
+    ],
+    "first_exchange_ts_ms": 1790312281527,
+    "last_exchange_ts_ms": 1790324878692,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 11962,
+      "max": 401.0,
+      "min": 78.0,
+      "p50": 129.0,
+      "p95": 170.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}

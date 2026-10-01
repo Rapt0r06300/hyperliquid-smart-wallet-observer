@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 367293,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-mark-price-aero-usdt-swap-1790312287001-1790313186029-6180c535e561",
+  "end_ts_ms": 1790313186029,
+  "event_count": 4446,
+  "family": "mark_price",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "mark_price"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587907021,
+    "asset_name": "okx-public-ws-mark-price-aero-usdt-swap-1790312287001-1790313186029-6180c535e561.jsonl.gz",
+    "release_id": 396438274,
+    "remote_digest": "sha256:6180c535e5618adf1c954400e08c5146e64dc3f3dc13772c829f45c93ced2607",
+    "remote_size": 367293,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s0"
+  },
+  "release_asset": "okx-public-ws-mark-price-aero-usdt-swap-1790312287001-1790313186029-6180c535e561.jsonl.gz",
+  "release_asset_id": 587907021,
+  "release_id": 396438274,
+  "release_remote_digest": "sha256:6180c535e5618adf1c954400e08c5146e64dc3f3dc13772c829f45c93ced2607",
+  "release_remote_size": 367293,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6180c535e5618adf1c954400e08c5146e64dc3f3dc13772c829f45c93ced2607",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790312287001,
+  "symbol": "AERO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 4446,
+      "max": 70.5,
+      "min": 20.5,
+      "p50": 24.5,
+      "p95": 70.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-6f7579a4c8234aaba80f9c65dc852612"
+    ],
+    "first_exchange_ts_ms": 1790312286772,
+    "last_exchange_ts_ms": 1790313185936,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4446,
+      "max": 229.0,
+      "min": 83.0,
+      "p50": 93.0,
+      "p95": 95.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 4446,
+      "max": 157.31478,
+      "min": 0.0,
+      "p50": 155.577729,
+      "p95": 156.340812
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

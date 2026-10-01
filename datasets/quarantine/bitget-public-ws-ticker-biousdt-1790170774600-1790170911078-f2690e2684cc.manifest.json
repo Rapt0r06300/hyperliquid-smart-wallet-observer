@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 115671,
+  "collection_run_id": "market-35868451926",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-biousdt-1790170774600-1790170911078-f2690e2684cc",
+  "end_ts_ms": 1790170911078,
+  "event_count": 1263,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584231754,
+    "asset_name": "bitget-public-ws-ticker-biousdt-1790170774600-1790170911078-f2690e2684cc.jsonl.gz",
+    "release_id": 394886376,
+    "remote_digest": "sha256:f2690e2684cce2579aba6ceb42ee3c32082323a38d7486624df2f60eaa77d2f7",
+    "remote_size": 115671,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35868451926-s2"
+  },
+  "release_asset": "bitget-public-ws-ticker-biousdt-1790170774600-1790170911078-f2690e2684cc.jsonl.gz",
+  "release_asset_id": 584231754,
+  "release_id": 394886376,
+  "release_remote_digest": "sha256:f2690e2684cce2579aba6ceb42ee3c32082323a38d7486624df2f60eaa77d2f7",
+  "release_remote_size": 115671,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35868451926-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f2690e2684cce2579aba6ceb42ee3c32082323a38d7486624df2f60eaa77d2f7",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790170774600,
+  "symbol": "BIOUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-1eecd0ed8d1e4e45adedde97301093f6"
+    ],
+    "first_exchange_ts_ms": 1790170774298,
+    "last_exchange_ts_ms": 1790170910988,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1263,
+      "max": 1876.0,
+      "min": 65.0,
+      "p50": 80.0,
+      "p95": 118.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

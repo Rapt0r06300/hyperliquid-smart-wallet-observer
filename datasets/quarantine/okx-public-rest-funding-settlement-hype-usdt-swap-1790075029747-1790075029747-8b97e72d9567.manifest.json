@@ -1,0 +1,98 @@
+{
+  "asset_verified": true,
+  "bytes": 719,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-rest-funding-settlement-hype-usdt-swap-1790075029747-1790075029747-8b97e72d9567",
+  "end_ts_ms": 1790075029747,
+  "event_count": 1,
+  "family": "funding_settlement",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581213091,
+    "asset_name": "okx-public-rest-funding-settlement-hype-usdt-swap-1790075029747-1790075029747-8b97e72d9567.jsonl.gz",
+    "release_id": 393656800,
+    "remote_digest": "sha256:8b97e72d9567938ea0f305d906845bb911d823d4ae904b7d31ea55ec75d27178",
+    "remote_size": 719,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35696301919-s3"
+  },
+  "release_asset": "okx-public-rest-funding-settlement-hype-usdt-swap-1790075029747-1790075029747-8b97e72d9567.jsonl.gz",
+  "release_asset_id": 581213091,
+  "release_id": 393656800,
+  "release_remote_digest": "sha256:8b97e72d9567938ea0f305d906845bb911d823d4ae904b7d31ea55ec75d27178",
+  "release_remote_size": 719,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35696301919-s3",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "8b97e72d9567938ea0f305d906845bb911d823d4ae904b7d31ea55ec75d27178",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790075029747,
+  "symbol": "HYPE-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790064000000,
+    "last_exchange_ts_ms": 1790064000000,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 11029747.0,
+      "min": 11029747.0,
+      "p50": 11029747.0,
+      "p95": 11029747.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

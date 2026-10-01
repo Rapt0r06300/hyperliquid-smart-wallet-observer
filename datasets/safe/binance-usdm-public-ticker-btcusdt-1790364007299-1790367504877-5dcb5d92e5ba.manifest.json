@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 237509,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-ticker-btcusdt-1790364007299-1790367504877-5dcb5d92e5ba",
+  "end_ts_ms": 1790367504877,
+  "event_count": 1711,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1711,
+  "release": {
+    "asset_id": 589176244,
+    "asset_name": "binance-usdm-public-ticker-btcusdt-1790364007299-1790367504877-5dcb5d92e5ba.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:5dcb5d92e5bab983e9e3754fd188e866edc6ceda785dabbceffd18860a867a63",
+    "remote_size": 237509,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-ticker-btcusdt-1790364007299-1790367504877-5dcb5d92e5ba.jsonl.gz",
+  "release_asset_id": 589176244,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:5dcb5d92e5bab983e9e3754fd188e866edc6ceda785dabbceffd18860a867a63",
+  "release_remote_size": 237509,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5dcb5d92e5bab983e9e3754fd188e866edc6ceda785dabbceffd18860a867a63",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790364007299,
+  "symbol": "BTCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-market-e731396580294476b8fa94eacddee044"
+    ],
+    "first_exchange_ts_ms": 1790364006797,
+    "last_exchange_ts_ms": 1790367504561,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1711,
+      "max": 2383.0,
+      "min": 70.0,
+      "p50": 427.0,
+      "p95": 1592.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "binance"
+}

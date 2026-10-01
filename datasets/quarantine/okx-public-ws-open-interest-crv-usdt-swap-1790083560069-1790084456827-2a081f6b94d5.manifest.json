@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 12152,
+  "collection_run_id": "market-35733245157",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-crv-usdt-swap-1790083560069-1790084456827-2a081f6b94d5",
+  "end_ts_ms": 1790084456827,
+  "event_count": 104,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 581834849,
+    "asset_name": "okx-public-ws-open-interest-crv-usdt-swap-1790083560069-1790084456827-2a081f6b94d5.jsonl.gz",
+    "release_id": 393952509,
+    "remote_digest": "sha256:2a081f6b94d57c326dcf95b07b0c84836e7a7b54dae76e35f34c35fa69cdf295",
+    "remote_size": 12152,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35733245157-s5"
+  },
+  "release_asset": "okx-public-ws-open-interest-crv-usdt-swap-1790083560069-1790084456827-2a081f6b94d5.jsonl.gz",
+  "release_asset_id": 581834849,
+  "release_id": 393952509,
+  "release_remote_digest": "sha256:2a081f6b94d57c326dcf95b07b0c84836e7a7b54dae76e35f34c35fa69cdf295",
+  "release_remote_size": 12152,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35733245157-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "2a081f6b94d57c326dcf95b07b0c84836e7a7b54dae76e35f34c35fa69cdf295",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790083560069,
+  "symbol": "CRV-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 104,
+      "max": 55.0,
+      "min": 9.0,
+      "p50": 18.5,
+      "p95": 55.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-f656c394ae04412ca12d1f6af5864de5"
+    ],
+    "first_exchange_ts_ms": 1790083556572,
+    "last_exchange_ts_ms": 1790084456715,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 104,
+      "max": 4758.0,
+      "min": 108.0,
+      "p50": 109.0,
+      "p95": 112.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 104,
+      "max": 999.762174,
+      "min": 0.0,
+      "p50": 178.468169,
+      "p95": 189.685613
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

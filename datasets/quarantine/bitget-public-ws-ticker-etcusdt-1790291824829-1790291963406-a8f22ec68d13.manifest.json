@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 120017,
+  "collection_run_id": "market-36071545657",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-etcusdt-1790291824829-1790291963406-a8f22ec68d13",
+  "end_ts_ms": 1790291963406,
+  "event_count": 1302,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587365836,
+    "asset_name": "bitget-public-ws-ticker-etcusdt-1790291824829-1790291963406-a8f22ec68d13.jsonl.gz",
+    "release_id": 396247866,
+    "remote_digest": "sha256:a8f22ec68d1362587ae56fed158d73cdb7a252422d1184e02063faa61590a95c",
+    "remote_size": 120017,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36071545657-s4"
+  },
+  "release_asset": "bitget-public-ws-ticker-etcusdt-1790291824829-1790291963406-a8f22ec68d13.jsonl.gz",
+  "release_asset_id": 587365836,
+  "release_id": 396247866,
+  "release_remote_digest": "sha256:a8f22ec68d1362587ae56fed158d73cdb7a252422d1184e02063faa61590a95c",
+  "release_remote_size": 120017,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36071545657-s4",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "a8f22ec68d1362587ae56fed158d73cdb7a252422d1184e02063faa61590a95c",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790291824829,
+  "symbol": "ETCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-389f2f5b0d584a30bcd0e723051fb4b4"
+    ],
+    "first_exchange_ts_ms": 1790291824489,
+    "last_exchange_ts_ms": 1790291963321,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1302,
+      "max": 340.0,
+      "min": 71.0,
+      "p50": 75.0,
+      "p95": 89.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

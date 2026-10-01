@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 106731,
+  "collection_run_id": "market-35868451926",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-fetusdt-1790170777177-1790170902127-6251d2585d27",
+  "end_ts_ms": 1790170902127,
+  "event_count": 1155,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 584231358,
+    "asset_name": "bitget-public-ws-ticker-fetusdt-1790170777177-1790170902127-6251d2585d27.jsonl.gz",
+    "release_id": 394886172,
+    "remote_digest": "sha256:6251d2585d270bca97a3d5fdaf9f883622c4f5b813836e21c7da9c24513cefa1",
+    "remote_size": 106731,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35868451926-s7"
+  },
+  "release_asset": "bitget-public-ws-ticker-fetusdt-1790170777177-1790170902127-6251d2585d27.jsonl.gz",
+  "release_asset_id": 584231358,
+  "release_id": 394886172,
+  "release_remote_digest": "sha256:6251d2585d270bca97a3d5fdaf9f883622c4f5b813836e21c7da9c24513cefa1",
+  "release_remote_size": 106731,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35868451926-s7",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6251d2585d270bca97a3d5fdaf9f883622c4f5b813836e21c7da9c24513cefa1",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790170777177,
+  "symbol": "FETUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-84b1bf050c2e4194bf541ad104b04e06"
+    ],
+    "first_exchange_ts_ms": 1790170776935,
+    "last_exchange_ts_ms": 1790170902060,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1155,
+      "max": 1853.0,
+      "min": 58.0,
+      "p50": 63.0,
+      "p95": 83.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 1545848,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-bbo-suiusdt-1790367338174-1790367506755-d1b1f2d97ddd",
+  "end_ts_ms": 1790367506755,
+  "event_count": 18642,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 18642,
+  "release": {
+    "asset_id": 589174807,
+    "asset_name": "binance-usdm-public-bbo-suiusdt-1790367338174-1790367506755-d1b1f2d97ddd.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:d1b1f2d97ddd1679800030a0a3e8e4dc6278e71ad5e0c4e818244df6de262e7a",
+    "remote_size": 1545848,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-bbo-suiusdt-1790367338174-1790367506755-d1b1f2d97ddd.jsonl.gz",
+  "release_asset_id": 589174807,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:d1b1f2d97ddd1679800030a0a3e8e4dc6278e71ad5e0c4e818244df6de262e7a",
+  "release_remote_size": 1545848,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d1b1f2d97ddd1679800030a0a3e8e4dc6278e71ad5e0c4e818244df6de262e7a",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790367338174,
+  "symbol": "SUIUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-bbo-95733a79c93141e6855a540bf0a9810d"
+    ],
+    "first_exchange_ts_ms": 1790367338102,
+    "last_exchange_ts_ms": 1790367506684,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 18642,
+      "max": 1601.0,
+      "min": 70.0,
+      "p50": 71.0,
+      "p95": 125.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "binance"
+}

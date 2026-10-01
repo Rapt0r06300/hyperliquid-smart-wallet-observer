@@ -2,7 +2,7 @@
 """Publish one Alina dataset V2 bundle to a GitHub Release.
 
 Designed for a GitHub-hosted runner executing inside
-Rapt0r06300/alina-smartflow-datasets-v2. The workflow token therefore writes only
+Rapt0r06300/hyperliquid-smart-wallet-observer. The workflow token therefore writes only
 to its own dataset repository; no user PC and no cross-repository PAT is required.
 """
 from __future__ import annotations

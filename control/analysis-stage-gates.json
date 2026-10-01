@@ -1,0 +1,103 @@
+{
+  "schema_version": "alina.analysis_stage_gates.v1",
+  "stages": {
+    "DRAIN": {
+      "requires_no_active_collection": true
+    },
+    "QUALITY": {
+      "required_files": [
+        "catalog/DATASET_HEALTH_RECEIPT.json"
+      ],
+      "required_coverage": {
+        "trade_count_exact": true,
+        "unique_trade_count_exact": true,
+        "uncompressed_bytes_exact": true,
+        "valid_record_count_exact": true,
+        "unique_record_count_exact": true
+      }
+    },
+    "REPLAY": {
+      "required_files": [
+        "catalog/DATASET_HEALTH_RECEIPT.json"
+      ],
+      "required_coverage": {
+        "trade_count_exact": true,
+        "unique_trade_count_exact": true,
+        "uncompressed_bytes_exact": true,
+        "valid_record_count_exact": true,
+        "unique_record_count_exact": true
+      }
+    },
+    "BACKTEST": {
+      "required_campaign_kinds": [
+        "replay"
+      ]
+    },
+    "OOS": {
+      "required_campaign_kinds": [
+        "backtest"
+      ]
+    },
+    "FORWARD_PAPER": {
+      "required_campaign_kinds": [
+        "oos"
+      ]
+    },
+    "PNL_PROOF": {
+      "required_campaign_kinds": [
+        "forward_paper"
+      ]
+    },
+    "SCOREBOARD": {
+      "required_files": [
+        "catalog/DATASET_HEALTH_RECEIPT.json"
+      ],
+      "required_campaign_kinds": [
+        "module_pnl_proof"
+      ],
+      "required_coverage": {
+        "replayable_shards": {
+          "min": 1
+        }
+      }
+    },
+    "DONE": {
+      "required_files": [
+        "catalog/DATASET_HEALTH_RECEIPT.json",
+        "catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json",
+        "catalog/CAMPAIGN_WATCHDOG_RECEIPT.json",
+        "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json",
+        "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json"
+      ],
+      "required_campaign_kinds": [
+        "replay",
+        "backtest",
+        "oos",
+        "forward_paper",
+        "module_pnl_proof",
+        "scoreboard"
+      ],
+      "required_coverage": {
+        "trade_count_exact": true,
+        "unique_trade_count_exact": true,
+        "uncompressed_bytes_exact": true,
+        "replayable_shards": {
+          "min": 1
+        },
+        "valid_record_count_exact": true,
+        "unique_record_count_exact": true
+      },
+      "required_watchdog_status": "HEALTHY",
+      "required_resilience_status": "READY",
+      "required_global_flags": {
+        "implementation_complete": true,
+        "final_validation_complete": true,
+        "cloud_only": true
+      },
+      "coverage_receipt": "catalog/ANALYSIS_FROZEN_COVERAGE_RECEIPT.json"
+    }
+  },
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false
+}

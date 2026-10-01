@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 115504,
+  "collection_run_id": "market-36143095458",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-aztecusdt-1790344083984-1790344220755-b73554f2c2cd",
+  "end_ts_ms": 1790344220755,
+  "event_count": 1269,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 588846883,
+    "asset_name": "bitget-public-ws-ticker-aztecusdt-1790344083984-1790344220755-b73554f2c2cd.jsonl.gz",
+    "release_id": 396793704,
+    "remote_digest": "sha256:b73554f2c2cd930acffea6b1e423023529049eedeb2a36eb9c4759cf2705a54f",
+    "remote_size": 115504,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36143095458-s5"
+  },
+  "release_asset": "bitget-public-ws-ticker-aztecusdt-1790344083984-1790344220755-b73554f2c2cd.jsonl.gz",
+  "release_asset_id": 588846883,
+  "release_id": 396793704,
+  "release_remote_digest": "sha256:b73554f2c2cd930acffea6b1e423023529049eedeb2a36eb9c4759cf2705a54f",
+  "release_remote_size": 115504,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36143095458-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b73554f2c2cd930acffea6b1e423023529049eedeb2a36eb9c4759cf2705a54f",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790344083984,
+  "symbol": "AZTECUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-751d017f4c4e481d9b3cc850ab173ec8"
+    ],
+    "first_exchange_ts_ms": 1790344083700,
+    "last_exchange_ts_ms": 1790344220665,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1269,
+      "max": 543.0,
+      "min": 77.0,
+      "p50": 90.0,
+      "p95": 115.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

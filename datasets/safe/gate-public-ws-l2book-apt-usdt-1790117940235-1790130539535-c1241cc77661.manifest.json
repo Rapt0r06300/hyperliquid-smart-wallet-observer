@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 9745257,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-l2book-apt-usdt-1790117940235-1790130539535-c1241cc77661",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790130539535,
+  "event_count": 79874,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 79874,
+  "release": {
+    "asset_id": 582776121,
+    "asset_name": "gate-public-ws-l2book-apt-usdt-1790117940235-1790130539535-c1241cc77661.jsonl.gz",
+    "release_id": 394256137,
+    "remote_digest": "sha256:c1241cc776615a526f6dabaf1a950b2e938e4f7bf993fae81051e48f50e9b259",
+    "remote_size": 9745257,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s5"
+  },
+  "release_asset": "gate-public-ws-l2book-apt-usdt-1790117940235-1790130539535-c1241cc77661.jsonl.gz",
+  "release_asset_id": 582776121,
+  "release_id": 394256137,
+  "release_remote_digest": "sha256:c1241cc776615a526f6dabaf1a950b2e938e4f7bf993fae81051e48f50e9b259",
+  "release_remote_size": 9745257,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c1241cc776615a526f6dabaf1a950b2e938e4f7bf993fae81051e48f50e9b259",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790117940235,
+  "symbol": "APT_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-4a8e4bab81614920b6a736fb727007fe"
+    ],
+    "first_exchange_ts_ms": 1790117940121,
+    "last_exchange_ts_ms": 1790130539439,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 79874,
+      "max": 313.0,
+      "min": 70.0,
+      "p50": 101.0,
+      "p95": 164.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}

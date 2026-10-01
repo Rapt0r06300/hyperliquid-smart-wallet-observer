@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 524580,
+  "collection_run_id": "market-35733245157",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-aero-1790094076288-1790096158460-e93cdcec6f19",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790096158460,
+  "event_count": 5922,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 5922,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 5922,
+  "release": {
+    "asset_id": 581834602,
+    "asset_name": "hyperliquid-public-ws-bbo-aero-1790094076288-1790096158460-e93cdcec6f19.jsonl.gz",
+    "release_id": 393952859,
+    "remote_digest": "sha256:e93cdcec6f19350bfdf35a875605910afe79206f712706f8f164d52b0bb02417",
+    "remote_size": 524580,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35733245157-s0"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-aero-1790094076288-1790096158460-e93cdcec6f19.jsonl.gz",
+  "release_asset_id": 581834602,
+  "release_id": 393952859,
+  "release_remote_digest": "sha256:e93cdcec6f19350bfdf35a875605910afe79206f712706f8f164d52b0bb02417",
+  "release_remote_size": 524580,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35733245157-s0",
+  "replay_compatible": false,
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e93cdcec6f19350bfdf35a875605910afe79206f712706f8f164d52b0bb02417",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790094076288,
+  "symbol": "AERO",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 5922,
+      "max": -228.5,
+      "min": -935.0,
+      "p50": -519.0,
+      "p95": -252.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-0df18753534d4a56a2c33f221623faa6"
+    ],
+    "first_exchange_ts_ms": 1790094075959,
+    "last_exchange_ts_ms": 1790096158180,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5922,
+      "max": 1516.0,
+      "min": 221.0,
+      "p50": 307.0,
+      "p95": 523.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

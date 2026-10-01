@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 121825,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-dashusdt-1790117940358-1790118081044-cce8d8d0b3e1",
+  "end_ts_ms": 1790118081044,
+  "event_count": 1311,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582775916,
+    "asset_name": "bitget-public-ws-ticker-dashusdt-1790117940358-1790118081044-cce8d8d0b3e1.jsonl.gz",
+    "release_id": 394256137,
+    "remote_digest": "sha256:cce8d8d0b3e157654ef90d6f7c469fcce3e8eb6436fcd2d21292e36460762478",
+    "remote_size": 121825,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s5"
+  },
+  "release_asset": "bitget-public-ws-ticker-dashusdt-1790117940358-1790118081044-cce8d8d0b3e1.jsonl.gz",
+  "release_asset_id": 582775916,
+  "release_id": 394256137,
+  "release_remote_digest": "sha256:cce8d8d0b3e157654ef90d6f7c469fcce3e8eb6436fcd2d21292e36460762478",
+  "release_remote_size": 121825,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "cce8d8d0b3e157654ef90d6f7c469fcce3e8eb6436fcd2d21292e36460762478",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790117940358,
+  "symbol": "DASHUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-95dca1c919e043179aa598bd0df8ce72"
+    ],
+    "first_exchange_ts_ms": 1790117940042,
+    "last_exchange_ts_ms": 1790118080973,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1311,
+      "max": 316.0,
+      "min": 66.0,
+      "p50": 73.0,
+      "p95": 89.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

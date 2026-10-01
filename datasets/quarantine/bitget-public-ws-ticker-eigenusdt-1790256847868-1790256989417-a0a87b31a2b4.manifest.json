@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 122191,
+  "collection_run_id": "market-36006392932",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-eigenusdt-1790256847868-1790256989417-a0a87b31a2b4",
+  "end_ts_ms": 1790256989417,
+  "event_count": 1324,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 586415359,
+    "asset_name": "bitget-public-ws-ticker-eigenusdt-1790256847868-1790256989417-a0a87b31a2b4.jsonl.gz",
+    "release_id": 395896906,
+    "remote_digest": "sha256:a0a87b31a2b40338c5d41c03b3ed8b32ecb915c5586998b7bedf9ddcd05ead77",
+    "remote_size": 122191,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36006392932-s1"
+  },
+  "release_asset": "bitget-public-ws-ticker-eigenusdt-1790256847868-1790256989417-a0a87b31a2b4.jsonl.gz",
+  "release_asset_id": 586415359,
+  "release_id": 395896906,
+  "release_remote_digest": "sha256:a0a87b31a2b40338c5d41c03b3ed8b32ecb915c5586998b7bedf9ddcd05ead77",
+  "release_remote_size": 122191,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36006392932-s1",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "a0a87b31a2b40338c5d41c03b3ed8b32ecb915c5586998b7bedf9ddcd05ead77",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790256847868,
+  "symbol": "EIGENUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-52db121219ac4fda8dc90cebd198070a"
+    ],
+    "first_exchange_ts_ms": 1790256847543,
+    "last_exchange_ts_ms": 1790256989329,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1324,
+      "max": 325.0,
+      "min": 79.0,
+      "p50": 90.0,
+      "p95": 125.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

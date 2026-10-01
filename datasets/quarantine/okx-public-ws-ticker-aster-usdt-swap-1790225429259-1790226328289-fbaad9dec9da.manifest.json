@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 364870,
+  "collection_run_id": "market-35957266010",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-aster-usdt-swap-1790225429259-1790226328289-fbaad9dec9da",
+  "end_ts_ms": 1790226328289,
+  "event_count": 4268,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 585489869,
+    "asset_name": "okx-public-ws-ticker-aster-usdt-swap-1790225429259-1790226328289-fbaad9dec9da.jsonl.gz",
+    "release_id": 395475107,
+    "remote_digest": "sha256:fbaad9dec9da30f3e786476a777621be008beb84ad95a35dd09214a536849170",
+    "remote_size": 364870,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35957266010-s0"
+  },
+  "release_asset": "okx-public-ws-ticker-aster-usdt-swap-1790225429259-1790226328289-fbaad9dec9da.jsonl.gz",
+  "release_asset_id": 585489869,
+  "release_id": 395475107,
+  "release_remote_digest": "sha256:fbaad9dec9da30f3e786476a777621be008beb84ad95a35dd09214a536849170",
+  "release_remote_size": 364870,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35957266010-s0",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "fbaad9dec9da30f3e786476a777621be008beb84ad95a35dd09214a536849170",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790225429259,
+  "symbol": "ASTER-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 4268,
+      "max": 43.5,
+      "min": 10.0,
+      "p50": 21.0,
+      "p95": 43.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-6f7f1ab3bf3f490e8b5c8812adcec96e"
+    ],
+    "first_exchange_ts_ms": 1790225429072,
+    "last_exchange_ts_ms": 1790226328163,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4268,
+      "max": 267.0,
+      "min": 104.0,
+      "p50": 168.0,
+      "p95": 205.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 4268,
+      "max": 181.969761,
+      "min": 0.0,
+      "p50": 179.555218,
+      "p95": 180.735162
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

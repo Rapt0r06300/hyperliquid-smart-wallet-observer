@@ -1,0 +1,83 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "market-2026092910-v5",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "710d022e5c1fee23639df14873bb170a21cb820f",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "b6b03cab59c5081a26f1e1c313bb877e2d975989e05ca00e96aeecb2688bb7f1",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-29T10:49:54.709256+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "coins": "BTC,ETH,SOL,XRP,DOGE,BNB,AVAX,LINK,SUI,ADA,TRX,TON,WIF,ARB,OP,APT",
+    "duration_s": 3500,
+    "max_coins": 0,
+    "rotate_mb": 64,
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-06T10:49:54.709256+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "at": "2026-09-29T10:52:21.086386Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at_utc": "2026-09-29T19:58:44.193968Z",
+      "event": "WATCHDOG_LEASE_EXPIRED",
+      "previous_lease": {
+        "acquired_at": "2026-09-29T10:52:21.086309Z",
+        "expires_at": "2026-09-29T16:37:21.086309Z",
+        "lease_token_sha256": "b1a4672339363d037e1b3c27a90aff688d386c58edbd2b81f2449e1863bcaade",
+        "owner_run_id": "36558088951"
+      },
+      "previous_status": "RUNNING"
+    },
+    {
+      "at_utc": "2026-09-30T12:01:57.803219Z",
+      "collection_cutoff_at_utc": "2026-09-29T10:56:59.390365Z",
+      "event": "WATCHDOG_DRAIN_CUTOFF_TERMINALIZED",
+      "previous_status": "STUCK",
+      "reason": "DRAIN_CUTOFF_INTERRUPTED_WITHOUT_DURABLE_PROGRESS",
+      "source_collection_epoch": 2,
+      "terminal_status": "UNAVAILABLE"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 2,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "UNAVAILABLE",
+  "status_reason": "DRAIN_CUTOFF_INTERRUPTED_WITHOUT_DURABLE_PROGRESS",
+  "stuck_reason": null,
+  "terminal_evidence_digest": "dc9eb1b6c89f388f4f22798c64189e0bfeaa383e6406a15d92891ad8f7c9a00b",
+  "updated_at": "2026-09-30T12:01:57.803219Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

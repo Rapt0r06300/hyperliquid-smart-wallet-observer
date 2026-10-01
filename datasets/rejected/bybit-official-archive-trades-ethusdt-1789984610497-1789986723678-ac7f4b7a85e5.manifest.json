@@ -1,0 +1,101 @@
+{
+  "asset_verified": true,
+  "bytes": 8511135,
+  "collection_run_id": "archive-35994331362",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-official-archive-trades-ethusdt-1789984610497-1789986723678-ac7f4b7a85e5",
+  "end_ts_ms": 1789986723678,
+  "event_count": 100000,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 100000,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:missing_monotonic_count=100000",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "release": {
+    "asset_id": 585840674,
+    "asset_name": "bybit-official-archive-trades-ethusdt-1789984610497-1789986723678-ac7f4b7a85e5.jsonl.gz",
+    "release_id": 395615268,
+    "remote_digest": "sha256:ac7f4b7a85e55515877cee34e052bd5f4cfe17587e764da9a1a3008c2aaedd14",
+    "remote_size": 8511135,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "archive-v2-35994331362-bybit-ETH"
+  },
+  "release_asset": "bybit-official-archive-trades-ethusdt-1789984610497-1789986723678-ac7f4b7a85e5.jsonl.gz",
+  "release_asset_id": 585840674,
+  "release_id": 395615268,
+  "release_remote_digest": "sha256:ac7f4b7a85e55515877cee34e052bd5f4cfe17587e764da9a1a3008c2aaedd14",
+  "release_remote_size": 8511135,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "archive-v2-35994331362-bybit-ETH",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ac7f4b7a85e55515877cee34e052bd5f4cfe17587e764da9a1a3008c2aaedd14",
+  "source": "bybit_official_archive",
+  "start_ts_ms": 1789984610497,
+  "symbol": "ETHUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1789984610497,
+    "last_exchange_ts_ms": 1789986723678,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 100000,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "unique_trade_count": 60820,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

@@ -1,0 +1,98 @@
+{
+  "attempts": 0,
+  "campaign_id": "pnl-20260927-s2-v5",
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "4a7f9308acf861359547d7a03e0aca9c50b12795",
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+          "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py",
+          "--root",
+          "/home/runner/work/_temp/alina-replay-workspace"
+        ],
+        "failure_category": "QUALITY",
+        "phase": "economic_campaign",
+        "phases": [
+          {
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "-m",
+              "hl_observer.ops.v2_dataset_bridge",
+              "materialize"
+            ],
+            "name": "materialize_safe_v2",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "\"hyperliquid-public-copy-l2-copy-vault-l2-pump-1790512020803-1790512316859-dbd3533d2c97\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-rune-1790512020803-1790512316859-c84401f4d510\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sui-1790512020803-1790512316960-c1f72737d573\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x5ffed73b4780c539b644cb287d5d5795f7d304d3-1790512419336-1790512419336-f1ae9eafa54b\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x25db19ae5c4fd7945ba10c6fbb98b83b931849bf-1790512419337-1790512419337-c882859a9ecc\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x1e17b4ebd5cd3595b556995c6d2e743e30c73ad5-1790512419338-1790512419338-940580d3b06f\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x96b2d558e98075ac356822fd2245226f3ca1d734-1790512419338-1790512419338-6415698432ba\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc5e0ba563c5082c3312380f6b7f5c6bbff8991b2-1790512419339-1790512419339-c10637fcc306\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x745a0b7d4ba1ef3f5de24cb8a14bbbb84d270ad6-1790512419342-1790512419342-053f53426851\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xb39cecd2d493daab328e65b2eb57824a0e8d417d-1790512419342-1790512419342-51c235526709\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xbbb47ca9882c87caa5629d91680c0ef3a57cedf8-1790512419343-1790512419343-e10f192fa750\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x92add4d053301c87a74b02610ff400cad25c9597-1790512419344-1790512419344-0cb2c945d706\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-btc-1790512419475-1790512713576-45098fdc652f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-atom-1790512419486-1790512713576-ed51a4f8c71c\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wld-1790512419497-1790512713699-5a110513b67d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hype-1790512419598-1790512713698-507db81662eb\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-inj-1790512419598-1790512713698-87dd8b82ec16\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-near-1790512419598-1790512713699-8c8fa6c1ec52\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-aave-1790512419599-1790512713575-8a59d01d0f00\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sol-1790512419599-1790512713699-05e5fcb465e2\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-eth-1790512419609-1790512713698-6b79a748db60\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-doge-1790512419635-1790512713576-4cd64398d2bd\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-op-1790512419642-1790512713699-50e6f362d387\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-arb-1790512419654-1790512713576-eefe26ae12a5\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-uni-1790512419664-1790512713699-7965f268d99a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-avax-1790512419721-1790512713576-57e0d4af66df\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bnb-1790512419721-1790512713576-abb9fb30a85c\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sui-1790512419721-1790512713699-3f99f60cdfc8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-link-1790512419722-1790512713698-5182d0495eb8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-algo-1790512419893-1790512713575-c9d0b3a70e8e\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dydx-1790512419893-1790512713576-4d1a1248a6ba\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-tao-1790512419893-1790512713699-4d6a3ae93410\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xmr-1790512419893-1790512713699-61113984e2fd\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xrp-1790512419894-1790512713699-03713a41a71a\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xe342d028b90a00803a3de613d0bdb55a5fa9c437-1790512822727-1790512822727-c3b49bee7a4d\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x5a136f40af6a7cfe708a03949e6a17da65811170-1790512822728-1790512822728-91739d920faa\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc5a37e255aee95a67d48471e01501e2bc40dab25-1790512822728-1790512822728-29c2fe9e285c\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x5a6d0d465fef60e565cfbfbb2a8a7b4c203c8b57-1790512822729-1790512822729-c60cee5841e3\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc63f1d0cf6c8e4373e34390d31f535643b8266d9-1790512822729-1790512822729-913eac2cbbc0\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x4f0936c31f9844950ec14e25c85a0163a141d6a3-1790512822730-1790512822730-2833373fc473\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x98dc528beeffa2e051dc09d30b9028953ee5077b-1790512822730-1790512822730-9cff486bf83d\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x4ebcd88568fbb8c5067f97cae8be2a8aa5f8916b-1790512822731-1790512822731-499b623380a4\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x9403774b1f2ac920d8ea434324d2c578d4299699-1790512822731-1790512822731-313cb9a2989c\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xfcb203444b410e69ce704fa3effdbc4ca8767612-1790513214930-1790513214930-6754d63daf14\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x78aeee1669e15febc5c8d2f473a9fc63604b823f-1790513214931-1790513214931-14d351c8eabd\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc2ebb4f99634a70194c99d46b42b9cfe4d592926-1790513214931-1790513214931-b2989c6c9ffb\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xf6d69935cb8c65087f49f41d60f58340217c3e1d-1790513214931-1790513214931-bac527505e7b\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xc89810976301b27f4f87495e521bcc4bca2f85fd-1790513214932-1790513214932-228585ef621d\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x68c707e9fd21644c0d1b19d55b0ae96bd9ef32b3-1790513214933-1790513214933-877c1cc9b828\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xafe52e764a7997670deccffe056312781dd5925f-1790513214933-1790513214933-61409b9e97be\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x037e2a15cd923bed3482d1c14d389f9058d168d9-1790513214934-1790513214934-10bf6386c776\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x947d9db182f0b1c1d8e3026b53e95a1f3d57356d-1790513214934-1790513214934-a5fa6f529d14\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-popcat-1790513215054-1790513513002-c1b682dc4558\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pnut-1790513215066-1790513513002-c23d0968bec1\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wif-1790513215076-1790513513003-71a839d7bbd1\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dot-1790513215161-1790513512896-e17129452d32\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-avax-1790513215162-1790513512896-7ce22c92b203\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-btc-1790513215162-1790513512896-21b13e715461\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-doge-1790513215162-1790513512896-b7e3d627d342\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-eth-1790513215173-1790513512896-1c406ef76132\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-jup-1790513215173-1790513512896-4cf1afbb92d6\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pyth-1790513215173-1790513513003-717a33290668\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xrp-1790513215173-1790513513003-88b992cf4816\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-link-1790513215183-1790513512896-44872f331907\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-cake-1790513215186-1790513512896-d3faa7eab6d4\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ldo-1790513215198-1790513512896-e46afe33802a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sol-1790513215268-1790513513003-7d5eb2ffc818\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-zec-1790513215268-1790513513003-647e12ab6f0a\"\n    ],\n    \"events\": 4290,\n    \"index_sha256\": \"f177bcb56aa51fa66f46821b71dd81711de5a5abb2b977720e6df666f5304a02\",\n    \"legacy_import\": false,\n    \"real_execution\": false,\n    \"safe_shards\": 128,\n    \"schema\": \"alina.dataset_v2_materialization_plan.v1\"\n  }\n}\n"
+          },
+          {
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py",
+              "--root",
+              "/home/runner/work/_temp/alina-replay-workspace"
+            ],
+            "name": "economic_campaign",
+            "returncode": 1,
+            "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 880, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 855, in main\n    result = run_campaigns(\n             ^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 201, in run_campaigns\n    copy_tool = _tool(\"hypersmart_copy_pipeline\", root / \"tools\" / \"pipeline_copie_reel.py\")\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 113, in _tool\n    spec.loader.exec_module(module)\n  File \"<frozen importlib._bootstrap_external>\", line 995, in exec_module\n  File \"<frozen importlib._bootstrap_external>\", line 1132, in get_code\n  File \"<frozen importlib._bootstrap_external>\", line 1190, in get_data\nFileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/_temp/alina-replay-workspace/tools/pipeline_copie_reel.py'\n",
+            "stdout": ""
+          }
+        ],
+        "reason": "adapter_failed",
+        "returncode": 1,
+        "status": "FAILED",
+        "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 880, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 855, in main\n    result = run_campaigns(\n             ^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 201, in run_campaigns\n    copy_tool = _tool(\"hypersmart_copy_pipeline\", root / \"tools\" / \"pipeline_copie_reel.py\")\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/alina-smartflow-datasets-v2/alina-smartflow-datasets-v2/alina/tools/run_economic_objective_campaigns.py\", line 113, in _tool\n    spec.loader.exec_module(module)\n  File \"<frozen importlib._bootstrap_external>\", line 995, in exec_module\n  File \"<frozen importlib._bootstrap_external>\", line 1132, in get_code\n  File \"<frozen importlib._bootstrap_external>\", line 1190, in get_data\nFileNotFoundError: [Errno 2] No such file or directory: '/home/runner/work/_temp/alina-replay-workspace/tools/pipeline_copie_reel.py'\n",
+        "stdout": ""
+      },
+      "sha256": "7a0a727f0ceb1ed9b3ffb92db28fc9bae87e115ac9ff805b4ef9103616fbda3a"
+    }
+  },
+  "config_sha256": "a57252dd34265274245554705e84062bb7a144e3c12963f317c937872c2f657a",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-27T12:50:22.169238+00:00",
+  "cursor": {
+    "end_ts_ms": 1790513421000,
+    "max_shards": 128,
+    "start_ts_ms": 1789908621000
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "expires_at": "2026-10-04T12:50:22.169238+00:00",
+  "history": [
+    {
+      "at": "2026-09-27T18:04:10.349781Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-27T18:05:32.123931Z",
+      "from": "RUNNING",
+      "reason": "adapter_failed",
+      "to": "FAILED"
+    }
+  ],
+  "kind": "module_pnl_proof",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "outputs": [],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v1",
+  "status": "FAILED",
+  "status_reason": "adapter_failed",
+  "updated_at": "2026-09-27T18:05:32.123931Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

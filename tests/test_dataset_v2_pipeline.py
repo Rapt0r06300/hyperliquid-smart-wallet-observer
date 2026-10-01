@@ -74,7 +74,7 @@ def test_remote_digest_is_required_before_safe(tmp_path) -> None:
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-run-1-1",
         release_id=10,
         asset_id=20,
@@ -104,7 +104,7 @@ def test_gap_inside_shard_is_rejected_even_with_remote_hash(tmp_path) -> None:
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-run-2-1",
         release_id=11,
         asset_id=21,
@@ -131,7 +131,7 @@ def test_wrong_remote_digest_never_promotes_safe(tmp_path) -> None:
     asset = tmp_path / "bundle" / "assets" / manifest["release_asset"]
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-run-3-1",
         release_id=12,
         asset_id=22,
@@ -209,7 +209,7 @@ def test_trade_shard_requires_explicit_matched_reconciliation(tmp_path) -> None:
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-run-trades",
         release_id=30,
         asset_id=40,
@@ -323,7 +323,7 @@ def test_receive_observation_snapshot_can_be_safe_without_exchange_timestamp(tmp
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-receive-only",
         release_id=90,
         asset_id=91,
@@ -370,7 +370,7 @@ def test_missing_exchange_timestamp_without_explicit_semantics_stays_partial(tmp
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
     verified = verify_remote_asset(
         manifest,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         release_tag="data-v2-missing-time",
         release_id=92,
         asset_id=93,

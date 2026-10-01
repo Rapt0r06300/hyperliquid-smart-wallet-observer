@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 6556,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-aaveusdt-1790138736156-1790138861999-fa77d7f7f884",
+  "end_ts_ms": 1790138861999,
+  "event_count": 52,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "status": "UNAVAILABLE"
+  },
+  "release": {
+    "asset_id": 583315217,
+    "asset_name": "bitget-public-ws-trades-aaveusdt-1790138736156-1790138861999-fa77d7f7f884.jsonl.gz",
+    "release_id": 394435259,
+    "remote_digest": "sha256:fa77d7f7f884ea0a7b71f8a6d216456f0149f360e08db57b2d07704ff8a2a746",
+    "remote_size": 6556,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s6"
+  },
+  "release_asset": "bitget-public-ws-trades-aaveusdt-1790138736156-1790138861999-fa77d7f7f884.jsonl.gz",
+  "release_asset_id": 583315217,
+  "release_id": 394435259,
+  "release_remote_digest": "sha256:fa77d7f7f884ea0a7b71f8a6d216456f0149f360e08db57b2d07704ff8a2a746",
+  "release_remote_size": 6556,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s6",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "fa77d7f7f884ea0a7b71f8a6d216456f0149f360e08db57b2d07704ff8a2a746",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790138736156,
+  "symbol": "AAVEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-13e6bf2127d5466a9530fe352778235b"
+    ],
+    "first_exchange_ts_ms": 1790138726650,
+    "last_exchange_ts_ms": 1790138861938,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 52,
+      "max": 9506.0,
+      "min": 56.0,
+      "p50": 62.0,
+      "p95": 73.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "unique_trade_count": 124,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

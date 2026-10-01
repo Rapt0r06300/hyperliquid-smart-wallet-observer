@@ -134,7 +134,7 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
 
     result = module.publish_bundle(
         bundle,
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         tag="data-v2-run-test",
         target="main",
         title="test",
@@ -174,7 +174,7 @@ def test_upload_file_retries_transient_release_visibility_race(tmp_path, monkeyp
     monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
 
     module.upload_file(
-        repository="Rapt0r06300/alina-smartflow-datasets-v2",
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
         tag="copy-vault-v2-test-s1",
         path=asset,
     )

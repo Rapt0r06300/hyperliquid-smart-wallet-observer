@@ -1,0 +1,101 @@
+{
+  "asset_verified": true,
+  "bytes": 8660036,
+  "collection_run_id": "archive-36131186581",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-official-archive-trades-btcusdt-1790093635309-1790096625369-bec6de887a3d",
+  "end_ts_ms": 1790096625369,
+  "event_count": 100000,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 100000,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:missing_monotonic_count=100000",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "release": {
+    "asset_id": 588248556,
+    "asset_name": "bybit-official-archive-trades-btcusdt-1790093635309-1790096625369-bec6de887a3d.jsonl.gz",
+    "release_id": 396559637,
+    "remote_digest": "sha256:bec6de887a3d6c8e16b27ab4367145b536e58d88de749dd15f3d125801797428",
+    "remote_size": 8660036,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "archive-v2-36131186581-bybit-BTC"
+  },
+  "release_asset": "bybit-official-archive-trades-btcusdt-1790093635309-1790096625369-bec6de887a3d.jsonl.gz",
+  "release_asset_id": 588248556,
+  "release_id": 396559637,
+  "release_remote_digest": "sha256:bec6de887a3d6c8e16b27ab4367145b536e58d88de749dd15f3d125801797428",
+  "release_remote_size": 8660036,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "archive-v2-36131186581-bybit-BTC",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "bec6de887a3d6c8e16b27ab4367145b536e58d88de749dd15f3d125801797428",
+  "source": "bybit_official_archive",
+  "start_ts_ms": 1790093635309,
+  "symbol": "BTCUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790093635309,
+    "last_exchange_ts_ms": 1790096625369,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 100000,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "unique_trade_count": 71465,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2636,
+  "collection_run_id": "market-36006392932",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-bio-usdt-swap-1790256855243-1790257748226-feb614117ee6",
+  "end_ts_ms": 1790257748226,
+  "event_count": 17,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 586419115,
+    "asset_name": "okx-public-ws-funding-bio-usdt-swap-1790256855243-1790257748226-feb614117ee6.jsonl.gz",
+    "release_id": 395897533,
+    "remote_digest": "sha256:feb614117ee60603996822a2c23cd136713ac1f12ef73c83d722e3eb833912dc",
+    "remote_size": 2636,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36006392932-s2"
+  },
+  "release_asset": "okx-public-ws-funding-bio-usdt-swap-1790256855243-1790257748226-feb614117ee6.jsonl.gz",
+  "release_asset_id": 586419115,
+  "release_id": 395897533,
+  "release_remote_digest": "sha256:feb614117ee60603996822a2c23cd136713ac1f12ef73c83d722e3eb833912dc",
+  "release_remote_size": 2636,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36006392932-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "feb614117ee60603996822a2c23cd136713ac1f12ef73c83d722e3eb833912dc",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790256855243,
+  "symbol": "BIO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 17,
+      "max": 70.5,
+      "min": 22.0,
+      "p50": 28.5,
+      "p95": 70.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-8ff1e52bda7e431d8e15ba980d73ca47"
+    ],
+    "first_exchange_ts_ms": 1790256805066,
+    "last_exchange_ts_ms": 1790257748145,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 17,
+      "max": 50177.0,
+      "min": 80.0,
+      "p50": 82.0,
+      "p95": 86.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 17,
+      "max": 123.202633,
+      "min": 0.0,
+      "p50": 118.535541,
+      "p95": 120.426856
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

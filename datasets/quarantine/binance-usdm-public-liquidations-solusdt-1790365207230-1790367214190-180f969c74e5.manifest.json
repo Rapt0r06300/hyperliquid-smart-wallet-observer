@@ -1,0 +1,104 @@
+{
+  "asset_verified": true,
+  "bytes": 1480,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-liquidations-solusdt-1790365207230-1790367214190-180f969c74e5",
+  "end_ts_ms": 1790367214190,
+  "event_count": 4,
+  "family": "liquidations",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "liquidations"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 4,
+  "release": {
+    "asset_id": 589175559,
+    "asset_name": "binance-usdm-public-liquidations-solusdt-1790365207230-1790367214190-180f969c74e5.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:180f969c74e5ca0ac9ebe7002f7e31fb7c0f822c802bb1920fe5e5b97120a8bf",
+    "remote_size": 1480,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-liquidations-solusdt-1790365207230-1790367214190-180f969c74e5.jsonl.gz",
+  "release_asset_id": 589175559,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:180f969c74e5ca0ac9ebe7002f7e31fb7c0f822c802bb1920fe5e5b97120a8bf",
+  "release_remote_size": 1480,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "180f969c74e5ca0ac9ebe7002f7e31fb7c0f822c802bb1920fe5e5b97120a8bf",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790365207230,
+  "symbol": "SOLUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-market-e731396580294476b8fa94eacddee044"
+    ],
+    "first_exchange_ts_ms": 1790365206127,
+    "last_exchange_ts_ms": 1790367213114,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4,
+      "max": 1103.0,
+      "min": 1072.0,
+      "p50": 1078.0,
+      "p95": 1103.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "binance"
+}

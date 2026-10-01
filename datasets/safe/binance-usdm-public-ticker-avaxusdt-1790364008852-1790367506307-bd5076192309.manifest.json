@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 202570,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-ticker-avaxusdt-1790364008852-1790367506307-bd5076192309",
+  "end_ts_ms": 1790367506307,
+  "event_count": 1469,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1469,
+  "release": {
+    "asset_id": 589176161,
+    "asset_name": "binance-usdm-public-ticker-avaxusdt-1790364008852-1790367506307-bd5076192309.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:bd5076192309a6dac85c3393b0ed9d67b216ba4225e251db6fe30726e03c7526",
+    "remote_size": 202570,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-ticker-avaxusdt-1790364008852-1790367506307-bd5076192309.jsonl.gz",
+  "release_asset_id": 589176161,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:bd5076192309a6dac85c3393b0ed9d67b216ba4225e251db6fe30726e03c7526",
+  "release_remote_size": 202570,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "bd5076192309a6dac85c3393b0ed9d67b216ba4225e251db6fe30726e03c7526",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790364008852,
+  "symbol": "AVAXUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-market-e731396580294476b8fa94eacddee044"
+    ],
+    "first_exchange_ts_ms": 1790364008781,
+    "last_exchange_ts_ms": 1790367505596,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1469,
+      "max": 3647.0,
+      "min": 70.0,
+      "p50": 492.0,
+      "p95": 1934.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "binance"
+}

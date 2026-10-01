@@ -89,7 +89,7 @@ def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path
         kind="module_pnl_proof",
         code_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
         code_sha="a" * 40,
-        dataset_repo="Rapt0r06300/alina-smartflow-datasets-v2",
+        dataset_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
         dataset_generation="V2_FRESH",
         config_sha256="b" * 64,
         work_plan_sha256="c" * 64,

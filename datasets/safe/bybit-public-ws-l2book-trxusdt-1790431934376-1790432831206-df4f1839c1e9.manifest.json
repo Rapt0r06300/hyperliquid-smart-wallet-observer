@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 248704,
+  "collection_run_id": "market-2026092600-v4-0",
+  "collector_version": "a96015e8340c481d754fd3ac48212b5dbff96341",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-public-ws-l2book-trxusdt-1790431934376-1790432831206-df4f1839c1e9",
+  "end_ts_ms": 1790432831206,
+  "event_count": 2173,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 2173,
+  "release": {
+    "asset_id": 590891562,
+    "asset_name": "bybit-public-ws-l2book-trxusdt-1790431934376-1790432831206-df4f1839c1e9.jsonl.gz",
+    "release_id": 397281551,
+    "remote_digest": "sha256:df4f1839c1e9acc7a28f117a1415875ea6bac13f06e88d144092a679ac8e0077",
+    "remote_size": 248704,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092600-v4-u0"
+  },
+  "release_asset": "bybit-public-ws-l2book-trxusdt-1790431934376-1790432831206-df4f1839c1e9.jsonl.gz",
+  "release_asset_id": 590891562,
+  "release_id": 397281551,
+  "release_remote_digest": "sha256:df4f1839c1e9acc7a28f117a1415875ea6bac13f06e88d144092a679ac8e0077",
+  "release_remote_size": 248704,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092600-v4-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "df4f1839c1e9acc7a28f117a1415875ea6bac13f06e88d144092a679ac8e0077",
+  "source": "bybit_public_ws",
+  "start_ts_ms": 1790431934376,
+  "symbol": "TRXUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bybit-da773c67cccb42f5926f0f3c387718c3"
+    ],
+    "first_exchange_ts_ms": 1790431933490,
+    "last_exchange_ts_ms": 1790432831090,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2173,
+      "max": 886.0,
+      "min": 116.0,
+      "p50": 164.0,
+      "p95": 213.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2173,
+      "max": 236.491756,
+      "min": 0.0,
+      "p50": 234.304502,
+      "p95": 235.906237
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "bybit"
+}

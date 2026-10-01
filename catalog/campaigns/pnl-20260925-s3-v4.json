@@ -1,0 +1,86 @@
+{
+  "attempts": 0,
+  "campaign_id": "pnl-20260925-s3-v4",
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "a3dae46335b038d7588ce7c7e2ab93674c064c76",
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+          "-m",
+          "hl_observer.ops.v2_dataset_bridge",
+          "materialize"
+        ],
+        "failure_category": "QUALITY",
+        "phase": "materialize_safe_v2",
+        "phases": [
+          {
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "-m",
+              "hl_observer.ops.v2_dataset_bridge",
+              "materialize"
+            ],
+            "name": "materialize_safe_v2",
+            "returncode": 2,
+            "stderr": "",
+            "stdout": "DATASET_V2_NO_GO: no SAFE shards match the selection\n"
+          }
+        ],
+        "reason": "dataset_materialization_failed",
+        "returncode": 2,
+        "status": "FAILED",
+        "stderr": "",
+        "stdout": "DATASET_V2_NO_GO: no SAFE shards match the selection\n"
+      },
+      "sha256": "897246d56278e940f57f86cbafd54d02edaf040f2dcd8d420e5043b98bc58bf6"
+    }
+  },
+  "config_sha256": "f3d0aa1e2c5b8ddf3813ea09611abd0d3c351f6faaad99ed83d2ee6c5ff8870d",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-25T18:00:16.490333+00:00",
+  "cursor": {
+    "end_ts_ms": 1790359215000,
+    "max_shards": 128,
+    "start_ts_ms": 1789754415000
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "expires_at": "2026-10-02T18:00:16.490333+00:00",
+  "history": [
+    {
+      "at": "2026-09-25T18:19:19.852957Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-25T18:19:27.383436Z",
+      "from": "RUNNING",
+      "reason": "dataset_materialization_failed",
+      "to": "FAILED"
+    }
+  ],
+  "kind": "module_pnl_proof",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "outputs": [],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v1",
+  "status": "FAILED",
+  "status_reason": "dataset_materialization_failed",
+  "updated_at": "2026-09-25T18:19:27.383436Z",
+  "work_plan_sha256": "4b8c6fa37af27e2f9079c3c766d0525624e08e866ad213bdf4b6042b28ee16f6"
+}

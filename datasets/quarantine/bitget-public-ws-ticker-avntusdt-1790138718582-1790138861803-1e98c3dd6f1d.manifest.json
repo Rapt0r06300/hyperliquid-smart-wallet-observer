@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 121775,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-avntusdt-1790138718582-1790138861803-1e98c3dd6f1d",
+  "end_ts_ms": 1790138861803,
+  "event_count": 1339,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583313541,
+    "asset_name": "bitget-public-ws-ticker-avntusdt-1790138718582-1790138861803-1e98c3dd6f1d.jsonl.gz",
+    "release_id": 394434558,
+    "remote_digest": "sha256:1e98c3dd6f1de887234f43766e3e460d865fc751dd0b040fa48d57e742578eeb",
+    "remote_size": 121775,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s3"
+  },
+  "release_asset": "bitget-public-ws-ticker-avntusdt-1790138718582-1790138861803-1e98c3dd6f1d.jsonl.gz",
+  "release_asset_id": 583313541,
+  "release_id": 394434558,
+  "release_remote_digest": "sha256:1e98c3dd6f1de887234f43766e3e460d865fc751dd0b040fa48d57e742578eeb",
+  "release_remote_size": 121775,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s3",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1e98c3dd6f1de887234f43766e3e460d865fc751dd0b040fa48d57e742578eeb",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790138718582,
+  "symbol": "AVNTUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-ac98d6e3de784df88a8e91bf2a62a579"
+    ],
+    "first_exchange_ts_ms": 1790138718321,
+    "last_exchange_ts_ms": 1790138861712,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1339,
+      "max": 261.0,
+      "min": 72.0,
+      "p50": 88.0,
+      "p95": 99.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

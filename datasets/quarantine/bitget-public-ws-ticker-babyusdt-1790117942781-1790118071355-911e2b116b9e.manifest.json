@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 107937,
+  "collection_run_id": "market-35794949117",
+  "collector_version": "e7f155ab40a92d8313b3ec5dcab54651cb939c4d",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-ticker-babyusdt-1790117942781-1790118071355-911e2b116b9e",
+  "end_ts_ms": 1790118071355,
+  "event_count": 1186,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 582776444,
+    "asset_name": "bitget-public-ws-ticker-babyusdt-1790117942781-1790118071355-911e2b116b9e.jsonl.gz",
+    "release_id": 394256555,
+    "remote_digest": "sha256:911e2b116b9e42886d577d970effeebd08716866e4674bd8832ede0595c959ea",
+    "remote_size": 107937,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35794949117-s6"
+  },
+  "release_asset": "bitget-public-ws-ticker-babyusdt-1790117942781-1790118071355-911e2b116b9e.jsonl.gz",
+  "release_asset_id": 582776444,
+  "release_id": 394256555,
+  "release_remote_digest": "sha256:911e2b116b9e42886d577d970effeebd08716866e4674bd8832ede0595c959ea",
+  "release_remote_size": 107937,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35794949117-s6",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "911e2b116b9e42886d577d970effeebd08716866e4674bd8832ede0595c959ea",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790117942781,
+  "symbol": "BABYUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-122b83e2b8514b0196bfc1a004437a2a"
+    ],
+    "first_exchange_ts_ms": 1790117942447,
+    "last_exchange_ts_ms": 1790118071276,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1186,
+      "max": 1900.0,
+      "min": 78.0,
+      "p50": 87.0,
+      "p95": 100.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bitget"
+}

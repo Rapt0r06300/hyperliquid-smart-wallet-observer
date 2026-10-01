@@ -1,0 +1,106 @@
+{
+  "asset_verified": true,
+  "bytes": 6674805,
+  "collection_run_id": "market-2026092519-v4-0",
+  "collector_version": "a48d2a5f116dd794c9d2198888db879823b2311a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-public-l2book-opusdt-1790364007307-1790367506801-0191e8cd96f6",
+  "end_ts_ms": 1790367506801,
+  "event_count": 27781,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 22781,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=22781",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 27781,
+  "release": {
+    "asset_id": 589175192,
+    "asset_name": "binance-usdm-public-l2book-opusdt-1790364007307-1790367506801-0191e8cd96f6.jsonl.gz",
+    "release_id": 396903637,
+    "remote_digest": "sha256:0191e8cd96f6bc13ba0708fcc03aa07f59c651057e067ca2bd4b566a3a5caf07",
+    "remote_size": 6674805,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-campaign-market-2026092519-v4-u0"
+  },
+  "release_asset": "binance-usdm-public-l2book-opusdt-1790364007307-1790367506801-0191e8cd96f6.jsonl.gz",
+  "release_asset_id": 589175192,
+  "release_id": 396903637,
+  "release_remote_digest": "sha256:0191e8cd96f6bc13ba0708fcc03aa07f59c651057e067ca2bd4b566a3a5caf07",
+  "release_remote_size": 6674805,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-campaign-market-2026092519-v4-u0",
+  "replay_compatible": false,
+  "replay_reason": "GAP",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "0191e8cd96f6bc13ba0708fcc03aa07f59c651057e067ca2bd4b566a3a5caf07",
+  "source": "binance_usdm_public",
+  "start_ts_ms": 1790364007307,
+  "symbol": "OPUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bin-depth-87235be7ed434a819f1f62f992695d29"
+    ],
+    "first_exchange_ts_ms": 1790364007147,
+    "last_exchange_ts_ms": 1790367506719,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 27781,
+      "max": 2008.0,
+      "min": 70.0,
+      "p50": 86.0,
+      "p95": 172.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "binance"
+}

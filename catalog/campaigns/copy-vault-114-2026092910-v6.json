@@ -1,0 +1,64 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "copy-vault-114-2026092910-v6",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "710d022e5c1fee23639df14873bb170a21cb820f",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "752cc711eb93247c251e89c8ae568269eca91f64d80ba84d9a992880b1b67af0",
+  "consecutive_failures": 0,
+  "created_at": "2026-09-29T10:50:13.088043+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "duration_s": 3500,
+    "max_vaults": 3094,
+    "rotate_mb": 64,
+    "selection_file": "catalog/copy_vault_selections/2026092910.json",
+    "selection_sha256": "c5935c5b3035e2b010f3a0e8ac1faaf0dfa75a3524564680adb36354d7397db2",
+    "vault_shard_count": 310,
+    "vault_shard_index": 114
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-06T10:50:13.088043+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "at_utc": "2026-09-29T10:54:45.902033Z",
+      "event": "SUPERSEDED_BY_BOUNDED_COPY_VAULT_LANES",
+      "previous_lease": null,
+      "previous_status": "PENDING"
+    }
+  ],
+  "kind": "copy_vault_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 2,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "FAILED",
+  "status_reason": "SUPERSEDED_BY_BOUNDED_V7_LANES",
+  "terminal_evidence_digest": "02dfd9480b21d037c410b38b5d222b6e2686d7ab037711bf9efdc17804e14ce3",
+  "updated_at": "2026-09-29T10:54:45.902033Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

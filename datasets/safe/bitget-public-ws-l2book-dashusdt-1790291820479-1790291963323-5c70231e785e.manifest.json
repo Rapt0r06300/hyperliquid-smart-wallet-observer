@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 171453,
+  "collection_run_id": "market-36071545657",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-l2book-dashusdt-1790291820479-1790291963323-5c70231e785e",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790291963323,
+  "event_count": 1403,
+  "family": "l2Book",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "l2Book"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1403,
+  "release": {
+    "asset_id": 587365371,
+    "asset_name": "bitget-public-ws-l2book-dashusdt-1790291820479-1790291963323-5c70231e785e.jsonl.gz",
+    "release_id": 396247759,
+    "remote_digest": "sha256:5c70231e785ee9b5c86fa2f4d6cde4fe525fd913b1e7359fdf1a92ab1e522276",
+    "remote_size": 171453,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36071545657-s5"
+  },
+  "release_asset": "bitget-public-ws-l2book-dashusdt-1790291820479-1790291963323-5c70231e785e.jsonl.gz",
+  "release_asset_id": 587365371,
+  "release_id": 396247759,
+  "release_remote_digest": "sha256:5c70231e785ee9b5c86fa2f4d6cde4fe525fd913b1e7359fdf1a92ab1e522276",
+  "release_remote_size": 171453,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36071545657-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5c70231e785ee9b5c86fa2f4d6cde4fe525fd913b1e7359fdf1a92ab1e522276",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1790291820479,
+  "symbol": "DASHUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-0bda07e64eee4fbcafb34de215303ed0"
+    ],
+    "first_exchange_ts_ms": 1790291820132,
+    "last_exchange_ts_ms": 1790291963253,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1403,
+      "max": 347.0,
+      "min": 68.0,
+      "p50": 71.0,
+      "p95": 177.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "unique_trade_count": 1389,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}

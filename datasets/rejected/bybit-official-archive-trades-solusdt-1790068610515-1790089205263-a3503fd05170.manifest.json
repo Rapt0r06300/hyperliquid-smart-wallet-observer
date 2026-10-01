@@ -1,0 +1,101 @@
+{
+  "asset_verified": true,
+  "bytes": 16903517,
+  "collection_run_id": "archive-36131186581",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-official-archive-trades-solusdt-1790068610515-1790089205263-a3503fd05170",
+  "end_ts_ms": 1790089205263,
+  "event_count": 195000,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 195000,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:missing_monotonic_count=195000",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "release": {
+    "asset_id": 588246925,
+    "asset_name": "bybit-official-archive-trades-solusdt-1790068610515-1790089205263-a3503fd05170.jsonl.gz",
+    "release_id": 396559232,
+    "remote_digest": "sha256:a3503fd0517084efc97969d267afe1f9e6a34b683f9e41e524af7929ca01c02e",
+    "remote_size": 16903517,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "archive-v2-36131186581-bybit-SOL"
+  },
+  "release_asset": "bybit-official-archive-trades-solusdt-1790068610515-1790089205263-a3503fd05170.jsonl.gz",
+  "release_asset_id": 588246925,
+  "release_id": 396559232,
+  "release_remote_digest": "sha256:a3503fd0517084efc97969d267afe1f9e6a34b683f9e41e524af7929ca01c02e",
+  "release_remote_size": 16903517,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "archive-v2-36131186581-bybit-SOL",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "a3503fd0517084efc97969d267afe1f9e6a34b683f9e41e524af7929ca01c02e",
+  "source": "bybit_official_archive",
+  "start_ts_ms": 1790068610515,
+  "symbol": "SOLUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790068610515,
+    "last_exchange_ts_ms": 1790089205263,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 195000,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "unique_trade_count": 119766,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bybit"
+}

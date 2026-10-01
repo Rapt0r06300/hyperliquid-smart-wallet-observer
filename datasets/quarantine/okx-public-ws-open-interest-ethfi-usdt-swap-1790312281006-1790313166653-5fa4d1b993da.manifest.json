@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 11853,
+  "collection_run_id": "market-36096498552",
+  "collector_version": "f8a19b3e5789025360af759319a03226265ea091",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-ethfi-usdt-swap-1790312281006-1790313166653-5fa4d1b993da",
+  "end_ts_ms": 1790313166653,
+  "event_count": 108,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 587906380,
+    "asset_name": "okx-public-ws-open-interest-ethfi-usdt-swap-1790312281006-1790313166653-5fa4d1b993da.jsonl.gz",
+    "release_id": 396438123,
+    "remote_digest": "sha256:5fa4d1b993dabcd75d2803ef216849164133d6b553dbf102b8065f837dd164f4",
+    "remote_size": 11853,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-36096498552-s5"
+  },
+  "release_asset": "okx-public-ws-open-interest-ethfi-usdt-swap-1790312281006-1790313166653-5fa4d1b993da.jsonl.gz",
+  "release_asset_id": 587906380,
+  "release_id": 396438123,
+  "release_remote_digest": "sha256:5fa4d1b993dabcd75d2803ef216849164133d6b553dbf102b8065f837dd164f4",
+  "release_remote_size": 11853,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-36096498552-s5",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5fa4d1b993dabcd75d2803ef216849164133d6b553dbf102b8065f837dd164f4",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790312281006,
+  "symbol": "ETHFI-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 108,
+      "max": 93.0,
+      "min": 8.5,
+      "p50": 22.0,
+      "p95": 93.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-4efad1e6f6bf483eaa06ccd2399c61c5"
+    ],
+    "first_exchange_ts_ms": 1790312268518,
+    "last_exchange_ts_ms": 1790313166542,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 108,
+      "max": 12488.0,
+      "min": 106.0,
+      "p50": 108.0,
+      "p95": 111.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 108,
+      "max": 197.952295,
+      "min": 0.0,
+      "p50": 193.861599,
+      "p95": 195.298829
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

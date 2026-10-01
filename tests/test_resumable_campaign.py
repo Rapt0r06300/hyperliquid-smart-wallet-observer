@@ -3,7 +3,7 @@ import pytest
 from hl_observer.control_plane.resumable_campaign import *
 
 def manifest():
- now=datetime.now(timezone.utc); return CampaignManifest("c1","market_collection","Rapt0r06300/hyperliquid-smart-wallet-observer","a"*40,"Rapt0r06300/alina-smartflow-datasets-v2","g1","b"*64,"c"*64,(now+timedelta(days=1)).isoformat(),schema_version=SCHEMA_VERSION_V2,created_at=now.isoformat(),creation_phase="COLLECT",phase_epoch=1)
+ now=datetime.now(timezone.utc); return CampaignManifest("c1","market_collection","Rapt0r06300/hyperliquid-smart-wallet-observer","a"*40,"Rapt0r06300/hyperliquid-smart-wallet-observer","g1","b"*64,"c"*64,(now+timedelta(days=1)).isoformat(),schema_version=SCHEMA_VERSION_V2,created_at=now.isoformat(),creation_phase="COLLECT",phase_epoch=1)
 def test_safety_and_transition():
  m=manifest(); validate_manifest(m); transition(m,"RUNNING","go"); assert m.status=="RUNNING"
  m.real_execution=True
@@ -55,7 +55,7 @@ def test_due_selection_round_robins_campaign_kinds_before_repeating():
             kind,
             "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "a"*40,
-            "Rapt0r06300/alina-smartflow-datasets-v2",
+            "Rapt0r06300/hyperliquid-smart-wallet-observer",
             "g1",
             "b"*64,
             "c"*64,

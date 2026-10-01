@@ -1,0 +1,100 @@
+{
+  "asset_verified": true,
+  "bytes": 2655,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-funding-avax-usdt-swap-1790138725094-1790139612537-1ee001aaadff",
+  "end_ts_ms": 1790139612537,
+  "event_count": 16,
+  "family": "funding",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583316592,
+    "asset_name": "okx-public-ws-funding-avax-usdt-swap-1790138725094-1790139612537-1ee001aaadff.jsonl.gz",
+    "release_id": 394435219,
+    "remote_digest": "sha256:1ee001aaadffffd148747ff0dd2e24c30090dd6f5faf5f962a668e845c0c0596",
+    "remote_size": 2655,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s2"
+  },
+  "release_asset": "okx-public-ws-funding-avax-usdt-swap-1790138725094-1790139612537-1ee001aaadff.jsonl.gz",
+  "release_asset_id": 583316592,
+  "release_id": 394435219,
+  "release_remote_digest": "sha256:1ee001aaadffffd148747ff0dd2e24c30090dd6f5faf5f962a668e845c0c0596",
+  "release_remote_size": 2655,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1ee001aaadffffd148747ff0dd2e24c30090dd6f5faf5f962a668e845c0c0596",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790138725094,
+  "symbol": "AVAX-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 16,
+      "max": 51.5,
+      "min": 11.0,
+      "p50": 20.0,
+      "p95": 51.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-eae8b2fdc48b46329a76e464ec787ffc"
+    ],
+    "first_exchange_ts_ms": 1790138715460,
+    "last_exchange_ts_ms": 1790139612430,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 16,
+      "max": 9634.0,
+      "min": 98.0,
+      "p50": 107.0,
+      "p95": 109.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 16,
+      "max": 162.633817,
+      "min": 0.0,
+      "p50": 162.20809,
+      "p95": 162.503007
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

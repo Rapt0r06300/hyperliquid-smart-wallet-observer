@@ -1,0 +1,94 @@
+{
+  "attempts": 2,
+  "campaign_id": "market-2026092700-v4",
+  "chunk_index": 2,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "4a7f9308acf861359547d7a03e0aca9c50b12795",
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "dc57fcff7668b4f416794cc6a17430237656fa1521f8e90b608c45293d2b36cb",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "404658510b16823d03d092c162cad79fe9f09dcac6475a98e42c397d534e6b5b"
+    },
+    "1": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "ae9a8f96633e63d61096211b5469f277e03e7bc2983f45082a248f6a333a9b52",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "82a19104b45a4f7fb5f90733ba085be5913d79a513f1024c6e29c3a4961587a6"
+    }
+  },
+  "config_sha256": "bb02720d9c632da42069136b1f64c289c8888a53efe6a4731db6be4548b246bc",
+  "consecutive_failures": 2,
+  "created_at": "2026-09-27T00:19:10.569501+00:00",
+  "cursor": {
+    "coins": "BTC,ETH,SOL,XRP,DOGE,BNB,AVAX,LINK,SUI,ADA,TRX,TON,WIF,ARB,OP,APT",
+    "duration_s": 3500,
+    "rotate_mb": 64
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "expires_at": "2026-10-04T00:19:10.569501+00:00",
+  "history": [
+    {
+      "at": "2026-09-27T02:25:52.881075Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-27T03:29:18.801273Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-09-27T18:06:12.851595Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-09-27T19:12:52.997308Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at_utc": "2026-09-29T10:44:08.312784Z",
+      "event": "WATCHDOG_LEGACY_V1_TERMINALIZED",
+      "previous_lease": null,
+      "previous_status": "CONTINUATION_REQUIRED",
+      "reason": "LEGACY_SCHEMA_HAS_NO_PHASE_EPOCH_AND_CANNOT_RESUME"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 2,
+  "outputs": [],
+  "paper_only": true,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v1",
+  "status": "FAILED",
+  "status_reason": "LEGACY_V1_EXPIRED_EPOCH",
+  "terminal_evidence_digest": "e1d7ec6cd02aa768983a192a17ddb77f7c2df1a0b7799dedf00f0b03d789fdef",
+  "updated_at": "2026-09-29T10:44:08.312784Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

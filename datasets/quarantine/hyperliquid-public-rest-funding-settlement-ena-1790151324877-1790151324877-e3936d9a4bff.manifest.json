@@ -1,0 +1,98 @@
+{
+  "asset_verified": true,
+  "bytes": 925,
+  "collection_run_id": "market-35819537811",
+  "collector_version": "25f27e9667e8634e83a067153049b963216a6ab5",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-rest-funding-settlement-ena-1790151324877-1790151324877-e3936d9a4bff",
+  "end_ts_ms": 1790151324877,
+  "event_count": 4,
+  "family": "funding_settlement",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "pre_replay_quality_status": "SAFE",
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "release": {
+    "asset_id": 583315423,
+    "asset_name": "hyperliquid-public-rest-funding-settlement-ena-1790151324877-1790151324877-e3936d9a4bff.jsonl.gz",
+    "release_id": 394435219,
+    "remote_digest": "sha256:e3936d9a4bff246c68bac124833779a24e940d58687d05f9e32b1eb15a4e0b02",
+    "remote_size": 925,
+    "repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+    "tag": "data-v2-35819537811-s2"
+  },
+  "release_asset": "hyperliquid-public-rest-funding-settlement-ena-1790151324877-1790151324877-e3936d9a4bff.jsonl.gz",
+  "release_asset_id": 583315423,
+  "release_id": 394435219,
+  "release_remote_digest": "sha256:e3936d9a4bff246c68bac124833779a24e940d58687d05f9e32b1eb15a4e0b02",
+  "release_remote_size": 925,
+  "release_repository": "Rapt0r06300/alina-smartflow-datasets-v2",
+  "release_tag": "data-v2-35819537811-s2",
+  "replay_validation_pending": true,
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e3936d9a4bff246c68bac124833779a24e940d58687d05f9e32b1eb15a4e0b02",
+  "source": "hyperliquid_public_rest",
+  "start_ts_ms": 1790151324877,
+  "symbol": "ENA",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790139600009,
+    "last_exchange_ts_ms": 1790150400033,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4,
+      "max": 11724868.0,
+      "min": 924844.0,
+      "p50": 8124872.0,
+      "p95": 11724868.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
