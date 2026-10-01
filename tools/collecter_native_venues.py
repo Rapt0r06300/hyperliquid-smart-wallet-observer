@@ -53,13 +53,18 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     os.replace(tmp, path)
 
 
-def snapshot_summary(snapshot: NativeMarketSnapshot) -> dict[str, Any]:
+def snapshot_summary(
+    snapshot: NativeMarketSnapshot,
+    *,
+    clock_domain_id: str | None = None,
+) -> dict[str, Any]:
     """Résumé normalisé persistant, sans donnée d'exécution."""
     bid_size = snapshot.bids[0].size if snapshot.bids else None
     ask_size = snapshot.asks[0].size if snapshot.asks else None
     return {
         "venue": snapshot.venue,
         "coin": snapshot.coin,
+        "clock_domain_id": str(clock_domain_id or "") or None,
         "exchange_symbol": snapshot.exchange_symbol,
         "bid": snapshot.bid,
         "ask": snapshot.ask,
@@ -101,6 +106,7 @@ def envelope_from_snapshot(
     raw_payload: Mapping[str, object],
     *,
     monotonic_ns: int | None = None,
+    clock_domain_id: str | None = None,
 ) -> TickEnvelope:
     return TickEnvelope(
         source_id=f"{snapshot.venue}_public_readonly",
@@ -126,17 +132,28 @@ def envelope_from_snapshot(
             "transport": "websocket",
             "authenticated": False,
             "collector": "native_venues",
+            "clock_domain_id": str(clock_domain_id or "") or None,
         },
-        parsed_summary=snapshot_summary(snapshot),
+        parsed_summary=snapshot_summary(
+            snapshot,
+            clock_domain_id=clock_domain_id,
+        ),
     )
 
 
 class RecordingNativeVenueCoordinator(NativeVenueCoordinator):
     """Même coordinateur, avec un sink local après normalisation."""
 
-    def __init__(self, *args: Any, on_snapshot: Callable[[TickEnvelope], None], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        on_snapshot: Callable[[TickEnvelope], None],
+        clock_domain_id: str,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._on_snapshot = on_snapshot
+        self._clock_domain_id = str(clock_domain_id)
 
     def _record(
         self,
@@ -144,7 +161,13 @@ class RecordingNativeVenueCoordinator(NativeVenueCoordinator):
         payload: Mapping[str, object],
     ) -> NativeMarketSnapshot | None:
         if snapshot is not None:
-            self._on_snapshot(envelope_from_snapshot(snapshot, payload))
+            self._on_snapshot(
+                envelope_from_snapshot(
+                    snapshot,
+                    payload,
+                    clock_domain_id=self._clock_domain_id,
+                )
+            )
         return snapshot
 
     def ingest_bybit(self, payload: Mapping[str, object], **kwargs: Any) -> NativeMarketSnapshot | None:
@@ -227,8 +250,13 @@ async def _run(
 
     queue_tick_writer = QueueTickWriter()
 
+    clock_domain_id = (
+        f"{collection_run_id}:native-shard-{symbol_shard_index}:"
+        f"{collection_start_wall_ms}"
+    )
     coordinator = RecordingNativeVenueCoordinator(
         on_snapshot=enqueue,
+        clock_domain_id=clock_domain_id,
         tick_writer=queue_tick_writer,
         stale_after_ms=stale_after_ms,
         max_symbols_per_venue=max_symbols,
