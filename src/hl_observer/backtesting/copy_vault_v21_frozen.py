@@ -429,6 +429,42 @@ def _evaluate_segment(
     }
 
 
+def evaluate_frozen_v21_segment(
+    metaorders: Sequence[Mapping[str, Any]],
+    books_by_coin: Mapping[str, list[dict[str, Any]]],
+    freeze_payload: Mapping[str, Any],
+    *,
+    segment: str,
+) -> dict[str, Any]:
+    """Reproduce one named segment with the immutable V21 policy."""
+    freeze = _verified_freeze(freeze_payload)
+    params = dict(freeze["parameters"])
+    bounds = dict(params.get("bounds") or {})
+    selected = str(segment).strip().lower()
+    if selected == "train":
+        start_ms = int(bounds["train_start_ms"])
+        end_ms: int | None = int(bounds["train_end_ms"])
+    elif selected == "validation":
+        start_ms = int(bounds["validation_start_ms"])
+        end_ms = int(bounds["validation_end_ms"])
+    elif selected == "oos":
+        start_ms = int(bounds["oos_start_ms"])
+        end_ms = int(bounds["oos_end_ms"])
+    elif selected == "forward":
+        start_ms = int(freeze["frozen_at_ms"]) + 1
+        end_ms = None
+    else:
+        raise ValueError(f"unsupported COPY_V21 segment: {segment!r}")
+    return _evaluate_segment(
+        metaorders,
+        books_by_coin,
+        segment=selected,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        params=params,
+    )
+
+
 def evaluate_frozen_v21(
     metaorders: Sequence[Mapping[str, Any]],
     books_by_coin: Mapping[str, list[dict[str, Any]]],
@@ -521,4 +557,5 @@ __all__ = [
     "PROTOCOL",
     "SCHEMA_VERSION",
     "evaluate_frozen_v21",
+    "evaluate_frozen_v21_segment",
 ]
