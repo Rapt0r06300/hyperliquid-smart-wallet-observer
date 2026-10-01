@@ -186,3 +186,58 @@ def test_okx_books_gap_discards_reconstructed_book() -> None:
     assert not state.book_ready
     assert not state.book_bids
     assert not state.book_asks
+
+
+def test_gate_preserves_transport_clock_in_snapshot() -> None:
+    from hl_observer.collection.gate_market_data import GateMarketState
+
+    state = GateMarketState("BTC_USDT")
+    state.apply_book(
+        {
+            "t": 1_000,
+            "u": 10,
+            "b": [{"p": "100", "s": 2}],
+            "a": [{"p": "101", "s": 2}],
+            "_alina_transport": {
+                "connection_id": "gate-test",
+                "receive_wall_ts_ms": 1_010,
+                "receive_mono_ns": 123_000,
+                "transport_rtt_ms": 9.0,
+            },
+        }
+    )
+    snap = state.snapshot(now_ms=1_020)
+    assert snap.receive_ts_ms == 1_010
+    assert snap.receive_mono_ns == 123_000
+    assert snap.connection_id == "gate-test"
+    assert snap.transport_rtt_ms == 9.0
+
+
+def test_bitget_preserves_transport_clock_in_snapshot() -> None:
+    from hl_observer.collection.bitget_market_data import BitgetMarketState
+
+    state = BitgetMarketState("BTCUSDT")
+    state.apply(
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "books", "instId": "BTCUSDT"},
+            "data": [
+                {
+                    "ts": "1000",
+                    "seq": "10",
+                    "bids": [["100", "2"]],
+                    "asks": [["101", "2"]],
+                }
+            ],
+            "_alina_transport": {
+                "connection_id": "bitget-test",
+                "receive_wall_ts_ms": 1_010,
+                "receive_mono_ns": 124_000,
+                "transport_rtt_ms": 10.0,
+            },
+        }
+    )
+    snap = state.snapshot(now_ms=1_020)
+    assert snap.receive_ts_ms == 1_010
+    assert snap.receive_mono_ns == 124_000
+    assert snap.connection_id == "bitget-test"
+    assert snap.transport_rtt_ms == 10.0
