@@ -55,16 +55,18 @@ def _non_negative_finite(value: float | None) -> float | None:
 def _transport_uncertainty_ms(
     buy: NativeMarketSnapshot,
     sell: NativeMarketSnapshot,
-) -> float:
+) -> float | None:
     """Conservative one-way transport uncertainty from recorded RTT evidence.
 
     Each feed's one-way uncertainty is approximated as half its measured RTT.
-    Missing/invalid RTT evidence contributes zero to this prefilter penalty; the
-    row remains non-certifiable and closed-cycle proof is still required.
+    Missing/invalid RTT evidence is unknown rather than zero so callers can fail
+    closed whenever a latency penalty is part of the executable-edge model.
     """
     buy_rtt = _non_negative_finite(buy.transport_rtt_ms)
     sell_rtt = _non_negative_finite(sell.transport_rtt_ms)
-    return 0.5 * float(buy_rtt or 0.0) + 0.5 * float(sell_rtt or 0.0)
+    if buy_rtt is None or sell_rtt is None:
+        return None
+    return 0.5 * buy_rtt + 0.5 * sell_rtt
 
 
 def _orientation(
@@ -104,7 +106,10 @@ def _orientation(
 
     receive_skew = evidence.get("receive_skew_ms")
     skew_ms = max(0.0, float(receive_skew)) if receive_skew is not None else 0.0
-    transport_uncertainty_ms = _transport_uncertainty_ms(buy, sell)
+    transport_uncertainty = _transport_uncertainty_ms(buy, sell)
+    if latency_penalty_bps_per_ms > 0.0 and transport_uncertainty is None:
+        return None
+    transport_uncertainty_ms = float(transport_uncertainty or 0.0)
     total_latency_uncertainty_ms = skew_ms + transport_uncertainty_ms
     latency_penalty = total_latency_uncertainty_ms * latency_penalty_bps_per_ms
     uncertainty_penalty = execution_buffer_bps + latency_penalty
