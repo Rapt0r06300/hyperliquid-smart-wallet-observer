@@ -103,6 +103,32 @@ def test_preserves_leased_collect_campaign(tmp_path) -> None:
     assert json.loads(manifest.read_text(encoding="utf-8")) == original
 
 
+def test_refreshes_failed_collect_campaign_with_only_failed_unit_and_terminal_failure_digest(tmp_path) -> None:
+    module = _module()
+    manifest = tmp_path / "market.json"
+    history = tmp_path / "history"
+    row = _manifest(
+        status="FAILED",
+        completed_units={
+            "0": {
+                "sha256": "d" * 64,
+                "result": {"status": "FAILED", "reason": "adapter_failed"},
+            }
+        },
+    )
+    row["status_reason"] = "adapter_failed"
+    row["terminal_evidence_digest"] = "e" * 64
+    _write(manifest, row)
+
+    result = _refresh(module, manifest, history)
+    refreshed = json.loads(manifest.read_text(encoding="utf-8"))
+
+    assert result["refreshed"] is True
+    assert refreshed["status"] == "PENDING"
+    assert refreshed["completed_units"] == {}
+    assert refreshed["terminal_evidence_digest"] is None
+
+
 def test_preserves_collect_campaign_with_productive_completed_unit(tmp_path) -> None:
     module = _module()
     manifest = tmp_path / "market.json"
