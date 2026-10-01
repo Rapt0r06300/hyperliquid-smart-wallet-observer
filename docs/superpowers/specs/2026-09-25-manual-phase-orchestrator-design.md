@@ -11609,7 +11609,7 @@ These sources motivate hypotheses. They do not themselves prove profitability in
 
 The analysis phase is an ordered state machine:
 
-`DRAIN -> QUALITY -> REPLAY -> BACKTEST -> PNL_PROOF -> SCOREBOARD -> DONE`
+`DRAIN -> QUALITY -> REPLAY -> BACKTEST -> OOS -> FORWARD_PAPER -> PNL_PROOF -> SCOREBOARD -> DONE`
 
 ### DRAIN
 
@@ -11639,6 +11639,14 @@ Run the three research families independently:
 - Cross-Venue Dislocation.
 
 Keep existing TRAIN/validation/OOS/forward causality rules and all execution-cost assumptions.
+
+### OOS
+
+Evaluate only on a frozen out-of-sample slice that was not used to select or tune the evaluated parameters. The OOS dataset selection, code/config hashes and cost model remain immutable for the stage. Missing replay-safe evidence yields `MORE_DATA`/`UNMEASURABLE` rather than an inferred pass.
+
+### FORWARD_PAPER
+
+Run strictly paper/read-only forward evaluation on evidence arriving after the frozen research selection. No real order, key, signature or execution path is reachable. Forward evidence must remain causally separated from TRAIN/validation/OOS tuning and must publish a durable terminal result before PNL proof may advance.
 
 ### PNL_PROOF
 
