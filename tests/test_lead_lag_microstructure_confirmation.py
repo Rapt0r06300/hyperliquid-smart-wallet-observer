@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from hl_observer.backtesting.lead_lag_microstructure_confirmation import (
+    ECONOMIC_TARGET_USD_DAY,
+    HORIZONS_MS,
+    NOTIONALS_USD,
+    SHOCK_THRESHOLDS_BPS,
+    SHOCK_WINDOWS_MS,
     confirm_shocks_with_book_and_flow,
+    trial_count,
 )
 
 
@@ -23,6 +29,18 @@ def _trade(ts: int, direction: float, qty: float, source: str = "same") -> dict:
         "direction": direction,
         "source_id": source,
     }
+
+
+def test_microstructure_economic_grid_is_predeclared_and_counted() -> None:
+    assert NOTIONALS_USD == (25.0, 75.0, 150.0, 300.0)
+    assert ECONOMIC_TARGET_USD_DAY == 4.0
+    assert trial_count(2) == (
+        2
+        * len(SHOCK_WINDOWS_MS)
+        * len(SHOCK_THRESHOLDS_BPS)
+        * len(HORIZONS_MS)
+        * len(NOTIONALS_USD)
+    )
 
 
 def test_book_and_flow_confirmation_accepts_only_causal_agreement() -> None:
