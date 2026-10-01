@@ -1,0 +1,82 @@
+name: final-sync-legacy-dataset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/final-sync-legacy-dataset.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: final-sync-legacy-dataset
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: Rapt0r06300/alina-smartflow-datasets-v2
+          ref: main
+          path: legacy-dataset
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify legacy is inert and stage final replay metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          LEGACY_PHASE="$(python -c 'import json; print(json.load(open("legacy-dataset/control/alina-phase.json"))["phase"])')"
+          test "$LEGACY_PHASE" = "IDLE"
+          SOURCE_HEAD="$(git -C legacy-dataset rev-parse HEAD)"
+          mkdir -p catalog datasets control
+          rsync -a legacy-dataset/catalog/ catalog/
+          rsync -a legacy-dataset/datasets/ datasets/
+          SOURCE_HEAD="$SOURCE_HEAD" LEGACY_PHASE="$LEGACY_PHASE" python - <<'PY'
+          import datetime as dt, json, os, pathlib
+          p=pathlib.Path("control/unified-repository.json")
+          row=json.loads(p.read_text()) if p.exists() else {}
+          row.update({
+              "schema":"alina.unified_repository_migration.v1",
+              "source_repository":"Rapt0r06300/alina-smartflow-datasets-v2",
+              "source_head":os.environ["SOURCE_HEAD"],
+              "target_repository":"Rapt0r06300/hyperliquid-smart-wallet-observer",
+              "mode":"single-active-repository",
+              "phase_authority":"control/alina-phase.json",
+              "legacy_phase_at_final_sync":os.environ["LEGACY_PHASE"],
+              "heavy_data_storage":"github-releases",
+              "historical_catalog_provenance_preserved":True,
+              "final_metadata_sync_at_utc":dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00","Z"),
+          })
+          p.write_text(json.dumps(row,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+          PY
+          test "$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')" = "COLLECT"
+
+      - name: Commit final metadata snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add catalog datasets control/unified-repository.json
+          if git diff --cached --name-only | grep -q '^\.github/workflows/'; then
+            echo "workflow mutation is forbidden in metadata sync" >&2
+            exit 2
+          fi
+          git diff --cached --quiet && exit 0
+          git commit -m "data: final sync from legacy Dataset V2"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep "$((attempt * 3))"
+          done
+          exit 1
