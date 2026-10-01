@@ -1,65 +1,24 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "market-11-2026100104-v7",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "de591de1053b269544a09acc43671e29a686354b",
+  "code_sha": "453ac83c731f921c3a56ff78952ba63ecf56a2ff",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "command": [
-          "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
-          "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
-          "--output",
-          "/home/runner/work/_temp/campaign-output/market-11-2026100104-v7/0"
-        ],
-        "failure_category": "QUALITY",
-        "phase": "unit",
-        "phases": [
-          {
-            "analysis_stage": null,
-            "command": [
-              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
-              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
-              "--output",
-              "/home/runner/work/_temp/campaign-output/market-11-2026100104-v7/0"
-            ],
-            "name": "unit",
-            "returncode": 1,
-            "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 1320, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 1280, in main\n    plan_rows = _load_plan_rows(plan_path) if plan_path else None\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 767, in _load_plan_rows\n    payload = json.loads(path.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: 'catalog/market_collection_plans/2026100104/shard-11.json'\n",
-            "stdout": ""
-          }
-        ],
-        "reason": "adapter_failed",
-        "returncode": 1,
-        "status": "FAILED",
-        "stderr": "Traceback (most recent call last):\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 1320, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 1280, in main\n    plan_rows = _load_plan_rows(plan_path) if plan_path else None\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py\", line 767, in _load_plan_rows\n    payload = json.loads(path.read_text(encoding=\"utf-8\"))\n                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1027, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/pathlib.py\", line 1013, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nFileNotFoundError: [Errno 2] No such file or directory: 'catalog/market_collection_plans/2026100104/shard-11.json'\n",
-        "stdout": ""
-      },
-      "sha256": "ee4df908fa6e6cd798b47af801c3a6d1afb6b5ef9f2ce68f248c05918f57549e"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "f923fcfb311a886f2e0cd2c3f2720c13bff0fd6f9e9e6409bfb8c9eb086d7b66",
   "consecutive_failures": 0,
   "created_at": "2026-10-01T04:38:04.120899+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "ee4df908fa6e6cd798b47af801c3a6d1afb6b5ef9f2ce68f248c05918f57549e",
     "duration_s": 3500,
-    "generation": 0,
-    "handoff_generation": null,
-    "handoff_phase_epoch": 4,
-    "last_run_id": "36815986616",
     "market_shard_count": 16,
     "market_shard_index": 11,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/2026100104/shard-11.json",
     "plan_sha256": "943105a805ce180a6eeec6b58c676c66d515d076d58ce7cf55c08aa55e5c72f5",
-    "predecessor_run_id": null,
-    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 48,
@@ -86,6 +45,15 @@
       "from": "RUNNING",
       "reason": "adapter_failed",
       "to": "FAILED"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-11-2026100104-v7.failed.de591de1053b.ee032692b46487fdea97d3456b1199688f0628db811ed8a623a7a626bfaa405a.json",
+      "archived_manifest_sha256": "ee032692b46487fdea97d3456b1199688f0628db811ed8a623a7a626bfaa405a",
+      "at": "2026-10-01T04:46:25.618593Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "de591de1053b269544a09acc43671e29a686354b",
+      "prior_status": "FAILED",
+      "prior_status_reason": "adapter_failed"
     }
   ],
   "kind": "market_collection",
@@ -107,9 +75,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "FAILED",
-  "status_reason": "adapter_failed",
-  "terminal_evidence_digest": "6bbcb691034e3132ea3fe8b55c64c7c9c83f24ac06d1de63dcda428497270dfb",
-  "updated_at": "2026-10-01T04:41:16.053439Z",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-01T04:46:25.618611Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
