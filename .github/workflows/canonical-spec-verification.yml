@@ -214,9 +214,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          PHASE="$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')"
+          if [ "$PHASE" != "ANALYZE" ]; then
+            echo "Canonical verification passed in phase=$PHASE; closure refresh is deferred until ANALYZE."
+            exit 0
+          fi
           # A GITHUB_TOKEN-authored receipt push does not recursively start the
-          # closure workflow. Dispatch it explicitly so the single-repository
-          # closure receipt binds to the verified canonical HEAD.
+          # closure workflow. Dispatch it explicitly only during ANALYZE.
           for attempt in 1 2 3 4 5 6; do
             set +e
             output="$(gh workflow run alina-dual-repository-closure-report.yml \
