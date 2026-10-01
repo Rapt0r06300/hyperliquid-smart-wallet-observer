@@ -240,6 +240,8 @@ def build() -> dict[str, Any]:
 
     payload = {
         "schema": "alina.collection_metrics.v1",
+        "status": "OK",
+        "stale": False,
         "dataset_generation": "V2_FRESH",
         "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
         "source": "durable_campaign_checkpoints_on_main",
@@ -277,12 +279,80 @@ def build() -> dict[str, Any]:
         "read_only": True,
         "real_execution": False,
     }
-    OUTPUT.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _write_atomic(payload)
     return payload
 
 
+def _write_atomic(payload: Mapping[str, Any]) -> None:
+    """Persist metrics without ever exposing a partially written JSON file."""
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUTPUT.with_suffix(OUTPUT.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(dict(payload), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    tmp.replace(OUTPUT)
+
+
+def _read_previous() -> dict[str, Any] | None:
+    try:
+        row = json.loads(OUTPUT.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    return dict(row) if isinstance(row, Mapping) else None
+
+
+def safe_build() -> dict[str, Any]:
+    """Best-effort operational publication.
+
+    Metrics must never be able to stop collection. On an unexpected metrics
+    failure, preserve the last valid snapshot, mark it stale/degraded, and
+    return success to the caller. If there is no previous snapshot, publish
+    unknown values rather than inventing zero.
+    """
+    previous = _read_previous()
+    try:
+        return build()
+    except Exception as exc:  # defensive boundary: observability cannot stop collection
+        error = f"{type(exc).__name__}: {exc}"
+        if previous is not None:
+            degraded = dict(previous)
+            degraded["status"] = "DEGRADED"
+            degraded["stale"] = True
+            degraded["source"] = "last_known_good_snapshot"
+            degraded["degraded_reason"] = error
+            degraded["rebuild_required"] = True
+        else:
+            degraded = {
+                "schema": "alina.collection_metrics.v1",
+                "status": "DEGRADED",
+                "stale": True,
+                "dataset_generation": "V2_FRESH",
+                "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+                "source": "no_last_known_good_snapshot",
+                "degraded_reason": error,
+                "rebuild_required": True,
+                "instant": {
+                    "trades_collected_observed": None,
+                    "persisted_frames": None,
+                    "shards_published": None,
+                    "compressed_bytes_known": None,
+                    "coverage_complete": False,
+                    "all_collection_metrics_complete": False,
+                },
+                "indexed_dataset": {},
+                "paper_only": True,
+                "read_only": True,
+                "real_execution": False,
+            }
+        try:
+            _write_atomic(degraded)
+        except Exception:
+            # Even persistence failure is non-fatal to collection. The JSON
+            # emitted on stdout still exposes the degraded state to logs.
+            pass
+        return degraded
+
+
 if __name__ == "__main__":
-    print(json.dumps(build(), sort_keys=True))
+    print(json.dumps(safe_build(), sort_keys=True))
