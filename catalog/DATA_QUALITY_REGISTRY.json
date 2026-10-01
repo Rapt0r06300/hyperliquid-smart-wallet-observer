@@ -1,28 +1,15 @@
 {
-  "schema": "alina.dataset_quality_registry.v2",
-  "generation": "V2_FRESH",
-  "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "visibility": "public",
-  "status_vocabulary": [
-    "SAFE",
-    "PARTIAL",
-    "STALE",
-    "REJECT",
-    "NO_DATA"
-  ],
-  "validation_allowed_statuses": [
-    "SAFE"
-  ],
   "active_dataset": {
-    "status": "NO_DATA",
     "indexed_shards": 0,
-    "safe_count": 0,
     "partial_count": 0,
-    "stale_count": 0,
+    "proof_of_pnl_allowed": false,
     "reject_count": 0,
-    "validation_allowed": false,
-    "proof_of_pnl_allowed": false
+    "safe_count": 0,
+    "stale_count": 0,
+    "status": "NO_DATA",
+    "validation_allowed": false
   },
+  "generation": "V2_FRESH",
   "policy": {
     "legacy_import_allowed": false,
     "missing_values_never_zero_imputed": true,
@@ -42,5 +29,18 @@
     "unknown_status": "REJECT",
     "user_pc_forbidden": true,
     "validation_root": "datasets/safe"
-  }
+  },
+  "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "schema": "alina.dataset_quality_registry.v2",
+  "status_vocabulary": [
+    "SAFE",
+    "PARTIAL",
+    "STALE",
+    "REJECT",
+    "NO_DATA"
+  ],
+  "validation_allowed_statuses": [
+    "SAFE"
+  ],
+  "visibility": "public"
 }

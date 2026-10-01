@@ -1,5 +1,13 @@
 name: dataset-metrics-v2
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'catalog/DATA_INDEX.json'
+      - 'catalog/RECORD_COUNT_PATCH.json'
+      - 'catalog/UNCOMPRESSED_SIZE_PATCH.json'
+      - 'tools/build_catalog_metrics.py'
+      - '.github/workflows/dataset-metrics-v2.yml'
   schedule:
     - cron: '53 * * * *'
   workflow_dispatch:

@@ -1,6 +1,4 @@
 {
-  "schema": "alina.data_catalog.v2",
-  "generation": "V2_FRESH",
   "active_data_status": "NO_DATA",
   "active_roots": {
     "incoming": "datasets/incoming",
@@ -8,15 +6,18 @@
     "rejected": "datasets/rejected",
     "safe": "datasets/safe"
   },
+  "generation": "V2_FRESH",
   "indexed_shard_count": 0,
-  "safe_shard_count": 0,
-  "partial_shard_count": 0,
-  "stale_shard_count": 0,
-  "reject_shard_count": 0,
+  "latest_collection": null,
   "legacy_sources": {
     "automatic_import": false,
     "enabled": false
   },
+  "partial_shard_count": 0,
+  "reject_shard_count": 0,
+  "safe_shard_count": 0,
+  "schema": "alina.data_catalog.v2",
+  "stale_shard_count": 0,
   "storage": {
     "control_plane": "git_main",
     "heavy_data": "github_releases",
