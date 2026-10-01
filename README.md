@@ -72,7 +72,10 @@ La cible de +4 USD n'est jamais obtenue en abaissant artificiellement les frais,
 
 ## 3. Architecture générale
 
-Alina est désormais organisée autour de **deux dépôts complémentaires**, d'un control plane versionné et d'un data plane durable.
+Alina fonctionne désormais en **repository unique**. Le code, le control plane, les campagnes,
+les manifests, les receipts, les tests et les GitHub Actions vivent tous dans :
+
+`Rapt0r06300/hyperliquid-smart-wallet-observer` — branche `main`.
 
 ~~~text
                  OPERATOR INTENT
@@ -80,35 +83,24 @@ Alina est désormais organisée autour de **deux dépôts complémentaires**, d'
                          |
                          v
 +------------------------------------------------+
-| Main Alina repository                          |
+| Alina Smart Flow — repository unique           |
 |                                                |
-| - phase/orchestration semantics                |
-| - campaign request contracts                   |
-| - strategies / market truth                    |
-| - replay / backtest / OOS / forward            |
-| - paper execution / PnL / scoreboard           |
-| - user-facing operator surface                 |
-+------------------------------------------------+
-                         |
-              idempotent dispatch
-                         |
-                         v
-+------------------------------------------------+
-| Dataset V2 repository                          |
-|                                                |
-| - immutable dataset assets                     |
-| - manifests                                    |
-| - leases                                       |
-| - checkpoints                                  |
-| - campaign durable state                       |
-| - published receipts / evidence                |
+| - phase / orchestration / campaign state       |
+| - collectors / quality / replay-grade gates    |
+| - replay / backtest / OOS / forward paper      |
+| - PnL proof / scoreboard / receipts            |
+| - manifests / indexes / durable checkpoints    |
+| - GitHub Actions GitHub-hosted                  |
 +------------------------------------------------+
                          |
                          v
-              GITHUB-HOSTED WORKERS
+             GITHUB-HOSTED WORKERS
                          |
                          v
-       COLLECT -> QUALITY -> REPLAY -> ...
+        immutable heavy data in GitHub Releases
+                         |
+                         v
+        COLLECT -> QUALITY -> REPLAY -> BACKTEST
                          |
                          v
        OOS -> FORWARD_PAPER -> PNL_PROOF
@@ -117,60 +109,45 @@ Alina est désormais organisée autour de **deux dépôts complémentaires**, d'
                     SCOREBOARD
 ~~~
 
-Le repo principal **ne doit pas maintenir une seconde copie mutable** de l'état de progression d'une campagne Dataset V2.
+Les gros shards de marché ne sont pas ajoutés à l'historique Git : ils sont publiés comme
+**assets immuables de GitHub Releases du même repository**. Git `main` conserve les manifests,
+hashes, index, états qualité, leases/checkpoints et receipts nécessaires pour les retrouver et
+les valider de façon déterministe.
 
 ---
 
-## 4. Les deux repositories
+## 4. Repository unique et ancien Dataset V2
 
-### Repo principal — code, orchestration et économie
+### Repository actif — code, data plane, orchestration et économie
 
 `Rapt0r06300/hyperliquid-smart-wallet-observer`
 
-Branche source de vérité :
-
-`main`
+Branche source de vérité : `main`.
 
 Responsabilités :
 
-- runtime Python actif sous `src/hl_observer/`
-- contrats d'orchestration
-- control plane
-- stratégies
-- market truth
-- simulation paper
-- exécution paper réaliste
-- ledger/PnL
-- replays et backtests
-- OOS / forward paper
-- Event Intelligence
-- operator surface
-- scoreboard et receipts économiques
-- sécurité no-real-trade
+- runtime Python actif sous `src/hl_observer/`;
+- control plane `IDLE / COLLECT / ANALYZE`;
+- collecte replay-grade, manifests, catalogues et quality receipts;
+- GitHub Releases pour les shards lourds;
+- replays et backtests;
+- OOS / forward paper;
+- Copy-Vault, Lead-Lag et Cross-Venue;
+- PnL proof et scoreboard;
+- tests et GitHub Actions;
+- sécurité paper/read-only et interdiction d'exécution réelle.
 
-Le package historique `hyper_smart_observer/` reste présent pour compatibilité/audit. **Il ne doit pas devenir une nouvelle architecture concurrente.**
+Le package historique `hyper_smart_observer/` reste présent pour compatibilité/audit. **Il ne
+doit pas devenir une architecture concurrente.**
 
-### Dataset V2 — stockage durable et data plane cloud
+### Ancien repository Dataset V2
 
-`Rapt0r06300/alina-smartflow-datasets-v2`
+`Rapt0r06300/alina-smartflow-datasets-v2` est **historique et inactif**.
 
-Branche :
-
-`main`
-
-Responsabilités :
-
-- manifests et index
-- état qualité
-- campaign state
-- leases et checkpoints
-- catalogue de données
-- petits rapports/metadata dans Git
-- gros shards immuables via GitHub Releases
-- workers de collecte/data processing sur GitHub-hosted
-- evidence et receipts durables
-
-Dataset V2 est déjà utilisé pour des campagnes resumables, notamment des lanes Copy-Vault. Son état vivant doit toujours être lu dans les manifests/receipts du dépôt — **jamais copié en dur dans ce README**.
+Il peut être conservé pour la provenance des anciennes releases/manifests, mais il ne détient
+plus l'autorité de phase, ne lance plus les campagnes actives et ne reçoit plus les nouvelles
+données. Toute nouvelle collecte, replay, backtest, OOS/forward, preuve PnL ou scoreboard part
+du repository Alina unique ci-dessus.
 
 ---
 
