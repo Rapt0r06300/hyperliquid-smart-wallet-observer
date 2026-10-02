@@ -37,14 +37,15 @@ from hl_observer.collection.native_funding_history import (
     fetch_gate_funding_settlements,
     fetch_okx_funding_settlements,
 )
-from hl_observer.collection.bybit_market_data import BybitPublicClient
-from hl_observer.collection.bitget_market_data import BitgetPublicClient
-from hl_observer.collection.gate_market_data import GatePublicClient
+from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
+from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
+from hl_observer.collection.depth_capacity import capacity_tape_envelope
+from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
 )
-from hl_observer.collection.okx_market_data import OkxPublicClient
+from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.collection.trade_reconciliation import (
@@ -367,6 +368,135 @@ def _binance_liquidation_envelope(
     )
 
 
+
+def _capacity_from_native_state(
+    venue: str,
+    state: Any,
+    *,
+    received_ts_ms: int,
+    timing_evidence: Mapping[str, Any] | None = None,
+) -> TickEnvelope | None:
+    snapshot = state.snapshot(now_ms=int(received_ts_ms))
+    return capacity_tape_envelope(
+        venue=venue,
+        instrument=snapshot.exchange_symbol,
+        bids=snapshot.bids,
+        asks=snapshot.asks,
+        exchange_ts_ms=snapshot.exchange_ts_ms,
+        received_ts_ms=snapshot.receive_ts_ms,
+        receive_mono_ns=snapshot.receive_mono_ns,
+        connection_id=snapshot.connection_id,
+        sequence=snapshot.sequence,
+        snapshot_id=snapshot.update_id,
+        gap_count=snapshot.gap_count,
+        quality=str(getattr(state, "quality", snapshot.quality)),
+        timing_evidence=timing_evidence,
+    )
+
+
+def _native_capacity_envelope(
+    venue: str,
+    message: Mapping[str, Any],
+    states: dict[str, Any],
+) -> TickEnvelope | None:
+    transport_raw = message.get("_alina_transport")
+    transport = dict(transport_raw) if isinstance(transport_raw, Mapping) else {}
+    received = _int(transport.get("receive_wall_ts_ms"))
+    if received is None:
+        return None
+    venue_key = str(venue).lower()
+
+    if venue_key == "bybit":
+        topic = str(message.get("topic") or "")
+        parts = topic.split(".")
+        if not topic.startswith("orderbook.") or len(parts) < 3 or parts[1] == "1":
+            return None
+        data = message.get("data")
+        if not isinstance(data, Mapping):
+            return None
+        symbol = str(data.get("s") or "").upper()
+        if not symbol:
+            return None
+        state = states.setdefault(symbol, BybitMarketState(symbol=symbol))
+        state.apply_orderbook(dict(message), receive_ts_ms=received)
+
+    elif venue_key == "okx":
+        arg = message.get("arg")
+        channel = str(arg.get("channel") or "") if isinstance(arg, Mapping) else ""
+        if channel != "books":
+            return None
+        symbol = str(arg.get("instId") or "").upper() if isinstance(arg, Mapping) else ""
+        if not symbol:
+            return None
+        state = states.setdefault(symbol, OkxMarketState(inst_id=symbol))
+        state.apply(dict(message), receive_ts_ms=received)
+
+    elif venue_key == "gate":
+        if str(message.get("channel") or "") != "futures.order_book_update":
+            return None
+        result = message.get("result")
+        if not isinstance(result, Mapping):
+            return None
+        symbol = str(result.get("contract") or result.get("s") or "").upper()
+        if not symbol:
+            return None
+        state = states.get(symbol)
+        if state is None:
+            # Incremental Gate depth is inadmissible without the official REST base.
+            return None
+        incoming_connection = str(transport.get("connection_id") or "") or None
+        if (
+            incoming_connection
+            and state.connection_id
+            and incoming_connection != state.connection_id
+        ):
+            # A real reconnect needs a new official base snapshot. Raw frames keep
+            # flowing, but derived capacity fails closed for the remainder of this
+            # bounded window instead of walking an uncertain partial book.
+            states.pop(symbol, None)
+            return None
+        raw = dict(result)
+        raw["_alina_transport"] = transport
+        state.apply_book(raw, receive_ts_ms=received)
+
+    elif venue_key == "bitget":
+        arg = message.get("arg")
+        channel = str(arg.get("channel") or "") if isinstance(arg, Mapping) else ""
+        if channel != "books":
+            return None
+        symbol = str(arg.get("instId") or "").upper() if isinstance(arg, Mapping) else ""
+        if not symbol:
+            return None
+        action = str(message.get("action") or "").lower()
+        incoming_connection = str(transport.get("connection_id") or "") or None
+        state = states.get(symbol)
+        if state is None:
+            if action != "snapshot":
+                return None
+            state = BitgetMarketState(symbol=symbol)
+            states[symbol] = state
+        elif (
+            incoming_connection
+            and state.connection_id
+            and incoming_connection != state.connection_id
+        ):
+            if action != "snapshot":
+                states.pop(symbol, None)
+                return None
+            state = BitgetMarketState(symbol=symbol)
+            states[symbol] = state
+        state.apply(dict(message), receive_ts_ms=received)
+    else:
+        return None
+
+    return _capacity_from_native_state(
+        venue_key,
+        state,
+        received_ts_ms=received,
+        timing_evidence=transport,
+    )
+
+
 async def _native_with_clock_sync(
     venue: str,
     client: Any,
@@ -376,6 +506,7 @@ async def _native_with_clock_sync(
     probe_interval_s: float = 60.0,
 ) -> None:
     sync: dict[str, float | int] = {}
+    capacity_states: dict[str, Any] = {}
 
     async def refresh_probe() -> None:
         try:
@@ -448,6 +579,24 @@ async def _native_with_clock_sync(
             bootstrap_rows = []
         for envelope in bootstrap_rows:
             sink.emit(envelope)
+            if venue == "gate" and envelope.channel == "l2Book":
+                raw = dict(envelope.raw_payload) if isinstance(envelope.raw_payload, Mapping) else {}
+                raw["_alina_transport"] = {
+                    "receive_wall_ts_ms": envelope.received_ts_ms,
+                    "receive_mono_ns": envelope.local_monotonic_ns,
+                    "connection_id": envelope.connection_id,
+                }
+                state = GateMarketState(contract=envelope.instrument)
+                state.apply_book(raw, receive_ts_ms=envelope.received_ts_ms)
+                capacity_states[envelope.instrument] = state
+                capacity = _capacity_from_native_state(
+                    "gate",
+                    state,
+                    received_ts_ms=envelope.received_ts_ms,
+                    timing_evidence=raw["_alina_transport"],
+                )
+                if capacity is not None:
+                    sink.emit(capacity)
     probe_task = asyncio.create_task(probe_loop())
     connection_id = f"{venue}-{uuid.uuid4().hex}"
     try:
@@ -471,6 +620,9 @@ async def _native_with_clock_sync(
             envelope = native_tick_envelope(venue, message)
             if envelope is not None:
                 sink.emit(envelope)
+            capacity = _native_capacity_envelope(venue, message, capacity_states)
+            if capacity is not None:
+                sink.emit(capacity)
     finally:
         probe_task.cancel()
         await asyncio.gather(probe_task, return_exceptions=True)
@@ -714,19 +866,29 @@ async def _collect_funding_settlements(
     return {venue: row for venue, row in result}
 
 
-async def _native_bybit(symbols: list[str], sink: AsyncPartitionSink) -> None:
+async def _native_bybit(
+    symbols: list[str],
+    sink: AsyncPartitionSink,
+    *,
+    session_refresh_s: float = 3600.0,
+) -> None:
     await _native_with_clock_sync(
         "bybit",
-        BybitPublicClient(orderbook_depth=200),
+        BybitPublicClient(orderbook_depth=200, session_refresh_s=session_refresh_s),
         symbols,
         sink,
     )
 
 
-async def _native_okx(symbols: list[str], sink: AsyncPartitionSink) -> None:
+async def _native_okx(
+    symbols: list[str],
+    sink: AsyncPartitionSink,
+    *,
+    session_refresh_s: float = 3600.0,
+) -> None:
     await _native_with_clock_sync(
         "okx",
-        OkxPublicClient(),
+        OkxPublicClient(session_refresh_s=session_refresh_s),
         symbols,
         sink,
     )
@@ -813,6 +975,26 @@ async def _hyperliquid(
                         if envelope is not None:
                             envelope.reconnect_count = reconnects
                             sink.emit(envelope)
+                            if envelope.channel == "l2Book" and isinstance(message.get("data"), Mapping):
+                                levels = message["data"].get("levels")
+                                if isinstance(levels, list) and len(levels) >= 2:
+                                    capacity = capacity_tape_envelope(
+                                        venue="hyperliquid",
+                                        instrument=envelope.instrument,
+                                        bids=levels[0] if isinstance(levels[0], list) else [],
+                                        asks=levels[1] if isinstance(levels[1], list) else [],
+                                        exchange_ts_ms=envelope.exchange_ts_ms,
+                                        received_ts_ms=envelope.received_ts_ms,
+                                        receive_mono_ns=envelope.local_monotonic_ns,
+                                        connection_id=envelope.connection_id,
+                                        sequence=envelope.sequence,
+                                        gap_count=envelope.gap_count,
+                                        quality="EXPLOITABLE",
+                                        timing_evidence=clock_evidence,
+                                    )
+                                    if capacity is not None:
+                                        capacity.reconnect_count = reconnects
+                                        sink.emit(capacity)
                 finally:
                     heartbeat_task.cancel()
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
@@ -1033,15 +1215,16 @@ def _replay_grade_coverage_report(
 ) -> dict[str, Any]:
     """Verify actual persisted replay families, timing and clock proof."""
     required_by_venue: dict[str, set[str]] = {
-        "hyperliquid": {"l2Book", "bbo", "trades", "instrument_metadata"},
-        "binance": {"l2Book", "bbo", "agg_trades", "instrument_metadata"},
-        "bybit": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
-        "okx": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
-        "gate": {"l2Book", "bbo", "trades", "ticker", "open_interest", "instrument_metadata"},
-        "bitget": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
+        "hyperliquid": {"l2Book", "bbo", "trades", "capacity_tape", "instrument_metadata"},
+        "binance": {"l2Book", "bbo", "agg_trades", "capacity_tape", "instrument_metadata"},
+        "bybit": {"l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"},
+        "okx": {"l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"},
+        "gate": {"l2Book", "bbo", "trades", "ticker", "open_interest", "capacity_tape", "instrument_metadata"},
+        "bitget": {"l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"},
     }
     observed: dict[tuple[str, str], set[str]] = defaultdict(set)
     timing_defects: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    trade_reconciliation_defects: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     clock_sync_venues: set[str] = set()
     for manifest in manifests:
         venue = str(manifest.get("venue") or "").lower()
@@ -1066,6 +1249,15 @@ def _replay_grade_coverage_report(
                     defects.append("REGRESSION")
                 if defects:
                     timing_defects[venue][symbol].extend(defects)
+        if family in {"trades", "agg_trades"}:
+            reconciliation = manifest.get("reconciliation")
+            status = (
+                str(reconciliation.get("status") or "UNVERIFIED").upper()
+                if isinstance(reconciliation, Mapping)
+                else "UNVERIFIED"
+            )
+            if status != "MATCHED":
+                trade_reconciliation_defects[venue][symbol].append(status)
 
     per_venue: dict[str, Any] = {}
     all_complete = True
@@ -1083,14 +1275,20 @@ def _replay_grade_coverage_report(
             for symbol, reasons in sorted(timing_defects.get(venue, {}).items())
             if reasons
         }
+        trade_reconciliation = {
+            symbol: sorted(set(reasons))
+            for symbol, reasons in sorted(trade_reconciliation_defects.get(venue, {}).items())
+            if reasons
+        }
         clock_required = venue in {"bybit", "okx", "gate", "bitget"}
         clock_ok = venue in clock_sync_venues if clock_required else True
-        complete = not missing and not timing and clock_ok
+        complete = not missing and not timing and not trade_reconciliation and clock_ok
         all_complete = all_complete and complete
         per_venue[venue] = {
             "required_families": sorted(required),
             "missing_families_by_symbol": missing,
             "timing_defects_by_symbol": timing,
+            "trade_reconciliation_defects_by_symbol": trade_reconciliation,
             "clock_sync_required": clock_required,
             "clock_sync_observed": clock_ok,
             "complete": complete,
@@ -1167,6 +1365,7 @@ async def collect(
     bitget_symbols = venue_lists["bitget"]
 
     instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
+    native_session_refresh_s = max(3600.0, float(duration_s) + 300.0)
 
     hyperliquid_clock = HyperliquidClockSyncProbe() if hl_coins else None
     binance_clock = BinanceClockSyncProbe() if binance_symbols else None
@@ -1194,15 +1393,31 @@ async def collect(
 
     tasks: list[asyncio.Task[Any]] = []
     if bybit_symbols:
-        tasks.append(asyncio.create_task(_native_bybit(bybit_symbols, sink)))
+        tasks.append(
+            asyncio.create_task(
+                _native_bybit(
+                    bybit_symbols,
+                    sink,
+                    session_refresh_s=native_session_refresh_s,
+                )
+            )
+        )
     if okx_symbols:
-        tasks.append(asyncio.create_task(_native_okx(okx_symbols, sink)))
+        tasks.append(
+            asyncio.create_task(
+                _native_okx(
+                    okx_symbols,
+                    sink,
+                    session_refresh_s=native_session_refresh_s,
+                )
+            )
+        )
     if gate_symbols:
         tasks.append(
             asyncio.create_task(
                 _native_with_clock_sync(
                     "gate",
-                    GatePublicClient(),
+                    GatePublicClient(session_refresh_s=native_session_refresh_s),
                     gate_symbols,
                     sink,
                 )
@@ -1213,7 +1428,7 @@ async def collect(
             asyncio.create_task(
                 _native_with_clock_sync(
                     "bitget",
-                    BitgetPublicClient(),
+                    BitgetPublicClient(session_refresh_s=native_session_refresh_s),
                     bitget_symbols,
                     sink,
                 )
