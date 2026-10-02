@@ -91,8 +91,14 @@ def test_rest_snapshot_replays_buffered_diff_and_publishes_deep_book() -> None:
         assert publication["best_bid"] == 100.0
         assert publication["best_ask"] == 101.5
         assert publication["bids"][0] == [100.0, 3.0]
-        assert ticks and ticks[-1].event_kind.value == "SNAPSHOT"
-        assert ticks[-1].source_id == "binance_usdm_public"
+        raw_ticks = [tick for tick in ticks if tick.channel == "l2Book_snapshot"]
+        capacity_ticks = [tick for tick in ticks if tick.channel == "capacity_tape"]
+        assert len(raw_ticks) == 1
+        assert raw_ticks[0].event_kind.value == "SNAPSHOT"
+        assert raw_ticks[0].source_id == "binance_usdm_public"
+        assert len(capacity_ticks) == 1
+        assert capacity_ticks[0].source_id == "binance_derived_capacity"
+        assert capacity_ticks[0].parsed_summary["raw_l2_source_of_truth"] is True
         assert publications[-1][0] == "BTCUSDT"
         await client.aclose()
 
@@ -162,11 +168,15 @@ def test_rest_snapshot_uses_separate_partition_and_zero_event_gap() -> None:
             tick_sink=ticks.append,
         )
         await collector.resync_symbol("BTCUSDT", connection_id="bin-test")
-        assert len(ticks) == 1
-        tick = ticks[0]
-        assert tick.channel == "l2Book_snapshot"
+        raw_ticks = [tick for tick in ticks if tick.channel == "l2Book_snapshot"]
+        capacity_ticks = [tick for tick in ticks if tick.channel == "capacity_tape"]
+        assert len(raw_ticks) == 1
+        assert len(capacity_ticks) == 1
+        tick = raw_ticks[0]
         assert tick.gap_count == 0
         assert tick.provenance["gap_count_semantics"] == "event_delta"
+        assert capacity_ticks[0].gap_count == 0
+        assert capacity_ticks[0].provenance["derived_from_family"] == "l2Book"
         await client.aclose()
 
     asyncio.run(scenario())
