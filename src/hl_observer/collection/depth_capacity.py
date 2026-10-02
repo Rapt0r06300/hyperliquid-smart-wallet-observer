@@ -41,8 +41,18 @@ def _level(row: Any) -> tuple[float, float] | None:
     return price, size
 
 
-def _levels(rows: Iterable[Any] | None, *, reverse: bool) -> list[tuple[float, float]]:
-    parsed = [level for level in (_level(row) for row in (rows or ())) if level is not None]
+def _levels(
+    rows: Iterable[Any] | None,
+    *,
+    reverse: bool,
+    size_multiplier_to_base: float,
+) -> list[tuple[float, float]]:
+    parsed = [
+        (price, size * size_multiplier_to_base)
+        for level in (_level(row) for row in (rows or ()))
+        if level is not None
+        for price, size in (level,)
+    ]
     parsed.sort(key=lambda item: item[0], reverse=reverse)
     return parsed
 
@@ -115,9 +125,21 @@ def build_capacity_tape(
     receive_ts_ms: int | None = None,
     sequence: int | None = None,
     snapshot_id: int | None = None,
+    size_multiplier_to_base: float = 1.0,
 ) -> dict[str, Any]:
-    bid_levels = _levels(bids, reverse=True)
-    ask_levels = _levels(asks, reverse=False)
+    multiplier = _number(size_multiplier_to_base)
+    if multiplier is None:
+        raise ValueError("size_multiplier_to_base must be finite and positive")
+    bid_levels = _levels(
+        bids,
+        reverse=True,
+        size_multiplier_to_base=multiplier,
+    )
+    ask_levels = _levels(
+        asks,
+        reverse=False,
+        size_multiplier_to_base=multiplier,
+    )
     best_bid = bid_levels[0][0] if bid_levels else None
     best_ask = ask_levels[0][0] if ask_levels else None
     mid = (
@@ -162,6 +184,8 @@ def build_capacity_tape(
         "book_age_ms": book_age_ms,
         "source_sequence": int(sequence) if sequence is not None else None,
         "source_snapshot_id": int(snapshot_id) if snapshot_id is not None else None,
+        "size_multiplier_to_base": _rounded(multiplier),
+        "size_semantics": "raw_size_times_multiplier_equals_base_quantity",
         "complete_for_all_targets": bool(
             targets
             and buy_rows
@@ -189,10 +213,14 @@ def capacity_tape_envelope(
     snapshot_id: int | None = None,
     gap_count: int = 0,
     timing_evidence: Mapping[str, Any] | None = None,
+    size_multiplier_to_base: float | None = 1.0,
 ) -> TickEnvelope | None:
     if str(quality or "").upper() != "EXPLOITABLE":
         return None
     if exchange_ts_ms is None or received_ts_ms is None or receive_mono_ns is None:
+        return None
+    multiplier = _number(size_multiplier_to_base)
+    if multiplier is None:
         return None
     tape = build_capacity_tape(
         bids,
@@ -201,6 +229,7 @@ def capacity_tape_envelope(
         receive_ts_ms=int(received_ts_ms),
         sequence=sequence,
         snapshot_id=snapshot_id,
+        size_multiplier_to_base=multiplier,
     )
     if not tape["bid_level_count"] or not tape["ask_level_count"]:
         return None
