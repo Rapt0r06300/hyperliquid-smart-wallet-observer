@@ -1,0 +1,107 @@
+{
+  "asset_verified": true,
+  "bytes": 17642,
+  "collection_run_id": "copy-vault-e6-46-2026100104-v7-0",
+  "collector_version": "26c0361910b9904a1b3c8c06c3ecae9093240a7a",
+  "copy_vault_selection": {
+    "forward_only": true,
+    "observation_only": true,
+    "selected_at_ms": 1790830536036
+  },
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-fartcoin-1790957629234-1790957923739-accd68381cdf",
+  "end_ts_ms": 1790957923739,
+  "event_count": 56,
+  "family": "copy_vault_l2",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "copy_vault_l2"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 56,
+  "release": {
+    "asset_id": 605992511,
+    "asset_name": "hyperliquid-public-copy-l2-copy-vault-l2-fartcoin-1790957629234-1790957923739-accd68381cdf.jsonl.gz",
+    "release_id": 401972441,
+    "remote_digest": "sha256:accd68381cdff94ec36d1f5f420bd266d53c0caa2fd7368868e25487c8a8fc69",
+    "remote_size": 17642,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-copy-vault-e6-46-2026100104-v7-u0"
+  },
+  "release_asset": "hyperliquid-public-copy-l2-copy-vault-l2-fartcoin-1790957629234-1790957923739-accd68381cdf.jsonl.gz",
+  "release_asset_id": 605992511,
+  "release_id": 401972441,
+  "release_remote_digest": "sha256:accd68381cdff94ec36d1f5f420bd266d53c0caa2fd7368868e25487c8a8fc69",
+  "release_remote_size": 17642,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-copy-vault-e6-46-2026100104-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "accd68381cdff94ec36d1f5f420bd266d53c0caa2fd7368868e25487c8a8fc69",
+  "source": "hyperliquid_public_copy_l2",
+  "start_ts_ms": 1790957629234,
+  "symbol": "FARTCOIN",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "copy-l2-af8f418d7dc0478faa5ce0773c442d0f"
+    ],
+    "first_exchange_ts_ms": 1790957628706,
+    "last_exchange_ts_ms": 1790957923410,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 56,
+      "max": 614.0,
+      "min": 297.0,
+      "p50": 375.0,
+      "p95": 549.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "hyperliquid"
+}
