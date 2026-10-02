@@ -168,6 +168,7 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     assert "data-v2-" in text
     assert "--attempts 1" in text
     assert "--poll-seconds 0" in text
+    assert "dataset-health-receipt.yml" in text
     assert "actions/checkout@v4" not in text
     assert "actions/setup-python@v5" not in text
     assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" in text

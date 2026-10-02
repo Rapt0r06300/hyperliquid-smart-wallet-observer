@@ -64,7 +64,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          PHASE="$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')"
+          if [ "$PHASE" != "ANALYZE" ]; then
+            echo "Phase $PHASE: analysis dispatch intentionally skipped."
+            exit 0
+          fi
           gh workflow run analysis-stage-controller.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main
 
+
+      - name: Refresh canonical closure report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run alina-canonical-closure-report.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main

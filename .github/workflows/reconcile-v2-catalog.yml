@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: write
 
 concurrency:
@@ -129,3 +130,13 @@ jobs:
           done
           echo "Unable to publish reconciled V2 catalog."
           exit 1
+
+      - name: Dispatch health receipts after durable catalog publication
+        if: env.RUN_MANIFEST_COUNT != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run dataset-health-receipt.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
