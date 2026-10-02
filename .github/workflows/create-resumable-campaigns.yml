@@ -21,6 +21,16 @@ on:
       - 'tools/requeue_failed_analysis_campaign.py'
       - 'tools/refresh_pending_collect_campaign.py'
       - 'tools/freeze_market_shards.py'
+      - 'tools/collect_cloud_window.py'
+      - 'src/hl_observer/collection/gate_market_data.py'
+      - 'src/hl_observer/collection/bitget_market_data.py'
+      - 'src/hl_observer/collection/bybit_market_data.py'
+      - 'src/hl_observer/collection/okx_market_data.py'
+      - 'src/hl_observer/collection/native_market_tape.py'
+      - 'src/hl_observer/collection/native_funding_history.py'
+      - 'src/hl_observer/collection/trade_reconciliation.py'
+      - 'src/hl_observer/datasets/v2_export.py'
+      - 'src/hl_observer/datasets/v2_pipeline.py'
       - 'control/alina-phase.json'
   workflow_dispatch:
 
