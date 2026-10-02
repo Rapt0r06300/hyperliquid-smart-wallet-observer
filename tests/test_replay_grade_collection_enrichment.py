@@ -7,6 +7,7 @@ import json
 import httpx
 
 from hl_observer.collection.bitget_market_data import BitgetMarketState
+from hl_observer.collection.depth_capacity import build_capacity_tape, capacity_tape_envelope
 from hl_observer.collection.gate_market_data import GateMarketState
 from hl_observer.collection.native_funding_history import (
     fetch_bitget_funding_settlements,
@@ -77,7 +78,7 @@ def test_bitget_bbo_liquidation_and_vwap_depth_evidence() -> None:
     assert bbo is not None
     assert bbo.channel == "bbo"
     assert bbo.parsed_summary["depth_curve_replay_ready"] is True
-    assert bbo.parsed_summary["vwap_target_quote_notionals_usd"] == [10, 50, 100, 250, 500, 1000]
+    assert bbo.parsed_summary["vwap_target_quote_notionals_usd"] == [10, 25, 50, 100, 250, 500, 1000]
 
     liquidation = native_tick_envelope(
         "bitget",
@@ -181,7 +182,7 @@ def test_gate_and_bitget_exact_trade_reconciliation(tmp_path) -> None:
 
 def test_replay_grade_coverage_uses_actual_published_families() -> None:
     manifests = []
-    for family in ("l2Book", "bbo", "trades", "ticker", "instrument_metadata"):
+    for family in ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"):
         manifests.append(
             {
                 "venue": "bitget",
@@ -194,6 +195,9 @@ def test_replay_grade_coverage_uses_actual_published_families() -> None:
                     "gap_count": 0,
                     "regression_count": 0,
                 },
+                "reconciliation": (
+                    {"status": "MATCHED"} if family == "trades" else {"status": "UNVERIFIED"}
+                ),
             }
         )
     manifests.append(
@@ -211,6 +215,16 @@ def test_replay_grade_coverage_uses_actual_published_families() -> None:
     report = _replay_grade_coverage_report(broken, {"bitget": ["BTCUSDT"]})
     assert report["complete"] is False
     assert report["per_venue"]["bitget"]["missing_families_by_symbol"]["BTCUSDT"] == ["bbo"]
+
+    unreconciled = [
+        {**row, "reconciliation": {"status": "PARTIAL"}}
+        if row["family"] == "trades"
+        else row
+        for row in manifests
+    ]
+    report = _replay_grade_coverage_report(unreconciled, {"bitget": ["BTCUSDT"]})
+    assert report["complete"] is False
+    assert report["per_venue"]["bitget"]["trade_reconciliation_defects_by_symbol"]["BTCUSDT"] == ["PARTIAL"]
 
 
 def test_binance_public_liquidation_is_taped() -> None:
@@ -321,3 +335,55 @@ def test_gate_contract_info_change_is_replayable() -> None:
     assert envelope.instrument == "BTC_USDT"
     assert envelope.parsed_summary["tick_size"] == "0.1"
     assert envelope.parsed_summary["contract_multiplier"] == "0.001"
+
+
+
+def test_capacity_tape_walks_reconstructed_depth_at_predeclared_notionals() -> None:
+    tape = build_capacity_tape(
+        bids=[[100, 1], [99, 2]],
+        asks=[[101, 1], [102, 2]],
+        exchange_ts_ms=1_990,
+        receive_ts_ms=2_000,
+        sequence=42,
+    )
+    assert tape["target_notionals_usd"] == [10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
+    assert tape["book_age_ms"] == 10
+    assert tape["source_sequence"] == 42
+    assert tape["buy_from_asks"][3]["fully_fillable"] is True
+    assert tape["buy_from_asks"][-1]["fully_fillable"] is False
+    assert 0.0 < tape["buy_from_asks"][-1]["fill_ratio"] < 1.0
+    assert tape["buy_from_asks"][3]["executable_vwap"] == 101.0
+
+
+def test_capacity_tape_envelope_fails_closed_on_desync() -> None:
+    envelope = capacity_tape_envelope(
+        venue="bitget",
+        instrument="BTCUSDT",
+        bids=[[100, 1]],
+        asks=[[101, 1]],
+        exchange_ts_ms=1_990,
+        received_ts_ms=2_000,
+        receive_mono_ns=123,
+        connection_id="c1",
+        sequence=10,
+        quality="DESYNC",
+    )
+    assert envelope is None
+
+    envelope = capacity_tape_envelope(
+        venue="bitget",
+        instrument="BTCUSDT",
+        bids=[[100, 1]],
+        asks=[[101, 1]],
+        exchange_ts_ms=1_990,
+        received_ts_ms=2_000,
+        receive_mono_ns=123,
+        connection_id="c1",
+        sequence=10,
+        quality="EXPLOITABLE",
+        timing_evidence={"clock_offset_ms": -2.0, "clock_probe_rtt_ms": 8.0},
+    )
+    assert envelope is not None
+    assert envelope.channel == "capacity_tape"
+    assert envelope.parsed_summary["raw_l2_source_of_truth"] is True
+    assert envelope.parsed_summary["clock_offset_ms"] == -2.0
