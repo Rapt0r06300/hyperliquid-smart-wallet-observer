@@ -2,6 +2,7 @@
   "by_kind": {
     "copy_vault_collection": {
       "accepted_frames": 5508,
+      "bbo_frames": 0,
       "compressed_bytes": 1415423,
       "durable_units": 12,
       "l2_frames": 5007,
@@ -13,11 +14,14 @@
       "safe_shards": 219,
       "shards": 580,
       "trades_observed": 51,
+      "uncompressed_bytes": 0,
       "units_missing_compact_metrics": 0,
-      "units_trade_count_coverage_incomplete": 0
+      "units_trade_count_coverage_incomplete": 0,
+      "units_uncompressed_coverage_incomplete": 12
     },
     "event_intelligence_collection": {
       "accepted_frames": 0,
+      "bbo_frames": 0,
       "compressed_bytes": 0,
       "durable_units": 3,
       "l2_frames": 0,
@@ -29,11 +33,14 @@
       "safe_shards": 0,
       "shards": 0,
       "trades_observed": 0,
+      "uncompressed_bytes": 0,
       "units_missing_compact_metrics": 3,
-      "units_trade_count_coverage_incomplete": 0
+      "units_trade_count_coverage_incomplete": 0,
+      "units_uncompressed_coverage_incomplete": 0
     },
     "market_collection": {
       "accepted_frames": 0,
+      "bbo_frames": 0,
       "compressed_bytes": 0,
       "durable_units": 0,
       "l2_frames": 0,
@@ -45,18 +52,20 @@
       "safe_shards": 0,
       "shards": 0,
       "trades_observed": 0,
+      "uncompressed_bytes": 0,
       "units_missing_compact_metrics": 0,
-      "units_trade_count_coverage_incomplete": 0
+      "units_trade_count_coverage_incomplete": 0,
+      "units_uncompressed_coverage_incomplete": 0
     }
   },
   "campaign_status_counts": {
     "COMPLETE": 15,
     "FAILED": 31,
-    "PENDING": 679,
+    "PENDING": 696,
     "RUNNING": 16,
     "STUCK": 32
   },
-  "collection_campaign_count": 773,
+  "collection_campaign_count": 790,
   "dataset_generation": "V2_FRESH",
   "indexed_dataset": {
     "global_unique_coverage_complete": false,
@@ -68,15 +77,19 @@
   },
   "instant": {
     "all_collection_metrics_complete": false,
+    "bbo_frames": 0,
     "compressed_bytes_known": 1415423,
     "coverage_complete": true,
+    "l2_frames": 5007,
     "persisted_frames": 5508,
     "shards_published": 580,
     "trades_collected_observed": 51,
+    "uncompressed_bytes_known": 0,
+    "uncompressed_coverage_complete": false,
     "units_missing_compact_metrics": 3,
     "units_trade_count_coverage_incomplete": 0
   },
-  "latest_checkpoint_at_utc": "2026-10-02T07:13:16.313801Z",
+  "latest_checkpoint_at_utc": "2026-10-02T09:18:20.199596Z",
   "paper_only": true,
   "read_only": true,
   "real_execution": false,
@@ -92,6 +105,7 @@
   "status": "OK",
   "totals": {
     "accepted_frames": 5508,
+    "bbo_frames": 0,
     "compressed_bytes": 1415423,
     "durable_units": 15,
     "l2_frames": 5007,
@@ -103,7 +117,9 @@
     "safe_shards": 219,
     "shards": 580,
     "trades_observed": 51,
+    "uncompressed_bytes": 0,
     "units_missing_compact_metrics": 3,
-    "units_trade_count_coverage_incomplete": 0
+    "units_trade_count_coverage_incomplete": 0,
+    "units_uncompressed_coverage_incomplete": 12
   }
 }
