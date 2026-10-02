@@ -100,7 +100,10 @@ def native_instrument_metadata_envelope(
             "contract_multiplier": (
                 row.get("ctVal") if venue_key == "okx"
                 else row.get("quanto_multiplier") if venue_key == "gate"
-                else row.get("sizeMultiplier") if venue_key == "bitget"
+                else None
+            ),
+            "quantity_step": (
+                row.get("sizeMultiplier") if venue_key == "bitget"
                 else None
             ),
             "data_gate_ready": False,
