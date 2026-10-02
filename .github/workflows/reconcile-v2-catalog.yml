@@ -71,7 +71,7 @@ jobs:
             echo "No new production releases to reconcile."
             exit 0
           fi
-          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 6             --poll-seconds 5
+          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 1             --poll-seconds 0
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
           echo "new production run manifests found: $COUNT"
