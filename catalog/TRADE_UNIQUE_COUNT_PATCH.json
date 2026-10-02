@@ -1,6 +1,6 @@
 {
-  "attempted": 2,
-  "candidate_trade_shards": 2,
+  "attempted": 5,
+  "candidate_trade_shards": 5,
   "collision_policy": "full canonical identity strings; native identifiers preferred; ambiguous missing identities fail closed",
   "counts": {
     "hyperliquid-public-userfills-copy-vault-fills-0x07fd993f0fa3a185f7207adccd29f7a87404689d-1790867234297-1790867323304-2ae217ab6283": {
@@ -18,6 +18,30 @@
       "trade_count_scanned": 1,
       "unique_trade_count": 1,
       "unique_trade_count_exact": true
+    },
+    "hyperliquid-public-userfills-copy-vault-fills-0x4102ef9de91d1a1fa99839293b3a878f94679499-1790949447779-1790949663965-d54c5e1ef3c5": {
+      "cross_shard_overlap_count": 0,
+      "global_new_identity_count": 3,
+      "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
+      "trade_count_scanned": 3,
+      "unique_trade_count": 3,
+      "unique_trade_count_exact": true
+    },
+    "hyperliquid-public-userfills-copy-vault-fills-0x65aee08c9235025355ac6c5ad020fb167ecef4fe-1790943870752-1790943870752-ec6797814887": {
+      "cross_shard_overlap_count": 0,
+      "global_new_identity_count": 1,
+      "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
+      "trade_count_scanned": 1,
+      "unique_trade_count": 1,
+      "unique_trade_count_exact": true
+    },
+    "hyperliquid-public-userfills-copy-vault-fills-0xc3b1bf1f1e6fb8161ef4dc2f34e2c56f70b94b11-1790965255479-1790965255479-a3d295218bcb": {
+      "cross_shard_overlap_count": 0,
+      "global_new_identity_count": 7,
+      "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
+      "trade_count_scanned": 7,
+      "unique_trade_count": 7,
+      "unique_trade_count_exact": true
     }
   },
   "coverage_complete": true,
@@ -25,16 +49,16 @@
   "failed": [],
   "failure_attempts": {},
   "failure_reasons": {},
-  "global_identity_digest": "d04766e476369b1f4737c9037bae9f26efdac48b0853ad5c31e3512933d25b05",
-  "global_unique_trade_count": 51,
+  "global_identity_digest": "557c6b2df480a4905db9f0544cdf111fec9b1eeb546a06898121b6e02c48b097",
+  "global_unique_trade_count": 62,
   "identity_store_persisted": false,
   "identity_store_policy": "identity universe is recomputed from immutable release assets; only compact counts and digest are persisted in Git",
   "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
   "method": "full_trade_corpus_parallel_scan_then_deterministic_sqlite_merge",
-  "observed_identity_digest": "d04766e476369b1f4737c9037bae9f26efdac48b0853ad5c31e3512933d25b05",
-  "observed_unique_trade_count": 51,
+  "observed_identity_digest": "557c6b2df480a4905db9f0544cdf111fec9b1eeb546a06898121b6e02c48b097",
+  "observed_unique_trade_count": 62,
   "remaining_candidate_shards": 0,
   "schema": "alina.global_unique_trade_patch.v3",
-  "successful": 2,
+  "successful": 5,
   "unscanned_candidate_shards": 0
 }
