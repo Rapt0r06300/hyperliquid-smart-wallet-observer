@@ -19,6 +19,12 @@ on:
       - 'src/hl_observer/collection/native_market_tape.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
       - 'src/hl_observer/collection/okx_market_data.py'
+      - 'src/hl_observer/collection/gate_market_data.py'
+      - 'src/hl_observer/collection/bitget_market_data.py'
+      - 'src/hl_observer/collection/native_funding_history.py'
+      - 'src/hl_observer/collection/trade_reconciliation.py'
+      - 'tools/collect_cloud_window.py'
+      - 'tests/test_replay_grade_collection_enrichment.py'
       - 'tests/test_native_venue_coordinator.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_native_market_tape.py'
@@ -39,6 +45,12 @@ on:
     branches:
       - main
     paths:
+      - 'src/hl_observer/collection/gate_market_data.py'
+      - 'src/hl_observer/collection/bitget_market_data.py'
+      - 'src/hl_observer/collection/native_funding_history.py'
+      - 'src/hl_observer/collection/trade_reconciliation.py'
+      - 'tools/collect_cloud_window.py'
+      - 'tests/test_replay_grade_collection_enrichment.py'
       - 'tools/collecter_native_venues.py'
       - 'src/hl_observer/ops/collecteur_registry.py'
       - 'src/hl_observer/ops/preuve_de_vie.py'
@@ -96,6 +108,7 @@ jobs:
             tests/test_native_cross_venue_replay.py \
             tests/test_frais_venues.py \
             tests/test_native_venue_transport_integrity.py \
+            tests/test_replay_grade_collection_enrichment.py \
             tests/test_partitioned_tick_dataset.py \
             tests/test_dataset_v2_export.py \
             tests/test_dataset_v2_pipeline.py \
