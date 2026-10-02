@@ -11,6 +11,7 @@ on:
       - 'src/hl_observer/collection/tick_dataset.py'
       - 'src/hl_observer/collection/partitioned_tick_dataset.py'
       - 'src/hl_observer/collection/native_market_tape.py'
+      - 'src/hl_observer/collection/depth_capacity.py'
       - 'src/hl_observer/collection/native_venue_market.py'
       - 'src/hl_observer/collection/native_venue_coordinator.py'
       - 'src/hl_observer/collection/bybit_market_data.py'
@@ -57,6 +58,7 @@ on:
       - 'tests/test_cross_venue_window.py'
       - 'tests/test_strategy_data_contracts.py'
       - 'tests/test_collect_cloud_window.py'
+      - 'tests/test_replay_grade_collection_enrichment.py'
       - 'tests/test_discover_cloud_collection_plan.py'
       - 'tests/test_publish_dataset_v2_release.py'
       - 'tests/test_official_archive_backfill.py'
@@ -116,6 +118,7 @@ jobs:
             src/hl_observer/collection/tick_dataset.py \
             src/hl_observer/collection/partitioned_tick_dataset.py \
             src/hl_observer/collection/native_market_tape.py \
+            src/hl_observer/collection/depth_capacity.py \
             src/hl_observer/collection/native_venue_market.py \
             src/hl_observer/collection/native_venue_coordinator.py \
             src/hl_observer/collection/bybit_market_data.py \
@@ -165,6 +168,7 @@ jobs:
             tests/test_cross_venue_window.py \
             tests/test_strategy_data_contracts.py \
             tests/test_collect_cloud_window.py \
+            tests/test_replay_grade_collection_enrichment.py \
             tests/test_discover_cloud_collection_plan.py \
             tests/test_publish_dataset_v2_release.py \
             tests/test_official_archive_backfill.py \
