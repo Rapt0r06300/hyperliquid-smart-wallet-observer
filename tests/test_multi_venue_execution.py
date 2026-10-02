@@ -15,6 +15,7 @@ def _snap(venue: str, bid: float, ask: float):
         receive_ts_ms=1_010,
         now_ms=1_020,
         stale_after_ms=1_000,
+        transport_rtt_ms=0.0,
         bids=(MarketLevel(bid, 10.0),),
         asks=(MarketLevel(ask, 10.0),),
     )
