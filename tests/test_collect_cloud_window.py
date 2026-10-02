@@ -342,6 +342,7 @@ def test_cloud_native_frame_carries_clock_probe_evidence() -> None:
             ["BTCUSDT"],
             sink,
             probe_interval_s=60,
+            capacity_size_multipliers={"BTCUSDT": 1.0},
         )
     )
     assert {row.channel for row in sink.rows} == {"l2Book", "capacity_tape"}
