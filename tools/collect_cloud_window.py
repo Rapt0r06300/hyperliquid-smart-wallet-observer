@@ -579,18 +579,26 @@ async def _native_with_clock_sync(
             await asyncio.sleep(max(10.0, float(probe_interval_s)))
             await refresh_probe()
 
-    # Acquire one explicit sample before admitting market frames when possible.
-    await refresh_probe()
-    bootstrap = getattr(client, "bootstrap_envelopes", None)
-    if callable(bootstrap):
+    async def refresh_bootstrap_capacity() -> None:
+        bootstrap = getattr(client, "bootstrap_envelopes", None)
+        if not callable(bootstrap):
+            return
         try:
             bootstrap_rows = await asyncio.to_thread(bootstrap, symbols)
         except Exception:
-            bootstrap_rows = []
+            # Incremental Gate capacity must remain unavailable if its
+            # authoritative REST base cannot be refreshed.
+            if venue == "gate":
+                capacity_states.clear()
+            return
         for envelope in bootstrap_rows:
             sink.emit(envelope)
             if venue == "gate" and envelope.channel == "l2Book":
-                raw = dict(envelope.raw_payload) if isinstance(envelope.raw_payload, Mapping) else {}
+                raw = (
+                    dict(envelope.raw_payload)
+                    if isinstance(envelope.raw_payload, Mapping)
+                    else {}
+                )
                 raw["_alina_transport"] = {
                     "receive_wall_ts_ms": envelope.received_ts_ms,
                     "receive_mono_ns": envelope.local_monotonic_ns,
@@ -610,8 +618,14 @@ async def _native_with_clock_sync(
                 )
                 if capacity is not None:
                     sink.emit(capacity)
+
+    # Acquire explicit timing and official base-book evidence before admitting
+    # incremental native frames.
+    await refresh_probe()
+    await refresh_bootstrap_capacity()
     probe_task = asyncio.create_task(probe_loop())
     connection_id = f"{venue}-{uuid.uuid4().hex}"
+    gate_connection_id: str | None = None
     try:
         async for payload in client.messages(symbols):
             receive_wall_ts_ms = int(time.time() * 1_000)
@@ -622,6 +636,21 @@ async def _native_with_clock_sync(
             transport.setdefault("receive_wall_ts_ms", receive_wall_ts_ms)
             transport.setdefault("receive_mono_ns", receive_mono_ns)
             transport.setdefault("connection_id", connection_id)
+            if venue == "gate":
+                incoming_connection = str(transport.get("connection_id") or "") or None
+                if gate_connection_id is None:
+                    gate_connection_id = incoming_connection
+                elif (
+                    incoming_connection is not None
+                    and incoming_connection != gate_connection_id
+                ):
+                    # Gate depth deltas require an authoritative base book.
+                    # Rebootstrap immediately on a real websocket reconnect;
+                    # if REST fails, refresh_bootstrap_capacity clears state
+                    # and derived capacity stays fail-closed.
+                    capacity_states.clear()
+                    await refresh_bootstrap_capacity()
+                    gate_connection_id = incoming_connection
             if sync:
                 transport["clock_offset_ms"] = sync.get("offset_ms")
                 transport["clock_probe_rtt_ms"] = sync.get("rtt_ms")
