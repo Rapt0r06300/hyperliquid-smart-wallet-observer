@@ -17,7 +17,7 @@ permissions:
   contents: write
 concurrency:
   group: dataset-v2-control-plane-index
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   metrics:
     runs-on: ubuntu-latest

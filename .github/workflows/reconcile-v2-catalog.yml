@@ -39,36 +39,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: One-time import final legacy Dataset V2 metadata
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git remote remove legacy-dataset 2>/dev/null || true
-          git remote add legacy-dataset https://github.com/Rapt0r06300/alina-smartflow-datasets-v2.git
-          git fetch --depth=1 legacy-dataset main
-          LEGACY_PHASE="$(git show FETCH_HEAD:control/alina-phase.json | python -c 'import json,sys; print(json.load(sys.stdin)["phase"])')"
-          test "$LEGACY_PHASE" = "IDLE"
-          LEGACY_HEAD="$(git rev-parse FETCH_HEAD)"
-          git checkout FETCH_HEAD -- catalog datasets
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add catalog datasets
-          if ! git diff --cached --quiet; then
-            git commit -m "data: import final legacy Dataset V2 metadata"
-            for attempt in 1 2 3 4 5 6 7 8; do
-              if git pull --rebase origin main && git push origin HEAD:main; then
-                break
-              fi
-              if [ "$attempt" = 8 ]; then
-                echo "Unable to publish legacy metadata import" >&2
-                exit 1
-              fi
-              sleep "$((attempt * 3))"
-            done
-          fi
-          printf 'legacy_dataset_head=%s\n' "$LEGACY_HEAD"
-
       - name: Download only new production V2 run manifests
         shell: bash
         run: |
