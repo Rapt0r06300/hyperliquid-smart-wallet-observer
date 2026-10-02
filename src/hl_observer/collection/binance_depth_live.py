@@ -22,6 +22,7 @@ from hl_observer.collection.binance_depth_orchestrator import (
     BUFFERISE,
     BinanceDepthOrchestrator,
 )
+from hl_observer.collection.depth_capacity import capacity_tape_envelope
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.realtime.feed_quality import FeedEventKind
 
@@ -361,6 +362,23 @@ class BinanceDepthLiveCollector:
 
     def _emit_publication(self, symbol: str, publication: Mapping[str, Any]) -> None:
         self.publications += 1
+        capacity = capacity_tape_envelope(
+            venue="binance",
+            instrument=symbol,
+            bids=publication.get("bids") if isinstance(publication.get("bids"), list) else [],
+            asks=publication.get("asks") if isinstance(publication.get("asks"), list) else [],
+            exchange_ts_ms=_int_or_none(publication.get("exchange_ts_ms")),
+            received_ts_ms=_int_or_none(publication.get("receive_ts_ms")),
+            receive_mono_ns=_int_or_none(publication.get("receive_mono_ns")),
+            connection_id=str(publication.get("connection_id") or "") or None,
+            sequence=_int_or_none(publication.get("sequence")),
+            snapshot_id=_int_or_none(publication.get("sequence")),
+            gap_count=int(publication.get("gap_count") or 0),
+            quality=str(publication.get("quality") or ""),
+            timing_evidence=self._clock_evidence(),
+        )
+        if capacity is not None:
+            self._emit_tick(capacity)
         if self.publication_sink is not None:
             self.publication_sink(symbol, publication)
 
