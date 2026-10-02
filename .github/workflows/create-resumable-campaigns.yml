@@ -185,6 +185,57 @@ jobs:
           }
 
           if [ "$PHASE" = "COLLECT" ]; then
+            # A collector fix must reach the OLD non-productive market backlog too,
+            # otherwise FIFO scheduling would spend hours on stale code before the
+            # new hourly bucket. Pin the latest commit that actually changed the
+            # market collector surface; catalog/checkpoint-only commits do not
+            # cause refresh churn. Leased or productive campaigns are preserved by
+            # refresh_pending_collect_campaign.py and concurrent worker races are
+            # resolved by the existing rebase-before-push fail-closed logic.
+            COLLECTOR_CODE_SHA="$(git -C alina log -1 --format=%H -- \
+              tools/collect_cloud_window.py \
+              src/hl_observer/collection/gate_market_data.py \
+              src/hl_observer/collection/bitget_market_data.py \
+              src/hl_observer/collection/bybit_market_data.py \
+              src/hl_observer/collection/okx_market_data.py \
+              src/hl_observer/collection/native_market_tape.py \
+              src/hl_observer/collection/native_funding_history.py \
+              src/hl_observer/collection/trade_reconciliation.py \
+              src/hl_observer/datasets/v2_export.py \
+              src/hl_observer/datasets/v2_pipeline.py)"
+            test -n "$COLLECTOR_CODE_SHA"
+            REFRESHED_MARKET_BACKLOG=0
+            for P in catalog/campaigns/market-*.json; do
+              [ -f "$P" ] || continue
+              read -r KIND EPOCH CFG PLAN < <(
+                python - "$P" <<'PY'
+import json,sys
+row=json.load(open(sys.argv[1],encoding="utf-8"))
+print(
+    row.get("kind",""),
+    int(row.get("phase_epoch") or 0),
+    row.get("config_sha256",""),
+    row.get("work_plan_sha256",""),
+)
+PY
+              )
+              [ "$KIND" = "market_collection" ] || continue
+              [ "$EPOCH" = "$PHASE_EPOCH" ] || continue
+              RESULT="$(python tools/refresh_pending_collect_campaign.py \
+                --manifest "$P" \
+                --history-dir catalog/campaign-history \
+                --code-sha "$COLLECTOR_CODE_SHA" \
+                --config-sha256 "$CFG" \
+                --work-plan-sha256 "$PLAN" \
+                --expected-phase-epoch "$PHASE_EPOCH")"
+              if python -c 'import json,sys; raise SystemExit(0 if json.loads(sys.argv[1]).get("refreshed") else 1)' "$RESULT"; then
+                REFRESHED_MARKET_BACKLOG=$((REFRESHED_MARKET_BACKLOG + 1))
+              fi
+            done
+            echo "refreshed_market_backlog=$REFRESHED_MARKET_BACKLOG collector_code_sha=$COLLECTOR_CODE_SHA"
+          fi
+
+          if [ "$PHASE" = "COLLECT" ]; then
             # Freeze one authoritative discovery snapshot per UTC hour, then
             # derive disjoint market shards from that exact snapshot. Every
             # coin keeps all of its venue symbols on one runner so receive-clock
