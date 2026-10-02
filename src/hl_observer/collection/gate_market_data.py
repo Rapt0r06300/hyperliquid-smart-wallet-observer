@@ -1,5 +1,6 @@
 """Gate.io USDT perpetual public collector (read-only)."""
 from __future__ import annotations
+
 import asyncio
 import json
 import time
@@ -11,28 +12,51 @@ import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
-from hl_observer.collection.native_venue_market import DESYNC, EXPLOITABLE, MarketLevel, NativeMarketSnapshot, UNMEASURABLE, canonical_coin
+from hl_observer.collection.feed_integrity import estimate_clock_sync
+from hl_observer.collection.native_venue_market import (
+    DESYNC,
+    EXPLOITABLE,
+    MarketLevel,
+    NativeMarketSnapshot,
+    UNMEASURABLE,
+    canonical_coin,
+)
+from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://api.gateio.ws/api/v4"
 PUBLIC_WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
+VWAP_TARGET_QUOTE_NOTIONALS_USD = (10, 50, 100, 250, 500, 1000)
+
 
 def _f(v: Any) -> float | None:
-    try: return float(v)
-    except (TypeError, ValueError): return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _i(v: Any) -> int | None:
-    try: return int(v)
-    except (TypeError, ValueError): return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
 
 def parse_gate_contracts(payload: Any) -> list[tuple[str, str]]:
     rows = payload.get("data", payload) if isinstance(payload, dict) else payload
     out = []
     for item in rows or []:
-        if not isinstance(item, dict): continue
+        if not isinstance(item, dict):
+            continue
         symbol = str(item.get("name") or item.get("contract") or "").upper()
-        if not symbol or item.get("in_delisting") in (True, "true"): continue
-        if str(item.get("type") or "direct").lower() not in {"direct", ""}: continue
+        if not symbol or item.get("in_delisting") in (True, "true"):
+            continue
+        if str(item.get("type") or "direct").lower() not in {"direct", ""}:
+            continue
         out.append((canonical_coin(symbol), symbol))
     return sorted({x for x in out if x[0]})
+
 
 @dataclass(slots=True)
 class GateMarketState:
@@ -56,30 +80,48 @@ class GateMarketState:
     transport_rtt_ms: float | None = None
     clock_offset_ms: float | None = None
     gap_count: int = 0
+    regression_count: int = 0
 
     def apply_book(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         meta = payload.get("_alina_transport")
         transport = dict(meta) if isinstance(meta, Mapping) else {}
-        seq = _i(payload.get("u") or payload.get("last_update_id") or payload.get("id"))
-        if self.sequence is not None and seq is not None and seq > self.sequence + 1:
-            self.gap_count += 1
-            self.quality, self.reason = DESYNC, "SEQUENCE_GAP"; return self.quality
-        for side, target in ((payload.get("b") or payload.get("bids"), self.bids), (payload.get("a") or payload.get("asks"), self.asks)):
+        first = _i(payload.get("U") or payload.get("first_update_id"))
+        last = _i(payload.get("u") or payload.get("last_update_id") or payload.get("id"))
+        if self.sequence is not None and last is not None:
+            if first is not None and first > self.sequence + 1:
+                self.gap_count += 1
+                self.quality, self.reason = DESYNC, "SEQUENCE_GAP"
+                return self.quality
+            if last < self.sequence:
+                self.regression_count += 1
+                self.quality, self.reason = DESYNC, "SEQUENCE_REGRESSION"
+                return self.quality
+        for side, target in (
+            (payload.get("b") or payload.get("bids"), self.bids),
+            (payload.get("a") or payload.get("asks"), self.asks),
+        ):
             for row in side or []:
-                if isinstance(row, (list, tuple)):
+                if isinstance(row, (list, tuple)) and len(row) >= 2:
                     price, size = _f(row[0]), _f(row[1])
                 elif isinstance(row, dict):
                     price, size = _f(row.get("p") or row.get("price")), _f(row.get("s") or row.get("size"))
-                else: continue
-                if price is None or price <= 0 or size is None: continue
-                (target.pop(price, None) if size <= 0 else target.__setitem__(price, size))
-        self.sequence = seq if seq is not None else self.sequence
-        self.exchange_ts_ms = _i(payload.get("t") or payload.get("time")) or self.exchange_ts_ms
-        self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time()*1000)
+                else:
+                    continue
+                if price is None or price <= 0 or size is None:
+                    continue
+                if size <= 0:
+                    target.pop(price, None)
+                else:
+                    target[price] = size
+        self.sequence = last if last is not None else self.sequence
+        self.exchange_ts_ms = _i(payload.get("t") or payload.get("time") or payload.get("time_ms")) or self.exchange_ts_ms
+        self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
         self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
-        self.transport_rtt_ms = _f(transport.get("transport_rtt_ms")) if transport.get("transport_rtt_ms") is not None else self.transport_rtt_ms
-        self.clock_offset_ms = _f(transport.get("clock_offset_ms")) if transport.get("clock_offset_ms") is not None else self.clock_offset_ms
+        if transport.get("transport_rtt_ms") is not None:
+            self.transport_rtt_ms = _f(transport.get("transport_rtt_ms"))
+        if transport.get("clock_offset_ms") is not None:
+            self.clock_offset_ms = _f(transport.get("clock_offset_ms"))
         self.quality = EXPLOITABLE if self._valid() else UNMEASURABLE
         self.reason = "" if self.quality == EXPLOITABLE else "INVALID_BBO"
         return self.quality
@@ -90,14 +132,45 @@ class GateMarketState:
         self.index = _f(payload.get("index_price") or payload.get("index")) or self.index
         self.volume_24h = _f(payload.get("volume_24h_base") or payload.get("volume_24h")) or self.volume_24h
         self.open_interest = _f(payload.get("total_size") or payload.get("open_interest")) or self.open_interest
-        self.funding_rate = _f(payload.get("funding_rate")) if payload.get("funding_rate") is not None else self.funding_rate
+        if payload.get("funding_rate") is not None:
+            self.funding_rate = _f(payload.get("funding_rate"))
         return self.quality
 
-    def snapshot(self, *, now_ms: int | None = None, depth: int = 50) -> NativeMarketSnapshot:
+    def snapshot(self, *, now_ms: int | None = None, depth: int = 100) -> NativeMarketSnapshot:
         bids = tuple(MarketLevel(p, s) for p, s in sorted(self.bids.items(), reverse=True)[:depth])
         asks = tuple(MarketLevel(p, s) for p, s in sorted(self.asks.items())[:depth])
-        return NativeMarketSnapshot.build(venue="gate", coin=canonical_coin(self.contract), exchange_symbol=self.contract, bid=bids[0].price if bids else 0, ask=asks[0].price if asks else 0, bids=bids, asks=asks, exchange_ts_ms=self.exchange_ts_ms, receive_ts_ms=self.receive_ts_ms, now_ms=now_ms, stale_after_ms=self.stale_after_ms, quality=self.quality if self.quality in {DESYNC, UNMEASURABLE} else None, last=self.last, mark=self.mark, index=self.index, volume_24h=self.volume_24h, open_interest=self.open_interest, funding_rate=self.funding_rate, sequence=self.sequence, connection_id=self.connection_id, receive_mono_ns=self.receive_mono_ns, transport_rtt_ms=self.transport_rtt_ms, clock_offset_ms=self.clock_offset_ms, gap_count=self.gap_count, reason=self.reason)
-    def _valid(self) -> bool: return bool(self.bids and self.asks and max(self.bids) <= min(self.asks))
+        return NativeMarketSnapshot.build(
+            venue="gate",
+            coin=canonical_coin(self.contract),
+            exchange_symbol=self.contract,
+            bid=bids[0].price if bids else 0,
+            ask=asks[0].price if asks else 0,
+            bids=bids,
+            asks=asks,
+            exchange_ts_ms=self.exchange_ts_ms,
+            receive_ts_ms=self.receive_ts_ms,
+            now_ms=now_ms,
+            stale_after_ms=self.stale_after_ms,
+            quality=self.quality if self.quality in {DESYNC, UNMEASURABLE} else None,
+            last=self.last,
+            mark=self.mark,
+            index=self.index,
+            volume_24h=self.volume_24h,
+            open_interest=self.open_interest,
+            funding_rate=self.funding_rate,
+            sequence=self.sequence,
+            connection_id=self.connection_id,
+            receive_mono_ns=self.receive_mono_ns,
+            transport_rtt_ms=self.transport_rtt_ms,
+            clock_offset_ms=self.clock_offset_ms,
+            gap_count=self.gap_count,
+            regression_count=self.regression_count,
+            reason=self.reason,
+        )
+
+    def _valid(self) -> bool:
+        return bool(self.bids and self.asks and max(self.bids) <= min(self.asks))
+
 
 class GatePublicClient:
     def __init__(
@@ -118,19 +191,110 @@ class GatePublicClient:
             response.raise_for_status()
             payload = response.json()
         rows = payload.get("data", payload) if isinstance(payload, dict) else payload
-        self.last_instrument_metadata = [
-            dict(row) for row in (rows or []) if isinstance(row, dict)
-        ]
+        self.last_instrument_metadata = [dict(row) for row in (rows or []) if isinstance(row, dict)]
         return parse_gate_contracts(payload)
+
+    def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
+        with httpx.Client(timeout=timeout_s) as client:
+            response = client.get(f"{self.rest_base_url}/spot/time")
+            response.raise_for_status()
+            payload = response.json()
+        server = _i(payload.get("server_time")) if isinstance(payload, Mapping) else None
+        if server is None:
+            raise RuntimeError("Gate server time missing")
+        return server
+
+    def measure_clock_sync(self, *, timeout_s: float = 5.0):
+        sent = int(time.time() * 1000)
+        server = self.server_time_ms(timeout_s=timeout_s)
+        received = int(time.time() * 1000)
+        return estimate_clock_sync(
+            venue="gate",
+            server_ts_ms=server,
+            send_wall_ts_ms=sent,
+            receive_wall_ts_ms=received,
+        )
+
+    def bootstrap_envelopes(
+        self,
+        contracts: Iterable[str],
+        *,
+        timeout_s: float = 10.0,
+        depth: int = 100,
+    ) -> list[TickEnvelope]:
+        """Capture an official REST base book before applying incremental WS updates."""
+        rows: list[TickEnvelope] = []
+        with httpx.Client(timeout=timeout_s) as client:
+            for contract in sorted({str(c).upper() for c in contracts if str(c).strip()}):
+                sent = int(time.time() * 1000)
+                response = client.get(
+                    f"{self.rest_base_url}/futures/usdt/order_book",
+                    params={
+                        "contract": contract,
+                        "limit": max(1, min(100, int(depth))),
+                        "with_id": "true",
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+                received = int(time.time() * 1000)
+                mono = time.monotonic_ns()
+                if not isinstance(payload, Mapping):
+                    continue
+                asks = payload.get("asks") if isinstance(payload.get("asks"), list) else []
+                bids = payload.get("bids") if isinstance(payload.get("bids"), list) else []
+                rows.append(
+                    TickEnvelope(
+                        source_id="gate_public_rest",
+                        channel="l2Book",
+                        instrument=contract,
+                        event_kind=FeedEventKind.SNAPSHOT,
+                        raw_payload=dict(payload),
+                        exchange_ts_ms=_i(payload.get("current")),
+                        received_ts_ms=received,
+                        local_monotonic_ns=mono,
+                        connection_id=None,
+                        sequence=_i(payload.get("id")),
+                        provenance={
+                            "url": f"{self.rest_base_url}/futures/usdt/order_book",
+                            "network": "mainnet",
+                            "access": "read_only",
+                            "transport": "https",
+                            "authenticated": False,
+                            "request_send_wall_ms": sent,
+                            "request_receive_wall_ms": received,
+                            "snapshot_role": "official_base_for_incremental_depth",
+                        },
+                        parsed_summary={
+                            "bid_levels": len(bids),
+                            "ask_levels": len(asks),
+                            "snapshot_id": _i(payload.get("id")),
+                            "vwap_target_quote_notionals_usd": list(VWAP_TARGET_QUOTE_NOTIONALS_USD),
+                            "depth_curve_replay_ready": bool(bids and asks),
+                            "data_gate_ready": False,
+                        },
+                    )
+                )
+        return rows
 
     async def messages(self, contracts: Iterable[str]) -> AsyncIterator[dict[str, Any]]:
         contracts = tuple(sorted({str(c).upper() for c in contracts if str(c).strip()}))
         if not contracts:
             return
-        subscriptions = [
-            {"channel": "futures.order_book_update", "event": "subscribe", "payload": [contract, "100ms", "20"]}
-            for contract in contracts
-        ]
+        subscriptions: list[dict[str, Any]] = []
+        for contract in contracts:
+            subscriptions.extend(
+                [
+                    {"channel": "futures.order_book_update", "event": "subscribe", "payload": [contract, "100ms", "100"]},
+                    {"channel": "futures.book_ticker", "event": "subscribe", "payload": [contract]},
+                    {"channel": "futures.trades", "event": "subscribe", "payload": [contract]},
+                    {"channel": "futures.tickers", "event": "subscribe", "payload": [contract]},
+                    {"channel": "futures.contract_stats", "event": "subscribe", "payload": [contract, "1m"]},
+                ]
+            )
+        subscriptions.append(
+            {"channel": "futures.public_liquidates", "event": "subscribe", "payload": list(contracts)}
+        )
         attempt = 0
         while True:
             try:
@@ -142,7 +306,7 @@ class GatePublicClient:
                     attempt = 0
                     async for raw in socket:
                         receive_mono_ns = time.monotonic_ns()
-                        receive_wall_ts_ms = int(time.time() * 1_000)
+                        receive_wall_ts_ms = int(time.time() * 1000)
                         payload = json.loads(raw)
                         if not isinstance(payload, dict):
                             continue
@@ -151,7 +315,7 @@ class GatePublicClient:
                             "connection_id": connection_id,
                             "receive_wall_ts_ms": receive_wall_ts_ms,
                             "receive_mono_ns": receive_mono_ns,
-                            "transport_rtt_ms": float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None,
+                            "transport_rtt_ms": float(latency) * 1000.0 if isinstance(latency, (int, float)) else None,
                         }
                         yield payload
                         if time.monotonic() - session_started >= self.session_refresh_s:
@@ -163,4 +327,12 @@ class GatePublicClient:
                 attempt += 1
                 await asyncio.sleep(delay.delay_seconds)
 
-__all__ = ["GateMarketState", "GatePublicClient", "parse_gate_contracts", "REST_BASE_URL", "PUBLIC_WS_URL"]
+
+__all__ = [
+    "GateMarketState",
+    "GatePublicClient",
+    "PUBLIC_WS_URL",
+    "REST_BASE_URL",
+    "VWAP_TARGET_QUOTE_NOTIONALS_USD",
+    "parse_gate_contracts",
+]

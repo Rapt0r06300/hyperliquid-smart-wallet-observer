@@ -29,7 +29,7 @@ from hl_observer.collection.native_venue_market import (
 
 SCHEMA_VERSION = "alina.okx_market_data.v1"
 REST_BASE_URL = "https://www.okx.com"
-PUBLIC_WS_URL = "wss://ws.okx.com:8443/ws/v5/public"
+PUBLIC_WS_URL = "wss://ws.okx.com/ws/v5/public"
 
 
 def _float(value: object) -> float | None:
@@ -388,6 +388,7 @@ class OkxPublicClient:
             for inst_id in inst_ids
             for channel in (
                 "books",
+                "bbo-tbt",
                 "trades",
                 "tickers",
                 "funding-rate",

@@ -409,6 +409,7 @@ class BybitPublicClient:
             for symbol in symbols
             for topic in (
                 f"orderbook.{self.orderbook_depth}.{symbol}",
+                *(() if self.orderbook_depth == 1 else (f"orderbook.1.{symbol}",)),
                 f"tickers.{symbol}",
                 f"publicTrade.{symbol}",
                 f"allLiquidation.{symbol}",

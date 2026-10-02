@@ -180,14 +180,16 @@ def _bybit_identity(
         return None
 
     if topic.startswith("orderbook."):
-        channel = "l2Book"
+        depth_topic = topic.split(".")[1] if len(topic.split(".")) > 2 else None
+        channel = "bbo" if depth_topic == "1" else "l2Book"
         exchange_ts = _int(payload.get("cts")) or _int(first.get("cts")) or _int(payload.get("ts"))
         sequence = _int(first.get("seq"))
         summary = {
             "update_id": _int(first.get("u")),
             "cross_sequence": sequence,
             "message_type": str(payload.get("type") or ""),
-            "depth_topic": topic.split(".")[1] if len(topic.split(".")) > 2 else None,
+            "depth_topic": depth_topic,
+            **_depth_summary(first.get("b"), first.get("a")),
         }
     elif topic.startswith("publicTrade."):
         channel = "trades"
@@ -266,24 +268,63 @@ def _gate_identity(
 ) -> tuple[str, str, int | None, int | None, dict[str, Any]] | None:
     channel_raw = str(payload.get("channel") or "")
     result = payload.get("result")
-    if channel_raw != "futures.order_book_update" or not isinstance(result, Mapping):
+    rows = result if isinstance(result, list) else [result] if isinstance(result, Mapping) else []
+    first = rows[0] if rows and isinstance(rows[0], Mapping) else {}
+    if not channel_raw or not rows:
         return None
-    instrument = str(result.get("contract") or result.get("s") or "").upper()
-    if not instrument:
-        return None
-    sequence = _int(result.get("u"))
-    return (
-        "l2Book",
-        instrument,
-        _int(result.get("t")) or _int(payload.get("time_ms")),
-        sequence,
-        {
-            "source_channel": channel_raw,
-            "event": str(payload.get("event") or ""),
-            "first_update_id": _int(result.get("U")),
-            "last_update_id": sequence,
-        },
-    )
+
+    if channel_raw == "futures.order_book_update":
+        instrument = str(first.get("contract") or first.get("s") or "").upper()
+        if not instrument:
+            return None
+        sequence = _int(first.get("u"))
+        return (
+            "l2Book",
+            instrument,
+            _int(first.get("t")) or _int(first.get("time_ms")) or _int(payload.get("time_ms")),
+            sequence,
+            {
+                "source_channel": channel_raw,
+                "event": str(payload.get("event") or ""),
+                "first_update_id": _int(first.get("U")),
+                "last_update_id": sequence,
+                **_depth_summary(first.get("b"), first.get("a")),
+            },
+        )
+    if channel_raw == "futures.book_ticker":
+        instrument = str(first.get("s") or first.get("contract") or "").upper()
+        return ("bbo", instrument, _int(first.get("t")) or _int(payload.get("time_ms")), _int(first.get("u")), {"source_channel": channel_raw, "event_count": len(rows)}) if instrument else None
+    if channel_raw == "futures.trades":
+        instrument = str(first.get("contract") or "").upper()
+        return (
+            "trades",
+            instrument,
+            _max_int(row.get("create_time_ms", row.get("time_ms", row.get("time"))) for row in rows if isinstance(row, Mapping)),
+            _max_int(row.get("id") for row in rows if isinstance(row, Mapping)),
+            {"source_channel": channel_raw, "event_count": len(rows)},
+        ) if instrument else None
+    if channel_raw == "futures.tickers":
+        instrument = str(first.get("contract") or "").upper()
+        return ("ticker", instrument, _int(payload.get("time_ms")), None, {"source_channel": channel_raw, "event_count": len(rows)}) if instrument else None
+    if channel_raw == "futures.contract_stats":
+        instrument = str(first.get("contract") or "").upper()
+        return (
+            "open_interest",
+            instrument,
+            _int(first.get("time_ms")) or _int(first.get("time")) or _int(payload.get("time_ms")),
+            None,
+            {"source_channel": channel_raw, "event_count": len(rows), "long_liq_size": _float(first.get("long_liq_size")), "short_liq_size": _float(first.get("short_liq_size"))},
+        ) if instrument else None
+    if channel_raw == "futures.public_liquidates":
+        instrument = str(first.get("contract") or "").upper()
+        return (
+            "liquidations",
+            instrument,
+            _max_int(row.get("time_ms", row.get("time")) for row in rows if isinstance(row, Mapping)),
+            None,
+            {"source_channel": channel_raw, "event_count": len(rows)},
+        ) if instrument else None
+    return None
 
 
 def _bitget_identity(
@@ -301,23 +342,39 @@ def _bitget_identity(
         return None
     channel = {
         "books": "l2Book",
-        "books1": "l2Book",
+        "books1": "bbo",
         "ticker": "ticker",
         "trade": "trades",
+        "liquidation": "liquidations",
     }.get(channel_raw)
     if channel is None:
         return None
+    summary = {
+        "event_count": len(rows),
+        "source_channel": channel_raw,
+        "action": str(payload.get("action") or ""),
+    }
+    if channel_raw in {"books", "books1"}:
+        summary.update(_depth_summary(first.get("bids"), first.get("asks")))
+        summary["prev_sequence"] = _int(first.get("pseq") or first.get("prevSeqId"))
     return (
         channel,
         instrument,
-        _max_int(row.get("ts") for row in rows if isinstance(row, Mapping)),
+        _max_int(row.get("ts") for row in rows if isinstance(row, Mapping)) or _int(payload.get("ts")),
         _int(first.get("seq")) or _int(first.get("seqId")),
-        {
-            "event_count": len(rows),
-            "source_channel": channel_raw,
-            "action": str(payload.get("action") or ""),
-        },
+        summary,
     )
+
+
+def _depth_summary(bids: Any, asks: Any) -> dict[str, Any]:
+    bid_rows = bids if isinstance(bids, list) else []
+    ask_rows = asks if isinstance(asks, list) else []
+    return {
+        "bid_levels": len(bid_rows),
+        "ask_levels": len(ask_rows),
+        "depth_curve_replay_ready": bool(bid_rows and ask_rows),
+        "vwap_target_quote_notionals_usd": [10, 50, 100, 250, 500, 1000],
+    }
 
 
 def _topic_symbol(topic: str) -> str:
