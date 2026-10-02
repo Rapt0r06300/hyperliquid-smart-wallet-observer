@@ -208,16 +208,7 @@ jobs:
             for P in catalog/campaigns/market-*.json; do
               [ -f "$P" ] || continue
               read -r KIND EPOCH CFG PLAN < <(
-                python - "$P" <<'PY'
-import json,sys
-row=json.load(open(sys.argv[1],encoding="utf-8"))
-print(
-    row.get("kind",""),
-    int(row.get("phase_epoch") or 0),
-    row.get("config_sha256",""),
-    row.get("work_plan_sha256",""),
-)
-PY
+                python -c 'import json,sys; row=json.load(open(sys.argv[1],encoding="utf-8")); print(row.get("kind",""), int(row.get("phase_epoch") or 0), row.get("config_sha256",""), row.get("work_plan_sha256",""))' "$P"
               )
               [ "$KIND" = "market_collection" ] || continue
               [ "$EPOCH" = "$PHASE_EPOCH" ] || continue
