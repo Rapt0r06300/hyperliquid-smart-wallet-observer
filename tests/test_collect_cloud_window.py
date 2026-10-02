@@ -344,12 +344,16 @@ def test_cloud_native_frame_carries_clock_probe_evidence() -> None:
             probe_interval_s=60,
         )
     )
-    assert len(sink.rows) == 1
-    record = sink.rows[0].as_record(written_ts_ms=1020)
+    assert {row.channel for row in sink.rows} == {"l2Book", "capacity_tape"}
+    raw = next(row for row in sink.rows if row.channel == "l2Book")
+    record = raw.as_record(written_ts_ms=1020)
     summary = record["parsed_summary"]
     assert summary["clock_offset_ms"] == -3.5
     assert summary["clock_probe_rtt_ms"] == 12.0
     assert summary["transport_rtt_ms"] == 8.0
+    capacity = next(row for row in sink.rows if row.channel == "capacity_tape")
+    assert capacity.parsed_summary["clock_offset_ms"] == -3.5
+    assert capacity.parsed_summary["clock_probe_rtt_ms"] == 12.0
 
 
 def test_cloud_window_backfills_funding_per_venue_fail_closed(monkeypatch) -> None:
