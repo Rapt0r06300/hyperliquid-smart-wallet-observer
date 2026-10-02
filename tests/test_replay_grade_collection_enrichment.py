@@ -18,7 +18,10 @@ from hl_observer.collection.trade_reconciliation import (
     reconcile_bitget_trade_shard,
     reconcile_gate_trade_shard,
 )
-from tools.collect_cloud_window import _replay_grade_coverage_report
+from tools.collect_cloud_window import (
+    _binance_liquidation_envelope,
+    _replay_grade_coverage_report,
+)
 
 
 def _transport() -> dict:
@@ -208,3 +211,36 @@ def test_replay_grade_coverage_uses_actual_published_families() -> None:
     report = _replay_grade_coverage_report(broken, {"bitget": ["BTCUSDT"]})
     assert report["complete"] is False
     assert report["per_venue"]["bitget"]["missing_families_by_symbol"]["BTCUSDT"] == ["bbo"]
+
+
+def test_binance_public_liquidation_is_taped() -> None:
+    envelope = _binance_liquidation_envelope(
+        {
+            "data": {
+                "e": "forceOrder",
+                "E": 2_000,
+                "o": {
+                    "s": "BTCUSDT",
+                    "S": "SELL",
+                    "T": 1_995,
+                    "ap": "65000",
+                    "z": "0.25",
+                },
+            }
+        },
+        received_ts_ms=2_005,
+        receive_mono_ns=456_789,
+        connection_id="binance-liquidation-test",
+        clock_evidence={
+            "clock_offset_ms": -2.0,
+            "clock_probe_rtt_ms": 8.0,
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "liquidations"
+    assert envelope.instrument == "BTCUSDT"
+    assert envelope.exchange_ts_ms == 1_995
+    assert envelope.local_monotonic_ns == 456_789
+    assert envelope.parsed_summary["price"] == 65000.0
+    assert envelope.parsed_summary["size"] == 0.25
+    assert envelope.parsed_summary["clock_offset_ms"] == -2.0

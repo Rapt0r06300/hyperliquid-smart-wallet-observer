@@ -321,6 +321,52 @@ def _binance_trade_envelope(
     )
 
 
+def _binance_liquidation_envelope(
+    payload: Mapping[str, Any],
+    *,
+    received_ts_ms: int,
+    receive_mono_ns: int,
+    connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
+) -> TickEnvelope | None:
+    raw = payload.get("data") if isinstance(payload.get("data"), Mapping) else payload
+    if not isinstance(raw, Mapping) or str(raw.get("e") or "") != "forceOrder":
+        return None
+    order = raw.get("o")
+    if not isinstance(order, Mapping):
+        return None
+    symbol = str(order.get("s") or "").upper()
+    if not symbol:
+        return None
+    return TickEnvelope(
+        source_id="binance_usdm_public",
+        channel="liquidations",
+        instrument=symbol,
+        event_kind=FeedEventKind.EVENT,
+        raw_payload=dict(raw),
+        exchange_ts_ms=_int(order.get("T")) or _int(raw.get("E")),
+        received_ts_ms=int(received_ts_ms),
+        local_monotonic_ns=int(receive_mono_ns),
+        connection_id=connection_id,
+        sequence=None,
+        provenance={
+            "url": WS_BINANCE_MARKET,
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "websocket",
+            "authenticated": False,
+            "real_execution": False,
+        },
+        parsed_summary={
+            **dict(clock_evidence or {}),
+            "side": str(order.get("S") or ""),
+            "price": _float(order.get("ap") or order.get("p")),
+            "size": _float(order.get("z") or order.get("q")),
+            "data_gate_ready": False,
+        },
+    )
+
+
 async def _native_with_clock_sync(
     venue: str,
     client: Any,
@@ -784,6 +830,10 @@ async def _binance_stream(
         base = WS_BINANCE_MARKET
         suffix = "aggTrade"
         parser = _binance_trade_envelope
+    elif mode == "liquidations":
+        base = WS_BINANCE_MARKET
+        suffix = "forceOrder"
+        parser = _binance_liquidation_envelope
     else:
         raise ValueError(mode)
 
@@ -1176,6 +1226,7 @@ async def collect(
                 asyncio.create_task(_binance_stream(binance_symbols, sink, mode="bbo", clock_probe=binance_clock)),
                 asyncio.create_task(_binance_stream(binance_symbols, sink, mode="trades", clock_probe=binance_clock)),
                 asyncio.create_task(_binance_stream(binance_symbols, sink, mode="agg_trades", clock_probe=binance_clock)),
+                asyncio.create_task(_binance_stream(binance_symbols, sink, mode="liquidations", clock_probe=binance_clock)),
                 asyncio.create_task(binance_depth.run()),
                 asyncio.create_task(binance_context.run()),
             )
