@@ -1,0 +1,169 @@
+{
+  "asset_verified": true,
+  "bytes": 10177,
+  "collection_run_id": "event-e6-2026100104-v5-0",
+  "collector_version": "26c0361910b9904a1b3c8c06c3ecae9093240a7a",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gdacs-external-events-global-1790830835079-1790830835079-4371a853a818",
+  "end_ts_ms": 1790830835079,
+  "event_count": 83,
+  "event_intelligence": {
+    "coverage_complete": true,
+    "coverage_sha256": "2c05ba9e2fefd9f768fa95db5453028ae9c56cfb9b8878d4320b28970302a72b",
+    "dataset_families": [
+      "bbo",
+      "copy_vault_fills",
+      "copy_vault_l2",
+      "copy_vault_positions",
+      "external_events",
+      "funding_settlement",
+      "instrument_metadata",
+      "l2book",
+      "open_interest",
+      "trades"
+    ],
+    "idea_count": 120,
+    "linked_strategy_families": [
+      "arbitrage",
+      "copy_vault",
+      "cross_venue_dislocation",
+      "lead_lag"
+    ],
+    "paper_only": true,
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "read_only": true,
+    "real_execution": false,
+    "schema": "alina.event_intelligence_integration.v1",
+    "wiring": {
+      "economic_proof_allowed": false,
+      "economic_proof_complete": true,
+      "idea_count": 120,
+      "paper_only": true,
+      "partial_proof_count": 0,
+      "read_only": true,
+      "real_execution": false,
+      "schema": "alina.event_intelligence_wiring.v1",
+      "status_registry_digest": "2388e21593eb47d7f77872a6c36c9d0388523c7f07e16e248fa431d49f630713",
+      "summary": {
+        "BROKEN": 0,
+        "IMPLEMENTED_AND_WIRED": 117,
+        "IMPLEMENTED_BUT_NOT_WIRED": 0,
+        "IMPLEMENTED_BUT_PARTIAL": 0,
+        "MISSING": 0,
+        "NOT_APPLICABLE": 3
+      },
+      "wiring_complete": true
+    }
+  },
+  "event_intelligence_runtime": {
+    "accepted_event_count": 183,
+    "economic_research_sha256": "bed12db43e67391b1a8740769c8eca28cd7b0fa4f87ca493515348af035a653c",
+    "economic_research_state": "UNMEASURABLE",
+    "market_response_sha256": "5641497b839118dfd944ff7190fd31d0bbe5d48bc2ec4fcccb94d02e408dc754",
+    "market_response_state": "UNMEASURABLE",
+    "proof_of_pnl_allowed": false,
+    "proof_state": "STRUCTURAL_ONLY",
+    "research_protocol_sha256": "cfc4698840adfece84d4679ae7c1669a86aad48ffa441420d991c2218d363031",
+    "research_protocol_state": "UNMEASURABLE",
+    "runtime_evidence_sha256": "5a815e14bdebe829a8bd55e9b18a0d868e154fd9242c31c0cdf4f3d6d98a8a72",
+    "schema": "alina.event_intelligence_runtime_evidence.v1"
+  },
+  "family": "external_events",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "external_events"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "causal_event_availability"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNAVAILABLE"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "reason": "NO_INDEPENDENT_EXACT_REFERENCE",
+    "status": "UNAVAILABLE"
+  },
+  "record_count": 83,
+  "release": {
+    "asset_id": 602475832,
+    "asset_name": "gdacs-external-events-global-1790830835079-1790830835079-4371a853a818.jsonl.gz",
+    "release_id": 400663012,
+    "remote_digest": "sha256:4371a853a8180df41ae6c30892c3d0eefa124929a52db0bef66c6369b92f8f7f",
+    "remote_size": 10177,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-event-e6-2026100104-v5-u0"
+  },
+  "release_asset": "gdacs-external-events-global-1790830835079-1790830835079-4371a853a818.jsonl.gz",
+  "release_asset_id": 602475832,
+  "release_id": 400663012,
+  "release_remote_digest": "sha256:4371a853a8180df41ae6c30892c3d0eefa124929a52db0bef66c6369b92f8f7f",
+  "release_remote_size": 10177,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-event-e6-2026100104-v5-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4371a853a8180df41ae6c30892c3d0eefa124929a52db0bef66c6369b92f8f7f",
+  "source": "gdacs",
+  "start_ts_ms": 1790830835079,
+  "symbol": "GLOBAL",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "event-e6-2026100104-v5-0:gdacs"
+    ],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}
