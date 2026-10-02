@@ -133,8 +133,10 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "publish_dataset_v2_release.py" in worker
     assert "verify_lease" in worker
     assert "workflow_call:" in worker
-    assert "Refresh Dataset V2 main" in controller
-    assert "Refresh Dataset V2 main before pin" in worker
+    assert "Checkout Alina repository" in controller
+    assert "Refresh Alina main before pin" in worker
+    assert "alina-smartflow-datasets-v2" not in controller
+    assert "alina-smartflow-datasets-v2" not in worker
     assert 'os.path.abspath(str(part["selection_file"]))' in worker
     assert "COPY_VAULT_SWEEP_DURATION_CAP_S=300" in worker
     assert 'part["duration_s"] = min' in worker
