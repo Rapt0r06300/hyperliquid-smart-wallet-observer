@@ -455,20 +455,20 @@
       {
         "campaign_id": "copy-vault-e6-50-2026100104-v7",
         "collected": false,
-        "completed_units": 0,
+        "completed_units": 1,
         "published": false,
         "shard_index": 50,
-        "status": "PENDING",
-        "status_reason": "created"
+        "status": "STUCK",
+        "status_reason": "durable_publication_failed"
       },
       {
         "campaign_id": "copy-vault-e6-51-2026100104-v7",
         "collected": false,
-        "completed_units": 0,
+        "completed_units": 1,
         "published": false,
         "shard_index": 51,
-        "status": "PENDING",
-        "status_reason": "created"
+        "status": "STUCK",
+        "status_reason": "durable_publication_failed"
       },
       {
         "campaign_id": "copy-vault-e6-52-2026100104-v7",
@@ -2794,7 +2794,7 @@
       }
     ],
     "collected_lane_count": 48,
-    "completed_unit_count": 56,
+    "completed_unit_count": 58,
     "created_at_max": "2026-10-01T04:56:06.195239+00:00",
     "declared_universe_count": 3093,
     "duplicate_lane_indices": [],
@@ -3136,6 +3136,16 @@
       {
         "campaign_id": "copy-vault-e6-48-2026100104-v7",
         "reason": "worker_unit_crash",
+        "status": "STUCK"
+      },
+      {
+        "campaign_id": "copy-vault-e6-50-2026100104-v7",
+        "reason": "durable_publication_failed",
+        "status": "STUCK"
+      },
+      {
+        "campaign_id": "copy-vault-e6-51-2026100104-v7",
+        "reason": "durable_publication_failed",
         "status": "STUCK"
       }
     ],
@@ -3604,20 +3614,20 @@
         {
           "campaign_id": "copy-vault-e6-50-2026100104-v7",
           "collected": false,
-          "completed_units": 0,
+          "completed_units": 1,
           "published": false,
           "shard_index": 50,
-          "status": "PENDING",
-          "status_reason": "created"
+          "status": "STUCK",
+          "status_reason": "durable_publication_failed"
         },
         {
           "campaign_id": "copy-vault-e6-51-2026100104-v7",
           "collected": false,
-          "completed_units": 0,
+          "completed_units": 1,
           "published": false,
           "shard_index": 51,
-          "status": "PENDING",
-          "status_reason": "created"
+          "status": "STUCK",
+          "status_reason": "durable_publication_failed"
         },
         {
           "campaign_id": "copy-vault-e6-52-2026100104-v7",
@@ -5943,7 +5953,7 @@
         }
       ],
       "collected_lane_count": 48,
-      "completed_unit_count": 56,
+      "completed_unit_count": 58,
       "created_at_max": "2026-10-01T04:56:06.195239+00:00",
       "declared_universe_count": 3093,
       "duplicate_lane_indices": [],
@@ -6286,6 +6296,16 @@
           "campaign_id": "copy-vault-e6-48-2026100104-v7",
           "reason": "worker_unit_crash",
           "status": "STUCK"
+        },
+        {
+          "campaign_id": "copy-vault-e6-50-2026100104-v7",
+          "reason": "durable_publication_failed",
+          "status": "STUCK"
+        },
+        {
+          "campaign_id": "copy-vault-e6-51-2026100104-v7",
+          "reason": "durable_publication_failed",
+          "status": "STUCK"
         }
       ],
       "users_per_largest_lane": 10
@@ -6293,7 +6313,7 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "d96b038e1890fec054bbbc8c1d6e33652b44c1145862bbb227374063757e53c3",
+  "receipt_digest": "8355a4cc2aae4fcb6056da397c5a48c6596135af3b767a89c7c85be4cd7bed3a",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
