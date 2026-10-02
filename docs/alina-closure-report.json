@@ -796,7 +796,7 @@
   "campaign_resilience_status": "READY",
   "canonical_spec_blob": "92325bef5a95338c6d1d103965820e00f1f6dfed",
   "copy_vault_coverage_receipt": {
-    "digest": "ffac2e736e9f00c3b43b86882af27ad853d83f254aade041934cf8cc6c7848cc",
+    "digest": "e90ee182cfe8cee31d7902a252ba0c472dea6290e24aa9a4e1f27c705aec0b8f",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
@@ -815,7 +815,6 @@
     "analysis_eligible": false,
     "analysis_stage": null,
     "blockers": [
-      "NO_VALID_RECORDS",
       "TRADE_COUNT_COVERAGE_INCOMPLETE",
       "GLOBAL_UNIQUE_TRADE_COVERAGE_INCOMPLETE",
       "GLOBAL_UNIQUE_TRADE_COUNT_UNAVAILABLE"
@@ -843,19 +842,19 @@
     "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": false,
     "trade_count_failure_reason_count": 0,
-    "unique_record_count": 0,
-    "unique_record_ratio": 0.0,
+    "unique_record_count": 6106,
+    "unique_record_ratio": 1.0,
     "unique_trade_count_exact": false,
     "unique_trade_count_global": null,
-    "valid_record_count": 0,
-    "valid_record_ratio": 0.0
+    "valid_record_count": 6106,
+    "valid_record_ratio": 1.0
   },
-  "dataset_health_digest": "68fe5e0e08a61e8d15b4718bd75db646c196b9ce239c18daec15f158aee3a38c",
+  "dataset_health_digest": "f159bf1cdebba47ae75ab8895c53fb113df299c28296bc770501de60c7443b8c",
   "dataset_selection_id": null,
-  "dataset_v2_head": "3c95ba1e75948f05f638efbca91ca6239adef783",
+  "dataset_v2_head": "de1517c20cdff3d7891fc8b582bebbb5bcb35cdc",
   "declared_spec_requirements": [],
   "environment_provenance": null,
-  "event_intelligence_registry_digest": "c36bd53f9c373e543e0bfe93be629a479370a342527b9f56ba6bed7221c402e5",
+  "event_intelligence_registry_digest": "b47b490980229a0cad413682c7f0604598e2823df7ec7f7916329a5c623131a2",
   "event_intelligence_wiring_complete": true,
   "execution_ledger": [
     {
@@ -885,7 +884,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-02T09:33:55.317210Z",
+  "generated_at_utc": "2026-10-02T12:37:53.842414Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -932,7 +931,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "3c95ba1e75948f05f638efbca91ca6239adef783",
+  "main_alina_head": "de1517c20cdff3d7891fc8b582bebbb5bcb35cdc",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -967,7 +966,7 @@
   "raw_record_count": 6106,
   "raw_trade_count": 51,
   "real_execution_reachable": false,
-  "receipt_digest": "83884072ed4b5790c5e225e553696f593f9d2c27044ba68463d107a9b60fa163",
+  "receipt_digest": "4b89ea554d6faaa92b99cabc6f51ee94580bdfd3b6a967eccd9f21bf81abc286",
   "rejected_count": 260,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
@@ -1114,12 +1113,12 @@
   "two_segment_resume_status": "UNMEASURABLE",
   "uncompressed_size_coverage": false,
   "uncompressed_size_exact": false,
-  "uncompressed_size_exact_assets": 0,
+  "uncompressed_size_exact_assets": 625,
   "uncompressed_size_unavailable_assets": 0,
-  "unique_record_count": 0,
+  "unique_record_count": 6106,
   "unique_trade_count_exact": false,
   "unique_trade_count_global": null,
-  "valid_record_count": 0,
+  "valid_record_count": 6106,
   "workflow_run_ids": [
     "36815986616",
     "36817451158",
@@ -1149,6 +1148,29 @@
     "36949928722",
     "36976092484",
     "36976762364",
-    "36989221158"
+    "36989221158",
+    "36990211073",
+    "36990946252",
+    "36991712063",
+    "36992531478",
+    "36993334717",
+    "36994060097",
+    "36994827171",
+    "36995610706",
+    "36996350303",
+    "36997204111",
+    "36997864744",
+    "36998604356",
+    "36999282201",
+    "36999978954",
+    "37000689796",
+    "37001445039",
+    "37002145595",
+    "37002853786",
+    "37003576274",
+    "37004328890",
+    "37005107033",
+    "37005934148",
+    "37006829145"
   ]
 }
