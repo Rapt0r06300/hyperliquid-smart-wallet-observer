@@ -157,6 +157,8 @@ def upload_file(*, repository: str, tag: str, path: Path) -> None:
                 "timeout",
                 "timed out",
                 "connection reset",
+                "api rate limit exceeded",
+                "secondary rate limit",
             )
         )
         if not transient or attempt >= max_attempts:
@@ -165,7 +167,12 @@ def upload_file(*, repository: str, tag: str, path: Path) -> None:
         # GitHub can expose a newly created release through one endpoint before
         # the release-upload lookup sees its tag. Back off, then retry the exact
         # idempotent --clobber upload instead of failing an otherwise valid lane.
-        time.sleep(min(20.0, float(2 ** (attempt - 1))))
+        rate_limited = "rate limit" in lowered
+        time.sleep(
+            min(60.0, 30.0 * attempt)
+            if rate_limited
+            else min(20.0, float(2 ** (attempt - 1)))
+        )
 
 
 def assert_existing_asset_compatible(
@@ -257,6 +264,11 @@ def publish_bundle(
     # Upload immutable data assets first.
     for manifest in manifests:
         asset_name = str(manifest.get("release_asset") or "")
+        # Compatible remote assets are immutable progress from a prior
+        # interrupted hosted runner. Re-uploading them with --clobber both
+        # wastes API quota and can prevent a large bundle from ever finishing.
+        if asset_name in existing_assets:
+            continue
         local = root / "assets" / asset_name
         upload_file(repository=repository, tag=tag, path=local)
 

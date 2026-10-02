@@ -43,7 +43,18 @@ def _int(value: Any) -> int:
 def _summary_from_result(result: Mapping[str, Any]) -> dict[str, Any] | None:
     metrics = result.get("collection_metrics")
     if isinstance(metrics, Mapping):
-        return dict(metrics)
+        compact = dict(metrics)
+        # A compact checkpoint carrying an explicit non-negative trade total
+        # is itself exact count evidence unless the producer explicitly marks
+        # its coverage incomplete.
+        if "trade_count_coverage_complete" not in compact:
+            observed = compact.get("trade_count_observed")
+            compact["trade_count_coverage_complete"] = (
+                isinstance(observed, int)
+                and not isinstance(observed, bool)
+                and observed >= 0
+            )
+        return compact
 
     raw = result.get("stdout")
     if not isinstance(raw, str) or not raw.strip():

@@ -62,7 +62,7 @@ def _record(
     }
 
 
-def _write_pair(root: Path, *, transport_rtt_ms: float | None = None) -> None:
+def _write_pair(root: Path, *, transport_rtt_ms: float | None = 0.0) -> None:
     rows = [
         ("bybit", _record("bybit", 99.9, 100.0, 1_000, transport_rtt_ms=transport_rtt_ms)),
         ("okx", _record("okx", 101.5, 101.6, 1_010, transport_rtt_ms=transport_rtt_ms)),

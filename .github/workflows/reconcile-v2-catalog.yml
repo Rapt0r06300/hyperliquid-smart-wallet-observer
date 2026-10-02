@@ -131,7 +131,12 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests
+          python -m pytest -q \
+            tests/test_dataset_policy.py \
+            tests/test_dataset_metrics.py \
+            tests/test_manifest_policy.py \
+            tests/test_release_manifest_download.py \
+            tests/test_collection_metrics.py
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'

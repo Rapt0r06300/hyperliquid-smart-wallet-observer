@@ -182,3 +182,137 @@ def test_upload_file_retries_transient_release_visibility_race(tmp_path, monkeyp
     assert len(calls) == 2
     assert all(check is False for _args, check in calls)
     assert sleeps == [1.0]
+
+def test_publish_skips_existing_compatible_assets(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    manifests_dir = bundle / "manifests"
+    assets.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+    asset = assets / "already-there.jsonl.gz"
+    asset.write_bytes(b"payload")
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    manifest = {
+        "dataset_id": "dataset-existing",
+        "family": "l2Book",
+        "venue": "okx",
+        "symbol": "BTC-USDT-SWAP",
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1000,
+        "sha256": digest,
+        "bytes": asset.stat().st_size,
+        "event_count": 1,
+        "collector_version": "a" * 40,
+        "source": "okx_public_ws",
+        "quality_status": "PARTIAL",
+        "release_asset": asset.name,
+        "asset_verified": False,
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+            "duplicates_deduped": True,
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [],
+        "observed_channels": ["l2Book"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    manifest_path = manifests_dir / "dataset-existing.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (bundle / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "collector_version": "a" * 40,
+                "collection_run_id": "run-existing",
+                "shard_count": 1,
+                "manifests": ["manifests/dataset-existing.json"],
+                "assets": ["assets/already-there.jsonl.gz"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    remote_asset = {
+        "id": 101,
+        "name": asset.name,
+        "size": asset.stat().st_size,
+        "digest": "sha256:" + digest,
+    }
+    monkeypatch.setattr(
+        module,
+        "ensure_release",
+        lambda **_kwargs: {"id": 77, "assets": [remote_asset]},
+    )
+    uploaded = []
+    monkeypatch.setattr(
+        module,
+        "upload_file",
+        lambda **kwargs: uploaded.append(Path(kwargs["path"]).name),
+    )
+
+    def fake_json(_args):
+        rows = [remote_asset]
+        if "RUN_MANIFEST.json" in uploaded:
+            rows.append(
+                {
+                    "id": 999,
+                    "name": "RUN_MANIFEST.json",
+                    "size": 1,
+                    "digest": "sha256:" + "0" * 64,
+                }
+            )
+        return {"id": 77, "assets": rows}
+
+    monkeypatch.setattr(module, "_json", fake_json)
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-run-existing",
+        target="main",
+        title="test",
+    )
+
+    assert uploaded == ["RUN_MANIFEST.json"]
+    assert result["shard_count"] == 1
+
+
+def test_upload_file_retries_api_rate_limit(tmp_path, monkeypatch) -> None:
+    module = _module()
+    asset = tmp_path / "asset.jsonl.gz"
+    asset.write_bytes(b"payload")
+    calls = []
+
+    class Result:
+        def __init__(self, returncode: int, stderr: str = "") -> None:
+            self.returncode = returncode
+            self.stderr = stderr
+            self.stdout = ""
+
+    def fake_run(args, *, check=True):
+        calls.append((list(args), check))
+        if len(calls) == 1:
+            return Result(1, "HTTP 403: API rate limit exceeded for installation")
+        return Result(0)
+
+    sleeps = []
+    monkeypatch.setattr(module, "_run", fake_run)
+    monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
+    module.upload_file(
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-test",
+        path=asset,
+    )
+
+    assert len(calls) == 2
+    assert sleeps == [30.0]
