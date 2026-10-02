@@ -1,0 +1,114 @@
+{
+  "analysis_stage": null,
+  "attempts": 2,
+  "campaign_id": "market-e6-12-2026100117-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 2,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "4427964ba2b42ef51e4d0dfc9282f40b5efc0016",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "acbe569a0b56bdf8fa1f0f9c1004ae5f1bb881529f4f8e54b16555f498d4e4eb",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "f7f2c93e8730cce2d7a1b11a224002f529d11fdeaeb2917929d9657962a739ad"
+    },
+    "1": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "fce1bdac2d7fd27ef8ac80f30104a6d4eb10b13bb6f19e9f440c83d432c4f481",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "f0818c8f8b885e3e44ad5f35b78cb19520ab318bda55f05d31a7a48e35c85864"
+    }
+  },
+  "config_sha256": "72713a56de35146e0a5b00999ee93d65295216b0551481d24f9c7921a527fbcb",
+  "consecutive_failures": 2,
+  "created_at": "2026-10-01T17:21:26.644392+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "checkpoint_id": "f0818c8f8b885e3e44ad5f35b78cb19520ab318bda55f05d31a7a48e35c85864",
+    "duration_s": 3500,
+    "generation": 2,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 6,
+    "last_run_id": "37032289352",
+    "market_shard_count": 16,
+    "market_shard_index": 12,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e6/2026100117/shard-12.json",
+    "plan_sha256": "f6437a461d8442c1169d632ff6e41274b49f123dc9599b6771a7c73763cb0555",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 40,
+    "universe_digest": "e742993649ca010ee2a1685272a5f8f42c040f1d4249d0df70eb794149411138",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-08T17:21:26.644392+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "at": "2026-10-02T13:55:59.506497Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-02T15:08:10.493873Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-10-02T16:13:35.523623Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-02T17:24:30.333606Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": "2026-10-02T17:29:30.333606Z",
+  "no_progress_count": 2,
+  "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-02T17:24:30.333606Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}

@@ -1,62 +1,24 @@
 {
   "analysis_stage": null,
-  "attempts": 3,
+  "attempts": 4,
   "campaign_id": "market-e6-10-2026100104-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 3,
+  "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "26c0361910b9904a1b3c8c06c3ecae9093240a7a",
+  "code_sha": "543104bc87a3d1674614ef6488cb4413aa3dfba9",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "92d8048f0c3f635bb43c759531a2afe145c6a7bb37ad4325e8d11ae783596673",
-        "previous_status": "COMPLETE",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "b93354ec6acf96f008ffea9b34ff506d4f2f0365eee958684132bc5c380eefba"
-    },
-    "1": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "c3120f1034a23498891b86df2caa4edba7f413beb6ebd411e2f62f37476669ad",
-        "previous_status": "COMPLETE",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "1c45e48b9c8f2386895e3bb65cc44dbd000eaedcd0e14828ff11ef44ca18f350"
-    },
-    "2": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "b22120fabe326cf36c5271ac220fccf57f3bec813b85fe10dff9259783bec6c0",
-        "previous_status": "COMPLETE",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "0a1a8aa5c2a503904f0d22d63effc1ec20a74607d12030bde2b494d21f81f3c3"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "aeaa108b60e5803ce82f3ac5cb3dc7b6ac3f423da8e148491294e611e5dd9d3a",
-  "consecutive_failures": 3,
+  "consecutive_failures": 0,
   "created_at": "2026-10-01T04:55:33.879025+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "0a1a8aa5c2a503904f0d22d63effc1ec20a74607d12030bde2b494d21f81f3c3",
     "duration_s": 3500,
-    "generation": 3,
-    "handoff_generation": null,
-    "handoff_phase_epoch": 6,
-    "last_run_id": "36849376734",
     "market_shard_count": 16,
     "market_shard_index": 10,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e6/2026100104/shard-10.json",
     "plan_sha256": "144bab1501c39c86024f31e788a3f1ffde7fbea30bb8c78ce9d35bf48b11c64a",
-    "predecessor_run_id": null,
-    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 52,
@@ -115,6 +77,15 @@
       "previous_status": "STUCK",
       "reason": "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN",
       "replacement_campaign_id": "market-e6-10-2026100105-v7"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100104-v7.failed.26c0361910b9.872dc2eb62f173f3d893ae6d2ea9cf8a812a68340b90bd9fb8c7e4872e4f09cd.json",
+      "archived_manifest_sha256": "872dc2eb62f173f3d893ae6d2ea9cf8a812a68340b90bd9fb8c7e4872e4f09cd",
+      "at": "2026-10-02T17:49:08.779181Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "26c0361910b9904a1b3c8c06c3ecae9093240a7a",
+      "prior_status": "FAILED",
+      "prior_status_reason": "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN"
     }
   ],
   "kind": "market_collection",
@@ -126,8 +97,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": "2026-10-01T11:44:11.182618Z",
-  "no_progress_count": 3,
+  "next_due_at": null,
+  "no_progress_count": 0,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -136,10 +107,10 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "FAILED",
-  "status_reason": "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "stuck_reason": null,
-  "terminal_evidence_digest": "d25fc1f3def66e8ab2adec57a1b095fcd0d46290ae8262873d93b6d2ebad4088",
-  "updated_at": "2026-10-01T15:08:17.110955Z",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-02T17:49:08.779196Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
