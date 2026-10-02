@@ -595,3 +595,116 @@ def test_l2_gate_rejects_a_completely_empty_l2_capture() -> None:
         "missing_symbols": {"hyperliquid": ["BTC"]},
     }
     assert m._l2_gate_failure_reason(coverage, required=True) == "L2_COLLECTION_EMPTY"
+
+
+
+def test_gate_reconnect_rebootstraps_capacity_book() -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    m = _module()
+
+    class Sink:
+        def __init__(self) -> None:
+            self.rows = []
+
+        def emit(self, envelope) -> None:
+            self.rows.append(envelope)
+
+    class Client:
+        def __init__(self) -> None:
+            self.bootstrap_calls = 0
+
+        def measure_clock_sync(self):
+            return SimpleNamespace(
+                offset_ms=-1.0,
+                rtt_ms=4.0,
+                server_ts_ms=1000,
+                receive_wall_ts_ms=1002,
+            )
+
+        def bootstrap_envelopes(self, _symbols):
+            self.bootstrap_calls += 1
+            seq = self.bootstrap_calls * 100
+            ts = self.bootstrap_calls * 1000
+            return [
+                m.TickEnvelope(
+                    source_id="gate_public_rest",
+                    channel="l2Book",
+                    instrument="BTC_USDT",
+                    event_kind="SNAPSHOT",
+                    raw_payload={
+                        "id": seq,
+                        "current": ts,
+                        "bids": [{"p": "100", "s": "10"}],
+                        "asks": [{"p": "101", "s": "10"}],
+                    },
+                    exchange_ts_ms=ts,
+                    received_ts_ms=ts + 2,
+                    local_monotonic_ns=seq,
+                    connection_id=None,
+                    sequence=seq,
+                    provenance={"access": "read_only", "transport": "https"},
+                    parsed_summary={},
+                )
+            ]
+
+        async def messages(self, _symbols):
+            yield {
+                "channel": "futures.order_book_update",
+                "event": "update",
+                "result": {
+                    "contract": "BTC_USDT",
+                    "U": 101,
+                    "u": 101,
+                    "t": 1_010,
+                    "b": [{"p": "100", "s": "11"}],
+                    "a": [],
+                },
+                "_alina_transport": {
+                    "connection_id": "gate-a",
+                    "receive_wall_ts_ms": 1_012,
+                    "receive_mono_ns": 1_001,
+                    "transport_rtt_ms": 3.0,
+                },
+            }
+            yield {
+                "channel": "futures.order_book_update",
+                "event": "update",
+                "result": {
+                    "contract": "BTC_USDT",
+                    "U": 201,
+                    "u": 201,
+                    "t": 2_010,
+                    "b": [{"p": "100", "s": "12"}],
+                    "a": [],
+                },
+                "_alina_transport": {
+                    "connection_id": "gate-b",
+                    "receive_wall_ts_ms": 2_012,
+                    "receive_mono_ns": 2_001,
+                    "transport_rtt_ms": 3.0,
+                },
+            }
+
+    client = Client()
+    sink = Sink()
+    asyncio.run(
+        m._native_with_clock_sync(
+            "gate",
+            client,
+            ["BTC_USDT"],
+            sink,
+            probe_interval_s=60,
+            capacity_size_multipliers={"BTC_USDT": 0.001},
+        )
+    )
+    assert client.bootstrap_calls == 2
+    raw_books = [row for row in sink.rows if row.channel == "l2Book"]
+    capacity = [row for row in sink.rows if row.channel == "capacity_tape"]
+    assert len(raw_books) == 4
+    assert len(capacity) == 4
+    assert all(
+        row.parsed_summary["size_multiplier_to_base"] == 0.001
+        for row in capacity
+    )
