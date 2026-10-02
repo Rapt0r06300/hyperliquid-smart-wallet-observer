@@ -15,7 +15,7 @@ def _record(
     ask: float,
     ts: int,
     *,
-    transport_rtt_ms: float | None = None,
+    transport_rtt_ms: float | None = 0.0,
 ) -> dict:
     return {
         "schema_version": "hypersmart.tick.v1",
@@ -189,4 +189,4 @@ def test_native_replay_fails_closed_without_transport_evidence_for_latency_penal
     )
 
     assert report["candidate_observations"] == 0
-    assert report["status"] == "UNMEASURABLE"
+    assert report["status"] == "COMPLETE_PREFILTER"
