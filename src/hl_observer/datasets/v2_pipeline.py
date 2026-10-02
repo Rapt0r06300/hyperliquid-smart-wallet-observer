@@ -21,6 +21,7 @@ _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
     "open_interest",
     "funding_settlement",
+    "clock_sync",
 }
 _MATCHED_RECONCILIATION_FAMILIES = {
     "agg_trades",

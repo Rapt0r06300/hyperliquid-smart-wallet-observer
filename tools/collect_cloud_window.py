@@ -32,7 +32,9 @@ from hl_observer.collection.hyperliquid_funding_history import (
     fetch_hyperliquid_funding_settlements,
 )
 from hl_observer.collection.native_funding_history import (
+    fetch_bitget_funding_settlements,
     fetch_bybit_funding_settlements,
+    fetch_gate_funding_settlements,
     fetch_okx_funding_settlements,
 )
 from hl_observer.collection.bybit_market_data import BybitPublicClient
@@ -48,7 +50,9 @@ from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.collection.trade_reconciliation import (
     HyperliquidTradeReferenceSampler,
     reconcile_binance_aggtrade_shard,
+    reconcile_bitget_trade_shard,
     reconcile_bybit_trade_shard,
+    reconcile_gate_trade_shard,
     reconcile_okx_trade_shard,
 )
 from hl_observer.datasets.v2_export import build_manifest_from_tick_shard, write_manifest
@@ -332,8 +336,37 @@ async def _native_with_clock_sync(
             sample = await asyncio.to_thread(client.measure_clock_sync)
             sync["offset_ms"] = float(sample.offset_ms)
             sync["rtt_ms"] = float(sample.rtt_ms)
+            sync["uncertainty_ms"] = float(sample.uncertainty_ms)
             sync["server_ts_ms"] = int(sample.server_ts_ms)
             sync["probe_receive_wall_ts_ms"] = int(sample.receive_wall_ts_ms)
+            sink.emit(
+                TickEnvelope(
+                    source_id=f"{venue}_public_rest",
+                    channel="clock_sync",
+                    instrument="__VENUE__",
+                    event_kind=FeedEventKind.SNAPSHOT,
+                    raw_payload=sample.as_dict() if hasattr(sample, "as_dict") else dict(sample),
+                    exchange_ts_ms=int(sample.server_ts_ms),
+                    received_ts_ms=int(sample.receive_wall_ts_ms),
+                    local_monotonic_ns=time.monotonic_ns(),
+                    connection_id=None,
+                    sequence=None,
+                    provenance={
+                        "access": "read_only",
+                        "network": "mainnet",
+                        "transport": "https",
+                        "authenticated": False,
+                        "real_execution": False,
+                        "clock_probe": True,
+                    },
+                    parsed_summary={
+                        "offset_ms": float(sample.offset_ms),
+                        "rtt_ms": float(sample.rtt_ms),
+                        "uncertainty_ms": float(sample.uncertainty_ms),
+                        "data_gate_ready": False,
+                    },
+                )
+            )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -347,6 +380,14 @@ async def _native_with_clock_sync(
 
     # Acquire one explicit sample before admitting market frames when possible.
     await refresh_probe()
+    bootstrap = getattr(client, "bootstrap_envelopes", None)
+    if callable(bootstrap):
+        try:
+            bootstrap_rows = await asyncio.to_thread(bootstrap, symbols)
+        except Exception:
+            bootstrap_rows = []
+        for envelope in bootstrap_rows:
+            sink.emit(envelope)
     probe_task = asyncio.create_task(probe_loop())
     connection_id = f"{venue}-{uuid.uuid4().hex}"
     try:
@@ -381,11 +422,8 @@ async def _collect_instrument_metadata(
 ) -> dict[str, Any]:
     """Capture public replay-critical instrument rules at window start."""
     result: dict[str, Any] = {
-        "hyperliquid": {"records": 0, "status": "NO_DATA"},
-        "bybit": {"records": 0, "status": "NO_DATA"},
-        "okx": {"records": 0, "status": "NO_DATA"},
-        "gate": {"records": 0, "status": "NO_DATA"},
-        "bitget": {"records": 0, "status": "NO_DATA"},
+        venue: {"records": 0, "status": "NO_DATA"}
+        for venue in ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
     }
 
     hl_coins = {str(value).upper() for value in venue_lists.get("hyperliquid", [])}
@@ -396,7 +434,7 @@ async def _collect_instrument_metadata(
                 response.raise_for_status()
                 payload = response.json()
             rows = payload.get("universe") if isinstance(payload, Mapping) else None
-            receive_wall = int(time.time() * 1_000)
+            receive_wall = int(time.time() * 1000)
             receive_mono = time.monotonic_ns()
             count = 0
             for row in rows if isinstance(rows, list) else []:
@@ -438,17 +476,69 @@ async def _collect_instrument_metadata(
                 count += 1
             result["hyperliquid"] = {"records": count, "status": "OK" if count else "NO_DATA"}
         except Exception as exc:
-            result["hyperliquid"] = {
-                "records": 0,
-                "status": "ERROR",
-                "error": type(exc).__name__,
-            }
+            result["hyperliquid"] = {"records": 0, "status": "ERROR", "error": type(exc).__name__}
 
-    for venue in ("bybit", "okx"):
+    binance_symbols = {str(value).upper() for value in venue_lists.get("binance", [])}
+    if binance_symbols:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+                response.raise_for_status()
+                payload = response.json()
+            rows = payload.get("symbols") if isinstance(payload, Mapping) else None
+            receive_wall = int(time.time() * 1000)
+            receive_mono = time.monotonic_ns()
+            count = 0
+            for row in rows if isinstance(rows, list) else []:
+                if not isinstance(row, Mapping):
+                    continue
+                symbol = str(row.get("symbol") or "").upper()
+                if symbol not in binance_symbols:
+                    continue
+                sink.emit(
+                    TickEnvelope(
+                        source_id="binance_usdm_public_rest",
+                        channel="instrument_metadata",
+                        instrument=symbol,
+                        event_kind=FeedEventKind.SNAPSHOT,
+                        raw_payload=dict(row),
+                        exchange_ts_ms=None,
+                        received_ts_ms=receive_wall,
+                        local_monotonic_ns=receive_mono,
+                        connection_id=None,
+                        sequence=None,
+                        provenance={
+                            "url": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+                            "network": "mainnet",
+                            "access": "read_only",
+                            "transport": "https",
+                            "authenticated": False,
+                            "timestamp_semantics": "receive_observation_time_only",
+                        },
+                        parsed_summary={
+                            "price_precision": row.get("pricePrecision"),
+                            "quantity_precision": row.get("quantityPrecision"),
+                            "filters": row.get("filters"),
+                            "status": row.get("status"),
+                            "data_gate_ready": False,
+                        },
+                    )
+                )
+                count += 1
+            result["binance"] = {"records": count, "status": "OK" if count else "NO_DATA"}
+        except Exception as exc:
+            result["binance"] = {"records": 0, "status": "ERROR", "error": type(exc).__name__}
+
+    clients: dict[str, Any] = {
+        "bybit": BybitPublicClient(),
+        "okx": OkxPublicClient(),
+        "gate": GatePublicClient(),
+        "bitget": BitgetPublicClient(),
+    }
+    for venue, client in clients.items():
         symbols = {str(value).upper() for value in venue_lists.get(venue, [])}
         if not symbols:
             continue
-        client = BybitPublicClient() if venue == "bybit" else OkxPublicClient()
         try:
             if venue == "bybit":
                 rows = await asyncio.to_thread(client.fetch_instrument_metadata)
@@ -459,15 +549,20 @@ async def _collect_instrument_metadata(
                 server_ts = await asyncio.to_thread(client.server_time_ms)
             except Exception:
                 server_ts = None
-            receive_wall = int(time.time() * 1_000)
+            receive_wall = int(time.time() * 1000)
             receive_mono = time.monotonic_ns()
             count = 0
             for row in rows:
                 if not isinstance(row, Mapping):
                     continue
-                symbol = str(
-                    row.get("symbol") if venue == "bybit" else row.get("instId")
-                ).upper()
+                if venue == "bybit":
+                    symbol = str(row.get("symbol") or "").upper()
+                elif venue == "okx":
+                    symbol = str(row.get("instId") or "").upper()
+                elif venue == "gate":
+                    symbol = str(row.get("name") or row.get("contract") or "").upper()
+                else:
+                    symbol = str(row.get("symbol") or row.get("instId") or "").upper()
                 if symbol not in symbols:
                     continue
                 envelope = native_instrument_metadata_envelope(
@@ -482,11 +577,7 @@ async def _collect_instrument_metadata(
                     count += 1
             result[venue] = {"records": count, "status": "OK" if count else "NO_DATA"}
         except Exception as exc:
-            result[venue] = {
-                "records": 0,
-                "status": "ERROR",
-                "error": type(exc).__name__,
-            }
+            result[venue] = {"records": 0, "status": "ERROR", "error": type(exc).__name__}
     return result
 
 
@@ -518,6 +609,14 @@ async def _collect_funding_settlements(
         "okx": (
             fetch_okx_funding_settlements,
             list(venue_lists.get("okx", [])),
+        ),
+        "gate": (
+            fetch_gate_funding_settlements,
+            list(venue_lists.get("gate", [])),
+        ),
+        "bitget": (
+            fetch_bitget_funding_settlements,
+            list(venue_lists.get("bitget", [])),
         ),
     }
 
@@ -863,6 +962,90 @@ def _l2_coverage_report(
     }
 
 
+
+def _replay_grade_coverage_report(
+    manifests: list[dict[str, Any]],
+    venue_lists: Mapping[str, list[str]],
+) -> dict[str, Any]:
+    """Verify actual persisted replay families, timing and clock proof."""
+    required_by_venue: dict[str, set[str]] = {
+        "hyperliquid": {"l2Book", "bbo", "trades", "instrument_metadata"},
+        "binance": {"l2Book", "bbo", "agg_trades", "instrument_metadata"},
+        "bybit": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
+        "okx": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
+        "gate": {"l2Book", "bbo", "trades", "ticker", "open_interest", "instrument_metadata"},
+        "bitget": {"l2Book", "bbo", "trades", "ticker", "instrument_metadata"},
+    }
+    observed: dict[tuple[str, str], set[str]] = defaultdict(set)
+    timing_defects: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    clock_sync_venues: set[str] = set()
+    for manifest in manifests:
+        venue = str(manifest.get("venue") or "").lower()
+        symbol = str(manifest.get("symbol") or "").upper()
+        family = str(manifest.get("family") or "")
+        if family == "clock_sync" and venue:
+            clock_sync_venues.add(venue)
+        if not venue or not symbol or int(manifest.get("event_count") or 0) <= 0:
+            continue
+        observed[(venue, symbol)].add(family)
+        if family in {"l2Book", "bbo", "trades", "agg_trades"}:
+            integrity = manifest.get("integrity")
+            if isinstance(integrity, Mapping):
+                defects = []
+                if int(integrity.get("missing_monotonic_count") or 0) > 0:
+                    defects.append("MISSING_MONOTONIC")
+                if int(integrity.get("missing_timestamp_count") or 0) > 0:
+                    defects.append("MISSING_TIMESTAMP")
+                if int(integrity.get("gap_count") or 0) > 0:
+                    defects.append("GAP")
+                if int(integrity.get("regression_count") or 0) > 0:
+                    defects.append("REGRESSION")
+                if defects:
+                    timing_defects[venue][symbol].extend(defects)
+
+    per_venue: dict[str, Any] = {}
+    all_complete = True
+    for venue, symbols in venue_lists.items():
+        if not symbols:
+            continue
+        required = required_by_venue.get(venue, {"l2Book", "instrument_metadata"})
+        missing: dict[str, list[str]] = {}
+        for symbol in sorted({str(value).upper() for value in symbols if str(value).strip()}):
+            absent = sorted(required - observed.get((venue, symbol), set()))
+            if absent:
+                missing[symbol] = absent
+        timing = {
+            symbol: sorted(set(reasons))
+            for symbol, reasons in sorted(timing_defects.get(venue, {}).items())
+            if reasons
+        }
+        clock_required = venue in {"bybit", "okx", "gate", "bitget"}
+        clock_ok = venue in clock_sync_venues if clock_required else True
+        complete = not missing and not timing and clock_ok
+        all_complete = all_complete and complete
+        per_venue[venue] = {
+            "required_families": sorted(required),
+            "missing_families_by_symbol": missing,
+            "timing_defects_by_symbol": timing,
+            "clock_sync_required": clock_required,
+            "clock_sync_observed": clock_ok,
+            "complete": complete,
+        }
+    return {
+        "schema": "alina.replay_grade_coverage.v1",
+        "per_venue": per_venue,
+        "complete": all_complete and bool(per_venue),
+        "liquidation_families_observed": sorted(
+            {
+                str(manifest.get("venue") or "").lower()
+                for manifest in manifests
+                if str(manifest.get("family") or "") == "liquidations"
+                and int(manifest.get("event_count") or 0) > 0
+            }
+        ),
+        "fail_closed": True,
+    }
+
 def _l2_gate_failure_reason(
     coverage: Mapping[str, Any],
     *,
@@ -1140,6 +1323,22 @@ async def collect(
                     end_ms=reference_end,
                 )
                 manifest = attach_reconciliation(manifest, report)
+            elif venue == "gate" and family == "trades":
+                report = await reconcile_gate_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
+            elif venue == "bitget" and family == "trades":
+                report = await reconcile_bitget_trade_shard(
+                    asset_path,
+                    symbol=str(manifest.get("symbol") or ""),
+                    start_ms=reference_start,
+                    end_ms=reference_end,
+                )
+                manifest = attach_reconciliation(manifest, report)
             else:
                 manifest = attach_reconciliation(
                     manifest,
@@ -1154,6 +1353,7 @@ async def collect(
         manifests.append(manifest)
 
     l2_coverage = _l2_coverage_report(manifests, venue_lists)
+    replay_grade_coverage = _replay_grade_coverage_report(manifests, venue_lists)
 
     bundle_index = _bundle_index(
         manifests,
@@ -1165,6 +1365,7 @@ async def collect(
         **l2_coverage,
         "required": bool(require_l2),
     }
+    bundle_index["replay_grade_coverage"] = replay_grade_coverage
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
 
     summary = {
@@ -1189,6 +1390,7 @@ async def collect(
             **l2_coverage,
             "required": bool(require_l2),
         },
+        "replay_grade_coverage": replay_grade_coverage,
         "bundle_index": {
             "schema": bundle_index["schema"],
             "shard_count": bundle_index["shard_count"],

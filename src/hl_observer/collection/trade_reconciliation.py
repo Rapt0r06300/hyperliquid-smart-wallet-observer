@@ -62,10 +62,15 @@ def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
             if not isinstance(raw, Mapping):
                 continue
             data = raw.get("data")
+            result = raw.get("result")
             if isinstance(data, list):
                 rows = data
             elif isinstance(data, Mapping):
                 rows = [data]
+            elif str(venue).lower() == "gate" and isinstance(result, list):
+                rows = result
+            elif str(venue).lower() == "gate" and isinstance(result, Mapping):
+                rows = [result]
             elif str(venue).lower() == "binance":
                 # Binance cloud envelopes preserve the raw stream payload itself.
                 rows = [raw]
@@ -410,6 +415,167 @@ async def reconcile_okx_trade_shard(
 
 
 
+
+async def reconcile_gate_trade_shard(
+    path: str | Path,
+    *,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    client: httpx.AsyncClient | None = None,
+    limit: int = 1000,
+    max_requests: int = 240,
+) -> dict[str, Any]:
+    own_client = client is None
+    http = client or httpx.AsyncClient(base_url="https://api.gateio.ws/api/v4", timeout=10.0)
+    start_s = int(start_ms) // 1000
+    end_s = (int(end_ms) + 999) // 1000
+    pending = [(start_s, end_s)]
+    reference: dict[str, Mapping[str, Any]] = {}
+    requests = 0
+    try:
+        while pending:
+            left, right = pending.pop()
+            if requests >= max(1, int(max_requests)):
+                return {
+                    "status": "PARTIAL",
+                    "reason": "REFERENCE_REQUEST_BUDGET_EXHAUSTED",
+                    "reference_count": len(reference),
+                    "requests": requests,
+                }
+            response = await http.get(
+                "/futures/usdt/trades",
+                params={
+                    "contract": str(symbol).upper(),
+                    "from": left,
+                    "to": right,
+                    "limit": min(1000, max(1, int(limit))),
+                },
+            )
+            requests += 1
+            response.raise_for_status()
+            payload = response.json()
+            rows = [row for row in payload if isinstance(row, Mapping)] if isinstance(payload, list) else []
+            for row in rows:
+                trade_id = row.get("id")
+                ts = _int(row.get("create_time_ms"))
+                if ts is None:
+                    sec = _int(row.get("create_time") or row.get("time"))
+                    ts = sec * 1000 if sec is not None else None
+                if trade_id not in {None, ""} and ts is not None and int(start_ms) <= ts <= int(end_ms):
+                    reference[str(trade_id)] = row
+            full = len(rows) >= min(1000, max(1, int(limit)))
+            if full and left < right:
+                midpoint = left + (right - left) // 2
+                pending.append((midpoint + 1, right))
+                pending.append((left, midpoint))
+            elif full and left == right:
+                return {
+                    "status": "PARTIAL",
+                    "reason": "REFERENCE_DENSITY_UNRESOLVED",
+                    "reference_count": len(reference),
+                    "requests": requests,
+                }
+    except Exception as exc:
+        return _error_report("GATE_REFERENCE_ERROR", exc)
+    finally:
+        if own_client:
+            await http.aclose()
+    live_ids, live_events = live_trade_ids(path, venue="gate")
+    return _compare(
+        live_ids,
+        set(reference),
+        live_event_count=live_events,
+        reference_event_count=len(reference),
+        reference_coverage="EXPLICIT_BOUNDED_REST_WINDOW",
+    )
+
+
+async def reconcile_bitget_trade_shard(
+    path: str | Path,
+    *,
+    symbol: str,
+    start_ms: int,
+    end_ms: int,
+    client: httpx.AsyncClient | None = None,
+    limit: int = 1000,
+    max_pages: int = 100,
+) -> dict[str, Any]:
+    own_client = client is None
+    http = client or httpx.AsyncClient(base_url="https://api.bitget.com", timeout=10.0)
+    reference: dict[str, Mapping[str, Any]] = {}
+    cursor: str | None = None
+    covered_start = False
+    try:
+        for _page in range(max(1, int(max_pages))):
+            params = {
+                "symbol": str(symbol).upper(),
+                "productType": "USDT-FUTURES",
+                "startTime": str(int(start_ms)),
+                "endTime": str(int(end_ms)),
+                "limit": str(min(1000, max(1, int(limit)))),
+            }
+            if cursor:
+                params["idLessThan"] = cursor
+            response = await http.get("/api/v2/mix/market/fills-history", params=params)
+            response.raise_for_status()
+            payload = response.json()
+            if str(payload.get("code", "00000")) not in {"00000", "0"}:
+                return {
+                    "status": "UNAVAILABLE",
+                    "reason": "BITGET_REFERENCE_REJECTED",
+                    "message": str(payload.get("msg") or ""),
+                }
+            data = payload.get("data")
+            rows = data if isinstance(data, list) else data.get("fillList") if isinstance(data, Mapping) else []
+            page_rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+            if not page_rows:
+                covered_start = True
+                break
+            page_ts: list[int] = []
+            page_ids: list[str] = []
+            for row in page_rows:
+                trade_id = row.get("tradeId") or row.get("id")
+                ts = _int(row.get("ts") or row.get("timestamp"))
+                if ts is not None:
+                    page_ts.append(ts)
+                if trade_id not in {None, ""}:
+                    page_ids.append(str(trade_id))
+                    if ts is not None and int(start_ms) <= ts <= int(end_ms):
+                        reference[str(trade_id)] = row
+            if page_ts and min(page_ts) <= int(start_ms):
+                covered_start = True
+                break
+            if len(page_rows) < min(1000, max(1, int(limit))):
+                covered_start = True
+                break
+            numeric_ids = [int(value) for value in page_ids if value.isdigit()]
+            if not numeric_ids:
+                break
+            next_cursor = str(min(numeric_ids))
+            if cursor == next_cursor:
+                break
+            cursor = next_cursor
+    except Exception as exc:
+        return _error_report("BITGET_REFERENCE_ERROR", exc)
+    finally:
+        if own_client:
+            await http.aclose()
+    if not covered_start:
+        return {
+            "status": "PARTIAL",
+            "reason": "REFERENCE_DOES_NOT_COVER_WINDOW_START",
+            "reference_count": len(reference),
+        }
+    live_ids, live_events = live_trade_ids(path, venue="bitget")
+    return _compare(
+        live_ids,
+        set(reference),
+        live_event_count=live_events,
+        reference_event_count=len(reference),
+        reference_coverage="BOUNDED_HISTORY_PAGINATION",
+    )
+
 async def reconcile_binance_aggtrade_shard(
     path: str | Path,
     *,
@@ -549,6 +715,10 @@ def _trade_id(row: Mapping[str, Any], venue: str) -> str | None:
         value = row.get("a")
     elif key == "hyperliquid":
         value = row.get("tid")
+    elif key == "gate":
+        value = row.get("id")
+    elif key == "bitget":
+        value = row.get("tradeId", row.get("id"))
     else:
         return None
     return None if value in {None, ""} else str(value)
@@ -576,6 +746,8 @@ __all__ = [
     "safe_hyperliquid_reference_interval_s",
     "live_trade_ids",
     "reconcile_binance_aggtrade_shard",
+    "reconcile_bitget_trade_shard",
     "reconcile_bybit_trade_shard",
+    "reconcile_gate_trade_shard",
     "reconcile_okx_trade_shard",
 ]

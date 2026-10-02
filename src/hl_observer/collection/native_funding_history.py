@@ -13,6 +13,8 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 BYBIT_REST = "https://api.bybit.com"
 OKX_REST = "https://www.okx.com"
+GATE_REST = "https://api.gateio.ws/api/v4"
+BITGET_REST = "https://api.bitget.com"
 
 
 async def fetch_bybit_funding_settlements(
@@ -181,6 +183,153 @@ async def fetch_okx_funding_settlements(
     return _sort([row for group in nested for row in group])
 
 
+
+async def fetch_gate_funding_settlements(
+    symbols: Iterable[str],
+    *,
+    start_ms: int,
+    end_ms: int,
+    rest_base_url: str = GATE_REST,
+    http_client: httpx.AsyncClient | None = None,
+    concurrency: int = 6,
+) -> list[TickEnvelope]:
+    start, end = int(start_ms), int(end_ms)
+    if start >= end:
+        return []
+    wanted = _symbols(symbols)
+    if not wanted:
+        return []
+    owns = http_client is None
+    client = http_client or httpx.AsyncClient(base_url=rest_base_url.rstrip("/"), timeout=10.0)
+    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def one(symbol: str) -> list[TickEnvelope]:
+        sent = int(time.time() * 1000)
+        async with semaphore:
+            response = await client.get(
+                "/futures/usdt/funding_rate",
+                params={
+                    "contract": symbol,
+                    "from": start // 1000,
+                    "to": (end + 999) // 1000,
+                },
+            )
+        response.raise_for_status()
+        recv_mono = time.monotonic_ns()
+        recv_wall = int(time.time() * 1000)
+        payload = response.json()
+        raw_rows = payload.get("data", payload) if isinstance(payload, Mapping) else payload
+        accepted: list[tuple[int, Mapping[str, Any], float]] = []
+        for raw in raw_rows if isinstance(raw_rows, list) else []:
+            if not isinstance(raw, Mapping):
+                continue
+            raw_ts = _int(raw.get("t") or raw.get("time"))
+            ts = raw_ts * 1000 if raw_ts is not None and raw_ts < 10_000_000_000 else raw_ts
+            rate = _float(raw.get("r") or raw.get("rate"))
+            if ts is None or rate is None or not start <= ts <= end or not -1.0 < rate < 1.0:
+                continue
+            accepted.append((ts, raw, rate))
+        return [
+            _envelope(
+                source_id="gate_public_rest",
+                symbol=symbol,
+                timestamp=ts,
+                sequence=index,
+                raw=raw,
+                rate=rate,
+                realized_rate=None,
+                rest_url=f"{rest_base_url.rstrip('/')}/futures/usdt/funding_rate",
+                sent_wall_ms=sent,
+                receive_wall_ms=recv_wall,
+                receive_mono_ns=recv_mono,
+                start_ms=start,
+                end_ms=end,
+            )
+            for index, (ts, raw, rate) in enumerate(sorted(accepted, key=lambda row: row[0]), start=1)
+        ]
+
+    try:
+        nested = await asyncio.gather(*(one(symbol) for symbol in wanted))
+    finally:
+        if owns:
+            await client.aclose()
+    return _sort([row for group in nested for row in group])
+
+
+async def fetch_bitget_funding_settlements(
+    symbols: Iterable[str],
+    *,
+    start_ms: int,
+    end_ms: int,
+    rest_base_url: str = BITGET_REST,
+    http_client: httpx.AsyncClient | None = None,
+    concurrency: int = 6,
+) -> list[TickEnvelope]:
+    start, end = int(start_ms), int(end_ms)
+    if start >= end:
+        return []
+    wanted = _symbols(symbols)
+    if not wanted:
+        return []
+    owns = http_client is None
+    client = http_client or httpx.AsyncClient(base_url=rest_base_url.rstrip("/"), timeout=10.0)
+    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+
+    async def one(symbol: str) -> list[TickEnvelope]:
+        sent = int(time.time() * 1000)
+        async with semaphore:
+            response = await client.get(
+                "/api/v2/mix/market/history-fund-rate",
+                params={
+                    "symbol": symbol,
+                    "productType": "USDT-FUTURES",
+                    "pageSize": "100",
+                    "pageNo": "1",
+                },
+            )
+        response.raise_for_status()
+        recv_mono = time.monotonic_ns()
+        recv_wall = int(time.time() * 1000)
+        payload = response.json()
+        if str(payload.get("code", "00000")) not in {"00000", "0"}:
+            raise RuntimeError(f"Bitget funding error: {payload.get('msg', 'unknown')}")
+        data = payload.get("data")
+        raw_rows = data if isinstance(data, list) else data.get("list") if isinstance(data, Mapping) else []
+        accepted: list[tuple[int, Mapping[str, Any], float]] = []
+        for raw in raw_rows if isinstance(raw_rows, list) else []:
+            if not isinstance(raw, Mapping):
+                continue
+            ts = _int(raw.get("fundingTime") or raw.get("fundingRateTimestamp"))
+            rate = _float(raw.get("fundingRate"))
+            if ts is None or rate is None or not start <= ts <= end or not -1.0 < rate < 1.0:
+                continue
+            accepted.append((ts, raw, rate))
+        return [
+            _envelope(
+                source_id="bitget_public_rest",
+                symbol=str(raw.get("symbol") or symbol).upper(),
+                timestamp=ts,
+                sequence=index,
+                raw=raw,
+                rate=rate,
+                realized_rate=None,
+                rest_url=f"{rest_base_url.rstrip('/')}/api/v2/mix/market/history-fund-rate",
+                sent_wall_ms=sent,
+                receive_wall_ms=recv_wall,
+                receive_mono_ns=recv_mono,
+                start_ms=start,
+                end_ms=end,
+            )
+            for index, (ts, raw, rate) in enumerate(sorted(accepted, key=lambda row: row[0]), start=1)
+        ]
+
+    try:
+        nested = await asyncio.gather(*(one(symbol) for symbol in wanted))
+    finally:
+        if owns:
+            await client.aclose()
+    return _sort([row for group in nested for row in group])
+
 def _envelope(
     *,
     source_id: str,
@@ -258,8 +407,12 @@ def _float(value: Any) -> float | None:
 
 
 __all__ = [
+    "BITGET_REST",
     "BYBIT_REST",
+    "GATE_REST",
     "OKX_REST",
+    "fetch_bitget_funding_settlements",
     "fetch_bybit_funding_settlements",
+    "fetch_gate_funding_settlements",
     "fetch_okx_funding_settlements",
 ]
