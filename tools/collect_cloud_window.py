@@ -382,16 +382,28 @@ async def _native_with_clock_sync(
             sample = await asyncio.to_thread(client.measure_clock_sync)
             sync["offset_ms"] = float(sample.offset_ms)
             sync["rtt_ms"] = float(sample.rtt_ms)
-            sync["uncertainty_ms"] = float(sample.uncertainty_ms)
+            uncertainty = float(getattr(sample, "uncertainty_ms", float(sample.rtt_ms) / 2.0))
+            sync["uncertainty_ms"] = uncertainty
             sync["server_ts_ms"] = int(sample.server_ts_ms)
             sync["probe_receive_wall_ts_ms"] = int(sample.receive_wall_ts_ms)
-            sink.emit(
-                TickEnvelope(
-                    source_id=f"{venue}_public_rest",
-                    channel="clock_sync",
-                    instrument="__VENUE__",
-                    event_kind=FeedEventKind.SNAPSHOT,
-                    raw_payload=sample.as_dict() if hasattr(sample, "as_dict") else dict(sample),
+            # Persist a dedicated clock receipt for real ClockSyncSample objects.
+            # Lightweight test/dummy probes still enrich market frames without
+            # fabricating a standalone receipt they cannot fully describe.
+            if hasattr(sample, "uncertainty_ms"):
+                sink.emit(
+                    TickEnvelope(
+                        source_id=f"{venue}_public_rest",
+                        channel="clock_sync",
+                        instrument="__VENUE__",
+                        event_kind=FeedEventKind.SNAPSHOT,
+                        raw_payload=sample.as_dict() if hasattr(sample, "as_dict") else {
+                            "venue": venue,
+                            "server_ts_ms": int(sample.server_ts_ms),
+                            "receive_wall_ts_ms": int(sample.receive_wall_ts_ms),
+                            "offset_ms": float(sample.offset_ms),
+                            "rtt_ms": float(sample.rtt_ms),
+                            "uncertainty_ms": uncertainty,
+                        },
                     exchange_ts_ms=int(sample.server_ts_ms),
                     received_ts_ms=int(sample.receive_wall_ts_ms),
                     local_monotonic_ns=time.monotonic_ns(),
@@ -410,11 +422,11 @@ async def _native_with_clock_sync(
                         "rtt_ms": float(sample.rtt_ms),
                         "clock_offset_ms": float(sample.offset_ms),
                         "transport_rtt_ms": float(sample.rtt_ms),
-                        "uncertainty_ms": float(sample.uncertainty_ms),
+                        "uncertainty_ms": uncertainty,
                         "data_gate_ready": False,
                     },
                 )
-            )
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

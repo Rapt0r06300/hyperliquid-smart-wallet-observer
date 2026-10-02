@@ -241,7 +241,7 @@ def test_bundle_index_is_publisher_compatible_and_counts_quality() -> None:
         },
     )
     assert index["schema"] == "alina.dataset_bundle.v2"
-    assert index["repository"] == "Rapt0r06300/alina-smartflow-datasets-v2"
+    assert index["repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
     assert index["collection_run_id"] == "market-test-run"
     assert index["shard_count"] == 3
     assert index["safe_count"] == 1
