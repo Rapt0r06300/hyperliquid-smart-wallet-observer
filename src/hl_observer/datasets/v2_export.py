@@ -17,6 +17,14 @@ _RECEIVE_ONLY_SEMANTICS = {
     "causal_event_availability",
     "receive_observation_time_only",
 }
+_TRADE_CHANNELS = {
+    "trades",
+    "agg_trades",
+    "fills",
+    "userfills",
+    "user_fills",
+    "copy_vault_fills",
+}
 _REPLAYABLE_CHANNELS = {
     "activeAssetCtx",
     "agg_trades",
@@ -74,6 +82,9 @@ def build_manifest_from_tick_shard(
     desync_count = 0
     event_count = 0
     trade_count = 0
+    uncompressed_bytes = 0
+    trade_identity_digests: set[str] = set()
+    trade_identity_complete = True
     public_only = True
     authenticated_false = True
     authenticated_explicit = True
@@ -93,23 +104,26 @@ def build_manifest_from_tick_shard(
     event_gap_deltas: list[int] = []
     reconnect_counter_values: list[int] = []
 
-    with gzip.open(path, "rt", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
+    with gzip.open(path, "rb") as handle:
+        for raw_line in handle:
+            uncompressed_bytes += len(raw_line)
+            if not raw_line.strip():
                 continue
-            record = json.loads(line)
+            record = json.loads(raw_line.decode("utf-8"))
             if not isinstance(record, dict):
                 continue
             event_count += 1
             source = str(record.get("source_id") or "")
             channel = str(record.get("channel") or "")
             instrument = str(record.get("instrument") or "")
-            if channel in {"trades", "agg_trades", "fills", "userfills", "user_fills", "copy_vault_fills"}:
+            record_trade_count = 0
+            if channel in _TRADE_CHANNELS:
                 parsed = record.get("parsed_summary")
                 count = _int(parsed.get("event_count")) if isinstance(parsed, Mapping) else None
                 if count is None and channel == "copy_vault_fills" and isinstance(parsed, Mapping):
                     count = _int(parsed.get("fill_count"))
-                trade_count += max(1, int(count or 1))
+                record_trade_count = max(1, int(count or 1))
+                trade_count += record_trade_count
             sources.add(source)
             channels.add(channel)
             instruments.add(instrument)
@@ -180,6 +194,16 @@ def build_manifest_from_tick_shard(
                     duplicate_count += 1
                 else:
                     identities.add(identity)
+            if channel in _TRADE_CHANNELS:
+                if identity is None or record_trade_count != 1:
+                    trade_identity_complete = False
+                else:
+                    encoded = json.dumps(
+                        identity,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    trade_identity_digests.add(hashlib.sha256(encoded).hexdigest())
 
             if str(record.get("event_kind") or "").upper() == "GAP":
                 gap_count += 1
@@ -313,17 +337,28 @@ def build_manifest_from_tick_shard(
         "end_ts_ms": end,
         "sha256": sha256,
         "bytes": path.stat().st_size,
+        "uncompressed_bytes": uncompressed_bytes,
+        "uncompressed_size_exact": True,
         "event_count": event_count,
         "record_count": event_count,
         "trade_count": trade_count,
-        "trade_count_exact": channel in {
-            "trades",
-            "agg_trades",
-            "fills",
-            "userfills",
-            "user_fills",
-            "copy_vault_fills",
-        },
+        "trade_count_exact": channel in _TRADE_CHANNELS,
+        "unique_trade_count": (
+            len(trade_identity_digests)
+            if channel in _TRADE_CHANNELS and trade_identity_complete
+            else None
+        ),
+        "unique_trade_count_exact": (
+            channel in _TRADE_CHANNELS and trade_identity_complete
+        ),
+        "trade_identity_digests": (
+            sorted(trade_identity_digests)
+            if channel in _TRADE_CHANNELS and trade_identity_complete
+            else []
+        ),
+        "trade_identity_digests_exact": (
+            channel in _TRADE_CHANNELS and trade_identity_complete
+        ),
         "replay_compatible": replay_compatible,
         "replay_schema_version": "alina.replay.v1",
         "replay_reason": "SMOKE_OK" if replay_compatible else ",".join(replay_reasons),

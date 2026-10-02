@@ -145,13 +145,16 @@ def _empty_bucket() -> dict[str, int]:
         "accepted_frames": 0,
         "persisted_frames": 0,
         "l2_frames": 0,
+        "bbo_frames": 0,
         "queue_drops": 0,
         "shards": 0,
         "safe_shards": 0,
         "partial_shards": 0,
         "rejected_shards": 0,
         "compressed_bytes": 0,
+        "uncompressed_bytes": 0,
         "units_missing_compact_metrics": 0,
+        "units_uncompressed_coverage_incomplete": 0,
         "units_trade_count_coverage_incomplete": 0,
     }
 
@@ -208,6 +211,9 @@ def build() -> dict[str, Any]:
             if compact.get("trade_count_coverage_complete") is not True:
                 totals["units_trade_count_coverage_incomplete"] += 1
                 bucket["units_trade_count_coverage_incomplete"] += 1
+            if compact.get("uncompressed_size_coverage_complete") is not True:
+                totals["units_uncompressed_coverage_incomplete"] += 1
+                bucket["units_uncompressed_coverage_incomplete"] += 1
 
             fields = {
                 "trades_observed": "trade_count_observed",
@@ -215,12 +221,14 @@ def build() -> dict[str, Any]:
                 "accepted_frames": "accepted_frames",
                 "persisted_frames": "persisted_frames",
                 "l2_frames": "l2_frames",
+                "bbo_frames": "bbo_frames",
                 "queue_drops": "queue_drops",
                 "shards": "shard_count",
                 "safe_shards": "safe_count",
                 "partial_shards": "partial_count",
                 "rejected_shards": "reject_count",
                 "compressed_bytes": "compressed_bytes",
+                "uncompressed_bytes": "uncompressed_bytes",
             }
             for target, source in fields.items():
                 value = _int(compact.get(source))
@@ -264,7 +272,13 @@ def build() -> dict[str, Any]:
             "persisted_frames": totals["persisted_frames"],
             "shards_published": totals["shards"],
             "compressed_bytes_known": totals["compressed_bytes"],
+            "uncompressed_bytes_known": totals["uncompressed_bytes"],
+            "l2_frames": totals["l2_frames"],
+            "bbo_frames": totals["bbo_frames"],
             "coverage_complete": totals["units_trade_count_coverage_incomplete"] == 0,
+            "uncompressed_coverage_complete": (
+                totals["units_uncompressed_coverage_incomplete"] == 0
+            ),
             "all_collection_metrics_complete": totals["units_missing_compact_metrics"] == 0,
             "units_missing_compact_metrics": totals["units_missing_compact_metrics"],
             "units_trade_count_coverage_incomplete": (

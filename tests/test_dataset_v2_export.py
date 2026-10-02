@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
@@ -45,6 +46,8 @@ def test_manifest_is_derived_from_real_partitioned_shard(tmp_path) -> None:
     assert manifest["start_ts_ms"] == 1005
     assert manifest["end_ts_ms"] == 1015
     assert manifest["bytes"] == shard.stat().st_size
+    assert manifest["uncompressed_bytes"] == len(gzip.decompress(shard.read_bytes()))
+    assert manifest["uncompressed_size_exact"] is True
     assert manifest["sha256"] == hashlib.sha256(shard.read_bytes()).hexdigest()
     assert manifest["asset_verified"] is False
     assert manifest["reconciliation"]["status"] == "UNVERIFIED"
@@ -328,6 +331,8 @@ def test_trade_manifest_counts_underlying_trade_events_exactly(tmp_path) -> None
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["record_count"] == 1
     assert manifest["trade_count"] == 3
+    assert manifest["unique_trade_count"] is None
+    assert manifest["unique_trade_count_exact"] is False
 
 def test_clean_trade_shard_is_replay_compatible(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
@@ -350,6 +355,10 @@ def test_clean_trade_shard_is_replay_compatible(tmp_path) -> None:
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["replay_compatible"] is True
     assert manifest["replay_reason"] == "SMOKE_OK"
+    assert manifest["unique_trade_count"] == 1
+    assert manifest["unique_trade_count_exact"] is True
+    assert len(manifest["trade_identity_digests"]) == 1
+    assert manifest["trade_identity_digests_exact"] is True
 
 
 def test_duplicate_shard_is_not_replay_compatible(tmp_path) -> None:

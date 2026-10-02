@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,11 @@ def build() -> dict[str, Any]:
         record_rows = {}
     totals: dict[str, Any] = {
         "TOTAL_SHARDS": len(shards),
+        "TOTAL_RELEASES": 0,
+        "MIN_COLLECTION_TS_MS": None,
+        "MAX_COLLECTION_TS_MS": None,
+        "TOTAL_L2_RECORDS": 0,
+        "TOTAL_BBO_RECORDS": 0,
         "SAFE_SHARDS": 0,
         "PARTIAL_SHARDS": 0,
         "REJECTED_SHARDS": 0,
@@ -109,6 +115,12 @@ def build() -> dict[str, Any]:
     valid_record_count_missing = 0
     unique_record_count_missing = 0
     unique_unavailable_ids: set[str] = set()
+    release_tags: set[str] = set()
+    start_times: list[int] = []
+    end_times: list[int] = []
+    manifest_trade_identities: set[str] = set()
+    manifest_identity_complete = True
+    manifest_trade_shards = 0
     try:
         unique_doc_early = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
         unavailable_early = unique_doc_early.get("unavailable") if isinstance(unique_doc_early, dict) else {}
@@ -145,25 +157,41 @@ def build() -> dict[str, Any]:
                 unique_records = 0
         gaps = _int(row.get("gap_count"))
         compressed = _int(row.get("bytes"))
+        release_tag = str(row.get("release_tag") or "").strip()
+        if release_tag:
+            release_tags.add(release_tag)
+        if isinstance(row.get("start_ts_ms"), int):
+            start_times.append(int(row["start_ts_ms"]))
+        if isinstance(row.get("end_ts_ms"), int):
+            end_times.append(int(row["end_ts_ms"]))
         size_entry = size_rows.get(str(row.get("dataset_id")))
         if isinstance(size_entry, dict) and isinstance(size_entry.get("uncompressed_bytes"), int):
             uncompressed = int(size_entry["uncompressed_bytes"])
+            totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] += 1
+        elif (
+            row.get("uncompressed_size_exact") is True
+            and isinstance(row.get("uncompressed_bytes"), int)
+            and not isinstance(row.get("uncompressed_bytes"), bool)
+            and int(row["uncompressed_bytes"]) >= 0
+        ):
+            uncompressed = int(row["uncompressed_bytes"])
             totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] += 1
         elif isinstance(size_entry, dict) and size_entry.get("status") == "UNAVAILABLE":
             uncompressed = 0
             totals["UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS"] += 1
         else:
-            uncompressed = _int(row.get("uncompressed_bytes"))
-            if uncompressed:
-                totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] += 1
-            else:
-                totals["UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS"] += 1
+            uncompressed = 0
+            totals["UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS"] += 1
         family = str(row.get("family") or "").lower()
         trade_family = family in TRADE_FAMILIES
         trade_exact = trade_family and row.get("trade_count_exact") is True
         unique_exact = trade_family and row.get("unique_trade_count_exact") is True
         trades = _int(row.get("trade_count")) if trade_exact else 0
         unique_trades = _int(row.get("unique_trade_count")) if unique_exact else 0
+        if family in {"l2book", "copy_vault_l2", "native_market"}:
+            totals["TOTAL_L2_RECORDS"] += records
+        if family == "bbo":
+            totals["TOTAL_BBO_RECORDS"] += records
 
         totals["TOTAL_RECORDS"] += records
         totals["TOTAL_VALID_RECORDS"] += valid_records
@@ -195,6 +223,22 @@ def build() -> dict[str, Any]:
             totals["TOTAL_TRADES_REPLAYABLE"] += trades
 
         if trade_family:
+            manifest_trade_shards += 1
+            identity_rows = row.get("trade_identity_digests")
+            identity_exact = row.get("trade_identity_digests_exact") is True
+            valid_identity_rows = (
+                isinstance(identity_rows, list)
+                and all(
+                    isinstance(value, str)
+                    and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+                    for value in identity_rows
+                )
+                and len(set(identity_rows)) == unique_trades
+            )
+            if unique_exact and identity_exact and valid_identity_rows:
+                manifest_trade_identities.update(identity_rows)
+            else:
+                manifest_identity_complete = False
             if trade_exact:
                 totals["TRADE_SHARDS_WITH_EXACT_COUNT"] += 1
                 totals["TOTAL_TRADES_COLLECTED"] += trades
@@ -235,6 +279,10 @@ def build() -> dict[str, Any]:
                 if replay:
                     bucket["replayable_trades"] += trades
 
+    totals["TOTAL_RELEASES"] = len(release_tags)
+    totals["MIN_COLLECTION_TS_MS"] = min(start_times) if start_times else None
+    totals["MAX_COLLECTION_TS_MS"] = max(end_times) if end_times else None
+
     if TRADE_COUNT_PATCH.is_file():
         try:
             trade_patch = json.loads(TRADE_COUNT_PATCH.read_text(encoding="utf-8"))
@@ -259,6 +307,20 @@ def build() -> dict[str, Any]:
                 totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(unique_patch.get("cross_shard_overlap_count"))
         except (OSError, ValueError, TypeError):
             global_unique = None
+    if (
+        not global_unique_complete
+        and manifest_trade_shards > 0
+        and manifest_identity_complete
+    ):
+        global_unique = len(manifest_trade_identities)
+        global_unique_digest = hashlib.sha256(
+            ("\n".join(sorted(manifest_trade_identities)) + "\n").encode("ascii")
+        ).hexdigest()
+        global_unique_complete = True
+        totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = (
+            totals["TOTAL_UNIQUE_TRADES_WITHIN_SHARDS"] - global_unique
+        )
+        totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = 0
     totals["TOTAL_UNIQUE_TRADES_GLOBAL"] = int(global_unique) if isinstance(global_unique, int) else None
     totals["GLOBAL_UNIQUE_TRADE_IDENTITY_DIGEST"] = global_unique_digest
     totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] = bool(global_unique_complete)
@@ -299,7 +361,12 @@ def build() -> dict[str, Any]:
     )
     totals["UNCOMPRESSED_SIZE_COVERAGE_COMPLETE"] = (
         totals["UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS"] == 0
-        and size_doc.get("coverage_complete") is True
+        and totals["UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS"] == 0
+        and (
+            totals["TOTAL_SHARDS"] == 0
+            or totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] == totals["TOTAL_SHARDS"]
+            or size_doc.get("coverage_complete") is True
+        )
     )
     totals["UNCOMPRESSED_SIZE_PATCH_DIGEST"] = (
         hashlib.sha256(json.dumps(size_doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -324,8 +391,8 @@ def build() -> dict[str, Any]:
                 "of global cross-shard uniqueness"
             ),
             "TOTAL_UNIQUE_TRADES_GLOBAL": (
-                "published only from TRADE_UNIQUE_COUNT_PATCH.json after deterministic "
-                "cross-shard identity deduplication; missing patch means unknown"
+                "published from deterministic manifest identity digests when coverage "
+                "is complete, otherwise from TRADE_UNIQUE_COUNT_PATCH.json"
             ),
         },
     }

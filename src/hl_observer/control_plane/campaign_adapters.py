@@ -428,6 +428,11 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
     trade_count = 0
     record_count = 0
     compressed_bytes = 0
+    uncompressed_bytes = 0
+    uncompressed_exact_shards = 0
+    bbo_frames = 0
+    l2_manifest_frames = 0
+    manifest_count = 0
     trade_shards = 0
     trade_shards_exact = 0
     manifest_paths = index.get("manifests")
@@ -439,12 +444,22 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
                 continue
             if not isinstance(row, dict):
                 continue
+            manifest_count += 1
             records = _bounded_int(
                 row.get("record_count") or row.get("event_count"), 0, 0, 2**63 - 1
             )
             record_count += records
             compressed_bytes += _bounded_int(row.get("bytes"), 0, 0, 2**63 - 1)
+            if row.get("uncompressed_size_exact") is True:
+                uncompressed_exact_shards += 1
+                uncompressed_bytes += _bounded_int(
+                    row.get("uncompressed_bytes"), 0, 0, 2**63 - 1
+                )
             family = str(row.get("family") or "").lower()
+            if family in {"l2book", "copy_vault_l2", "native_market"}:
+                l2_manifest_frames += records
+            elif family == "bbo":
+                bbo_frames += records
             if family in {
                 "trades",
                 "agg_trades",
@@ -478,7 +493,11 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         "persisted_frames": _bounded_int(
             summary.get("persisted_frames"), 0, 0, 2**63 - 1
         ),
-        "l2_frames": _bounded_int(summary.get("l2_frames"), 0, 0, 2**63 - 1),
+        "l2_frames": max(
+            l2_manifest_frames,
+            _bounded_int(summary.get("l2_frames"), 0, 0, 2**63 - 1),
+        ),
+        "bbo_frames": bbo_frames,
         "queue_drops": queue_drops,
         "shard_count": _bounded_int(index.get("shard_count"), 0, 0, 2**63 - 1),
         "safe_count": _bounded_int(index.get("safe_count"), 0, 0, 2**63 - 1),
@@ -487,6 +506,10 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         ),
         "reject_count": _bounded_int(index.get("reject_count"), 0, 0, 2**63 - 1),
         "compressed_bytes": compressed_bytes,
+        "uncompressed_bytes": uncompressed_bytes,
+        "uncompressed_size_coverage_complete": (
+            manifest_count == uncompressed_exact_shards
+        ),
         "basis": "published_bundle_manifests",
     }
 

@@ -55,6 +55,10 @@ def test_trade_totals_never_zero_fill_unknown_legacy_counts(tmp_path, monkeypatc
                     "unique_trade_count_exact": True,
                     "replay_compatible": True,
                     "bytes": 50,
+                    "uncompressed_bytes": 125,
+                    "uncompressed_size_exact": True,
+                    "trade_identity_digests": ["a" * 64] * 6,
+                    "trade_identity_digests_exact": False,
                 },
             ]
         }),
