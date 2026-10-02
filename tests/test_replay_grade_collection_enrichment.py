@@ -21,6 +21,7 @@ from hl_observer.collection.trade_reconciliation import (
 )
 from tools.collect_cloud_window import (
     _binance_liquidation_envelope,
+    _capacity_size_multiplier_from_metadata,
     _replay_grade_coverage_report,
 )
 
@@ -387,3 +388,57 @@ def test_capacity_tape_envelope_fails_closed_on_desync() -> None:
     assert envelope.channel == "capacity_tape"
     assert envelope.parsed_summary["raw_l2_source_of_truth"] is True
     assert envelope.parsed_summary["clock_offset_ms"] == -2.0
+
+
+
+def test_capacity_multiplier_rules_are_explicit() -> None:
+    assert _capacity_size_multiplier_from_metadata(
+        "gate",
+        "BTC_USDT",
+        {"quanto_multiplier": "0.001"},
+    ) == 0.001
+    assert _capacity_size_multiplier_from_metadata(
+        "okx",
+        "BTC-USDT-SWAP",
+        {"ctVal": "0.01", "ctValCcy": "BTC"},
+    ) == 0.01
+    assert _capacity_size_multiplier_from_metadata(
+        "okx",
+        "BTC-USDT-SWAP",
+        {"ctVal": "0.01", "ctValCcy": "USDT"},
+    ) is None
+    assert _capacity_size_multiplier_from_metadata(
+        "bitget",
+        "BTCUSDT",
+        {"sizeMultiplier": "0.001"},
+    ) == 1.0
+
+    tape = build_capacity_tape(
+        bids=[[100, 10]],
+        asks=[[101, 10]],
+        notionals_usd=[1.0],
+        exchange_ts_ms=1_990,
+        receive_ts_ms=2_000,
+        size_multiplier_to_base=0.001,
+    )
+    assert tape["size_multiplier_to_base"] == 0.001
+    assert tape["bid_available_notional_usd"] == 1.0
+    assert tape["ask_available_notional_usd"] == 1.01
+    assert tape["sell_into_bids"][0]["fully_fillable"] is True
+
+
+def test_capacity_tape_fails_closed_without_contract_multiplier() -> None:
+    envelope = capacity_tape_envelope(
+        venue="gate",
+        instrument="BTC_USDT",
+        bids=[[100, 10]],
+        asks=[[101, 10]],
+        exchange_ts_ms=1_990,
+        received_ts_ms=2_000,
+        receive_mono_ns=123,
+        connection_id="gate-test",
+        sequence=10,
+        quality="EXPLOITABLE",
+        size_multiplier_to_base=None,
+    )
+    assert envelope is None
