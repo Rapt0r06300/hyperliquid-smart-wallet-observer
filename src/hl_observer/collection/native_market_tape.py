@@ -433,7 +433,7 @@ def _depth_summary(bids: Any, asks: Any) -> dict[str, Any]:
         "bid_levels": len(bid_rows),
         "ask_levels": len(ask_rows),
         "depth_curve_replay_ready": bool(bid_rows and ask_rows),
-        "vwap_target_quote_notionals_usd": [10, 50, 100, 250, 500, 1000],
+        "vwap_target_quote_notionals_usd": [10, 25, 50, 100, 250, 500, 1000],
     }
 
 
