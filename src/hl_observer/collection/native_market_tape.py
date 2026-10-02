@@ -305,7 +305,23 @@ def _gate_identity(
         ) if instrument else None
     if channel_raw == "futures.tickers":
         instrument = str(first.get("contract") or "").upper()
-        return ("ticker", instrument, _int(payload.get("time_ms")), None, {"source_channel": channel_raw, "event_count": len(rows)}) if instrument else None
+        return (
+            "ticker",
+            instrument,
+            _int(first.get("t")) or _int(payload.get("time_ms")),
+            None,
+            {
+                "source_channel": channel_raw,
+                "event_count": len(rows),
+                "last": _float(first.get("last")),
+                "mark_price": _float(first.get("mark_price")),
+                "index_price": _float(first.get("index_price")),
+                "funding_rate": _float(first.get("funding_rate")),
+                "open_interest": _float(first.get("total_size")),
+                "volume_24h_base": _float(first.get("volume_24h_base")),
+                "volume_24h_quote": _float(first.get("volume_24h_quote")),
+            },
+        ) if instrument else None
     if channel_raw == "futures.contract_stats":
         instrument = str(first.get("contract") or "").upper()
         return (
@@ -313,7 +329,30 @@ def _gate_identity(
             instrument,
             _int(first.get("time_ms")) or _int(first.get("time")) or _int(payload.get("time_ms")),
             None,
-            {"source_channel": channel_raw, "event_count": len(rows), "long_liq_size": _float(first.get("long_liq_size")), "short_liq_size": _float(first.get("short_liq_size"))},
+            {
+                "source_channel": channel_raw,
+                "event_count": len(rows),
+                "open_interest": _float(first.get("open_interest")),
+                "open_interest_usd": _float(first.get("open_interest_usd")),
+                "long_liq_size": _float(first.get("long_liq_size")),
+                "short_liq_size": _float(first.get("short_liq_size")),
+                "mark_price": _float(first.get("mark_price")),
+            },
+        ) if instrument else None
+    if channel_raw == "futures.contract_info":
+        instrument = str(first.get("contract") or "").upper()
+        return (
+            "instrument_metadata",
+            instrument,
+            _int(payload.get("time_ms")),
+            None,
+            {
+                "source_channel": channel_raw,
+                "event": str(payload.get("event") or ""),
+                "tick_size": first.get("order_price_round"),
+                "contract_multiplier": first.get("quanto_multiplier"),
+                "min_order_size": first.get("order_size_min"),
+            },
         ) if instrument else None
     if channel_raw == "futures.public_liquidates":
         instrument = str(first.get("contract") or "").upper()
@@ -357,6 +396,27 @@ def _bitget_identity(
     if channel_raw in {"books", "books1"}:
         summary.update(_depth_summary(first.get("bids"), first.get("asks")))
         summary["prev_sequence"] = _int(first.get("pseq") or first.get("prevSeqId"))
+    elif channel_raw == "ticker":
+        summary.update(
+            {
+                "last": _float(first.get("lastPr")),
+                "bid": _float(first.get("bidPr")),
+                "ask": _float(first.get("askPr")),
+                "mark_price": _float(first.get("markPrice")),
+                "index_price": _float(first.get("indexPrice")),
+                "funding_rate": _float(first.get("fundingRate")),
+                "open_interest": _float(first.get("holdingAmount")),
+                "base_volume_24h": _float(first.get("baseVolume")),
+                "quote_volume_24h": _float(first.get("quoteVolume")),
+                "next_funding_time_ms": _int(first.get("nextFundingTime")),
+            }
+        )
+    elif channel_raw == "trade":
+        summary["trade_ids_present"] = sum(
+            1
+            for row in rows
+            if isinstance(row, Mapping) and row.get("tradeId") not in {None, ""}
+        )
     return (
         channel,
         instrument,

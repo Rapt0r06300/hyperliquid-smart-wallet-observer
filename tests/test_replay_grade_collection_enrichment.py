@@ -244,3 +244,80 @@ def test_binance_public_liquidation_is_taped() -> None:
     assert envelope.parsed_summary["price"] == 65000.0
     assert envelope.parsed_summary["size"] == 0.25
     assert envelope.parsed_summary["clock_offset_ms"] == -2.0
+
+
+def test_gate_and_bitget_ticker_context_is_normalized() -> None:
+    gate = native_tick_envelope(
+        "gate",
+        {
+            "channel": "futures.tickers",
+            "event": "update",
+            "time_ms": 2_000,
+            "result": [{
+                "contract": "BTC_USDT",
+                "last": "100",
+                "mark_price": "100.1",
+                "index_price": "99.9",
+                "funding_rate": "0.0001",
+                "total_size": "123.5",
+                "volume_24h_base": "456",
+                "volume_24h_quote": "45600",
+                "t": 1_995,
+            }],
+            "_alina_transport": _transport(),
+        },
+    )
+    assert gate is not None
+    assert gate.parsed_summary["mark_price"] == 100.1
+    assert gate.parsed_summary["index_price"] == 99.9
+    assert gate.parsed_summary["funding_rate"] == 0.0001
+    assert gate.parsed_summary["open_interest"] == 123.5
+
+    bitget = native_tick_envelope(
+        "bitget",
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "ticker", "instId": "BTCUSDT"},
+            "data": [{
+                "lastPr": "100",
+                "bidPr": "99.9",
+                "askPr": "100.1",
+                "markPrice": "100.05",
+                "indexPrice": "99.95",
+                "fundingRate": "0.0002",
+                "holdingAmount": "456.5",
+                "baseVolume": "1000",
+                "quoteVolume": "100000",
+                "nextFundingTime": "3000",
+                "ts": "1995",
+            }],
+            "_alina_transport": _transport(),
+        },
+    )
+    assert bitget is not None
+    assert bitget.parsed_summary["mark_price"] == 100.05
+    assert bitget.parsed_summary["index_price"] == 99.95
+    assert bitget.parsed_summary["funding_rate"] == 0.0002
+    assert bitget.parsed_summary["open_interest"] == 456.5
+
+
+def test_gate_contract_info_change_is_replayable() -> None:
+    envelope = native_tick_envelope(
+        "gate",
+        {
+            "channel": "futures.contract_info",
+            "event": "update",
+            "time_ms": 1_995,
+            "result": {
+                "contract": "BTC_USDT",
+                "order_price_round": "0.1",
+                "quanto_multiplier": "0.001",
+                "order_size_min": "1",
+            },
+            "_alina_transport": _transport(),
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "instrument_metadata"
+    assert envelope.instrument == "BTC_USDT"
+    assert envelope.parsed_summary["tick_size"] == "0.1"
+    assert envelope.parsed_summary["contract_multiplier"] == "0.001"

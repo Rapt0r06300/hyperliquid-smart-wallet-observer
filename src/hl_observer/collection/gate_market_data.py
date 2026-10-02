@@ -302,6 +302,7 @@ class GatePublicClient:
                     {"channel": "futures.trades", "event": "subscribe", "payload": [contract]},
                     {"channel": "futures.tickers", "event": "subscribe", "payload": [contract]},
                     {"channel": "futures.contract_stats", "event": "subscribe", "payload": [contract, "1m"]},
+                    {"channel": "futures.contract_info", "event": "subscribe", "payload": [contract]},
                 ]
             )
         subscriptions.append(
@@ -312,7 +313,12 @@ class GatePublicClient:
             try:
                 connection_id = f"gate-{uuid.uuid4().hex}"
                 session_started = time.monotonic()
-                async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
+                async with websockets.connect(
+                    self.ws_url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                    extra_headers={"X-Gate-Size-Decimal": "1"},
+                ) as socket:
                     for message in subscriptions:
                         await socket.send(json.dumps(message))
                     attempt = 0
