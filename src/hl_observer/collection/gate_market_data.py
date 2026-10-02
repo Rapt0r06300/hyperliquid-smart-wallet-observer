@@ -43,6 +43,18 @@ def _i(v: Any) -> int | None:
         return None
 
 
+def _epoch_ms(v: Any) -> int | None:
+    try:
+        value = float(v)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value < 10_000_000_000:
+        value *= 1000.0
+    return int(value)
+
+
 def parse_gate_contracts(payload: Any) -> list[tuple[str, str]]:
     rows = payload.get("data", payload) if isinstance(payload, dict) else payload
     out = []
@@ -114,7 +126,7 @@ class GateMarketState:
                 else:
                     target[price] = size
         self.sequence = last if last is not None else self.sequence
-        self.exchange_ts_ms = _i(payload.get("t") or payload.get("time") or payload.get("time_ms")) or self.exchange_ts_ms
+        self.exchange_ts_ms = _epoch_ms(payload.get("time_ms") or payload.get("t") or payload.get("time")) or self.exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
         self.connection_id = str(transport.get("connection_id") or "") or self.connection_id
@@ -250,7 +262,7 @@ class GatePublicClient:
                         instrument=contract,
                         event_kind=FeedEventKind.SNAPSHOT,
                         raw_payload=dict(payload),
-                        exchange_ts_ms=_i(payload.get("current")),
+                        exchange_ts_ms=_epoch_ms(payload.get("current")),
                         received_ts_ms=received,
                         local_monotonic_ns=mono,
                         connection_id=None,
