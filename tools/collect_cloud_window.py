@@ -375,6 +375,7 @@ def _capacity_from_native_state(
     *,
     received_ts_ms: int,
     timing_evidence: Mapping[str, Any] | None = None,
+    size_multiplier_to_base: float | None = 1.0,
 ) -> TickEnvelope | None:
     snapshot = state.snapshot(now_ms=int(received_ts_ms))
     return capacity_tape_envelope(
@@ -391,6 +392,7 @@ def _capacity_from_native_state(
         gap_count=snapshot.gap_count,
         quality=str(getattr(state, "quality", snapshot.quality)),
         timing_evidence=timing_evidence,
+        size_multiplier_to_base=size_multiplier_to_base,
     )
 
 
@@ -398,6 +400,7 @@ def _native_capacity_envelope(
     venue: str,
     message: Mapping[str, Any],
     states: dict[str, Any],
+    capacity_size_multipliers: Mapping[str, float],
 ) -> TickEnvelope | None:
     transport_raw = message.get("_alina_transport")
     transport = dict(transport_raw) if isinstance(transport_raw, Mapping) else {}
@@ -494,6 +497,7 @@ def _native_capacity_envelope(
         state,
         received_ts_ms=received,
         timing_evidence=transport,
+        size_multiplier_to_base=capacity_size_multipliers.get(symbol),
     )
 
 
@@ -504,9 +508,15 @@ async def _native_with_clock_sync(
     sink: AsyncPartitionSink,
     *,
     probe_interval_s: float = 60.0,
+    capacity_size_multipliers: Mapping[str, float] | None = None,
 ) -> None:
     sync: dict[str, float | int] = {}
     capacity_states: dict[str, Any] = {}
+    capacity_multipliers = {
+        str(symbol).upper(): float(value)
+        for symbol, value in dict(capacity_size_multipliers or {}).items()
+        if _float(value) is not None and float(value) > 0
+    }
 
     async def refresh_probe() -> None:
         try:
@@ -594,6 +604,9 @@ async def _native_with_clock_sync(
                     state,
                     received_ts_ms=envelope.received_ts_ms,
                     timing_evidence=raw["_alina_transport"],
+                    size_multiplier_to_base=capacity_multipliers.get(
+                        envelope.instrument
+                    ),
                 )
                 if capacity is not None:
                     sink.emit(capacity)
@@ -620,7 +633,12 @@ async def _native_with_clock_sync(
             envelope = native_tick_envelope(venue, message)
             if envelope is not None:
                 sink.emit(envelope)
-            capacity = _native_capacity_envelope(venue, message, capacity_states)
+            capacity = _native_capacity_envelope(
+                venue,
+                message,
+                capacity_states,
+                capacity_multipliers,
+            )
             if capacity is not None:
                 sink.emit(capacity)
     finally:
@@ -914,12 +932,14 @@ async def _native_bybit(
     sink: AsyncPartitionSink,
     *,
     session_refresh_s: float = 3600.0,
+    capacity_size_multipliers: Mapping[str, float] | None = None,
 ) -> None:
     await _native_with_clock_sync(
         "bybit",
         BybitPublicClient(orderbook_depth=200, session_refresh_s=session_refresh_s),
         symbols,
         sink,
+        capacity_size_multipliers=capacity_size_multipliers,
     )
 
 
@@ -928,12 +948,14 @@ async def _native_okx(
     sink: AsyncPartitionSink,
     *,
     session_refresh_s: float = 3600.0,
+    capacity_size_multipliers: Mapping[str, float] | None = None,
 ) -> None:
     await _native_with_clock_sync(
         "okx",
         OkxPublicClient(session_refresh_s=session_refresh_s),
         symbols,
         sink,
+        capacity_size_multipliers=capacity_size_multipliers,
     )
 
 
@@ -1408,6 +1430,15 @@ async def collect(
     bitget_symbols = venue_lists["bitget"]
 
     instrument_metadata = await _collect_instrument_metadata(venue_lists, sink)
+    capacity_size_multipliers = {
+        venue: dict(
+            (instrument_metadata.get(venue) or {}).get(
+                "capacity_size_multiplier_by_symbol"
+            )
+            or {}
+        )
+        for venue in ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
+    }
     native_session_refresh_s = max(3600.0, float(duration_s) + 300.0)
 
     hyperliquid_clock = HyperliquidClockSyncProbe() if hl_coins else None
@@ -1442,6 +1473,7 @@ async def collect(
                     bybit_symbols,
                     sink,
                     session_refresh_s=native_session_refresh_s,
+                    capacity_size_multipliers=capacity_size_multipliers["bybit"],
                 )
             )
         )
@@ -1452,6 +1484,7 @@ async def collect(
                     okx_symbols,
                     sink,
                     session_refresh_s=native_session_refresh_s,
+                    capacity_size_multipliers=capacity_size_multipliers["okx"],
                 )
             )
         )
@@ -1463,6 +1496,7 @@ async def collect(
                     GatePublicClient(session_refresh_s=native_session_refresh_s),
                     gate_symbols,
                     sink,
+                    capacity_size_multipliers=capacity_size_multipliers["gate"],
                 )
             )
         )
@@ -1474,6 +1508,7 @@ async def collect(
                     BitgetPublicClient(session_refresh_s=native_session_refresh_s),
                     bitget_symbols,
                     sink,
+                    capacity_size_multipliers=capacity_size_multipliers["bitget"],
                 )
             )
         )
