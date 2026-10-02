@@ -628,6 +628,32 @@ async def _native_with_clock_sync(
         await asyncio.gather(probe_task, return_exceptions=True)
 
 
+def _capacity_size_multiplier_from_metadata(
+    venue: str,
+    symbol: str,
+    row: Mapping[str, Any],
+) -> float | None:
+    venue_key = str(venue).lower()
+    if venue_key in {"hyperliquid", "binance", "bybit", "bitget"}:
+        # Public USDT-linear depth size is already expressed in base-asset
+        # quantity for these adapters. Bitget sizeMultiplier is a quantity step.
+        return 1.0
+    if venue_key == "gate":
+        multiplier = _float(row.get("quanto_multiplier"))
+        return multiplier if multiplier is not None and multiplier > 0 else None
+    if venue_key == "okx":
+        multiplier = _float(row.get("ctVal"))
+        contract_value_ccy = str(row.get("ctValCcy") or "").upper()
+        base_ccy = str(symbol).upper().split("-", 1)[0]
+        if (
+            multiplier is not None
+            and multiplier > 0
+            and contract_value_ccy == base_ccy
+        ):
+            return multiplier
+    return None
+
+
 async def _collect_instrument_metadata(
     venue_lists: Mapping[str, list[str]],
     sink: AsyncPartitionSink,
@@ -635,6 +661,10 @@ async def _collect_instrument_metadata(
     """Capture public replay-critical instrument rules at window start."""
     result: dict[str, Any] = {
         venue: {"records": 0, "status": "NO_DATA"}
+        for venue in ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
+    }
+    capacity_multipliers: dict[str, dict[str, float]] = {
+        venue: {}
         for venue in ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
     }
 
@@ -655,6 +685,7 @@ async def _collect_instrument_metadata(
                 coin = str(row.get("name") or "").upper()
                 if coin not in hl_coins:
                     continue
+                capacity_multipliers["hyperliquid"][coin] = 1.0
                 sink.emit(
                     TickEnvelope(
                         source_id="hyperliquid_public_rest",
@@ -707,6 +738,7 @@ async def _collect_instrument_metadata(
                 symbol = str(row.get("symbol") or "").upper()
                 if symbol not in binance_symbols:
                     continue
+                capacity_multipliers["binance"][symbol] = 1.0
                 sink.emit(
                     TickEnvelope(
                         source_id="binance_usdm_public_rest",
@@ -777,6 +809,13 @@ async def _collect_instrument_metadata(
                     symbol = str(row.get("symbol") or row.get("instId") or "").upper()
                 if symbol not in symbols:
                     continue
+                multiplier = _capacity_size_multiplier_from_metadata(
+                    venue,
+                    symbol,
+                    row,
+                )
+                if multiplier is not None:
+                    capacity_multipliers[venue][symbol] = multiplier
                 envelope = native_instrument_metadata_envelope(
                     venue,
                     row,
@@ -790,6 +829,10 @@ async def _collect_instrument_metadata(
             result[venue] = {"records": count, "status": "OK" if count else "NO_DATA"}
         except Exception as exc:
             result[venue] = {"records": 0, "status": "ERROR", "error": type(exc).__name__}
+    for venue in result:
+        result[venue]["capacity_size_multiplier_by_symbol"] = dict(
+            capacity_multipliers[venue]
+        )
     return result
 
 
