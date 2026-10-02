@@ -1,61 +1,61 @@
 {
-  "dataset_v2_head": "c2673205f87b9852049bd76d2d6618e74a9fbdb1",
-  "generated_at_utc": "2026-10-01T17:06:08.346793Z",
+  "dataset_v2_head": "f811983aa4cae16863fce946f8daf831a5098efa",
+  "generated_at_utc": "2026-10-02T09:21:53.148886Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "6874d8b042f92fe15dbfc9d8064ea74de9d544a201e355dd7d6cd99b4f39957b",
-      "output_tail": "........................F..........                                      [100%]\n=================================== FAILURES ===================================\n________ test_controller_worker_are_bounded_hosted_and_collect_relayed _________\n\n    def test_controller_worker_are_bounded_hosted_and_collect_relayed():\n        controller = _workflow(\"resumable-campaign-controller.yml\")\n        worker = _workflow(\"resumable-campaign-worker.yml\")\n        assert \"cron: '*/5 * * * *'\" in controller\n        assert \"push:\" in controller\n        assert \"resumable-campaign-controller.yml\" in controller\n        assert \"timeout-minutes: 10\" in controller\n        assert \"timeout-minutes: 345\" in worker\n        assert \"cancel-in-progress: false\" in controller\n        assert \"group: resumable-campaign-controller-v4\" in controller\n        assert \"cancel-in-progress: false\" in worker\n        assert \"self-hosted\" not in controller + worker\n        assert \"uses: ./.github/workflows/resumable-campaign-worker.yml\" in controller\n        assert \"copy_work:\" in controller\n        assert \"other_work:\" in controller\n        assert \"max-parallel: 1\" in controller\n        assert \"max-parallel: 16\" in controller\n        assert \"head -n 128\" in controller\n        assert 'list-due catalog/campaigns             | head -n 128' not in controller\n        assert 'all-due.txt' in controller\n        assert \"copy_matrix\" in controller\n        assert \"other_matrix\" in controller\n        assert \"active_copy=False\" in controller\n        assert \"active_other=0\" in controller\n        assert \"other_capacity=max(0,16-active_other)\" in controller\n        assert \"fromJSON(needs.select.outputs.copy_matrix)\" in controller\n        assert \"fromJSON(needs.select.outputs.other_matrix)\" in controller\n        assert \"relay_collect:\" in controller\n        assert \"gh workflow run resumable-campaign-controller.yml\" in controller\n        assert \"ref: ${{ steps.pin.outputs.sha }}\" in worker\n        assert \"Claim durable campaign lease\" in worker\n        assert \"Persist collection data or analysis evidence\" in worker\n        assert 'ENV_RECEIPT=\"$WORKSPACE/runtime/reports/analysis_stages/scoreboard.json\"' in worker\n        assert 'LEGACY_ENV_RECEIPT=\"$WORKSPACE/runtime/reports/economic_campaigns/analysis_stages/scoreboard.json\"' in worker\n        assert \"Publish final campaign checkpoint\" in worker\n        assert \"publish_dataset_v2_release.py\" in worker\n        assert \"verify_lease\" in worker\n        assert \"workflow_call:\" in worker\n>       assert \"Refresh Dataset V2 main\" in controller\nE       assert 'Refresh Dataset V2 main' in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...kflow run global-implementation-closure.yml \\\\\\n            --repo \"$GITHUB_REPOSITORY\" \\\\\\n            --ref main\\n\\n'\n\ntests/test_workflow_bounds.py:136: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - assert 'Refresh Dataset V2 main' in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...kflow run global-implementation-closure.yml \\\\\\n            --repo \"$GITHUB_REPOSITORY\" \\\\\\n            --ref main\\n\\n'\n1 failed, 34 passed in 2.57s\n",
+      "output_sha256": "48e1c4b07758b2cd9419acaddb0c2544ddc74688a2c4fe9a0f916008d94294ba",
+      "output_tail": "........................F..........                                      [100%]\n=================================== FAILURES ===================================\n________ test_controller_worker_are_bounded_hosted_and_collect_relayed _________\n\n    def test_controller_worker_are_bounded_hosted_and_collect_relayed():\n        controller = _workflow(\"resumable-campaign-controller.yml\")\n        worker = _workflow(\"resumable-campaign-worker.yml\")\n        assert \"cron: '*/5 * * * *'\" in controller\n        assert \"push:\" in controller\n        assert \"resumable-campaign-controller.yml\" in controller\n        assert \"timeout-minutes: 10\" in controller\n        assert \"timeout-minutes: 345\" in worker\n        assert \"cancel-in-progress: false\" in controller\n        assert \"group: resumable-campaign-controller-v4\" in controller\n        assert \"cancel-in-progress: false\" in worker\n        assert \"self-hosted\" not in controller + worker\n        assert \"uses: ./.github/workflows/resumable-campaign-worker.yml\" in controller\n        assert \"copy_work:\" in controller\n        assert \"other_work:\" in controller\n        assert \"max-parallel: 1\" in controller\n        assert \"max-parallel: 16\" in controller\n        assert \"head -n 128\" in controller\n        assert 'list-due catalog/campaigns             | head -n 128' not in controller\n        assert 'all-due.txt' in controller\n        assert \"copy_matrix\" in controller\n        assert \"other_matrix\" in controller\n        assert \"active_copy=False\" in controller\n        assert \"active_other=0\" in controller\n        assert \"other_capacity=max(0,16-active_other)\" in controller\n        assert \"fromJSON(needs.select.outputs.copy_matrix)\" in controller\n        assert \"fromJSON(needs.select.outputs.other_matrix)\" in controller\n        assert \"relay_collect:\" in controller\n        assert \"gh workflow run resumable-campaign-controller.yml\" in controller\n        assert \"ref: ${{ steps.pin.outputs.sha }}\" in worker\n        assert \"Claim durable campaign lease\" in worker\n        assert \"Persist collection data or analysis evidence\" in worker\n        assert 'ENV_RECEIPT=\"$WORKSPACE/runtime/reports/analysis_stages/scoreboard.json\"' in worker\n        assert 'LEGACY_ENV_RECEIPT=\"$WORKSPACE/runtime/reports/economic_campaigns/analysis_stages/scoreboard.json\"' in worker\n        assert \"Publish final campaign checkpoint\" in worker\n        assert \"publish_dataset_v2_release.py\" in worker\n        assert \"verify_lease\" in worker\n        assert \"workflow_call:\" in worker\n>       assert \"Refresh Dataset V2 main\" in controller\nE       assert 'Refresh Dataset V2 main' in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...kflow run global-implementation-closure.yml \\\\\\n            --repo \"$GITHUB_REPOSITORY\" \\\\\\n            --ref main\\n\\n'\n\ntests/test_workflow_bounds.py:136: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_workflow_bounds.py::test_controller_worker_are_bounded_hosted_and_collect_relayed - assert 'Refresh Dataset V2 main' in 'name: resumable-campaign-controller\\non:\\n  push:\\n    branches: [main]\\n    paths:\\n      - \\'.github/workflows/resu...kflow run global-implementation-closure.yml \\\\\\n            --repo \"$GITHUB_REPOSITORY\" \\\\\\n            --ref main\\n\\n'\n1 failed, 34 passed in 2.07s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "a2771ff7a442cde356cd043489e0b312f0624e0c5336ef39664d0af69a060df5",
-      "output_tail": ".............................                                            [100%]\n29 passed in 2.85s\n",
+      "output_sha256": "768f28440ed20e8a8cf3df04f0ba0c0605b8d3de3ef537a134ec8cd7aad02071",
+      "output_tail": ".............................                                            [100%]\n29 passed in 2.35s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "264b6e1ab67eaad01d79116c4685e0aad6f39f690e1cc20fc0ea759499fd712b",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.43s\n",
+      "output_sha256": "14574ec498afb39d1ba6039b38bd98a9109d46e9bb9dba0d5a04958ce246c239",
+      "output_tail": ".........                                                                [100%]\n9 passed in 1.16s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "8331c0d38d51ecc2534101bb899339a3f2dc9936a14a5ab64f80aeebb5aca9ba",
-      "output_tail": "..............................................                           [100%]\n46 passed in 3.31s\n",
+      "output_sha256": "d754b05efce577d4e43f79bffc20460e5a4385e08312967197087580bacb58dc",
+      "output_tail": "..............................................                           [100%]\n46 passed in 3.02s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "1cd23ee576f1785ade66382e773ebf395e97b7ae4c725b194343b898153c7ba9",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 6.02s\n",
+      "output_sha256": "96ded1a8f9b9d2317b3302db2fbd33e589994d121eb3c41ac303a61dfb567eb8",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 4.83s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_validators",
-      "output_sha256": "83806b69b2bca6edf28db19d7ded986e5d31f47b99dc1466c948efc370abea4c",
-      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"194f2bf7a5a52037ca2e4c2fcaa4b481f03bc6e6a44c7c04227dd4bf031eac53\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=74\n",
+      "output_sha256": "ab84b44a74c0f92c8613b3a61749852e5644760202ea392c4688779ba64d3af7",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"c36bd53f9c373e543e0bfe93be629a479370a342527b9f56ba6bed7221c402e5\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=74\n",
       "returncode": 0,
       "status": "PASS"
     }
   ],
-  "main_alina_head": "c2673205f87b9852049bd76d2d6618e74a9fbdb1",
+  "main_alina_head": "f811983aa4cae16863fce946f8daf831a5098efa",
   "paper_only": true,
   "python_version": "3.12.14",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "a98b2f4b179b5f798f23011f58d54cc108f787d4ca36250e7b10755ba5bd93ce",
+  "receipt_digest": "cdd9ba5a4b0c4b47a8cce792a06a08ae67dfff0296fbb40a49415d446156a6a1",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "36896659722"
+  "workflow_run_id": "36989233948"
 }
