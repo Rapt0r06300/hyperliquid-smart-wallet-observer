@@ -1,0 +1,150 @@
+{
+  "analysis_stage": null,
+  "attempts": 6,
+  "campaign_id": "market-e6-2-2026100122-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 2,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "e07540fac1993e81f385753ab092b183c13e63cd",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "9a9fe809bf70d7551141b0ed4d35a7bad738853cc97bd9f341283ddd3fc690a7",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "ce118df5976e435a2fc4d7028908569fed723a283274d3fa3d1637f9ec0de694"
+    },
+    "1": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "be7b157b14c62d5c67d0ebb6312a0871af063cdffc2d8d8742fd47da274d9026",
+        "previous_status": "COMPLETE",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "a593b40444542b1d365ef5b653605f47ecec1be7f3425f7084211455dd7de2a3"
+    }
+  },
+  "config_sha256": "8445750ffcffd66c8aca8d37b54f5a283027546fdd795c6914c92efd29e11e06",
+  "consecutive_failures": 2,
+  "created_at": "2026-10-01T22:34:19.652469+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "checkpoint_id": "a593b40444542b1d365ef5b653605f47ecec1be7f3425f7084211455dd7de2a3",
+    "duration_s": 3500,
+    "generation": 2,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 6,
+    "last_run_id": "37049099393",
+    "market_shard_count": 16,
+    "market_shard_index": 2,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e6/2026100122/shard-02.json",
+    "plan_sha256": "f82ea03e819a3d23cd192fa4f46b0cd3053f4f823e5f95e76ec0413084658495",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 50,
+    "universe_digest": "44922afb2d4b7297d897b06aff7d345486764a01a4687c19a78324403f634991",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-08T22:34:19.652469+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-2-2026100122-v7.pending.f5fb35cda160.71097a80dcb8e07218a9ec9ae82eda22d5276cfbd2b3a5ab84bb3d71ae2dedf2.json",
+      "archived_manifest_sha256": "71097a80dcb8e07218a9ec9ae82eda22d5276cfbd2b3a5ab84bb3d71ae2dedf2",
+      "at": "2026-10-02T17:49:18.044944Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "f5fb35cda16003d06bf262d36fc31ebff3d376c5",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-2-2026100122-v7.pending.543104bc87a3.f22542dfd6991d5ba5454529e0cdc30e3a8d5b75dbd6b3e5d712116902ac4267.json",
+      "archived_manifest_sha256": "f22542dfd6991d5ba5454529e0cdc30e3a8d5b75dbd6b3e5d712116902ac4267",
+      "at": "2026-10-02T17:52:10.788875Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "543104bc87a3d1674614ef6488cb4413aa3dfba9",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-2-2026100122-v7.pending.aeeff07238f2.975abca8626740777335e4edebf14b5714c14ba79e289e13090b8b286b25e194.json",
+      "archived_manifest_sha256": "975abca8626740777335e4edebf14b5714c14ba79e289e13090b8b286b25e194",
+      "at": "2026-10-02T17:58:19.049764Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "aeeff07238f2c84ddf4cec2a6ce2652eb1e708dc",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-2-2026100122-v7.pending.0a49ea72902b.b9e262af6bcdca31d3317e7b4b81c99d0bf861fe863e2f5649aa10d3bdf50b21.json",
+      "archived_manifest_sha256": "b9e262af6bcdca31d3317e7b4b81c99d0bf861fe863e2f5649aa10d3bdf50b21",
+      "at": "2026-10-02T18:11:37.614456Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "0a49ea72902b8f1a6dd29741d6ccc1fc168feac3",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "at": "2026-10-02T18:16:57.159290Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-02T19:24:51.631454Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-10-02T20:49:20.718188Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-02T21:52:49.476368Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 2,
+  "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-02T21:52:49.476368Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
