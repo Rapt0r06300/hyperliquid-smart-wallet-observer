@@ -26,7 +26,7 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://api.gateio.ws/api/v4"
 PUBLIC_WS_URL = "wss://fx-ws.gateio.ws/v4/ws/usdt"
-VWAP_TARGET_QUOTE_NOTIONALS_USD = (10, 50, 100, 250, 500, 1000)
+VWAP_TARGET_QUOTE_NOTIONALS_USD = (10, 25, 50, 100, 250, 500, 1000)
 
 
 def _f(v: Any) -> float | None:
