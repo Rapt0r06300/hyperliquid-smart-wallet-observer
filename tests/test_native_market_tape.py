@@ -271,4 +271,6 @@ def test_bitget_instrument_metadata_snapshot_is_replayable() -> None:
     row = envelope.as_record(written_ts_ms=1_700_000_000_020)
     assert row["instrument"] == "BTCUSDT"
     assert row["parsed_summary"]["lot_size"] == "0.001"
+    assert row["parsed_summary"]["quantity_step"] == "0.001"
+    assert row["parsed_summary"]["contract_multiplier"] is None
     assert row["parsed_summary"]["min_notional"] == "5"
