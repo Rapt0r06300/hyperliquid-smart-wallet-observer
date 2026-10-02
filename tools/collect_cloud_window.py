@@ -362,6 +362,8 @@ async def _native_with_clock_sync(
                     parsed_summary={
                         "offset_ms": float(sample.offset_ms),
                         "rtt_ms": float(sample.rtt_ms),
+                        "clock_offset_ms": float(sample.offset_ms),
+                        "transport_rtt_ms": float(sample.rtt_ms),
                         "uncertainty_ms": float(sample.uncertainty_ms),
                         "data_gate_ready": False,
                     },
