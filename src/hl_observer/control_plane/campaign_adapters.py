@@ -239,12 +239,16 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             max(0, shard_count - 1),
         )
         mode = str(ctx.partition.get("copy_vault_mode") or "legacy_sharded_ws")
-        max_ws_vaults = _bounded_int(
-            ctx.partition.get("max_ws_vaults"),
-            10,
-            1,
-            10,
-        )
+        raw_max_ws_vaults = ctx.partition.get("max_ws_vaults", 10)
+        try:
+            requested_max_ws_vaults = int(raw_max_ws_vaults)
+        except (TypeError, ValueError, OverflowError):
+            requested_max_ws_vaults = 10
+        if not 1 <= requested_max_ws_vaults <= 10:
+            raise ValueError(
+                "copy-vault two-speed mode allows 1..10 unique WS users per IP"
+            )
+        max_ws_vaults = requested_max_ws_vaults
         if mode == "two_speed_broad_rest_priority_ws":
             if shard_count != 1 or shard_index != 0:
                 raise ValueError("two-speed Copy-Vault mode requires one broad universe lane")
