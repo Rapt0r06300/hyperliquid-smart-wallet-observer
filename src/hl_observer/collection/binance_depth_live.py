@@ -71,6 +71,7 @@ class BinanceDepthLiveCollector:
         ws_base_url: str = WS_BASE_URL,
         snapshot_limit: int = 1000,
         publication_depth: int = 200,
+        partial_fallback_levels: int = 20,
         http_client: httpx.AsyncClient | None = None,
         tick_sink: Callable[[TickEnvelope], Any] | None = None,
         publication_sink: Callable[[str, Mapping[str, Any]], Any] | None = None,
@@ -85,6 +86,9 @@ class BinanceDepthLiveCollector:
         if self.snapshot_limit not in {5, 10, 20, 50, 100, 500, 1000}:
             raise ValueError("unsupported Binance snapshot_limit")
         self.publication_depth = max(1, min(int(publication_depth), self.snapshot_limit))
+        self.partial_fallback_levels = int(partial_fallback_levels)
+        if self.partial_fallback_levels not in {5, 10, 20}:
+            raise ValueError("partial_fallback_levels must be one of 5, 10, 20")
         self._owns_http = http_client is None
         self.http = http_client or httpx.AsyncClient(
             base_url=self.rest_base_url,
@@ -98,10 +102,13 @@ class BinanceDepthLiveCollector:
             for symbol in self.symbols
         }
         self._resync_pending: set[str] = set()
+        self._rest_unavailable_symbols: set[str] = set()
         self.frames_received = 0
         self.snapshots_received = 0
         self.resync_failures = 0
         self.publications = 0
+        self.partial_fallback_frames = 0
+        self.partial_fallback_publications = 0
         self.reconnects = 0
         self.last_error = ""
 
@@ -110,7 +117,14 @@ class BinanceDepthLiveCollector:
             await self.http.aclose()
 
     def websocket_url(self) -> str:
-        streams = "/".join(f"{symbol.lower()}@depth@100ms" for symbol in self.symbols)
+        streams = "/".join(
+            stream
+            for symbol in self.symbols
+            for stream in (
+                f"{symbol.lower()}@depth@100ms",
+                f"{symbol.lower()}@depth{self.partial_fallback_levels}@100ms",
+            )
+        )
         return f"{self.ws_base_url}?streams={streams}"
 
     def state(self, symbol: str) -> BinanceDepthOrchestrator:
@@ -135,6 +149,7 @@ class BinanceDepthLiveCollector:
             payload = response.json()
         except Exception as exc:
             self.resync_failures += 1
+            self._rest_unavailable_symbols.add(key)
             self.last_error = f"{type(exc).__name__}: {exc}"[:500]
             return None
         receive_mono_ns = time.monotonic_ns()
@@ -164,6 +179,7 @@ class BinanceDepthLiveCollector:
             connection_id=connection_id,
         )
         self.snapshots_received += 1
+        self._rest_unavailable_symbols.discard(key)
         self._emit_tick(
             TickEnvelope(
                 source_id="binance_usdm_public",
@@ -240,6 +256,21 @@ class BinanceDepthLiveCollector:
                             symbol = frame["symbol"]
                             state = self.states.get(symbol)
                             if state is None:
+                                continue
+                            stream_name = str(payload.get("stream") or "")
+                            is_partial_fallback_frame = (
+                                f"@depth{self.partial_fallback_levels}@" in stream_name
+                            )
+                            if is_partial_fallback_frame:
+                                self.partial_fallback_frames += 1
+                                if symbol in self._rest_unavailable_symbols:
+                                    self._emit_partial_fallback(
+                                        symbol,
+                                        frame,
+                                        connection_id=connection_id,
+                                        receive_wall_ms=receive_wall_ms,
+                                        receive_mono_ns=receive_mono_ns,
+                                    )
                                 continue
                             self.frames_received += 1
                             gaps_before = state.gap_count
@@ -324,6 +355,10 @@ class BinanceDepthLiveCollector:
             "snapshots_received": self.snapshots_received,
             "resync_failures": self.resync_failures,
             "publications": self.publications,
+            "partial_fallback_frames": self.partial_fallback_frames,
+            "partial_fallback_publications": self.partial_fallback_publications,
+            "partial_fallback_levels": self.partial_fallback_levels,
+            "rest_unavailable_symbols": sorted(self._rest_unavailable_symbols),
             "reconnects": self.reconnects,
             "pending_resyncs": len(self._resync_pending),
             "books_exploitable": sum(
@@ -334,6 +369,84 @@ class BinanceDepthLiveCollector:
             "read_only": True,
             "real_execution": False,
         }
+
+    def _emit_partial_fallback(
+        self,
+        symbol: str,
+        frame: Mapping[str, Any],
+        *,
+        connection_id: str,
+        receive_wall_ms: int,
+        receive_mono_ns: int,
+    ) -> None:
+        """Persist bounded WS-only L2 when the official REST snapshot is unavailable.
+
+        This is intentionally NOT promoted to a full reconstructed book: the
+        publication is marked PARTIAL_L2_FALLBACK and data_gate_ready=False.
+        It preserves real top-of-book depth instead of dropping the venue to zero.
+        """
+        bids = list(frame.get("bids") or [])[: self.partial_fallback_levels]
+        asks = list(frame.get("asks") or [])[: self.partial_fallback_levels]
+        if not bids or not asks:
+            return
+        exchange_ts_ms = frame.get("transaction_ts_ms") or frame.get("event_ts_ms")
+        publication = {
+            "schema_version": "alina.binance_usdm_partial_l2_fallback.v1",
+            "symbol": symbol,
+            "bids": bids,
+            "asks": asks,
+            "exchange_ts_ms": exchange_ts_ms,
+            "receive_ts_ms": receive_wall_ms,
+            "receive_mono_ns": receive_mono_ns,
+            "connection_id": connection_id,
+            "sequence": frame.get("u"),
+            "gap_count": 0,
+            "quality": "PARTIAL_L2_FALLBACK",
+            "partial_depth_levels": self.partial_fallback_levels,
+            "rest_snapshot_available": False,
+            "data_gate_ready": False,
+            "read_only": True,
+            "real_execution": False,
+        }
+        self._emit_tick(
+            TickEnvelope(
+                source_id="binance_usdm_public",
+                channel="l2Book_partial_snapshot",
+                instrument=symbol,
+                event_kind=FeedEventKind.SNAPSHOT,
+                raw_payload=frame.get("raw") or {},
+                exchange_ts_ms=_int_or_none(exchange_ts_ms),
+                received_ts_ms=receive_wall_ms,
+                local_monotonic_ns=receive_mono_ns,
+                connection_id=connection_id,
+                sequence=_int_or_none(frame.get("u")),
+                gap_count=0,
+                provenance={
+                    "url": self.websocket_url(),
+                    "network": "mainnet",
+                    "access": "read_only",
+                    "transport": "websocket",
+                    "authenticated": False,
+                    "stream": f"partial_depth_{self.partial_fallback_levels}_100ms",
+                    "fallback_reason": "REST_SNAPSHOT_UNAVAILABLE",
+                    "gap_count_semantics": "bounded_snapshot",
+                },
+                parsed_summary={
+                    **self._clock_evidence(),
+                    "bid_levels": len(bids),
+                    "ask_levels": len(asks),
+                    "book_state": "PARTIAL_L2_FALLBACK",
+                    "partial_depth_levels": self.partial_fallback_levels,
+                    "data_gate_ready": False,
+                },
+            )
+        )
+        self.partial_fallback_publications += 1
+        self._emit_publication(
+            symbol,
+            publication,
+            source_raw_l2_payload=frame.get("raw"),
+        )
 
     def _schedule_resync(self, symbol: str, connection_id: str) -> None:
         if symbol in self._resync_pending:
