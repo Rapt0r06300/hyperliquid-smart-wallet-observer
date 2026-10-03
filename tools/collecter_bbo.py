@@ -37,8 +37,18 @@ from hl_observer.config.cross_venue_instruments import (  # noqa: E402
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
-WS_BINANCE_PUBLIC = "wss://fstream.binance.com/public/stream"
-WS_BINANCE_MARKET = "wss://fstream.binance.com/market/stream"
+BINANCE_WS_HOSTS = (
+    "wss://fstream.binance.com",
+    "wss://stream.binancefuture.com",
+)
+BINANCE_PUBLIC_WS_CANDIDATES = tuple(
+    f"{host}/public/stream" for host in BINANCE_WS_HOSTS
+)
+BINANCE_MARKET_WS_CANDIDATES = tuple(
+    f"{host}/market/stream" for host in BINANCE_WS_HOSTS
+)
+WS_BINANCE_PUBLIC = BINANCE_PUBLIC_WS_CANDIDATES[0]
+WS_BINANCE_MARKET = BINANCE_MARKET_WS_CANDIDATES[0]
 SORTIE = Path("runtime") / "data" / "bbo_synchro.jsonl"
 TAPE = Path("runtime") / "data" / "bbo_tape.jsonl"     # chaque message BBO (monotone) -> lead-lag fin
 ATOMIC_BBO_TAPE = Path("runtime") / "data" / "cross_venue_atomic_bbo.jsonl"
@@ -669,6 +679,10 @@ async def _boucle(
              "binance_funding_settlements": 0, "binance_funding_history_error": "",
              "binance_l2_publications": 0, "binance_l2_full_publications": 0,
              "binance_l2_partial_publications": 0, "raw_frames_received": 0,
+             "binance_bbo_ws_url": WS_BINANCE_PUBLIC,
+             "binance_bbo_last_error": "",
+             "binance_trade_ws_url": WS_BINANCE_MARKET,
+             "binance_trade_last_error": "",
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
@@ -1160,9 +1174,18 @@ async def _boucle(
         # bookTicker (entrée exécutable) sur SA connexion. Séparée de l'aggTrade : la très haute
         # fréquence du bookTicker ne peut plus AFFAMER l'aggTrade (cause probable des 0 trades captés).
         streams = "/".join("%s@bookTicker" % s.lower() for s in sym.values())
+        endpoint_index = 0
         while True:
+            endpoint = BINANCE_PUBLIC_WS_CANDIDATES[
+                endpoint_index % len(BINANCE_PUBLIC_WS_CANDIDATES)
+            ]
+            stats["binance_bbo_ws_url"] = endpoint
             try:
-                async with websockets.connect("%s?streams=%s" % (WS_BINANCE_PUBLIC, streams), ping_interval=20) as ws:
+                async with websockets.connect(
+                    "%s?streams=%s" % (endpoint, streams),
+                    ping_interval=20,
+                ) as ws:
+                    stats["binance_bbo_last_error"] = ""
                     bin_bbo_connection_serial += 1
                     connection_id = "bin-bbo-%d-%d" % (
                         int(time.time() * 1000),
@@ -1194,7 +1217,7 @@ async def _boucle(
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE_PUBLIC,
+                                        "url": endpoint,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
@@ -1231,7 +1254,7 @@ async def _boucle(
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE_PUBLIC,
+                                        "url": endpoint,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
@@ -1267,8 +1290,12 @@ async def _boucle(
                                     sequence=sequence,
                                 )
                             )
-            except Exception:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
+            except Exception as exc:  # noqa: BLE001 — reconnecte SEULEMENT sur panne
                 stats["reconnexions_bin"] += 1
+                stats["binance_bbo_last_error"] = (
+                    f"{type(exc).__name__}: {exc}"
+                )[:500]
+                endpoint_index += 1
                 await asyncio.sleep(1.0)
 
     async def binance_ag():
@@ -1277,9 +1304,18 @@ async def _boucle(
         # Depuis le split Binance USD-M 2026, le flux marché officiel est <symbol>@aggTrade
         # sur /market. Le parseur accepte encore "trade" pour compatibilité historique.
         streams = "/".join("%s@aggTrade" % s.lower() for s in sym.values())
+        endpoint_index = 0
         while True:
+            endpoint = BINANCE_MARKET_WS_CANDIDATES[
+                endpoint_index % len(BINANCE_MARKET_WS_CANDIDATES)
+            ]
+            stats["binance_trade_ws_url"] = endpoint
             try:
-                async with websockets.connect("%s?streams=%s" % (WS_BINANCE_MARKET, streams), ping_interval=20) as ws:
+                async with websockets.connect(
+                    "%s?streams=%s" % (endpoint, streams),
+                    ping_interval=20,
+                ) as ws:
+                    stats["binance_trade_last_error"] = ""
                     bin_trade_connection_serial += 1
                     connection_id = "bin-trade-%d-%d" % (
                         int(time.time() * 1000),
@@ -1312,7 +1348,7 @@ async def _boucle(
                                     reconnect_count=stats["reconnexions_bin"],
                                     gap_count=stats["trous"],
                                     provenance={
-                                        "url": WS_BINANCE_MARKET,
+                                        "url": endpoint,
                                         "network": "mainnet",
                                         "access": "read_only",
                                         "transport": "websocket",
@@ -1366,8 +1402,12 @@ async def _boucle(
                                 mag.hl.get(coin_name),
                                 now_ms=recv_wall_ms,
                             )
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 stats["reconnexions_bin"] += 1
+                stats["binance_trade_last_error"] = (
+                    f"{type(exc).__name__}: {exc}"
+                )[:500]
+                endpoint_index += 1
                 await asyncio.sleep(1.0)
 
     async def lead_lag_checkpoint_worker() -> None:
