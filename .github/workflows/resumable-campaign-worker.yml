@@ -396,8 +396,10 @@ jobs:
                 exit 2
               fi
               test -f "$BUNDLE/RUN_MANIFEST.json"
-              python tools/augment_campaign_result.py collection                 --result "$RESULT"                 --run-manifest "$BUNDLE/RUN_MANIFEST.json"                 --tag "$TAG"                 --repository "$GITHUB_REPOSITORY"
-              echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+              ACTUAL_RELEASE_TAG="$(python -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8"))["release_tag"])' "$BUNDLE/RUN_MANIFEST.json")"
+              test -n "$ACTUAL_RELEASE_TAG"
+              python tools/augment_campaign_result.py collection                 --result "$RESULT"                 --run-manifest "$BUNDLE/RUN_MANIFEST.json"                 --tag "$ACTUAL_RELEASE_TAG"                 --repository "$GITHUB_REPOSITORY"
+              echo "release_tag=$ACTUAL_RELEASE_TAG" >> "$GITHUB_OUTPUT"
               ;;
             replay|backtest|oos|forward_paper|module_pnl_proof|scoreboard)
               WORKSPACE="$RUNNER_TEMP/alina-replay-workspace"
