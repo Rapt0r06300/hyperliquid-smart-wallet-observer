@@ -104,10 +104,9 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git rm -f \
-            .github/workflows/migrate-legacy-releases-to-main.yml \
-            tools/migrate_legacy_releases_to_main.py \
-            tests/test_legacy_release_migration.py
+          # Remove the only automatic external-reading trigger. Keep the
+          # generic migration utility + tests as inert, auditable evidence.
+          git rm -f .github/workflows/migrate-legacy-releases-to-main.yml
           git commit -m "architecture: retire completed historical migration plumbing"
           for attempt in 1 2 3 4 5 6 7 8; do
             if git pull --rebase origin main && git push origin HEAD:main; then
