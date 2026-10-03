@@ -57,7 +57,7 @@ def test_session_lie_surface_capacites_au_run_et_au_sha(tmp_path):
     bound = cat["contexte"]["capability_reconciliation"]
     assert rid == "harvest-capabilities"
     assert bound["capability_ready"] is True
-    assert bound["capability_counts"]["expected"] == 14
+    assert bound["capability_counts"]["expected"] == 15
     assert len(bound["capability_surface_digest"]) == 64
 
 
