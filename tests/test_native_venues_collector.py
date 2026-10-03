@@ -104,6 +104,8 @@ def test_native_runner_publishes_canonical_harvest_heartbeat() -> None:
     assert '"required_venues_ready"' in text
     assert "counts.get(venue, 0) > 0" in text
     assert "last_event_ms.get(venue, 0) > 0" in text
+    assert "final_health = coordinator.health" in text
+    assert '"coordinator_health": final_health' in text
 
 def test_native_final_heartbeat_preserves_coordinator_health() -> None:
     text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
