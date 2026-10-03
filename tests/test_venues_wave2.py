@@ -3,7 +3,7 @@ sequencage, IV/skew, CVD/basis, live-gate honnete. Aucun reseau, aucun ordre ree
 import pytest
 
 from hl_observer.venues import coinbase, deribit, kraken
-from hl_observer.venues._canon import ReseauRequisError, SIDE_ACHAT, SIDE_VENTE
+from hl_observer.venues._canon import SIDE_ACHAT, SIDE_VENTE, ReseauRequisError
 
 
 # ---------------- Coinbase ----------------
@@ -41,6 +41,13 @@ def test_cb_lead_lag_perp_mene():
 def test_cb_live_gate():
     with pytest.raises(ReseauRequisError):
         coinbase.LiveClientCoinbase().souscrire("level2", "BTC-USD")
+
+
+def test_coinbase_public_subscription_plan_is_bounded_and_read_only():
+    plan = coinbase.public_subscription_plan(["BTC-USD", "ETH-USD"], max_symbols=1)
+    assert plan["channel"] == "level2"
+    assert plan["product_ids"] == ["BTC-USD"]
+    assert plan["authenticated"] is False
 
 
 # ---------------- Deribit ----------------
@@ -84,6 +91,12 @@ def test_deribit_skew():
     assert s["skew"] == pytest.approx(10.0)
 
 
+def test_deribit_public_subscription_plan_uses_100ms_not_raw():
+    plan = deribit.public_subscription_plan(["BTC-PERPETUAL", "ETH-PERPETUAL"], max_symbols=1)
+    assert plan["channels"] == ["book.BTC-PERPETUAL.100ms", "trades.BTC-PERPETUAL.100ms"]
+    assert plan["authenticated"] is False
+
+
 # ---------------- Kraken ----------------
 def test_kraken_book_seq_gap():
     msgs = [
@@ -112,3 +125,9 @@ def test_kraken_liq_volume_no_fake_zero():
 def test_kraken_live_gate():
     with pytest.raises(ReseauRequisError):
         kraken.LiveClientKraken().souscrire("book", "PI_XBTUSD")
+
+
+def test_kraken_public_subscription_plan_is_bounded():
+    plan = kraken.public_subscription_plan(["PI_XBTUSD", "PI_ETHUSD"], max_symbols=1)
+    assert plan["product_ids"] == ["PI_ETHUSD"]
+    assert plan["feeds"] == ["book", "trade", "ticker"]

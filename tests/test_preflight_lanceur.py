@@ -93,7 +93,7 @@ def test_preflight_schemas_reels_presents_dans_le_repo():
 def test_preflight_reconcilie_surface_chargee_avec_sha_complet():
     v = PF.verifier_capacites_chargees(RACINE_REPO, git_head="a" * 40)
     assert v.ok is True and v.dur is True
-    assert "expected=14 loaded=3" in v.detail
+    assert "expected=14 loaded=6" in v.detail
 
 
 def test_preflight_capacites_refuse_sha_absent():

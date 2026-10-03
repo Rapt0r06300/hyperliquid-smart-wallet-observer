@@ -154,6 +154,8 @@ def registre_par_defaut() -> RegistreCapacitesVenues:
     r.declarer("hyperliquid", OFFLINE_READY, flux=tous, requis=True)
     r.declarer("dydx", OFFLINE_READY, flux=tous)
     r.declarer("binance", OFFLINE_READY, flux=tous)
-    for v in ("bybit", "okx", "coinbase", "deribit", "kraken", "drift", "gmx", "nansen", "dune", "glassnode", "defillama"):
+    for v in ("coinbase", "deribit", "kraken"):
+        r.declarer(v, OFFLINE_READY, flux=tous)
+    for v in ("bybit", "okx", "drift", "gmx", "nansen", "dune", "glassnode", "defillama"):
         r.declarer(v, REQUIRES_NETWORK, flux=tous)
     return r

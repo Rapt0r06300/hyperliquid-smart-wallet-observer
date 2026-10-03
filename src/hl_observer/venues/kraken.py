@@ -4,16 +4,35 @@ interest, funding/basis, CVD (cumulative volume delta) et volume de liquidation 
 Pull LIVE derriere une frontiere REQUIRES_NETWORK. stdlib pure, 0 reseau, 0 cle, 0 ordre reel."""
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from ._canon import (ClientLiveBase, DetecteurSequence, OFFLINE_READY, REQUIRES_NETWORK,
-                     ligne, nbbo, norm_side, to_float)
+from ._canon import (
+    OFFLINE_READY,
+    REQUIRES_NETWORK,
+    ClientLiveBase,
+    DetecteurSequence,
+    ligne,
+    nbbo,
+    norm_side,
+    to_float,
+)
 
 VENUE = "kraken"
 ENDPOINTS = {
     "ws": "wss://futures.kraken.com/ws/v1",
     "feeds": ("book_snapshot", "book", "trade", "ticker"),
 }
+
+
+def public_subscription_plan(product_ids: Sequence[str], *, max_symbols: int = 10) -> dict:
+    limit = max(1, min(50, int(max_symbols)))
+    products = sorted({str(value).strip().upper() for value in product_ids if str(value).strip()})[:limit]
+    return {
+        "feeds": ["book", "trade", "ticker"],
+        "product_ids": products,
+        "authenticated": False,
+        "read_only": True,
+    }
 
 
 def _niveaux_dict(rows: Sequence[Mapping]) -> list:

@@ -8,7 +8,11 @@ from datetime import date
 from pathlib import Path
 
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
-from hl_observer.data_sources.official_archive_backfill import fetch_official_archive_stream, iter_days
+from hl_observer.data_sources.official_archive_backfill import (
+    ArchiveObservationStats,
+    fetch_official_archive_stream,
+    iter_days,
+)
 from hl_observer.datasets.v2_pipeline import build_bundle
 
 
@@ -49,19 +53,19 @@ def main() -> int:
             day=day,
             max_events=max(1, int(args.max_events_per_day)),
         )
-        count = 0
+        stats = ArchiveObservationStats()
         batch = []
         for event in result.events:
             batch.append(event)
-            count += 1
+            stats.observe_exchange_ts(event.exchange_ts_ms)
             if len(batch) >= 5000:
                 writer.append_batch(batch)
                 batch.clear()
         if batch:
             writer.append_batch(batch)
-        if count <= 0:
+        if stats.event_count <= 0:
             raise SystemExit(f"NO_ARCHIVE_EVENTS:{day.isoformat()}")
-        total += count
+        total += stats.event_count
         archives.append({
             "venue": result.venue,
             "coin": result.coin,
@@ -70,7 +74,10 @@ def main() -> int:
             "source_url": result.source_url,
             "compressed_sha256": result.compressed_sha256,
             "checksum_verified": result.checksum_verified,
-            "event_count": count,
+            "event_count": stats.event_count,
+            "first_exchange_ts_ms": stats.first_exchange_ts_ms,
+            "last_exchange_ts_ms": stats.last_exchange_ts_ms,
+            "timestamp_semantics": stats.timestamp_semantics,
         })
 
     shards = writer.rotate_all()

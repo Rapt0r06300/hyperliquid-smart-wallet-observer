@@ -28,6 +28,26 @@ DEFAULT_MAX_DECOMPRESSED_BYTES = 1024 * 1024 * 1024
 DEFAULT_MAX_EVENTS = 2_000_000
 
 
+@dataclass(slots=True)
+class ArchiveObservationStats:
+    event_count: int = 0
+    first_exchange_ts_ms: int | None = None
+    last_exchange_ts_ms: int | None = None
+    timestamp_semantics: str = "historical_exchange_time_only"
+
+    def observe_exchange_ts(self, exchange_ts_ms: int | None) -> None:
+        self.event_count += 1
+        if exchange_ts_ms is None:
+            return
+        value = int(exchange_ts_ms)
+        self.first_exchange_ts_ms = (
+            value if self.first_exchange_ts_ms is None else min(self.first_exchange_ts_ms, value)
+        )
+        self.last_exchange_ts_ms = (
+            value if self.last_exchange_ts_ms is None else max(self.last_exchange_ts_ms, value)
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class ArchiveDay:
     venue: str

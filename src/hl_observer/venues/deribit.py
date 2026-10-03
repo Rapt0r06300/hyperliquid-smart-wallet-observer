@@ -4,10 +4,9 @@ change_id/prev_change_id, open interest, funding perpetuel, implied volatility e
 Pull LIVE derriere une frontiere REQUIRES_NETWORK. stdlib pure, 0 reseau, 0 cle, 0 ordre reel."""
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from ._canon import (ClientLiveBase, DetecteurSequence, OFFLINE_READY, REQUIRES_NETWORK,
-                     ligne, nbbo, to_float)
+from ._canon import OFFLINE_READY, REQUIRES_NETWORK, ClientLiveBase, DetecteurSequence, ligne, nbbo, to_float
 
 VENUE = "deribit"
 ENDPOINTS = {
@@ -15,6 +14,17 @@ ENDPOINTS = {
     "channels": ("book.{instr}.{group}.{depth}.{interval}", "trades.{instr}.{interval}",
                  "ticker.{instr}.{interval}"),
 }
+
+
+def public_subscription_plan(instruments: Sequence[str], *, max_symbols: int = 10) -> dict:
+    """Use the public 100 ms complete book; raw requires authorization."""
+    limit = max(1, min(50, int(max_symbols)))
+    selected = sorted({str(value).strip().upper() for value in instruments if str(value).strip()})[:limit]
+    channels = [channel for instrument in selected for channel in (
+        f"book.{instrument}.100ms",
+        f"trades.{instrument}.100ms",
+    )]
+    return {"channels": channels, "authenticated": False, "read_only": True}
 
 
 def _niveaux_action(rows: Sequence[Sequence]) -> list:

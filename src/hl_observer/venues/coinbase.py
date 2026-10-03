@@ -4,16 +4,28 @@ continuite via sequence_num (DATA-069), heartbeats (DATA-068), mapping USD/USDC 
 spot/perp (DATA-071). Pull LIVE derriere une frontiere REQUIRES_NETWORK. stdlib pure, 0 reseau, 0 cle."""
 from __future__ import annotations
 
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
-from ._canon import (ClientLiveBase, DetecteurSequence, OFFLINE_READY, REQUIRES_NETWORK,
-                     ligne, nbbo, to_float)
+from ._canon import OFFLINE_READY, REQUIRES_NETWORK, ClientLiveBase, DetecteurSequence, ligne, nbbo, to_float
 
 VENUE = "coinbase"
 ENDPOINTS = {
     "ws": "wss://advanced-trade-ws.coinbase.com",
     "channels": ("level2", "market_trades", "ticker", "candles", "status", "heartbeats"),
 }
+
+
+def public_subscription_plan(product_ids: Sequence[str], *, max_symbols: int = 10) -> dict:
+    """Build a bounded public-only plan; transport remains behind the network gate."""
+    limit = max(1, min(50, int(max_symbols)))
+    products = sorted({str(value).strip().upper() for value in product_ids if str(value).strip()})[:limit]
+    return {
+        "channel": "level2",
+        "channels": ["level2", "market_trades", "heartbeats"],
+        "product_ids": products,
+        "authenticated": False,
+        "read_only": True,
+    }
 
 
 def normalize_l2(evt: Mapping) -> dict:

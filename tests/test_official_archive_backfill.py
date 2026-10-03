@@ -9,12 +9,25 @@ from datetime import date
 import pytest
 
 from hl_observer.data_sources.official_archive_backfill import (
+    ArchiveObservationStats,
     binance_usdm_aggtrades_url,
     bybit_trades_url,
     fetch_official_archive_day,
     fetch_official_archive_stream,
     iter_days,
 )
+
+
+def test_archive_observation_stats_preserve_exchange_only_semantics() -> None:
+    stats = ArchiveObservationStats()
+    stats.observe_exchange_ts(1_700_000_000_100)
+    stats.observe_exchange_ts(1_700_000_000_000)
+    stats.observe_exchange_ts(None)
+
+    assert stats.event_count == 3
+    assert stats.first_exchange_ts_ms == 1_700_000_000_000
+    assert stats.last_exchange_ts_ms == 1_700_000_000_100
+    assert stats.timestamp_semantics == "historical_exchange_time_only"
 
 
 def _zip_csv(text: str) -> bytes:
