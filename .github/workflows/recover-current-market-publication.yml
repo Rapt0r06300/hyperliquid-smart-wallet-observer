@@ -1,0 +1,154 @@
+name: recover-current-market-publication
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-current-market-publication.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: alina-current-market-publication-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_RUN_ID: "37135946399"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Identify only market campaigns owned by the pre-fix wave
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          phase=json.loads(Path("control/alina-phase.json").read_text())
+          assert phase.get("phase")=="COLLECT"
+          epoch=int(phase.get("epoch") or 0)
+
+          rows=[]
+          for path in sorted(Path("catalog/campaigns").glob("*.json")):
+              try:
+                  row=json.loads(path.read_text())
+              except Exception:
+                  continue
+              lease=row.get("lease") if isinstance(row.get("lease"),dict) else {}
+              if (
+                  row.get("schema_version")=="alina.resumable_campaign.v2"
+                  and row.get("kind")=="market_collection"
+                  and row.get("creation_phase")=="COLLECT"
+                  and int(row.get("phase_epoch") or 0)==epoch
+                  and row.get("status")=="RUNNING"
+                  and str(lease.get("owner_run_id") or "")=="37135946399"
+              ):
+                  unit=int(row.get("chunk_index") or 0)
+                  campaign=str(row.get("campaign_id") or path.stem)
+                  rows.append((campaign,unit))
+
+          if not rows:
+              print("No active pre-fix market campaigns remain; nothing destructive to do.")
+          Path("/tmp/recovery-tags.txt").write_text(
+              "".join(f"data-v2-campaign-{campaign}-u{unit}\n" for campaign,unit in rows)
+          )
+          print(f"target_campaigns={len(rows)}")
+          for campaign,unit in rows:
+              print(f"{campaign} unit={unit}")
+          PY
+
+      - name: Remove only unfinalized stale releases for those active campaigns
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleaned=0
+          skipped_final=0
+          missing=0
+
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+
+            rid="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.id' 2>/dev/null || true)"
+            if [ -z "$rid" ]; then
+              echo "absent: $tag"
+              missing=$((missing+1))
+              continue
+            fi
+
+            if gh api "repos/$GITHUB_REPOSITORY/releases/$rid/assets?per_page=100" --paginate --jq '.[].name'                 | grep -Fxq 'RUN_MANIFEST.json'; then
+              echo "FINALIZED; preserving immutable evidence: $tag"
+              skipped_final=$((skipped_final+1))
+              continue
+            fi
+
+            echo "Removing stale unfinalized release: $tag"
+            deleted=0
+            for attempt in 1 2 3 4 5 6 7 8; do
+              if gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
+                deleted=1
+                break
+              fi
+              msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
+              if printf '%s' "$msg" | grep -Eqi 'not found|HTTP 404'; then
+                deleted=1
+                break
+              fi
+              if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary|abuse'; then
+                sleep_seconds=$((attempt * 20))
+                [ "$sleep_seconds" -le 120 ] || sleep_seconds=120
+                sleep "$sleep_seconds"
+                continue
+              fi
+              printf '%s\n' "$msg" >&2
+              exit 31
+            done
+            test "$deleted" -eq 1
+            cleaned=$((cleaned+1))
+            sleep 8
+          done < /tmp/recovery-tags.txt
+
+          echo "recovery cleaned=$cleaned missing=$missing finalized_preserved=$skipped_final"
+
+      - name: Verify no stale unfinalized target release remains
+        shell: bash
+        run: |
+          set -euo pipefail
+          stale=0
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            rid="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.id' 2>/dev/null || true)"
+            [ -n "$rid" ] || continue
+            if ! gh api "repos/$GITHUB_REPOSITORY/releases/$rid/assets?per_page=100" --paginate --jq '.[].name'                 | grep -Fxq 'RUN_MANIFEST.json'; then
+              echo "stale release still present: $tag" >&2
+              stale=$((stale+1))
+            fi
+          done < /tmp/recovery-tags.txt
+          test "$stale" -eq 0
+
+      - name: Retire this one-shot recovery workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f .github/workflows/recover-current-market-publication.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "ops(data): retire one-shot market publication recovery"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 4))
+          done
+          exit 51
