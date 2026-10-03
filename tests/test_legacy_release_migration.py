@@ -32,3 +32,12 @@ def test_inventory_digest_deterministic():
     m=mod(); rows=[{"publishedAt":"1","tagName":"a","isPrerelease":False},{"publishedAt":"2","tagName":"b","isPrerelease":False}]
     assert m.inv(rows)==m.inv(list(rows))
     assert m.inv(rows)!=m.inv(list(reversed(rows)))
+
+def test_completed_migration_never_queries_external_storage(tmp_path:Path, monkeypatch):
+    m=mod(); u=tmp_path/'u.json'; s=tmp_path/'s.json'
+    u.write_text(json.dumps({'legacy_collection_state_imported':True,'fresh_dataset_state':False}),encoding='utf-8')
+    s.write_text('{}',encoding='utf-8')
+    monkeypatch.setattr(m,'releases',lambda _repo: (_ for _ in ()).throw(AssertionError('external read forbidden')))
+    out=m.migrate('deleted/external',m.TARGET,s,u,1,1)
+    assert out['status']=='COMPLETE'
+    assert json.loads(u.read_text())['legacy_collection_state_imported'] is True
