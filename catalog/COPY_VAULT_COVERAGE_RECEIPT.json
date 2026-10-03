@@ -1,6 +1,6 @@
 {
   "authoritative_plan": {
-    "active_lane_count": 258,
+    "active_lane_count": 256,
     "campaigns": [
       {
         "campaign_id": "copy-vault-e6-0-2026100104-v7",
@@ -526,21 +526,21 @@
       },
       {
         "campaign_id": "copy-vault-e6-58-2026100104-v7",
-        "collected": false,
-        "completed_units": 0,
-        "published": false,
+        "collected": true,
+        "completed_units": 1,
+        "published": true,
         "shard_index": 58,
-        "status": "PENDING",
-        "status_reason": "created"
+        "status": "COMPLETE",
+        "status_reason": "unit_complete"
       },
       {
         "campaign_id": "copy-vault-e6-59-2026100104-v7",
-        "collected": false,
-        "completed_units": 0,
-        "published": false,
+        "collected": true,
+        "completed_units": 1,
+        "published": true,
         "shard_index": 59,
-        "status": "PENDING",
-        "status_reason": "created"
+        "status": "COMPLETE",
+        "status_reason": "unit_complete"
       },
       {
         "campaign_id": "copy-vault-e6-60-2026100104-v7",
@@ -548,8 +548,8 @@
         "completed_units": 0,
         "published": false,
         "shard_index": 60,
-        "status": "PENDING",
-        "status_reason": "created"
+        "status": "RUNNING",
+        "status_reason": "worker_started"
       },
       {
         "campaign_id": "copy-vault-e6-61-2026100104-v7",
@@ -2793,8 +2793,8 @@
         "status_reason": "created"
       }
     ],
-    "collected_lane_count": 52,
-    "completed_unit_count": 64,
+    "collected_lane_count": 54,
+    "completed_unit_count": 66,
     "created_at_max": "2026-10-01T04:56:06.195239+00:00",
     "declared_universe_count": 3093,
     "duplicate_lane_indices": [],
@@ -3118,15 +3118,15 @@
     "no_silent_loss": true,
     "out_of_range_lane_indices": [],
     "plan_valid": true,
-    "published_lane_count": 52,
-    "qualified_shard_count": 1582,
+    "published_lane_count": 54,
+    "qualified_shard_count": 1643,
     "scheduled_lane_count": 310,
     "selected_count": 3093,
     "selection_file": "catalog/copy_vault_selections/e6/2026100104.json",
     "selection_sha256": "c88ed72eaf11b399602f5bf5f481c92f95302872d367dacfccb516a4a8ca4b50",
     "selection_verified": true,
     "status": "MORE_DATA",
-    "terminal_lane_count": 52,
+    "terminal_lane_count": 54,
     "unexpected_failures": [
       {
         "campaign_id": "copy-vault-e6-47-2026100104-v7",
@@ -3169,7 +3169,7 @@
   "phase_epoch": 6,
   "plans": [
     {
-      "active_lane_count": 258,
+      "active_lane_count": 256,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e6-0-2026100104-v7",
@@ -3695,21 +3695,21 @@
         },
         {
           "campaign_id": "copy-vault-e6-58-2026100104-v7",
-          "collected": false,
-          "completed_units": 0,
-          "published": false,
+          "collected": true,
+          "completed_units": 1,
+          "published": true,
           "shard_index": 58,
-          "status": "PENDING",
-          "status_reason": "created"
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
         },
         {
           "campaign_id": "copy-vault-e6-59-2026100104-v7",
-          "collected": false,
-          "completed_units": 0,
-          "published": false,
+          "collected": true,
+          "completed_units": 1,
+          "published": true,
           "shard_index": 59,
-          "status": "PENDING",
-          "status_reason": "created"
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
         },
         {
           "campaign_id": "copy-vault-e6-60-2026100104-v7",
@@ -3717,8 +3717,8 @@
           "completed_units": 0,
           "published": false,
           "shard_index": 60,
-          "status": "PENDING",
-          "status_reason": "created"
+          "status": "RUNNING",
+          "status_reason": "worker_started"
         },
         {
           "campaign_id": "copy-vault-e6-61-2026100104-v7",
@@ -5962,8 +5962,8 @@
           "status_reason": "created"
         }
       ],
-      "collected_lane_count": 52,
-      "completed_unit_count": 64,
+      "collected_lane_count": 54,
+      "completed_unit_count": 66,
       "created_at_max": "2026-10-01T04:56:06.195239+00:00",
       "declared_universe_count": 3093,
       "duplicate_lane_indices": [],
@@ -6287,15 +6287,15 @@
       "no_silent_loss": true,
       "out_of_range_lane_indices": [],
       "plan_valid": true,
-      "published_lane_count": 52,
-      "qualified_shard_count": 1582,
+      "published_lane_count": 54,
+      "qualified_shard_count": 1643,
       "scheduled_lane_count": 310,
       "selected_count": 3093,
       "selection_file": "catalog/copy_vault_selections/e6/2026100104.json",
       "selection_sha256": "c88ed72eaf11b399602f5bf5f481c92f95302872d367dacfccb516a4a8ca4b50",
       "selection_verified": true,
       "status": "MORE_DATA",
-      "terminal_lane_count": 52,
+      "terminal_lane_count": 54,
       "unexpected_failures": [
         {
           "campaign_id": "copy-vault-e6-47-2026100104-v7",
@@ -6333,7 +6333,7 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "aa0ea5d218b15d02b07a4afaba74fdef476465b564ba4aa9408754b5ada9e4b5",
+  "receipt_digest": "e9883e00df95d84c0976aa2c8ab529e62134f25ca3297ae55311b3035e8da911",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
