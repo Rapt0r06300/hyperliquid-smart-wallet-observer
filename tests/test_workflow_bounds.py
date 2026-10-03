@@ -49,6 +49,8 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "market-hourly-sharded-frozen-universe-v7" in text
     assert "market_shard_count" in text
     assert "market_shard_index" in text
+    assert "src/hl_observer/collection/depth_capacity.py" in text
+    assert "src/hl_observer/collection/binance_depth_live.py" in text
     assert "market_collection" in text
     assert "copy_vault_collection" in text
     assert "freeze_copy_vault_selection.py" in text
