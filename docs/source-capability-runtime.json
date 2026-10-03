@@ -1,18 +1,23 @@
 {
-  "generated_at_utc": "2026-10-03T20:12:36.064852Z",
-  "github_run_id": "37150600668",
-  "github_sha": "f20b6b2b1129f9168ab974bbc4a0ab188a817a1b",
+  "generated_at_utc": "2026-10-03T20:32:32.305413Z",
+  "github_run_id": "37151781643",
+  "github_sha": "4f62ebc83f9a1d2f8f86f07e44e01cde5c077353",
   "native_heartbeat_present": true,
-  "native_records_written": 3327,
+  "native_records_written": 3156,
   "paper_read_only": true,
   "real_execution": false,
-  "receipt_digest": "c9df0e837e295ac7f627e66a3aa0364fe1078f66a2b89d4f6b0784f2ebff7920",
+  "receipt_digest": "a9d593d58c5ed47efc6164df542e6bad79b99d902c6dcf91d5dacf4098a1557a",
   "runner_kind": "github-hosted",
+  "runner_network": {
+    "public_ip": "145.132.101.187",
+    "source_url": "https://api64.ipify.org?format=json",
+    "status": "OBSERVED"
+  },
   "schema_version": "alina.source_capability_runtime.v1",
   "venues": {
     "binance": {
       "capability_runtime": {
-        "bbo": "DEGRADED",
+        "bbo": "HEALTHY",
         "clock_sync": "DEGRADED",
         "l2": "DEGRADED",
         "official_archive": "DEGRADED",
@@ -23,9 +28,16 @@
         "venue_status": "DEGRADED"
       },
       "network_observed": false,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
-      "reason": "BINANCE_UNAVAILABLE:HTTPError",
-      "runtime_status": "DEGRADED"
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
+      "reason": "BINANCE_WS_NOT_OBSERVED:bbo=1:trades=0:l2=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
+      "rest_probe_observed": false,
+      "rest_probe_reason": "BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
+      "runtime_status": "DEGRADED",
+      "ws_frames": {
+        "bbo": 1,
+        "l2_publications": 0,
+        "trades": 0
+      }
     },
     "bitget": {
       "capability_runtime": {
@@ -39,10 +51,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791058353637,
+      "last_event_ms": 1791059529795,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791058353637",
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791059529795",
       "runtime_status": "HEALTHY"
     },
     "bybit": {
@@ -59,8 +71,10 @@
       },
       "last_event_ms": 0,
       "network_observed": false,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
-      "reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE",
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
+      "reason": "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE;REST=BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country };DISCOVERY=RuntimeError: Bybit REST discovery unavailable: https://api.bybit.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403 | https://api.bytick.com:HTTPStatusError:Client error '403 Forbidden' for url 'https://api.bytick.com/v5/market/instruments-info?category=linear&limit=1000'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/403",
+      "rest_probe_observed": false,
+      "rest_probe_reason": "BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country }",
       "runtime_status": "DEGRADED"
     },
     "gate": {
@@ -75,10 +89,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791058353330,
+      "last_event_ms": 1791059529478,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791058353330",
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791059529478",
       "runtime_status": "HEALTHY"
     },
     "hyperliquid": {
@@ -94,7 +108,7 @@
         "venue_status": "HEALTHY"
       },
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
       "reason": "HYPERLIQUID_META_OK:234",
       "runtime_status": "HEALTHY"
     },
@@ -110,10 +124,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791058353641,
+      "last_event_ms": 1791059529671,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T20:12:36.064852Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791058353641",
+      "observed_at_utc": "2026-10-03T20:32:32.305413Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791059529671",
       "runtime_status": "HEALTHY"
     }
   }
