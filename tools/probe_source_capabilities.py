@@ -218,6 +218,16 @@ def build_receipt(
         else frames_l2
     )
     frames_l2_partial = int(bbo_hb.get("binance_l2_partial_publications") or 0)
+    bin_clock = (
+        bbo_hb.get("binance_clock_sync")
+        if isinstance(bbo_hb.get("binance_clock_sync"), dict)
+        else {}
+    )
+    bin_ws_clock_ok = (
+        isinstance(bin_clock.get("clock_offset_ms"), (int, float))
+        and isinstance(bin_clock.get("clock_probe_rtt_ms"), (int, float))
+        and float(bin_clock.get("clock_probe_rtt_ms")) >= 0.0
+    )
     bin_ws_ok = frames_bbo > 0 and frames_trades > 0
     if bbo_expected:
         bin_ok = bin_ws_ok
@@ -244,7 +254,9 @@ def build_receipt(
         bin_caps["bbo"] = "HEALTHY" if frames_bbo > 0 else "DEGRADED"
         bin_caps["trades"] = "HEALTHY" if frames_trades > 0 else "DEGRADED"
         bin_caps["l2"] = "HEALTHY" if frames_l2_full > 0 else "DEGRADED"
-        bin_caps["clock_sync"] = "HEALTHY" if bin_rest_ok else "DEGRADED"
+        bin_caps["clock_sync"] = (
+            "HEALTHY" if (bin_rest_ok or bin_ws_clock_ok) else "DEGRADED"
+        )
     venues["binance"] = {
         "runtime_status": bin_runtime,
         "reason": bin_reason,
@@ -252,6 +264,7 @@ def build_receipt(
         "network_observed": bin_ok,
         "rest_probe_observed": bin_rest_ok,
         "rest_probe_reason": bin_rest_reason,
+        "clock_sync_evidence": dict(bin_clock),
         "ws_frames": {
             "bbo": frames_bbo,
             "trades": frames_trades,
