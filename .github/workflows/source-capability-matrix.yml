@@ -15,11 +15,13 @@ on:
       - "tools/generate_source_capabilities.py"
       - "tools/probe_source_capabilities.py"
       - "tools/collecter_bbo.py"
+      - "tools/collecter_native_venues.py"
       - "tools/validate_source_capabilities.py"
       - "tools/validate_source_rules.py"
       - "tests/test_source_capability_runtime.py"
       - "tests/test_feed_quality_gate.py"
       - "tests/test_bybit_market_data.py"
+      - "tests/test_native_venues_collector.py"
       - "tests/test_binance_depth_live.py"
       - ".github/workflows/source-capability-matrix.yml"
 env:
