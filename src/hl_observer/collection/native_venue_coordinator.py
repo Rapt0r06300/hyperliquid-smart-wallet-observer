@@ -89,6 +89,7 @@ class NativeVenueCoordinator:
         self._clock_sync: dict[str, dict[str, float | int | str]] = {}
         self._active_symbols: dict[str, tuple[str, ...]] = {}
         self._discovery_errors: dict[str, str] = {}
+        self._ws_fallback_symbols: dict[str, tuple[str, ...]] = {}
         self._discovery_refreshes = 0
         self._universe_changes = 0
         self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
@@ -130,6 +131,34 @@ class NativeVenueCoordinator:
                 if base and symbol:
                     discovered.setdefault(base, {})[venue] = symbol
             self._record_discovery_metadata(venue, client, rows)
+
+        # GitHub-hosted egress can be region-blocked by Bybit REST while the public
+        # WebSocket may still be reachable. In that case, attempt only inferred
+        # USDT symbol subscriptions derived from coins observed on other venues.
+        # These candidates never enter the strategy store until Bybit itself sends
+        # a real market-data event, so the fallback remains fail-closed.
+        if self._discovery_errors.get("bybit") and not any(
+            "bybit" in venues for venues in discovered.values()
+        ):
+            ranked_fallback_coins = sorted(
+                (
+                    coin
+                    for coin, venues in discovered.items()
+                    if venues and coin and coin.isalnum()
+                ),
+                key=lambda coin: (
+                    coin not in self._ccxt_priority,
+                    -len(discovered[coin]),
+                    coin,
+                ),
+            )
+            self._ws_fallback_symbols["bybit"] = tuple(
+                f"{coin}USDT"
+                for coin in ranked_fallback_coins[: self.max_symbols_per_venue]
+            )
+        else:
+            self._ws_fallback_symbols.pop("bybit", None)
+
         self.registry = dict(sorted(discovered.items()))
         note_coins(self.registry.keys(), now_s=time.time() if now_s is None else now_s)
         return {coin: dict(venues) for coin, venues in self.registry.items()}
@@ -255,6 +284,9 @@ class NativeVenueCoordinator:
             key=lambda item: (item[0] not in self._ccxt_priority, -len(item[1]), item[0]),
         )
         symbols = [venues[venue_key] for _coin, venues in ranked if venue_key in venues]
+        for fallback_symbol in self._ws_fallback_symbols.get(venue_key, ()):
+            if fallback_symbol not in symbols:
+                symbols.append(fallback_symbol)
         selected = symbols[: self.max_symbols_per_venue]
         return selected[self.symbol_shard_index :: self.symbol_shard_count]
 
@@ -500,6 +532,10 @@ class NativeVenueCoordinator:
             "symbol_shard_count": self.symbol_shard_count,
             "clock_sync": {venue: dict(row) for venue, row in self._clock_sync.items()},
             "discovery_errors": dict(self._discovery_errors),
+            "ws_fallback_symbols": {
+                venue: list(symbols)
+                for venue, symbols in sorted(self._ws_fallback_symbols.items())
+            },
             "transport_errors": {
                 venue: error
                 for venue, client in (
