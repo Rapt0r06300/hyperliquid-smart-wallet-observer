@@ -39,12 +39,16 @@ from hl_observer.collection.native_funding_history import (
 )
 from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
 from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
-from hl_observer.collection.depth_capacity import capacity_tape_envelope
+from hl_observer.collection.depth_capacity import (
+    capacity_tape_envelope,
+    cross_venue_capacity_envelope,
+)
 from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
 )
+from hl_observer.collection.native_venue_market import canonical_coin
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
@@ -91,6 +95,7 @@ class AsyncPartitionSink:
         self.accepted = 0
         self.persisted = 0
         self._stop = False
+        self._latest_capacity: dict[tuple[str, str], TickEnvelope] = {}
 
     @staticmethod
     def key(envelope: TickEnvelope) -> tuple[str, str, str]:
@@ -101,6 +106,25 @@ class AsyncPartitionSink:
         )
 
     def emit(self, envelope: TickEnvelope) -> None:
+        self._put(envelope)
+        if envelope.channel != "capacity_tape":
+            return
+        coin = str(envelope.parsed_summary.get("coin") or "").upper()
+        venue = str(envelope.parsed_summary.get("venue") or "").lower()
+        if not coin or not venue:
+            return
+        peers = [
+            row
+            for (peer_coin, peer_venue), row in self._latest_capacity.items()
+            if peer_coin == coin and peer_venue != venue
+        ]
+        self._latest_capacity[(coin, venue)] = envelope
+        for peer in peers:
+            paired = cross_venue_capacity_envelope(peer, envelope)
+            if paired is not None:
+                self._put(paired)
+
+    def _put(self, envelope: TickEnvelope) -> None:
         try:
             self.queue.put_nowait(envelope)
             self.accepted += 1
@@ -376,6 +400,7 @@ def _capacity_from_native_state(
     received_ts_ms: int,
     timing_evidence: Mapping[str, Any] | None = None,
     size_multiplier_to_base: float | None = 1.0,
+    source_raw_l2_payload: Any | None = None,
 ) -> TickEnvelope | None:
     snapshot = state.snapshot(now_ms=int(received_ts_ms))
     return capacity_tape_envelope(
@@ -393,6 +418,7 @@ def _capacity_from_native_state(
         quality=str(getattr(state, "quality", snapshot.quality)),
         timing_evidence=timing_evidence,
         size_multiplier_to_base=size_multiplier_to_base,
+        source_raw_l2_payload=source_raw_l2_payload,
     )
 
 
@@ -498,6 +524,9 @@ def _native_capacity_envelope(
         received_ts_ms=received,
         timing_evidence=transport,
         size_multiplier_to_base=capacity_size_multipliers.get(symbol),
+        source_raw_l2_payload={
+            key: value for key, value in message.items() if key != "_alina_transport"
+        },
     )
 
 
@@ -1085,6 +1114,7 @@ async def _hyperliquid(
                                         gap_count=envelope.gap_count,
                                         quality="EXPLOITABLE",
                                         timing_evidence=clock_evidence,
+                                        source_raw_l2_payload=message,
                                     )
                                     if capacity is not None:
                                         capacity.reconnect_count = reconnects
@@ -1320,16 +1350,31 @@ def _replay_grade_coverage_report(
     timing_defects: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     trade_reconciliation_defects: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
     clock_sync_venues: set[str] = set()
+    observed_cross_capacity_coins: set[str] = set()
     for manifest in manifests:
         venue = str(manifest.get("venue") or "").lower()
         symbol = str(manifest.get("symbol") or "").upper()
         family = str(manifest.get("family") or "")
+        if family == "cross_venue_capacity_tape" and int(manifest.get("event_count") or 0) > 0:
+            integrity = manifest.get("integrity")
+            if isinstance(integrity, Mapping) and all(
+                int(integrity.get(key) or 0) == 0
+                for key in (
+                    "missing_monotonic_count",
+                    "missing_timestamp_count",
+                    "gap_count",
+                    "regression_count",
+                )
+            ):
+                coin = canonical_coin(symbol)
+                if coin:
+                    observed_cross_capacity_coins.add(coin)
         if family == "clock_sync" and venue:
             clock_sync_venues.add(venue)
         if not venue or not symbol or int(manifest.get("event_count") or 0) <= 0:
             continue
         observed[(venue, symbol)].add(family)
-        if family in {"l2Book", "bbo", "trades", "agg_trades"}:
+        if family in {"l2Book", "bbo", "trades", "agg_trades", "capacity_tape"}:
             integrity = manifest.get("integrity")
             if isinstance(integrity, Mapping):
                 defects = []
@@ -1387,10 +1432,24 @@ def _replay_grade_coverage_report(
             "clock_sync_observed": clock_ok,
             "complete": complete,
         }
+    expected_coin_venues: dict[str, set[str]] = defaultdict(set)
+    for venue, symbols in venue_lists.items():
+        for symbol in symbols:
+            coin = canonical_coin(str(symbol))
+            if coin:
+                expected_coin_venues[coin].add(str(venue).lower())
+    expected_cross_capacity_coins = {
+        coin for coin, venues in expected_coin_venues.items() if len(venues) >= 2
+    }
+    missing_cross_capacity_coins = sorted(
+        expected_cross_capacity_coins - observed_cross_capacity_coins
+    )
     return {
         "schema": "alina.replay_grade_coverage.v1",
         "per_venue": per_venue,
-        "complete": all_complete and bool(per_venue),
+        "complete": all_complete and bool(per_venue) and not missing_cross_capacity_coins,
+        "cross_venue_capacity_coins_observed": sorted(observed_cross_capacity_coins),
+        "missing_cross_venue_capacity_coins": missing_cross_capacity_coins,
         "liquidation_families_observed": sorted(
             {
                 str(manifest.get("venue") or "").lower()

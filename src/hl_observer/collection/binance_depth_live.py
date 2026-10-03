@@ -204,7 +204,7 @@ class BinanceDepthLiveCollector:
             )
         )
         publication = state.publier(self.publication_depth)
-        self._emit_publication(key, publication)
+        self._emit_publication(key, publication, source_raw_l2_payload=payload)
         self.last_error = ""
         return publication
 
@@ -304,6 +304,7 @@ class BinanceDepthLiveCollector:
                                 self._emit_publication(
                                     symbol,
                                     state.publier(self.publication_depth),
+                                    source_raw_l2_payload=frame["raw"],
                                 )
                 except asyncio.CancelledError:
                     raise
@@ -360,7 +361,13 @@ class BinanceDepthLiveCollector:
         if self.tick_sink is not None:
             self.tick_sink(envelope)
 
-    def _emit_publication(self, symbol: str, publication: Mapping[str, Any]) -> None:
+    def _emit_publication(
+        self,
+        symbol: str,
+        publication: Mapping[str, Any],
+        *,
+        source_raw_l2_payload: Any | None = None,
+    ) -> None:
         self.publications += 1
         capacity = capacity_tape_envelope(
             venue="binance",
@@ -376,6 +383,7 @@ class BinanceDepthLiveCollector:
             gap_count=int(publication.get("gap_count") or 0),
             quality=str(publication.get("quality") or ""),
             timing_evidence=self._clock_evidence(),
+            source_raw_l2_payload=source_raw_l2_payload,
         )
         if capacity is not None:
             self._emit_tick(capacity)

@@ -361,6 +361,36 @@ def test_clean_trade_shard_is_replay_compatible(tmp_path) -> None:
     assert manifest["trade_identity_digests_exact"] is True
 
 
+def test_clean_capacity_tape_shard_is_replay_compatible(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(
+        TickEnvelope(
+            source_id="bybit_derived_capacity",
+            channel="capacity_tape",
+            instrument="BTCUSDT",
+            event_kind="SNAPSHOT",
+            raw_payload={"source_sequence": 10},
+            exchange_ts_ms=1000,
+            received_ts_ms=1005,
+            local_monotonic_ns=100,
+            connection_id="bybit-1",
+            sequence=10,
+            provenance={
+                "access": "read_only",
+                "authenticated": False,
+                "transport": "derived",
+                "real_execution": False,
+            },
+            parsed_summary={"raw_l2_source_of_truth": True},
+        )
+    )
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+    assert manifest["family"] == "capacity_tape"
+    assert manifest["replay_compatible"] is True
+    assert manifest["replay_reason"] == "SMOKE_OK"
+
+
 def test_duplicate_shard_is_not_replay_compatible(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path)
     event = TickEnvelope(

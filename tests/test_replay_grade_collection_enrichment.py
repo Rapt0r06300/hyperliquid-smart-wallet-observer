@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import gzip
 import json
 
 import httpx
 
 from hl_observer.collection.bitget_market_data import BitgetMarketState
-from hl_observer.collection.depth_capacity import build_capacity_tape, capacity_tape_envelope
+from hl_observer.collection.depth_capacity import (
+    build_capacity_tape,
+    build_cross_venue_capacity_tape,
+    capacity_tape_envelope,
+)
 from hl_observer.collection.gate_market_data import GateMarketState
 from hl_observer.collection.native_funding_history import (
     fetch_bitget_funding_settlements,
@@ -354,6 +359,88 @@ def test_capacity_tape_walks_reconstructed_depth_at_predeclared_notionals() -> N
     assert tape["buy_from_asks"][-1]["fully_fillable"] is False
     assert 0.0 < tape["buy_from_asks"][-1]["fill_ratio"] < 1.0
     assert tape["buy_from_asks"][3]["executable_vwap"] == 101.0
+    assert tape["buy_from_asks"][4]["side"] == "BUY"
+    assert tape["buy_from_asks"][4]["levels_consumed"] == 2
+    assert tape["buy_from_asks"][4]["worst_consumed_price"] == 102.0
+    assert tape["buy_from_asks"][4]["requested_notional_usd"] == 250.0
+    assert tape["buy_from_asks"][4]["cumulative_depth_base_qty"] > 2.0
+    assert tape["buy_from_asks"][4]["quality_status"] == "CERTIFIABLE"
+    assert tape["buy_from_asks"][-1]["quality_status"] == "UNMEASURABLE"
+    assert tape["buy_from_asks"][-1]["failure_reason"] == "INSUFFICIENT_DEPTH"
+
+
+def test_capacity_tape_exact_vwap_sides_and_slippage() -> None:
+    tape = build_capacity_tape(
+        bids=[[99, 1], [98, 1]],
+        asks=[[101, 1], [102, 1]],
+        notionals_usd=[150],
+    )
+    buy = tape["buy_from_asks"][0]
+    sell = tape["sell_into_bids"][0]
+    assert buy == {
+        "side": "BUY",
+        "target_notional_usd": 150.0,
+        "requested_notional_usd": 150.0,
+        "filled_notional_usd": 150.0,
+        "fill_ratio": 1.0,
+        "base_qty": 1.4803921569,
+        "cumulative_depth_base_qty": 1.4803921569,
+        "executable_vwap": 101.3245033113,
+        "worst_consumed_price": 102.0,
+        "spread_cost_bps": 132.4503311258,
+        "incremental_depth_slippage_bps": 32.1290407186,
+        "cumulative_consumed_notional_usd": 150.0,
+        "levels_consumed": 2,
+        "fully_fillable": True,
+        "quality_status": "CERTIFIABLE",
+        "failure_reason": None,
+    }
+    assert sell["side"] == "SELL"
+    assert sell["executable_vwap"] == 98.6577181208
+    assert sell["worst_consumed_price"] == 98.0
+    assert sell["spread_cost_bps"] == 134.2281879195
+    assert sell["incremental_depth_slippage_bps"] == 34.5739271914
+    assert sell["levels_consumed"] == 2
+
+
+def test_capacity_tape_preserves_provenance_and_does_not_mutate_raw_l2() -> None:
+    raw = {
+        "topic": "orderbook.200.BTCUSDT",
+        "type": "snapshot",
+        "data": {"s": "BTCUSDT", "b": [["100", "1"]], "a": [["101", "1"]], "u": 7},
+    }
+    before = copy.deepcopy(raw)
+    envelope = capacity_tape_envelope(
+        venue="bybit",
+        instrument="BTCUSDT",
+        bids=[[100, 1]],
+        asks=[[101, 1]],
+        exchange_ts_ms=1_990,
+        received_ts_ms=2_000,
+        receive_mono_ns=123,
+        connection_id="c1",
+        sequence=10,
+        snapshot_id=7,
+        quality="EXPLOITABLE",
+        timing_evidence={"transport_rtt_ms": 4.0, "uncertainty_ms": 2.0},
+        source_raw_l2_payload=raw,
+    )
+    assert envelope is not None
+    assert raw == before
+    summary = envelope.parsed_summary
+    assert summary["venue"] == "bybit"
+    assert summary["instrument"] == "BTCUSDT"
+    assert summary["coin"] == "BTC"
+    assert summary["receive_wall_ts_ms"] == 2_000
+    assert summary["receive_monotonic_ns"] == 123
+    assert summary["exchange_ts_ms"] == 1_990
+    assert summary["source_sequence"] == 10
+    assert summary["source_snapshot_id"] == 7
+    assert len(summary["source_raw_l2_sha256"]) == 64
+    assert len(summary["source_reconstructed_book_sha256"]) == 64
+    assert summary["transport_rtt_ms"] == 4.0
+    assert summary["timing_uncertainty_ms"] == 2.0
+    assert envelope.provenance["source_raw_l2_sha256"] == summary["source_raw_l2_sha256"]
 
 
 def test_capacity_tape_envelope_fails_closed_on_desync() -> None:
@@ -442,3 +529,113 @@ def test_capacity_tape_fails_closed_without_contract_multiplier() -> None:
         size_multiplier_to_base=None,
     )
     assert envelope is None
+
+
+def test_replay_grade_coverage_rejects_capacity_integrity_defects() -> None:
+    manifests = []
+    for family in ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"):
+        manifests.append(
+            {
+                "venue": "bitget",
+                "symbol": "BTCUSDT",
+                "family": family,
+                "event_count": 1,
+                "integrity": {
+                    "missing_monotonic_count": 0,
+                    "missing_timestamp_count": 0,
+                    "gap_count": 1 if family == "capacity_tape" else 0,
+                    "regression_count": 0,
+                },
+                "reconciliation": {"status": "MATCHED" if family == "trades" else "UNVERIFIED"},
+            }
+        )
+    manifests.append({"venue": "bitget", "symbol": "__VENUE__", "family": "clock_sync", "event_count": 1, "integrity": {}})
+    report = _replay_grade_coverage_report(manifests, {"bitget": ["BTCUSDT"]})
+    assert report["complete"] is False
+    assert report["per_venue"]["bitget"]["timing_defects_by_symbol"]["BTCUSDT"] == ["GAP"]
+
+
+def test_cross_venue_capacity_is_minimum_of_simultaneous_legs() -> None:
+    left = build_capacity_tape(
+        bids=[[99, 4]],
+        asks=[[100, 3]],
+        notionals_usd=[100, 250, 500],
+        exchange_ts_ms=1_990,
+        receive_ts_ms=2_000,
+        sequence=10,
+    )
+    right = build_capacity_tape(
+        bids=[[101, 2]],
+        asks=[[102, 5]],
+        notionals_usd=[100, 250, 500],
+        exchange_ts_ms=1_992,
+        receive_ts_ms=2_003,
+        sequence=20,
+    )
+    tape = build_cross_venue_capacity_tape(
+        venue_a="bybit",
+        instrument_a="BTCUSDT",
+        tape_a=left,
+        receive_mono_ns_a=100,
+        venue_b="okx",
+        instrument_b="BTC-USDT-SWAP",
+        tape_b=right,
+        receive_mono_ns_b=103,
+    )
+    assert tape is not None
+    assert tape["coin"] == "BTC"
+    assert tape["receive_skew_ns"] == 3
+    forward = tape["directions"]["BUY_A_SELL_B"]
+    assert forward["entry_capacity_leg_a_usd"] == 300.0
+    assert forward["entry_capacity_leg_b_usd"] == 202.0
+    assert forward["entry_simultaneous_capacity_usd"] == 202.0
+    assert forward["exit_capacity_leg_a_usd"] == 396.0
+    assert forward["exit_capacity_leg_b_usd"] == 510.0
+    assert forward["exit_simultaneous_capacity_usd"] == 396.0
+    assert forward["target_rows"][-1]["entry_quality_status"] == "UNMEASURABLE"
+    assert tape["paper_read_only"] is True
+    assert tape["real_execution"] is False
+
+
+def test_replay_grade_requires_published_cross_venue_capacity_for_shared_coin() -> None:
+    required = {
+        "bybit": ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"),
+        "okx": ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"),
+    }
+    manifests = []
+    for venue, families in required.items():
+        symbol = "BTCUSDT" if venue == "bybit" else "BTC-USDT-SWAP"
+        for family in families:
+            manifests.append(
+                {
+                    "venue": venue,
+                    "symbol": symbol,
+                    "family": family,
+                    "event_count": 1,
+                    "integrity": {"missing_monotonic_count": 0, "missing_timestamp_count": 0, "gap_count": 0, "regression_count": 0},
+                    "reconciliation": {"status": "MATCHED" if family == "trades" else "UNVERIFIED"},
+                }
+            )
+        manifests.append({"venue": venue, "symbol": "__VENUE__", "family": "clock_sync", "event_count": 1, "integrity": {}})
+    report = _replay_grade_coverage_report(
+        manifests,
+        {"bybit": ["BTCUSDT"], "okx": ["BTC-USDT-SWAP"]},
+    )
+    assert report["complete"] is False
+    assert report["missing_cross_venue_capacity_coins"] == ["BTC"]
+
+    manifests.append(
+        {
+            "venue": "unknown",
+            "symbol": "BTC",
+            "family": "cross_venue_capacity_tape",
+            "event_count": 1,
+            "integrity": {"missing_monotonic_count": 0, "missing_timestamp_count": 0, "gap_count": 0, "regression_count": 0},
+        }
+    )
+    report = _replay_grade_coverage_report(
+        manifests,
+        {"bybit": ["BTCUSDT"], "okx": ["BTC-USDT-SWAP"]},
+    )
+    assert report["complete"] is True
+    assert report["missing_cross_venue_capacity_coins"] == []

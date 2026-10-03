@@ -71,6 +71,53 @@ def test_hyperliquid_frame_carries_clock_probe_evidence() -> None:
     assert tick.parsed_summary["clock_probe_rtt_ms"] == 20.0
 
 
+def test_sink_publishes_same_runner_cross_venue_capacity() -> None:
+    m = _module()
+
+    class Writer:
+        pass
+
+    sink = m.AsyncPartitionSink(Writer())
+    left = m.capacity_tape_envelope(
+        venue="bybit",
+        instrument="BTCUSDT",
+        bids=[[99, 4]],
+        asks=[[100, 3]],
+        exchange_ts_ms=1_990,
+        received_ts_ms=2_000,
+        receive_mono_ns=100,
+        connection_id="bybit-1",
+        sequence=10,
+        quality="EXPLOITABLE",
+        source_raw_l2_payload={"seq": 10},
+    )
+    right = m.capacity_tape_envelope(
+        venue="okx",
+        instrument="BTC-USDT-SWAP",
+        bids=[[101, 2]],
+        asks=[[102, 5]],
+        exchange_ts_ms=1_992,
+        received_ts_ms=2_003,
+        receive_mono_ns=103,
+        connection_id="okx-1",
+        sequence=20,
+        quality="EXPLOITABLE",
+        source_raw_l2_payload={"seqId": 20},
+    )
+    assert left is not None and right is not None
+    sink.emit(left)
+    sink.emit(right)
+    rows = []
+    while not sink.queue.empty():
+        rows.append(sink.queue.get_nowait())
+    cross = [row for row in rows if row.channel == "cross_venue_capacity_tape"]
+    assert len(cross) == 1
+    assert cross[0].instrument == "BTC"
+    assert cross[0].parsed_summary["directions"]["BUY_A_SELL_B"]["entry_simultaneous_capacity_usd"] == 202.0
+    assert cross[0].provenance["derived"] is True
+    assert cross[0].provenance["raw_l2_source_of_truth"] is True
+
+
 def test_binance_bbo_keeps_update_id_and_transport_clock() -> None:
     m = _module()
     tick = m._binance_bbo_envelope(
@@ -355,6 +402,7 @@ def test_cloud_native_frame_carries_clock_probe_evidence() -> None:
     capacity = next(row for row in sink.rows if row.channel == "capacity_tape")
     assert capacity.parsed_summary["clock_offset_ms"] == -3.5
     assert capacity.parsed_summary["clock_probe_rtt_ms"] == 12.0
+    assert capacity.parsed_summary["source_raw_l2_sha256"] == record["raw_sha256"]
 
 
 def test_cloud_window_backfills_funding_per_venue_fail_closed(monkeypatch) -> None:
