@@ -185,21 +185,26 @@ class BitgetPublicClient:
         self.uta_ws_url = uta_ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.capture_tier = CaptureTier.B
+        self.capture_tiers_by_symbol: dict[str, CaptureTier] = {}
         self.last_instrument_metadata: list[dict[str, Any]] = []
 
     def set_capture_profile(self, tier: CaptureTier | str) -> None:
         self.capture_tier = capture_profile("bitget", tier).tier
 
+    def set_capture_profiles(self, tiers: Mapping[str, CaptureTier | str]) -> None:
+        self.capture_tiers_by_symbol = {
+            str(symbol).upper(): capture_profile("bitget", tier).tier
+            for symbol, tier in tiers.items()
+        }
+
     def subscription_args(self, symbols: Iterable[str]) -> list[dict[str, str]]:
-        channels = tuple(
-            channel
-            for channel in capture_profile("bitget", self.capture_tier).channels
-            if channel != "liquidation"
-        )
         return [
             {"instType": "USDT-FUTURES", "channel": channel, "instId": symbol}
             for symbol in sorted({str(s).upper() for s in symbols if str(s).strip()})
-            for channel in channels
+            for channel in capture_profile(
+                "bitget", self.capture_tiers_by_symbol.get(symbol, self.capture_tier)
+            ).channels
+            if channel != "liquidation"
         ]
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0):

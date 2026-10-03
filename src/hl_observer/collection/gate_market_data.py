@@ -198,15 +198,24 @@ class GatePublicClient:
         self.ws_url = ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.capture_tier = CaptureTier.B
+        self.capture_tiers_by_symbol: dict[str, CaptureTier] = {}
         self.last_instrument_metadata: list[dict[str, Any]] = []
 
     def set_capture_profile(self, tier: CaptureTier | str) -> None:
         self.capture_tier = capture_profile("gate", tier).tier
 
+    def set_capture_profiles(self, tiers: Mapping[str, CaptureTier | str]) -> None:
+        self.capture_tiers_by_symbol = {
+            str(symbol).upper(): capture_profile("gate", tier).tier
+            for symbol, tier in tiers.items()
+        }
+
     def subscription_args(self, contracts: Iterable[str]) -> list[dict[str, Any]]:
-        profile = capture_profile("gate", self.capture_tier)
         rows: list[dict[str, Any]] = []
         for contract in sorted({str(c).upper() for c in contracts if str(c).strip()}):
+            profile = capture_profile(
+                "gate", self.capture_tiers_by_symbol.get(contract, self.capture_tier)
+            )
             for channel in profile.channels:
                 payload = [contract]
                 if channel == "futures.order_book_update":

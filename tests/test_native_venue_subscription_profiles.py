@@ -42,6 +42,15 @@ def test_coordinator_exposes_explicit_profile_without_changing_default() -> None
     assert coordinator.capture_profile_for("bybit", "ETHUSDT").tier is CaptureTier.B
 
 
+def test_mixed_symbol_tiers_do_not_force_deep_book_on_every_symbol() -> None:
+    client = BybitPublicClient()
+    client.set_capture_profiles({"BTCUSDT": CaptureTier.A, "ETHUSDT": CaptureTier.C})
+    topics = set(client.subscription_args(["BTCUSDT", "ETHUSDT"]))
+    assert "orderbook.1000.BTCUSDT" in topics
+    assert "orderbook.1.ETHUSDT" in topics
+    assert "orderbook.1000.ETHUSDT" not in topics
+
+
 class _ClockClient:
     def __init__(self, venue: str) -> None:
         self.venue = venue

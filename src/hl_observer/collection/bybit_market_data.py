@@ -13,7 +13,7 @@ import json
 import math
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
 
 import httpx
@@ -371,6 +371,7 @@ class BybitPublicClient:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
         self.orderbook_depth = depth
         self.capture_tier = CaptureTier.B
+        self.capture_tiers_by_symbol: dict[str, CaptureTier] = {}
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.last_instrument_metadata: list[dict[str, object]] = []
 
@@ -379,10 +380,18 @@ class BybitPublicClient:
         self.capture_tier = profile.tier
         self.orderbook_depth = profile.depth
 
+    def set_capture_profiles(self, tiers: Mapping[str, CaptureTier | str]) -> None:
+        self.capture_tiers_by_symbol = {
+            str(symbol).upper(): capture_profile("bybit", tier).tier
+            for symbol, tier in tiers.items()
+        }
+
     def subscription_args(self, symbols: Iterable[str]) -> list[str]:
-        profile = capture_profile("bybit", self.capture_tier)
         topics: list[str] = []
         for symbol in sorted({str(s).upper() for s in symbols if str(s).strip()}):
+            profile = capture_profile(
+                "bybit", self.capture_tiers_by_symbol.get(symbol, self.capture_tier)
+            )
             if "orderbook" in profile.channels or "bbo" in profile.channels:
                 topics.append(f"orderbook.{profile.depth}.{symbol}")
             if "bbo" in profile.channels and profile.depth != 1:
@@ -506,7 +515,6 @@ class BybitPublicClient:
         errors: list[str] = []
         for ws_url in self._clock_ws_candidates():
             request_id = f"alina-clock-{uuid.uuid4().hex[:16]}"
-            sent = int(time.time() * 1_000)
             try:
                 async with websockets.connect(
                     ws_url,
@@ -514,6 +522,7 @@ class BybitPublicClient:
                     close_timeout=5,
                     open_timeout=max(1.0, float(timeout_s)),
                 ) as socket:
+                    sent = int(time.time() * 1_000)
                     await socket.send(json.dumps({"req_id": request_id, "op": "ping"}))
                     raw = await asyncio.wait_for(
                         socket.recv(),

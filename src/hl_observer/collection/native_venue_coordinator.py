@@ -313,7 +313,15 @@ class NativeVenueCoordinator:
         return capture_profile(venue_key, tier)
 
     def _configure_capture_profile(self, venue: str, symbols: list[str]) -> None:
-        setter = getattr(getattr(self, f"{venue}_client"), "set_capture_profile", None)
+        client = getattr(self, f"{venue}_client")
+        profile_setter = getattr(client, "set_capture_profiles", None)
+        if callable(profile_setter):
+            profile_setter({
+                symbol: self.capture_profile_for(venue, symbol).tier
+                for symbol in symbols
+            })
+            return
+        setter = getattr(client, "set_capture_profile", None)
         if not callable(setter) or not symbols:
             return
         tiers = {self.capture_profile_for(venue, symbol).tier for symbol in symbols}
