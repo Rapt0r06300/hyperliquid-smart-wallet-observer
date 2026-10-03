@@ -1,14 +1,10 @@
-name: migrate-legacy-releases-to-main
+name: purge-legacy-dataset-imports
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/migrate-legacy-releases-to-main.yml'
-      - 'tools/migrate_legacy_releases_to_main.py'
-  schedule:
-    - cron: '23 */6 * * *'
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,14 +12,16 @@ permissions:
 
 concurrency:
   group: alina-historical-release-migration
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  migrate:
+  purge:
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      SOURCE_REPOSITORY: Rapt0r06300/alina-smartflow-datasets-v2
+      TARGET_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -31,88 +29,112 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        with:
-          python-version: '3.12'
-
-      - name: Check whether historical migration is already closed
-        id: gate
+      - name: Derive the exact imported tag set
         shell: bash
         run: |
           set -euo pipefail
-          COMPLETE="$(python -c 'import json; print(str(bool(json.load(open("control/unified-repository.json")).get("legacy_collection_state_imported"))).lower())')"
-          echo "complete=$COMPLETE" >> "$GITHUB_OUTPUT"
-          if [ "$COMPLETE" = "true" ]; then
-            echo "Historical migration already complete; no external storage will be queried."
-          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path("control/legacy-release-migration.json").read_text())
+          assert s.get("target_repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
+          assert s.get("migrated_releases")==16
+          assert s.get("next_index")==16
+          assert s.get("last_completed_tag")=="data-v2-35696462284-s0"
+          assert s.get("status")=="IN_PROGRESS"
+          PY
+          gh release list --repo "$SOURCE_REPOSITORY" --limit 100000 \
+            --json tagName,isDraft,isPrerelease,publishedAt > /tmp/source-releases.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          prefixes=("data-v2-","copy-vault-v2-","archive-v2-","event-intelligence-v2-")
+          s=json.loads(Path("control/legacy-release-migration.json").read_text())
+          rows=json.loads(Path("/tmp/source-releases.json").read_text())
+          rows=[r for r in rows if not r.get("isDraft") and str(r.get("tagName") or "").startswith(prefixes)]
+          rows=sorted(rows,key=lambda r:(str(r.get("publishedAt") or ""),str(r.get("tagName") or "")))
+          tags=[str(r["tagName"]) for r in rows[:int(s["next_index"])]]
+          assert len(tags)==16
+          assert tags[-1]==s["last_completed_tag"]
+          Path("/tmp/imported-tags.txt").write_text("\n".join(tags)+"\n")
+          print("\n".join(tags))
+          PY
 
-      - name: Migrate a bounded historical release batch into canonical Alina storage
-        if: steps.gate.outputs.complete != 'true'
-        id: migrate
+      - name: Verify migration signatures and purge only imported releases
         shell: bash
         run: |
           set -euo pipefail
-          python tools/migrate_legacy_releases_to_main.py             --source-repository 'Rapt0r06300/alina-smartflow-datasets-v2'             --target-repository "$GITHUB_REPOSITORY"             --state control/legacy-release-migration.json             --unified control/unified-repository.json             --max-releases 64             --time-budget-seconds 16200
-          STATUS="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json"))["status"])')"
-          PENDING="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json")).get("pending_releases",0))')"
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
+          mkdir -p /tmp/alina-purge
+          deleted=0
+          absent=0
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            if ! gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
+              absent=$((absent+1))
+              continue
+            fi
+            rm -rf "/tmp/alina-purge/$tag"
+            mkdir -p "/tmp/alina-purge/$tag"
+            gh release download "$tag" --repo "$TARGET_REPOSITORY" \
+              --pattern RUN_MANIFEST.json --dir "/tmp/alina-purge/$tag"
+            TAG="$tag" python - <<'PY'
+          import json, os
+          from pathlib import Path
+          tag=os.environ["TAG"]
+          m=json.loads((Path("/tmp/alina-purge")/tag/"RUN_MANIFEST.json").read_text())
+          r=m.get("migration_receipt") or {}
+          assert m.get("repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
+          assert r.get("schema")=="alina.target_native_release_migration.v1"
+          assert r.get("target_repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
+          assert r.get("all_data_assets_verified") is True
+          assert len(str(r.get("source_manifest_sha256") or ""))==64
+          PY
+            gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes
+            deleted=$((deleted+1))
+          done < /tmp/imported-tags.txt
+          test $((deleted+absent)) -eq 16
+          echo "deleted=$deleted absent=$absent"
 
-      - name: Persist verified migration checkpoint
-        if: steps.gate.outputs.complete != 'true'
+      - name: Prove the sixteen imported releases are absent
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            ! gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1
+          done < /tmp/imported-tags.txt
+
+      - name: Persist fresh-only policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          sp=Path("control/legacy-release-migration.json")
+          up=Path("control/unified-repository.json")
+          s=json.loads(sp.read_text())
+          s.update(status="ABORTED_CLEANED",cleanup_status="COMPLETE",
+                   historical_migration_enabled=False,imported_releases_remaining=0,
+                   removed_imported_releases=16,removed_imported_assets=int(s.get("copied_assets") or 0),
+                   removed_imported_bytes=int(s.get("copied_bytes") or 0),pending_releases=0)
+          sp.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
+          u=json.loads(up.read_text())
+          u.update(fresh_dataset_state=True,legacy_collection_state_imported=False,
+                   historical_release_migration_status="DISABLED_CLEAN",
+                   historical_source_deletion_safe=False,historical_external_import_allowed=False,
+                   dataset_v2_import_allowed=False,legacy_imported_releases_present=False,
+                   external_dataset_repository_required=False,legacy_release_mirror_required=False)
+          up.write_text(json.dumps(u,indent=2,sort_keys=True)+"\n")
+          PY
           git add control/legacy-release-migration.json control/unified-repository.json
-          if git diff --cached --quiet; then
-            echo "Migration checkpoint already current."
-            exit 0
-          fi
-          git commit -m "data: checkpoint historical release migration"
-          for attempt in 1 2 3 4 5 6 7 8; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((attempt * 3))
-          done
-          echo "Unable to publish migration checkpoint."
-          exit 1
-
-      - name: Continue migration on GitHub-hosted runner
-        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status != 'COMPLETE'
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run migrate-legacy-releases-to-main.yml             --repo "$GITHUB_REPOSITORY"             --ref main
-
-      - name: Rebuild canonical catalog after full migration
-        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status == 'COMPLETE'
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run reconcile-v2-catalog.yml --repo "$GITHUB_REPOSITORY" --ref main
-          gh workflow run backfill-exact-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
-          gh workflow run backfill-global-unique-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
-          gh workflow run uncompressed-size-v2.yml --repo "$GITHUB_REPOSITORY" --ref main
-
-      - name: Retire one-time migration plumbing after certified completion
-        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status == 'COMPLETE'
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          # Remove the only automatic external-reading trigger. Keep the
-          # generic migration utility + tests as inert, auditable evidence.
-          git rm -f .github/workflows/migrate-legacy-releases-to-main.yml
-          git commit -m "architecture: retire completed historical migration plumbing"
+          git commit -m "data: purge dataset-v2 imports and enforce fresh-only collection"
           for attempt in 1 2 3 4 5 6 7 8; do
             if git pull --rebase origin main && git push origin HEAD:main; then
               exit 0
             fi
             sleep $((attempt * 3))
           done
-          echo "Unable to retire completed migration plumbing." >&2
-          exit 1
+          exit 51
