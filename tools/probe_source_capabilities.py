@@ -212,15 +212,26 @@ def build_receipt(
     frames_bbo = int(bbo_hb.get("frames_bookticker") or 0)
     frames_trades = int(bbo_hb.get("frames_trades") or 0)
     frames_l2 = int(bbo_hb.get("binance_l2_publications") or 0)
+    frames_l2_full = int(
+        bbo_hb.get("binance_l2_full_publications")
+        if bbo_hb.get("binance_l2_full_publications") is not None
+        else frames_l2
+    )
+    frames_l2_partial = int(bbo_hb.get("binance_l2_partial_publications") or 0)
     bin_ws_ok = frames_bbo > 0 and frames_trades > 0
     if bbo_expected:
         bin_ok = bin_ws_ok
         bin_reason = (
-            f"BINANCE_WS_OBSERVED:bbo={frames_bbo}:trades={frames_trades}:l2={frames_l2}"
+            (
+                "BINANCE_WS_OBSERVED:"
+                f"bbo={frames_bbo}:trades={frames_trades}:"
+                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial}"
+            )
             if bin_ws_ok
             else (
                 "BINANCE_WS_NOT_OBSERVED:"
-                f"bbo={frames_bbo}:trades={frames_trades}:l2={frames_l2};"
+                f"bbo={frames_bbo}:trades={frames_trades}:"
+                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial};"
                 f"rest={bin_rest_reason}"
             )
         )
@@ -232,7 +243,7 @@ def build_receipt(
     if bbo_expected:
         bin_caps["bbo"] = "HEALTHY" if frames_bbo > 0 else "DEGRADED"
         bin_caps["trades"] = "HEALTHY" if frames_trades > 0 else "DEGRADED"
-        bin_caps["l2"] = "HEALTHY" if frames_l2 > 0 else "DEGRADED"
+        bin_caps["l2"] = "HEALTHY" if frames_l2_full > 0 else "DEGRADED"
         bin_caps["clock_sync"] = "HEALTHY" if bin_rest_ok else "DEGRADED"
     venues["binance"] = {
         "runtime_status": bin_runtime,
@@ -245,6 +256,8 @@ def build_receipt(
             "bbo": frames_bbo,
             "trades": frames_trades,
             "l2_publications": frames_l2,
+            "l2_full_publications": frames_l2_full,
+            "l2_partial_publications": frames_l2_partial,
         },
         "capability_runtime": bin_caps,
     }
