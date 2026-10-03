@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 
@@ -370,6 +371,51 @@ def test_rest_resync_failure_is_rate_limited_by_cooldown() -> None:
         assert rest_calls == 1
         assert ws_calls == 2
         await client.aclose()
+
+    asyncio.run(scenario())
+
+def test_ws_api_error_status_is_not_masked_by_null_response_id(monkeypatch) -> None:
+    class FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def send(self, raw: str) -> None:
+            request = json.loads(raw)
+            assert request["method"] == "depth"
+            assert request["params"]["symbol"] == "BTCUSDT"
+
+        async def recv(self) -> str:
+            return json.dumps(
+                {
+                    "id": None,
+                    "status": 451,
+                    "error": {
+                        "code": 0,
+                        "msg": "restricted location",
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "hl_observer.collection.binance_depth_live.websockets.connect",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    collector = BinanceDepthLiveCollector(["BTCUSDT"])
+
+    async def scenario() -> None:
+        try:
+            await collector._fetch_ws_api_snapshot("BTCUSDT")
+        except RuntimeError as exc:
+            message = str(exc)
+        else:
+            raise AssertionError("expected Binance WS API error")
+        assert "BINANCE_WS_API_DEPTH_STATUS_451" in message
+        assert "restricted location" in message
+        assert "ID_MISMATCH" not in message
+        await collector.close()
 
     asyncio.run(scenario())
 

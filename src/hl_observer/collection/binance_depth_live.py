@@ -179,11 +179,34 @@ class BinanceDepthLiveCollector:
         response = json.loads(raw)
         if not isinstance(response, Mapping):
             raise RuntimeError("BINANCE_WS_API_DEPTH_INVALID_RESPONSE")
-        if str(response.get("id") or "") != request_id:
-            raise RuntimeError("BINANCE_WS_API_DEPTH_ID_MISMATCH")
-        if int(response.get("status") or 0) != 200:
+        try:
+            response_status = int(response.get("status") or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise RuntimeError("BINANCE_WS_API_DEPTH_STATUS_INVALID") from None
+        if response_status != 200:
+            error_payload = response.get("error")
+            error_detail = (
+                json.dumps(
+                    error_payload,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                if error_payload is not None
+                else ""
+            )
             raise RuntimeError(
-                f"BINANCE_WS_API_DEPTH_STATUS_{int(response.get('status') or 0)}"
+                (
+                    f"BINANCE_WS_API_DEPTH_STATUS_{response_status}:"
+                    f"id={response.get('id')!r}:error={error_detail}"
+                )[:1000]
+            )
+        if str(response.get("id") or "") != request_id:
+            raise RuntimeError(
+                (
+                    "BINANCE_WS_API_DEPTH_ID_MISMATCH:"
+                    f"expected={request_id!r}:actual={response.get('id')!r}"
+                )[:500]
             )
         result = response.get("result")
         if not isinstance(result, Mapping):
