@@ -783,6 +783,7 @@ async def _boucle(
     binance_market_context_collector = BinanceMarketContextCollector(
         sym.values(),
         tick_sink=queue_raw,
+        clock_sync_provider=binance_depth_collector.clock_evidence,
     )
 
     async def binance_market_context() -> None:
@@ -1238,6 +1239,7 @@ async def _boucle(
                                         "channel_semantics": "full_top_of_book",
                                     },
                                     parsed_summary={
+                                        **binance_depth_collector.clock_evidence(),
                                         "best_bid": q["bid"],
                                         "best_ask": q["ask"],
                                         "bid_size": q["bid_sz"],
@@ -1318,6 +1320,7 @@ async def _boucle(
                                         "channel_semantics": "event_stream",
                                     },
                                     parsed_summary={
+                                        **binance_depth_collector.clock_evidence(),
                                         "price": t["px"],
                                         "size": t["sz"],
                                         "aggressor_side": t["side"],
@@ -1554,6 +1557,7 @@ async def _boucle(
                   "raw_queue_depth": len(raw_queue),
                   "feed_quality_ready": quality_payload["ready_feeds"],
                   "feed_quality_total": quality_payload["total_feeds"],
+                  "binance_clock_sync": binance_depth_collector.clock_evidence(),
                   "tick_dataset": dataset.stats()}
             CF.ecrire_atomique(root / HEARTBEAT, json.dumps(hb, ensure_ascii=False))
             if now_ns - heartbeat_canonique["dernier_ts_ns"] >= 2_000_000_000:
