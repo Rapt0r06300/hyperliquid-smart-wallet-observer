@@ -110,6 +110,8 @@ class BinanceDepthLiveCollector:
         self._resync_pending: set[str] = set()
         self._rest_unavailable_symbols: set[str] = set()
         self._full_snapshot_unavailable_symbols: set[str] = set()
+        self.rest_retry_cooldown_s = max(1.0, float(rest_retry_cooldown_s))
+        self._next_rest_retry_monotonic: dict[str, float] = {}
         self.frames_received = 0
         self.snapshots_received = 0
         self.ws_api_snapshots_received = 0
@@ -206,19 +208,30 @@ class BinanceDepthLiveCollector:
         snapshot_transport = "https"
         send_wall_ms = int(time.time() * 1_000)
         rest_error = ""
-        try:
-            response = await self.http.get(
-                "/fapi/v1/depth",
-                params={"symbol": key, "limit": self.snapshot_limit},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            receive_mono_ns = time.monotonic_ns()
-            receive_wall_ms = int(time.time() * 1_000)
-            self._rest_unavailable_symbols.discard(key)
-        except Exception as exc:
-            rest_error = f"{type(exc).__name__}: {exc}"[:500]
-            self._rest_unavailable_symbols.add(key)
+        rest_retry_at = self._next_rest_retry_monotonic.get(key, 0.0)
+        rest_allowed = time.monotonic() >= rest_retry_at
+        if rest_allowed:
+            try:
+                response = await self.http.get(
+                    "/fapi/v1/depth",
+                    params={"symbol": key, "limit": self.snapshot_limit},
+                )
+                response.raise_for_status()
+                payload = response.json()
+                receive_mono_ns = time.monotonic_ns()
+                receive_wall_ms = int(time.time() * 1_000)
+                self._rest_unavailable_symbols.discard(key)
+                self._next_rest_retry_monotonic.pop(key, None)
+            except Exception as exc:
+                rest_error = f"{type(exc).__name__}: {exc}"[:500]
+                self._rest_unavailable_symbols.add(key)
+                self._next_rest_retry_monotonic[key] = (
+                    time.monotonic() + self.rest_retry_cooldown_s
+                )
+        else:
+            rest_error = "REST_RETRY_COOLDOWN"
+
+        if rest_error:
             try:
                 (
                     payload,
@@ -465,6 +478,12 @@ class BinanceDepthLiveCollector:
             "partial_fallback_publications": self.partial_fallback_publications,
             "partial_fallback_levels": self.partial_fallback_levels,
             "rest_unavailable_symbols": sorted(self._rest_unavailable_symbols),
+            "rest_retry_cooldown_s": self.rest_retry_cooldown_s,
+            "rest_retry_deferred_symbols": sorted(
+                symbol
+                for symbol, retry_at in self._next_rest_retry_monotonic.items()
+                if retry_at > time.monotonic()
+            ),
             "full_snapshot_unavailable_symbols": sorted(
                 self._full_snapshot_unavailable_symbols
             ),
@@ -559,9 +578,6 @@ class BinanceDepthLiveCollector:
 
     def _schedule_resync(self, symbol: str, connection_id: str) -> None:
         if symbol in self._resync_pending:
-            return
-        retry_at = self._next_resync_monotonic.get(symbol, 0.0)
-        if time.monotonic() < retry_at:
             return
         self._resync_pending.add(symbol)
 

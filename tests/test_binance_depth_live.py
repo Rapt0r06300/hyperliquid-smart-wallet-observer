@@ -334,11 +334,12 @@ def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() 
 
 def test_rest_resync_failure_is_rate_limited_by_cooldown() -> None:
     async def scenario() -> None:
-        calls = 0
+        rest_calls = 0
+        ws_calls = 0
 
         async def handler(_request: httpx.Request) -> httpx.Response:
-            nonlocal calls
-            calls += 1
+            nonlocal rest_calls
+            rest_calls += 1
             return httpx.Response(451, json={"msg": "restricted location"})
 
         client = httpx.AsyncClient(
@@ -351,14 +352,23 @@ def test_rest_resync_failure_is_rate_limited_by_cooldown() -> None:
             rest_retry_cooldown_s=60.0,
         )
 
+        async def failing_ws_api_snapshot(_symbol: str):
+            nonlocal ws_calls
+            ws_calls += 1
+            raise OSError("temporary WS API failure")
+
+        collector._fetch_ws_api_snapshot = failing_ws_api_snapshot
+
         assert await collector.resync_symbol("BTCUSDT", connection_id="cooldown") is None
-        assert calls == 1
+        assert rest_calls == 1
+        assert ws_calls == 1
         assert "BTCUSDT" in collector.health()["rest_retry_deferred_symbols"]
 
-        collector._schedule_resync("BTCUSDT", "cooldown")
-        await asyncio.sleep(0)
-        assert calls == 1
-        assert "BTCUSDT" not in collector._resync_pending
+        # A second resync remains allowed immediately, but skips the blocked REST
+        # endpoint and retries the public WebSocket API instead.
+        assert await collector.resync_symbol("BTCUSDT", connection_id="cooldown") is None
+        assert rest_calls == 1
+        assert ws_calls == 2
         await client.aclose()
 
     asyncio.run(scenario())
