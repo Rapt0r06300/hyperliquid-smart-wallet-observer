@@ -181,6 +181,83 @@ def test_rest_snapshot_uses_separate_partition_and_zero_event_gap() -> None:
 
     asyncio.run(scenario())
 
+
+def test_ws_api_snapshot_recovers_full_book_when_rest_is_restricted() -> None:
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                451,
+                json={"msg": "Service unavailable from a restricted location"},
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        ticks = []
+        publications = []
+        collector = BinanceDepthLiveCollector(
+            ["BTCUSDT"],
+            http_client=client,
+            tick_sink=ticks.append,
+            publication_sink=lambda symbol, row: publications.append((symbol, dict(row))),
+        )
+        state = collector.state("BTCUSDT")
+        assert (
+            state.sur_diff(
+                U=101,
+                u=103,
+                pu=100,
+                bids=[["100", "3"]],
+                asks=[["101", "0"], ["101.5", "4"]],
+                exchange_ts_ms=1_020,
+                receive_ts_ms=1_025,
+                receive_mono_ns=10_000,
+                connection_id="bin-ws-api",
+            )
+            == "BUFFERISE"
+        )
+
+        async def fake_ws_api_snapshot(_symbol: str):
+            return (
+                {
+                    "lastUpdateId": 100,
+                    "E": 1_000,
+                    "T": 999,
+                    "bids": [["100", "1"], ["99", "2"]],
+                    "asks": [["101", "1"], ["102", "2"]],
+                },
+                990,
+                1_010,
+                9_000,
+            )
+
+        collector._fetch_ws_api_snapshot = fake_ws_api_snapshot
+        publication = await collector.resync_symbol(
+            "BTCUSDT",
+            connection_id="bin-ws-api",
+        )
+
+        assert publication is not None
+        assert publication["quality"] == "EXPLOITABLE"
+        assert publication["sequence"] == 103
+        assert publication["best_bid"] == 100.0
+        assert publication["best_ask"] == 101.5
+        health = collector.health()
+        assert health["ws_api_snapshots_received"] == 1
+        assert health["ws_api_failures"] == 0
+        assert health["full_snapshot_unavailable_symbols"] == []
+        assert health["rest_unavailable_symbols"] == ["BTCUSDT"]
+        raw = [tick for tick in ticks if tick.channel == "l2Book_snapshot"]
+        assert len(raw) == 1
+        assert raw[0].provenance["snapshot_source"] == "websocket_api"
+        assert raw[0].provenance["transport"] == "websocket"
+        assert publications[-1][0] == "BTCUSDT"
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() -> None:
     async def scenario() -> None:
         async def handler(_request: httpx.Request) -> httpx.Response:
@@ -203,8 +280,15 @@ def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() 
             partial_fallback_levels=20,
         )
 
+        async def failing_ws_api_snapshot(_symbol: str):
+            raise OSError("WS API unavailable")
+
+        collector._fetch_ws_api_snapshot = failing_ws_api_snapshot
         assert await collector.resync_symbol("BTCUSDT", connection_id="bin-partial") is None
-        assert "BTCUSDT" in collector.health()["rest_unavailable_symbols"]
+        health = collector.health()
+        assert "BTCUSDT" in health["rest_unavailable_symbols"]
+        assert "BTCUSDT" in health["full_snapshot_unavailable_symbols"]
+        assert health["ws_api_failures"] == 1
         assert "btcusdt@depth20@100ms" in collector.websocket_url()
 
         frame = parse_depth_frame(
