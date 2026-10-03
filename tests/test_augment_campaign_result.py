@@ -66,3 +66,17 @@ def test_durability_failure_never_keeps_complete(tmp_path):
     assert row["status"]=="FAILED"
     assert row["progressed"] is False
     assert row["payload"]["failure_category"]=="INFRASTRUCTURE"
+
+def test_durability_failure_preserves_bounded_publication_detail(tmp_path):
+    result=tmp_path/"result.json"
+    detail=tmp_path/"publish-error.txt"
+    _result(result)
+    detail.write_text(
+        "gh release create failed: HTTP 403 secondary rate limit exceeded\n",
+        encoding="utf-8",
+    )
+    row=mark_durability_failure(result,detail_path=detail)
+    assert row["payload"]["reason"]=="durable_publication_failed"
+    assert "HTTP 403" in row["payload"]["publication_error_detail"]
+    assert len(row["payload"]["publication_error_detail"]) <= 2000
+
