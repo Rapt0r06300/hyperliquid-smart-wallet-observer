@@ -253,9 +253,18 @@ def test_bybit_clock_falls_back_to_unauthenticated_ws_pong(monkeypatch) -> None:
                 }
             )
 
+    seen_urls = []
+
+    def fake_connect(url, *_args, **_kwargs):
+        seen_urls.append(str(url))
+        if str(url).startswith("wss://stream.bybit.com"):
+            raise OSError("primary WS blocked")
+        assert str(url).startswith("wss://stream.bytick.com")
+        return FakeSocket()
+
     monkeypatch.setattr(
         "hl_observer.collection.bybit_market_data.websockets.connect",
-        lambda *_args, **_kwargs: FakeSocket(),
+        fake_connect,
     )
     client = BybitPublicClient()
     monkeypatch.setattr(
@@ -277,6 +286,76 @@ def test_bybit_clock_falls_back_to_unauthenticated_ws_pong(monkeypatch) -> None:
     assert sample.server_ts_ms == 1675418560633
     assert sample.rtt_ms == 20.0
     assert sample.offset_ms == 3.0
-    assert client.last_clock_source == "websocket_private_ping"
+    assert seen_urls == [
+        "wss://stream.bybit.com/v5/private",
+        "wss://stream.bytick.com/v5/private",
+    ]
+    assert client.last_clock_source == "websocket_private_ping:stream.bytick.com"
+    assert client.last_clock_ws_url == "wss://stream.bytick.com/v5/private"
     assert client.last_clock_error == ""
+
+def test_bybit_market_stream_falls_back_to_official_bytick_domain(monkeypatch) -> None:
+    seen_urls = []
+
+    class FakeSocket:
+        latency = 0.01
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def send(self, _raw: str) -> None:
+            return None
+
+        async def recv(self) -> str:
+            return json.dumps(
+                {
+                    "topic": "orderbook.200.BTCUSDT",
+                    "type": "snapshot",
+                    "ts": 1672304484978,
+                    "data": {
+                        "s": "BTCUSDT",
+                        "b": [["100", "1"]],
+                        "a": [["101", "1"]],
+                        "u": 1,
+                        "seq": 1,
+                    },
+                    "cts": 1672304484976,
+                }
+            )
+
+    def fake_connect(url, *_args, **_kwargs):
+        seen_urls.append(str(url))
+        if str(url).startswith("wss://stream.bybit.com"):
+            raise OSError("primary WS blocked")
+        assert str(url).startswith("wss://stream.bytick.com")
+        return FakeSocket()
+
+    monkeypatch.setattr(
+        "hl_observer.collection.bybit_market_data.websockets.connect",
+        fake_connect,
+    )
+    monkeypatch.setattr(
+        "hl_observer.collection.bybit_market_data.compute_backoff_delay",
+        lambda **_kwargs: type("Delay", (), {"delay_seconds": 0.0})(),
+    )
+    client = BybitPublicClient()
+
+    async def scenario() -> None:
+        stream = client.messages(["BTCUSDT"])
+        payload = await anext(stream)
+        await stream.aclose()
+        assert payload["topic"] == "orderbook.200.BTCUSDT"
+        assert payload["_alina_transport"]["ws_url"] == (
+            "wss://stream.bytick.com/v5/public/linear"
+        )
+
+    asyncio.run(scenario())
+    assert seen_urls == [
+        "wss://stream.bybit.com/v5/public/linear",
+        "wss://stream.bytick.com/v5/public/linear",
+    ]
+    assert client.last_ws_url == "wss://stream.bytick.com/v5/public/linear"
 

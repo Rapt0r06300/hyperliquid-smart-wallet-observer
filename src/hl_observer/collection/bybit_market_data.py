@@ -34,7 +34,9 @@ SCHEMA_VERSION = "alina.bybit_market_data.v1"
 REST_BASE_URL = "https://api.bybit.com"
 REST_FALLBACK_BASE_URLS = ("https://api.bytick.com",)
 PUBLIC_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear"
+PUBLIC_LINEAR_WS_FALLBACK_URLS = ("wss://stream.bytick.com/v5/public/linear",)
 CLOCK_WS_URL = "wss://stream.bybit.com/v5/private"
+CLOCK_WS_FALLBACK_URLS = ("wss://stream.bytick.com/v5/private",)
 
 
 def _float(value: object) -> float | None:
@@ -325,7 +327,9 @@ class BybitPublicClient:
         rest_base_url: str = REST_BASE_URL,
         rest_fallback_urls: Iterable[str] = REST_FALLBACK_BASE_URLS,
         ws_url: str = PUBLIC_LINEAR_WS_URL,
+        ws_fallback_urls: Iterable[str] = PUBLIC_LINEAR_WS_FALLBACK_URLS,
         clock_ws_url: str = CLOCK_WS_URL,
+        clock_ws_fallback_urls: Iterable[str] = CLOCK_WS_FALLBACK_URLS,
         orderbook_depth: int = 200,
         session_refresh_s: float = 900.0,
     ) -> None:
@@ -343,8 +347,24 @@ class BybitPublicClient:
         self.last_ws_error = ""
         self.last_clock_source = ""
         self.last_clock_error = ""
-        self.ws_url = ws_url
-        self.clock_ws_url = clock_ws_url
+        self.ws_url = str(ws_url).rstrip("/")
+        self.ws_fallback_urls = tuple(
+            dict.fromkeys(
+                str(url).rstrip("/")
+                for url in ws_fallback_urls
+                if str(url).strip() and str(url).rstrip("/") != self.ws_url
+            )
+        )
+        self.clock_ws_url = str(clock_ws_url).rstrip("/")
+        self.clock_ws_fallback_urls = tuple(
+            dict.fromkeys(
+                str(url).rstrip("/")
+                for url in clock_ws_fallback_urls
+                if str(url).strip() and str(url).rstrip("/") != self.clock_ws_url
+            )
+        )
+        self.last_ws_url = self.ws_url
+        self.last_clock_ws_url = self.clock_ws_url
         depth = int(orderbook_depth)
         if depth not in {1, 50, 200, 1000}:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
@@ -354,6 +374,12 @@ class BybitPublicClient:
 
     def _rest_candidates(self) -> tuple[str, ...]:
         return (self.rest_base_url, *self.rest_fallback_urls)
+
+    def _ws_candidates(self) -> tuple[str, ...]:
+        return (self.ws_url, *self.ws_fallback_urls)
+
+    def _clock_ws_candidates(self) -> tuple[str, ...]:
+        return (self.clock_ws_url, *self.clock_ws_fallback_urls)
 
     def _fetch_instrument_metadata_from(
         self,
@@ -454,35 +480,51 @@ class BybitPublicClient:
 
     async def _measure_ws_clock_sync(self, *, timeout_s: float = 5.0):
         """Measure Bybit clock by an unauthenticated official WS heartbeat only."""
-        request_id = f"alina-clock-{uuid.uuid4().hex[:16]}"
-        sent = int(time.time() * 1_000)
-        async with websockets.connect(
-            self.clock_ws_url,
-            ping_interval=None,
-            close_timeout=5,
-            open_timeout=max(1.0, float(timeout_s)),
-        ) as socket:
-            await socket.send(json.dumps({"req_id": request_id, "op": "ping"}))
-            raw = await asyncio.wait_for(socket.recv(), timeout=max(1.0, float(timeout_s)))
-        received = int(time.time() * 1_000)
-        payload = json.loads(raw)
-        if not isinstance(payload, dict):
-            raise RuntimeError("Bybit WS clock pong invalid")
-        if str(payload.get("op") or "").lower() != "pong":
-            raise RuntimeError(f"Bybit WS clock pong missing: {payload!r}"[:500])
-        args = payload.get("args")
-        if not isinstance(args, list) or not args:
-            raise RuntimeError("Bybit WS clock pong timestamp missing")
-        server = _int(args[0])
-        if server is None or server <= 0:
-            raise RuntimeError("Bybit WS clock pong timestamp invalid")
-        self.last_clock_source = "websocket_private_ping"
-        self.last_clock_error = ""
-        return estimate_clock_sync(
-            venue="bybit",
-            server_ts_ms=server,
-            send_wall_ts_ms=sent,
-            receive_wall_ts_ms=received,
+        errors: list[str] = []
+        for ws_url in self._clock_ws_candidates():
+            request_id = f"alina-clock-{uuid.uuid4().hex[:16]}"
+            sent = int(time.time() * 1_000)
+            try:
+                async with websockets.connect(
+                    ws_url,
+                    ping_interval=None,
+                    close_timeout=5,
+                    open_timeout=max(1.0, float(timeout_s)),
+                ) as socket:
+                    await socket.send(json.dumps({"req_id": request_id, "op": "ping"}))
+                    raw = await asyncio.wait_for(
+                        socket.recv(),
+                        timeout=max(1.0, float(timeout_s)),
+                    )
+                received = int(time.time() * 1_000)
+                payload = json.loads(raw)
+                if not isinstance(payload, dict):
+                    raise RuntimeError("Bybit WS clock pong invalid")
+                if str(payload.get("op") or "").lower() != "pong":
+                    raise RuntimeError(f"Bybit WS clock pong missing: {payload!r}"[:500])
+                args = payload.get("args")
+                if not isinstance(args, list) or not args:
+                    raise RuntimeError("Bybit WS clock pong timestamp missing")
+                server = _int(args[0])
+                if server is None or server <= 0:
+                    raise RuntimeError("Bybit WS clock pong timestamp invalid")
+            except Exception as exc:
+                errors.append(f"{ws_url}:{type(exc).__name__}:{exc}"[:600])
+                continue
+            self.last_clock_ws_url = ws_url
+            self.last_clock_source = (
+                "websocket_private_ping:"
+                + ws_url.split("/", 3)[2]
+            )
+            self.last_clock_error = ""
+            return estimate_clock_sync(
+                venue="bybit",
+                server_ts_ms=server,
+                send_wall_ts_ms=sent,
+                receive_wall_ts_ms=received,
+            )
+        raise RuntimeError(
+            "Bybit WS clock unavailable: " + " | ".join(errors)[:1200]
         )
 
     def measure_clock_sync(self, *, timeout_s: float = 5.0):
@@ -528,28 +570,40 @@ class BybitPublicClient:
         ]
         attempt = 0
         while True:
+            ws_candidates = self._ws_candidates()
+            ws_url = ws_candidates[attempt % len(ws_candidates)]
             try:
                 connection_id = f"bybit-{uuid.uuid4().hex}"
                 session_started = time.monotonic()
+                market_message_seen = False
                 async with websockets.connect(
-                    self.ws_url,
+                    ws_url,
                     ping_interval=20,
                     ping_timeout=10,
+                    open_timeout=5,
                 ) as socket:
+                    self.last_ws_url = ws_url
                     self.last_ws_error = ""
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
-                    attempt = 0
-                    async for raw in socket:
+                    while True:
+                        raw = await asyncio.wait_for(
+                            socket.recv(),
+                            timeout=10.0 if market_message_seen else 5.0,
+                        )
                         receive_mono_ns = time.monotonic_ns()
                         receive_wall_ts_ms = int(time.time() * 1_000)
                         payload = json.loads(raw)
                         if isinstance(payload, dict):
+                            if payload.get("topic") and payload.get("data") is not None:
+                                market_message_seen = True
+                                attempt = 0
                             latency = getattr(socket, "latency", None)
                             payload["_alina_transport"] = {
                                 "connection_id": connection_id,
                                 "receive_wall_ts_ms": receive_wall_ts_ms,
                                 "receive_mono_ns": receive_mono_ns,
                                 "transport_rtt_ms": (float(latency) * 1_000.0 if isinstance(latency, (int, float)) else None),
+                                "ws_url": ws_url,
                             }
                             yield payload
                             if time.monotonic() - session_started >= self.session_refresh_s:
@@ -557,7 +611,9 @@ class BybitPublicClient:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                self.last_ws_error = f"{type(exc).__name__}: {exc}"[:500]
+                self.last_ws_error = (
+                    f"{ws_url}:{type(exc).__name__}: {exc}"
+                )[:800]
                 delay = compute_backoff_delay(attempt=attempt, shard_key="bybit-public-ws")
                 attempt += 1
                 await asyncio.sleep(delay.delay_seconds)
@@ -566,7 +622,9 @@ class BybitPublicClient:
 __all__ = [
     "BybitMarketState",
     "BybitPublicClient",
+    "CLOCK_WS_FALLBACK_URLS",
     "CLOCK_WS_URL",
+    "PUBLIC_LINEAR_WS_FALLBACK_URLS",
     "PUBLIC_LINEAR_WS_URL",
     "REST_BASE_URL",
     "REST_FALLBACK_BASE_URLS",
