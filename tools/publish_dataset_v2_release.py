@@ -27,6 +27,20 @@ from hl_observer.datasets.v2_pipeline import (
 
 MAX_RELEASE_ASSETS = 1000
 CONTROL_ASSET_SLOTS = 1
+DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS - CONTROL_ASSET_SLOTS
+
+
+def overflow_release_tag(base_tag: str, part_index: int) -> str:
+    """Stable non-production tag for overflow data assets.
+
+    Only the canonical base tag carries RUN_MANIFEST.json and is discovered by
+    the catalog reconciler. Overflow releases remain addressable through each
+    embedded shard manifest without being mistaken for independent runs.
+    """
+    if int(part_index) <= 0:
+        return str(base_tag)
+    digest = hashlib.sha256(str(base_tag).encode("utf-8")).hexdigest()[:16]
+    return f"alina-data-part-{digest}-{int(part_index):03d}"
 
 
 class PublishError(RuntimeError):
@@ -232,10 +246,21 @@ def publish_bundle(
             raise PublishError(f"Invalid manifest: {path}")
         manifests.append(payload)
 
-    # GitHub caps uploaded assets at 1000 per Release. Final shard manifests
-    # are embedded in RUN_MANIFEST.json, so only data assets + one run manifest
-    # are uploaded. Refuse oversized releases before spending time on uploads.
-    validate_release_capacity(len(manifests))
+    # GitHub caps each Release at 1000 assets. Large replay-grade market
+    # windows can legitimately exceed that without being invalid. Keep one
+    # canonical production Release (the requested tag) for RUN_MANIFEST.json
+    # plus at most 999 data assets, and spill any remaining immutable data
+    # assets into deterministic non-production overflow Releases. Every shard
+    # manifest records the exact Release that owns its bytes, so replay/index
+    # semantics remain unchanged while publication stays below GitHub's cap.
+    if DATA_ASSETS_PER_RELEASE <= 0:
+        raise PublishError("invalid GitHub release asset capacity")
+    chunks = [
+        manifests[offset : offset + DATA_ASSETS_PER_RELEASE]
+        for offset in range(0, len(manifests), DATA_ASSETS_PER_RELEASE)
+    ]
+    if not chunks:
+        chunks = [[]]
 
     notes = (
         "Alina SmartFlow dataset V2 collection run.\n\n"
@@ -245,124 +270,102 @@ def publish_bundle(
         "Only manifests with quality_status=SAFE and validation_allowed=true "
         "may be used by validation replays/backtests."
     )
-    release = ensure_release(
-        repository=repository,
-        tag=tag,
-        target=target,
-        title=title,
-        notes=notes,
-    )
 
-    # A campaign unit may be retried after collection produced a new bundle.
-    # If a prior attempt died before RUN_MANIFEST.json was published, GitHub
-    # can retain hundreds of orphan assets under the same deterministic tag.
-    # Those stale assets accumulate across retries and eventually hit GitHub's
-    # hard 1000-assets-per-release limit. Preserve resumable progress only when
-    # every existing asset belongs to the current bundle; otherwise reset the
-    # incomplete release atomically before uploading the current bundle.
-    desired_asset_names = {
-        str(manifest.get("release_asset") or "")
-        for manifest in manifests
-        if str(manifest.get("release_asset") or "")
-    }
-    existing_assets = release_asset_map(release)
-    existing_run = existing_assets.get("RUN_MANIFEST.json")
-    if existing_run is None:
-        stale_asset_names = sorted(set(existing_assets) - desired_asset_names)
-        if stale_asset_names:
-            _run(
-                [
-                    "release",
-                    "delete",
-                    tag,
-                    "--repo",
-                    repository,
-                    "--cleanup-tag",
-                    "--yes",
-                ]
-            )
-            release = ensure_release(
-                repository=repository,
-                tag=tag,
-                target=target,
-                title=title,
-                notes=notes,
-            )
-            existing_assets = release_asset_map(release)
-            if existing_assets:
-                raise PublishError(
-                    "recreated incomplete release is unexpectedly non-empty"
-                )
-    else:
-        unexpected = sorted(
-            set(existing_assets) - desired_asset_names - {"RUN_MANIFEST.json"}
-        )
-        if unexpected:
-            raise PublishError(
-                "finalized release contains assets outside the current bundle; "
-                "refusing to mutate immutable evidence"
-            )
-
-    release_id = int(release.get("id") or 0)
-    if release_id <= 0:
-        raise PublishError("Release id is missing.")
-
-    # A release tag plus asset name is an immutable publication identity.
-    # Repeating an identical publication is idempotent; clobbering a different
-    # digest is a hard conflict and must fail closed.
-    for manifest in manifests:
-        asset_name = str(manifest.get("release_asset") or "")
-        existing = existing_assets.get(asset_name)
-        if existing is not None:
-            assert_existing_asset_compatible(manifest, existing)
-
-    # Upload immutable data assets first.
-    for manifest in manifests:
-        asset_name = str(manifest.get("release_asset") or "")
-        # Compatible remote assets are immutable progress from a prior
-        # interrupted hosted runner. Re-uploading them with --clobber both
-        # wastes API quota and can prevent a large bundle from ever finishing.
-        if asset_name in existing_assets:
-            continue
-        local = root / "assets" / asset_name
-        upload_file(repository=repository, tag=tag, path=local)
-
-    # Re-read remote metadata after all uploads and verify exact digest + size.
-    release = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
-    if not isinstance(release, Mapping):
-        raise PublishError("Release payload after upload is invalid.")
-    assets = release_asset_map(release)
-
-    final_dir = root / "final_manifests"
-    final_dir.mkdir(parents=True, exist_ok=True)
     final_manifests: list[dict[str, Any]] = []
-    for manifest in manifests:
-        asset_name = str(manifest.get("release_asset") or "")
-        remote = assets.get(asset_name)
-        if remote is None:
-            raise PublishError(f"Uploaded asset not visible in release: {asset_name}")
-        verified = verify_remote_asset(
-            manifest,
-            repository=repository,
-            release_tag=tag,
-            release_id=release_id,
-            asset_id=int(remote.get("id") or 0),
-            asset_name=asset_name,
-            remote_size=int(remote.get("size") or 0),
-            remote_digest=str(remote.get("digest") or ""),
+    release_parts: list[dict[str, Any]] = []
+    base_release: Mapping[str, Any] | None = None
+
+    for part_index, chunk in enumerate(chunks):
+        validate_release_capacity(len(chunk))
+        part_tag = overflow_release_tag(tag, part_index)
+        part_title = (
+            title
+            if part_index == 0
+            else f"{title} overflow part {part_index + 1}/{len(chunks)}"
         )
-        # Local paths are ephemeral runner implementation details.
-        verified.pop("local_source_path", None)
-        verified.pop("local_asset_path", None)
-        final_path = final_dir / f"{verified['dataset_id']}.json"
-        write_manifest(verified, final_path)
-        final_manifests.append(verified)
+        part_notes = (
+            notes
+            if part_index == 0
+            else (
+                "Alina SmartFlow immutable overflow data assets.\n\n"
+                f"Canonical run tag: {tag}\n"
+                f"Part: {part_index + 1}/{len(chunks)}\n"
+                "This tag is intentionally outside production catalog discovery; "
+                "the canonical RUN_MANIFEST.json references these verified assets."
+            )
+        )
+        release = ensure_release(
+            repository=repository,
+            tag=part_tag,
+            target=target,
+            title=part_title,
+            notes=part_notes,
+        )
+        release_id = int(release.get("id") or 0)
+        if release_id <= 0:
+            raise PublishError("Release id is missing.")
+        if part_index == 0:
+            base_release = release
+
+        existing_assets = release_asset_map(release)
+        for manifest in chunk:
+            asset_name = str(manifest.get("release_asset") or "")
+            existing = existing_assets.get(asset_name)
+            if existing is not None:
+                assert_existing_asset_compatible(manifest, existing)
+
+        for manifest in chunk:
+            asset_name = str(manifest.get("release_asset") or "")
+            if asset_name in existing_assets:
+                continue
+            local = root / "assets" / asset_name
+            upload_file(repository=repository, tag=part_tag, path=local)
+
+        refreshed = _json(["api", f"repos/{repository}/releases/tags/{part_tag}"])
+        if not isinstance(refreshed, Mapping):
+            raise PublishError("Release payload after upload is invalid.")
+        assets = release_asset_map(refreshed)
+
+        for manifest in chunk:
+            asset_name = str(manifest.get("release_asset") or "")
+            remote = assets.get(asset_name)
+            if remote is None:
+                raise PublishError(f"Uploaded asset not visible in release: {asset_name}")
+            verified = verify_remote_asset(
+                manifest,
+                repository=repository,
+                release_tag=part_tag,
+                release_id=release_id,
+                asset_id=int(remote.get("id") or 0),
+                asset_name=asset_name,
+                remote_size=int(remote.get("size") or 0),
+                remote_digest=str(remote.get("digest") or ""),
+            )
+            verified.pop("local_source_path", None)
+            verified.pop("local_asset_path", None)
+            final_manifests.append(verified)
+
+        release_parts.append(
+            {
+                "release_tag": part_tag,
+                "release_id": release_id,
+                "shard_count": len(chunk),
+                "catalog_discoverable": part_index == 0,
+            }
+        )
+
+    if base_release is None:
+        raise PublishError("Canonical release was not created.")
+    base_release_id = int(base_release.get("id") or 0)
+    if base_release_id <= 0:
+        raise PublishError("Canonical release id is missing.")
 
     run_manifest = {
         "schema": "alina.dataset_run_manifest.v2",
         "repository": repository,
-        "release_id": release_id,
+        "release_id": base_release_id,
         "release_tag": tag,
+        "release_parts": release_parts,
         "collector_version": index.get("collector_version"),
         "collection_run_id": index.get("collection_run_id"),
         "shard_count": len(final_manifests),
@@ -387,15 +390,19 @@ def publish_bundle(
         "bytes": run_path.stat().st_size,
         "sha256": hashlib.sha256(run_path.read_bytes()).hexdigest(),
     }
-    existing_run = release_asset_map(release).get("RUN_MANIFEST.json")
+
+    canonical_release = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
+    if not isinstance(canonical_release, Mapping):
+        raise PublishError("Canonical release payload is invalid.")
+    existing_run = release_asset_map(canonical_release).get("RUN_MANIFEST.json")
     if existing_run is not None:
         assert_existing_asset_compatible(run_identity, existing_run)
-    else:
-        upload_file(repository=repository, tag=tag, path=run_path)
+    upload_file(repository=repository, tag=tag, path=run_path)
 
-    # Refresh once more so RUN_MANIFEST itself is visible before success.
     final_release = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
-    final_assets = release_asset_map(final_release if isinstance(final_release, Mapping) else {})
+    final_assets = release_asset_map(
+        final_release if isinstance(final_release, Mapping) else {}
+    )
     if "RUN_MANIFEST.json" not in final_assets:
         raise PublishError("RUN_MANIFEST.json not visible after upload.")
     return run_manifest
