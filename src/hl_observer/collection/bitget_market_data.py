@@ -5,20 +5,22 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Iterable, Mapping
+from typing import Any
 
 import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
 from hl_observer.collection.feed_integrity import estimate_clock_sync
+from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
+    UNMEASURABLE,
     MarketLevel,
     NativeMarketSnapshot,
-    UNMEASURABLE,
     canonical_coin,
 )
 
@@ -182,7 +184,23 @@ class BitgetPublicClient:
         self.ws_url = ws_url
         self.uta_ws_url = uta_ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
+        self.capture_tier = CaptureTier.B
         self.last_instrument_metadata: list[dict[str, Any]] = []
+
+    def set_capture_profile(self, tier: CaptureTier | str) -> None:
+        self.capture_tier = capture_profile("bitget", tier).tier
+
+    def subscription_args(self, symbols: Iterable[str]) -> list[dict[str, str]]:
+        channels = tuple(
+            channel
+            for channel in capture_profile("bitget", self.capture_tier).channels
+            if channel != "liquidation"
+        )
+        return [
+            {"instType": "USDT-FUTURES", "channel": channel, "instId": symbol}
+            for symbol in sorted({str(s).upper() for s in symbols if str(s).strip()})
+            for channel in channels
+        ]
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0):
         with httpx.Client(timeout=timeout_s) as client:
@@ -219,11 +237,7 @@ class BitgetPublicClient:
         )
 
     async def _classic_messages(self, symbols: tuple[str, ...]) -> AsyncIterator[dict[str, Any]]:
-        args = [
-            {"instType": "USDT-FUTURES", "channel": channel, "instId": symbol}
-            for symbol in symbols
-            for channel in ("books", "books1", "ticker", "trade")
-        ]
+        args = self.subscription_args(symbols)
         attempt = 0
         while True:
             try:

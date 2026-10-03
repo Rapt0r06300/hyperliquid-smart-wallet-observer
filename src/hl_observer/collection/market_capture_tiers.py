@@ -1,9 +1,9 @@
 """Deterministic, causal capture tiers for bounded public market collection."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Mapping
 
 
 class CaptureTier(StrEnum):

@@ -20,10 +20,11 @@ from hl_observer.arbitrage.cross_source_comparator import (
     compare_cross_source_prices,
 )
 from hl_observer.arbitrage.multi_venue_execution import executable_pair_rows
-from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
 from hl_observer.collection.bitget_market_data import BitgetMarketState, BitgetPublicClient
+from hl_observer.collection.bybit_market_data import BybitMarketState, BybitPublicClient
 from hl_observer.collection.coin_universe import note_coins
 from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
+from hl_observer.collection.market_capture_tiers import CaptureProfile, CaptureTier, capture_profile
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
@@ -63,6 +64,7 @@ class NativeVenueCoordinator:
         discovery_refresh_interval_s: float = 300.0,
         venue_session_s: float = 300.0,
         ccxt_snapshot_path: str | Path | None = "data/ccxt_universe.json",
+        capture_tiers: Mapping[str, Mapping[str, str | CaptureTier]] | None = None,
     ) -> None:
         self.stale_after_ms = int(stale_after_ms)
         self.max_symbols_per_venue = max(1, int(max_symbols_per_venue))
@@ -88,6 +90,13 @@ class NativeVenueCoordinator:
         self._bitget_states: dict[str, BitgetMarketState] = {}
         self._clock_sync: dict[str, dict[str, float | int | str]] = {}
         self._active_symbols: dict[str, tuple[str, ...]] = {}
+        self._capture_tiers = {
+            str(venue).lower(): {
+                str(symbol).upper(): tier if isinstance(tier, CaptureTier) else CaptureTier(str(tier).upper())
+                for symbol, tier in symbols.items()
+            }
+            for venue, symbols in (capture_tiers or {}).items()
+        }
         self._discovery_errors: dict[str, str] = {}
         self._ws_fallback_symbols: dict[str, tuple[str, ...]] = {}
         self._discovery_refreshes = 0
@@ -217,7 +226,12 @@ class NativeVenueCoordinator:
     def refresh_clock_sync(self) -> dict[str, dict[str, float | int | str]]:
         """Measure public venue clocks and retain RTT/offset evidence."""
         samples: dict[str, dict[str, float | int | str]] = {}
-        for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client)):
+        for venue, client in (
+            ("bybit", self.bybit_client),
+            ("okx", self.okx_client),
+            ("gate", self.gate_client),
+            ("bitget", self.bitget_client),
+        ):
             measure = getattr(client, "measure_clock_sync", None)
             if not callable(measure):
                 continue
@@ -292,6 +306,18 @@ class NativeVenueCoordinator:
                 symbols.append(fallback_symbol)
         selected = symbols[: self.max_symbols_per_venue]
         return selected[self.symbol_shard_index :: self.symbol_shard_count]
+
+    def capture_profile_for(self, venue: str, symbol: str) -> CaptureProfile:
+        venue_key = str(venue).strip().lower()
+        tier = self._capture_tiers.get(venue_key, {}).get(str(symbol).strip().upper(), CaptureTier.B)
+        return capture_profile(venue_key, tier)
+
+    def _configure_capture_profile(self, venue: str, symbols: list[str]) -> None:
+        setter = getattr(getattr(self, f"{venue}_client"), "set_capture_profile", None)
+        if not callable(setter) or not symbols:
+            return
+        tiers = {self.capture_profile_for(venue, symbol).tier for symbol in symbols}
+        setter(CaptureTier.A if CaptureTier.A in tiers else CaptureTier.B if CaptureTier.B in tiers else CaptureTier.C)
 
     def ingest_external_bbo(
         self,
@@ -571,6 +597,7 @@ class NativeVenueCoordinator:
         if not symbols:
             return
         self._active_symbols["bybit"] = tuple(symbols)
+        self._configure_capture_profile("bybit", symbols)
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bybit_client.messages(symbols):
@@ -586,6 +613,7 @@ class NativeVenueCoordinator:
         if not symbols:
             return
         self._active_symbols["okx"] = tuple(symbols)
+        self._configure_capture_profile("okx", symbols)
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.okx_client.messages(symbols):
@@ -601,6 +629,7 @@ class NativeVenueCoordinator:
         if not symbols:
             return
         self._active_symbols["gate"] = tuple(symbols)
+        self._configure_capture_profile("gate", symbols)
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
@@ -616,6 +645,7 @@ class NativeVenueCoordinator:
         if not symbols:
             return
         self._active_symbols["bitget"] = tuple(symbols)
+        self._configure_capture_profile("bitget", symbols)
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bitget_client.messages(symbols):
@@ -637,7 +667,7 @@ class NativeVenueCoordinator:
             self.run_gate(),
             self.run_bitget(),
         ]
-        if self.symbols_for("bybit") or self.symbols_for("okx"):
+        if any(self.symbols_for(venue) for venue in ("bybit", "okx", "gate", "bitget")):
             tasks.append(self.run_clock_sync())
         tasks.append(self.run_discovery_refresh())
         await asyncio.gather(*tasks)

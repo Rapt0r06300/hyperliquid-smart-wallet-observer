@@ -5,20 +5,22 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Iterable, Mapping
+from typing import Any
 
 import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
 from hl_observer.collection.feed_integrity import estimate_clock_sync
+from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
+    UNMEASURABLE,
     MarketLevel,
     NativeMarketSnapshot,
-    UNMEASURABLE,
     canonical_coin,
 )
 from hl_observer.collection.tick_dataset import TickEnvelope
@@ -195,7 +197,22 @@ class GatePublicClient:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
+        self.capture_tier = CaptureTier.B
         self.last_instrument_metadata: list[dict[str, Any]] = []
+
+    def set_capture_profile(self, tier: CaptureTier | str) -> None:
+        self.capture_tier = capture_profile("gate", tier).tier
+
+    def subscription_args(self, contracts: Iterable[str]) -> list[dict[str, Any]]:
+        profile = capture_profile("gate", self.capture_tier)
+        rows: list[dict[str, Any]] = []
+        for contract in sorted({str(c).upper() for c in contracts if str(c).strip()}):
+            for channel in profile.channels:
+                payload = [contract]
+                if channel == "futures.order_book_update":
+                    payload += ["100ms", str(profile.depth)]
+                rows.append({"channel": channel, "event": "subscribe", "payload": payload})
+        return rows
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
@@ -293,21 +310,7 @@ class GatePublicClient:
         contracts = tuple(sorted({str(c).upper() for c in contracts if str(c).strip()}))
         if not contracts:
             return
-        subscriptions: list[dict[str, Any]] = []
-        for contract in contracts:
-            subscriptions.extend(
-                [
-                    {"channel": "futures.order_book_update", "event": "subscribe", "payload": [contract, "100ms", "100"]},
-                    {"channel": "futures.book_ticker", "event": "subscribe", "payload": [contract]},
-                    {"channel": "futures.trades", "event": "subscribe", "payload": [contract]},
-                    {"channel": "futures.tickers", "event": "subscribe", "payload": [contract]},
-                    {"channel": "futures.contract_stats", "event": "subscribe", "payload": [contract, "1m"]},
-                    {"channel": "futures.contract_info", "event": "subscribe", "payload": [contract]},
-                ]
-            )
-        subscriptions.append(
-            {"channel": "futures.public_liquidates", "event": "subscribe", "payload": list(contracts)}
-        )
+        subscriptions = self.subscription_args(contracts)
         attempt = 0
         while True:
             try:

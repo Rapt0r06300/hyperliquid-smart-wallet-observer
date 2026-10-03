@@ -13,20 +13,21 @@ import json
 import math
 import time
 import uuid
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Iterable
 
 import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
 from hl_observer.collection.feed_integrity import FeedIntegrityState, estimate_clock_sync
+from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
+    UNMEASURABLE,
     MarketLevel,
     NativeMarketSnapshot,
-    UNMEASURABLE,
     canonical_coin,
 )
 
@@ -369,8 +370,30 @@ class BybitPublicClient:
         if depth not in {1, 50, 200, 1000}:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
         self.orderbook_depth = depth
+        self.capture_tier = CaptureTier.B
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.last_instrument_metadata: list[dict[str, object]] = []
+
+    def set_capture_profile(self, tier: CaptureTier | str) -> None:
+        profile = capture_profile("bybit", tier)
+        self.capture_tier = profile.tier
+        self.orderbook_depth = profile.depth
+
+    def subscription_args(self, symbols: Iterable[str]) -> list[str]:
+        profile = capture_profile("bybit", self.capture_tier)
+        topics: list[str] = []
+        for symbol in sorted({str(s).upper() for s in symbols if str(s).strip()}):
+            if "orderbook" in profile.channels or "bbo" in profile.channels:
+                topics.append(f"orderbook.{profile.depth}.{symbol}")
+            if "bbo" in profile.channels and profile.depth != 1:
+                topics.append(f"orderbook.1.{symbol}")
+            if "ticker" in profile.channels:
+                topics.append(f"tickers.{symbol}")
+            if "trades" in profile.channels:
+                topics.append(f"publicTrade.{symbol}")
+            if "liquidations" in profile.channels:
+                topics.append(f"allLiquidation.{symbol}")
+        return topics
 
     def _rest_candidates(self) -> tuple[str, ...]:
         return (self.rest_base_url, *self.rest_fallback_urls)
@@ -557,17 +580,7 @@ class BybitPublicClient:
         symbols = tuple(sorted({str(symbol).upper() for symbol in symbols if str(symbol).strip()}))
         if not symbols:
             return
-        args = [
-            topic
-            for symbol in symbols
-            for topic in (
-                f"orderbook.{self.orderbook_depth}.{symbol}",
-                *(() if self.orderbook_depth == 1 else (f"orderbook.1.{symbol}",)),
-                f"tickers.{symbol}",
-                f"publicTrade.{symbol}",
-                f"allLiquidation.{symbol}",
-            )
-        ]
+        args = self.subscription_args(symbols)
         attempt = 0
         while True:
             ws_candidates = self._ws_candidates()

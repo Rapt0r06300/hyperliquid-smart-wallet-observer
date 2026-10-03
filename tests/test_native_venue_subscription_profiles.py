@@ -1,0 +1,61 @@
+from hl_observer.collection.bitget_market_data import BitgetPublicClient
+from hl_observer.collection.bybit_market_data import BybitPublicClient
+from hl_observer.collection.gate_market_data import GatePublicClient
+from hl_observer.collection.market_capture_tiers import CaptureTier
+from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
+from hl_observer.collection.okx_market_data import OkxPublicClient
+
+
+def test_clients_build_tier_specific_public_subscriptions() -> None:
+    bybit = BybitPublicClient()
+    bybit.set_capture_profile(CaptureTier.C)
+    assert bybit.subscription_args(["BTCUSDT"]) == [
+        "orderbook.1.BTCUSDT",
+        "publicTrade.BTCUSDT",
+    ]
+
+    okx = OkxPublicClient()
+    okx.set_capture_profile(CaptureTier.A)
+    assert {row["channel"] for row in okx.subscription_args(["BTC-USDT-SWAP"])} >= {
+        "books", "bbo-tbt", "trades", "funding-rate", "open-interest"
+    }
+
+    bitget = BitgetPublicClient()
+    bitget.set_capture_profile(CaptureTier.B)
+    assert {row["channel"] for row in bitget.subscription_args(["BTCUSDT"])} == {
+        "books50", "books1", "ticker", "trade"
+    }
+
+    gate = GatePublicClient()
+    gate.set_capture_profile(CaptureTier.C)
+    assert {row["channel"] for row in gate.subscription_args(["BTC_USDT"])} == {
+        "futures.book_ticker", "futures.trades"
+    }
+
+
+def test_coordinator_exposes_explicit_profile_without_changing_default() -> None:
+    coordinator = NativeVenueCoordinator(
+        capture_tiers={"bybit": {"BTCUSDT": "A"}},
+        ccxt_snapshot_path=None,
+    )
+    assert coordinator.capture_profile_for("bybit", "BTCUSDT").tier is CaptureTier.A
+    assert coordinator.capture_profile_for("bybit", "ETHUSDT").tier is CaptureTier.B
+
+
+class _ClockClient:
+    def __init__(self, venue: str) -> None:
+        self.venue = venue
+
+    def measure_clock_sync(self):
+        return {"venue": self.venue, "offset_ms": 1.0, "rtt_ms": 2.0}
+
+
+def test_clock_sync_covers_every_native_venue() -> None:
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_ClockClient("bybit"),
+        okx_client=_ClockClient("okx"),
+        gate_client=_ClockClient("gate"),
+        bitget_client=_ClockClient("bitget"),
+        ccxt_snapshot_path=None,
+    )
+    assert set(coordinator.refresh_clock_sync()) == {"bybit", "okx", "gate", "bitget"}

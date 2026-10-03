@@ -10,20 +10,21 @@ import asyncio
 import json
 import time
 import uuid
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Iterable
 
 import httpx
 import websockets
 
 from hl_observer.collection.backoff import compute_backoff_delay
 from hl_observer.collection.feed_integrity import FeedIntegrityState, estimate_clock_sync
+from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_market import (
     DESYNC,
     EXPLOITABLE,
+    UNMEASURABLE,
     MarketLevel,
     NativeMarketSnapshot,
-    UNMEASURABLE,
     canonical_coin,
 )
 
@@ -338,7 +339,19 @@ class OkxPublicClient:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
+        self.capture_tier = CaptureTier.B
         self.last_instrument_metadata: list[dict[str, object]] = []
+
+    def set_capture_profile(self, tier: CaptureTier | str) -> None:
+        self.capture_tier = capture_profile("okx", tier).tier
+
+    def subscription_args(self, inst_ids: Iterable[str]) -> list[dict[str, str]]:
+        channels = capture_profile("okx", self.capture_tier).channels
+        return [
+            {"channel": channel, "instId": inst_id}
+            for inst_id in sorted({str(v).upper() for v in inst_ids if str(v).strip()})
+            for channel in channels
+        ]
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
@@ -383,20 +396,7 @@ class OkxPublicClient:
         inst_ids = tuple(sorted({str(value).upper() for value in inst_ids if str(value).strip()}))
         if not inst_ids:
             return
-        args = [
-            {"channel": channel, "instId": inst_id}
-            for inst_id in inst_ids
-            for channel in (
-                "books",
-                "bbo-tbt",
-                "trades",
-                "tickers",
-                "funding-rate",
-                "open-interest",
-                "mark-price",
-                "index-tickers",
-            )
-        ]
+        args = self.subscription_args(inst_ids)
         # OKX may change tick size / minimum trade amount while a collector is
         # running. Capture the public instruments stream once per connection so
         # the replay tape contains the exact rule changes effective at that time.
