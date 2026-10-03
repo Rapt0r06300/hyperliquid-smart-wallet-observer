@@ -36,7 +36,7 @@ def test_parse_binance_combined_depth_frame() -> None:
     assert frame["transaction_ts_ms"] == 1_005
 
 
-def test_binance_depth_ws_candidates_stay_mainnet_only() -> None:
+def test_binance_depth_ws_candidates_include_documented_mainnet_failover() -> None:
     async def scenario() -> None:
         client = httpx.AsyncClient()
         collector = BinanceDepthLiveCollector(
@@ -45,9 +45,16 @@ def test_binance_depth_ws_candidates_stay_mainnet_only() -> None:
         )
         assert collector._ws_candidates() == (
             "wss://fstream.binance.com/public/stream",
+            "wss://stream.binancefuture.com/public/stream",
+        )
+        assert collector.websocket_url(
+            "wss://stream.binancefuture.com/public/stream"
+        ) == (
+            "wss://stream.binancefuture.com/public/stream?"
+            "streams=btcusdt@depth@100ms/btcusdt@depth20@100ms"
         )
         assert all(
-            "binancefuture.com" not in endpoint
+            "fstream.binancefuture.com" not in endpoint
             for endpoint in collector._ws_candidates()
         )
         await client.aclose()
