@@ -75,6 +75,7 @@ class BinanceDepthLiveCollector:
         snapshot_limit: int = 1000,
         publication_depth: int = 200,
         partial_fallback_levels: int = 20,
+        rest_retry_cooldown_s: float = 60.0,
         http_client: httpx.AsyncClient | None = None,
         tick_sink: Callable[[TickEnvelope], Any] | None = None,
         publication_sink: Callable[[str, Mapping[str, Any]], Any] | None = None,
@@ -543,6 +544,9 @@ class BinanceDepthLiveCollector:
 
     def _schedule_resync(self, symbol: str, connection_id: str) -> None:
         if symbol in self._resync_pending:
+            return
+        retry_at = self._next_resync_monotonic.get(symbol, 0.0)
+        if time.monotonic() < retry_at:
             return
         self._resync_pending.add(symbol)
 

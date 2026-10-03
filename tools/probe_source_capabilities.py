@@ -280,13 +280,16 @@ def build_receipt(
             if transport_error:
                 details.append(f"WS={transport_error}")
             reason = ";".join(details)[:1800]
+        venue_caps = {name: runtime for name in CAPABILITIES}
+        if venue == "bybit" and ok:
+            venue_caps["clock_sync"] = "HEALTHY" if bybit_rest_ok else "DEGRADED"
         venues[venue] = {
             "runtime_status": runtime,
             "reason": reason,
             "observed_at_utc": observed_at,
             "network_observed": ok,
             "last_event_ms": event_ms,
-            "capability_runtime": {name: runtime for name in CAPABILITIES},
+            "capability_runtime": venue_caps,
         }
         if venue == "bybit":
             venues[venue]["rest_probe_observed"] = bybit_rest_ok

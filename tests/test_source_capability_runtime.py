@@ -209,3 +209,45 @@ def test_runtime_receipt_does_not_promote_partial_binance_l2_to_full(tmp_path: P
     assert receipt["venues"]["binance"]["ws_frames"]["l2_partial_publications"] == 4
     assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 0
 
+def test_bybit_live_ws_does_not_fake_clock_sync_when_rest_is_blocked(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 1,
+                "last_event_ms": {
+                    "bybit": 123,
+                    "okx": 1,
+                    "gate": 2,
+                    "bitget": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            return {"serverTime": 123}
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit REST blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        github_sha="e" * 40,
+        github_run_id="101",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    assert receipt["venues"]["bybit"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["bybit"]["capability_runtime"]["bbo"] == "HEALTHY"
+    assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
+    assert receipt["venues"]["bybit"]["capability_runtime"]["clock_sync"] == "DEGRADED"
+

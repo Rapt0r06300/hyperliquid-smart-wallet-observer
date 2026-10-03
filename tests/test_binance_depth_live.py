@@ -242,3 +242,34 @@ def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() 
 
     asyncio.run(scenario())
 
+def test_rest_resync_failure_is_rate_limited_by_cooldown() -> None:
+    async def scenario() -> None:
+        calls = 0
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(451, json={"msg": "restricted location"})
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        collector = BinanceDepthLiveCollector(
+            ["BTCUSDT"],
+            http_client=client,
+            rest_retry_cooldown_s=60.0,
+        )
+
+        assert await collector.resync_symbol("BTCUSDT", connection_id="cooldown") is None
+        assert calls == 1
+        assert "BTCUSDT" in collector.health()["rest_retry_deferred_symbols"]
+
+        collector._schedule_resync("BTCUSDT", "cooldown")
+        await asyncio.sleep(0)
+        assert calls == 1
+        assert "BTCUSDT" not in collector._resync_pending
+        await client.aclose()
+
+    asyncio.run(scenario())
+
