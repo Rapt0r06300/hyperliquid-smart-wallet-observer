@@ -134,6 +134,31 @@ def test_native_trade_keys_support_normalized_copy_vault_fill_ts_ms():
     )
 
 
+def test_native_trade_keys_support_gate_native_trade_id() -> None:
+    record = {
+        "raw_payload": {
+            "channel": "futures.trades",
+            "result": [
+                {
+                    "id": 987654321,
+                    "create_time_ms": 1790991018232,
+                    "contract": "ETH_USDT",
+                    "price": "3500.1",
+                    "size": 3,
+                    "side": "sell",
+                }
+            ],
+        }
+    }
+    keys = global_counts._native_trade_keys(
+        record,
+        venue="gate",
+        family="trades",
+        symbol="ETH_USDT",
+    )
+    assert keys == ["gate|trades|ETH_USDT|id|987654321"]
+
+
 def test_native_trade_keys_fail_closed_when_composite_is_ambiguous():
     keys = global_counts._native_trade_keys(
         {"raw_payload": {"time": 1, "px": "10"}},
