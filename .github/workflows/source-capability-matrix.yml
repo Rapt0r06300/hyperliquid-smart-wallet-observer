@@ -96,6 +96,15 @@ jobs:
           python tools/generate_source_capabilities.py             --runtime-evidence docs/source-capability-runtime.json
       - name: Validate capability matrix
         run: python tools/validate_source_capabilities.py
+      - name: Upload runtime evidence artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: source-capability-${{ github.run_id }}
+          path: |
+            docs/source-capability-runtime.json
+            docs/source-capability-matrix.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Publish runtime receipt and matrix
         run: |
           set -euo pipefail
@@ -105,13 +114,13 @@ jobs:
           git diff --cached --quiet && exit 0
           git commit -m "sources: publish github-hosted capability evidence"
           gh auth setup-git
-          for attempt in 1 2 3 4 5; do
+          for attempt in {1..20}; do
             if git push origin HEAD:main; then
               exit 0
             fi
             git fetch origin main
             git rebase origin/main
-            sleep $((attempt * 2))
+            sleep 1
           done
           echo "Unable to publish runtime evidence after bounded retries" >&2
           exit 1
