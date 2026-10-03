@@ -30,6 +30,7 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/public/stream"
+WS_FALLBACK_BASE_URLS = ("wss://stream.binancefuture.com/public/stream",)
 WS_API_URL = "wss://ws-fapi.binance.com/ws-fapi/v1"
 SCHEMA_VERSION = "alina.binance_usdm_l2_live.v1"
 
@@ -72,6 +73,7 @@ class BinanceDepthLiveCollector:
         *,
         rest_base_url: str = REST_BASE_URL,
         ws_base_url: str = WS_BASE_URL,
+        ws_fallback_urls: Iterable[str] = WS_FALLBACK_BASE_URLS,
         ws_api_url: str = WS_API_URL,
         snapshot_limit: int = 1000,
         publication_depth: int = 200,
@@ -87,6 +89,16 @@ class BinanceDepthLiveCollector:
         )
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_base_url = ws_base_url.rstrip("/")
+        self.ws_fallback_urls = tuple(
+            dict.fromkeys(
+                str(url).rstrip("/")
+                for url in ws_fallback_urls
+                if str(url).strip()
+                and str(url).rstrip("/") != self.ws_base_url
+            )
+        )
+        self.last_ws_base_url = self.ws_base_url
+        self.last_ws_error = ""
         self.ws_api_url = ws_api_url.rstrip("/")
         self.snapshot_limit = int(snapshot_limit)
         if self.snapshot_limit not in {5, 10, 20, 50, 100, 500, 1000}:
@@ -129,7 +141,10 @@ class BinanceDepthLiveCollector:
         if self._owns_http:
             await self.http.aclose()
 
-    def websocket_url(self) -> str:
+    def _ws_candidates(self) -> tuple[str, ...]:
+        return (self.ws_base_url, *self.ws_fallback_urls)
+
+    def websocket_url(self, base_url: str | None = None) -> str:
         streams = "/".join(
             stream
             for symbol in self.symbols
@@ -138,7 +153,8 @@ class BinanceDepthLiveCollector:
                 f"{symbol.lower()}@depth{self.partial_fallback_levels}@100ms",
             )
         )
-        return f"{self.ws_base_url}?streams={streams}"
+        endpoint = str(base_url or self.last_ws_base_url or self.ws_base_url).rstrip("/")
+        return f"{endpoint}?streams={streams}"
 
     def state(self, symbol: str) -> BinanceDepthOrchestrator:
         key = str(symbol).strip().upper()
@@ -366,18 +382,23 @@ class BinanceDepthLiveCollector:
         if not self.symbols:
             return
         attempt = 0
+        candidates = self._ws_candidates()
+        candidate_index = 0
         try:
             while True:
                 connection_id = f"bin-depth-{uuid.uuid4().hex}"
+                endpoint = candidates[candidate_index % len(candidates)]
+                self.last_ws_base_url = endpoint
                 try:
                     async with websockets.connect(
-                        self.websocket_url(),
+                        self.websocket_url(endpoint),
                         ping_interval=20,
                         ping_timeout=10,
                         close_timeout=5,
                         max_size=2**23,
                     ) as socket:
                         attempt = 0
+                        self.last_ws_error = ""
                         async for raw_text in socket:
                             receive_mono_ns = time.monotonic_ns()
                             receive_wall_ms = int(time.time() * 1_000)
@@ -478,7 +499,9 @@ class BinanceDepthLiveCollector:
                     raise
                 except Exception as exc:
                     self.reconnects += 1
-                    self.last_error = f"{type(exc).__name__}: {exc}"[:500]
+                    self.last_ws_error = f"{type(exc).__name__}: {exc}"[:500]
+                    self.last_error = self.last_ws_error
+                    candidate_index += 1
                     await asyncio.sleep(min(30.0, 2.0 ** min(attempt, 5)))
                     attempt += 1
         finally:
@@ -508,6 +531,9 @@ class BinanceDepthLiveCollector:
                 self._full_snapshot_unavailable_symbols
             ),
             "reconnects": self.reconnects,
+            "ws_base_url": self.last_ws_base_url,
+            "ws_candidates": list(self._ws_candidates()),
+            "ws_last_error": self.last_ws_error,
             "pending_resyncs": len(self._resync_pending),
             "books_exploitable": sum(
                 1 for state in self.states.values() if not state.besoin_resnapshot()
