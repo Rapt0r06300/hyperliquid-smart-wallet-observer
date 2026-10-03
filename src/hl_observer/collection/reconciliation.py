@@ -1,8 +1,11 @@
 """Live-versus-reference reconciliation for replay-quality collection windows."""
 from __future__ import annotations
 
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,18 +66,39 @@ def _duplicate_count(rows: list[Mapping[str, Any]]) -> int:
 
 
 def _key(row: Mapping[str, Any]) -> tuple[Any, ...] | None:
-    event_id = row.get("event_id", row.get("id"))
+    venue = str(row.get("venue", row.get("source_id", "")) or "").lower()
+    symbol = str(
+        row.get("exchange_symbol", row.get("symbol", row.get("instrument", ""))) or ""
+    )
+    event_id = row.get(
+        "trade_id",
+        row.get("tradeId", row.get("event_id", row.get("id"))),
+    )
     if event_id not in {None, ""}:
-        return ("event", str(event_id))
+        return ("event", venue, symbol, str(event_id))
     sequence = row.get("sequence", row.get("seq", row.get("seqId")))
     ts = row.get(
         "exchange_timestamp",
         row.get("exchange_ts_ms", row.get("timestamp", row.get("ts"))),
     )
-    symbol = row.get("exchange_symbol", row.get("symbol", row.get("instrument")))
-    if sequence is None and ts is None:
+    if sequence is not None or ts is not None:
+        return ("market", venue, symbol, _intish(ts), _intish(sequence))
+    raw = row.get("raw_payload")
+    if raw is None:
         return None
-    return ("market", str(symbol or ""), _intish(ts), _intish(sequence))
+    if isinstance(raw, str):
+        encoded = raw.encode("utf-8")
+    elif isinstance(raw, bytes):
+        encoded = raw
+    else:
+        encoded = json.dumps(
+            raw,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ).encode("utf-8")
+    return ("raw", venue, symbol, hashlib.sha256(encoded).hexdigest())
 
 
 def _intish(value: Any) -> Any:

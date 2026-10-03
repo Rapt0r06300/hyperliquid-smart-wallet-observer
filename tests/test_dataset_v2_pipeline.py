@@ -51,6 +51,36 @@ def test_connection_change_seals_previous_partition_epoch(tmp_path) -> None:
     assert len(shards) == 2
 
 
+def test_bundle_compacts_compatible_small_shards_without_changing_raw(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    writer.append(_event(1000, connection="ws-a"))
+    first = writer.rotate_all()
+    writer.append(_event(1010, connection="ws-a"))
+    second = writer.rotate_all()
+    source_shards = sorted((tmp_path / "ticks").glob("**/shards/*.jsonl.gz"))
+    source_hashes = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_shards}
+
+    index = build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="a" * 40,
+        compact_target_bytes=10_000_000,
+    )
+
+    assert first and second
+    assert index["source_shard_count"] == 2
+    assert index["shard_count"] == 1
+    assert index["compacted_source_shard_count"] == 2
+    import json
+    manifest = json.loads(next((tmp_path / "bundle" / "manifests").glob("*.json")).read_text())
+    assert manifest["event_count"] == 2
+    assert len(manifest["source_shards"]) == 2
+    assert manifest["compacted"] is True
+    assert source_hashes == {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in source_shards
+    }
+
+
 def test_remote_digest_is_required_before_safe(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
     writer.append(_event(1000))

@@ -1,7 +1,6 @@
 """End-to-end packaging and strict qualification for Alina dataset V2 shards."""
 from __future__ import annotations
 
-import json
 import os
 import shutil
 from collections.abc import Mapping
@@ -173,9 +172,12 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         reasons.append("REQUIRED_CHANNEL_MISSING")
 
     cost_model = manifest.get("cost_model")
-    if isinstance(cost_model, Mapping):
-        if cost_model.get("applicable") is True and cost_model.get("ready") is not True:
-            reasons.append("COST_MODEL_NOT_READY")
+    if (
+        isinstance(cost_model, Mapping)
+        and cost_model.get("applicable") is True
+        and cost_model.get("ready") is not True
+    ):
+        reasons.append("COST_MODEL_NOT_READY")
 
     if manifest.get("asset_verified") is not True:
         reasons.append("REMOTE_ASSET_NOT_VERIFIED")
@@ -278,6 +280,7 @@ def build_bundle(
     cost_model_channels: tuple[str, ...] = (),
     collection_queue_drops: int = 0,
     collection_run_id: str | None = None,
+    compact_target_bytes: int = 0,
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -292,9 +295,8 @@ def build_bundle(
     manifests_dir.mkdir(parents=True, exist_ok=True)
 
     shard_paths = sorted(source_root.glob("**/shards/*.jsonl.gz"))
-    manifests: list[dict[str, Any]] = []
-    for shard in shard_paths:
-        preliminary = build_manifest_from_tick_shard(
+    source_manifests = [
+        build_manifest_from_tick_shard(
             shard,
             collector_version=collector_version,
             reconciliation_status="UNVERIFIED",
@@ -302,6 +304,34 @@ def build_bundle(
             cost_model_applicable=False,
             cost_model_ready=False,
         )
+        for shard in shard_paths
+    ]
+    groups = _compaction_groups(
+        list(zip(shard_paths, source_manifests, strict=True)),
+        target_bytes=max(0, int(compact_target_bytes)),
+    )
+    staging = output / ".compaction"
+    manifests: list[dict[str, Any]] = []
+    for group in groups:
+        source_shards = [row[0] for row in group]
+        shard = source_shards[0]
+        if len(source_shards) > 1:
+            staging.mkdir(parents=True, exist_ok=True)
+            shard = staging / f"compacted-{len(manifests):06d}.jsonl.gz"
+            with shard.open("wb") as target:
+                for source_shard in source_shards:
+                    with source_shard.open("rb") as source:
+                        shutil.copyfileobj(source, target)
+            preliminary = build_manifest_from_tick_shard(
+                shard,
+                collector_version=collector_version,
+                reconciliation_status="UNVERIFIED",
+                required_channels=(),
+                cost_model_applicable=False,
+                cost_model_ready=False,
+            )
+        else:
+            preliminary = dict(group[0][1])
         queue_drops = max(0, int(collection_queue_drops))
         if queue_drops:
             integrity = dict(preliminary.get("integrity") or {})
@@ -333,9 +363,20 @@ def build_bundle(
             shutil.copyfile(shard, asset_path)
 
         preliminary["release_asset"] = asset_name
+        preliminary["compacted"] = len(source_shards) > 1
+        preliminary["source_shards"] = [
+            {
+                "path": str(source),
+                "sha256": str(source_manifest["sha256"]),
+                "bytes": int(source_manifest["bytes"]),
+            }
+            for source, source_manifest in group
+        ]
         if run_id is not None:
             preliminary["collection_run_id"] = run_id
-        preliminary["local_source_path"] = str(shard)
+        preliminary["local_source_path"] = (
+            str(source_shards[0]) if len(source_shards) == 1 else None
+        )
         preliminary["local_asset_path"] = str(asset_path)
         preliminary = finalize_manifest(preliminary)
         write_manifest(preliminary, manifests_dir / f"{dataset_id}.json")
@@ -348,6 +389,12 @@ def build_bundle(
         "collection_run_id": run_id,
         "collection_queue_drops": max(0, int(collection_queue_drops)),
         "shard_count": len(manifests),
+        "source_shard_count": len(shard_paths),
+        "compacted_source_shard_count": sum(
+            len(row.get("source_shards") or [])
+            for row in manifests
+            if row.get("compacted") is True
+        ),
         "safe_count": sum(1 for row in manifests if row["quality_status"] == "SAFE"),
         "partial_count": sum(1 for row in manifests if row["quality_status"] == "PARTIAL"),
         "reject_count": sum(1 for row in manifests if row["quality_status"] == "REJECT"),
@@ -358,7 +405,61 @@ def build_bundle(
         "real_execution": False,
     }
     write_manifest(index, output / "BUNDLE_INDEX.json")
+    if staging.exists():
+        shutil.rmtree(staging)
     return index
+
+
+def _compaction_groups(
+    rows: list[tuple[Path, dict[str, Any]]],
+    *,
+    target_bytes: int,
+) -> list[list[tuple[Path, dict[str, Any]]]]:
+    """Group only compatible, ordered shards; zero preserves legacy behavior."""
+    if target_bytes <= 0:
+        return [[row] for row in rows]
+    result: list[list[tuple[Path, dict[str, Any]]]] = []
+    for row in sorted(rows, key=lambda item: (_compaction_key(item[1]), _int(item[1].get("start_ts_ms")) or 0)):
+        if not result:
+            result.append([row])
+            continue
+        current = result[-1]
+        current_bytes = sum(int(item[1].get("bytes") or 0) for item in current)
+        previous_end = _int(current[-1][1].get("end_ts_ms"))
+        next_start = _int(row[1].get("start_ts_ms"))
+        compatible = (
+            _compaction_key(current[-1][1]) == _compaction_key(row[1])
+            and current_bytes + int(row[1].get("bytes") or 0) <= target_bytes
+            and previous_end is not None
+            and next_start is not None
+            and next_start >= previous_end
+        )
+        if compatible:
+            current.append(row)
+        else:
+            result.append([row])
+    return result
+
+
+def _compaction_key(manifest: Mapping[str, Any]) -> tuple[Any, ...]:
+    synchronization = manifest.get("synchronization")
+    connection_ids = ()
+    if isinstance(synchronization, Mapping):
+        connection_ids = tuple(sorted(str(value) for value in synchronization.get("connection_ids") or ()))
+    integrity = manifest.get("integrity")
+    safe_class = "clean"
+    if isinstance(integrity, Mapping) and any(
+        int(integrity.get(key) or 0) > 0
+        for key in ("gap_count", "regression_count", "desync_count")
+    ):
+        safe_class = "unsafe"
+    return (
+        str(manifest.get("venue") or ""),
+        str(manifest.get("family") or ""),
+        str(manifest.get("symbol") or ""),
+        connection_ids,
+        safe_class,
+    )
 
 
 def _int(value: Any) -> int | None:
