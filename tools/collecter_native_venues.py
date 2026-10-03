@@ -539,6 +539,7 @@ async def _run(
             collection_queue_drops=dropped,
             collection_run_id=collection_run_id,
         )
+        final_health = coordinator.health(now_ms=int(time.time() * 1000))
         final = {
             "schema_version": "alina.native_venues_heartbeat.v1",
             "ts": time.time(),
@@ -568,6 +569,7 @@ async def _run(
                 counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
                 for venue in ("bybit", "okx") if venue in enabled_venues
             ),
+            "coordinator_health": final_health,
             "dataset": writer.stats(),
             "dataset_v2_bundle": bundle,
             "collection_run_id": collection_run_id,
