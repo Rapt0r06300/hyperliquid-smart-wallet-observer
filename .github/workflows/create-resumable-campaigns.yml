@@ -286,7 +286,7 @@ jobs:
             # shards are superseded before the single v8 two-speed campaign starts.
             python tools/supersede_copy_vault_fanout.py
             python tools/supersede_copy_vault_fanout.py \
-              --legacy-version "-v7" \
+              --legacy-version=-v7 \
               --preserve-running
 
             ACTIVE_COPY_CAMPAIGNS="$(python -c 'import glob,json,sys; epoch=int(sys.argv[1]); active={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}; rows=[json.load(open(path,encoding="utf-8")) for path in glob.glob("catalog/campaigns/copy-vault-*.json")]; print(sum(str(row.get("status") or "") in active and row.get("creation_phase")=="COLLECT" and int(row.get("phase_epoch") or 0)==epoch for row in rows))' "$PHASE_EPOCH")"
