@@ -34,6 +34,21 @@ Rules:
 
 The main Alina Smart Flow repository owns the phase state, campaign manifests, durable collection metadata, quality catalog and GitHub Actions control plane. Heavy immutable market-data assets are stored in GitHub Releases of this same repository so code, tests, orchestration and data provenance share one repository without committing raw L2/trade payloads into Git history.
 
+### Single-repository storage invariant
+
+The Alina Smart Flow repository is the only operational data repository. Every new collection Release, run manifest, catalog row, replay/backtest input and durability checkpoint must resolve to `Rapt0r06300/hyperliquid-smart-wallet-observer`. No collector, reconciler, validator or analysis workflow may require another repository at runtime.
+
+Historical assets created before repository unification are a one-time migration concern only. Migration is complete only when:
+
+- every production Release asset has been preserved in this repository with matching byte length and SHA-256;
+- every manifest-bearing Release has a target-native `RUN_MANIFEST.json` whose release references point to this repository;
+- Releases lacking a usable run manifest are preserved but quarantined and excluded from validation;
+- catalog reconciliation enumerates all matching Releases with pagination, never a fixed “latest N” window;
+- exact trade count, global trade deduplication and uncompressed-size coverage have been rebuilt from target-native evidence;
+- `control/unified-repository.json` records `legacy_collection_state_imported=true` and `external_dataset_repository_required=false`.
+
+Pre-unification storage may be retired only after all of those checks are satisfied. Current collection must continue independently throughout the migration. Once migration is complete, no operational workflow may read from or depend on pre-unification storage.
+
 Create:
 
 `control/alina-phase.json`
