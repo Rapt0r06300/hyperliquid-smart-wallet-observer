@@ -6,7 +6,7 @@ on:
     paths:
       - '.github/workflows/migrate-legacy-releases-to-main.yml'
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  purge-one:
+  purge-all:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_REPOSITORY: ${{ github.repository }}
@@ -30,8 +30,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Delete at most one frozen imported release
-        id: purge
+      - name: Purge the frozen imported set with bounded backoff
         shell: bash
         run: |
           set -euo pipefail
@@ -59,114 +58,123 @@ jobs:
             "copy-vault-v2-35696508705-s2",
             "data-v2-35696462284-s0",
           ]
+          assert len(tags)==16 and len(set(tags))==16
           i=int(s.get("cleanup_index") or 0)
-          assert 0 <= i <= len(tags)
-          p=Path("/tmp/purge.env")
-          if i >= len(tags):
-              p.write_text("DONE=true\n")
-          else:
-              p.write_text(f"DONE=false\nINDEX={i}\nTAG={tags[i]}\n")
+          assert 0 <= i <= 16
+          Path("/tmp/imported-tags.txt").write_text("\n".join(tags)+"\n")
+          Path("/tmp/remaining-tags.txt").write_text("\n".join(tags[i:])+("\n" if i < 16 else ""))
+          print(f"cleanup_index={i}; remaining={16-i}")
           PY
-          cat /tmp/purge.env >> "$GITHUB_OUTPUT"
 
-          if grep -q '^DONE=true$' /tmp/purge.env; then
-            exit 0
-          fi
+          index="$(python -c 'import json; print(int(json.load(open("control/legacy-release-migration.json")).get("cleanup_index") or 0))')"
 
-          tag="$(grep '^TAG=' /tmp/purge.env | cut -d= -f2-)"
-          if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes > /tmp/delete.out 2> /tmp/delete.err; then
-            echo "RESULT=deleted" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Purging frozen imported release $((index+1))/16: $tag"
+            done_one=0
+            for attempt in $(seq 1 18); do
+              if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
+                done_one=1
+                break
+              fi
 
-          msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
-          if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
-            echo "RESULT=absent" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary'; then
-            echo "GitHub secondary release-write throttle is still active; cursor unchanged."
-            echo "RESULT=throttled" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          printf '%s\n' "$msg" >&2
-          exit 31
+              msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
+              if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
+                echo "$tag is already absent; treating deletion as idempotently complete."
+                done_one=1
+                break
+              fi
 
-      - name: Advance durable purge cursor
-        if: steps.purge.outputs.DONE != 'true' && steps.purge.outputs.RESULT != 'throttled'
+              if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary|abuse detection'; then
+                wait_seconds=$((attempt * 30))
+                if [ "$wait_seconds" -gt 300 ]; then wait_seconds=300; fi
+                echo "GitHub release-write throttle for $tag; retry $attempt/18 in ${wait_seconds}s."
+                sleep "$wait_seconds"
+                continue
+              fi
+
+              printf '%s\n' "$msg" >&2
+              exit 31
+            done
+
+            if [ "$done_one" -ne 1 ]; then
+              echo "Unable to purge $tag after bounded retries." >&2
+              exit 32
+            fi
+
+            index=$((index+1))
+            if [ "$index" -lt 16 ]; then
+              sleep 45
+            fi
+          done < /tmp/remaining-tags.txt
+
+      - name: Verify all sixteen frozen imports are absent
         shell: bash
-        env:
-          INDEX: ${{ steps.purge.outputs.INDEX }}
-          RESULT: ${{ steps.purge.outputs.RESULT }}
         run: |
           set -euo pipefail
+          gh release list --repo "$TARGET_REPOSITORY" --limit 100000 --json tagName > /tmp/current-releases.json
           python - <<'PY'
-          import json, os
+          import json
           from pathlib import Path
-          sp=Path("control/legacy-release-migration.json")
-          up=Path("control/unified-repository.json")
-          s=json.loads(sp.read_text())
-          i=int(os.environ["INDEX"])
-          nxt=i+1
-          s["cleanup_index"]=nxt
-          s["imported_releases_remaining"]=16-nxt
-          s["removed_imported_releases"]=nxt
-          s["last_cleanup_result"]=os.environ["RESULT"]
-          s["cleanup_status"]="COMPLETE" if nxt==16 else "IN_PROGRESS"
-          s["status"]="ABORTED_CLEANED" if nxt==16 else "ABORTED_PURGE_PENDING"
-          s["pending_releases"]=0
-          sp.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
-          u=json.loads(up.read_text())
-          u["fresh_dataset_state"]=True
-          u["legacy_collection_state_imported"]=False
-          u["historical_external_import_allowed"]=False
-          u["dataset_v2_import_allowed"]=False
-          u["collection_origin_policy"]="fresh-main-only"
-          u["legacy_imported_release_count"]=16-nxt
-          u["legacy_imported_releases_present"]=nxt<16
-          u["historical_release_migration_status"]="DISABLED_CLEAN" if nxt==16 else "DISABLED_PURGE_PENDING"
-          up.write_text(json.dumps(u,indent=2,sort_keys=True)+"\n")
+          current={r["tagName"] for r in json.loads(Path("/tmp/current-releases.json").read_text())}
+          imported=set(Path("/tmp/imported-tags.txt").read_text().splitlines())
+          left=sorted(imported & current)
+          if left:
+              raise SystemExit("Imported releases still present: " + ", ".join(left))
+          print("verified_absent=16")
           PY
 
-          git add control/legacy-release-migration.json control/unified-repository.json
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "data: advance dataset-v2 purge cursor"
-          for attempt in 1 2 3 4 5 6; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((attempt * 3))
-          done
-          exit 51
-
-      - name: Retire purge plumbing after 16 of 16
-        if: steps.purge.outputs.DONE == 'true'
+      - name: Persist fresh-only completion and retire migration plumbing
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
           from pathlib import Path
-          s=json.loads(Path("control/legacy-release-migration.json").read_text())
-          assert int(s.get("cleanup_index") or 0)==16
-          assert int(s.get("imported_releases_remaining") or 0)==0
-          u=json.loads(Path("control/unified-repository.json").read_text())
-          assert u.get("dataset_v2_import_allowed") is False
-          assert u.get("historical_external_import_allowed") is False
-          assert u.get("legacy_imported_releases_present") is False
+
+          sp=Path("control/legacy-release-migration.json")
+          up=Path("control/unified-repository.json")
+
+          s=json.loads(sp.read_text())
+          s.update(
+              cleanup_index=16,
+              cleanup_status="COMPLETE",
+              historical_migration_enabled=False,
+              imported_releases_remaining=0,
+              removed_imported_releases=16,
+              pending_releases=0,
+              status="ABORTED_CLEANED",
+              last_cleanup_result="verified_absent_16",
+          )
+          sp.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
+
+          u=json.loads(up.read_text())
+          u.update(
+              fresh_dataset_state=True,
+              legacy_collection_state_imported=False,
+              historical_external_import_allowed=False,
+              dataset_v2_import_allowed=False,
+              collection_origin_policy="fresh-main-only",
+              legacy_imported_release_count=0,
+              legacy_imported_releases_present=False,
+              historical_release_migration_status="DISABLED_CLEAN",
+              external_dataset_repository_required=False,
+              legacy_release_mirror_required=False,
+          )
+          up.write_text(json.dumps(u,indent=2,sort_keys=True)+"\n")
           PY
-          git rm -f \
-            .github/workflows/migrate-legacy-releases-to-main.yml \
-            tools/migrate_legacy_releases_to_main.py \
-            tests/test_legacy_release_migration.py
+
+          git rm -f             .github/workflows/migrate-legacy-releases-to-main.yml             tools/migrate_legacy_releases_to_main.py             tests/test_legacy_release_migration.py
+          git add control/legacy-release-migration.json control/unified-repository.json
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "architecture: retire dataset-v2 migration and purge plumbing"
-          for attempt in 1 2 3 4 5 6; do
+          git commit -m "data: finish purge and retire dataset-v2 migration plumbing"
+
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
             if git pull --rebase origin main && git push origin HEAD:main; then
               exit 0
             fi
-            sleep $((attempt * 3))
+            sleep $((attempt * 5))
           done
-          exit 61
+          echo "Cleanup succeeded but final state commit could not be published." >&2
+          exit 51
