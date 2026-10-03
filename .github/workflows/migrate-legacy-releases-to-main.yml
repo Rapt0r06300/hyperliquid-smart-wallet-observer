@@ -99,34 +99,49 @@ jobs:
           absent=0
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
-            if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
-              deleted=$((deleted+1))
-            else
+            success=0
+            for attempt in 1 2 3 4 5 6; do
+              if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
+                deleted=$((deleted+1))
+                success=1
+                break
+              fi
               msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
               if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
                 absent=$((absent+1))
-              else
-                printf '%s\n' "$msg" >&2
-                exit 31
+                success=1
+                break
               fi
-            fi
+              if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary'; then
+                sleep_seconds=$((attempt * 30))
+                echo "Write throttle for $tag; retry $attempt after backoff."
+                sleep "$sleep_seconds"
+                continue
+              fi
+              printf '%s\n' "$msg" >&2
+              exit 31
+            done
+            test "$success" -eq 1
+            sleep 8
           done < /tmp/imported-tags.txt
           test $((deleted+absent)) -eq 16
           echo "cleanup_result deleted=$deleted already_absent=$absent total=16"
 
-      - name: Verify imported releases are absent
+      - name: Verify imported releases are absent with one catalog read
         shell: bash
         run: |
           set -euo pipefail
-          present=0
-          while IFS= read -r tag; do
-            [ -n "$tag" ] || continue
-            if gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
-              echo "still present: $tag" >&2
-              present=$((present+1))
-            fi
-          done < /tmp/imported-tags.txt
-          test "$present" -eq 0
+          gh release list --repo "$TARGET_REPOSITORY" --limit 100000 --json tagName > /tmp/target-releases.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          current={r["tagName"] for r in json.loads(Path("/tmp/target-releases.json").read_text())}
+          imported=set(Path("/tmp/imported-tags.txt").read_text().splitlines())
+          left=sorted(imported & current)
+          if left:
+              raise SystemExit("Imported releases still present: " + ", ".join(left))
+          print("verified_absent=16")
+          PY
 
       - name: Persist fresh-only policy and retire migration code
         shell: bash
