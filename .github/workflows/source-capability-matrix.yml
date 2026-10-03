@@ -66,11 +66,29 @@ jobs:
           echo "SOURCE_CAPABILITY_NATIVE_ROOT=$ROOT" >> "$GITHUB_ENV"
           mkdir -p "$ROOT"
           python tools/collecter_native_venues.py             --root "$ROOT"             --max-symbols 2             --duration-s 12
+      - name: Bounded HL/Binance public-network smoke
+        continue-on-error: true
+        env:
+          PYTHONPATH: src:tools:.
+          ALINA_COLLECTOR_VERSION: "${{ github.sha }}"
+        run: |
+          ROOT="$RUNNER_TEMP/source-capability-bbo-$GITHUB_RUN_ID"
+          echo "SOURCE_CAPABILITY_BBO_ROOT=$ROOT" >> "$GITHUB_ENV"
+          mkdir -p "$ROOT"
+          python tools/collecter_bbo.py \
+            --root "$ROOT" \
+            --coins BTC,ETH \
+            --duration-s 12
       - name: Capture GitHub-hosted runtime evidence
         env:
           PYTHONPATH: src:tools:.
         run: |
-          python tools/probe_source_capabilities.py             --native-heartbeat "$SOURCE_CAPABILITY_NATIVE_ROOT/runtime/data/native_venues_heartbeat.json"             --output docs/source-capability-runtime.json             --github-sha "$GITHUB_SHA"             --github-run-id "$GITHUB_RUN_ID"
+          python tools/probe_source_capabilities.py \
+            --native-heartbeat "$SOURCE_CAPABILITY_NATIVE_ROOT/runtime/data/native_venues_heartbeat.json" \
+            --bbo-heartbeat "$SOURCE_CAPABILITY_BBO_ROOT/runtime/data/bbo_heartbeat.json" \
+            --output docs/source-capability-runtime.json \
+            --github-sha "$GITHUB_SHA" \
+            --github-run-id "$GITHUB_RUN_ID"
       - name: Generate conservative capability matrix
         run: |
           python tools/generate_source_capabilities.py             --runtime-evidence docs/source-capability-runtime.json

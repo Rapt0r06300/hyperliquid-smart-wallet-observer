@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +21,14 @@ from typing import Callable, Mapping
 
 VENUES = ("hyperliquid", "binance", "bybit", "okx", "gate", "bitget")
 NATIVE_VENUES = ("bybit", "okx", "gate", "bitget")
+BYBIT_TIME_URLS = (
+    "https://api.bybit.com/v5/market/time",
+    "https://api.bytick.com/v5/market/time",
+)
+RUNNER_IP_URLS = (
+    "https://api64.ipify.org?format=json",
+    "https://api.ipify.org?format=json",
+)
 CAPABILITIES = (
     "trades",
     "bbo",
@@ -57,6 +67,63 @@ def _request_json(
         return json.loads(response.read().decode("utf-8-sig"))
 
 
+def _exception_detail(exc: Exception) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        body = ""
+        try:
+            body = exc.read(512).decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        body = " ".join(body.split())[:240]
+        return f"HTTP_{exc.code}" + (f":{body}" if body else "")
+    return f"{type(exc).__name__}:{exc}"[:300]
+
+
+def _probe_runner_network(request_json: Callable[..., object]) -> dict[str, object]:
+    errors: list[str] = []
+    for url in RUNNER_IP_URLS:
+        try:
+            payload = request_json(url, timeout=4.0)
+            raw_ip = payload.get("ip") if isinstance(payload, dict) else None
+            public_ip = str(raw_ip or "").strip()
+            ipaddress.ip_address(public_ip)
+        except Exception as exc:
+            errors.append(f"{url}:{_exception_detail(exc)}")
+            continue
+        return {
+            "status": "OBSERVED",
+            "public_ip": public_ip,
+            "source_url": url,
+        }
+    return {
+        "status": "UNAVAILABLE",
+        "public_ip": None,
+        "source_url": None,
+        "error": " | ".join(errors)[:1000],
+    }
+
+
+def _probe_bybit(request_json: Callable[..., object]) -> tuple[bool, str]:
+    errors: list[str] = []
+    for url in BYBIT_TIME_URLS:
+        try:
+            payload = request_json(url)
+            if not isinstance(payload, dict) or int(payload.get("retCode", -1)) != 0:
+                raise ValueError("BYBIT_TIME_INVALID")
+            result = payload.get("result")
+            valid_time = (
+                isinstance(result, dict)
+                and bool(result.get("timeSecond") or result.get("timeNano"))
+            ) or bool(payload.get("time"))
+            if not valid_time:
+                raise ValueError("BYBIT_TIME_MISSING")
+            host = url.split("/", 3)[2]
+            return True, f"BYBIT_TIME_OK:{host}"
+        except Exception as exc:
+            errors.append(f"{url}:{_exception_detail(exc)}")
+    return False, "BYBIT_UNAVAILABLE:" + " | ".join(errors)[:900]
+
+
 def _probe_hyperliquid(request_json: Callable[..., object]) -> tuple[bool, str]:
     try:
         payload = request_json(
@@ -80,10 +147,12 @@ def _probe_binance(request_json: Callable[..., object]) -> tuple[bool, str]:
             return False, "BINANCE_TIME_INVALID"
         return True, "BINANCE_TIME_OK"
     except Exception as exc:  # network evidence is fail-closed
-        return False, f"BINANCE_UNAVAILABLE:{type(exc).__name__}"
+        return False, f"BINANCE_UNAVAILABLE:{_exception_detail(exc)}"
 
 
-def _load_native_heartbeat(path: Path) -> dict[str, object]:
+def _load_json(path: Path | None) -> dict[str, object]:
+    if path is None:
+        return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
@@ -91,34 +160,94 @@ def _load_native_heartbeat(path: Path) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
+def _load_native_heartbeat(path: Path) -> dict[str, object]:
+    return _load_json(path)
+
+
 def build_receipt(
     *,
     native_heartbeat: Path,
     github_sha: str,
     github_run_id: str,
+    bbo_heartbeat: Path | None = None,
     request_json: Callable[..., object] = _request_json,
     now_utc: str | None = None,
 ) -> dict[str, object]:
     observed_at = now_utc or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     hb = _load_native_heartbeat(native_heartbeat)
+    bbo_hb = _load_json(bbo_heartbeat)
     last_event = hb.get("last_event_ms") if isinstance(hb.get("last_event_ms"), dict) else {}
+    coordinator_health = (
+        hb.get("coordinator_health")
+        if isinstance(hb.get("coordinator_health"), dict)
+        else {}
+    )
+    discovery_errors = (
+        coordinator_health.get("discovery_errors")
+        if isinstance(coordinator_health.get("discovery_errors"), dict)
+        else {}
+    )
+    transport_errors = (
+        coordinator_health.get("transport_errors")
+        if isinstance(coordinator_health.get("transport_errors"), dict)
+        else {}
+    )
 
+    runner_network = _probe_runner_network(request_json)
     hl_ok, hl_reason = _probe_hyperliquid(request_json)
-    bin_ok, bin_reason = _probe_binance(request_json)
+    bin_rest_ok, bin_rest_reason = _probe_binance(request_json)
+    bybit_rest_ok, bybit_rest_reason = _probe_bybit(request_json)
 
     venues: dict[str, object] = {}
-    for venue, ok, reason in (
-        ("hyperliquid", hl_ok, hl_reason),
-        ("binance", bin_ok, bin_reason),
-    ):
-        runtime = "HEALTHY" if ok else "DEGRADED"
-        venues[venue] = {
-            "runtime_status": runtime,
-            "reason": reason,
-            "observed_at_utc": observed_at,
-            "network_observed": ok,
-            "capability_runtime": {name: runtime for name in CAPABILITIES},
-        }
+    hl_runtime = "HEALTHY" if hl_ok else "DEGRADED"
+    venues["hyperliquid"] = {
+        "runtime_status": hl_runtime,
+        "reason": hl_reason,
+        "observed_at_utc": observed_at,
+        "network_observed": hl_ok,
+        "capability_runtime": {name: hl_runtime for name in CAPABILITIES},
+    }
+
+    bbo_expected = bbo_heartbeat is not None
+    frames_bbo = int(bbo_hb.get("frames_bookticker") or 0)
+    frames_trades = int(bbo_hb.get("frames_trades") or 0)
+    frames_l2 = int(bbo_hb.get("binance_l2_publications") or 0)
+    bin_ws_ok = frames_bbo > 0 and frames_trades > 0
+    if bbo_expected:
+        bin_ok = bin_ws_ok
+        bin_reason = (
+            f"BINANCE_WS_OBSERVED:bbo={frames_bbo}:trades={frames_trades}:l2={frames_l2}"
+            if bin_ws_ok
+            else (
+                "BINANCE_WS_NOT_OBSERVED:"
+                f"bbo={frames_bbo}:trades={frames_trades}:l2={frames_l2};"
+                f"rest={bin_rest_reason}"
+            )
+        )
+    else:
+        bin_ok = bin_rest_ok
+        bin_reason = bin_rest_reason
+    bin_runtime = "HEALTHY" if bin_ok else "DEGRADED"
+    bin_caps = {name: bin_runtime for name in CAPABILITIES}
+    if bbo_expected:
+        bin_caps["bbo"] = "HEALTHY" if frames_bbo > 0 else "DEGRADED"
+        bin_caps["trades"] = "HEALTHY" if frames_trades > 0 else "DEGRADED"
+        bin_caps["l2"] = "HEALTHY" if frames_l2 > 0 else "DEGRADED"
+        bin_caps["clock_sync"] = "HEALTHY" if bin_rest_ok else "DEGRADED"
+    venues["binance"] = {
+        "runtime_status": bin_runtime,
+        "reason": bin_reason,
+        "observed_at_utc": observed_at,
+        "network_observed": bin_ok,
+        "rest_probe_observed": bin_rest_ok,
+        "rest_probe_reason": bin_rest_reason,
+        "ws_frames": {
+            "bbo": frames_bbo,
+            "trades": frames_trades,
+            "l2_publications": frames_l2,
+        },
+        "capability_runtime": bin_caps,
+    }
 
     for venue in NATIVE_VENUES:
         event_ms = int(last_event.get(venue) or 0)
@@ -129,6 +258,15 @@ def build_receipt(
             if ok
             else "NATIVE_EVENT_NOT_OBSERVED_ON_GITHUB_HOSTED_SMOKE"
         )
+        if venue == "bybit" and not ok:
+            details = [reason, f"REST={bybit_rest_reason}"]
+            discovery_error = str(discovery_errors.get("bybit") or "")
+            transport_error = str(transport_errors.get("bybit") or "")
+            if discovery_error:
+                details.append(f"DISCOVERY={discovery_error}")
+            if transport_error:
+                details.append(f"WS={transport_error}")
+            reason = ";".join(details)[:1800]
         venues[venue] = {
             "runtime_status": runtime,
             "reason": reason,
@@ -137,6 +275,9 @@ def build_receipt(
             "last_event_ms": event_ms,
             "capability_runtime": {name: runtime for name in CAPABILITIES},
         }
+        if venue == "bybit":
+            venues[venue]["rest_probe_observed"] = bybit_rest_ok
+            venues[venue]["rest_probe_reason"] = bybit_rest_reason
 
     body: dict[str, object] = {
         "schema_version": "alina.source_capability_runtime.v1",
@@ -144,6 +285,7 @@ def build_receipt(
         "github_sha": github_sha,
         "github_run_id": github_run_id,
         "runner_kind": "github-hosted",
+        "runner_network": runner_network,
         "paper_read_only": True,
         "real_execution": False,
         "native_heartbeat_present": bool(hb),
@@ -157,6 +299,7 @@ def build_receipt(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--native-heartbeat", required=True)
+    parser.add_argument("--bbo-heartbeat")
     parser.add_argument("--output", default="docs/source-capability-runtime.json")
     parser.add_argument("--github-sha", default=os.environ.get("GITHUB_SHA", "unknown"))
     parser.add_argument("--github-run-id", default=os.environ.get("GITHUB_RUN_ID", "unknown"))
@@ -164,6 +307,7 @@ def main() -> int:
 
     receipt = build_receipt(
         native_heartbeat=Path(args.native_heartbeat),
+        bbo_heartbeat=Path(args.bbo_heartbeat) if args.bbo_heartbeat else None,
         github_sha=str(args.github_sha),
         github_run_id=str(args.github_run_id),
     )

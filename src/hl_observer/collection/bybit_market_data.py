@@ -31,6 +31,7 @@ from hl_observer.collection.native_venue_market import (
 
 SCHEMA_VERSION = "alina.bybit_market_data.v1"
 REST_BASE_URL = "https://api.bybit.com"
+REST_FALLBACK_BASE_URLS = ("https://api.bytick.com",)
 PUBLIC_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 
 
@@ -320,11 +321,23 @@ class BybitPublicClient:
         self,
         *,
         rest_base_url: str = REST_BASE_URL,
+        rest_fallback_urls: Iterable[str] = REST_FALLBACK_BASE_URLS,
         ws_url: str = PUBLIC_LINEAR_WS_URL,
         orderbook_depth: int = 200,
         session_refresh_s: float = 900.0,
     ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
+        self.rest_fallback_urls = tuple(
+            dict.fromkeys(
+                str(url).rstrip("/")
+                for url in rest_fallback_urls
+                if str(url).strip()
+                and str(url).rstrip("/") != self.rest_base_url
+            )
+        )
+        self.last_rest_base_url = self.rest_base_url
+        self.last_rest_error = ""
+        self.last_ws_error = ""
         self.ws_url = ws_url
         depth = int(orderbook_depth)
         if depth not in {1, 50, 200, 1000}:
@@ -333,8 +346,15 @@ class BybitPublicClient:
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.last_instrument_metadata: list[dict[str, object]] = []
 
-    def fetch_instrument_metadata(self, *, timeout_s: float = 10.0) -> list[dict[str, object]]:
-        """Return every public linear instrument row, preserving replay-critical rules."""
+    def _rest_candidates(self) -> tuple[str, ...]:
+        return (self.rest_base_url, *self.rest_fallback_urls)
+
+    def _fetch_instrument_metadata_from(
+        self,
+        base_url: str,
+        *,
+        timeout_s: float,
+    ) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
         cursor = ""
         with httpx.Client(timeout=timeout_s) as client:
@@ -343,7 +363,7 @@ class BybitPublicClient:
                 if cursor:
                     params["cursor"] = cursor
                 response = client.get(
-                    f"{self.rest_base_url}/v5/market/instruments-info",
+                    f"{base_url}/v5/market/instruments-info",
                     params=params,
                 )
                 response.raise_for_status()
@@ -361,8 +381,28 @@ class BybitPublicClient:
                 cursor = str(result.get("nextPageCursor") or "")
                 if not cursor:
                     break
-        self.last_instrument_metadata = [dict(row) for row in rows]
         return rows
+
+    def fetch_instrument_metadata(self, *, timeout_s: float = 10.0) -> list[dict[str, object]]:
+        """Try the documented global Bybit REST domains without fabricating markets."""
+        errors: list[str] = []
+        for base_url in self._rest_candidates():
+            try:
+                rows = self._fetch_instrument_metadata_from(
+                    base_url,
+                    timeout_s=timeout_s,
+                )
+            except Exception as exc:
+                errors.append(f"{base_url}:{type(exc).__name__}:{exc}"[:500])
+                continue
+            self.last_rest_base_url = base_url
+            self.last_rest_error = ""
+            self.last_instrument_metadata = [dict(row) for row in rows]
+            return rows
+        self.last_rest_error = " | ".join(errors)[:1000]
+        raise RuntimeError(
+            f"Bybit REST discovery unavailable: {self.last_rest_error or 'unknown'}"
+        )
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         metadata = self.fetch_instrument_metadata(timeout_s=timeout_s)
@@ -370,24 +410,41 @@ class BybitPublicClient:
         return parse_bybit_linear_instruments({"result": {"list": metadata}})
 
     def server_time_ms(self, *, timeout_s: float = 5.0) -> int:
-        with httpx.Client(timeout=timeout_s) as client:
-            response = client.get(f"{self.rest_base_url}/v5/market/time")
-            response.raise_for_status()
-            payload = response.json()
-        if int(payload.get("retCode", -1)) != 0:
-            raise RuntimeError(f"Bybit time error: {payload.get('retMsg', 'unknown')}")
-        result = payload.get("result")
-        if isinstance(result, dict):
-            nano = _int(result.get("timeNano"))
-            if nano is not None:
-                return nano // 1_000_000
-            seconds = _int(result.get("timeSecond"))
-            if seconds is not None:
-                return seconds * 1_000
-        server = _int(payload.get("time"))
-        if server is None:
-            raise RuntimeError("Bybit server time missing")
-        return server
+        errors: list[str] = []
+        for base_url in self._rest_candidates():
+            try:
+                with httpx.Client(timeout=timeout_s) as client:
+                    response = client.get(f"{base_url}/v5/market/time")
+                    response.raise_for_status()
+                    payload = response.json()
+                if int(payload.get("retCode", -1)) != 0:
+                    raise RuntimeError(
+                        f"Bybit time error: {payload.get('retMsg', 'unknown')}"
+                    )
+                result = payload.get("result")
+                if isinstance(result, dict):
+                    nano = _int(result.get("timeNano"))
+                    if nano is not None:
+                        self.last_rest_base_url = base_url
+                        self.last_rest_error = ""
+                        return nano // 1_000_000
+                    seconds = _int(result.get("timeSecond"))
+                    if seconds is not None:
+                        self.last_rest_base_url = base_url
+                        self.last_rest_error = ""
+                        return seconds * 1_000
+                server = _int(payload.get("time"))
+                if server is None:
+                    raise RuntimeError("Bybit server time missing")
+                self.last_rest_base_url = base_url
+                self.last_rest_error = ""
+                return server
+            except Exception as exc:
+                errors.append(f"{base_url}:{type(exc).__name__}:{exc}"[:500])
+        self.last_rest_error = " | ".join(errors)[:1000]
+        raise RuntimeError(
+            f"Bybit REST time unavailable: {self.last_rest_error or 'unknown'}"
+        )
 
     def measure_clock_sync(self, *, timeout_s: float = 5.0):
         sent = int(time.time() * 1_000)
@@ -420,7 +477,12 @@ class BybitPublicClient:
             try:
                 connection_id = f"bybit-{uuid.uuid4().hex}"
                 session_started = time.monotonic()
-                async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
+                async with websockets.connect(
+                    self.ws_url,
+                    ping_interval=20,
+                    ping_timeout=10,
+                ) as socket:
+                    self.last_ws_error = ""
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
                     async for raw in socket:
@@ -440,7 +502,8 @@ class BybitPublicClient:
                                 return
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                self.last_ws_error = f"{type(exc).__name__}: {exc}"[:500]
                 delay = compute_backoff_delay(attempt=attempt, shard_key="bybit-public-ws")
                 attempt += 1
                 await asyncio.sleep(delay.delay_seconds)
@@ -451,6 +514,7 @@ __all__ = [
     "BybitPublicClient",
     "PUBLIC_LINEAR_WS_URL",
     "REST_BASE_URL",
+    "REST_FALLBACK_BASE_URLS",
     "SCHEMA_VERSION",
     "parse_bybit_linear_instruments",
 ]

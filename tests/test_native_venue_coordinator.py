@@ -427,3 +427,26 @@ def test_discovery_persists_gate_and_bitget_instrument_rules() -> None:
         ("gate_public_rest", "BTC_USDT"),
         ("bitget_public_rest", "ETHUSDT"),
     }
+
+
+class _BrokenBybitDiscovery:
+    last_ws_error = "InvalidStatus: HTTP 403"
+
+    def discover_usdt_perpetuals(self):
+        raise RuntimeError("HTTP 403 region/rate restriction")
+
+
+def test_discovery_failure_is_visible_in_health_instead_of_silent() -> None:
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_BrokenBybitDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        ccxt_snapshot_path=None,
+    )
+
+    assert coordinator.discover(now_s=100.0) == {}
+    health = coordinator.health(now_ms=100_000)
+    assert "HTTP 403" in health["discovery_errors"]["bybit"]
+    assert "HTTP 403" in health["transport_errors"]["bybit"]
+

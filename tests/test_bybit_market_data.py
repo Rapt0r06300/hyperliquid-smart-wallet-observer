@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import httpx
+
 from hl_observer.collection.bybit_market_data import (
     BybitMarketState,
     BybitPublicClient,
@@ -164,3 +166,64 @@ def test_bybit_discovery_retains_replay_critical_instrument_metadata(monkeypatch
     assert client.last_instrument_metadata[0]["priceFilter"]["tickSize"] == "0.1"
     assert client.last_instrument_metadata[0]["lotSizeFilter"]["qtyStep"] == "0.001"
     assert client.last_instrument_metadata[0]["fundingInterval"] == 480
+
+
+def test_bybit_discovery_falls_back_to_documented_bytick_domain(monkeypatch) -> None:
+    seen: list[str] = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, url, params=None):
+            seen.append(str(url))
+            if str(url).startswith("https://api.bybit.com"):
+                raise httpx.ConnectError("primary blocked")
+            assert str(url).startswith("https://api.bytick.com")
+            return FakeResponse(
+                {
+                    "retCode": 0,
+                    "result": {
+                        "list": [
+                            {
+                                "symbol": "BTCUSDT",
+                                "baseCoin": "BTC",
+                                "quoteCoin": "USDT",
+                                "settleCoin": "USDT",
+                                "status": "Trading",
+                                "contractType": "LinearPerpetual",
+                            }
+                        ],
+                        "nextPageCursor": "",
+                    },
+                }
+            )
+
+    monkeypatch.setattr(
+        "hl_observer.collection.bybit_market_data.httpx.Client",
+        FakeClient,
+    )
+    client = BybitPublicClient()
+
+    assert client.discover_usdt_perpetuals() == [("BTC", "BTCUSDT")]
+    assert seen[0].startswith("https://api.bybit.com")
+    assert seen[1].startswith("https://api.bytick.com")
+    assert client.last_rest_base_url == "https://api.bytick.com"
+    assert client.last_rest_error == ""
+

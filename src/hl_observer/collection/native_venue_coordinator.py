@@ -88,6 +88,7 @@ class NativeVenueCoordinator:
         self._bitget_states: dict[str, BitgetMarketState] = {}
         self._clock_sync: dict[str, dict[str, float | int | str]] = {}
         self._active_symbols: dict[str, tuple[str, ...]] = {}
+        self._discovery_errors: dict[str, str] = {}
         self._discovery_refreshes = 0
         self._universe_changes = 0
         self.ccxt_snapshot_path = Path(ccxt_snapshot_path) if ccxt_snapshot_path else None
@@ -108,11 +109,21 @@ class NativeVenueCoordinator:
                 load_native_collection_candidates(self.ccxt_snapshot_path)
             )
         discovered: dict[str, dict[str, str]] = {}
-        for venue, client in (("bybit", self.bybit_client), ("okx", self.okx_client), ("gate", self.gate_client), ("bitget", self.bitget_client)):
+        for venue, client in (
+            ("bybit", self.bybit_client),
+            ("okx", self.okx_client),
+            ("gate", self.gate_client),
+            ("bitget", self.bitget_client),
+        ):
             try:
                 rows = client.discover_usdt_perpetuals()
-            except Exception:
+            except Exception as exc:
+                self._discovery_errors[venue] = (
+                    f"{type(exc).__name__}: {exc}"
+                )[:1000]
                 rows = []
+            else:
+                self._discovery_errors.pop(venue, None)
             for coin, exchange_symbol in rows:
                 base = str(coin or "").strip().upper()
                 symbol = str(exchange_symbol or "").strip().upper()
@@ -488,6 +499,22 @@ class NativeVenueCoordinator:
             "symbol_shard_index": self.symbol_shard_index,
             "symbol_shard_count": self.symbol_shard_count,
             "clock_sync": {venue: dict(row) for venue, row in self._clock_sync.items()},
+            "discovery_errors": dict(self._discovery_errors),
+            "transport_errors": {
+                venue: error
+                for venue, client in (
+                    ("bybit", self.bybit_client),
+                    ("okx", self.okx_client),
+                    ("gate", self.gate_client),
+                    ("bitget", self.bitget_client),
+                )
+                if (error := str(getattr(client, "last_ws_error", "") or ""))
+            },
+            "rest_endpoints": {
+                "bybit": str(
+                    getattr(self.bybit_client, "last_rest_base_url", "") or ""
+                ),
+            },
             "raw_tick_writer_enabled": self.tick_writer is not None,
             "active_symbols": {
                 venue: list(symbols)

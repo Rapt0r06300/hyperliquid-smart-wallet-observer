@@ -80,3 +80,76 @@ def test_runtime_receipt_keeps_http_failure_degraded(tmp_path: Path) -> None:
         receipt["venues"][venue]["runtime_status"] == "DEGRADED"
         for venue in ("bybit", "okx", "gate", "bitget")
     )
+
+
+def test_runtime_receipt_records_runner_ip_and_uses_real_binance_ws_evidence(
+    tmp_path: Path,
+) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 5,
+                "last_event_ms": {
+                    "bybit": 0,
+                    "okx": 1,
+                    "gate": 2,
+                    "bitget": 3,
+                },
+                "coordinator_health": {
+                    "discovery_errors": {
+                        "bybit": "RuntimeError: primary endpoint blocked",
+                    },
+                    "transport_errors": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bbo = tmp_path / "bbo.json"
+    bbo.write_text(
+        json.dumps(
+            {
+                "frames_bookticker": 12,
+                "frames_trades": 34,
+                "binance_l2_publications": 5,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            raise OSError("REST blocked")
+        if "api.bybit.com" in url:
+            raise OSError("primary blocked")
+        if "api.bytick.com" in url:
+            return {
+                "retCode": 0,
+                "result": {"timeSecond": "1790000000"},
+            }
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        bbo_heartbeat=bbo,
+        github_sha="c" * 40,
+        github_run_id="99",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    assert receipt["runner_network"]["public_ip"] == "20.42.1.2"
+    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["ws_frames"]["bbo"] == 12
+    assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["capability_runtime"]["clock_sync"] == "DEGRADED"
+    assert receipt["venues"]["bybit"]["runtime_status"] == "DEGRADED"
+    assert receipt["venues"]["bybit"]["rest_probe_observed"] is True
+    assert "api.bytick.com" in receipt["venues"]["bybit"]["rest_probe_reason"]
+
