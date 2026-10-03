@@ -41,7 +41,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Enumerate all canonical Releases and select a bounded new batch
+      - name: Download only new production V2 run manifests (all Releases, bounded batch)
         shell: bash
         run: |
           set -euo pipefail
