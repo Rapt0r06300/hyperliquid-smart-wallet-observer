@@ -3,8 +3,9 @@
 Implements the official snapshot + diff-depth reconstruction protocol without any
 authenticated/account endpoint. WebSocket frames are stamped at receipt with wall and
 monotonic clocks, persisted as replayable TickEnvelope evidence, and reconstructed by
-BinanceDepthOrchestrator. A reconnect or continuity break always requires a new REST
-snapshot before the book becomes exploitable again.
+BinanceDepthOrchestrator. A reconnect or continuity break always requires a fresh public
+snapshot before the book becomes exploitable again. REST is preferred; Binance's public
+WebSocket API depth request is the full-depth fallback when REST egress is restricted.
 """
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/public/stream"
+WS_API_URL = "wss://ws-fapi.binance.com/ws-fapi/v1"
 SCHEMA_VERSION = "alina.binance_usdm_l2_live.v1"
 
 
@@ -69,6 +71,7 @@ class BinanceDepthLiveCollector:
         *,
         rest_base_url: str = REST_BASE_URL,
         ws_base_url: str = WS_BASE_URL,
+        ws_api_url: str = WS_API_URL,
         snapshot_limit: int = 1000,
         publication_depth: int = 200,
         partial_fallback_levels: int = 20,
@@ -82,6 +85,7 @@ class BinanceDepthLiveCollector:
         )
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_base_url = ws_base_url.rstrip("/")
+        self.ws_api_url = ws_api_url.rstrip("/")
         self.snapshot_limit = int(snapshot_limit)
         if self.snapshot_limit not in {5, 10, 20, 50, 100, 500, 1000}:
             raise ValueError("unsupported Binance snapshot_limit")
@@ -103,8 +107,11 @@ class BinanceDepthLiveCollector:
         }
         self._resync_pending: set[str] = set()
         self._rest_unavailable_symbols: set[str] = set()
+        self._full_snapshot_unavailable_symbols: set[str] = set()
         self.frames_received = 0
         self.snapshots_received = 0
+        self.ws_api_snapshots_received = 0
+        self.ws_api_failures = 0
         self.resync_failures = 0
         self.publications = 0
         self.partial_fallback_frames = 0
@@ -133,13 +140,65 @@ class BinanceDepthLiveCollector:
             raise KeyError(key)
         return self.states[key]
 
+    async def _fetch_ws_api_snapshot(
+        self,
+        symbol: str,
+    ) -> tuple[dict[str, Any], int, int, int]:
+        """Fetch a public full-depth snapshot through Binance's WebSocket API."""
+        request_id = f"alina-depth-{uuid.uuid4().hex}"
+        send_wall_ms = int(time.time() * 1_000)
+        async with websockets.connect(
+            self.ws_api_url,
+            ping_interval=20,
+            ping_timeout=10,
+            close_timeout=5,
+            open_timeout=10,
+            max_size=2**23,
+        ) as socket:
+            await socket.send(
+                json.dumps(
+                    {
+                        "id": request_id,
+                        "method": "depth",
+                        "params": {
+                            "symbol": symbol,
+                            "limit": self.snapshot_limit,
+                        },
+                    }
+                )
+            )
+            raw = await asyncio.wait_for(socket.recv(), timeout=10.0)
+        receive_mono_ns = time.monotonic_ns()
+        receive_wall_ms = int(time.time() * 1_000)
+        response = json.loads(raw)
+        if not isinstance(response, Mapping):
+            raise RuntimeError("BINANCE_WS_API_DEPTH_INVALID_RESPONSE")
+        if str(response.get("id") or "") != request_id:
+            raise RuntimeError("BINANCE_WS_API_DEPTH_ID_MISMATCH")
+        if int(response.get("status") or 0) != 200:
+            raise RuntimeError(
+                f"BINANCE_WS_API_DEPTH_STATUS_{int(response.get('status') or 0)}"
+            )
+        result = response.get("result")
+        if not isinstance(result, Mapping):
+            raise RuntimeError("BINANCE_WS_API_DEPTH_RESULT_MISSING")
+        payload = dict(result)
+        if not isinstance(payload.get("bids"), list) or not isinstance(payload.get("asks"), list):
+            raise RuntimeError("BINANCE_WS_API_DEPTH_BOOK_MISSING")
+        return payload, send_wall_ms, receive_wall_ms, receive_mono_ns
+
     async def resync_symbol(self, symbol: str, *, connection_id: str) -> dict[str, Any] | None:
-        """Fetch one public REST snapshot and replay all already-buffered WS diffs."""
+        """Fetch a public snapshot and replay all already-buffered WS diffs."""
         key = str(symbol).strip().upper()
         state = self.states.get(key)
         if state is None:
             return None
+
+        snapshot_source = "rest"
+        snapshot_url = f"{self.rest_base_url}/fapi/v1/depth"
+        snapshot_transport = "https"
         send_wall_ms = int(time.time() * 1_000)
+        rest_error = ""
         try:
             response = await self.http.get(
                 "/fapi/v1/depth",
@@ -147,27 +206,53 @@ class BinanceDepthLiveCollector:
             )
             response.raise_for_status()
             payload = response.json()
+            receive_mono_ns = time.monotonic_ns()
+            receive_wall_ms = int(time.time() * 1_000)
+            self._rest_unavailable_symbols.discard(key)
         except Exception as exc:
-            self.resync_failures += 1
+            rest_error = f"{type(exc).__name__}: {exc}"[:500]
             self._rest_unavailable_symbols.add(key)
-            self.last_error = f"{type(exc).__name__}: {exc}"[:500]
-            return None
-        receive_mono_ns = time.monotonic_ns()
-        receive_wall_ms = int(time.time() * 1_000)
+            try:
+                (
+                    payload,
+                    send_wall_ms,
+                    receive_wall_ms,
+                    receive_mono_ns,
+                ) = await self._fetch_ws_api_snapshot(key)
+            except Exception as ws_exc:
+                self.ws_api_failures += 1
+                self.resync_failures += 1
+                self._full_snapshot_unavailable_symbols.add(key)
+                self.last_error = (
+                    f"REST={rest_error};WS_API={type(ws_exc).__name__}: {ws_exc}"
+                )[:1000]
+                return None
+            snapshot_source = "websocket_api"
+            snapshot_url = self.ws_api_url
+            snapshot_transport = "websocket"
+            self.ws_api_snapshots_received += 1
+            self._full_snapshot_unavailable_symbols.discard(key)
 
-        # If the socket changed while HTTP was in flight, this snapshot belongs to
-        # the old epoch and must not re-anchor the new connection.
+        # If the diff-stream socket changed while the snapshot request was in flight,
+        # the snapshot belongs to the old epoch and must not re-anchor the new connection.
         if state.connection_id not in {None, connection_id}:
             return None
         try:
             last_update_id = int(payload["lastUpdateId"])
         except (KeyError, TypeError, ValueError, OverflowError):
             self.resync_failures += 1
+            self._full_snapshot_unavailable_symbols.add(key)
             self.last_error = "INVALID_SNAPSHOT_LAST_UPDATE_ID"
             return None
 
         bids = payload.get("bids") if isinstance(payload.get("bids"), list) else []
         asks = payload.get("asks") if isinstance(payload.get("asks"), list) else []
+        if not bids or not asks:
+            self.resync_failures += 1
+            self._full_snapshot_unavailable_symbols.add(key)
+            self.last_error = "EMPTY_SNAPSHOT_BOOK"
+            return None
+
         exchange_ts_ms = _int_or_none(payload.get("T")) or _int_or_none(payload.get("E"))
         result = state.sur_snapshot(
             last_update_id=last_update_id,
@@ -179,7 +264,7 @@ class BinanceDepthLiveCollector:
             connection_id=connection_id,
         )
         self.snapshots_received += 1
-        self._rest_unavailable_symbols.discard(key)
+        self._full_snapshot_unavailable_symbols.discard(key)
         self._emit_tick(
             TickEnvelope(
                 source_id="binance_usdm_public",
@@ -194,14 +279,16 @@ class BinanceDepthLiveCollector:
                 sequence=last_update_id,
                 gap_count=0,
                 provenance={
-                    "url": f"{self.rest_base_url}/fapi/v1/depth",
+                    "url": snapshot_url,
                     "network": "mainnet",
                     "access": "read_only",
-                    "transport": "https",
+                    "transport": snapshot_transport,
                     "authenticated": False,
+                    "snapshot_source": snapshot_source,
                     "snapshot_limit": self.snapshot_limit,
                     "request_send_wall_ms": send_wall_ms,
                     "request_receive_wall_ms": receive_wall_ms,
+                    "rest_error_before_fallback": rest_error or None,
                     "gap_count_semantics": "event_delta",
                 },
                 parsed_summary={
@@ -215,6 +302,7 @@ class BinanceDepthLiveCollector:
                         if bool(result["needs_snapshot"])
                         else "EXPLOITABLE"
                     ),
+                    "snapshot_source": snapshot_source,
                     "data_gate_ready": False,
                 },
             )
@@ -263,7 +351,7 @@ class BinanceDepthLiveCollector:
                             )
                             if is_partial_fallback_frame:
                                 self.partial_fallback_frames += 1
-                                if symbol in self._rest_unavailable_symbols:
+                                if symbol in self._full_snapshot_unavailable_symbols:
                                     self._emit_partial_fallback(
                                         symbol,
                                         frame,
@@ -353,12 +441,17 @@ class BinanceDepthLiveCollector:
             "symbols": len(self.symbols),
             "frames_received": self.frames_received,
             "snapshots_received": self.snapshots_received,
+            "ws_api_snapshots_received": self.ws_api_snapshots_received,
+            "ws_api_failures": self.ws_api_failures,
             "resync_failures": self.resync_failures,
             "publications": self.publications,
             "partial_fallback_frames": self.partial_fallback_frames,
             "partial_fallback_publications": self.partial_fallback_publications,
             "partial_fallback_levels": self.partial_fallback_levels,
             "rest_unavailable_symbols": sorted(self._rest_unavailable_symbols),
+            "full_snapshot_unavailable_symbols": sorted(
+                self._full_snapshot_unavailable_symbols
+            ),
             "reconnects": self.reconnects,
             "pending_resyncs": len(self._resync_pending),
             "books_exploitable": sum(
@@ -515,6 +608,7 @@ __all__ = [
     "BinanceDepthLiveCollector",
     "REST_BASE_URL",
     "SCHEMA_VERSION",
+    "WS_API_URL",
     "WS_BASE_URL",
     "parse_depth_frame",
 ]
