@@ -35,7 +35,19 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check whether historical migration is already closed
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMPLETE="$(python -c 'import json; print(str(bool(json.load(open("control/unified-repository.json")).get("legacy_collection_state_imported"))).lower())')"
+          echo "complete=$COMPLETE" >> "$GITHUB_OUTPUT"
+          if [ "$COMPLETE" = "true" ]; then
+            echo "Historical migration already complete; no external storage will be queried."
+          fi
+
       - name: Migrate a bounded historical release batch into canonical Alina storage
+        if: steps.gate.outputs.complete != 'true'
         id: migrate
         shell: bash
         run: |
@@ -47,6 +59,7 @@ jobs:
           echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
 
       - name: Persist verified migration checkpoint
+        if: steps.gate.outputs.complete != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -68,14 +81,14 @@ jobs:
           exit 1
 
       - name: Continue migration on GitHub-hosted runner
-        if: steps.migrate.outputs.status != 'COMPLETE'
+        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status != 'COMPLETE'
         shell: bash
         run: |
           set -euo pipefail
           gh workflow run migrate-legacy-releases-to-main.yml             --repo "$GITHUB_REPOSITORY"             --ref main
 
       - name: Rebuild canonical catalog after full migration
-        if: steps.migrate.outputs.status == 'COMPLETE'
+        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status == 'COMPLETE'
         shell: bash
         run: |
           set -euo pipefail
