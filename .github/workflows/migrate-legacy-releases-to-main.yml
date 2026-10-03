@@ -96,3 +96,24 @@ jobs:
           gh workflow run backfill-exact-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
           gh workflow run backfill-global-unique-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
           gh workflow run uncompressed-size-v2.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Retire one-time migration plumbing after certified completion
+        if: steps.gate.outputs.complete != 'true' && steps.migrate.outputs.status == 'COMPLETE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm -f \
+            .github/workflows/migrate-legacy-releases-to-main.yml \
+            tools/migrate_legacy_releases_to_main.py \
+            tests/test_legacy_release_migration.py
+          git commit -m "architecture: retire completed historical migration plumbing"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "Unable to retire completed migration plumbing." >&2
+          exit 1
