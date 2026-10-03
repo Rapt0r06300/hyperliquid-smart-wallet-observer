@@ -5,19 +5,21 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/migrate-legacy-releases-to-main.yml'
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
-  group: alina-historical-release-migration
-  cancel-in-progress: true
+  group: alina-dataset-v2-purge
+  cancel-in-progress: false
 
 jobs:
-  purge:
+  purge-one:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
       TARGET_REPOSITORY: ${{ github.repository }}
@@ -28,7 +30,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Validate frozen cleanup set
+      - name: Delete at most one frozen imported release
+        id: purge
         shell: bash
         run: |
           set -euo pipefail
@@ -37,10 +40,7 @@ jobs:
           from pathlib import Path
           s=json.loads(Path("control/legacy-release-migration.json").read_text())
           assert s.get("target_repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
-          assert s.get("migrated_releases")==16
-          assert s.get("next_index")==16
-          assert s.get("last_completed_tag")=="data-v2-35696462284-s0"
-          assert s.get("status")=="IN_PROGRESS"
+          assert s.get("historical_migration_enabled") is False
           tags=[
             "copy-vault-v2-35696114415-s1",
             "copy-vault-v2-35696114415-s2",
@@ -59,134 +59,114 @@ jobs:
             "copy-vault-v2-35696508705-s2",
             "data-v2-35696462284-s0",
           ]
-          assert len(tags)==16 and len(set(tags))==16
-          assert tags[-1]==s["last_completed_tag"]
-          Path("/tmp/imported-tags.txt").write_text("\n".join(tags)+"\n")
-          print("\n".join(tags))
+          i=int(s.get("cleanup_index") or 0)
+          assert 0 <= i <= len(tags)
+          p=Path("/tmp/purge.env")
+          if i >= len(tags):
+              p.write_text("DONE=true\n")
+          else:
+              p.write_text(f"DONE=false\nINDEX={i}\nTAG={tags[i]}\n")
           PY
+          cat /tmp/purge.env >> "$GITHUB_OUTPUT"
 
-      - name: Wait only if GitHub core quota is exhausted
-        shell: bash
-        run: |
-          set -euo pipefail
-          for attempt in $(seq 1 20); do
-            payload="$(gh api rate_limit 2>/dev/null || true)"
-            if [ -n "$payload" ]; then
-              remaining="$(python -c 'import json,sys; print(json.load(sys.stdin)["resources"]["core"]["remaining"])' <<<"$payload")"
-              reset="$(python -c 'import json,sys; print(json.load(sys.stdin)["resources"]["core"]["reset"])' <<<"$payload")"
-              if [ "$remaining" -ge 40 ]; then
-                echo "GitHub core quota available: $remaining"
-                exit 0
-              fi
-              now="$(date +%s)"
-              wait_seconds=$((reset-now+5))
-              if [ "$wait_seconds" -lt 5 ]; then wait_seconds=5; fi
-              if [ "$wait_seconds" -gt 300 ]; then wait_seconds=300; fi
-              echo "GitHub core quota low ($remaining); bounded wait."
-              sleep "$wait_seconds"
-            else
-              sleep 15
-            fi
-          done
-          echo "GitHub API quota did not recover in bounded wait." >&2
-          exit 21
+          if grep -q '^DONE=true$' /tmp/purge.env; then
+            exit 0
+          fi
 
-      - name: Purge exactly the sixteen imported releases
-        shell: bash
-        run: |
-          set -euo pipefail
-          deleted=0
-          absent=0
-          while IFS= read -r tag; do
-            [ -n "$tag" ] || continue
-            success=0
-            for attempt in 1 2 3 4 5 6; do
-              if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
-                deleted=$((deleted+1))
-                success=1
-                break
-              fi
-              msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
-              if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
-                absent=$((absent+1))
-                success=1
-                break
-              fi
-              if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary'; then
-                sleep_seconds=$((attempt * 30))
-                echo "Write throttle for $tag; retry $attempt after backoff."
-                sleep "$sleep_seconds"
-                continue
-              fi
-              printf '%s\n' "$msg" >&2
-              exit 31
-            done
-            test "$success" -eq 1
-            sleep 8
-          done < /tmp/imported-tags.txt
-          test $((deleted+absent)) -eq 16
-          echo "cleanup_result deleted=$deleted already_absent=$absent total=16"
+          tag="$(grep '^TAG=' /tmp/purge.env | cut -d= -f2-)"
+          if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes > /tmp/delete.out 2> /tmp/delete.err; then
+            echo "RESULT=deleted" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - name: Verify imported releases are absent with one catalog read
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release list --repo "$TARGET_REPOSITORY" --limit 100000 --json tagName > /tmp/target-releases.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          current={r["tagName"] for r in json.loads(Path("/tmp/target-releases.json").read_text())}
-          imported=set(Path("/tmp/imported-tags.txt").read_text().splitlines())
-          left=sorted(imported & current)
-          if left:
-              raise SystemExit("Imported releases still present: " + ", ".join(left))
-          print("verified_absent=16")
-          PY
+          msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
+          if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
+            echo "RESULT=absent" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s' "$msg" | grep -Eqi 'rate limit|HTTP 403|secondary'; then
+            echo "GitHub secondary release-write throttle is still active; cursor unchanged."
+            echo "RESULT=throttled" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$msg" >&2
+          exit 31
 
-      - name: Persist fresh-only policy and retire migration code
+      - name: Advance durable purge cursor
+        if: steps.purge.outputs.DONE != 'true' && steps.purge.outputs.RESULT != 'throttled'
         shell: bash
+        env:
+          INDEX: ${{ steps.purge.outputs.INDEX }}
+          RESULT: ${{ steps.purge.outputs.RESULT }}
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           sp=Path("control/legacy-release-migration.json")
           up=Path("control/unified-repository.json")
           s=json.loads(sp.read_text())
-          s.update(
-              status="ABORTED_CLEANED",
-              cleanup_status="COMPLETE",
-              historical_migration_enabled=False,
-              imported_releases_remaining=0,
-              removed_imported_releases=16,
-              removed_imported_assets=int(s.get("copied_assets") or 0),
-              removed_imported_bytes=int(s.get("copied_bytes") or 0),
-              pending_releases=0,
-          )
+          i=int(os.environ["INDEX"])
+          nxt=i+1
+          s["cleanup_index"]=nxt
+          s["imported_releases_remaining"]=16-nxt
+          s["removed_imported_releases"]=nxt
+          s["last_cleanup_result"]=os.environ["RESULT"]
+          s["cleanup_status"]="COMPLETE" if nxt==16 else "IN_PROGRESS"
+          s["status"]="ABORTED_CLEANED" if nxt==16 else "ABORTED_PURGE_PENDING"
+          s["pending_releases"]=0
           sp.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
           u=json.loads(up.read_text())
-          u.update(
-              fresh_dataset_state=True,
-              legacy_collection_state_imported=False,
-              historical_release_migration_status="DISABLED_CLEAN",
-              historical_source_deletion_safe=False,
-              historical_external_import_allowed=False,
-              dataset_v2_import_allowed=False,
-              legacy_imported_releases_present=False,
-              external_dataset_repository_required=False,
-              legacy_release_mirror_required=False,
-          )
+          u["fresh_dataset_state"]=True
+          u["legacy_collection_state_imported"]=False
+          u["historical_external_import_allowed"]=False
+          u["dataset_v2_import_allowed"]=False
+          u["collection_origin_policy"]="fresh-main-only"
+          u["legacy_imported_release_count"]=16-nxt
+          u["legacy_imported_releases_present"]=nxt<16
+          u["historical_release_migration_status"]="DISABLED_CLEAN" if nxt==16 else "DISABLED_PURGE_PENDING"
           up.write_text(json.dumps(u,indent=2,sort_keys=True)+"\n")
           PY
-          git rm -f tools/migrate_legacy_releases_to_main.py tests/test_legacy_release_migration.py
+
           git add control/legacy-release-migration.json control/unified-repository.json
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "data: purge dataset-v2 imports and enforce fresh-only collection"
-          for attempt in 1 2 3 4 5 6 7 8; do
+          git commit -m "data: advance dataset-v2 purge cursor"
+          for attempt in 1 2 3 4 5 6; do
             if git pull --rebase origin main && git push origin HEAD:main; then
               exit 0
             fi
             sleep $((attempt * 3))
           done
           exit 51
+
+      - name: Retire purge plumbing after 16 of 16
+        if: steps.purge.outputs.DONE == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          s=json.loads(Path("control/legacy-release-migration.json").read_text())
+          assert int(s.get("cleanup_index") or 0)==16
+          assert int(s.get("imported_releases_remaining") or 0)==0
+          u=json.loads(Path("control/unified-repository.json").read_text())
+          assert u.get("dataset_v2_import_allowed") is False
+          assert u.get("historical_external_import_allowed") is False
+          assert u.get("legacy_imported_releases_present") is False
+          PY
+          git rm -f \
+            .github/workflows/migrate-legacy-releases-to-main.yml \
+            tools/migrate_legacy_releases_to_main.py \
+            tests/test_legacy_release_migration.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "architecture: retire dataset-v2 migration and purge plumbing"
+          for attempt in 1 2 3 4 5 6; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          exit 61
