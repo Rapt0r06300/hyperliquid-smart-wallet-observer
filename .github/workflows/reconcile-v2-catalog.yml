@@ -8,6 +8,7 @@ on:
       - 'tools/index_run_manifest.py'
       - 'tools/manifest_policy.py'
       - 'tools/check_dataset_quality.py'
+      - 'control/legacy-release-migration.json'
       - 'tests/test_dataset_policy.py'
   schedule:
     - cron: '17,47 * * * *'
@@ -24,12 +25,12 @@ concurrency:
 jobs:
   reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Checkout dataset control plane
+      - name: Checkout canonical Alina control plane
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: main
@@ -40,53 +41,75 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Download only new production V2 run manifests
+      - name: Enumerate all canonical Releases and select a bounded new batch
         shell: bash
         run: |
           set -euo pipefail
           ROOT="$RUNNER_TEMP/v2-release-manifests"
           ALL_TAGS="$RUNNER_TEMP/v2-all-release-tags.txt"
           TAGS="$RUNNER_TEMP/v2-new-release-tags.txt"
-          gh release list             --repo "$GITHUB_REPOSITORY"             --limit 1000             --json tagName             --jq '.[].tagName'             > "$ALL_TAGS"
+          gh api --paginate             "repos/${GITHUB_REPOSITORY}/releases?per_page=100"             --jq '.[].tag_name' > "$ALL_TAGS"
           python - <<'PY' "$ALL_TAGS" "$TAGS"
-          import json,re,sys
+          import json, os, re, sys
           from pathlib import Path
-          all_path,out_path=map(Path,sys.argv[1:])
-          index=json.loads(Path("catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
-          known={
+
+          all_path, out_path = map(Path, sys.argv[1:])
+          index = json.loads(Path("catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
+          known = {
               str(row.get("release_tag"))
               for row in (index.get("shards") or [])
-              if isinstance(row,dict) and row.get("release_tag")
+              if isinstance(row, dict)
+              and row.get("release_tag")
+              and row.get("release_repository") == os.environ["GITHUB_REPOSITORY"]
           }
-          allowed=re.compile(r"^(data-v2-|copy-vault-v2-|archive-v2-|event-intelligence-v2-)")
-          tags=[
-              line.strip()
-              for line in all_path.read_text(encoding="utf-8").splitlines()
-              if line.strip() and allowed.match(line.strip()) and line.strip() not in known
-          ]
-          out_path.write_text("\n".join(tags)+("\n" if tags else ""),encoding="utf-8")
-          print(f"new_release_tags={len(tags)}")
+          quarantined = set()
+          migration = Path("control/legacy-release-migration.json")
+          if migration.is_file():
+              try:
+                  doc = json.loads(migration.read_text(encoding="utf-8"))
+              except (OSError, ValueError):
+                  doc = {}
+              quarantined = {
+                  str(tag) for tag in (doc.get("quarantined_tags") or []) if str(tag)
+              }
+          allowed = re.compile(r"^(data-v2-|copy-vault-v2-|archive-v2-|event-intelligence-v2-)")
+          seen = set()
+          new_tags = []
+          for line in all_path.read_text(encoding="utf-8").splitlines():
+              tag = line.strip()
+              if not tag or tag in seen:
+                  continue
+              seen.add(tag)
+              if allowed.match(tag) and tag not in known and tag not in quarantined:
+                  new_tags.append(tag)
+          batch = new_tags[:100]
+          remaining = max(0, len(new_tags) - len(batch))
+          out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"NEW_RELEASE_TAGS={len(batch)}\n")
+              env.write(f"REMAINING_NEW_TAGS={remaining}\n")
+          print(f"new_release_tags_total={len(new_tags)} batch={len(batch)} remaining={remaining}")
           PY
           if [ ! -s "$TAGS" ]; then
             echo "RUN_MANIFEST_COUNT=0" >> "$GITHUB_ENV"
-            echo "No new production releases to reconcile."
+            echo "No new canonical production releases to reconcile."
             exit 0
           fi
-          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 1             --poll-seconds 0
+          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 5
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
-          echo "new production run manifests found: $COUNT"
+          echo "canonical run manifests found: $COUNT"
 
-      - name: Rebuild control-plane index from verified production releases
+      - name: Rebuild control-plane index from target-native manifests
         if: env.RUN_MANIFEST_COUNT != '0'
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t MANIFESTS < <(
-            find "$RUNNER_TEMP/v2-release-manifests"               -name RUN_MANIFEST.json -type f | sort
+            find "$RUNNER_TEMP/v2-release-manifests" -name RUN_MANIFEST.json -type f | sort
           )
           if [ "${#MANIFESTS[@]}" -eq 0 ]; then
-            echo "No production manifests downloaded."
+            echo "No canonical manifests downloaded."
             exit 0
           fi
           python tools/index_run_manifest.py "${MANIFESTS[@]}"
@@ -102,12 +125,7 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q \
-            tests/test_dataset_policy.py \
-            tests/test_dataset_metrics.py \
-            tests/test_manifest_policy.py \
-            tests/test_release_manifest_download.py \
-            tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'
@@ -119,24 +137,27 @@ jobs:
           git add catalog datasets
           if git diff --cached --quiet; then
             echo "Catalog already reconciled."
-            exit 0
+          else
+            git commit -m "data: reconcile V2 catalog from canonical releases"
+            for attempt in 1 2 3 4 5 6 7 8; do
+              if git pull --rebase origin main && git push origin HEAD:main; then
+                break
+              fi
+              [ "$attempt" -lt 8 ] || exit 1
+              sleep $((attempt * 2))
+            done
           fi
-          git commit -m "data: reconcile V2 catalog from production releases"
-          for attempt in 1 2 3 4 5; do
-            if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
-            fi
-            sleep $((attempt * 2))
-          done
-          echo "Unable to publish reconciled V2 catalog."
-          exit 1
 
       - name: Dispatch health receipts after durable catalog publication
         if: env.RUN_MANIFEST_COUNT != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          gh workflow run dataset-health-receipt.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          gh workflow run dataset-health-receipt.yml             --repo "$GITHUB_REPOSITORY"             --ref main
+
+      - name: Continue bounded historical reconciliation when backlog remains
+        if: env.RUN_MANIFEST_COUNT != '0' && env.REMAINING_NEW_TAGS != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run reconcile-v2-catalog.yml             --repo "$GITHUB_REPOSITORY"             --ref main
