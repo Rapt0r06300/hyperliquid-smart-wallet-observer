@@ -184,7 +184,10 @@ class BinanceDepthLiveCollector:
         if not isinstance(result, Mapping):
             raise RuntimeError("BINANCE_WS_API_DEPTH_RESULT_MISSING")
         payload = dict(result)
-        if not isinstance(payload.get("bids"), list) or not isinstance(payload.get("asks"), list):
+        if (
+            not isinstance(payload.get("bids"), list)
+            or not isinstance(payload.get("asks"), list)
+        ):
             raise RuntimeError("BINANCE_WS_API_DEPTH_BOOK_MISSING")
         return payload, send_wall_ms, receive_wall_ms, receive_mono_ns
 
