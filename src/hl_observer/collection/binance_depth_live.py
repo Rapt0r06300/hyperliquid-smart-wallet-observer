@@ -24,6 +24,7 @@ from hl_observer.collection.binance_depth_orchestrator import (
     BinanceDepthOrchestrator,
 )
 from hl_observer.collection.depth_capacity import capacity_tape_envelope
+from hl_observer.collection.feed_integrity import ClockSyncSample, estimate_clock_sync
 from hl_observer.collection.tick_dataset import TickEnvelope
 from hl_observer.realtime.feed_quality import FeedEventKind
 
@@ -113,6 +114,8 @@ class BinanceDepthLiveCollector:
         self.snapshots_received = 0
         self.ws_api_snapshots_received = 0
         self.ws_api_failures = 0
+        self._snapshot_clock_sample: ClockSyncSample | None = None
+        self._snapshot_clock_source = ""
         self.resync_failures = 0
         self.publications = 0
         self.partial_fallback_frames = 0
@@ -258,6 +261,15 @@ class BinanceDepthLiveCollector:
             return None
 
         exchange_ts_ms = _int_or_none(payload.get("T")) or _int_or_none(payload.get("E"))
+        server_output_ts_ms = _int_or_none(payload.get("E"))
+        if server_output_ts_ms is not None:
+            self._snapshot_clock_sample = estimate_clock_sync(
+                venue="binance",
+                server_ts_ms=server_output_ts_ms,
+                send_wall_ts_ms=send_wall_ms,
+                receive_wall_ts_ms=receive_wall_ms,
+            )
+            self._snapshot_clock_source = f"{snapshot_source}_depth_roundtrip"
         result = state.sur_snapshot(
             last_update_id=last_update_id,
             bids=bids,
@@ -462,7 +474,7 @@ class BinanceDepthLiveCollector:
                 1 for state in self.states.values() if not state.besoin_resnapshot()
             ),
             "last_error": self.last_error,
-            "clock_sync": self._clock_evidence(),
+            "clock_sync": self.clock_evidence(),
             "read_only": True,
             "real_execution": False,
         }
@@ -561,14 +573,29 @@ class BinanceDepthLiveCollector:
 
         asyncio.create_task(worker())
 
+    def clock_evidence(self) -> dict[str, Any]:
+        """Return the best public clock evidence currently available."""
+        if self.clock_sync_provider is not None:
+            try:
+                row = self.clock_sync_provider()
+            except Exception:
+                row = {}
+            if isinstance(row, Mapping) and row:
+                return dict(row)
+        sample = self._snapshot_clock_sample
+        if sample is None:
+            return {}
+        return {
+            "clock_offset_ms": float(sample.offset_ms),
+            "clock_probe_rtt_ms": float(sample.rtt_ms),
+            "clock_uncertainty_ms": float(sample.uncertainty_ms),
+            "clock_probe_server_ts_ms": int(sample.server_ts_ms),
+            "clock_probe_receive_wall_ts_ms": int(sample.receive_wall_ts_ms),
+            "clock_probe_source": self._snapshot_clock_source,
+        }
+
     def _clock_evidence(self) -> dict[str, Any]:
-        if self.clock_sync_provider is None:
-            return {}
-        try:
-            row = self.clock_sync_provider()
-        except Exception:
-            return {}
-        return dict(row) if isinstance(row, Mapping) else {}
+        return self.clock_evidence()
 
     def _emit_tick(self, envelope: TickEnvelope) -> None:
         if self.tick_sink is not None:
