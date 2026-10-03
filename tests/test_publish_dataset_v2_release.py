@@ -316,3 +316,232 @@ def test_upload_file_retries_api_rate_limit(tmp_path, monkeypatch) -> None:
 
     assert len(calls) == 2
     assert sleeps == [30.0]
+
+
+def test_publish_resets_stale_incomplete_release_before_retry(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    manifests_dir = bundle / "manifests"
+    assets.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+
+    asset = assets / "current.jsonl.gz"
+    asset.write_bytes(b"current-payload")
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    manifest = {
+        "dataset_id": "dataset-current",
+        "family": "trades",
+        "venue": "bitget",
+        "symbol": "BTCUSDT",
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1001,
+        "sha256": digest,
+        "bytes": asset.stat().st_size,
+        "event_count": 1,
+        "collector_version": "a" * 40,
+        "source": "bitget_public_ws",
+        "quality_status": "PARTIAL",
+        "release_asset": asset.name,
+        "asset_verified": False,
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+            "duplicates_deduped": True,
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [],
+        "observed_channels": ["trades"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    manifest_path = manifests_dir / "dataset-current.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (bundle / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "collector_version": "a" * 40,
+                "collection_run_id": "run-current",
+                "shard_count": 1,
+                "manifests": ["manifests/dataset-current.json"],
+                "assets": ["assets/current.jsonl.gz"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stale = {
+        "id": 501,
+        "name": "stale-from-old-attempt.jsonl.gz",
+        "size": 123,
+        "digest": "sha256:" + "1" * 64,
+    }
+    releases = [
+        {"id": 77, "assets": [stale]},
+        {"id": 78, "assets": []},
+    ]
+
+    def fake_ensure_release(**_kwargs):
+        return releases.pop(0)
+
+    deleted = []
+    monkeypatch.setattr(module, "ensure_release", fake_ensure_release)
+
+    class Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(args, *, check=True):
+        deleted.append(list(args))
+        return Result()
+
+    monkeypatch.setattr(module, "_run", fake_run)
+
+    uploaded = []
+    monkeypatch.setattr(
+        module,
+        "upload_file",
+        lambda **kwargs: uploaded.append(Path(kwargs["path"]).name),
+    )
+
+    current_remote = {
+        "id": 601,
+        "name": asset.name,
+        "size": asset.stat().st_size,
+        "digest": "sha256:" + digest,
+    }
+
+    def fake_json(_args):
+        rows = [current_remote]
+        if "RUN_MANIFEST.json" in uploaded:
+            run_path = bundle / "RUN_MANIFEST.json"
+            rows.append(
+                {
+                    "id": 999,
+                    "name": "RUN_MANIFEST.json",
+                    "size": run_path.stat().st_size,
+                    "digest": "sha256:" + hashlib.sha256(run_path.read_bytes()).hexdigest(),
+                }
+            )
+        return {"id": 78, "assets": rows}
+
+    monkeypatch.setattr(module, "_json", fake_json)
+
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-retry-test",
+        target="main",
+        title="test",
+    )
+
+    assert any(args[:3] == ["release", "delete", "data-v2-retry-test"] for args in deleted)
+    assert uploaded == ["current.jsonl.gz", "RUN_MANIFEST.json"]
+    assert result["release_id"] == 78
+
+
+def test_publish_refuses_to_mutate_finalized_release_with_foreign_assets(
+    tmp_path, monkeypatch
+) -> None:
+    module = _module()
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    manifests_dir = bundle / "manifests"
+    assets.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+
+    asset = assets / "current.jsonl.gz"
+    asset.write_bytes(b"payload")
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()
+    manifest = {
+        "dataset_id": "dataset-current",
+        "family": "trades",
+        "venue": "okx",
+        "symbol": "BTC-USDT-SWAP",
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1000,
+        "sha256": digest,
+        "bytes": asset.stat().st_size,
+        "event_count": 1,
+        "collector_version": "a" * 40,
+        "source": "okx_public_ws",
+        "quality_status": "PARTIAL",
+        "release_asset": asset.name,
+        "asset_verified": False,
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+            "duplicates_deduped": True,
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [],
+        "observed_channels": ["trades"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    path = manifests_dir / "dataset-current.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    (bundle / "BUNDLE_INDEX.json").write_text(
+        json.dumps(
+            {
+                "collector_version": "a" * 40,
+                "collection_run_id": "run-current",
+                "shard_count": 1,
+                "manifests": ["manifests/dataset-current.json"],
+                "assets": ["assets/current.jsonl.gz"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        module,
+        "ensure_release",
+        lambda **_kwargs: {
+            "id": 77,
+            "assets": [
+                {
+                    "id": 1,
+                    "name": "RUN_MANIFEST.json",
+                    "size": 1,
+                    "digest": "sha256:" + "0" * 64,
+                },
+                {
+                    "id": 2,
+                    "name": "foreign.jsonl.gz",
+                    "size": 1,
+                    "digest": "sha256:" + "0" * 64,
+                },
+            ],
+        },
+    )
+
+    with pytest.raises(module.PublishError, match="refusing to mutate immutable evidence"):
+        module.publish_bundle(
+            bundle,
+            repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+            tag="data-v2-finalized-test",
+            target="main",
+            title="test",
+        )
