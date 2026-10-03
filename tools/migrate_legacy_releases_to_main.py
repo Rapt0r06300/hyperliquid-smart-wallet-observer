@@ -145,7 +145,7 @@ def load(p):
     except Exception:return {}
 def mark(unified,target,done):
     o=json.loads(unified.read_text(encoding="utf-8")); o.pop("source_repository",None)
-    o.update(target_repository=target,mode="single-active-repository",heavy_data_storage="github_releases_same_repository",collection_storage_repository=target,external_dataset_repository_required=False,legacy_release_mirror_required=False,historical_release_migration_status="COMPLETE" if done else "IN_PROGRESS")
+    o.update(target_repository=target,mode="single-active-repository",heavy_data_storage="github_releases_same_repository",collection_storage_repository=target,external_dataset_repository_required=False,legacy_release_mirror_required=False,historical_release_migration_status="COMPLETE" if done else "IN_PROGRESS",historical_source_deletion_safe=bool(done))
     if done:o.update(fresh_dataset_state=False,legacy_collection_state_imported=True)
     writej(unified,o)
 
