@@ -44,6 +44,23 @@ def manifest_release_tag(base_tag: str) -> str:
     return f"{base_tag}-manifest"
 
 
+def retry_release_tag(
+    base_tag: str,
+    collection_run_id: object,
+    manifests: list[Mapping[str, Any]],
+) -> str:
+    """Deterministic fresh tag when an old unfinalized tag contains foreign bytes."""
+    seed = "|".join(
+        [
+            str(base_tag),
+            str(collection_run_id or ""),
+            *sorted(str(row.get("sha256") or "") for row in manifests),
+        ]
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return f"{base_tag}-retry-{digest}"
+
+
 class PublishError(RuntimeError):
     pass
 
@@ -282,6 +299,7 @@ def publish_bundle(
     final_manifests: list[dict[str, Any]] = []
     release_parts: list[dict[str, Any]] = []
     data_releases: list[Mapping[str, Any]] = []
+    data_base_tag = str(tag)
 
     for part_index, chunk in enumerate(chunks):
         if len(chunk) > OVERFLOW_DATA_ASSETS_PER_RELEASE:
@@ -289,7 +307,7 @@ def publish_bundle(
         if not large_bundle:
             validate_release_capacity(len(chunk))
 
-        part_tag = overflow_release_tag(tag, part_index)
+        part_tag = overflow_release_tag(data_base_tag, part_index)
         part_title = (
             title
             if part_index == 0
@@ -334,19 +352,23 @@ def publish_bundle(
                     "refusing to mutate immutable evidence: finalized release "
                     f"{part_tag} contains unexpected assets"
                 )
-            # Incomplete pre-manifest releases are retry scratch, not evidence.
-            # Reset one conflicting release deterministically before retrying.
-            _run(
-                [
-                    "release",
-                    "delete",
-                    part_tag,
-                    "--repo",
-                    repository,
-                    "--cleanup-tag",
-                    "--yes",
-                ]
+            if part_index != 0:
+                raise PublishError(
+                    f"overflow release identity conflict: {part_tag}"
+                )
+
+            # Never delete a large stale Release just to retry publication:
+            # GitHub secondary write throttles make parallel destructive cleanup
+            # unreliable. Move this new immutable attempt to a deterministic
+            # fresh production tag instead. The reconciler ignores the old
+            # unfinalized tag because it has no RUN_MANIFEST.json.
+            data_base_tag = retry_release_tag(
+                tag,
+                index.get("collection_run_id"),
+                manifests,
             )
+            part_tag = data_base_tag
+            part_title = f"{title} retry"
             release = ensure_release(
                 repository=repository,
                 tag=part_tag,
@@ -356,8 +378,13 @@ def publish_bundle(
             )
             release_id = int(release.get("id") or 0)
             if release_id <= 0:
-                raise PublishError("Recreated release id is missing.")
+                raise PublishError("Retry release id is missing.")
             existing_assets = release_asset_map(release)
+            retry_foreign = set(existing_assets) - expected_names - allowed_control
+            if retry_foreign:
+                raise PublishError(
+                    f"retry release identity conflict: {part_tag}"
+                )
 
         for manifest in chunk:
             asset_name = str(manifest.get("release_asset") or "")
@@ -409,7 +436,9 @@ def publish_bundle(
     if not data_releases:
         raise PublishError("No data release was created.")
 
-    canonical_tag = manifest_release_tag(tag) if large_bundle else tag
+    canonical_tag = (
+        manifest_release_tag(data_base_tag) if large_bundle else data_base_tag
+    )
     if large_bundle:
         canonical_release = ensure_release(
             repository=repository,
@@ -435,6 +464,7 @@ def publish_bundle(
         "release_id": canonical_release_id,
         "release_tag": canonical_tag,
         "requested_release_tag": tag,
+        "data_release_base_tag": data_base_tag,
         "release_parts": release_parts,
         "collector_version": index.get("collector_version"),
         "collection_run_id": index.get("collection_run_id"),
