@@ -30,7 +30,7 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/public/stream"
-WS_FALLBACK_BASE_URLS = ("wss://stream.binancefuture.com/public/stream",)
+WS_FALLBACK_BASE_URLS: tuple[str, ...] = ()  # mainnet-only; never mix Binance Futures testnet
 WS_API_URL = "wss://ws-fapi.binance.com/ws-fapi/v1"
 SCHEMA_VERSION = "alina.binance_usdm_l2_live.v1"
 

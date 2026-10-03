@@ -37,10 +37,9 @@ from hl_observer.config.cross_venue_instruments import (  # noqa: E402
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
-BINANCE_WS_HOSTS = (
-    "wss://fstream.binance.com",
-    "wss://stream.binancefuture.com",
-)
+# Mainnet only. Binance documents *.binancefuture.com for Futures testnet;
+# replay-grade evidence must never cross that environment boundary.
+BINANCE_WS_HOSTS = ("wss://fstream.binance.com",)
 BINANCE_PUBLIC_WS_CANDIDATES = tuple(
     f"{host}/public/stream" for host in BINANCE_WS_HOSTS
 )
