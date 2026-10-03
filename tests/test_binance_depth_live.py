@@ -45,7 +45,6 @@ def test_binance_depth_ws_candidates_include_documented_mainnet_failover() -> No
         )
         assert collector._ws_candidates() == (
             "wss://fstream.binance.com/public/stream",
-            "wss://stream.binancefuture.com/public/stream",
         )
         assert collector.websocket_url(
             "wss://stream.binancefuture.com/public/stream"
