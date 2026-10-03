@@ -37,9 +37,13 @@ from hl_observer.config.cross_venue_instruments import (  # noqa: E402
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
-# Mainnet only. Binance documents *.binancefuture.com for Futures testnet;
-# replay-grade evidence must never cross that environment boundary.
-BINANCE_WS_HOSTS = ("wss://fstream.binance.com",)
+# Both hosts below are current official USD-M mainnet WebSocket endpoints.
+# Do not confuse stream.binancefuture.com (mainnet alternate) with
+# fstream.binancefuture.com, which Binance documents for Futures testnet.
+BINANCE_WS_HOSTS = (
+    "wss://fstream.binance.com",
+    "wss://stream.binancefuture.com",
+)
 BINANCE_PUBLIC_WS_CANDIDATES = tuple(
     f"{host}/public/stream" for host in BINANCE_WS_HOSTS
 )
