@@ -318,7 +318,7 @@ def test_upload_file_retries_api_rate_limit(tmp_path, monkeypatch) -> None:
     assert sleeps == [30.0]
 
 
-def test_publish_resets_stale_incomplete_release_before_retry(tmp_path, monkeypatch) -> None:
+def test_publish_moves_stale_incomplete_release_to_fresh_retry_tag(tmp_path, monkeypatch) -> None:
     module = _module()
     bundle = tmp_path / "bundle"
     assets = bundle / "assets"
@@ -446,9 +446,11 @@ def test_publish_resets_stale_incomplete_release_before_retry(tmp_path, monkeypa
         title="test",
     )
 
-    assert any(args[:3] == ["release", "delete", "data-v2-retry-test"] for args in deleted)
+    assert not any(args[:2] == ["release", "delete"] for args in deleted)
     assert uploaded == ["current.jsonl.gz", "RUN_MANIFEST.json"]
     assert result["release_id"] == 78
+    assert result["requested_release_tag"] == "data-v2-retry-test"
+    assert result["release_tag"].startswith("data-v2-retry-test-retry-")
 
 
 def test_publish_refuses_to_mutate_finalized_release_with_foreign_assets(
