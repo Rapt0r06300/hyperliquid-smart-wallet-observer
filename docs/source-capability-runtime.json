@@ -1,15 +1,15 @@
 {
-  "generated_at_utc": "2026-10-03T23:05:58.888173Z",
-  "github_run_id": "37160585011",
-  "github_sha": "8cba44dd83e5b36315d7614dca95ad795c201b82",
+  "generated_at_utc": "2026-10-03T23:47:30.619297Z",
+  "github_run_id": "37162769126",
+  "github_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
   "native_heartbeat_present": true,
-  "native_records_written": 2505,
+  "native_records_written": 2655,
   "paper_read_only": true,
   "real_execution": false,
-  "receipt_digest": "1eb2e8206bf25e3c33378bed7696fe12f468601cea1b63ca75636106873e50d9",
+  "receipt_digest": "cc6992a9de7e69b2b2d88362ff637a91ee058b699e6742ff1a46a11908da42be",
   "runner_kind": "github-hosted",
   "runner_network": {
-    "public_ip": "13.83.166.241",
+    "public_ip": "20.98.116.98",
     "source_url": "https://api64.ipify.org?format=json",
     "status": "OBSERVED"
   },
@@ -17,31 +17,74 @@
   "venues": {
     "binance": {
       "capability_runtime": {
-        "bbo": "DEGRADED",
-        "clock_sync": "DEGRADED",
-        "l2": "DEGRADED",
-        "official_archive": "DEGRADED",
-        "recovery": "DEGRADED",
-        "replay_adapter": "DEGRADED",
-        "sequence_integrity": "DEGRADED",
-        "trades": "DEGRADED",
-        "venue_status": "DEGRADED"
+        "bbo": "HEALTHY",
+        "clock_sync": "HEALTHY",
+        "l2": "HEALTHY",
+        "official_archive": "HEALTHY",
+        "recovery": "HEALTHY",
+        "replay_adapter": "HEALTHY",
+        "sequence_integrity": "HEALTHY",
+        "trades": "HEALTHY",
+        "venue_status": "HEALTHY"
       },
-      "clock_sync_evidence": {},
-      "deep_l2_health": {},
-      "network_observed": false,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
+      "clock_sync_evidence": {
+        "clock_offset_ms": 87.0,
+        "clock_probe_receive_wall_ts_ms": 1791071231769,
+        "clock_probe_rtt_ms": 694.0,
+        "clock_probe_server_ts_ms": 1791071231509,
+        "clock_probe_source": "websocket_api_depth_roundtrip",
+        "clock_uncertainty_ms": 347.0
+      },
+      "deep_l2_health": {
+        "books_exploitable": 2,
+        "clock_sync": {
+          "clock_offset_ms": 87.0,
+          "clock_probe_receive_wall_ts_ms": 1791071231769,
+          "clock_probe_rtt_ms": 694.0,
+          "clock_probe_server_ts_ms": 1791071231509,
+          "clock_probe_source": "websocket_api_depth_roundtrip",
+          "clock_uncertainty_ms": 347.0
+        },
+        "frames_received": 226,
+        "full_snapshot_unavailable_symbols": [],
+        "last_error": "",
+        "partial_fallback_frames": 198,
+        "partial_fallback_levels": 20,
+        "partial_fallback_publications": 0,
+        "pending_resyncs": 0,
+        "publications": 212,
+        "read_only": true,
+        "real_execution": false,
+        "reconnects": 0,
+        "rest_retry_cooldown_s": 60.0,
+        "rest_retry_deferred_symbols": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "rest_unavailable_symbols": [
+          "BTCUSDT",
+          "ETHUSDT"
+        ],
+        "resync_failures": 0,
+        "schema_version": "alina.binance_usdm_l2_live.v1",
+        "snapshots_received": 2,
+        "symbols": 2,
+        "ws_api_failures": 0,
+        "ws_api_snapshots_received": 2
+      },
+      "network_observed": true,
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
       "rest_probe_observed": false,
       "rest_probe_reason": "BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
+      "runtime_status": "HEALTHY",
       "ws_frames": {
-        "bbo": 0,
-        "l2_exploitable_frames": 0,
-        "l2_full_publications": 0,
+        "bbo": 2,
+        "l2_exploitable_frames": 212,
+        "l2_full_publications": 212,
         "l2_partial_publications": 0,
-        "l2_publications": 0,
-        "trades": 0
+        "l2_publications": 212,
+        "trades": 39
       }
     },
     "bitget": {
@@ -56,10 +99,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791068753204,
+      "last_event_ms": 1791071225251,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791071225251",
       "runtime_status": "HEALTHY"
     },
     "bybit": {
@@ -75,10 +118,10 @@
         "venue_status": "HEALTHY"
       },
       "clock_sync_evidence": {},
-      "last_event_ms": 1791068753173,
+      "last_event_ms": 1791071225084,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791071225084",
       "rest_probe_observed": false,
       "rest_probe_reason": "BYBIT_UNAVAILABLE:https://api.bybit.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country } | https://api.bytick.com/v5/market/time:HTTP_403:{ error:The Amazon CloudFront distribution is configured to block access from your country }",
       "runtime_status": "HEALTHY"
@@ -95,10 +138,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791068752959,
+      "last_event_ms": 1791071224780,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791071224780",
       "runtime_status": "HEALTHY"
     },
     "hyperliquid": {
@@ -114,7 +157,7 @@
         "venue_status": "HEALTHY"
       },
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
       "reason": "HYPERLIQUID_META_OK:234",
       "runtime_status": "HEALTHY"
     },
@@ -130,10 +173,10 @@
         "trades": "HEALTHY",
         "venue_status": "HEALTHY"
       },
-      "last_event_ms": 1791068753140,
+      "last_event_ms": 1791071225255,
       "network_observed": true,
-      "observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+      "observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "reason": "NATIVE_EVENT_OBSERVED:1791071225255",
       "runtime_status": "HEALTHY"
     }
   }

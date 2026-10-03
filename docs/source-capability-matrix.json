@@ -1,13 +1,13 @@
 {
-  "matrix_digest": "d83633197284b9f096669d5882535e95f6cf653c11b771d35a8ef27c66655932",
+  "matrix_digest": "702251592d974eb36d390b5183eb14ff7a5a353e985d2fd8b196d0517400c6fd",
   "policy": "FILE_PRESENT and registry.wired are not IMPORT_OK, COLLECTOR_ACTIVE, SOURCE_HEALTHY, REPLAY_COMPATIBLE or PNL_READY",
   "runtime_evidence": {
-    "github_run_id": "37160585011",
-    "github_sha": "8cba44dd83e5b36315d7614dca95ad795c201b82",
+    "github_run_id": "37162769126",
+    "github_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
     "paper_read_only": true,
     "path": "docs/source-capability-runtime.json",
     "real_execution": false,
-    "receipt_digest": "1eb2e8206bf25e3c33378bed7696fe12f468601cea1b63ca75636106873e50d9",
+    "receipt_digest": "cc6992a9de7e69b2b2d88362ff637a91ee058b699e6742ff1a46a11908da42be",
     "runner_kind": "github-hosted"
   },
   "schema_version": "alina.source_capability_matrix.v4",
@@ -378,7 +378,7 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
       "runtime_reason": "HYPERLIQUID_META_OK:234",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
@@ -409,8 +409,8 @@
             "src/hl_observer/datasets/archive_library.py",
             "src/hl_observer/datasets/catalog_profiler.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "clock_sync": {
@@ -436,8 +436,8 @@
             "src/hl_observer/ops/pre_run_cross_venue_466_545.py",
             "src/hl_observer/ops/preflight_lanceur.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "l2": {
@@ -463,8 +463,8 @@
             "src/hl_observer/datasets/catalog_profiler.py",
             "src/hl_observer/datasets/strategy_data_contracts.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "official_archive": {
@@ -490,8 +490,8 @@
             "src/hl_observer/research/lois_mesurees.py",
             "src/hl_observer/simulation/lead_lag_campaign_adapter.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "recovery": {
@@ -517,8 +517,8 @@
             "src/hl_observer/ops/lecons_du_ledger.py",
             "src/hl_observer/ops/preuve_de_vie.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "replay_adapter": {
@@ -544,8 +544,8 @@
             "src/hl_observer/control_plane/campaign_adapters.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "sequence_integrity": {
@@ -571,8 +571,8 @@
             "src/hl_observer/collection/binance_market_context.py",
             "src/hl_observer/collection/hf_recorder_multiplex.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "trades": {
@@ -598,8 +598,8 @@
             "src/hl_observer/dashboard/arbitrage_panel.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
         "venue_status": {
@@ -625,8 +625,8 @@
             "src/hl_observer/data_sources/official_archive_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-          "runtime_status": "DEGRADED",
+          "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+          "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
       },
@@ -744,9 +744,9 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "runtime_reason": "BINANCE_WS_OBSERVED:bbo=2:trades=39:l2_full=212:l2_partial=0:l2_exploitable=212",
+      "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "binance"
     },
@@ -770,7 +770,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -789,7 +789,7 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "DEGRADED",
           "status": "FILE_PRESENT"
         },
@@ -816,7 +816,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -831,7 +831,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -849,7 +849,7 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/research/domaines.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -872,7 +872,7 @@
             "src/hl_observer/venues/bybit.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -899,7 +899,7 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/bybit.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -926,7 +926,7 @@
             "src/hl_observer/ops/lab_alpha.py",
             "src/hl_observer/ops/preuve_de_vie.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -949,7 +949,7 @@
             "src/hl_observer/research/domaines.py",
             "src/hl_observer/research/frontiere.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1010,8 +1010,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225084",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bybit"
@@ -1035,7 +1035,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1050,7 +1050,7 @@
             "src/hl_observer/config/frais_venues.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1073,7 +1073,7 @@
             "src/hl_observer/research/run_factory.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1084,7 +1084,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/ops/lab_alpha.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1098,7 +1098,7 @@
             "src/hl_observer/ops/preuve_de_vie.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1119,7 +1119,7 @@
             "src/hl_observer/venues/okx.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1142,7 +1142,7 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1167,7 +1167,7 @@
             "src/hl_observer/research/venue_capabilities.py",
             "src/hl_observer/venues/okx.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1185,7 +1185,7 @@
             "src/hl_observer/markets/venues/okx.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1236,8 +1236,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753140",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225255",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "okx"
@@ -1258,7 +1258,7 @@
             "src/hl_observer/collection/native_venue_market.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1285,7 +1285,7 @@
             "src/hl_observer/collection/trade_reconciliation.py",
             "src/hl_observer/config/frais_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1312,7 +1312,7 @@
             "src/hl_observer/collection/coin_universe.py",
             "src/hl_observer/collection/depth_capacity.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1339,7 +1339,7 @@
             "src/hl_observer/datasets/continuous_vault_bridge.py",
             "src/hl_observer/datasets/max_data_policy.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1365,7 +1365,7 @@
             "src/hl_observer/datasets/research_lab_stream.py",
             "src/hl_observer/datasets/research_lab_stream_safe.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1392,7 +1392,7 @@
             "src/hl_observer/backtesting/lead_lag_multiasset_tape.py",
             "src/hl_observer/backtesting/lead_lag_queue_replay.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1419,7 +1419,7 @@
             "src/hl_observer/backtesting/lead_lag_multiasset_tape.py",
             "src/hl_observer/backtesting/lead_lag_queue_replay.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1446,7 +1446,7 @@
             "src/hl_observer/backtesting/lead_lag_causal_autopsy.py",
             "src/hl_observer/backtesting/lead_lag_causal_diagnostic.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1473,7 +1473,7 @@
             "src/hl_observer/collection/hyperliquid_funding_history.py",
             "src/hl_observer/collection/native_funding_history.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1593,8 +1593,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068752959",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071224780",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "gate"
@@ -1611,7 +1611,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1625,7 +1625,7 @@
             "src/hl_observer/config/frais_venues.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1639,7 +1639,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1649,7 +1649,7 @@
             "src/hl_observer/config/settings.py",
             "src/hl_observer/data_sources/market_backfill.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1661,7 +1661,7 @@
             "src/hl_observer/datasets/v2_export.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1675,7 +1675,7 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/venues/registre_venues.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1689,7 +1689,7 @@
             "src/hl_observer/data_sources/market_backfill.py",
             "src/hl_observer/datasets/v2_export.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1704,7 +1704,7 @@
             "src/hl_observer/ops/collecteur_registry.py",
             "src/hl_observer/venues/bitget.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         },
@@ -1720,7 +1720,7 @@
             "src/hl_observer/markets/ccxt_universe.py",
             "src/hl_observer/ops/collecteur_registry.py"
           ],
-          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+          "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
           "runtime_status": "HEALTHY",
           "status": "FILE_PRESENT"
         }
@@ -1755,8 +1755,8 @@
         "lead_lag",
         "cross_venue_dislocation"
       ],
-      "runtime_observed_at_utc": "2026-10-03T23:05:58.888173Z",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753204",
+      "runtime_observed_at_utc": "2026-10-03T23:47:30.619297Z",
+      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791071225251",
       "runtime_status": "HEALTHY",
       "status": "FILE_PRESENT",
       "venue": "bitget"
