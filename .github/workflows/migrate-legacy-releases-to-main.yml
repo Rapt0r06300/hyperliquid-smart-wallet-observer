@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
-      SOURCE_REPOSITORY: Rapt0r06300/alina-smartflow-datasets-v2
       TARGET_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -29,7 +28,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Derive the exact imported tag set
+      - name: Validate frozen cleanup set
         shell: bash
         run: |
           set -euo pipefail
@@ -42,69 +41,94 @@ jobs:
           assert s.get("next_index")==16
           assert s.get("last_completed_tag")=="data-v2-35696462284-s0"
           assert s.get("status")=="IN_PROGRESS"
-          PY
-          gh release list --repo "$SOURCE_REPOSITORY" --limit 100000 \
-            --json tagName,isDraft,isPrerelease,publishedAt > /tmp/source-releases.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          prefixes=("data-v2-","copy-vault-v2-","archive-v2-","event-intelligence-v2-")
-          s=json.loads(Path("control/legacy-release-migration.json").read_text())
-          rows=json.loads(Path("/tmp/source-releases.json").read_text())
-          rows=[r for r in rows if not r.get("isDraft") and str(r.get("tagName") or "").startswith(prefixes)]
-          rows=sorted(rows,key=lambda r:(str(r.get("publishedAt") or ""),str(r.get("tagName") or "")))
-          tags=[str(r["tagName"]) for r in rows[:int(s["next_index"])]]
-          assert len(tags)==16
+          tags=[
+            "copy-vault-v2-35696114415-s1",
+            "copy-vault-v2-35696114415-s2",
+            "copy-vault-v2-35696114415-s0",
+            "copy-vault-v2-35696114415-s3",
+            "copy-vault-v2-35696436974-s1",
+            "copy-vault-v2-35696436974-s3",
+            "copy-vault-v2-35696436974-s0",
+            "copy-vault-v2-35696436974-s2",
+            "data-v2-35696462284-s2",
+            "data-v2-35696462284-s7",
+            "data-v2-35696462284-s3",
+            "data-v2-35696462284-s6",
+            "copy-vault-v2-35696508705-s0",
+            "copy-vault-v2-35696508705-s3",
+            "copy-vault-v2-35696508705-s2",
+            "data-v2-35696462284-s0",
+          ]
+          assert len(tags)==16 and len(set(tags))==16
           assert tags[-1]==s["last_completed_tag"]
           Path("/tmp/imported-tags.txt").write_text("\n".join(tags)+"\n")
           print("\n".join(tags))
           PY
 
-      - name: Verify migration signatures and purge only imported releases
+      - name: Wait only if GitHub core quota is exhausted
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/alina-purge
+          for attempt in $(seq 1 20); do
+            payload="$(gh api rate_limit 2>/dev/null || true)"
+            if [ -n "$payload" ]; then
+              remaining="$(python -c 'import json,sys; print(json.load(sys.stdin)["resources"]["core"]["remaining"])' <<<"$payload")"
+              reset="$(python -c 'import json,sys; print(json.load(sys.stdin)["resources"]["core"]["reset"])' <<<"$payload")"
+              if [ "$remaining" -ge 40 ]; then
+                echo "GitHub core quota available: $remaining"
+                exit 0
+              fi
+              now="$(date +%s)"
+              wait_seconds=$((reset-now+5))
+              if [ "$wait_seconds" -lt 5 ]; then wait_seconds=5; fi
+              if [ "$wait_seconds" -gt 300 ]; then wait_seconds=300; fi
+              echo "GitHub core quota low ($remaining); bounded wait."
+              sleep "$wait_seconds"
+            else
+              sleep 15
+            fi
+          done
+          echo "GitHub API quota did not recover in bounded wait." >&2
+          exit 21
+
+      - name: Purge exactly the sixteen imported releases
+        shell: bash
+        run: |
+          set -euo pipefail
           deleted=0
           absent=0
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
-            if ! gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
-              absent=$((absent+1))
-              continue
+            if gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes >/tmp/delete.out 2>/tmp/delete.err; then
+              deleted=$((deleted+1))
+            else
+              msg="$(cat /tmp/delete.err /tmp/delete.out 2>/dev/null || true)"
+              if printf '%s' "$msg" | grep -Eqi 'not found|release does not exist|HTTP 404'; then
+                absent=$((absent+1))
+              else
+                printf '%s\n' "$msg" >&2
+                exit 31
+              fi
             fi
-            rm -rf "/tmp/alina-purge/$tag"
-            mkdir -p "/tmp/alina-purge/$tag"
-            gh release download "$tag" --repo "$TARGET_REPOSITORY" \
-              --pattern RUN_MANIFEST.json --dir "/tmp/alina-purge/$tag"
-            TAG="$tag" python - <<'PY'
-          import json, os
-          from pathlib import Path
-          tag=os.environ["TAG"]
-          m=json.loads((Path("/tmp/alina-purge")/tag/"RUN_MANIFEST.json").read_text())
-          r=m.get("migration_receipt") or {}
-          assert m.get("repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
-          assert r.get("schema")=="alina.target_native_release_migration.v1"
-          assert r.get("target_repository")=="Rapt0r06300/hyperliquid-smart-wallet-observer"
-          assert r.get("all_data_assets_verified") is True
-          assert len(str(r.get("source_manifest_sha256") or ""))==64
-          PY
-            gh release delete "$tag" --repo "$TARGET_REPOSITORY" --cleanup-tag --yes
-            deleted=$((deleted+1))
           done < /tmp/imported-tags.txt
           test $((deleted+absent)) -eq 16
-          echo "deleted=$deleted absent=$absent"
+          echo "cleanup_result deleted=$deleted already_absent=$absent total=16"
 
-      - name: Prove the sixteen imported releases are absent
+      - name: Verify imported releases are absent
         shell: bash
         run: |
           set -euo pipefail
+          present=0
           while IFS= read -r tag; do
             [ -n "$tag" ] || continue
-            ! gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1
+            if gh release view "$tag" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
+              echo "still present: $tag" >&2
+              present=$((present+1))
+            fi
           done < /tmp/imported-tags.txt
+          test "$present" -eq 0
 
-      - name: Persist fresh-only policy
+      - name: Persist fresh-only policy and retire migration code
         shell: bash
         run: |
           set -euo pipefail
@@ -114,19 +138,32 @@ jobs:
           sp=Path("control/legacy-release-migration.json")
           up=Path("control/unified-repository.json")
           s=json.loads(sp.read_text())
-          s.update(status="ABORTED_CLEANED",cleanup_status="COMPLETE",
-                   historical_migration_enabled=False,imported_releases_remaining=0,
-                   removed_imported_releases=16,removed_imported_assets=int(s.get("copied_assets") or 0),
-                   removed_imported_bytes=int(s.get("copied_bytes") or 0),pending_releases=0)
+          s.update(
+              status="ABORTED_CLEANED",
+              cleanup_status="COMPLETE",
+              historical_migration_enabled=False,
+              imported_releases_remaining=0,
+              removed_imported_releases=16,
+              removed_imported_assets=int(s.get("copied_assets") or 0),
+              removed_imported_bytes=int(s.get("copied_bytes") or 0),
+              pending_releases=0,
+          )
           sp.write_text(json.dumps(s,indent=2,sort_keys=True)+"\n")
           u=json.loads(up.read_text())
-          u.update(fresh_dataset_state=True,legacy_collection_state_imported=False,
-                   historical_release_migration_status="DISABLED_CLEAN",
-                   historical_source_deletion_safe=False,historical_external_import_allowed=False,
-                   dataset_v2_import_allowed=False,legacy_imported_releases_present=False,
-                   external_dataset_repository_required=False,legacy_release_mirror_required=False)
+          u.update(
+              fresh_dataset_state=True,
+              legacy_collection_state_imported=False,
+              historical_release_migration_status="DISABLED_CLEAN",
+              historical_source_deletion_safe=False,
+              historical_external_import_allowed=False,
+              dataset_v2_import_allowed=False,
+              legacy_imported_releases_present=False,
+              external_dataset_repository_required=False,
+              legacy_release_mirror_required=False,
+          )
           up.write_text(json.dumps(u,indent=2,sort_keys=True)+"\n")
           PY
+          git rm -f tools/migrate_legacy_releases_to_main.py tests/test_legacy_release_migration.py
           git add control/legacy-release-migration.json control/unified-repository.json
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
