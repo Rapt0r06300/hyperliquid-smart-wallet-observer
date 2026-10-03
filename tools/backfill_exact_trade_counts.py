@@ -258,6 +258,33 @@ def _native_trade_keys(
             add("fallback", fallback)
         return keys or None
 
+    if venue == "gate":
+        for row in rows:
+            native = row.get("id") or row.get("trade_id") or row.get("tradeId")
+            if native is not None:
+                add("id", native)
+                continue
+            fallback = composite(
+                row,
+                time_keys=(
+                    "create_time_ms",
+                    "time_ms",
+                    "create_time",
+                    "time",
+                    "timestamp",
+                    "event_ts_ms",
+                    "ts",
+                ),
+                price_keys=("price", "px", "p"),
+                size_keys=("size", "sz", "qty", "q"),
+                side_keys=("side", "S"),
+                extra_keys=("contract",),
+            )
+            if fallback is None:
+                return None
+            add("fallback", fallback)
+        return keys or None
+
     if venue == "bitget":
         for row in rows:
             native = row.get("tradeId") or row.get("trade_id")
