@@ -4,6 +4,7 @@ import json
 
 from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
 from hl_observer.collection.tick_dataset import TickEnvelope
+from hl_observer.datasets.v2_export import build_manifest_from_tick_shard
 
 
 def envelope(source: str, channel: str, instrument: str, ts: int) -> TickEnvelope:
@@ -50,3 +51,29 @@ def test_rotate_all_seals_each_partition(tmp_path) -> None:
     shards = writer.rotate_all()
     assert len(shards) == 2
     assert all(path.name.endswith(".jsonl.gz") for path in shards)
+
+
+def test_unicode_instruments_cannot_collapse_into_one_partition(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
+    instruments = ("哈基米USDT", "牛来USDT", "龙虾USDT")
+    writer.append_batch_records(
+        [
+            envelope("bitget_public_rest", "instrument_metadata", symbol, 2000 + index)
+            for index, symbol in enumerate(instruments)
+        ]
+    )
+
+    shards = writer.rotate_all()
+    assert len(shards) == 3
+
+    manifests = [
+        build_manifest_from_tick_shard(
+            shard,
+            collector_version="test-unicode-partitions",
+        )
+        for shard in shards
+    ]
+    assert {manifest["symbol"] for manifest in manifests} == set(instruments)
+    assert all(manifest["source"] == "bitget_public_rest" for manifest in manifests)
+    assert all(manifest["family"] == "instrument_metadata" for manifest in manifests)
+

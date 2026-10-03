@@ -119,8 +119,7 @@ jobs:
             tests/test_session_harvest.py \
             --tb=line
 
-      - name: Bounded public-network smoke (diagnostic only)
-        continue-on-error: true
+      - name: Bounded public-network smoke
         env:
           PYTHONPATH: src:tools:.
           ALINA_COLLECTOR_VERSION: ${{ github.sha }}

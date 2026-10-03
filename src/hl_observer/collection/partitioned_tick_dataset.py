@@ -1,6 +1,7 @@
 """Partition replay evidence by source/channel/instrument without changing TickEnvelope."""
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from collections.abc import Iterable
@@ -13,8 +14,16 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 def _component(value: object) -> str:
-    clean = _SAFE.sub("_", str(value or "").strip())
-    return clean.strip("._") or "unknown"
+    raw = str(value or "").strip()
+    if not raw:
+        return "unknown"
+    clean = _SAFE.sub("_", raw).strip("._") or "unknown"
+    if clean == raw:
+        return clean
+    # Lossy sanitisation must never alias two real exchange identifiers onto the
+    # same on-disk partition (for example multiple Unicode Bitget symbols -> USDT).
+    suffix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return f"{clean}-{suffix}"
 
 
 class PartitionedTickDatasetWriter:
