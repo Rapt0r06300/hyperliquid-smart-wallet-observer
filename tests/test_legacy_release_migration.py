@@ -26,6 +26,7 @@ def test_mark_complete_removes_external_dependency(tmp_path:Path):
     assert o["collection_storage_repository"]==m.TARGET
     assert o["external_dataset_repository_required"] is False
     assert o["legacy_collection_state_imported"] is True
+    assert o["historical_source_deletion_safe"] is True
     assert o["fresh_dataset_state"] is False
 
 def test_inventory_digest_deterministic():
