@@ -361,10 +361,16 @@ jobs:
               test -n "$BUNDLE"
               test -f "$BUNDLE/BUNDLE_INDEX.json"
               TAG="data-v2-campaign-$CAMPAIGN_ID-u$UNIT"
-              PUBLISH_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-2)"
-              PUBLISH_JITTER="$((16#$PUBLISH_HEX % 11))"
+              PUBLISH_HEX="$(printf '%s' "$CAMPAIGN_ID" | sha256sum | cut -c1-4)"
+              # Collection lanes run in parallel, but GitHub Release writes share one
+              # repository-level secondary-rate budget. Spread only the publication
+              # burst; do not reduce collection concurrency or touch the user PC.
+              PUBLISH_JITTER="$((16#$PUBLISH_HEX % 97))"
+              if [ "$PUBLISH_JITTER" -gt 0 ]; then
+                sleep "$PUBLISH_JITTER"
+              fi
               PUBLISH_OK=0
-              for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+              for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16; do
                 set +e
                 # Collection code remains campaign-pinned for reproducibility, but
                 # durable publication is control-plane infrastructure and must
@@ -383,9 +389,11 @@ jobs:
                   PUBLISH_OK=1
                   break
                 fi
-                if printf '%s' "$PUBLISH_OUTPUT" | grep -Eqi 'rate limit|HTTP 403|HTTP 429|502 bad gateway|503 service unavailable|timeout|timed out|connection reset|release not found|status 404'; then
-                  if [ "$attempt" -lt 12 ]; then
-                    sleep "$((5 + PUBLISH_JITTER + attempt * 5))"
+                if printf '%s' "$PUBLISH_OUTPUT" | grep -Eqi 'rate limit|secondary rate|abuse detection|HTTP 403|HTTP 429|HTTP 502|HTTP 503|HTTP 504|502 bad gateway|503 service unavailable|504 gateway timeout|timeout|timed out|connection reset|release not found|status 404'; then
+                  if [ "$attempt" -lt 16 ]; then
+                    delay="$((10 + attempt * 7))"
+                    [ "$delay" -le 120 ] || delay=120
+                    sleep "$delay"
                     continue
                   fi
                 fi
