@@ -227,6 +227,9 @@ class NativeVenueCoordinator:
                 samples[venue] = {"status": "UNAVAILABLE", "error": type(exc).__name__}
                 continue
             row = sample.as_dict() if hasattr(sample, "as_dict") else dict(sample)
+            source = str(getattr(client, "last_clock_source", "") or "")
+            if source:
+                row["source"] = source
             row["status"] = "OK"
             samples[venue] = row
         self._clock_sync = samples

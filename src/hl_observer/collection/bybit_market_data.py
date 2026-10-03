@@ -1,8 +1,9 @@
 """Native public Bybit V5 market-data adapter (read-only).
 
-Only public market endpoints are used.  The adapter keeps an in-memory L2 book,
-merges derivative ticker metrics, and emits canonical NativeMarketSnapshot rows.
-It never authenticates and never calls order/trade endpoints.
+Public market endpoints are used for collection. When REST time is unavailable, the
+official Bybit private WebSocket route is used only for an unauthenticated heartbeat
+ping to obtain server time; no authentication, private subscription, account access,
+or order/trade action is ever attempted.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ SCHEMA_VERSION = "alina.bybit_market_data.v1"
 REST_BASE_URL = "https://api.bybit.com"
 REST_FALLBACK_BASE_URLS = ("https://api.bytick.com",)
 PUBLIC_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear"
+CLOCK_WS_URL = "wss://stream.bybit.com/v5/private"
 
 
 def _float(value: object) -> float | None:
@@ -323,6 +325,7 @@ class BybitPublicClient:
         rest_base_url: str = REST_BASE_URL,
         rest_fallback_urls: Iterable[str] = REST_FALLBACK_BASE_URLS,
         ws_url: str = PUBLIC_LINEAR_WS_URL,
+        clock_ws_url: str = CLOCK_WS_URL,
         orderbook_depth: int = 200,
         session_refresh_s: float = 900.0,
     ) -> None:
@@ -338,7 +341,10 @@ class BybitPublicClient:
         self.last_rest_base_url = self.rest_base_url
         self.last_rest_error = ""
         self.last_ws_error = ""
+        self.last_clock_source = ""
+        self.last_clock_error = ""
         self.ws_url = ws_url
+        self.clock_ws_url = clock_ws_url
         depth = int(orderbook_depth)
         if depth not in {1, 50, 200, 1000}:
             raise ValueError("Bybit orderbook_depth must be one of 1, 50, 200, 1000")
@@ -446,10 +452,58 @@ class BybitPublicClient:
             f"Bybit REST time unavailable: {self.last_rest_error or 'unknown'}"
         )
 
+    async def _measure_ws_clock_sync(self, *, timeout_s: float = 5.0):
+        """Measure Bybit clock by an unauthenticated official WS heartbeat only."""
+        request_id = f"alina-clock-{uuid.uuid4().hex[:16]}"
+        sent = int(time.time() * 1_000)
+        async with websockets.connect(
+            self.clock_ws_url,
+            ping_interval=None,
+            close_timeout=5,
+            open_timeout=max(1.0, float(timeout_s)),
+        ) as socket:
+            await socket.send(json.dumps({"req_id": request_id, "op": "ping"}))
+            raw = await asyncio.wait_for(socket.recv(), timeout=max(1.0, float(timeout_s)))
+        received = int(time.time() * 1_000)
+        payload = json.loads(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Bybit WS clock pong invalid")
+        if str(payload.get("op") or "").lower() != "pong":
+            raise RuntimeError(f"Bybit WS clock pong missing: {payload!r}"[:500])
+        args = payload.get("args")
+        if not isinstance(args, list) or not args:
+            raise RuntimeError("Bybit WS clock pong timestamp missing")
+        server = _int(args[0])
+        if server is None or server <= 0:
+            raise RuntimeError("Bybit WS clock pong timestamp invalid")
+        self.last_clock_source = "websocket_private_ping"
+        self.last_clock_error = ""
+        return estimate_clock_sync(
+            venue="bybit",
+            server_ts_ms=server,
+            send_wall_ts_ms=sent,
+            receive_wall_ts_ms=received,
+        )
+
     def measure_clock_sync(self, *, timeout_s: float = 5.0):
         sent = int(time.time() * 1_000)
-        server = self.server_time_ms(timeout_s=timeout_s)
+        try:
+            server = self.server_time_ms(timeout_s=timeout_s)
+        except Exception as rest_exc:
+            try:
+                sample = asyncio.run(self._measure_ws_clock_sync(timeout_s=timeout_s))
+            except Exception as ws_exc:
+                self.last_clock_error = (
+                    f"REST={type(rest_exc).__name__}:{rest_exc};"
+                    f"WS={type(ws_exc).__name__}:{ws_exc}"
+                )[:1000]
+                raise RuntimeError(
+                    f"Bybit clock sync unavailable: {self.last_clock_error}"
+                ) from ws_exc
+            return sample
         received = int(time.time() * 1_000)
+        self.last_clock_source = "rest_time"
+        self.last_clock_error = ""
         return estimate_clock_sync(
             venue="bybit",
             server_ts_ms=server,
@@ -512,6 +566,7 @@ class BybitPublicClient:
 __all__ = [
     "BybitMarketState",
     "BybitPublicClient",
+    "CLOCK_WS_URL",
     "PUBLIC_LINEAR_WS_URL",
     "REST_BASE_URL",
     "REST_FALLBACK_BASE_URLS",

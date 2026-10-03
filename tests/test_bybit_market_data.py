@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+
 import httpx
 
 from hl_observer.collection.bybit_market_data import (
@@ -226,4 +229,54 @@ def test_bybit_discovery_falls_back_to_documented_bytick_domain(monkeypatch) -> 
     assert seen[1].startswith("https://api.bytick.com")
     assert client.last_rest_base_url == "https://api.bytick.com"
     assert client.last_rest_error == ""
+
+def test_bybit_clock_falls_back_to_unauthenticated_ws_pong(monkeypatch) -> None:
+    sent_payloads = []
+
+    class FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def send(self, raw: str) -> None:
+            sent_payloads.append(json.loads(raw))
+
+        async def recv(self) -> str:
+            return json.dumps(
+                {
+                    "req_id": "ignored",
+                    "op": "pong",
+                    "args": ["1675418560633"],
+                    "conn_id": "clock-test",
+                }
+            )
+
+    monkeypatch.setattr(
+        "hl_observer.collection.bybit_market_data.websockets.connect",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    client = BybitPublicClient()
+    monkeypatch.setattr(
+        client,
+        "server_time_ms",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("REST blocked")),
+    )
+    moments = iter([1675418560.620, 1675418560.620, 1675418560.640])
+    monkeypatch.setattr(
+        "hl_observer.collection.bybit_market_data.time.time",
+        lambda: next(moments),
+    )
+
+    sample = client.measure_clock_sync(timeout_s=1.0)
+
+    assert sent_payloads
+    assert sent_payloads[0]["op"] == "ping"
+    assert "auth" not in sent_payloads[0]
+    assert sample.server_ts_ms == 1675418560633
+    assert sample.rtt_ms == 20.0
+    assert sample.offset_ms == 3.0
+    assert client.last_clock_source == "websocket_private_ping"
+    assert client.last_clock_error == ""
 

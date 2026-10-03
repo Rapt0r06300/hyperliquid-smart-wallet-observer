@@ -192,6 +192,11 @@ def build_receipt(
         if isinstance(coordinator_health.get("transport_errors"), dict)
         else {}
     )
+    native_clock_sync = (
+        coordinator_health.get("clock_sync")
+        if isinstance(coordinator_health.get("clock_sync"), dict)
+        else {}
+    )
 
     runner_network = _probe_runner_network(request_json)
     hl_ok, hl_reason = _probe_hyperliquid(request_json)
@@ -304,8 +309,20 @@ def build_receipt(
                 details.append(f"WS={transport_error}")
             reason = ";".join(details)[:1800]
         venue_caps = {name: runtime for name in CAPABILITIES}
+        native_clock = (
+            native_clock_sync.get(venue)
+            if isinstance(native_clock_sync.get(venue), dict)
+            else {}
+        )
+        native_clock_ok = (
+            str(native_clock.get("status") or "").upper() == "OK"
+            and isinstance(native_clock.get("offset_ms"), (int, float))
+            and isinstance(native_clock.get("rtt_ms"), (int, float))
+        )
         if venue == "bybit" and ok:
-            venue_caps["clock_sync"] = "HEALTHY" if bybit_rest_ok else "DEGRADED"
+            venue_caps["clock_sync"] = (
+                "HEALTHY" if (bybit_rest_ok or native_clock_ok) else "DEGRADED"
+            )
         venues[venue] = {
             "runtime_status": runtime,
             "reason": reason,
@@ -317,6 +334,9 @@ def build_receipt(
         if venue == "bybit":
             venues[venue]["rest_probe_observed"] = bybit_rest_ok
             venues[venue]["rest_probe_reason"] = bybit_rest_reason
+            venues[venue]["clock_sync_evidence"] = (
+                dict(native_clock) if native_clock_ok else {}
+            )
 
     body: dict[str, object] = {
         "schema_version": "alina.source_capability_runtime.v1",

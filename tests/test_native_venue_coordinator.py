@@ -467,3 +467,36 @@ def test_bybit_rest_failure_uses_ws_only_candidates_without_claiming_registry() 
     health = coordinator.health(now_ms=100_000)
     assert health["ws_fallback_symbols"]["bybit"] == ["BTCUSDT", "ETHUSDT"]
 
+class _ClockSample:
+    def as_dict(self):
+        return {
+            "venue": "bybit",
+            "server_ts_ms": 1005,
+            "send_wall_ts_ms": 1000,
+            "receive_wall_ts_ms": 1010,
+            "rtt_ms": 10.0,
+            "offset_ms": 0.0,
+            "uncertainty_ms": 5.0,
+        }
+
+
+class _BybitWsClock:
+    last_clock_source = "websocket_private_ping"
+
+    def measure_clock_sync(self):
+        return _ClockSample()
+
+
+def test_clock_sync_preserves_client_measurement_source() -> None:
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_BybitWsClock(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        ccxt_snapshot_path=None,
+    )
+    rows = coordinator.refresh_clock_sync()
+    assert rows["bybit"]["status"] == "OK"
+    assert rows["bybit"]["source"] == "websocket_private_ping"
+    assert rows["bybit"]["rtt_ms"] == 10.0
+

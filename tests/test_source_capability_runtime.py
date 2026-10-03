@@ -431,3 +431,60 @@ def test_runtime_receipt_preserves_binance_deep_l2_diagnostics(tmp_path: Path) -
     assert deep["ws_api_failures"] == 2
     assert deep["last_error"] == "REST=HTTP 451;WS_API=HTTP 451"
 
+def test_bybit_native_ws_clock_evidence_promotes_clock_sync(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 5,
+                "last_event_ms": {
+                    "bybit": 123,
+                    "okx": 1,
+                    "gate": 2,
+                    "bitget": 3,
+                },
+                "coordinator_health": {
+                    "clock_sync": {
+                        "bybit": {
+                            "status": "OK",
+                            "source": "websocket_private_ping",
+                            "server_ts_ms": 1005,
+                            "send_wall_ts_ms": 1000,
+                            "receive_wall_ts_ms": 1010,
+                            "rtt_ms": 10.0,
+                            "offset_ms": 0.0,
+                            "uncertainty_ms": 5.0,
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            return {"serverTime": 123}
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit REST blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        github_sha="f" * 40,
+        github_run_id="104",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    bybit = receipt["venues"]["bybit"]
+    assert bybit["runtime_status"] == "HEALTHY"
+    assert bybit["capability_runtime"]["clock_sync"] == "HEALTHY"
+    assert bybit["clock_sync_evidence"]["source"] == "websocket_private_ping"
+    assert bybit["clock_sync_evidence"]["rtt_ms"] == 10.0
+
