@@ -375,3 +375,59 @@ def test_full_publication_without_exploitable_book_stays_l2_degraded(tmp_path: P
     assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 3
     assert receipt["venues"]["binance"]["ws_frames"]["l2_exploitable_frames"] == 0
 
+def test_runtime_receipt_preserves_binance_deep_l2_diagnostics(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 1,
+                "last_event_ms": {"bybit": 1, "okx": 2, "gate": 3, "bitget": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+    bbo = tmp_path / "bbo.json"
+    bbo.write_text(
+        json.dumps(
+            {
+                "frames_bookticker": 3,
+                "frames_trades": 4,
+                "frames_l2_bin": 0,
+                "binance_l2_publications": 5,
+                "binance_l2_full_publications": 0,
+                "binance_l2_partial_publications": 5,
+                "binance_deep_l2": {
+                    "ws_api_snapshots_received": 0,
+                    "ws_api_failures": 2,
+                    "last_error": "REST=HTTP 451;WS_API=HTTP 451",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            raise OSError("REST blocked")
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        bbo_heartbeat=bbo,
+        github_sha="a" * 40,
+        github_run_id="103",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    deep = receipt["venues"]["binance"]["deep_l2_health"]
+    assert deep["ws_api_failures"] == 2
+    assert deep["last_error"] == "REST=HTTP 451;WS_API=HTTP 451"
+
