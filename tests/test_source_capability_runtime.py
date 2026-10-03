@@ -251,3 +251,72 @@ def test_bybit_live_ws_does_not_fake_clock_sync_when_rest_is_blocked(tmp_path: P
     assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
     assert receipt["venues"]["bybit"]["capability_runtime"]["clock_sync"] == "DEGRADED"
 
+def test_runtime_receipt_accepts_binance_ws_clock_evidence(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 1,
+                "last_event_ms": {
+                    "bybit": 1,
+                    "okx": 2,
+                    "gate": 3,
+                    "bitget": 4,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bbo = tmp_path / "bbo.json"
+    bbo.write_text(
+        json.dumps(
+            {
+                "frames_bookticker": 4,
+                "frames_trades": 5,
+                "binance_l2_publications": 6,
+                "binance_l2_full_publications": 6,
+                "binance_l2_partial_publications": 0,
+                "binance_clock_sync": {
+                    "clock_offset_ms": 1.5,
+                    "clock_probe_rtt_ms": 12.0,
+                    "clock_uncertainty_ms": 6.0,
+                    "clock_probe_server_ts_ms": 1_000,
+                    "clock_probe_receive_wall_ts_ms": 1_006,
+                    "clock_probe_source": "websocket_api_depth_roundtrip",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            raise OSError("REST blocked")
+        if "api.bybit.com" in url or "api.bytick.com" in url:
+            raise OSError("Bybit blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        bbo_heartbeat=bbo,
+        github_sha="e" * 40,
+        github_run_id="101",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    binance = receipt["venues"]["binance"]
+    assert binance["runtime_status"] == "HEALTHY"
+    assert binance["capability_runtime"]["l2"] == "HEALTHY"
+    assert binance["capability_runtime"]["clock_sync"] == "HEALTHY"
+    assert binance["clock_sync_evidence"]["clock_offset_ms"] == 1.5
+    assert (
+        binance["clock_sync_evidence"]["clock_probe_source"]
+        == "websocket_api_depth_roundtrip"
+    )
+
