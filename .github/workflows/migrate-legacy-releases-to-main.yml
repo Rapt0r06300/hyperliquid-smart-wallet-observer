@@ -1,0 +1,85 @@
+name: migrate-legacy-releases-to-main
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/migrate-legacy-releases-to-main.yml'
+      - 'tools/migrate_legacy_releases_to_main.py'
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: alina-historical-release-migration
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Migrate a bounded historical release batch into canonical Alina storage
+        id: migrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/migrate_legacy_releases_to_main.py             --source-repository 'Rapt0r06300/alina-smartflow-datasets-v2'             --target-repository "$GITHUB_REPOSITORY"             --state control/legacy-release-migration.json             --unified control/unified-repository.json             --max-releases 8             --time-budget-seconds 16200
+          STATUS="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json"))["status"])')"
+          PENDING="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json")).get("pending_releases",0))')"
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "pending=$PENDING" >> "$GITHUB_OUTPUT"
+
+      - name: Persist verified migration checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add control/legacy-release-migration.json control/unified-repository.json
+          if git diff --cached --quiet; then
+            echo "Migration checkpoint already current."
+            exit 0
+          fi
+          git commit -m "data: checkpoint historical release migration"
+          for attempt in 1 2 3 4 5 6 7 8; do
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          echo "Unable to publish migration checkpoint."
+          exit 1
+
+      - name: Continue migration on GitHub-hosted runner
+        if: steps.migrate.outputs.status != 'COMPLETE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run migrate-legacy-releases-to-main.yml             --repo "$GITHUB_REPOSITORY"             --ref main
+
+      - name: Rebuild canonical catalog after full migration
+        if: steps.migrate.outputs.status == 'COMPLETE'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run reconcile-v2-catalog.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run backfill-exact-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run backfill-global-unique-trade-counts.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run uncompressed-size-v2.yml --repo "$GITHUB_REPOSITORY" --ref main
