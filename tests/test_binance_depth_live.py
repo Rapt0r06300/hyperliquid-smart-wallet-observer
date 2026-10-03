@@ -36,6 +36,28 @@ def test_parse_binance_combined_depth_frame() -> None:
     assert frame["transaction_ts_ms"] == 1_005
 
 
+def test_binance_depth_ws_candidates_include_official_failover() -> None:
+    async def scenario() -> None:
+        client = httpx.AsyncClient()
+        collector = BinanceDepthLiveCollector(
+            ["BTCUSDT"],
+            http_client=client,
+        )
+        assert collector._ws_candidates() == (
+            "wss://fstream.binance.com/public/stream",
+            "wss://stream.binancefuture.com/public/stream",
+        )
+        assert collector.websocket_url(
+            "wss://stream.binancefuture.com/public/stream"
+        ) == (
+            "wss://stream.binancefuture.com/public/stream?"
+            "streams=btcusdt@depth@100ms/btcusdt@depth20@100ms"
+        )
+        await client.aclose()
+
+    asyncio.run(scenario())
+
+
 def test_rest_snapshot_replays_buffered_diff_and_publishes_deep_book() -> None:
     async def scenario() -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
