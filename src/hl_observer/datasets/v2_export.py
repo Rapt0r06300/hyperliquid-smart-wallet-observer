@@ -290,7 +290,9 @@ def build_manifest_from_tick_shard(
     if len(sources) != 1 or len(channels) != 1 or len(instruments) != 1:
         raise ValueError(
             "V2 export requires one source/channel/instrument per shard; "
-            "use PartitionedTickDatasetWriter"
+            "use PartitionedTickDatasetWriter; "
+            f"path={path}; sources={sorted(sources)!r}; "
+            f"channels={sorted(channels)!r}; instruments={sorted(instruments)!r}"
         )
 
     if gap_counter_values:
