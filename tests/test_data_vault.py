@@ -19,6 +19,7 @@ from data_vault_core import (
     load_gzip_json,
 )
 from restore_data_vault_snapshot import (
+    is_replay_unsafe_path,
     needed_assets,
     select_records,
 )
@@ -249,6 +250,62 @@ class DataVaultTests(unittest.TestCase):
             event_selected,
         )
         self.assertNotIn("runtime/data/unrelated.jsonl", event_selected)
+
+    def test_replay_quality_gate_excludes_known_unsafe_paths(self):
+        payload = {
+            "files": {
+                "runtime/data/bbo_synchro.jsonl": {
+                    "release_tag": "tag-good",
+                    "storage": "zip_entry",
+                    "asset": "good.zip",
+                    "size": 10,
+                    "sha256": "a",
+                },
+                "runtime/data/market_ticks/hyperliquid_market_ticks.current.jsonl": {
+                    "release_tag": "tag-bad",
+                    "storage": "zip_entry",
+                    "asset": "bad.zip",
+                    "size": 10,
+                    "sha256": "b",
+                },
+                "runtime/data/hypersmart_simulation_session.sqlite3.corrupted-20260708": {
+                    "release_tag": "tag-corrupt",
+                    "storage": "zip_entry",
+                    "asset": "corrupt.zip",
+                    "size": 10,
+                    "sha256": "c",
+                },
+                ".git/_stale_locks/HEAD.lock.1": {
+                    "release_tag": "tag-lock",
+                    "storage": "zip_entry",
+                    "asset": "lock.zip",
+                    "size": 10,
+                    "sha256": "d",
+                },
+                "runtime/cache/__pycache__/x.pyc": {
+                    "release_tag": "tag-cache",
+                    "storage": "zip_entry",
+                    "asset": "cache.zip",
+                    "size": 10,
+                    "sha256": "e",
+                },
+            }
+        }
+        selected = select_records(
+            payload,
+            preset="all",
+            contains=(),
+            prefixes=(),
+        )
+        self.assertEqual(set(selected), {"runtime/data/bbo_synchro.jsonl"})
+        self.assertTrue(
+            is_replay_unsafe_path(
+                "runtime/data/market_ticks/hyperliquid_market_ticks.current.jsonl"
+            )
+        )
+        self.assertTrue(is_replay_unsafe_path(".git/index.lock"))
+        self.assertTrue(is_replay_unsafe_path("runtime/x.sqlite3-wal"))
+        self.assertFalse(is_replay_unsafe_path("runtime/data/bbo_synchro.jsonl"))
 
     def test_current_restore_excludes_archived_deleted_by_default(self):
         payload = {
