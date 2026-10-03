@@ -224,6 +224,11 @@ def build_receipt(
         if isinstance(bbo_hb.get("binance_clock_sync"), dict)
         else {}
     )
+    bin_deep_l2 = (
+        bbo_hb.get("binance_deep_l2")
+        if isinstance(bbo_hb.get("binance_deep_l2"), dict)
+        else {}
+    )
     bin_ws_clock_ok = (
         isinstance(bin_clock.get("clock_offset_ms"), (int, float))
         and isinstance(bin_clock.get("clock_probe_rtt_ms"), (int, float))
@@ -268,6 +273,7 @@ def build_receipt(
         "rest_probe_observed": bin_rest_ok,
         "rest_probe_reason": bin_rest_reason,
         "clock_sync_evidence": dict(bin_clock),
+        "deep_l2_health": dict(bin_deep_l2),
         "ws_frames": {
             "bbo": frames_bbo,
             "trades": frames_trades,
