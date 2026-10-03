@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/backfill-global-unique-trade-counts.yml"
       - "tools/backfill_global_unique_trade_counts.py"
+      - "tools/backfill_exact_trade_counts.py"
       - "tests/test_global_unique_trade_backfill.py"
   workflow_dispatch:
     inputs:
