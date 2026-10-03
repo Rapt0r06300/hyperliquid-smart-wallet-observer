@@ -279,6 +279,7 @@ def test_runtime_receipt_accepts_binance_ws_clock_evidence(tmp_path: Path) -> No
                 "binance_l2_publications": 6,
                 "binance_l2_full_publications": 6,
                 "binance_l2_partial_publications": 0,
+                "frames_l2_bin": 6,
                 "binance_clock_sync": {
                     "clock_offset_ms": 1.5,
                     "clock_probe_rtt_ms": 12.0,
