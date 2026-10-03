@@ -135,12 +135,23 @@ def annotate_evidence(
     return row
 
 
-def mark_durability_failure(result_path: Path) -> dict[str, Any]:
+def mark_durability_failure(
+    result_path: Path,
+    *,
+    detail_path: Path | None = None,
+) -> dict[str, Any]:
     previous: dict[str,Any]={}
     try:
         previous=_load(result_path)
     except (OSError,ValueError,json.JSONDecodeError):
         previous={}
+    detail=""
+    if detail_path is not None:
+        try:
+            detail=" ".join(detail_path.read_text(encoding="utf-8",errors="replace").split())
+        except OSError:
+            detail=""
+        detail=detail[-2000:]
     payload={
         "status":"FAILED",
         "reason":"durable_publication_failed",
@@ -148,6 +159,8 @@ def mark_durability_failure(result_path: Path) -> dict[str, Any]:
         "previous_status":previous.get("status"),
         "previous_sha256":previous.get("sha256"),
     }
+    if detail:
+        payload["publication_error_detail"]=detail
     row={
         "status":"FAILED",
         "payload":payload,
@@ -174,6 +187,7 @@ def main(argv: list[str] | None=None) -> int:
 
     failure=sub.add_parser("durability-failure")
     failure.add_argument("--result",required=True)
+    failure.add_argument("--detail-file")
 
     args=parser.parse_args(argv)
     if args.command=="collection":
@@ -190,7 +204,10 @@ def main(argv: list[str] | None=None) -> int:
             repository=args.repository,
         )
     else:
-        row=mark_durability_failure(Path(args.result))
+        row=mark_durability_failure(
+            Path(args.result),
+            detail_path=Path(args.detail_file) if args.detail_file else None,
+        )
     print(json.dumps(row,sort_keys=True))
     return 0
 
