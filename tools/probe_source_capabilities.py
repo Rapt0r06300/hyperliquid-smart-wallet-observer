@@ -218,6 +218,7 @@ def build_receipt(
         else frames_l2
     )
     frames_l2_partial = int(bbo_hb.get("binance_l2_partial_publications") or 0)
+    frames_l2_exploitable = int(bbo_hb.get("frames_l2_bin") or 0)
     bin_clock = (
         bbo_hb.get("binance_clock_sync")
         if isinstance(bbo_hb.get("binance_clock_sync"), dict)
@@ -235,13 +236,15 @@ def build_receipt(
             (
                 "BINANCE_WS_OBSERVED:"
                 f"bbo={frames_bbo}:trades={frames_trades}:"
-                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial}"
+                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial}:"
+                f"l2_exploitable={frames_l2_exploitable}"
             )
             if bin_ws_ok
             else (
                 "BINANCE_WS_NOT_OBSERVED:"
                 f"bbo={frames_bbo}:trades={frames_trades}:"
-                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial};"
+                f"l2_full={frames_l2_full}:l2_partial={frames_l2_partial}:"
+                f"l2_exploitable={frames_l2_exploitable};"
                 f"rest={bin_rest_reason}"
             )
         )
@@ -253,7 +256,7 @@ def build_receipt(
     if bbo_expected:
         bin_caps["bbo"] = "HEALTHY" if frames_bbo > 0 else "DEGRADED"
         bin_caps["trades"] = "HEALTHY" if frames_trades > 0 else "DEGRADED"
-        bin_caps["l2"] = "HEALTHY" if frames_l2_full > 0 else "DEGRADED"
+        bin_caps["l2"] = "HEALTHY" if frames_l2_exploitable > 0 else "DEGRADED"
         bin_caps["clock_sync"] = (
             "HEALTHY" if (bin_rest_ok or bin_ws_clock_ok) else "DEGRADED"
         )
@@ -271,6 +274,7 @@ def build_receipt(
             "l2_publications": frames_l2,
             "l2_full_publications": frames_l2_full,
             "l2_partial_publications": frames_l2_partial,
+            "l2_exploitable_frames": frames_l2_exploitable,
         },
         "capability_runtime": bin_caps,
     }

@@ -114,6 +114,7 @@ def test_runtime_receipt_records_runner_ip_and_uses_real_binance_ws_evidence(
                 "frames_bookticker": 12,
                 "frames_trades": 34,
                 "binance_l2_publications": 5,
+                "frames_l2_bin": 5,
             }
         ),
         encoding="utf-8",
@@ -179,6 +180,7 @@ def test_runtime_receipt_does_not_promote_partial_binance_l2_to_full(tmp_path: P
                 "binance_l2_publications": 4,
                 "binance_l2_full_publications": 0,
                 "binance_l2_partial_publications": 4,
+                "frames_l2_bin": 0,
             }
         ),
         encoding="utf-8",
@@ -319,4 +321,56 @@ def test_runtime_receipt_accepts_binance_ws_clock_evidence(tmp_path: Path) -> No
         binance["clock_sync_evidence"]["clock_probe_source"]
         == "websocket_api_depth_roundtrip"
     )
+
+def test_full_publication_without_exploitable_book_stays_l2_degraded(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 1,
+                "last_event_ms": {"bybit": 1, "okx": 2, "gate": 3, "bitget": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+    bbo = tmp_path / "bbo.json"
+    bbo.write_text(
+        json.dumps(
+            {
+                "frames_bookticker": 10,
+                "frames_trades": 10,
+                "binance_l2_publications": 3,
+                "binance_l2_full_publications": 3,
+                "binance_l2_partial_publications": 0,
+                "frames_l2_bin": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            raise OSError("REST blocked")
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit REST blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        bbo_heartbeat=bbo,
+        github_sha="f" * 40,
+        github_run_id="102",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "DEGRADED"
+    assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 3
+    assert receipt["venues"]["binance"]["ws_frames"]["l2_exploitable_frames"] == 0
 
