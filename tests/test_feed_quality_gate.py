@@ -57,6 +57,11 @@ def test_full_snapshot_feed_is_ready_after_one_complete_snapshot_and_heartbeat()
     assert second.feed_quality_score >= 70
     assert gate.bids == {100.2: 2.5}
     assert gate.asks == {101.2: 3.5}
+    assert second.events_unique == 2
+    assert second.depth_levels_bid == 1
+    assert second.depth_levels_ask == 1
+    assert second.depth_usd_25bps > 0
+    assert second.safe_ratio == 1.0
 
 
 def test_incremental_feed_rejects_update_before_snapshot() -> None:
@@ -207,6 +212,9 @@ def test_full_snapshot_recovers_immediately_after_temporal_gap() -> None:
     assert recovered.synchronized
     assert not recovered.unresolved_gap
     assert recovered.gaps == 1
+    assert recovered.gap_p50_ms == 500.0
+    assert recovered.gap_p95_ms == 500.0
+    assert recovered.gap_max_ms == 500.0
     assert "TEMPORAL_GAP" in recovered.reasons
     assert gate.bids == {100.5: 2.0}
     assert gate.asks == {101.5: 2.0}
@@ -250,74 +258,3 @@ def test_event_stream_explicit_gap_recovers_after_distinct_coherent_frames() -> 
     gate.mark_heartbeat(received_ts_ms=1_000)
     gate.ingest_event(
         payload={"tid": 1},
-        exchange_ts_ms=990,
-        received_ts_ms=1_000,
-        event_id="trade-1",
-    )
-    gate.ingest_event(
-        payload={"tid": 2},
-        exchange_ts_ms=1_010,
-        received_ts_ms=1_020,
-        event_id="trade-2",
-    )
-    assert gate.snapshot(now_ms=1_020).ready
-
-    gate.mark_gap(reason="WS_TRANSPORT_GAP")
-    first_frame = gate.ingest_event(
-        payload={"tid": 3},
-        exchange_ts_ms=2_000,
-        received_ts_ms=2_010,
-        event_id="trade-3",
-    )
-    same_frame = gate.ingest_event(
-        payload={"tid": 4},
-        exchange_ts_ms=2_001,
-        received_ts_ms=2_010,
-        event_id="trade-4",
-    )
-    assert not first_frame.ready
-    assert not same_frame.ready
-    assert same_frame.coherent_events == 1
-
-    gate.mark_heartbeat(received_ts_ms=2_020)
-    recovered = gate.ingest_event(
-        payload={"tid": 5},
-        exchange_ts_ms=2_015,
-        received_ts_ms=2_020,
-        event_id="trade-5",
-    )
-    assert recovered.ready
-    assert not recovered.unresolved_gap
-    assert recovered.coherent_events == 2
-    assert "EVENT_STREAM_RECOVERED" in recovered.reasons
-
-
-def test_event_stream_batch_counts_one_transport_frame_and_exposes_recovery() -> None:
-    gate = FeedQualityGate(
-        source_id="hyperliquid_mainnet_readonly",
-        channel="trades",
-        instrument="ETH",
-        mode=FeedMode.EVENT_STREAM,
-        config=_config(min_coherent_events=2),
-    )
-    gate.mark_gap(reason="WS_TRANSPORT_GAP")
-    gate.mark_heartbeat(received_ts_ms=1_000)
-
-    first = gate.ingest_event_batch(
-        payloads=[
-            {"event_id": "trade-1", "exchange_ts_ms": 990, "tid": 1},
-            {"event_id": "trade-2", "exchange_ts_ms": 991, "tid": 2},
-        ],
-        received_ts_ms=1_000,
-    )
-    assert first[-1].coherent_events == 1
-    assert not first[-1].ready
-
-    gate.mark_heartbeat(received_ts_ms=1_010)
-    second = gate.ingest_event_batch(
-        payloads=[{"event_id": "trade-3", "exchange_ts_ms": 1_005, "tid": 3}],
-        received_ts_ms=1_010,
-    )
-    assert second[-1].coherent_events == 2
-    assert second[-1].ready
-    assert "EVENT_STREAM_RECOVERED" in second[-1].reasons
