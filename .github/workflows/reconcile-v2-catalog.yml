@@ -48,7 +48,7 @@ jobs:
           ROOT="$RUNNER_TEMP/v2-release-manifests"
           ALL_TAGS="$RUNNER_TEMP/v2-all-release-tags.txt"
           TAGS="$RUNNER_TEMP/v2-new-release-tags.txt"
-          gh api --paginate             "repos/${GITHUB_REPOSITORY}/releases?per_page=100"             --jq '.[].tag_name' > "$ALL_TAGS"
+          gh api --paginate             "repos/${GITHUB_REPOSITORY}/releases?per_page=100"             --jq '.[] | [.tag_name, ([.assets[].name] | index("RUN_MANIFEST.json") != null)] | @tsv' > "$ALL_TAGS"
           python - <<'PY' "$ALL_TAGS" "$TAGS"
           import json, os, re, sys
           from pathlib import Path
@@ -76,10 +76,19 @@ jobs:
           seen = set()
           new_tags = []
           for line in all_path.read_text(encoding="utf-8").splitlines():
-              tag = line.strip()
+              fields = line.split("\t", 1)
+              tag = fields[0].strip() if fields else ""
+              has_run_manifest = (
+                  len(fields) == 2 and fields[1].strip().lower() == "true"
+              )
               if not tag or tag in seen:
                   continue
               seen.add(tag)
+              # Incomplete data-only or overflow Releases are not independent
+              # production runs. Only a Release that already exposes the
+              # immutable RUN_MANIFEST.json may enter catalog reconciliation.
+              if not has_run_manifest:
+                  continue
               if allowed.match(tag) and tag not in known and tag not in quarantined:
                   new_tags.append(tag)
           batch = new_tags[:100]
