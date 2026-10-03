@@ -667,7 +667,8 @@ async def _boucle(
              "frames_l2_hl": 0, "frames_l2_bin": 0, "frames_trades_hl": 0,
              "hl_funding_settlements": 0, "hl_funding_history_error": "",
              "binance_funding_settlements": 0, "binance_funding_history_error": "",
-             "binance_l2_publications": 0, "raw_frames_received": 0,
+             "binance_l2_publications": 0, "binance_l2_full_publications": 0,
+             "binance_l2_partial_publications": 0, "raw_frames_received": 0,
              "raw_records_written": 0, "raw_queue_drops": 0, "parse_errors_hl": 0,
              "canonical_events_written": 0, "canonical_events_rejected": 0,
              "certified_atomic_bbo_written": 0,
@@ -761,6 +762,10 @@ async def _boucle(
         row = dict(publication)
         binance_l2_latest[str(symbol).upper()] = row
         stats["binance_l2_publications"] += 1
+        if row.get("quality") == "PARTIAL_L2_FALLBACK":
+            stats["binance_l2_partial_publications"] += 1
+        else:
+            stats["binance_l2_full_publications"] += 1
         if row.get("quality") == "EXPLOITABLE":
             stats["frames_l2_bin"] += 1
 
@@ -1267,8 +1272,9 @@ async def _boucle(
     async def binance_ag():
         nonlocal bin_trade_connection_serial
         # TRADES = le CHOC exécutable (jamais le mid, qui reste un simple CONTRÔLE dans lead_lag).
-        # `@trade` et NON `@aggTrade` : prouvé au navigateur que fstream ...@aggTrade ne pousse rien ici.
-        streams = "/".join("%s@trade" % s.lower() for s in sym.values())
+        # Depuis le split Binance USD-M 2026, le flux marché officiel est <symbol>@aggTrade
+        # sur /market. Le parseur accepte encore "trade" pour compatibilité historique.
+        streams = "/".join("%s@aggTrade" % s.lower() for s in sym.values())
         while True:
             try:
                 async with websockets.connect("%s?streams=%s" % (WS_BINANCE_MARKET, streams), ping_interval=20) as ws:
