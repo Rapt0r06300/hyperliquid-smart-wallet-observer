@@ -57,6 +57,12 @@
       "from": "RUNNING",
       "reason": "worker_unit_crash",
       "to": "STUCK"
+    },
+    {
+      "at_utc": "2026-10-03T21:19:18.259517Z",
+      "event": "SUPERSEDED_BY_BOUNDED_COPY_VAULT_LANES",
+      "previous_lease": null,
+      "previous_status": "STUCK"
     }
   ],
   "kind": "copy_vault_collection",
@@ -78,9 +84,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "worker_unit_crash",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-02T18:14:01.853441Z",
+  "status": "FAILED",
+  "status_reason": "SUPERSEDED_BY_BOUNDED_V7_LANES",
+  "terminal_evidence_digest": "92371d478d1f95815113f4c65870ad6f242f61de88c26bbf16730d842a2d73c3",
+  "updated_at": "2026-10-03T21:19:18.259517Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
