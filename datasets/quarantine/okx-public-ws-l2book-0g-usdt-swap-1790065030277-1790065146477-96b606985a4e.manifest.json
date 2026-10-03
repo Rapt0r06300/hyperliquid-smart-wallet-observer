@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 30045,
+  "collection_run_id": "market-35696479968",
+  "collector_version": "de1cc284b76a0c11537bb7e9af8eb01f5dced1f9",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-0g-usdt-swap-1790065030277-1790065146477-96b606985a4e",
+  "end_ts_ms": 1790065146477,
+  "event_count": 210,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607736390,
+    "asset_name": "okx-public-ws-l2book-0g-usdt-swap-1790065030277-1790065146477-96b606985a4e.jsonl.gz",
+    "release_id": 402491803,
+    "remote_digest": "sha256:96b606985a4efb5528beaf2cad3520c189bc3c15dc38a69beb525762b8c6e816",
+    "remote_size": 30045,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696479968-s4"
+  },
+  "release_asset": "okx-public-ws-l2book-0g-usdt-swap-1790065030277-1790065146477-96b606985a4e.jsonl.gz",
+  "release_asset_id": 607736390,
+  "release_id": 402491803,
+  "release_remote_digest": "sha256:96b606985a4efb5528beaf2cad3520c189bc3c15dc38a69beb525762b8c6e816",
+  "release_remote_size": 30045,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696479968-s4",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "96b606985a4efb5528beaf2cad3520c189bc3c15dc38a69beb525762b8c6e816",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790065030277,
+  "symbol": "0G-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 210,
+      "max": 24.5,
+      "min": 14.5,
+      "p50": 14.5,
+      "p95": 24.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-43a1e124cc8d4c2cb99c2eacddb0adf9"
+    ],
+    "first_exchange_ts_ms": 1790065030205,
+    "last_exchange_ts_ms": 1790065146405,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 210,
+      "max": 76.0,
+      "min": 71.0,
+      "p50": 72.0,
+      "p95": 74.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 210,
+      "max": 141.187475,
+      "min": 0.0,
+      "p50": 140.355672,
+      "p95": 141.187475
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 1532,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-open-interest-iota-usdt-1790992254129-1790993874130-102b1d352f5f",
+  "end_ts_ms": 1790993874130,
+  "event_count": 5,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 5,
+  "release": {
+    "asset_id": 606995276,
+    "asset_name": "gate-public-ws-open-interest-iota-usdt-1790992254129-1790993874130-102b1d352f5f.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:102b1d352f5f23de1754d610dbd76450c5dba2698ec83142ef016aca062cf598",
+    "remote_size": 1532,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "gate-public-ws-open-interest-iota-usdt-1790992254129-1790993874130-102b1d352f5f.jsonl.gz",
+  "release_asset_id": 606995276,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:102b1d352f5f23de1754d610dbd76450c5dba2698ec83142ef016aca062cf598",
+  "release_remote_size": 1532,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "102b1d352f5f23de1754d610dbd76450c5dba2698ec83142ef016aca062cf598",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790992254129,
+  "symbol": "IOTA_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 5,
+      "max": 361.0,
+      "min": 270.5,
+      "p50": 325.5,
+      "p95": 361.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-5255dc36e8b340b4919af5aedccc6175"
+    ],
+    "first_exchange_ts_ms": 1790992080,
+    "last_exchange_ts_ms": 1790993700,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5,
+      "max": 1789202880430.0,
+      "min": 1789201262049.0,
+      "p50": 1789201681631.0,
+      "p95": 1789202880430.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 5,
+      "max": 152.532391,
+      "min": 152.252859,
+      "p50": 152.377293,
+      "p95": 152.532391
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 7755,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "gate"
+}

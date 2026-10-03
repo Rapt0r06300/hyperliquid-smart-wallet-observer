@@ -1,0 +1,111 @@
+{
+  "asset_verified": true,
+  "bytes": 114688,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-derived-capacity-capacity-tape-jtousdt-1790994406013-1790994491109-6b1ae5501f66",
+  "end_ts_ms": 1790994491109,
+  "event_count": 663,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 663,
+  "release": {
+    "asset_id": 606987605,
+    "asset_name": "bitget-derived-capacity-capacity-tape-jtousdt-1790994406013-1790994491109-6b1ae5501f66.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:6b1ae5501f66f4e6da50f66b408b9824a16db97b44974c2719f939c31f6de03b",
+    "remote_size": 114688,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "bitget-derived-capacity-capacity-tape-jtousdt-1790994406013-1790994491109-6b1ae5501f66.jsonl.gz",
+  "release_asset_id": 606987605,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:6b1ae5501f66f4e6da50f66b408b9824a16db97b44974c2719f939c31f6de03b",
+  "release_remote_size": 114688,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6b1ae5501f66f4e6da50f66b408b9824a16db97b44974c2719f939c31f6de03b",
+  "source": "bitget_derived_capacity",
+  "start_ts_ms": 1790994406013,
+  "symbol": "JTOUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 663,
+      "max": 117.5,
+      "min": 95.0,
+      "p50": 95.0,
+      "p95": 117.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-8a1f3d64c2f04748b49f2c055d2f3ca7"
+    ],
+    "first_exchange_ts_ms": 1790994405252,
+    "last_exchange_ts_ms": 1790994491027,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 663,
+      "max": 761.0,
+      "min": 77.0,
+      "p50": 83.0,
+      "p95": 189.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 663,
+      "max": 168.724559,
+      "min": 0.0,
+      "p50": 159.360743,
+      "p95": 168.724559
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 3955465,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

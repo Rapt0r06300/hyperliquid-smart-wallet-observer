@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 4913,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-ticker-cien-usdt-1790991125139-1790994369138-386277c925ea",
+  "end_ts_ms": 1790994369138,
+  "event_count": 32,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 32,
+  "release": {
+    "asset_id": 606995759,
+    "asset_name": "gate-public-ws-ticker-cien-usdt-1790991125139-1790994369138-386277c925ea.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:386277c925ea6dc9a237114cdce9acf61e9021207111be45f096ee58d30bbd90",
+    "remote_size": 4913,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "gate-public-ws-ticker-cien-usdt-1790991125139-1790994369138-386277c925ea.jsonl.gz",
+  "release_asset_id": 606995759,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:386277c925ea6dc9a237114cdce9acf61e9021207111be45f096ee58d30bbd90",
+  "release_remote_size": 4913,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "386277c925ea6dc9a237114cdce9acf61e9021207111be45f096ee58d30bbd90",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790991125139,
+  "symbol": "CIEN_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 32,
+      "max": 787.5,
+      "min": 270.5,
+      "p50": 321.5,
+      "p95": 373.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-5255dc36e8b340b4919af5aedccc6175"
+    ],
+    "first_exchange_ts_ms": 1790991124993,
+    "last_exchange_ts_ms": 1790994368988,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 32,
+      "max": 1126.0,
+      "min": 144.0,
+      "p50": 161.0,
+      "p95": 830.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 32,
+      "max": 155.757541,
+      "min": 152.235109,
+      "p50": 152.596165,
+      "p95": 154.17505
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 56122,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "gate"
+}

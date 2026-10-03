@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 199108,
+  "collection_run_id": "market-35696479968",
+  "collector_version": "de1cc284b76a0c11537bb7e9af8eb01f5dced1f9",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-hype-usdt-swap-1790064997308-1790065116207-ed3a907ba435",
+  "end_ts_ms": 1790065116207,
+  "event_count": 1065,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607735975,
+    "asset_name": "okx-public-ws-l2book-hype-usdt-swap-1790064997308-1790065116207-ed3a907ba435.jsonl.gz",
+    "release_id": 402491713,
+    "remote_digest": "sha256:ed3a907ba4359a1ef7c6cd500400a7a8cc7a4e86752cf1c38e9a6c3008588710",
+    "remote_size": 199108,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696479968-s3"
+  },
+  "release_asset": "okx-public-ws-l2book-hype-usdt-swap-1790064997308-1790065116207-ed3a907ba435.jsonl.gz",
+  "release_asset_id": 607735975,
+  "release_id": 402491713,
+  "release_remote_digest": "sha256:ed3a907ba4359a1ef7c6cd500400a7a8cc7a4e86752cf1c38e9a6c3008588710",
+  "release_remote_size": 199108,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696479968-s3",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ed3a907ba4359a1ef7c6cd500400a7a8cc7a4e86752cf1c38e9a6c3008588710",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790064997308,
+  "symbol": "HYPE-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1065,
+      "max": 21.0,
+      "min": 11.0,
+      "p50": 11.0,
+      "p95": 21.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-61aaeadc5ebb42eaab4514e190b037fb"
+    ],
+    "first_exchange_ts_ms": 1790064997208,
+    "last_exchange_ts_ms": 1790065116108,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1065,
+      "max": 103.0,
+      "min": 98.0,
+      "p50": 99.0,
+      "p95": 100.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1065,
+      "max": 191.335201,
+      "min": 0.0,
+      "p50": 189.226196,
+      "p95": 191.335201
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

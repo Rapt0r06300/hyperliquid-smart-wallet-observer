@@ -1,0 +1,102 @@
+{
+  "asset_verified": true,
+  "bytes": 17140779,
+  "collection_run_id": "archive-35707914210",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bybit-official-archive-trades-solusdt-1789810560722-1789850808990-87185eea4e26",
+  "end_ts_ms": 1789850808990,
+  "event_count": 195000,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 195000,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:missing_monotonic_count=195000",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "release": {
+    "asset_id": 607738404,
+    "asset_name": "bybit-official-archive-trades-solusdt-1789810560722-1789850808990-87185eea4e26.jsonl.gz",
+    "release_id": 402492355,
+    "remote_digest": "sha256:87185eea4e26440a94a52eeb4af890a595a78074b6f3357f739fb3038ff809b5",
+    "remote_size": 17140779,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "archive-v2-35707914210-bybit-SOL"
+  },
+  "release_asset": "bybit-official-archive-trades-solusdt-1789810560722-1789850808990-87185eea4e26.jsonl.gz",
+  "release_asset_id": 607738404,
+  "release_id": 402492355,
+  "release_remote_digest": "sha256:87185eea4e26440a94a52eeb4af890a595a78074b6f3357f739fb3038ff809b5",
+  "release_remote_size": 17140779,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "archive-v2-35707914210-bybit-SOL",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "87185eea4e26440a94a52eeb4af890a595a78074b6f3357f739fb3038ff809b5",
+  "source": "bybit_official_archive",
+  "start_ts_ms": 1789810560722,
+  "symbol": "SOLUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1789810560722,
+    "last_exchange_ts_ms": 1789850808990,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 195000,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "bybit"
+}

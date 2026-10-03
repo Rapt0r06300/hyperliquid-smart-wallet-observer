@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 974078,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-bera-1790069820239-1790074966470-3b7fc573ecc5",
+  "end_ts_ms": 1790074966470,
+  "event_count": 11171,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607739944,
+    "asset_name": "hyperliquid-public-ws-bbo-bera-1790069820239-1790074966470-3b7fc573ecc5.jsonl.gz",
+    "release_id": 402492729,
+    "remote_digest": "sha256:3b7fc573ecc511bbc316aa8a1566be17aec95d70c99bb41eff0fbeb35e5414d6",
+    "remote_size": 974078,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s0"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-bera-1790069820239-1790074966470-3b7fc573ecc5.jsonl.gz",
+  "release_asset_id": 607739944,
+  "release_id": 402492729,
+  "release_remote_digest": "sha256:3b7fc573ecc511bbc316aa8a1566be17aec95d70c99bb41eff0fbeb35e5414d6",
+  "release_remote_size": 974078,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s0",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3b7fc573ecc511bbc316aa8a1566be17aec95d70c99bb41eff0fbeb35e5414d6",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790069820239,
+  "symbol": "BERA",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-690dcdf1d499408ab159cae8053febcf"
+    ],
+    "first_exchange_ts_ms": 1790069819828,
+    "last_exchange_ts_ms": 1790074966196,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 11171,
+      "max": 12488.0,
+      "min": 220.0,
+      "p50": 335.0,
+      "p95": 667.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

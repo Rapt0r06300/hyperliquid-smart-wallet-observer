@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 18829,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-ticker-recall-usdt-1790991004175-1790994486168-71135d697900",
+  "end_ts_ms": 1790994486168,
+  "event_count": 146,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 146,
+  "release": {
+    "asset_id": 606996165,
+    "asset_name": "gate-public-ws-ticker-recall-usdt-1790991004175-1790994486168-71135d697900.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:71135d69790098cd7732bf5e5fa12fb3213ef9ac77b551faf86c4136ba3e78bf",
+    "remote_size": 18829,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "gate-public-ws-ticker-recall-usdt-1790991004175-1790994486168-71135d697900.jsonl.gz",
+  "release_asset_id": 606996165,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:71135d69790098cd7732bf5e5fa12fb3213ef9ac77b551faf86c4136ba3e78bf",
+  "release_remote_size": 18829,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "71135d69790098cd7732bf5e5fa12fb3213ef9ac77b551faf86c4136ba3e78bf",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1790991004175,
+  "symbol": "RECALL_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 146,
+      "max": 512.0,
+      "min": 260.5,
+      "p50": 318.0,
+      "p95": 512.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-5255dc36e8b340b4919af5aedccc6175"
+    ],
+    "first_exchange_ts_ms": 1790991003961,
+    "last_exchange_ts_ms": 1790994485980,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 146,
+      "max": 1123.0,
+      "min": 79.0,
+      "p50": 176.0,
+      "p95": 922.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 146,
+      "max": 179.130639,
+      "min": 0.0,
+      "p50": 152.688184,
+      "p95": 158.229901
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 264328,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "gate"
+}

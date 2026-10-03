@@ -1,0 +1,108 @@
+{
+  "asset_verified": true,
+  "bytes": 40802,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-open-interest-iota-usdt-swap-1790990992248-1790994484367-7a7cc612678e",
+  "end_ts_ms": 1790994484367,
+  "event_count": 405,
+  "family": "open_interest",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "open_interest"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 405,
+  "release": {
+    "asset_id": 607062718,
+    "asset_name": "okx-public-ws-open-interest-iota-usdt-swap-1790990992248-1790994484367-7a7cc612678e.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:7a7cc612678e9e669b8ee190b839d721f3cc3afcda6f3d8696422192353edbb6",
+    "remote_size": 40802,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "okx-public-ws-open-interest-iota-usdt-swap-1790990992248-1790994484367-7a7cc612678e.jsonl.gz",
+  "release_asset_id": 607062718,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:7a7cc612678e9e669b8ee190b839d721f3cc3afcda6f3d8696422192353edbb6",
+  "release_remote_size": 40802,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7a7cc612678e9e669b8ee190b839d721f3cc3afcda6f3d8696422192353edbb6",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790990992248,
+  "symbol": "IOTA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 405,
+      "max": 87.5,
+      "min": 11.0,
+      "p50": 26.5,
+      "p95": 54.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-f5fa8cf6cc3c45409455aa4646c17353"
+    ],
+    "first_exchange_ts_ms": 1790990979924,
+    "last_exchange_ts_ms": 1790994484258,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 405,
+      "max": 12324.0,
+      "min": 106.0,
+      "p50": 108.0,
+      "p95": 119.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 405,
+      "max": 201.818105,
+      "min": 0.0,
+      "p50": 171.092798,
+      "p95": 178.957088
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 481437,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}

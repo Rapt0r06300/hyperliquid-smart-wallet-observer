@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 91144,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-avax-1790074883875-1790075226340-07b9ca4a8334",
+  "end_ts_ms": 1790075226340,
+  "event_count": 1020,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607757048,
+    "asset_name": "hyperliquid-public-ws-bbo-avax-1790074883875-1790075226340-07b9ca4a8334.jsonl.gz",
+    "release_id": 402497053,
+    "remote_digest": "sha256:07b9ca4a833474b0c336b3bda12d5dcd9e15823e5ad1c2ddacac1837a7f57e1c",
+    "remote_size": 91144,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s2"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-avax-1790074883875-1790075226340-07b9ca4a8334.jsonl.gz",
+  "release_asset_id": 607757048,
+  "release_id": 402497053,
+  "release_remote_digest": "sha256:07b9ca4a833474b0c336b3bda12d5dcd9e15823e5ad1c2ddacac1837a7f57e1c",
+  "release_remote_size": 91144,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "07b9ca4a833474b0c336b3bda12d5dcd9e15823e5ad1c2ddacac1837a7f57e1c",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790074883875,
+  "symbol": "AVAX",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-bca17d4c2b34441784df6c9bfc572f5c"
+    ],
+    "first_exchange_ts_ms": 1790074883556,
+    "last_exchange_ts_ms": 1790075226074,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 1020,
+      "max": 1013.0,
+      "min": 227.0,
+      "p50": 292.0,
+      "p95": 510.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

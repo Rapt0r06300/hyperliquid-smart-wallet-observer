@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 361289,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-cfx-usdt-swap-1790059927431-1790060826159-38e600115679",
+  "end_ts_ms": 1790060826159,
+  "event_count": 2887,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607758328,
+    "asset_name": "okx-public-ws-l2book-cfx-usdt-swap-1790059927431-1790060826159-38e600115679.jsonl.gz",
+    "release_id": 402497053,
+    "remote_digest": "sha256:38e600115679b1deefc8cfba29fc1ba77423ff620737cb1fbd36e3973fd7ff1a",
+    "remote_size": 361289,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s2"
+  },
+  "release_asset": "okx-public-ws-l2book-cfx-usdt-swap-1790059927431-1790060826159-38e600115679.jsonl.gz",
+  "release_asset_id": 607758328,
+  "release_id": 402497053,
+  "release_remote_digest": "sha256:38e600115679b1deefc8cfba29fc1ba77423ff620737cb1fbd36e3973fd7ff1a",
+  "release_remote_size": 361289,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "38e600115679b1deefc8cfba29fc1ba77423ff620737cb1fbd36e3973fd7ff1a",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790059927431,
+  "symbol": "CFX-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2887,
+      "max": 48.5,
+      "min": 21.0,
+      "p50": 25.5,
+      "p95": 32.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-ad478c333e7b45b6b0cb522aa7bd4147"
+    ],
+    "first_exchange_ts_ms": 1790059927207,
+    "last_exchange_ts_ms": 1790060826103,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2887,
+      "max": 224.0,
+      "min": 55.0,
+      "p50": 56.0,
+      "p95": 59.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2887,
+      "max": 124.310872,
+      "min": 0.0,
+      "p50": 116.914851,
+      "p95": 120.809265
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

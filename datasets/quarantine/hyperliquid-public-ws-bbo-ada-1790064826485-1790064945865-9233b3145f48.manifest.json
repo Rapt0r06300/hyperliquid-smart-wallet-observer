@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 44600,
+  "collection_run_id": "market-35696479968",
+  "collector_version": "de1cc284b76a0c11537bb7e9af8eb01f5dced1f9",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-ada-1790064826485-1790064945865-9233b3145f48",
+  "end_ts_ms": 1790064945865,
+  "event_count": 505,
+  "family": "bbo",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "bbo"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607735258,
+    "asset_name": "hyperliquid-public-ws-bbo-ada-1790064826485-1790064945865-9233b3145f48.jsonl.gz",
+    "release_id": 402491593,
+    "remote_digest": "sha256:9233b3145f481126dc0c35f3d2b05f80a8fcd52778a6b6cd2312d298b5f459ae",
+    "remote_size": 44600,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696479968-s7"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-ada-1790064826485-1790064945865-9233b3145f48.jsonl.gz",
+  "release_asset_id": 607735258,
+  "release_id": 402491593,
+  "release_remote_digest": "sha256:9233b3145f481126dc0c35f3d2b05f80a8fcd52778a6b6cd2312d298b5f459ae",
+  "release_remote_size": 44600,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696479968-s7",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9233b3145f481126dc0c35f3d2b05f80a8fcd52778a6b6cd2312d298b5f459ae",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790064826485,
+  "symbol": "ADA",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-f900f9b711764e1285109f4748ec9f6c"
+    ],
+    "first_exchange_ts_ms": 1790064826203,
+    "last_exchange_ts_ms": 1790064945544,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 505,
+      "max": 867.0,
+      "min": 254.0,
+      "p50": 316.0,
+      "p95": 537.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

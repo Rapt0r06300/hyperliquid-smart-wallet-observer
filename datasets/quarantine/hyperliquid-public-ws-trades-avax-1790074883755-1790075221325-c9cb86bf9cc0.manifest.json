@@ -1,0 +1,109 @@
+{
+  "asset_verified": true,
+  "bytes": 7156,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-avax-1790074883755-1790075221325-c9cb86bf9cc0",
+  "end_ts_ms": 1790075221325,
+  "event_count": 35,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": null,
+    "live_only": null,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": null,
+    "status": "UNAVAILABLE"
+  },
+  "release": {
+    "asset_id": 607757406,
+    "asset_name": "hyperliquid-public-ws-trades-avax-1790074883755-1790075221325-c9cb86bf9cc0.jsonl.gz",
+    "release_id": 402497053,
+    "remote_digest": "sha256:c9cb86bf9cc0663158fb8604b995ed515e6beba89ca3eaf7de33130ef0866b3c",
+    "remote_size": 7156,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s2"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-avax-1790074883755-1790075221325-c9cb86bf9cc0.jsonl.gz",
+  "release_asset_id": 607757406,
+  "release_id": 402497053,
+  "release_remote_digest": "sha256:c9cb86bf9cc0663158fb8604b995ed515e6beba89ca3eaf7de33130ef0866b3c",
+  "release_remote_size": 7156,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c9cb86bf9cc0663158fb8604b995ed515e6beba89ca3eaf7de33130ef0866b3c",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790074883755,
+  "symbol": "AVAX",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-bca17d4c2b34441784df6c9bfc572f5c"
+    ],
+    "first_exchange_ts_ms": 1790074883236,
+    "last_exchange_ts_ms": 1790075221012,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 35,
+      "max": 519.0,
+      "min": 249.0,
+      "p50": 318.0,
+      "p95": 504.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

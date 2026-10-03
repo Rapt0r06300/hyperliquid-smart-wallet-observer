@@ -1,0 +1,111 @@
+{
+  "asset_verified": true,
+  "bytes": 3879,
+  "collection_run_id": "market-e6-3-2026100202-v7-0",
+  "collector_version": "a30b7be66acae019aa72525c2132d081660c610f",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-derived-capacity-capacity-tape-lmtusdt-1790994406020-1790994488542-b87abd104a2d",
+  "end_ts_ms": 1790994488542,
+  "event_count": 8,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 8,
+  "release": {
+    "asset_id": 606987691,
+    "asset_name": "bitget-derived-capacity-capacity-tape-lmtusdt-1790994406020-1790994488542-b87abd104a2d.jsonl.gz",
+    "release_id": 402284390,
+    "remote_digest": "sha256:b87abd104a2dea3f8d0a03d9ce2dd6df719b00c98b6e371b2862597676ff76b4",
+    "remote_size": 3879,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0"
+  },
+  "release_asset": "bitget-derived-capacity-capacity-tape-lmtusdt-1790994406020-1790994488542-b87abd104a2d.jsonl.gz",
+  "release_asset_id": 606987691,
+  "release_id": 402284390,
+  "release_remote_digest": "sha256:b87abd104a2dea3f8d0a03d9ce2dd6df719b00c98b6e371b2862597676ff76b4",
+  "release_remote_size": 3879,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
+  "replay_compatible": false,
+  "replay_reason": "NO_REPLAY_ADAPTER",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b87abd104a2dea3f8d0a03d9ce2dd6df719b00c98b6e371b2862597676ff76b4",
+  "source": "bitget_derived_capacity",
+  "start_ts_ms": 1790994406020,
+  "symbol": "LMTUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 8,
+      "max": 117.5,
+      "min": 95.0,
+      "p50": 95.0,
+      "p95": 117.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-8a1f3d64c2f04748b49f2c055d2f3ca7"
+    ],
+    "first_exchange_ts_ms": 1790994397957,
+    "last_exchange_ts_ms": 1790994488455,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 8,
+      "max": 8063.0,
+      "min": 78.0,
+      "p50": 87.0,
+      "p95": 8063.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 8,
+      "max": 162.157609,
+      "min": 0.0,
+      "p50": 162.157609,
+      "p95": 162.157609
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 48343,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

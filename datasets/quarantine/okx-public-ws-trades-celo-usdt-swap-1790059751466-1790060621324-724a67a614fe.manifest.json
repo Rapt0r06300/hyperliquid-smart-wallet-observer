@@ -1,0 +1,109 @@
+{
+  "asset_verified": true,
+  "bytes": 10789,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-celo-usdt-swap-1790059751466-1790060621324-724a67a614fe",
+  "end_ts_ms": 1790060621324,
+  "event_count": 110,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 0,
+    "live_only": 0,
+    "matched_count": 0,
+    "missing_from_live": 168,
+    "reference_count": 168,
+    "status": "MISMATCH"
+  },
+  "release": {
+    "asset_id": 607753554,
+    "asset_name": "okx-public-ws-trades-celo-usdt-swap-1790059751466-1790060621324-724a67a614fe.jsonl.gz",
+    "release_id": 402495715,
+    "remote_digest": "sha256:724a67a614fe217c8786ba83c5217de40bd8acceeccd8344a01004ba16b1ff18",
+    "remote_size": 10789,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s1"
+  },
+  "release_asset": "okx-public-ws-trades-celo-usdt-swap-1790059751466-1790060621324-724a67a614fe.jsonl.gz",
+  "release_asset_id": 607753554,
+  "release_id": 402495715,
+  "release_remote_digest": "sha256:724a67a614fe217c8786ba83c5217de40bd8acceeccd8344a01004ba16b1ff18",
+  "release_remote_size": 10789,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "724a67a614fe217c8786ba83c5217de40bd8acceeccd8344a01004ba16b1ff18",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1790059751466,
+  "symbol": "CELO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 110,
+      "max": 70.5,
+      "min": 13.5,
+      "p50": 28.0,
+      "p95": 70.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-c60fb1455241468c85983fd6cd8743df"
+    ],
+    "first_exchange_ts_ms": 1790059751393,
+    "last_exchange_ts_ms": 1790060621250,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 110,
+      "max": 80.0,
+      "min": 73.0,
+      "p50": 74.0,
+      "p95": 75.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 110,
+      "max": 156.294318,
+      "min": 0.0,
+      "p50": 154.910893,
+      "p95": 155.462622
+    }
+  },
+  "validation_allowed": false,
+  "venue": "okx"
+}

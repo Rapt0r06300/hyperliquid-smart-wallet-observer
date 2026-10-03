@@ -1,0 +1,99 @@
+{
+  "asset_verified": true,
+  "bytes": 5901,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-l2book-brett-1790074920323-1790075021112-b7d52b10dd19",
+  "end_ts_ms": 1790075021112,
+  "event_count": 20,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "release": {
+    "asset_id": 607743225,
+    "asset_name": "hyperliquid-public-ws-l2book-brett-1790074920323-1790075021112-b7d52b10dd19.jsonl.gz",
+    "release_id": 402493541,
+    "remote_digest": "sha256:b7d52b10dd1990f07652927add0711dd1bf544fd6b51cb5c2d53338cddac896c",
+    "remote_size": 5901,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s6"
+  },
+  "release_asset": "hyperliquid-public-ws-l2book-brett-1790074920323-1790075021112-b7d52b10dd19.jsonl.gz",
+  "release_asset_id": 607743225,
+  "release_id": 402493541,
+  "release_remote_digest": "sha256:b7d52b10dd1990f07652927add0711dd1bf544fd6b51cb5c2d53338cddac896c",
+  "release_remote_size": 5901,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s6",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b7d52b10dd1990f07652927add0711dd1bf544fd6b51cb5c2d53338cddac896c",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790074920323,
+  "symbol": "BRETT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-6bf482295a83427a8b9f3107dd4ab72a"
+    ],
+    "first_exchange_ts_ms": 1790074919783,
+    "last_exchange_ts_ms": 1790075020649,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 20,
+      "max": 800.0,
+      "min": 347.0,
+      "p50": 381.0,
+      "p95": 540.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
