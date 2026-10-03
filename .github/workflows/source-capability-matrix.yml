@@ -32,7 +32,9 @@ permissions:
   contents: read
 concurrency:
   group: source-capability-matrix
-  cancel-in-progress: false
+  # Runtime evidence is point-in-time; only the newest main SHA matters.
+  # Cancelling stale validation runs never touches the persistent collectors.
+  cancel-in-progress: true
 
 jobs:
   generate:
