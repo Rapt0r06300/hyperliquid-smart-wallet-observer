@@ -207,6 +207,11 @@ def publish_bundle(
     target: str,
     title: str,
 ) -> dict[str, Any]:
+    if repository != V2_REPOSITORY:
+        raise PublishError(
+            "dataset publication is locked to the single active Alina repository: "
+            f"{V2_REPOSITORY}"
+        )
     root = Path(bundle_root)
     index_path = root / "BUNDLE_INDEX.json"
     if not index_path.is_file():
