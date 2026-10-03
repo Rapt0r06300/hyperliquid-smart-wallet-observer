@@ -248,6 +248,12 @@ def test_ws_api_snapshot_recovers_full_book_when_rest_is_restricted() -> None:
         assert health["ws_api_failures"] == 0
         assert health["full_snapshot_unavailable_symbols"] == []
         assert health["rest_unavailable_symbols"] == ["BTCUSDT"]
+        assert health["clock_sync"]["clock_offset_ms"] == 0.0
+        assert health["clock_sync"]["clock_probe_rtt_ms"] == 20.0
+        assert (
+            health["clock_sync"]["clock_probe_source"]
+            == "websocket_api_depth_roundtrip"
+        )
         raw = [tick for tick in ticks if tick.channel == "l2Book_snapshot"]
         assert len(raw) == 1
         assert raw[0].provenance["snapshot_source"] == "websocket_api"
