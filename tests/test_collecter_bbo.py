@@ -77,6 +77,20 @@ def test_parser_bbo_hl():
     assert m.parser_bbo_hl({"channel": "trades"}) is None     # autre canal -> None
 
 
+def test_binance_ws_candidates_include_official_failover():
+    m = _mod()
+    assert m.BINANCE_PUBLIC_WS_CANDIDATES == (
+        "wss://fstream.binance.com/public/stream",
+        "wss://stream.binancefuture.com/public/stream",
+    )
+    assert m.BINANCE_MARKET_WS_CANDIDATES == (
+        "wss://fstream.binance.com/market/stream",
+        "wss://stream.binancefuture.com/market/stream",
+    )
+    assert m.WS_BINANCE_PUBLIC == m.BINANCE_PUBLIC_WS_CANDIDATES[0]
+    assert m.WS_BINANCE_MARKET == m.BINANCE_MARKET_WS_CANDIDATES[0]
+
+
 def test_parser_bookticker_binance():
     m = _mod()
     msg = {"data": {"s": "ETHUSDT", "b": "3000.1", "a": "3000.4", "B": "10", "A": "9", "T": 222}}
