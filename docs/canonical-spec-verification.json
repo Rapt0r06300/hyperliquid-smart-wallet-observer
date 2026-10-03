@@ -1,39 +1,39 @@
 {
-  "dataset_v2_head": "3763e809bc726acbd250258d4e99c15f317deea3",
-  "generated_at_utc": "2026-10-03T01:34:38.186114Z",
+  "dataset_v2_head": "76c66dbf1697b15239f0987c5107b814dbf49806",
+  "generated_at_utc": "2026-10-03T09:49:41.172096Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "f4faff0dcea94dc55eb2946f13f590cd1fbd7ed89939ac5448b2ec68ed4284c5",
-      "output_tail": "...................................                                      [100%]\n35 passed in 2.06s\n",
+      "output_sha256": "37e9a16b78c0b7f0d557fbe681bd43ea0bc1e384885457ebe26537df2799d9b3",
+      "output_tail": "...................................                                      [100%]\n35 passed in 1.18s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "6d8b08c37f61ca47b02166fe634db19368a7f79c3e4e6f017119ec1dd95b5717",
-      "output_tail": ".............................                                            [100%]\n29 passed in 2.28s\n",
+      "output_sha256": "e1c0ff0e6bcb5b7063df3e20d1400eb5d0dfc2da4470c34790ba4af691d8e30b",
+      "output_tail": ".............................                                            [100%]\n29 passed in 1.31s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "f4a7627d6655119b9ad3c6ba521e918e7594301fc98659c3cafe3fb5bf793b2d",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.12s\n",
+      "output_sha256": "7b9f81754d8638071367e1ebc1fba18202f804a1728009771fc2625ab8844ba8",
+      "output_tail": ".........                                                                [100%]\n9 passed in 0.66s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "fbbcde3dcdcd37feb85ff292140e1be344a0227c8b64fd45b32eec7bb864f55d",
-      "output_tail": "..............................................                           [100%]\n46 passed in 2.87s\n",
+      "output_sha256": "17df4f1edc4bf4d47921e31a4ef2e28fcffadbe7042d4e220314cc567b40161a",
+      "output_tail": "..............................................                           [100%]\n46 passed in 1.69s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "65059e9480cc00ef04ffd98e3a699b0d8b3ea412c5902478f69aa437ca653a6d",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.14s\n",
+      "output_sha256": "aa49ed86b286b1334c64b0e4ec20fcc20313f97222bee9f9729bc0e8f727436f",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 3.09s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -45,17 +45,17 @@
       "status": "PASS"
     }
   ],
-  "main_alina_head": "3763e809bc726acbd250258d4e99c15f317deea3",
+  "main_alina_head": "76c66dbf1697b15239f0987c5107b814dbf49806",
   "paper_only": true,
   "python_version": "3.12.14",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "d72a14c377fc4cb4ba06e0d1f8316ce9267fadbbfd9024ff6f4252a97fbbf75b",
+  "receipt_digest": "ca6682c0214aeedb1af621622a3c9795f97342b62dd123258a8ec9958eb34767",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "PASS",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "37086454039"
+  "workflow_run_id": "37114316436"
 }
