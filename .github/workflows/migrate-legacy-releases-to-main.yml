@@ -52,7 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python tools/migrate_legacy_releases_to_main.py             --source-repository 'Rapt0r06300/alina-smartflow-datasets-v2'             --target-repository "$GITHUB_REPOSITORY"             --state control/legacy-release-migration.json             --unified control/unified-repository.json             --max-releases 8             --time-budget-seconds 16200
+          python tools/migrate_legacy_releases_to_main.py             --source-repository 'Rapt0r06300/alina-smartflow-datasets-v2'             --target-repository "$GITHUB_REPOSITORY"             --state control/legacy-release-migration.json             --unified control/unified-repository.json             --max-releases 64             --time-budget-seconds 16200
           STATUS="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json"))["status"])')"
           PENDING="$(python -c 'import json; print(json.load(open("control/legacy-release-migration.json")).get("pending_releases",0))')"
           echo "status=$STATUS" >> "$GITHUB_OUTPUT"
