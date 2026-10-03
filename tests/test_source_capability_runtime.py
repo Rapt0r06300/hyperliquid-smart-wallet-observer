@@ -153,3 +153,59 @@ def test_runtime_receipt_records_runner_ip_and_uses_real_binance_ws_evidence(
     assert receipt["venues"]["bybit"]["rest_probe_observed"] is True
     assert "api.bytick.com" in receipt["venues"]["bybit"]["rest_probe_reason"]
 
+def test_runtime_receipt_does_not_promote_partial_binance_l2_to_full(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 1,
+                "last_event_ms": {
+                    "bybit": 0,
+                    "okx": 1,
+                    "gate": 2,
+                    "bitget": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    bbo = tmp_path / "bbo.json"
+    bbo.write_text(
+        json.dumps(
+            {
+                "frames_bookticker": 10,
+                "frames_trades": 10,
+                "binance_l2_publications": 4,
+                "binance_l2_full_publications": 0,
+                "binance_l2_partial_publications": 4,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            raise OSError("REST blocked")
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        bbo_heartbeat=bbo,
+        github_sha="d" * 40,
+        github_run_id="100",
+        request_json=fake_request,
+        now_utc="2026-10-03T00:00:00Z",
+    )
+
+    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "DEGRADED"
+    assert receipt["venues"]["binance"]["ws_frames"]["l2_partial_publications"] == 4
+    assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 0
+

@@ -450,3 +450,20 @@ def test_discovery_failure_is_visible_in_health_instead_of_silent() -> None:
     assert "HTTP 403" in health["discovery_errors"]["bybit"]
     assert "HTTP 403" in health["transport_errors"]["bybit"]
 
+def test_bybit_rest_failure_uses_ws_only_candidates_without_claiming_registry() -> None:
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_BrokenBybitDiscovery(),
+        okx_client=_OkxDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        max_symbols_per_venue=2,
+        ccxt_snapshot_path=None,
+    )
+
+    registry = coordinator.discover(now_s=100.0)
+    assert "bybit" not in registry["BTC"]
+    assert "bybit" not in registry["ETH"]
+    assert coordinator.symbols_for("bybit") == ["BTCUSDT", "ETHUSDT"]
+    health = coordinator.health(now_ms=100_000)
+    assert health["ws_fallback_symbols"]["bybit"] == ["BTCUSDT", "ETHUSDT"]
+

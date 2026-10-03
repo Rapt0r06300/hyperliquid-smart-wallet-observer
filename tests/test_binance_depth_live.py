@@ -180,3 +180,65 @@ def test_rest_snapshot_uses_separate_partition_and_zero_event_gap() -> None:
         await client.aclose()
 
     asyncio.run(scenario())
+
+def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() -> None:
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                451,
+                json={"msg": "Service unavailable from a restricted location"},
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://fapi.binance.com",
+            transport=httpx.MockTransport(handler),
+        )
+        ticks = []
+        publications = []
+        collector = BinanceDepthLiveCollector(
+            ["BTCUSDT"],
+            http_client=client,
+            tick_sink=ticks.append,
+            publication_sink=lambda symbol, row: publications.append((symbol, dict(row))),
+            partial_fallback_levels=20,
+        )
+
+        assert await collector.resync_symbol("BTCUSDT", connection_id="bin-partial") is None
+        assert "BTCUSDT" in collector.health()["rest_unavailable_symbols"]
+        assert "btcusdt@depth20@100ms" in collector.websocket_url()
+
+        frame = parse_depth_frame(
+            {
+                "stream": "btcusdt@depth20@100ms",
+                "data": {
+                    "e": "depthUpdate",
+                    "E": 2_010,
+                    "T": 2_005,
+                    "s": "BTCUSDT",
+                    "U": 201,
+                    "u": 203,
+                    "pu": 200,
+                    "b": [["100", "2"], ["99", "3"]],
+                    "a": [["101", "4"], ["102", "5"]],
+                },
+            }
+        )
+        assert frame is not None
+        collector._emit_partial_fallback(
+            "BTCUSDT",
+            frame,
+            connection_id="bin-partial",
+            receive_wall_ms=2_020,
+            receive_mono_ns=20_000,
+        )
+
+        assert publications[-1][1]["quality"] == "PARTIAL_L2_FALLBACK"
+        assert publications[-1][1]["data_gate_ready"] is False
+        raw = [tick for tick in ticks if tick.channel == "l2Book_partial_snapshot"]
+        assert len(raw) == 1
+        assert raw[0].parsed_summary["data_gate_ready"] is False
+        assert collector.health()["partial_fallback_publications"] == 1
+        await client.aclose()
+
+    asyncio.run(scenario())
+
