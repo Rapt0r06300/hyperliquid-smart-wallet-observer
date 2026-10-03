@@ -15,6 +15,7 @@ def test_registre_par_defaut_honnete():
     assert r.capacite("hyperliquid") == OFFLINE_READY
     assert r.capacite("dydx") == OFFLINE_READY and r.capacite("binance") == OFFLINE_READY
     assert r.capacite("coinbase") == OFFLINE_READY and r.capacite("nansen") == REQUIRES_NETWORK
+    assert r.capacite("htx") == OFFLINE_READY
     rd = r.ready()
     assert rd["ready"] is True                                   # aucune requise NON_IMPLEMENTE
     assert "bybit" in rd["requiert_reseau"] and "hyperliquid" in rd["offline_ready"]
@@ -33,8 +34,8 @@ def test_registre_reconcilie_exactement_venues_chargees_et_desactivees():
     r = registre_par_defaut()
     receipt = r.reconcile_loaded(run_id="venue-bootstrap", state_version="b" * 40)
     assert receipt.require_ready().counts == {
-        "expected": 14,
-        "loaded": 6,
+        "expected": 15,
+        "loaded": 7,
         "unavailable": 0,
         "intentionally_disabled": 8,
     }
@@ -45,6 +46,7 @@ def test_registre_reconcilie_exactement_venues_chargees_et_desactivees():
         "venue:coinbase",
         "venue:deribit",
         "venue:kraken",
+        "venue:htx",
     }
 
 
