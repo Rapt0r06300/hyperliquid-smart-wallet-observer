@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/dataset-quality-ci.yml'
+      - '.github/workflows/reconcile-v2-catalog.yml'
+      - '.github/workflows/migrate-legacy-releases-to-main.yml'
+      - 'control/unified-repository.json'
       - 'tools/**'
       - 'tests/**'
       - 'catalog/DATA_INDEX.json'
