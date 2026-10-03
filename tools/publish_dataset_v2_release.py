@@ -252,6 +252,57 @@ def publish_bundle(
         title=title,
         notes=notes,
     )
+
+    # A campaign unit may be retried after collection produced a new bundle.
+    # If a prior attempt died before RUN_MANIFEST.json was published, GitHub
+    # can retain hundreds of orphan assets under the same deterministic tag.
+    # Those stale assets accumulate across retries and eventually hit GitHub's
+    # hard 1000-assets-per-release limit. Preserve resumable progress only when
+    # every existing asset belongs to the current bundle; otherwise reset the
+    # incomplete release atomically before uploading the current bundle.
+    desired_asset_names = {
+        str(manifest.get("release_asset") or "")
+        for manifest in manifests
+        if str(manifest.get("release_asset") or "")
+    }
+    existing_assets = release_asset_map(release)
+    existing_run = existing_assets.get("RUN_MANIFEST.json")
+    if existing_run is None:
+        stale_asset_names = sorted(set(existing_assets) - desired_asset_names)
+        if stale_asset_names:
+            _run(
+                [
+                    "release",
+                    "delete",
+                    tag,
+                    "--repo",
+                    repository,
+                    "--cleanup-tag",
+                    "--yes",
+                ]
+            )
+            release = ensure_release(
+                repository=repository,
+                tag=tag,
+                target=target,
+                title=title,
+                notes=notes,
+            )
+            existing_assets = release_asset_map(release)
+            if existing_assets:
+                raise PublishError(
+                    "recreated incomplete release is unexpectedly non-empty"
+                )
+    else:
+        unexpected = sorted(
+            set(existing_assets) - desired_asset_names - {"RUN_MANIFEST.json"}
+        )
+        if unexpected:
+            raise PublishError(
+                "finalized release contains assets outside the current bundle; "
+                "refusing to mutate immutable evidence"
+            )
+
     release_id = int(release.get("id") or 0)
     if release_id <= 0:
         raise PublishError("Release id is missing.")
@@ -259,7 +310,6 @@ def publish_bundle(
     # A release tag plus asset name is an immutable publication identity.
     # Repeating an identical publication is idempotent; clobbering a different
     # digest is a hard conflict and must fail closed.
-    existing_assets = release_asset_map(release)
     for manifest in manifests:
         asset_name = str(manifest.get("release_asset") or "")
         existing = existing_assets.get(asset_name)
@@ -340,7 +390,8 @@ def publish_bundle(
     existing_run = release_asset_map(release).get("RUN_MANIFEST.json")
     if existing_run is not None:
         assert_existing_asset_compatible(run_identity, existing_run)
-    upload_file(repository=repository, tag=tag, path=run_path)
+    else:
+        upload_file(repository=repository, tag=tag, path=run_path)
 
     # Refresh once more so RUN_MANIFEST itself is visible before success.
     final_release = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
