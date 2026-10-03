@@ -24,6 +24,11 @@ def main() -> int:
     parser.add_argument("--campaign-dir", default="catalog/campaigns")
     parser.add_argument("--phase-path", default="control/alina-phase.json")
     parser.add_argument("--legacy-version", default="-v6")
+    parser.add_argument(
+        "--preserve-running",
+        action="store_true",
+        help="Do not supersede a currently RUNNING lane; let it finish cleanly.",
+    )
     args = parser.parse_args()
 
     phase = json.loads(Path(args.phase_path).read_text(encoding="utf-8"))
@@ -44,6 +49,8 @@ def main() -> int:
             continue
         campaign_id = str(row.get("campaign_id") or path.stem)
         previous_status = str(row.get("status"))
+        if args.preserve_running and previous_status == "RUNNING":
+            continue
         row.setdefault("history", []).append(
             {
                 "at_utc": now,

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import gzip
+import hashlib
 import json
 import shutil
 import sys
@@ -60,6 +61,12 @@ MAX_SUBSCRIPTIONS_PER_SOCKET = 5
 MAX_UNIQUE_USERS_PER_IP = 10
 MAX_RECONCILIATION_REQUESTS_PER_VAULT = 512
 RECONCILIATION_PER_VAULT_TIMEOUT_S = 90.0
+# clearinghouseState has official weight 2 under a shared 1200 weight/min/IP
+# REST budget. 0.14s/request ~= 857 weight/min, leaving safety headroom.
+BROAD_SWEEP_REQUEST_INTERVAL_S = 0.14
+BROAD_SWEEP_CONCURRENCY = 8
+MAX_PRIORITY_WS_VAULTS = 10
+PRIORITY_AUDIT_ROTATION_SLOTS = 2
 
 
 class AsyncTickSink:
@@ -429,6 +436,275 @@ def validate_user_subscription_budget(vaults: list[str]) -> int:
             f"Hyperliquid limit is {MAX_UNIQUE_USERS_PER_IP} per IP"
         )
     return count
+
+
+
+class _RequestRateGate:
+    """Monotonic request spacing shared by all broad-sweep workers."""
+
+    def __init__(self, interval_s: float) -> None:
+        self.interval_s = max(0.0, float(interval_s))
+        self._next_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            slot = max(now, self._next_at)
+            self._next_at = slot + self.interval_s
+        delay = slot - now
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
+def _position_fingerprint(state: Mapping[str, Any]) -> str:
+    rows = []
+    for raw in state.get("positions") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        rows.append(
+            {
+                "coin": str(raw.get("coin") or "").upper(),
+                "szi": raw.get("szi"),
+                "entryPx": raw.get("entryPx"),
+                "levier": raw.get("levier"),
+            }
+        )
+    rows.sort(key=lambda row: (row["coin"], str(row["szi"])))
+    return hashlib.sha256(
+        json.dumps(rows, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def broad_state_envelope(
+    payload: Mapping[str, Any],
+    *,
+    vault: str,
+    phase: str,
+    receive_wall_ms: int,
+    receive_mono_ns: int,
+) -> tuple[TickEnvelope | None, dict[str, Any] | None]:
+    """Normalize one broad clearinghouseState observation into one compact family.
+
+    All broad-state records intentionally use instrument='*' so thousands of vaults
+    stay in a small number of Dataset V2 shards instead of creating one release
+    asset per vault. The exact vault address remains in raw/parsed evidence.
+    """
+    parsed = CV.parser_clearinghouse(dict(payload))
+    if parsed is None:
+        return None, None
+    fingerprint = _position_fingerprint(parsed)
+    try:
+        exchange_ts_ms = int(payload.get("time")) if payload.get("time") is not None else None
+    except (TypeError, ValueError, OverflowError):
+        exchange_ts_ms = None
+    summary = {
+        "vault": str(vault).lower(),
+        "phase": str(phase).upper(),
+        "position_fingerprint": fingerprint,
+        "nav_usd": parsed.get("nav_usd"),
+        "expo_brute_usd": parsed.get("expo_brute_usd"),
+        "expo_nette_usd": parsed.get("expo_nette_usd"),
+        "levier": parsed.get("levier"),
+        "n_positions": parsed.get("n_positions"),
+        "data_gate_ready": False,
+    }
+    envelope = TickEnvelope(
+        source_id="hyperliquid_public_info",
+        channel="copy_vault_broad_state",
+        instrument="*",
+        event_kind=FeedEventKind.SNAPSHOT,
+        raw_payload={
+            "vault": str(vault).lower(),
+            "phase": str(phase).upper(),
+            "clearinghouseState": dict(payload),
+        },
+        exchange_ts_ms=exchange_ts_ms,
+        received_ts_ms=receive_wall_ms,
+        local_monotonic_ns=receive_mono_ns,
+        connection_id=None,
+        sequence=None,
+        provenance={
+            "url": INFO_URL,
+            "network": "mainnet",
+            "access": "read_only",
+            "transport": "https",
+            "authenticated": False,
+            "request_type": "clearinghouseState",
+            "broad_sweep": True,
+        },
+        parsed_summary=summary,
+    )
+    return envelope, {**summary, "positions": parsed.get("positions") or []}
+
+
+async def collect_broad_state(
+    rows: list[Mapping[str, Any]],
+    sink: AsyncTickSink,
+    *,
+    phase: str,
+    request_interval_s: float = BROAD_SWEEP_REQUEST_INTERVAL_S,
+    concurrency: int = BROAD_SWEEP_CONCURRENCY,
+    http_client: httpx.AsyncClient | None = None,
+) -> dict[str, Any]:
+    """Rate-budgeted complete-universe clearinghouseState sweep.
+
+    The official clearinghouseState request weight is 2. Production spacing is
+    deliberately below the per-IP 1200 weight/min limit. Failures remain visible
+    and never fabricate state.
+    """
+    started = time.monotonic()
+    gate = _RequestRateGate(request_interval_s)
+    semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+    owns_client = http_client is None
+    client = http_client or httpx.AsyncClient(
+        base_url="https://api.hyperliquid.xyz",
+        timeout=15.0,
+    )
+    states: dict[str, dict[str, Any]] = {}
+    failures: dict[str, int] = defaultdict(int)
+
+    async def one(row: Mapping[str, Any]) -> None:
+        vault = str(row.get("address") or "").strip().lower()
+        if not vault:
+            failures["MISSING_ADDRESS"] += 1
+            return
+        async with semaphore:
+            last_error = "UNKNOWN"
+            for attempt in range(2):
+                await gate.wait()
+                try:
+                    response = await client.post(
+                        "/info",
+                        json={"type": "clearinghouseState", "user": vault},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                except Exception as exc:
+                    last_error = type(exc).__name__
+                    if attempt == 0:
+                        await asyncio.sleep(0.5)
+                        continue
+                    failures[last_error] += 1
+                    return
+                if not isinstance(payload, Mapping):
+                    failures["INVALID_PAYLOAD"] += 1
+                    return
+                receive_mono_ns = time.monotonic_ns()
+                receive_wall_ms = int(time.time() * 1_000)
+                envelope, state = broad_state_envelope(
+                    payload,
+                    vault=vault,
+                    phase=phase,
+                    receive_wall_ms=receive_wall_ms,
+                    receive_mono_ns=receive_mono_ns,
+                )
+                if envelope is None or state is None:
+                    failures["UNPARSABLE_STATE"] += 1
+                    return
+                state["tvl_usd"] = float(row.get("tvl_usd") or 0.0)
+                states[vault] = state
+                sink.emit(envelope)
+                return
+            failures[last_error] += 1
+
+    try:
+        await asyncio.gather(*(one(row) for row in rows))
+    finally:
+        if owns_client:
+            await client.aclose()
+
+    return {
+        "phase": str(phase).upper(),
+        "requested": len(rows),
+        "observed": len(states),
+        "failed": max(0, len(rows) - len(states)),
+        "failure_types": dict(sorted(failures.items())),
+        "elapsed_s": round(time.monotonic() - started, 3),
+        "request_interval_s": float(request_interval_s),
+        "states": states,
+    }
+
+
+def select_priority_ws_vaults(
+    rows: list[Mapping[str, Any]],
+    broad_sweep: Mapping[str, Any],
+    *,
+    max_ws_vaults: int = MAX_PRIORITY_WS_VAULTS,
+    rotation_seed: str = "",
+) -> list[dict[str, Any]]:
+    """Pick scarce WS users from broad state, plus deterministic audit rotation."""
+    limit = max(1, min(MAX_PRIORITY_WS_VAULTS, int(max_ws_vaults)))
+    states = broad_sweep.get("states")
+    if not isinstance(states, Mapping) or not states:
+        raise RuntimeError("broad Copy-Vault sweep produced no usable state")
+    by_address = {
+        str(row.get("address") or "").strip().lower(): dict(row)
+        for row in rows
+        if isinstance(row, Mapping) and str(row.get("address") or "").strip()
+    }
+    observed = [
+        address for address in by_address
+        if isinstance(states.get(address), Mapping)
+    ]
+    if not observed:
+        raise RuntimeError("no frozen Copy-Vault address has observed broad state")
+
+    audit_slots = min(PRIORITY_AUDIT_ROTATION_SLOTS, limit)
+    core_slots = max(0, limit - audit_slots)
+
+    def activity_key(address: str) -> tuple[float, float, float, str]:
+        state = states[address]
+        return (
+            -float(state.get("n_positions") or 0),
+            -float(state.get("expo_brute_usd") or 0.0),
+            -float(by_address[address].get("tvl_usd") or 0.0),
+            address,
+        )
+
+    active = [
+        address for address in observed
+        if int(states[address].get("n_positions") or 0) > 0
+    ]
+    active.sort(key=activity_key)
+    selected = active[:core_slots]
+
+    if len(selected) < core_slots:
+        fill = [address for address in observed if address not in selected]
+        fill.sort(key=activity_key)
+        selected.extend(fill[: core_slots - len(selected)])
+
+    remaining = [address for address in observed if address not in selected]
+    remaining.sort(
+        key=lambda address: hashlib.sha256(
+            f"{rotation_seed}|{address}".encode("utf-8")
+        ).hexdigest()
+    )
+    selected.extend(remaining[: max(0, limit - len(selected))])
+
+    result: list[dict[str, Any]] = []
+    for index, address in enumerate(selected[:limit]):
+        row = dict(by_address[address])
+        state = states[address]
+        row["ws_selection_reason"] = (
+            "ACTIVE_PRIORITY" if address in active[:core_slots] else "AUDIT_ROTATION"
+        )
+        row["broad_n_positions"] = int(state.get("n_positions") or 0)
+        row["broad_expo_brute_usd"] = float(state.get("expo_brute_usd") or 0.0)
+        row["broad_position_fingerprint"] = str(
+            state.get("position_fingerprint") or ""
+        )
+        row["ws_priority_rank"] = index
+        result.append(row)
+    return result
+
+
+def _compact_sweep_metrics(sweep: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in sweep.items()
+        if key != "states"
+    }
 
 
 async def collect_position_snapshots(
@@ -902,6 +1178,8 @@ async def collect(
     max_vaults: int,
     vault_shard_count: int = 1,
     vault_shard_index: int = 0,
+    max_ws_vaults: int = MAX_PRIORITY_WS_VAULTS,
+    two_speed: bool = False,
     rotate_bytes: int,
     collection_run_id: str | None = None,
     frozen_selection: Mapping[str, Any] | None = None,
@@ -923,26 +1201,15 @@ async def collect(
         ][: max(1, int(max_vaults))]
         if not selected_rows:
             raise ValueError("frozen selection contains no usable vaults")
-        selection["vaults"] = selected_rows
-        selection["vault_count"] = len(selected_rows)
+
     shard_count = max(1, int(vault_shard_count))
     shard_index = int(vault_shard_index)
     if not 0 <= shard_index < shard_count:
         raise ValueError("vault_shard_index must be within vault_shard_count")
     full_count = len(selected_rows)
-    selected_rows = selected_rows[shard_index::shard_count]
-    selection = {
-        **selection,
-        "full_vault_count": full_count,
-        "vault_count": len(selected_rows),
-        "vault_shard_count": shard_count,
-        "vault_shard_index": shard_index,
-        "vaults": selected_rows,
-    }
-    vaults = [str(row["address"]).lower() for row in selected_rows]
-    if not vaults:
-        raise RuntimeError("selected Copy-Vault shard is empty")
-    validate_user_subscription_budget(vaults)
+    if two_speed and (shard_count != 1 or shard_index != 0):
+        raise ValueError("two-speed Copy-Vault collection requires one broad universe lane")
+
     selection_ts_ms = int(selection["selected_at_ms"])
     run_id = str(collection_run_id or "").strip() or (
         f"copy-vault-{str(collector_version)[:12]}-{selection_ts_ms}-"
@@ -957,6 +1224,58 @@ async def collect(
     )
     sink = AsyncTickSink(writer)
     writer_task = asyncio.create_task(sink.run())
+
+    broad_start: dict[str, Any] = {}
+    broad_end: dict[str, Any] = {}
+    changed_fingerprints = 0
+
+    if two_speed:
+        universe_rows = list(selected_rows)
+        broad_start = await collect_broad_state(
+            universe_rows,
+            sink,
+            phase="START",
+        )
+        priority_rows = select_priority_ws_vaults(
+            universe_rows,
+            broad_start,
+            max_ws_vaults=max_ws_vaults,
+            rotation_seed=run_id,
+        )
+        selected_rows = priority_rows
+        broad_digest = hashlib.sha256(
+            "\n".join(
+                sorted(str(row.get("address") or "").lower() for row in universe_rows)
+            ).encode("utf-8")
+        ).hexdigest()
+        selection = {
+            **selection,
+            "mode": "two_speed_broad_rest_priority_ws",
+            "full_vault_count": full_count,
+            "broad_vault_count": full_count,
+            "broad_selection_digest": broad_digest,
+            "vault_count": len(priority_rows),
+            "max_ws_vaults": min(MAX_PRIORITY_WS_VAULTS, int(max_ws_vaults)),
+            "vault_shard_count": 1,
+            "vault_shard_index": 0,
+            "vaults": priority_rows,
+        }
+    else:
+        selected_rows = selected_rows[shard_index::shard_count]
+        selection = {
+            **selection,
+            "mode": "legacy_sharded_ws",
+            "full_vault_count": full_count,
+            "vault_count": len(selected_rows),
+            "vault_shard_count": shard_count,
+            "vault_shard_index": shard_index,
+            "vaults": selected_rows,
+        }
+
+    vaults = [str(row["address"]).lower() for row in selected_rows]
+    if not vaults:
+        raise RuntimeError("selected Copy-Vault lane is empty")
+    validate_user_subscription_budget(vaults)
 
     for row in selected_rows:
         sink.emit(selection_envelope(row, selection))
@@ -973,10 +1292,7 @@ async def collect(
         sink,
         phase="START",
     )
-    # A frozen universe can be selected well before a hosted runner lane starts.
-    # Each vault gets its own observation start immediately after its subscription
-    # request is sent; queue delay and subscription startup are never treated as
-    # missing WebSocket fills.
+
     collection_launch_ms = int(time.time() * 1_000)
     groups = [
         vaults[index:index + MAX_SUBSCRIPTIONS_PER_SOCKET]
@@ -1008,8 +1324,22 @@ async def collect(
         )
     )
 
+    requested_duration = max(1.0, float(duration_s))
+    if two_speed:
+        estimated_end_sweep_s = (
+            float(full_count) * BROAD_SWEEP_REQUEST_INTERVAL_S * 1.10
+        )
+        ws_duration_s = max(
+            60.0,
+            requested_duration
+            - float(broad_start.get("elapsed_s") or 0.0)
+            - estimated_end_sweep_s,
+        )
+    else:
+        ws_duration_s = requested_duration
+
     try:
-        await asyncio.sleep(max(1.0, float(duration_s)))
+        await asyncio.sleep(ws_duration_s)
     finally:
         for task in tasks:
             task.cancel()
@@ -1020,6 +1350,23 @@ async def collect(
         sink,
         phase="END",
     )
+
+    if two_speed:
+        broad_end = await collect_broad_state(
+            universe_rows,
+            sink,
+            phase="END",
+        )
+        start_states = broad_start.get("states")
+        end_states = broad_end.get("states")
+        if isinstance(start_states, Mapping) and isinstance(end_states, Mapping):
+            changed_fingerprints = sum(
+                1
+                for address in set(start_states) & set(end_states)
+                if str(start_states[address].get("position_fingerprint") or "")
+                != str(end_states[address].get("position_fingerprint") or "")
+            )
+
     end_ms = int(time.time() * 1_000)
     reports = await reconcile_forward_window(
         vaults,
@@ -1046,7 +1393,7 @@ async def collect(
         default=collection_launch_ms,
     )
     summary = {
-        "schema": "alina.copy_vault_cloud_window.v1",
+        "schema": "alina.copy_vault_cloud_window.v2",
         "collection_run_id": run_id,
         "selection_ts_ms": selection_ts_ms,
         "collection_launch_ts_ms": collection_launch_ms,
@@ -1054,10 +1401,14 @@ async def collect(
         "vault_observation_start_ts_ms": dict(sorted(observation_start_ms.items())),
         "end_ts_ms": end_ms,
         "duration_s": round((end_ms - effective_start_ms) / 1000.0, 3),
+        "requested_duration_s": requested_duration,
+        "ws_duration_s": round(ws_duration_s, 3),
         "vault_count": len(vaults),
         "vault_universe_count": selection.get("full_vault_count"),
         "vault_shard_count": selection.get("vault_shard_count"),
         "vault_shard_index": selection.get("vault_shard_index"),
+        "copy_vault_mode": selection.get("mode"),
+        "priority_ws_vaults": vaults,
         "socket_groups": len(groups),
         "l2_coin_count": len(l2_known_coins),
         "l2_frames": l2_state.get("frames", 0),
@@ -1065,6 +1416,9 @@ async def collect(
         "l2_heartbeats": l2_state.get("heartbeats", 0),
         "position_snapshots_start": position_snapshots_start,
         "position_snapshots_end": position_snapshots_end,
+        "broad_sweep_start": _compact_sweep_metrics(broad_start),
+        "broad_sweep_end": _compact_sweep_metrics(broad_end),
+        "broad_position_fingerprints_changed": changed_fingerprints,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
@@ -1086,7 +1440,6 @@ async def collect(
     )
     return summary
 
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
@@ -1097,6 +1450,8 @@ def main() -> int:
     parser.add_argument("--max-vaults", type=int, default=100)
     parser.add_argument("--vault-shard-count", type=int, default=1)
     parser.add_argument("--vault-shard-index", type=int, default=0)
+    parser.add_argument("--max-ws-vaults", type=int, default=MAX_PRIORITY_WS_VAULTS)
+    parser.add_argument("--two-speed", action="store_true")
     parser.add_argument("--rotate-mb", type=int, default=64)
     args = parser.parse_args()
     frozen_selection = None
@@ -1114,6 +1469,8 @@ def main() -> int:
             max_vaults=max(1, int(args.max_vaults)),
             vault_shard_count=max(1, int(args.vault_shard_count)),
             vault_shard_index=int(args.vault_shard_index),
+            max_ws_vaults=max(1, min(MAX_PRIORITY_WS_VAULTS, int(args.max_ws_vaults))),
+            two_speed=bool(args.two_speed),
             rotate_bytes=max(1, int(args.rotate_mb)) * 1024 * 1024,
             collection_run_id=args.collection_run_id,
             frozen_selection=frozen_selection,

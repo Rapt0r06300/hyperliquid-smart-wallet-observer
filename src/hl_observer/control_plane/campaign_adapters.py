@@ -238,11 +238,22 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             0,
             max(0, shard_count - 1),
         )
-        users_in_largest_lane = (max_vaults + shard_count - 1) // shard_count
-        if users_in_largest_lane > 10:
-            raise ValueError(
-                "copy-vault partition exceeds Hyperliquid 10 unique users per IP"
-            )
+        mode = str(ctx.partition.get("copy_vault_mode") or "legacy_sharded_ws")
+        max_ws_vaults = _bounded_int(
+            ctx.partition.get("max_ws_vaults"),
+            10,
+            1,
+            10,
+        )
+        if mode == "two_speed_broad_rest_priority_ws":
+            if shard_count != 1 or shard_index != 0:
+                raise ValueError("two-speed Copy-Vault mode requires one broad universe lane")
+        else:
+            users_in_largest_lane = (max_vaults + shard_count - 1) // shard_count
+            if users_in_largest_lane > 10:
+                raise ValueError(
+                    "copy-vault partition exceeds Hyperliquid 10 unique users per IP"
+                )
         cmd = [
             py,
             str(ROOT / "tools" / "collect_cloud_copy_vault.py"),
@@ -260,6 +271,13 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             str(shard_count),
             "--vault-shard-index",
             str(shard_index),
+            "--max-ws-vaults",
+            str(max_ws_vaults),
+            *(
+                ["--two-speed"]
+                if mode == "two_speed_broad_rest_priority_ws"
+                else []
+            ),
             "--rotate-mb",
             str(_bounded_int(ctx.partition.get("rotate_mb"), 64, 1, 512)),
         ]

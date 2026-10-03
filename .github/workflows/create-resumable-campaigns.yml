@@ -281,11 +281,17 @@ jobs:
                 "$MARKET_CURSOR"
             done < "$RUNNER_TEMP/market-shards.tsv"
 
+            # Retire old fan-out manifests without interrupting a lane that is
+            # already RUNNING. The current lane may finish; all pending/stuck v7
+            # shards are superseded before the single v8 two-speed campaign starts.
             python tools/supersede_copy_vault_fanout.py
+            python tools/supersede_copy_vault_fanout.py \
+              --legacy-version "-v7" \
+              --preserve-running
 
-            ACTIVE_COPY_CAMPAIGNS="$(python -c 'import glob,json,sys; epoch=int(sys.argv[1]); active={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}; rows=[json.load(open(path,encoding="utf-8")) for path in glob.glob("catalog/campaigns/copy-vault-*-v7.json")]; print(sum(str(row.get("status") or "") in active and row.get("creation_phase")=="COLLECT" and int(row.get("phase_epoch") or 0)==epoch for row in rows))' "$PHASE_EPOCH")"
+            ACTIVE_COPY_CAMPAIGNS="$(python -c 'import glob,json,sys; epoch=int(sys.argv[1]); active={"PENDING","RUNNING","CONTINUATION_REQUIRED","STUCK"}; rows=[json.load(open(path,encoding="utf-8")) for path in glob.glob("catalog/campaigns/copy-vault-*.json")]; print(sum(str(row.get("status") or "") in active and row.get("creation_phase")=="COLLECT" and int(row.get("phase_epoch") or 0)==epoch for row in rows))' "$PHASE_EPOCH")"
             if [ "$ACTIVE_COPY_CAMPAIGNS" -gt 0 ]; then
-              echo "active Copy-Vault sweep already exists ($ACTIVE_COPY_CAMPAIGNS campaigns); skipping overlapping full-universe sweep"
+              echo "active Copy-Vault lane still running ($ACTIVE_COPY_CAMPAIGNS); preserving it and deferring v8 two-speed start"
             else
               COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"
               mkdir -p "$(dirname "$COPY_SELECTION")"
@@ -295,14 +301,12 @@ jobs:
               COPY_COUNT="$(python -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["vaults"]))' "$COPY_SELECTION")"
               test "$COPY_COUNT" -gt 0
               COPY_SHA="$(sha256sum "$COPY_SELECTION" | cut -d' ' -f1)"
-              COPY_LANES="$(((COPY_COUNT + 9) / 10))"
-              test "$COPY_LANES" -gt 0
-              COPY_MAX_USERS_PER_LANE="$(((COPY_COUNT + COPY_LANES - 1) / COPY_LANES))"
-              test "$COPY_MAX_USERS_PER_LANE" -le 10
-              for ((COPY_LANE=0; COPY_LANE<COPY_LANES; COPY_LANE++)); do
-                COPY_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":300,"max_vaults":int(sys.argv[1]),"vault_shard_count":int(sys.argv[2]),"vault_shard_index":int(sys.argv[3]),"rotate_mb":64,"selection_file":sys.argv[4],"selection_sha256":sys.argv[5]}, separators=(",",":")))' "$COPY_COUNT" "$COPY_LANES" "$COPY_LANE" "$COPY_SELECTION" "$COPY_SHA")"
-                make_campaign               copy_vault_collection               "copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7"               "copy-vault-hourly-complete-universe-v7"               "$COPY_CURSOR"
-              done
+              COPY_CURSOR="$(python -c 'import json,sys; print(json.dumps({"duration_s":3500,"max_vaults":int(sys.argv[1]),"max_ws_vaults":10,"vault_shard_count":1,"vault_shard_index":0,"rotate_mb":64,"copy_vault_mode":"two_speed_broad_rest_priority_ws","selection_file":sys.argv[2],"selection_sha256":sys.argv[3]}, separators=(",",":")))' "$COPY_COUNT" "$COPY_SELECTION" "$COPY_SHA")"
+              make_campaign \
+                copy_vault_collection \
+                "copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8" \
+                "copy-vault-two-speed-broad-rest-priority-ws-v8" \
+                "$COPY_CURSOR"
             fi
 
             make_campaign             event_intelligence_collection             "event-e$PHASE_EPOCH-$BUCKET-v5"             "event-hourly-v5"             '{}'

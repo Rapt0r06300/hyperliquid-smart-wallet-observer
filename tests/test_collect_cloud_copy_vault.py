@@ -332,3 +332,117 @@ def test_reconcile_timeout_is_unavailable_not_matched(monkeypatch) -> None:
         assert report["audit"]["reason"] == "REFERENCE_TIMEOUT"
 
     asyncio.run(scenario())
+
+def test_broad_sweep_covers_complete_universe_in_one_compact_family() -> None:
+    rows = [
+        {"address": "0x" + f"{index + 20:040x}", "tvl_usd": 1000 + index}
+        for index in range(4)
+    ]
+
+    async def scenario() -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content.decode())
+            address = body["user"]
+            index = int(address[-2:], 16)
+            return httpx.Response(
+                200,
+                json={
+                    "marginSummary": {
+                        "accountValue": "1000",
+                        "totalNtlPos": "100",
+                        "totalRawUsd": "900",
+                        "totalMarginUsed": "10",
+                    },
+                    "assetPositions": [
+                        {
+                            "position": {
+                                "coin": "BTC",
+                                "szi": str(index),
+                                "positionValue": "100",
+                                "entryPx": "100",
+                                "unrealizedPnl": "1",
+                                "leverage": {"value": 2},
+                            }
+                        }
+                    ],
+                    "time": 1_700_000_000_000 + index,
+                },
+            )
+
+        client = httpx.AsyncClient(
+            base_url="https://api.hyperliquid.xyz",
+            transport=httpx.MockTransport(handler),
+        )
+
+        class Sink:
+            def __init__(self):
+                self.rows = []
+
+            def emit(self, envelope):
+                self.rows.append(envelope)
+
+        sink = Sink()
+        result = await C.collect_broad_state(
+            rows,
+            sink,
+            phase="START",
+            request_interval_s=0.0,
+            http_client=client,
+        )
+        await client.aclose()
+        assert result["requested"] == 4
+        assert result["observed"] == 4
+        assert result["failed"] == 0
+        assert len(sink.rows) == 4
+        assert {row.instrument for row in sink.rows} == {"*"}
+        assert {row.channel for row in sink.rows} == {"copy_vault_broad_state"}
+        assert all(
+            row.parsed_summary["position_fingerprint"]
+            for row in sink.rows
+        )
+
+    asyncio.run(scenario())
+
+
+def test_two_speed_ws_selection_never_exceeds_user_limit_and_rotates() -> None:
+    rows = [
+        {
+            "address": "0x" + f"{index + 100:040x}",
+            "tvl_usd": float(10_000 - index),
+        }
+        for index in range(20)
+    ]
+    states = {}
+    for index, row in enumerate(rows):
+        address = row["address"]
+        states[address] = {
+            "vault": address,
+            "n_positions": 1 if index < 12 else 0,
+            "expo_brute_usd": float(50_000 - index * 100),
+            "position_fingerprint": f"{index:064x}",
+        }
+
+    selected_a = C.select_priority_ws_vaults(
+        rows,
+        {"states": states},
+        max_ws_vaults=10,
+        rotation_seed="run-a",
+    )
+    selected_b = C.select_priority_ws_vaults(
+        rows,
+        {"states": states},
+        max_ws_vaults=10,
+        rotation_seed="run-b",
+    )
+
+    assert len(selected_a) == 10
+    assert C.validate_user_subscription_budget(
+        [row["address"] for row in selected_a]
+    ) == 10
+    assert sum(row["ws_selection_reason"] == "ACTIVE_PRIORITY" for row in selected_a) == 8
+    assert {
+        row["address"] for row in selected_a if row["ws_selection_reason"] == "AUDIT_ROTATION"
+    } != {
+        row["address"] for row in selected_b if row["ws_selection_reason"] == "AUDIT_ROTATION"
+    }
+

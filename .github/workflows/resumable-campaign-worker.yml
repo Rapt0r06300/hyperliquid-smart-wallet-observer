@@ -223,13 +223,11 @@ jobs:
               part.setdefault("market_shard_count",1)
               part.setdefault("market_shard_index",0)
           elif kind=="copy_vault_collection":
-              COPY_VAULT_SWEEP_DURATION_CAP_S=300
+              # Copy-Vault two-speed campaigns own their full hosted-runner window.
+              # Never silently truncate a requested 3500s observation to 300s.
               part.setdefault("duration_s",3500)
-              part["duration_s"] = min(
-                  float(part["duration_s"]),
-                  float(COPY_VAULT_SWEEP_DURATION_CAP_S),
-              )
               part.setdefault("max_vaults",10)
+              part.setdefault("max_ws_vaults",10)
               part.setdefault("vault_shard_count",1)
               part.setdefault("vault_shard_index",0)
               part.setdefault("rotate_mb",64)

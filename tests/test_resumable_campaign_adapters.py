@@ -426,3 +426,39 @@ def test_resume_proof_replay_unit_zero_checkpoints_then_unit_one_materializes(tm
     assert second.status == "COMPLETE"
     assert second.progressed is True
     assert "materialize" in calls[0]
+
+def test_copy_vault_two_speed_separates_broad_universe_from_ws_limit(tmp_path):
+    selection = tmp_path / "selection.json"
+    selection.write_text('{"vaults":[]}', encoding="utf-8")
+    digest = hashlib.sha256(selection.read_bytes()).hexdigest()
+    cmd, _ = build_command(
+        context(
+            "copy_vault_collection",
+            output_root=str(tmp_path / "out"),
+            duration_s=3500,
+            max_vaults=3093,
+            max_ws_vaults=10,
+            vault_shard_count=1,
+            vault_shard_index=0,
+            copy_vault_mode="two_speed_broad_rest_priority_ws",
+            selection_file=str(selection),
+            selection_sha256=digest,
+        )
+    )
+    assert cmd[cmd.index("--max-vaults") + 1] == "3093"
+    assert cmd[cmd.index("--max-ws-vaults") + 1] == "10"
+    assert "--two-speed" in cmd
+
+
+def test_copy_vault_two_speed_rejects_more_than_ten_ws_users(tmp_path):
+    with pytest.raises(ValueError):
+        build_command(
+            context(
+                "copy_vault_collection",
+                output_root=str(tmp_path),
+                max_vaults=3093,
+                max_ws_vaults=11,
+                copy_vault_mode="two_speed_broad_rest_priority_ws",
+            )
+        )
+
