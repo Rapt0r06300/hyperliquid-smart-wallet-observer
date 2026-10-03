@@ -386,9 +386,11 @@ jobs:
                 set -e
                 printf '%s\n' "$PUBLISH_OUTPUT"
                 if [ "$rc" -eq 0 ]; then
+                  rm -f "$RUNNER_TEMP/durable-publish-error.txt"
                   PUBLISH_OK=1
                   break
                 fi
+                printf '%s\n' "$PUBLISH_OUTPUT" > "$RUNNER_TEMP/durable-publish-error.txt"
                 if printf '%s' "$PUBLISH_OUTPUT" | grep -Eqi 'rate limit|secondary rate|abuse detection|HTTP 403|HTTP 429|HTTP 502|HTTP 503|HTTP 504|502 bad gateway|503 service unavailable|504 gateway timeout|timeout|timed out|connection reset|release not found|status 404'; then
                   if [ "$attempt" -lt 16 ]; then
                     delay="$((10 + attempt * 7))"
@@ -496,7 +498,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python tools/augment_campaign_result.py durability-failure             --result "$RUNNER_TEMP/result.json"
+          python tools/augment_campaign_result.py durability-failure \
+            --result "$RUNNER_TEMP/result.json" \
+            --detail-file "$RUNNER_TEMP/durable-publish-error.txt"
 
       - name: Publish final campaign checkpoint
         id: checkpoint
