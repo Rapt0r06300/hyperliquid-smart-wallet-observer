@@ -1558,6 +1558,7 @@ async def _boucle(
                   "feed_quality_ready": quality_payload["ready_feeds"],
                   "feed_quality_total": quality_payload["total_feeds"],
                   "binance_clock_sync": binance_depth_collector.clock_evidence(),
+                  "binance_deep_l2": binance_depth_collector.health(),
                   "tick_dataset": dataset.stats()}
             CF.ecrire_atomique(root / HEARTBEAT, json.dumps(hb, ensure_ascii=False))
             if now_ns - heartbeat_canonique["dernier_ts_ns"] >= 2_000_000_000:
