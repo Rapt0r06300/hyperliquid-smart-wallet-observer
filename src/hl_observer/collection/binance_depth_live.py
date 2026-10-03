@@ -151,7 +151,11 @@ class BinanceDepthLiveCollector:
         symbol: str,
     ) -> tuple[dict[str, Any], int, int, int]:
         """Fetch a public full-depth snapshot through Binance's WebSocket API."""
-        request_id = f"alina-depth-{uuid.uuid4().hex}"
+        # Binance documents a string request id and its own published depth
+        # response examples do not guarantee an echoed value. Keep the request id
+        # in the documented compact hex shape; the dedicated socket carries only
+        # this one request, so success is validated from status + depth payload.
+        request_id = uuid.uuid4().hex
         send_wall_ms = int(time.time() * 1_000)
         async with websockets.connect(
             self.ws_api_url,
@@ -200,13 +204,6 @@ class BinanceDepthLiveCollector:
                     f"BINANCE_WS_API_DEPTH_STATUS_{response_status}:"
                     f"id={response.get('id')!r}:error={error_detail}"
                 )[:1000]
-            )
-        if str(response.get("id") or "") != request_id:
-            raise RuntimeError(
-                (
-                    "BINANCE_WS_API_DEPTH_ID_MISMATCH:"
-                    f"expected={request_id!r}:actual={response.get('id')!r}"
-                )[:500]
             )
         result = response.get("result")
         if not isinstance(result, Mapping):

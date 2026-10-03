@@ -419,3 +419,58 @@ def test_ws_api_error_status_is_not_masked_by_null_response_id(monkeypatch) -> N
 
     asyncio.run(scenario())
 
+def test_ws_api_valid_depth_response_accepts_non_echoed_id(monkeypatch) -> None:
+    sent = {}
+
+    class FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def send(self, raw: str) -> None:
+            request = json.loads(raw)
+            sent.update(request)
+            assert request["method"] == "depth"
+            assert request["params"] == {"symbol": "BTCUSDT", "limit": 1000}
+
+        async def recv(self) -> str:
+            return json.dumps(
+                {
+                    "id": "51e2affb-0aba-4821-ba75-f2625006eb43",
+                    "status": 200,
+                    "result": {
+                        "lastUpdateId": 1027024,
+                        "E": 1589436922972,
+                        "T": 1589436922959,
+                        "bids": [["4.00000000", "431.00000000"]],
+                        "asks": [["4.00000200", "12.00000000"]],
+                    },
+                    "rateLimits": [],
+                }
+            )
+
+    monkeypatch.setattr(
+        "hl_observer.collection.binance_depth_live.websockets.connect",
+        lambda *_args, **_kwargs: FakeSocket(),
+    )
+    collector = BinanceDepthLiveCollector(["BTCUSDT"])
+
+    async def scenario() -> None:
+        payload, sent_ms, received_ms, received_mono_ns = (
+            await collector._fetch_ws_api_snapshot("BTCUSDT")
+        )
+        assert payload["lastUpdateId"] == 1027024
+        assert payload["bids"][0][0] == "4.00000000"
+        assert sent_ms > 0
+        assert received_ms >= sent_ms
+        assert received_mono_ns > 0
+        request_id = str(sent["id"])
+        assert len(request_id) == 32
+        assert all(char in "0123456789abcdef" for char in request_id)
+        assert request_id != "51e2affb-0aba-4821-ba75-f2625006eb43"
+        await collector.close()
+
+    asyncio.run(scenario())
+
