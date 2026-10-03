@@ -335,7 +335,7 @@ def build_receipt(
             venues[venue]["rest_probe_observed"] = bybit_rest_ok
             venues[venue]["rest_probe_reason"] = bybit_rest_reason
             venues[venue]["clock_sync_evidence"] = (
-                dict(native_clock) if native_clock_ok else {}
+                dict(native_clock) if native_clock else {}
             )
 
     body: dict[str, object] = {

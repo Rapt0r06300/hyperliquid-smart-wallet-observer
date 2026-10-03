@@ -230,7 +230,7 @@ def test_bybit_discovery_falls_back_to_documented_bytick_domain(monkeypatch) -> 
     assert client.last_rest_base_url == "https://api.bytick.com"
     assert client.last_rest_error == ""
 
-def test_bybit_clock_falls_back_to_unauthenticated_ws_pong(monkeypatch) -> None:
+def test_bybit_clock_falls_back_to_unauthenticated_public_ws_pong(monkeypatch) -> None:
     sent_payloads = []
 
     class FakeSocket:
@@ -287,11 +287,15 @@ def test_bybit_clock_falls_back_to_unauthenticated_ws_pong(monkeypatch) -> None:
     assert sample.rtt_ms == 20.0
     assert sample.offset_ms == 3.0
     assert seen_urls == [
-        "wss://stream.bybit.com/v5/private",
-        "wss://stream.bytick.com/v5/private",
+        "wss://stream.bybit.com/v5/public/option",
+        "wss://stream.bybit.com/v5/public/spread",
+        "wss://stream.bytick.com/v5/public/option",
     ]
-    assert client.last_clock_source == "websocket_private_ping:stream.bytick.com"
-    assert client.last_clock_ws_url == "wss://stream.bytick.com/v5/private"
+    assert (
+        client.last_clock_source
+        == "websocket_public_ping:stream.bytick.com:option"
+    )
+    assert client.last_clock_ws_url == "wss://stream.bytick.com/v5/public/option"
     assert client.last_clock_error == ""
 
 def test_bybit_market_stream_falls_back_to_official_bytick_domain(monkeypatch) -> None:

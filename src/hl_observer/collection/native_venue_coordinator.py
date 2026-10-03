@@ -238,7 +238,13 @@ class NativeVenueCoordinator:
             try:
                 sample = measure()
             except Exception as exc:
-                samples[venue] = {"status": "UNAVAILABLE", "error": type(exc).__name__}
+                detail = str(getattr(client, "last_clock_error", "") or "").strip()
+                if not detail:
+                    detail = f"{type(exc).__name__}: {exc}"
+                samples[venue] = {
+                    "status": "UNAVAILABLE",
+                    "error": detail[:1200],
+                }
                 continue
             row = sample.as_dict() if hasattr(sample, "as_dict") else dict(sample)
             source = str(getattr(client, "last_clock_source", "") or "")

@@ -36,8 +36,12 @@ REST_BASE_URL = "https://api.bybit.com"
 REST_FALLBACK_BASE_URLS = ("https://api.bytick.com",)
 PUBLIC_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear"
 PUBLIC_LINEAR_WS_FALLBACK_URLS = ("wss://stream.bytick.com/v5/public/linear",)
-CLOCK_WS_URL = "wss://stream.bybit.com/v5/private"
-CLOCK_WS_FALLBACK_URLS = ("wss://stream.bytick.com/v5/private",)
+CLOCK_WS_URL = "wss://stream.bybit.com/v5/public/option"
+CLOCK_WS_FALLBACK_URLS = (
+    "wss://stream.bybit.com/v5/public/spread",
+    "wss://stream.bytick.com/v5/public/option",
+    "wss://stream.bytick.com/v5/public/spread",
+)
 
 
 def _float(value: object) -> float | None:
@@ -511,7 +515,7 @@ class BybitPublicClient:
         )
 
     async def _measure_ws_clock_sync(self, *, timeout_s: float = 5.0):
-        """Measure Bybit clock by an unauthenticated official WS heartbeat only."""
+        """Measure Bybit clock by an unauthenticated official public WS heartbeat."""
         errors: list[str] = []
         for ws_url in self._clock_ws_candidates():
             request_id = f"alina-clock-{uuid.uuid4().hex[:16]}"
@@ -545,8 +549,10 @@ class BybitPublicClient:
                 continue
             self.last_clock_ws_url = ws_url
             self.last_clock_source = (
-                "websocket_private_ping:"
+                "websocket_public_ping:"
                 + ws_url.split("/", 3)[2]
+                + ":"
+                + ws_url.rsplit("/", 1)[-1]
             )
             self.last_clock_error = ""
             return estimate_clock_sync(

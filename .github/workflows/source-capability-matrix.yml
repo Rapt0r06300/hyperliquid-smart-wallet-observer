@@ -19,6 +19,7 @@ on:
       - "tools/validate_source_rules.py"
       - "tests/test_source_capability_runtime.py"
       - "tests/test_feed_quality_gate.py"
+      - "tests/test_bybit_market_data.py"
       - "tests/test_binance_depth_live.py"
       - ".github/workflows/source-capability-matrix.yml"
 env:
@@ -61,7 +62,7 @@ jobs:
           PYTHONPATH: src:tools:.
         run: |
           python tools/validate_source_rules.py
-          python -m pytest -q             tests/test_source_capability_runtime.py             tests/test_feed_quality_gate.py             tests/test_collector_feed_integrity.py             tests/test_native_venue_transport_integrity.py             tests/test_native_venue_coordinator.py             tests/test_native_venues_collector.py             tests/test_binance_depth_live.py             tests/test_binance_clock_sync.py             tests/test_hyperliquid_clock_sync.py             tests/test_official_archive_backfill.py             --tb=line
+          python -m pytest -q             tests/test_source_capability_runtime.py             tests/test_feed_quality_gate.py             tests/test_bybit_market_data.py             tests/test_collector_feed_integrity.py             tests/test_native_venue_transport_integrity.py             tests/test_native_venue_coordinator.py             tests/test_native_venues_collector.py             tests/test_binance_depth_live.py             tests/test_binance_clock_sync.py             tests/test_hyperliquid_clock_sync.py             tests/test_official_archive_backfill.py             --tb=line
       - name: Bounded native venue public-network smoke
         id: native_smoke
         continue-on-error: true

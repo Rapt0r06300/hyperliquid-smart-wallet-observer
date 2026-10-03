@@ -224,6 +224,14 @@ def test_bybit_live_ws_does_not_fake_clock_sync_when_rest_is_blocked(tmp_path: P
                     "gate": 2,
                     "bitget": 3,
                 },
+                "coordinator_health": {
+                    "clock_sync": {
+                        "bybit": {
+                            "status": "UNAVAILABLE",
+                            "error": "WS public clock probe unavailable",
+                        }
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -252,6 +260,8 @@ def test_bybit_live_ws_does_not_fake_clock_sync_when_rest_is_blocked(tmp_path: P
     assert receipt["venues"]["bybit"]["capability_runtime"]["bbo"] == "HEALTHY"
     assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
     assert receipt["venues"]["bybit"]["capability_runtime"]["clock_sync"] == "DEGRADED"
+    assert receipt["venues"]["bybit"]["clock_sync_evidence"]["status"] == "UNAVAILABLE"
+    assert "WS public clock probe unavailable" in receipt["venues"]["bybit"]["clock_sync_evidence"]["error"]
 
 def test_runtime_receipt_accepts_binance_ws_clock_evidence(tmp_path: Path) -> None:
     module = _module()
@@ -448,7 +458,7 @@ def test_bybit_native_ws_clock_evidence_promotes_clock_sync(tmp_path: Path) -> N
                     "clock_sync": {
                         "bybit": {
                             "status": "OK",
-                            "source": "websocket_private_ping",
+                            "source": "websocket_public_ping:stream.bybit.com:option",
                             "server_ts_ms": 1005,
                             "send_wall_ts_ms": 1000,
                             "receive_wall_ts_ms": 1010,
@@ -485,6 +495,6 @@ def test_bybit_native_ws_clock_evidence_promotes_clock_sync(tmp_path: Path) -> N
     bybit = receipt["venues"]["bybit"]
     assert bybit["runtime_status"] == "HEALTHY"
     assert bybit["capability_runtime"]["clock_sync"] == "HEALTHY"
-    assert bybit["clock_sync_evidence"]["source"] == "websocket_private_ping"
+    assert bybit["clock_sync_evidence"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert bybit["clock_sync_evidence"]["rtt_ms"] == 10.0
 

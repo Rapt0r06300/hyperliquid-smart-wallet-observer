@@ -481,7 +481,7 @@ class _ClockSample:
 
 
 class _BybitWsClock:
-    last_clock_source = "websocket_private_ping"
+    last_clock_source = "websocket_public_ping:stream.bybit.com:option"
 
     def measure_clock_sync(self):
         return _ClockSample()
@@ -497,6 +497,6 @@ def test_clock_sync_preserves_client_measurement_source() -> None:
     )
     rows = coordinator.refresh_clock_sync()
     assert rows["bybit"]["status"] == "OK"
-    assert rows["bybit"]["source"] == "websocket_private_ping"
+    assert rows["bybit"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert rows["bybit"]["rtt_ms"] == 10.0
 
