@@ -32,6 +32,8 @@ PATCH_PATH=ROOT/"catalog"/"REPLAY_COMPAT_PATCH.json"
 CATALOG_PATH=ROOT/"catalog"/"DATA_CATALOG.json"
 REGISTRY_PATH=ROOT/"catalog"/"DATA_QUALITY_REGISTRY.json"
 TRADE_COUNT_PATCH_PATH=ROOT/"catalog"/"TRADE_COUNT_PATCH.json"
+GLOBAL_UNIQUE_PATCH_PATH=ROOT/"catalog"/"TRADE_UNIQUE_COUNT_PATCH.json"
+GLOBAL_IDENTITY_VERSION="native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"
 
 _STAGE_BY_STATUS={
     "SAFE":"safe",
@@ -131,23 +133,77 @@ def _hydrate_release_fields(row: dict[str,Any], manifest: Mapping[str,Any] | Non
             row[key]=value
 
 
-def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str]) -> bool:
+def _load_global_unique_rows(*, root: Path) -> dict[str,Mapping[str,Any]]:
+    path=root/"catalog"/"TRADE_UNIQUE_COUNT_PATCH.json"
+    if not path.is_file():
+        return {}
+    try:
+        patch=_load_json(path)
+    except (OSError,ValueError,json.JSONDecodeError):
+        return {}
+    if str(patch.get("identity_version") or "")!=GLOBAL_IDENTITY_VERSION:
+        return {}
+    counts=patch.get("counts")
+    if not isinstance(counts,Mapping):
+        return {}
+    return {
+        str(dataset_id): evidence
+        for dataset_id,evidence in counts.items()
+        if isinstance(evidence,Mapping)
+    }
+
+
+def _global_unique_evidence_valid(
+    row: Mapping[str,Any],
+    evidence: Mapping[str,Any] | None,
+) -> bool:
+    if not isinstance(evidence,Mapping) or evidence.get("unique_trade_count_exact") is not True:
+        return False
+    if row.get("trade_count_exact") is not True:
+        return False
+    try:
+        trade_count=int(row.get("trade_count"))
+        scanned=int(evidence.get("trade_count_scanned"))
+        unique_count=int(evidence.get("unique_trade_count"))
+    except (TypeError,ValueError,OverflowError):
+        return False
+    return trade_count>=0 and scanned==trade_count and 0<=unique_count<=trade_count
+
+
+def _candidate(
+    row: Mapping[str,Any],
+    known: Mapping[str,Any],
+    families: set[str],
+    unique_rows: Mapping[str,Mapping[str,Any]] | None=None,
+) -> bool:
     dataset_id=str(row.get("dataset_id") or "")
     family=str(row.get("family") or "").lower()
     if not dataset_id:
         return False
     if families and family not in families:
         return False
-    if row.get("replay_compatible") is True:
+
+    unique_evidence=(unique_rows or {}).get(dataset_id)
+    metadata_repair=bool(
+        row.get("replay_compatible") is True
+        and str(row.get("quality_status") or "").upper()=="PARTIAL"
+        and family in {"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
+        and row.get("unique_trade_count_exact") is not True
+        and _global_unique_evidence_valid(row,unique_evidence)
+    )
+    if row.get("replay_compatible") is True and not metadata_repair:
         return False
 
     prior=known.get(dataset_id)
     if isinstance(prior,Mapping):
-        if prior.get("replay_compatible") is True:
+        if prior.get("replay_compatible") is True and not metadata_repair:
             return False
         # Failed receipts from older verifier semantics must be retried once.
         # A failure produced by the current verifier is stable and must not loop.
-        if str(prior.get("verifier_version") or "") == VERIFIER_VERSION:
+        if (
+            prior.get("replay_compatible") is not True
+            and str(prior.get("verifier_version") or "")==VERIFIER_VERSION
+        ):
             return False
 
     manifest=_manifest_for_row(row)
@@ -161,6 +217,8 @@ def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str
         return False
 
     status=str(row.get("quality_status") or "").upper()
+    if metadata_repair:
+        return True
     # Immutable legacy SAFE/PARTIAL shards may predate replay receipts. Running
     # the strict parser can prove deterministic replay without pretending that
     # PARTIAL source reconciliation suddenly became SAFE.
@@ -242,7 +300,7 @@ def _verify_asset(path: Path, row: Mapping[str,Any]) -> None:
 
 
 def _restore_exact_trade_count_evidence(manifest: dict[str,Any], *, root: Path) -> bool:
-    """Restore SHA-matched exact-count proof before applying replay receipts."""
+    """Restore SHA-matched exact counts and current global-v3 uniqueness proof."""
     dataset_id=str(manifest.get("dataset_id") or "")
     if not dataset_id:
         return False
@@ -268,17 +326,30 @@ def _restore_exact_trade_count_evidence(manifest: dict[str,Any], *, root: Path) 
 
     manifest["trade_count"]=evidence.get("trade_count")
     manifest["trade_count_exact"]=True
-    method=str(evidence.get("unique_identity_method") or "")
-    if (
-        str(manifest.get("venue") or "").lower()=="bybit"
-        and method!=IDENTITY_VERSION
-    ):
-        manifest["unique_trade_count"]=None
-        manifest["unique_trade_count_exact"]=False
-    elif evidence.get("unique_trade_count_exact") is True:
-        manifest["unique_trade_count"]=evidence.get("unique_trade_count")
+
+    global_rows=_load_global_unique_rows(root=root)
+    global_evidence=global_rows.get(dataset_id)
+    proof_row=dict(manifest)
+    proof_row["trade_count"]=evidence.get("trade_count")
+    proof_row["trade_count_exact"]=True
+    if _global_unique_evidence_valid(proof_row,global_evidence):
+        manifest["unique_trade_count"]=int(global_evidence["unique_trade_count"])
         manifest["unique_trade_count_exact"]=True
-    for key in ("record_count_scanned","asset_sha256","unique_identity_method"):
+        manifest["unique_identity_method"]=GLOBAL_IDENTITY_VERSION
+    else:
+        method=str(evidence.get("unique_identity_method") or "")
+        if (
+            str(manifest.get("venue") or "").lower()=="bybit"
+            and method!=IDENTITY_VERSION
+        ):
+            manifest["unique_trade_count"]=None
+            manifest["unique_trade_count_exact"]=False
+        elif evidence.get("unique_trade_count_exact") is True:
+            manifest["unique_trade_count"]=evidence.get("unique_trade_count")
+            manifest["unique_trade_count_exact"]=True
+            manifest["unique_identity_method"]=method
+
+    for key in ("record_count_scanned","asset_sha256"):
         if key in evidence:
             manifest[key]=evidence[key]
     return True
@@ -409,9 +480,10 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     if not isinstance(known,dict):
         raise BackfillError("invalid replay patch results")
 
+    unique_rows=_load_global_unique_rows(root=ROOT)
     candidates=[
         row for row in rows
-        if isinstance(row,dict) and _candidate(row,known,families)
+        if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
     ]
     candidates.sort(
         key=lambda row:(
@@ -459,7 +531,7 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     patch["processed_assets"]=len(known)
     remaining=sum(
         1 for row in rows
-        if isinstance(row,dict) and _candidate(row,known,families)
+        if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
     )
     patch["remaining_candidates_for_filter"]=remaining
     _write_json(PATCH_PATH,patch)
