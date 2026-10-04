@@ -11,10 +11,12 @@ import pytest
 from hl_observer.data_sources.official_archive_backfill import (
     ArchiveObservationStats,
     binance_usdm_aggtrades_url,
+    binance_usdm_trades_url,
     bybit_trades_url,
     fetch_official_archive_day,
     fetch_official_archive_stream,
     iter_days,
+    parse_okx_trades_csv,
 )
 
 
@@ -46,6 +48,83 @@ def test_archive_urls_are_exact_and_public() -> None:
     assert bybit_trades_url("ethusdt", day) == (
         "https://public.bybit.com/trading/ETHUSDT/ETHUSDT2026-09-20.csv.gz"
     )
+    assert binance_usdm_trades_url("btcusdt", day) == (
+        "https://data.binance.vision/data/futures/um/daily/trades/"
+        "BTCUSDT/BTCUSDT-trades-2026-09-20.zip"
+    )
+
+
+def test_binance_individual_trades_preserve_native_trade_identity() -> None:
+    payload = _zip_csv(
+        "id,price,qty,quote_qty,time,is_buyer_maker\n"
+        "42,100.5,0.25,25.125,1790000000000,true\n"
+    )
+    checksum = hashlib.sha256(payload).hexdigest().encode() + b"  archive.zip\n"
+    result = fetch_official_archive_day(
+        venue="binance",
+        coin="BTC",
+        symbol="BTCUSDT",
+        day=date(2026, 9, 20),
+        stream_type="trades",
+        fetch_bytes=lambda url: checksum if url.endswith(".CHECKSUM") else payload,
+    )
+    event = result.events[0]
+    assert result.stream_type == "trades"
+    assert event.sequence == 42
+    assert event.raw_payload["trade_id"] == "42"
+    assert event.parsed_summary["native_event_kind"] == "individual_trade"
+
+
+def test_okx_explicit_official_cdn_archive_is_parsed_without_guessing_url() -> None:
+    url = (
+        "https://static.okx.com/cdn/okex/traderecords/trades/monthly/202609/"
+        "BTC-USDT-SWAP-trades-2026-09.zip"
+    )
+    events = list(parse_okx_trades_csv(
+        "trade_id,instrument_name,price,size,side,timestamp\n"
+        "abc,BTC-USDT-SWAP,60000,0.1,buy,1790000000000\n",
+        coin="BTC",
+        symbol="BTC-USDT-SWAP",
+        source_url=url,
+        archive_sha256="a" * 64,
+    ))
+    assert len(events) == 1
+    assert events[0].source_id == "okx_official_archive"
+    assert events[0].raw_payload["trade_id"] == "abc"
+    assert events[0].provenance["timestamp_semantics"] == "historical_exchange_time_only"
+
+
+def test_okx_archive_fetch_accepts_only_explicit_official_cdn_url() -> None:
+    url = (
+        "https://static.okx.com/cdn/okex/traderecords/trades/monthly/202609/"
+        "BTC-USDT-SWAP-trades-2026-09.zip"
+    )
+    payload = _zip_csv(
+        "trade_id,instrument_name,price,size,side,timestamp\n"
+        "abc,BTC-USDT-SWAP,60000,0.1,buy,1790000000000\n"
+    )
+    result = fetch_official_archive_day(
+        venue="okx",
+        coin="BTC",
+        symbol="BTC-USDT-SWAP",
+        day=date(2026, 9, 20),
+        stream_type="trades",
+        source_url=url,
+        fetch_bytes=lambda requested: payload if requested == url else b"",
+    )
+    assert result.source_url == url
+    assert result.checksum_verified is False
+    assert result.events[0].raw_payload["trade_id"] == "abc"
+
+    with pytest.raises(ValueError, match="explicit official"):
+        fetch_official_archive_stream(
+            venue="okx",
+            coin="BTC",
+            symbol="BTC-USDT-SWAP",
+            day=date(2026, 9, 20),
+            source_url="https://example.com/archive.zip",
+            fetch_bytes=lambda _url: payload,
+        )
 
 
 def test_archive_range_is_bounded() -> None:
