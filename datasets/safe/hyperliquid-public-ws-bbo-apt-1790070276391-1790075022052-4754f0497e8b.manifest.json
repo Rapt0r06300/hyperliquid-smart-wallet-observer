@@ -1,0 +1,107 @@
+{
+  "asset_verified": true,
+  "bytes": 1129008,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-apt-1790070276391-1790075022052-4754f0497e8b",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790075022052,
+  "event_count": 12539,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 12539,
+  "release": {
+    "asset_id": 607745652,
+    "asset_name": "hyperliquid-public-ws-bbo-apt-1790070276391-1790075022052-4754f0497e8b.jsonl.gz",
+    "release_id": 402494337,
+    "remote_digest": "sha256:4754f0497e8b2bd16c99c4f3ecd5fd80aa699184da07c7417b4b8b763446edae",
+    "remote_size": 1129008,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s5"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-apt-1790070276391-1790075022052-4754f0497e8b.jsonl.gz",
+  "release_asset_id": 607745652,
+  "release_id": 402494337,
+  "release_remote_digest": "sha256:4754f0497e8b2bd16c99c4f3ecd5fd80aa699184da07c7417b4b8b763446edae",
+  "release_remote_size": 1129008,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "4754f0497e8b2bd16c99c4f3ecd5fd80aa699184da07c7417b4b8b763446edae",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790070276391,
+  "symbol": "APT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-ce1f396f36cd4eb08940ac07800f29e2"
+    ],
+    "first_exchange_ts_ms": 1790070276044,
+    "last_exchange_ts_ms": 1790075021655,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 12539,
+      "max": 1930.0,
+      "min": 214.0,
+      "p50": 300.0,
+      "p95": 491.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v3"
+}

@@ -1,6 +1,6 @@
 {
   "blocking_reason_shard_counts": {
-    "DUPLICATES_NOT_DEDUPED:1": 11,
+    "DUPLICATES_NOT_DEDUPED:1": 2,
     "DUPLICATES_NOT_DEDUPED:11": 1,
     "DUPLICATES_NOT_DEDUPED:116": 1,
     "DUPLICATES_NOT_DEDUPED:118": 1,
@@ -40,12 +40,8 @@
     "DUPLICATES_NOT_DEDUPED:96": 1,
     "FATAL_INTEGRITY:missing_timestamp_count=1": 560,
     "FATAL_INTEGRITY:missing_timestamp_count=2": 560,
-    "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED": 18,
-    "RECONCILIATION_MATCH_REQUIRED": 105,
     "RECONCILIATION_UNVERIFIED": 1230,
-    "REPLAY_COMPATIBILITY_NOT_PROVEN": 1927,
-    "TRADE_COUNT_NOT_EXACT": 71,
-    "UNIQUE_TRADE_COUNT_NOT_EXACT": 123,
+    "REPLAY_COMPATIBILITY_NOT_PROVEN": 1689,
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": 419
   },
   "blocking_reason_trade_counts": {
@@ -89,12 +85,8 @@
     "DUPLICATES_NOT_DEDUPED:96": 0,
     "FATAL_INTEGRITY:missing_timestamp_count=1": 0,
     "FATAL_INTEGRITY:missing_timestamp_count=2": 0,
-    "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED": 0,
-    "RECONCILIATION_MATCH_REQUIRED": 36087,
     "RECONCILIATION_UNVERIFIED": 0,
-    "REPLAY_COMPATIBILITY_NOT_PROVEN": 36087,
-    "TRADE_COUNT_NOT_EXACT": 0,
-    "UNIQUE_TRADE_COUNT_NOT_EXACT": 36087,
+    "REPLAY_COMPATIBILITY_NOT_PROVEN": 0,
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": 0
   },
   "blocking_reason_trade_counts_overlap": true,
@@ -2881,309 +2873,219 @@
       "venue": "bitget"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789776000016-1789785214309-7def78acc8c0",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789785214309-1789806085275-0ea3deb59ed9",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789806085307-1789827962079-e58f09dd781f",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789827962082-1789838486352-3ae29fd3ce65",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789838486357-1789853917645-cf6a01b57f63",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-btcusdt-1789853918076-1789862398231-aafb37d79fac",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 70330,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789776000168-1789784664474-d0439ebac0f3",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789784664474-1789797815289-3ab24a0bf1b3",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789797815289-1789806756605-49f8ac5aeef4",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789806756605-1789814995252-5bf7b3ee9872",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789814995252-1789828324081-fed67beee7b2",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789828324081-1789838323670-1f462dacb3da",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789838323670-1789847438291-2d0bc8792bbb",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789847438291-1789861451637-4c71e053eb66",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 190000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-ethusdt-1789861451637-1789862399548-8fca66ccf7aa",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 6724,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-solusdt-1789776000025-1789810560722-344150f8915a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 195000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-solusdt-1789810560722-1789850808990-87185eea4e26",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 195000,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "bybit-official-archive-trades-solusdt-1789850808990-1789862398738-f80008222e0c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 51873,
+      "trade_count_exact": true,
       "venue": "bybit"
     },
     {
@@ -9967,15 +9869,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-btc-1790946973299-1790947270488-952ef8b7948c",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -11290,15 +11189,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-ena-1790936700682-1790936700683-038d20d4227d",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -11533,15 +11429,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-etc-1790936700682-1790936700683-add22b4f9be7",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -12016,15 +11909,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-eth-1790940764329-1790940764342-41a10304544b",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -12199,15 +12089,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-eth-1790946973299-1790947270488-27d0f68c92b3",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -13078,15 +12965,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-ftt-1790934714399-1790934714402-2e01c94bff09",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -14041,15 +13925,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-hype-1790940764329-1790940764342-c37d68fa60f4",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -20476,15 +20357,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-wlfi-1790940764238-1790940764342-cb21a5ec1b4e",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -21079,15 +20957,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "DUPLICATES_NOT_DEDUPED:1",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-copy-l2-copy-vault-l2-xrp-1790946973299-1790947270601-fe576eb6c718",
       "family": "copy_vault_l2",
       "quality_status": "PARTIAL",
-      "reason_code": "DUPLICATES_NOT_DEDUPED:1",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -48536,140 +48411,120 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-0g-1790063878664-1790063994840-0b5dc8436805",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-0g-1790065035184-1790065149441-eabb2dba2752",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-0g-1790070685857-1790075169948-a5cd65d5a546",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-2z-1790063653407-1790063772442-7b2aab79192a",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-2z-1790064135277-1790064254483-4194a3e6f258",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-2z-1790070275819-1790075026402-727440f800d9",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aave-1790065257504-1790065373914-c817b1731e8b",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aave-1790074920220-1790075021599-bd2658d7d0b3",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ada-1790064826485-1790064945865-9233b3145f48",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aero-1790069820240-1790074981236-b66e6efb86a2",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -48688,28 +48543,24 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aixbt-1790070686799-1790075038481-7c4c58720237",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-algo-1790074884723-1790075225854-ce3707073956",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -48728,196 +48579,168 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-anime-1790069865419-1790075024399-0adae3e35776",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ape-1790070687162-1790075169948-7ef38b5b3b5a",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-apt-1790070276391-1790075022052-4754f0497e8b",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ar-1790074920969-1790075021387-bc73b3ccbdeb",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aster-1790069820389-1790074981236-ab22ce82ca0f",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-atom-1790070686656-1790075041722-1d5b00dbc578",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-avax-1790074883875-1790075226340-07b9ca4a8334",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-avnt-1790069862795-1790075028958-73528dc55618",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-axs-1790070685723-1790075169948-397356529178",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-aztec-1790070276160-1790075026634-53159d3d07e8",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-baby-1790074920717-1790075021599-ebf8b6b83cee",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-bera-1790069820239-1790074966470-3b7fc573ecc5",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-bigtime-1790070687169-1790075038881-56ff0decb0aa",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-bio-1790074884118-1790075226198-49f9e7543eea",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -48936,168 +48759,144 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-blur-1790069902529-1790075028802-69db0437e148",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-bnb-1790070686694-1790075169587-99ba00616ced",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-bome-1790070275974-1790075025881-4c5d983b8521",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-brett-1790074920717-1790075019140-0256c1f3b28c",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-btc-1790065428928-1790065548461-3f4239eea88e",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-btc-1790069820389-1790074981236-6b4134f82709",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-cc-1790069820927-1790074981236-43fcfd957f92",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-celo-1790070686781-1790075041722-cf50c0daa55a",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-cfx-1790074883875-1790075226340-aece3bf89a1b",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-chip-1790069865343-1790075028711-d1ce6b548033",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-comp-1790070692944-1790075169948-5dbf03ea0b52",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-crv-1790070281305-1790075026454-7f164851465c",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49116,140 +48915,120 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-dash-1790074920969-1790075021387-1969076f22aa",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-dot-1790069820572-1790074981236-1c6633d13ac7",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-dydx-1790070688925-1790075037871-e2f3ade265b5",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-eigen-1790074883976-1790075226320-f30de6be39d3",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ena-1790069862843-1790075028958-87bd571497db",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ens-1790070685965-1790075168696-8aafa636e1bd",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-etc-1790070275974-1790075026454-17340eafe247",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-eth-1790063968162-1790064086978-9e604caa36cc",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-eth-1790063989463-1790064108790-f4137bdff36f",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-eth-1790070687022-1790075041722-3b8bc67e7b30",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49268,14 +49047,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-ethfi-1790074920871-1790075021545-a49571af9103",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49306,28 +49083,24 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-hype-1790064996571-1790065116136-8fa2073c0c4e",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-hype-1790069863631-1790075029131-f062360e86ca",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49418,168 +49191,144 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-sol-1790064229036-1790064348580-0382ebdc2878",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-bbo-sol-1790074883976-1790075226495-367263328058",
       "family": "bbo",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-0g-1790063875357-1790063991516-3961abd9bb99",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-0g-1790065029873-1790065145860-75ea560f87b2",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-0g-1790070685453-1790075165856-161ca4ce5aff",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-2z-1790063652990-1790063771719-b6847bad2549",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-2z-1790064135034-1790064249317-8fa6b6169c6e",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-2z-1790070275685-1790075026402-d029978fc39a",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aave-1790065257358-1790065372706-c71a99711cf7",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aave-1790074920096-1790075021112-cae834278e1c",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ada-1790064826179-1790064942967-5c4f3ea3012f",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aero-1790069819987-1790074977931-d7cecdaeb180",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49598,28 +49347,24 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aixbt-1790070686528-1790075037235-42d1936d6684",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-algo-1790074883630-1790075224937-83069ec6a89b",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49638,196 +49383,168 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-anime-1790069862575-1790075026347-21fa52f3470c",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ape-1790070685547-1790075165856-e4ab0745de07",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-apt-1790070275809-1790075026402-5da801641d8b",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ar-1790074920209-1790075021112-b7633903ba57",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aster-1790069820114-1790074977931-99255fd60c64",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-atom-1790070686563-1790075037235-65d75bf9e1b3",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-avax-1790074883743-1790075224937-fc28b6ce01ad",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-avnt-1790069862661-1790075026347-474ff2f8beda",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-axs-1790070685577-1790075165856-dadd8177e617",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-aztec-1790070275820-1790075026402-5f30358a5884",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-baby-1790074920240-1790075021112-f02d2cf3e78d",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-bera-1790069820125-1790074977931-09ed108d8f38",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-bigtime-1790070686655-1790075037235-54eb25ad05ea",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-bio-1790074883755-1790075224937-698ff9c4c9a2",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -49846,168 +49563,144 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-blur-1790069862709-1790075026347-a5e416a2b3c7",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-bnb-1790070685646-1790075165856-4b2a0d940f35",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-bome-1790070275867-1790075026402-8b591e2a173a",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-brett-1790074920323-1790075021112-b7d52b10dd19",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-btc-1790065428805-1790065543672-1ce1e85baaee",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-btc-1790069820239-1790074977931-64546a3be651",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-cc-1790069820240-1790074977931-721109566632",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-celo-1790070686656-1790075037235-a6afe9a27156",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-cfx-1790074883805-1790075224937-6b1586ad20bd",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-chip-1790069862711-1790075026347-0675ab9fc247",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-comp-1790070685679-1790075165856-3c51bbc70bbd",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-crv-1790070275932-1790075026402-89380c4f0392",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -50026,140 +49719,120 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-dash-1790074920717-1790075021112-7b80d2712ebf",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-dot-1790069820275-1790074977931-839271846682",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-dydx-1790070686781-1790075037235-06e803d51841",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-eigen-1790074883856-1790075224938-584c8019a744",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ena-1790069862795-1790075026348-c4fe5ed14f7f",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ens-1790070685734-1790075165856-e4a64064e2f6",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-etc-1790070275962-1790075026402-94922cb01b59",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-eth-1790063967750-1790064082502-bb6c31f95514",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-eth-1790063989262-1790064103694-0f13ed71fe7a",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-eth-1790070686782-1790075037235-93988019491e",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -50178,14 +49851,12 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-ethfi-1790074920717-1790075021112-a66413a00932",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -50216,28 +49887,24 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-hype-1790064996571-1790065113972-1ee001a392a1",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-hype-1790069862843-1790075026348-913ada13f6f3",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
@@ -50328,201 +49995,147 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-sol-1790064228945-1790064346532-421521335be4",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "REPLAY_COMPATIBILITY_NOT_PROVEN"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-l2book-sol-1790074883914-1790075224938-e96ae0ec8a01",
       "family": "l2Book",
-      "quality_status": "PARTIAL",
-      "reason_code": "REPLAY_COMPATIBILITY_NOT_PROVEN",
-      "replay_compatible": false,
+      "quality_status": "SAFE",
+      "reason_code": "SAFE_REPLAY_COMPATIBLE",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 0,
       "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-0g-1790063875357-1790063955993-e84b12f58afb",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 32,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-0g-1790065029873-1790065072676-0d8b0d12ac3b",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 35,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-0g-1790070685547-1790075142236-8dc2e1bb5e90",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 354,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-2z-1790063653103-1790063721815-b433dfd6c2d5",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 33,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-2z-1790064135180-1790064244996-51691f1b6791",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 37,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-2z-1790070275808-1790075011990-ad13f40714d5",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 262,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aave-1790065257504-1790065367539-13b18ffb85d1",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 38,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aave-1790074920209-1790075011335-3aaf2f38768a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 94,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ada-1790064826180-1790064942621-9f95b63a7a0a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 45,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aero-1790069820114-1790074972391-a38193d1cacf",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 872,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -50538,37 +50151,27 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aixbt-1790070686528-1790075034716-c28bf87d9a00",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 199,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-algo-1790074883743-1790075218749-8623f4d8ca44",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 43,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -50584,241 +50187,171 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-anime-1790069862575-1790075024399-9bd9c734f49c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 229,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ape-1790070685557-1790075163691-5b8e6a3d0638",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 244,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-apt-1790070275819-1790075018865-62ca8e635c2e",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 775,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ar-1790074920220-1790075015077-0c27cc2174ca",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 62,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aster-1790069820125-1790074970555-11b3ca3e059b",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 1299,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-atom-1790070686655-1790075036634-f3bbbcb46acc",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 1174,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-avax-1790074883755-1790075221325-c9cb86bf9cc0",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 68,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-avnt-1790069862709-1790074960463-0728c846eceb",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 235,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-axs-1790070685605-1790075158520-eef7a8ae2b4c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 138,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-aztec-1790070275820-1790074965828-767690f712d1",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 216,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-baby-1790074920269-1790074992666-b8acff46ee3e",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 31,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-bera-1790069820125-1790074942199-a03f93ddd923",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 1996,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-bigtime-1790070686656-1790075014907-44016875d12d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 171,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-bio-1790074883755-1790075205914-dcfcd766f218",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 38,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -50834,207 +50367,147 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-blur-1790069862710-1790074886488-e3218b6e4dc0",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 305,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-bnb-1790070685647-1790075156291-e760384d4ca5",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 629,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-bome-1790070275931-1790075007733-bff3b9f0b63f",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 407,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-brett-1790074920327-1790075017948-900bd6b15f1f",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 34,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-btc-1790065428826-1790065548371-2dc8f154d73d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 537,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-btc-1790069820240-1790074981236-002fa4601a75",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 18565,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-cc-1790069820241-1790074978515-da0adc1835b7",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 652,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-celo-1790070686781-1790075040952-d000530f6e6e",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 232,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-cfx-1790074883855-1790075155985-d536e403cc07",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 41,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-chip-1790069862795-1790074985562-dc01897b9efa",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 1901,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-comp-1790070685700-1790075160519-56f4df401f1c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 237,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-crv-1790070275932-1790075016927-44f001e3395c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 1780,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -51050,173 +50523,123 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-dash-1790074920717-1790075013814-8c7c9d520f22",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 34,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-dot-1790069820287-1790074955090-eea0bc60822a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 261,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-dydx-1790070686781-1790075008065-d550e52e6cd9",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 249,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-eigen-1790074883875-1790075185752-36bcdc56a269",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 43,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ena-1790069862842-1790075027475-83b02cdbdffc",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 10864,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ens-1790070685746-1790075157789-ae0489beeb1b",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 142,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-etc-1790070275973-1790074986896-1fe9201ad233",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 375,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-eth-1790063967845-1790064085749-a5af0b1d42b0",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 366,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-eth-1790063989413-1790064108360-c54f12d49dab",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 355,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-eth-1790070686782-1790075040952-822321b5d853",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 7011,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -51232,20 +50655,15 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-ethfi-1790074920717-1790074998160-eaed4df96cd4",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 36,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -51273,37 +50691,27 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-hype-1790064996571-1790065115615-b61a7e77eaec",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 501,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-hype-1790069862843-1790075027714-88cc6682c9c3",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 12109,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -51391,37 +50799,27 @@
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-sol-1790064229036-1790064341252-f9d680d77f67",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 106,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "TRADE_COUNT_NOT_EXACT",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "hyperliquid-public-ws-trades-sol-1790074883926-1790075226198-5f8d5d5b0f33",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 0,
-      "trade_count_exact": false,
+      "trade_count": 260,
+      "trade_count_exact": true,
       "venue": "hyperliquid"
     },
     {
@@ -59021,162 +58419,122 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-0g-usdt-swap-1790059871128-1790060760647-229e91c137d7",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 108,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-0g-usdt-swap-1790063878193-1790063993536-19112fa820c5",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 12,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-0g-usdt-swap-1790065044600-1790065105165-62f9c30f46d1",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 5,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790059752739-1790060598424-38af26e6e196",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 52,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790063704667-1790063731454-4e9589911137",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 3,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790064185777-1790064227692-c84b546281cf",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 8,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-aave-usdt-swap-1790059726294-1790060621536-c03ce95e8ff3",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 1020,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-aave-usdt-swap-1790065260465-1790065377019-d532affd19cb",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
-      "replay_schema_version": "alina.replay.v2",
-      "trade_count": 100,
-      "trade_count_exact": true,
-      "venue": "okx"
-    },
-    {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "dataset_id": "okx-public-ws-trades-ada-usdt-swap-1790064826838-1790064943452-2709f8feacb3",
-      "family": "trades",
-      "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
       "trade_count": 122,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-0g-usdt-swap-1790063878193-1790063993536-19112fa820c5",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 14,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-0g-usdt-swap-1790065044600-1790065105165-62f9c30f46d1",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 7,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790059752739-1790060598424-38af26e6e196",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 62,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790063704667-1790063731454-4e9589911137",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 4,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-2z-usdt-swap-1790064185777-1790064227692-c84b546281cf",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 16,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-aave-usdt-swap-1790059726294-1790060621536-c03ce95e8ff3",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 1142,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-aave-usdt-swap-1790065260465-1790065377019-d532affd19cb",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 106,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
+      "dataset_id": "okx-public-ws-trades-ada-usdt-swap-1790064826838-1790064943452-2709f8feacb3",
+      "family": "trades",
+      "quality_status": "PARTIAL",
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
+      "replay_schema_version": "alina.replay.v2",
+      "trade_count": 123,
+      "trade_count_exact": true,
+      "venue": "okx"
+    },
+    {
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-aero-usdt-swap-1790059727491-1790060581338-60e4664f5f26",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 116,
+      "trade_count": 133,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59193,178 +58551,134 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-aixbt-usdt-swap-1790059745556-1790060640569-0f3226abc13e",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 183,
+      "trade_count": 194,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-algo-usdt-swap-1790059928881-1790060824466-55816969d7a9",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 349,
+      "trade_count": 443,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-anime-usdt-swap-1790059737406-1790060629245-61484f821c0a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 268,
+      "trade_count": 333,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-ape-usdt-swap-1790059883721-1790060762242-98a1c9c2d204",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 319,
+      "trade_count": 446,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-apt-usdt-swap-1790059731182-1790060626896-e7fc7c29f346",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 780,
+      "trade_count": 864,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-ar-usdt-swap-1790059724210-1790060615489-f01b2d27a27a",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 468,
+      "trade_count": 575,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-aster-usdt-swap-1790059683255-1790060574645-eae46f6eee1d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 345,
+      "trade_count": 392,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-atom-usdt-swap-1790059748192-1790060630959-1711727daf75",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 156,
+      "trade_count": 162,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-avax-usdt-swap-1790059928919-1790060826514-a67651f2efff",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 1873,
+      "trade_count": 2036,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-avnt-usdt-swap-1790059757996-1790060621416-b266fb216d4d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 132,
+      "trade_count": 160,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-axs-usdt-swap-1790059877401-1790060763213-c974bbc3f3a7",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 274,
+      "trade_count": 335,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59381,18 +58695,14 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-baby-usdt-swap-1790059729368-1790060599532-eeee813ce4fc",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 85,
+      "trade_count": 115,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59409,50 +58719,38 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-bera-usdt-swap-1790059683470-1790060572992-f087320ab7a1",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 180,
+      "trade_count": 192,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-bigtime-usdt-swap-1790059764981-1790060613245-4123a7867b3e",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 35,
+      "trade_count": 38,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-bio-usdt-swap-1790059928937-1790060823854-47ef5fccdafb",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 130,
+      "trade_count": 147,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59469,66 +58767,50 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-blur-usdt-swap-1790059736238-1790060613405-ec74f34339b2",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 47,
+      "trade_count": 59,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-bnb-usdt-swap-1790059908629-1790060763208-c35d7677243d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 371,
+      "trade_count": 377,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-bome-usdt-swap-1790059728737-1790060626945-6e2097e77bed",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 1290,
+      "trade_count": 1825,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-brett-usdt-swap-1790059736220-1790060598340-bd2748902b64",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 45,
+      "trade_count": 57,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59545,98 +58827,74 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-btc-usdt-swap-1790059682328-1790060580986-2702833572d2",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 3397,
+      "trade_count": 6438,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-btc-usdt-swap-1790065430329-1790065548467-5ea1856177fa",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 1357,
+      "trade_count": 2955,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-cc-usdt-swap-1790059694314-1790060580469-a784c71cb2e6",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 561,
+      "trade_count": 668,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-celo-usdt-swap-1790059751466-1790060621324-724a67a614fe",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 68,
+      "trade_count": 110,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-cfx-usdt-swap-1790059929186-1790060823621-4b2b647c5a24",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 121,
+      "trade_count": 151,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-chip-usdt-swap-1790059730694-1790060623385-8febeedab049",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 450,
+      "trade_count": 541,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59653,18 +58911,14 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-comp-usdt-swap-1790059909748-1790060763099-c4eb4b787cc9",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 79,
+      "trade_count": 88,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59681,18 +58935,14 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-crv-usdt-swap-1790059735865-1790060623327-af9981eb5023",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 401,
+      "trade_count": 427,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59709,18 +58959,14 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-dash-usdt-swap-1790059723209-1790060621673-76e8f21288ad",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 588,
+      "trade_count": 718,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59737,146 +58983,110 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-dot-usdt-swap-1790059683470-1790060581374-35ac475df6d5",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 507,
+      "trade_count": 596,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-dydx-usdt-swap-1790059758471-1790060633077-ba0bde08fe21",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 260,
+      "trade_count": 311,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-eigen-usdt-swap-1790059928391-1790060824464-46c37cd2404b",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 212,
+      "trade_count": 224,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-ena-usdt-swap-1790059731476-1790060627229-2eb93d7e7269",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 2011,
+      "trade_count": 3214,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-ens-usdt-swap-1790059909178-1790060760907-fa5934c1c038",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 82,
+      "trade_count": 103,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-etc-usdt-swap-1790059729100-1790060626882-d4ba5b341751",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 715,
+      "trade_count": 759,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-eth-usdt-swap-1790059743684-1790060641693-bb25c5a1f292",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 6117,
+      "trade_count": 9141,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-eth-usdt-swap-1790063968028-1790064087285-09047c842a17",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 2103,
+      "trade_count": 3712,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-eth-usdt-swap-1790063990118-1790064108803-c8e1c92b212d",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 2199,
+      "trade_count": 3847,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59893,18 +59103,14 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-ethfi-usdt-swap-1790059729324-1790060621408-62c32430ba39",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 697,
+      "trade_count": 742,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -59921,34 +59127,26 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-hype-usdt-swap-1790059732042-1790060628978-e8474311396c",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 2021,
+      "trade_count": 3102,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-hype-usdt-swap-1790064997115-1790065113409-adc9e59b74a7",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 221,
+      "trade_count": 393,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -60061,34 +59259,26 @@
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-sol-usdt-swap-1790059927490-1790060825863-e88b870fcadb",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 2660,
+      "trade_count": 2701,
       "trade_count_exact": true,
       "venue": "okx"
     },
     {
-      "blocking_reasons": [
-        "RECONCILIATION_MATCH_REQUIRED",
-        "REPLAY_COMPATIBILITY_NOT_PROVEN",
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
+      "blocking_reasons": [],
       "dataset_id": "okx-public-ws-trades-sol-usdt-swap-1790064229241-1790064348015-3c15b4216ef5",
       "family": "trades",
       "quality_status": "PARTIAL",
-      "reason_code": "RECONCILIATION_MATCH_REQUIRED",
-      "replay_compatible": false,
+      "reason_code": "REPLAYABLE_BUT_PARTIAL",
+      "replay_compatible": true,
       "replay_schema_version": "alina.replay.v2",
-      "trade_count": 384,
+      "trade_count": 388,
       "trade_count_exact": true,
       "venue": "okx"
     },
@@ -60141,9 +59331,9 @@
       "venue": "okx"
     }
   ],
-  "non_replayable_trade_count_exact": 36087,
+  "non_replayable_trade_count_exact": 0,
   "reason_counts": {
-    "DUPLICATES_NOT_DEDUPED:1": 11,
+    "DUPLICATES_NOT_DEDUPED:1": 2,
     "DUPLICATES_NOT_DEDUPED:11": 1,
     "DUPLICATES_NOT_DEDUPED:116": 1,
     "DUPLICATES_NOT_DEDUPED:118": 1,
@@ -60183,18 +59373,16 @@
     "DUPLICATES_NOT_DEDUPED:96": 1,
     "FATAL_INTEGRITY:missing_timestamp_count=1": 560,
     "FATAL_INTEGRITY:missing_timestamp_count=2": 560,
-    "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED": 18,
-    "RECONCILIATION_MATCH_REQUIRED": 105,
     "RECONCILIATION_UNVERIFIED": 110,
-    "REPLAYABLE_BUT_PARTIAL": 154,
-    "REPLAY_COMPATIBILITY_NOT_PROVEN": 525,
-    "SAFE_REPLAY_COMPATIBLE": 2340
+    "REPLAYABLE_BUT_PARTIAL": 286,
+    "REPLAY_COMPATIBILITY_NOT_PROVEN": 419,
+    "SAFE_REPLAY_COMPATIBLE": 2446
   },
-  "receipt_digest": "9d80a92f1b73142bc181c07bad0694b2a5364ba824c106b0aa1ef4b718f06711",
-  "replayable_not_safe_count": 154,
-  "replayable_trade_count_exact": 1840227,
+  "receipt_digest": "1eb9926cc346fd0cd29d78800484a29e2d8abce5beff3d7576cba7b56ea68c86",
+  "replayable_not_safe_count": 286,
+  "replayable_trade_count_exact": 4947714,
   "row_count": 4421,
   "safe_not_replayable_count": 0,
   "schema": "alina.replay_compatibility_reasons.v2",
-  "source_index_sha256": "3c890e5f01479b710421ff0d28dee59fae261338289da9c8b221b32878740919"
+  "source_index_sha256": "2afbd3edf559a92b6f3bd98ad5fd8581e0f9f71344c90e4498b14db48fcab6f5"
 }

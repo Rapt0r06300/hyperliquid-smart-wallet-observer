@@ -23,7 +23,7 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
-  "invalid_record_count": 190000,
+  "invalid_record_count": 0,
   "observed_channels": [
     "trades"
   ],
@@ -41,14 +41,12 @@
     ]
   },
   "quality_reasons": [
-    "REPLAY_COMPATIBILITY_NOT_PROVEN",
-    "TRADE_COUNT_NOT_EXACT",
-    "UNIQUE_TRADE_COUNT_NOT_EXACT",
-    "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED"
+    "UNIQUE_TRADE_COUNT_NOT_EXACT"
   ],
   "quality_status": "PARTIAL",
   "reconciliation": {
-    "status": "UNVERIFIED"
+    "method": "release_sha256_size_plus_parse_chronology",
+    "status": "SOURCE_ARCHIVE_VERIFIED"
   },
   "record_count": 190000,
   "record_count_scanned": 190000,
@@ -68,8 +66,8 @@
   "release_remote_size": 16280854,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "archive-v2-35707914210-bybit-ETH",
-  "replay_compatible": false,
-  "replay_reason": "INVALID_RECORD",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
@@ -106,11 +104,12 @@
       "p95": null
     }
   },
-  "trade_count": 0,
-  "trade_count_exact": false,
+  "trade_count": 190000,
+  "trade_count_exact": true,
   "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
-  "unique_trade_count": 190000,
-  "unique_trade_count_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
   "validation_allowed": false,
-  "venue": "bybit"
+  "venue": "bybit",
+  "verifier_version": "alina.replay.compatibility.v3"
 }

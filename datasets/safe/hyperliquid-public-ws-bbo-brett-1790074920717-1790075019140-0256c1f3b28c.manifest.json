@@ -1,0 +1,107 @@
+{
+  "asset_verified": true,
+  "bytes": 13674,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-bbo-brett-1790074920717-1790075019140-0256c1f3b28c",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790075019140,
+  "event_count": 149,
+  "family": "bbo",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "bbo"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 149,
+  "release": {
+    "asset_id": 607743065,
+    "asset_name": "hyperliquid-public-ws-bbo-brett-1790074920717-1790075019140-0256c1f3b28c.jsonl.gz",
+    "release_id": 402493541,
+    "remote_digest": "sha256:0256c1f3b28cd94214adfd67def4d6064609551b631515261dcf1c8160dc9c64",
+    "remote_size": 13674,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s6"
+  },
+  "release_asset": "hyperliquid-public-ws-bbo-brett-1790074920717-1790075019140-0256c1f3b28c.jsonl.gz",
+  "release_asset_id": 607743065,
+  "release_id": 402493541,
+  "release_remote_digest": "sha256:0256c1f3b28cd94214adfd67def4d6064609551b631515261dcf1c8160dc9c64",
+  "release_remote_size": 13674,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "0256c1f3b28cd94214adfd67def4d6064609551b631515261dcf1c8160dc9c64",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1790074920717,
+  "symbol": "BRETT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-6bf482295a83427a8b9f3107dd4ab72a"
+    ],
+    "first_exchange_ts_ms": 1790074920012,
+    "last_exchange_ts_ms": 1790075018835,
+    "max_reconnect_count": 1,
+    "receive_minus_exchange_ms": {
+      "count": 149,
+      "max": 1109.0,
+      "min": 238.0,
+      "p50": 313.0,
+      "p95": 604.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v3"
+}

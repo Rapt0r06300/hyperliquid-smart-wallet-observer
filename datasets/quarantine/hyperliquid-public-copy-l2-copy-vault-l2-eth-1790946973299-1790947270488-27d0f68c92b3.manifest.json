@@ -27,7 +27,7 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
-  "invalid_record_count": 57,
+  "invalid_record_count": 0,
   "observed_channels": [
     "copy_vault_l2"
   ],
@@ -43,8 +43,7 @@
     ]
   },
   "quality_reasons": [
-    "DUPLICATES_NOT_DEDUPED:1",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+    "DUPLICATES_NOT_DEDUPED:1"
   ],
   "quality_status": "PARTIAL",
   "reconciliation": {
@@ -67,8 +66,8 @@
   "release_remote_size": 23675,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-campaign-copy-vault-e6-40-2026100104-v7-u0",
-  "replay_compatible": false,
-  "replay_reason": "INVALID_RECORD",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
@@ -110,5 +109,6 @@
   "trade_count": 0,
   "trade_count_exact": true,
   "validation_allowed": false,
-  "venue": "hyperliquid"
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v3"
 }
