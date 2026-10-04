@@ -96,16 +96,31 @@ class BitgetMarketState:
         if channel in {"books", "books1", "books5", "books15"}:
             seq = _i(item.get("seq") or item.get("seqId"))
             prev = _i(item.get("pseq") or item.get("prevSeqId"))
-            if self.sequence is not None and seq is not None:
+            action = str(payload.get("action") or "").lower()
+            snapshot_push = action == "snapshot" or channel in {"books1", "books5", "books15"}
+
+            if not snapshot_push and self.sequence is not None and seq is not None:
                 if prev is not None and prev != self.sequence:
                     self.gap_count += 1
+                    self.bids.clear()
+                    self.asks.clear()
                     self.quality, self.reason = DESYNC, "SEQUENCE_GAP"
                     return self.quality
                 if seq < self.sequence:
                     self.regression_count += 1
+                    self.bids.clear()
+                    self.asks.clear()
                     self.quality, self.reason = DESYNC, "SEQUENCE_REGRESSION"
                     return self.quality
-            for raw, target in ((item.get("bids"), self.bids), (item.get("asks"), self.asks)):
+
+            if snapshot_push:
+                next_bids: dict[float, float] = {}
+                next_asks: dict[float, float] = {}
+                targets = ((item.get("bids"), next_bids), (item.get("asks"), next_asks))
+            else:
+                targets = ((item.get("bids"), self.bids), (item.get("asks"), self.asks))
+
+            for raw, target in targets:
                 for row in raw or []:
                     if not isinstance(row, (list, tuple)) or len(row) < 2:
                         continue
@@ -116,6 +131,10 @@ class BitgetMarketState:
                         target.pop(price, None)
                     else:
                         target[price] = size
+
+            if snapshot_push:
+                self.bids = next_bids
+                self.asks = next_asks
             self.sequence = seq if seq is not None else self.sequence
             self.quality = (
                 EXPLOITABLE

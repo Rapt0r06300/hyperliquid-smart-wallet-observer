@@ -241,3 +241,95 @@ def test_bitget_preserves_transport_clock_in_snapshot() -> None:
     assert snap.receive_mono_ns == 124_000
     assert snap.connection_id == "bitget-test"
     assert snap.transport_rtt_ms == 10.0
+
+def test_bitget_books15_snapshots_replace_book_without_false_gap() -> None:
+    from hl_observer.collection.bitget_market_data import BitgetMarketState
+
+    state = BitgetMarketState("BTCUSDT")
+    first = state.apply(
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "books15", "instId": "BTCUSDT"},
+            "action": "snapshot",
+            "data": [{
+                "ts": "1000",
+                "seq": "10",
+                "pseq": "0",
+                "bids": [["100", "2"], ["99", "3"]],
+                "asks": [["101", "2"], ["102", "3"]],
+            }],
+        },
+        receive_ts_ms=1_010,
+    )
+    assert first != DESYNC
+
+    second = state.apply(
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "books15", "instId": "BTCUSDT"},
+            "action": "snapshot",
+            "data": [{
+                "ts": "1020",
+                "seq": "12",
+                "pseq": "0",
+                "bids": [["100.5", "1"]],
+                "asks": [["101.5", "1"]],
+            }],
+        },
+        receive_ts_ms=1_030,
+    )
+    assert second != DESYNC
+    assert state.gap_count == 0
+    snap = state.snapshot(now_ms=1_040)
+    assert snap.bid == 100.5
+    assert snap.ask == 101.5
+    assert len(snap.bids) == 1
+    assert len(snap.asks) == 1
+
+
+def test_bitget_tier_b_subscribes_only_supported_v2_depth_channels() -> None:
+    from hl_observer.collection.bitget_market_data import BitgetPublicClient
+
+    args = BitgetPublicClient().subscription_args(["BTCUSDT"])
+    channels = {row["channel"] for row in args}
+    assert "books15" in channels
+    assert "books1" in channels
+    assert "trade" in channels
+    assert "books50" not in channels
+
+
+def test_bitget_books_gap_clears_stale_reconstructed_book() -> None:
+    from hl_observer.collection.bitget_market_data import BitgetMarketState
+
+    state = BitgetMarketState("BTCUSDT")
+    state.apply(
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "books", "instId": "BTCUSDT"},
+            "action": "snapshot",
+            "data": [{
+                "ts": "1000",
+                "seq": "10",
+                "pseq": "0",
+                "bids": [["100", "2"]],
+                "asks": [["101", "2"]],
+            }],
+        },
+        receive_ts_ms=1_010,
+    )
+    status = state.apply(
+        {
+            "arg": {"instType": "USDT-FUTURES", "channel": "books", "instId": "BTCUSDT"},
+            "action": "update",
+            "data": [{
+                "ts": "1020",
+                "seq": "12",
+                "pseq": "8",
+                "bids": [["100", "3"]],
+                "asks": [],
+            }],
+        },
+        receive_ts_ms=1_030,
+    )
+    assert status == DESYNC
+    assert state.gap_count == 1
+    assert not state.bids
+    assert not state.asks
+
