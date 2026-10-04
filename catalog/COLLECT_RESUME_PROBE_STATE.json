@@ -27,6 +27,19 @@
         "unit": 0
       },
       "sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079"
+    },
+    "1f296b54ffd1e85ab6971198aefc4fcb5e279e5eaf54817f247668b296641317": {
+      "result": {
+        "network_used": false,
+        "operation": "fresh_runner_resume",
+        "paper_only": true,
+        "read_only": true,
+        "real_execution": false,
+        "resumed_from_checkpoint": true,
+        "status": "COMPLETE",
+        "unit": 1
+      },
+      "sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934"
     }
   },
   "config_sha256": "762e6d980010f14cf2d316f302d12b7055fc7ea7ea3afaf68f574442b1398530",
@@ -34,12 +47,15 @@
   "created_at": "2026-10-04T11:41:23.789958Z",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
     "network_used": false,
-    "next_probe_unit": 1,
+    "next_probe_unit": 2,
     "proof_scope": "control_plane_state_resume",
     "resume_proof": true,
     "segment_a_result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-    "segment_a_unit_id": "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13"
+    "segment_a_unit_id": "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13",
+    "segment_b_result_sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
+    "segment_b_unit_id": "1f296b54ffd1e85ab6971198aefc4fcb5e279e5eaf54817f247668b296641317"
   },
   "dataset_generation": "V2_FRESH",
   "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
@@ -57,6 +73,18 @@
       "from": "RUNNING",
       "reason": "fresh_runner_resume_required",
       "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-10-04T11:44:09.014809Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "collect_resume_probe_segment_b",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T11:44:09.014904Z",
+      "from": "RUNNING",
+      "reason": "fresh_runner_resume_proven",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
@@ -78,9 +106,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "CONTINUATION_REQUIRED",
-  "status_reason": "fresh_runner_resume_required",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T11:41:23.792040Z",
+  "status": "COMPLETE",
+  "status_reason": "fresh_runner_resume_proven",
+  "terminal_evidence_digest": "c91e0e66554e55779fe7be601713a39e8dc6ca91703b17fb6fd4b70e44f6e1be",
+  "updated_at": "2026-10-04T11:44:09.014904Z",
   "work_plan_sha256": "14fd231a242fb2b825354a4923149e86609c63054677dc4ebe6d624048e60ebf"
 }
