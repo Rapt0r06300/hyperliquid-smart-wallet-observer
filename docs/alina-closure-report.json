@@ -1100,17 +1100,17 @@
     },
     "global_unique_failure_reason_count": 0,
     "global_unique_trade_ratio": 0.99923278,
-    "partial_shard_count": 837,
+    "partial_shard_count": 834,
     "phase": "COLLECT",
     "phase_epoch": 6,
     "profitability_claimed": false,
-    "quarantined_record_count": 804257,
+    "quarantined_record_count": 804252,
     "raw_record_count": 7755643,
     "raw_trade_count": 4947714,
     "rejected_shard_count": 1120,
     "replay_compatible_shard_count": 2732,
     "replay_unclassified_candidate_count": 0,
-    "safe_shard_count": 2464,
+    "safe_shard_count": 2467,
     "status": "ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
@@ -1123,7 +1123,7 @@
   },
   "dataset_health_digest": "1c2e6e6fa03a8034994b05e7a889a3c3a27199aca4af21360985e4c1608cd716",
   "dataset_selection_id": null,
-  "dataset_v2_head": "97a6e65711564942b8002e2689808f5f6f526bc2",
+  "dataset_v2_head": "8857e6a448b8f368eaba07ebe945e172e9716f2e",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "9be4c968f4d5cf92d5cf5ab1f9097f04ee629e7a891e5fc2f715b52426dd4b1a",
@@ -1146,17 +1146,17 @@
     },
     {
       "id": "two-segment-resume-proof",
-      "reason": "fresh-runner two-segment resume proof is not durable yet",
-      "state": "BLOCKED"
+      "reason": "fresh-runner two-segment resume proof is durable",
+      "state": "DONE"
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "4 canonical closure blocker(s) remain",
+      "reason": "3 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-04T11:48:10.263758Z",
+  "generated_at_utc": "2026-10-04T11:53:47.892328Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1178,17 +1178,12 @@
     },
     {
       "id": "BLOCKER-03",
-      "reason": "fresh-runner two-segment resume proof is unavailable",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-04",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "97a6e65711564942b8002e2689808f5f6f526bc2",
+  "main_alina_head": "8857e6a448b8f368eaba07ebe945e172e9716f2e",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1216,24 +1211,23 @@
     "rows": []
   },
   "paper_read_only": true,
-  "partial_count": 837,
+  "partial_count": 834,
   "phase": "COLLECT",
   "phase_epoch": 6,
-  "quarantined_record_count": 804257,
+  "quarantined_record_count": 804252,
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "d2989a4c1db1a6c4403d293a8fc575fe20873eef95463c4e791c57cc98728992",
+  "receipt_digest": "4f9f38ede95ed5334a65bc89b7a6fcc01ffa048f8aaded80c3016f7832dbff2a",
   "rejected_count": 1120,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
-    "fresh-runner two-segment resume proof is unavailable",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 2732,
   "replay_remaining_candidates": 0,
-  "safe_count": 2464,
+  "safe_count": 2467,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
   "scoreboard_provenance": {
@@ -1255,7 +1249,8 @@
   "source_unvalidated_capability_count": 0,
   "trade_count_exact": true,
   "trade_count_failure_reason_count": 0,
-  "two_segment_resume_status": "UNMEASURABLE",
+  "two_segment_resume_reason": "CURRENT_RESUME_STRUCTURAL_RECEIPT_VALID",
+  "two_segment_resume_status": "PROVEN",
   "uncompressed_size_coverage": true,
   "uncompressed_size_exact": true,
   "uncompressed_size_exact_assets": 4421,
