@@ -3130,7 +3130,7 @@
     "unexpected_failures": [],
     "users_per_largest_lane": 10
   },
-  "candidate_campaign_count": 311,
+  "candidate_campaign_count": 312,
   "collection_cutoff_at_utc": null,
   "invalid_manifest_paths": [],
   "paper_only": true,
@@ -6269,20 +6269,20 @@
       "users_per_largest_lane": 10
     },
     {
-      "active_lane_count": 1,
+      "active_lane_count": 0,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e6-broad-2026100321-v8",
-          "collected": false,
-          "completed_units": 1,
-          "published": false,
+          "collected": true,
+          "completed_units": 3,
+          "published": true,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
         }
       ],
-      "collected_lane_count": 0,
-      "completed_unit_count": 1,
+      "collected_lane_count": 1,
+      "completed_unit_count": 3,
       "created_at_max": "2026-10-03T21:19:19.860479+00:00",
       "declared_universe_count": 3089,
       "duplicate_lane_indices": [],
@@ -6297,22 +6297,63 @@
       "no_silent_loss": true,
       "out_of_range_lane_indices": [],
       "plan_valid": false,
-      "published_lane_count": 0,
-      "qualified_shard_count": 0,
+      "published_lane_count": 1,
+      "qualified_shard_count": 45,
       "scheduled_lane_count": 1,
       "selected_count": 3089,
       "selection_file": "catalog/copy_vault_selections/e6/2026100321.json",
       "selection_sha256": "cb28934c39015bd05fc05eb3b9eef6161c5b62588e8eabbf0c2e745177a0348e",
       "selection_verified": true,
       "status": "BLOCKED",
-      "terminal_lane_count": 0,
+      "terminal_lane_count": 1,
       "unexpected_failures": [],
       "users_per_largest_lane": 3089
+    },
+    {
+      "active_lane_count": 0,
+      "campaigns": [
+        {
+          "campaign_id": "copy-vault-e6-broad-2026100405-v8",
+          "collected": true,
+          "completed_units": 1,
+          "published": true,
+          "shard_index": 0,
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
+        }
+      ],
+      "collected_lane_count": 1,
+      "completed_unit_count": 1,
+      "created_at_max": "2026-10-04T05:31:52.110895+00:00",
+      "declared_universe_count": 3088,
+      "duplicate_lane_indices": [],
+      "explicit_unavailable_lane_count": 0,
+      "fully_published": false,
+      "lane_indices": [
+        0
+      ],
+      "manifest_lane_count": 1,
+      "max_users_per_lane_contract": 10,
+      "missing_lane_indices": [],
+      "no_silent_loss": true,
+      "out_of_range_lane_indices": [],
+      "plan_valid": false,
+      "published_lane_count": 1,
+      "qualified_shard_count": 82,
+      "scheduled_lane_count": 1,
+      "selected_count": 3088,
+      "selection_file": "catalog/copy_vault_selections/e6/2026100405.json",
+      "selection_sha256": "54daee6761468e7b2f524c2c38d1e399775f7794a4f5aacaf3eb1128d158d5bb",
+      "selection_verified": true,
+      "status": "BLOCKED",
+      "terminal_lane_count": 1,
+      "unexpected_failures": [],
+      "users_per_largest_lane": 3088
     }
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "f7bbcc77794e4697707d181f3554a2448b0444927a5532135b0338dcb8c3ebca",
+  "receipt_digest": "f6b8dbb943e6823f4b75249494c62905c035263d60fa042ccd955fbd1043d20b",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
