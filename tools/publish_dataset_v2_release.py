@@ -13,17 +13,16 @@ import os
 import shutil
 import subprocess
 import time
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
-    finalize_manifest,
     verify_remote_asset,
     write_manifest,
 )
-
 
 MAX_RELEASE_ASSETS = 1000
 CONTROL_ASSET_SLOTS = 1
@@ -59,6 +58,13 @@ def retry_release_tag(
     )
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
     return f"{base_tag}-retry-{digest}"
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 class PublishError(RuntimeError):
@@ -458,6 +464,16 @@ def publish_bundle(
     if canonical_release_id <= 0:
         raise PublishError("Canonical release id is missing.")
 
+    starts = [
+        value
+        for row in final_manifests
+        if (value := _optional_int(row.get("start_ts_ms"))) is not None
+    ]
+    ends = [
+        value
+        for row in final_manifests
+        if (value := _optional_int(row.get("end_ts_ms"))) is not None
+    ]
     run_manifest = {
         "schema": "alina.dataset_run_manifest.v2",
         "repository": repository,
@@ -467,7 +483,30 @@ def publish_bundle(
         "data_release_base_tag": data_base_tag,
         "release_parts": release_parts,
         "collector_version": index.get("collector_version"),
+        "code_sha": index.get("collector_version"),
+        "collection_config": index.get("collection_config"),
         "collection_run_id": index.get("collection_run_id"),
+        "continuation_cursor": index.get("continuation_cursor"),
+        "start_ts_ms": min(starts) if starts else None,
+        "end_ts_ms": max(ends) if ends else None,
+        "venues": sorted(
+            {str(row.get("venue")) for row in final_manifests if row.get("venue")}
+        ),
+        "symbols": sorted(
+            {str(row.get("symbol")) for row in final_manifests if row.get("symbol")}
+        ),
+        "event_count": sum(
+            _optional_int(row.get("event_count")) or 0 for row in final_manifests
+        ),
+        "trade_count": sum(
+            _optional_int(row.get("trade_count")) or 0 for row in final_manifests
+        ),
+        "gap_count": sum(
+            _optional_int((row.get("integrity") or {}).get("gap_count")) or 0
+            for row in final_manifests
+            if isinstance(row.get("integrity"), Mapping)
+        ),
+        "asset_sha256s": [str(row.get("sha256") or "") for row in final_manifests],
         "shard_count": len(final_manifests),
         "safe_count": sum(
             1 for row in final_manifests if row.get("quality_status") == "SAFE"
