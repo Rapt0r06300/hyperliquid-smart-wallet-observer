@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
 try:
-    from tools.index_run_manifest import _atomic_json, _index_row
     from tools.manifest_policy import classify_manifest
 except ModuleNotFoundError:
-    from index_run_manifest import _atomic_json, _index_row
     from manifest_policy import classify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +25,27 @@ STAGE_BY_STATUS = {
     "REJECT": "rejected",
     "NO_DATA": "incoming",
 }
+
+MIRROR_KEYS = (
+    "family", "venue", "symbol", "start_ts_ms", "end_ts_ms",
+    "collection_run_id", "release_repository", "release_tag", "release_asset",
+    "sha256", "bytes", "uncompressed_bytes", "uncompressed_size_exact",
+    "event_count", "record_count", "trade_count", "trade_count_exact",
+    "unique_trade_count", "unique_trade_count_exact", "unique_identity_method",
+    "trade_identity_digests", "trade_identity_digests_exact",
+    "replay_compatible", "replay_schema_version", "replay_reason",
+    "quality_reasons", "source",
+)
+
+
+def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -86,14 +106,11 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
         destination = base / "datasets" / "safe" / f"{dataset_id}.manifest.json"
         _atomic_json(destination, manifest)
 
-        canonical_row = _index_row(manifest, destination, base)
         merged = dict(row)
-        merged.update(canonical_row)
-        # Keep exact evidence already present in DATA_INDEX when the canonical
-        # row has no replacement value.
-        for key, value in row.items():
-            if merged.get(key) is None and value is not None:
-                merged[key] = value
+        for key in MIRROR_KEYS:
+            if key in manifest and manifest.get(key) is not None:
+                merged[key] = manifest.get(key)
+        merged["dataset_id"] = dataset_id
         merged["quality_status"] = "SAFE"
         merged["quality_reasons"] = []
         merged["manifest_path"] = str(destination.relative_to(base)).replace("\\", "/")
