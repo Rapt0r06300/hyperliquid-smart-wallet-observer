@@ -203,7 +203,7 @@ def test_bybit_archive_trd_match_id_is_canonical_native_identity():
             "trdMatchID": "archive-match-123",
         }
     }
-    keys = global_unique._native_trade_keys(
+    keys = global_counts._native_trade_keys(
         row,
         venue="bybit",
         family="trades",

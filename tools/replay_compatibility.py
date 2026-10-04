@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 try:
-    from tools.backfill_exact_trade_counts import _native_trade_keys
+    from tools.backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 except ModuleNotFoundError:
-    from backfill_exact_trade_counts import _native_trade_keys
+    from backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
 REPLAYABLE_FAMILIES={"trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
@@ -92,6 +92,25 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
                     symbol=symbol,
                 )
                 if identities is None:
+                    # Legacy normalized batch envelopes may retain only a
+                    # causal sequence plus an exact parsed event count. Preserve
+                    # that already-supported replay path without fabricating
+                    # per-trade identities.
+                    batch_count=_summary_trade_count(row)
+                    sequence=row.get("sequence")
+                    if (
+                        batch_count is not None
+                        and batch_count > 0
+                        and sequence is not None
+                        and str(sequence) != ""
+                    ):
+                        result["trade_count"]+=batch_count
+                        envelope_identity=f"{venue}|{family}|{symbol}|sequence|{sequence}"
+                        if envelope_identity in seen:
+                            result["duplicate_count"]+=1
+                        else:
+                            seen.add(envelope_identity)
+                        continue
                     result["invalid_record_count"]+=1
                     result["trade_count_exact"]=False
                     continue
