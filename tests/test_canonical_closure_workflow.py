@@ -22,3 +22,22 @@ def test_canonical_closure_rebuilds_from_latest_head_before_push() -> None:
     assert "python tools/build_closure_report.py" in publish
     assert "--dataset-root ." in publish
     assert 'if git push origin HEAD:main; then' in publish
+
+
+def test_canonical_closure_reacts_to_durable_evidence_changes() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    for path in (
+        "catalog/DATA_METRICS.json",
+        "catalog/DATASET_HEALTH_RECEIPT.json",
+        "catalog/TRADE_COUNT_PATCH.json",
+        "catalog/TRADE_UNIQUE_COUNT_PATCH.json",
+        "catalog/RECORD_COUNT_PATCH.json",
+        "catalog/UNCOMPRESSED_SIZE_PATCH.json",
+        "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json",
+        "catalog/RESUME_SMOKE_RECEIPT.json",
+        "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json",
+        "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json",
+        "catalog/campaigns/**",
+        "control/alina-phase.json",
+    ):
+        assert path in text

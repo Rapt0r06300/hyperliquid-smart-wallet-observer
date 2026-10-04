@@ -162,6 +162,8 @@ def test_metrics_refresh_is_scheduled_and_serialized():
     assert "group: dataset-v2-control-plane-index" in text
     assert "cancel-in-progress: false" in text
     assert "tools/build_catalog_metrics.py" in text
+    assert "catalog/TRADE_COUNT_PATCH.json" in text
+    assert "catalog/TRADE_UNIQUE_COUNT_PATCH.json" in text
 
 
 def test_reconcile_covers_all_production_release_families_and_pins_actions():
