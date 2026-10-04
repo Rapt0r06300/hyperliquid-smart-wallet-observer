@@ -1,0 +1,63 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "canary-market-e6-okx-btc-eth-20261004-v1",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "e854a51b0d01e079edbc54541026400df81152d8",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "683f994e2989d78006bf1e07a5185e71397ca3335cd54cc57a3ffcfa09e44206",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-04T11:33:04Z",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "canary": true,
+    "duration_s": 180,
+    "market_shard_count": 1,
+    "market_shard_index": 0,
+    "max_coins": 2,
+    "plan_file": "catalog/market_collection_plans/e6/canary-20261004/okx-btc-eth.json",
+    "plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "require_all_native_venues": true,
+    "rotate_mb": 16,
+    "selected_coin_count": 2,
+    "universe_digest": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "universe_mode": "bounded_canary"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-11T11:33:04Z",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "6639033a2c2a1b81c854e104f351b8003e0e5217c239ad15d3fcb77f35efb272"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 1,
+    "max_chunks": 1,
+    "max_consecutive_failures": 1,
+    "max_no_progress": 1,
+    "max_wall_clock_s": 1200
+  },
+  "next_due_at": "2026-10-01T00:00:00Z",
+  "no_progress_count": 0,
+  "operator_request_id": "6639033a2c2a1b81c854e104f351b8003e0e5217c239ad15d3fcb77f35efb272",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "PENDING",
+  "status_reason": "bounded_canary_requested",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-04T11:33:04Z",
+  "work_plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589"
+}
