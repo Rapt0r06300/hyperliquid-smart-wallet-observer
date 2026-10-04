@@ -889,6 +889,29 @@ A disconnect can be repaired for trades if an authoritative public endpoint/arch
 
 If exact recovery cannot be demonstrated, the affected trade interval is not certified exact.
 
+#### Historical official-archive replay qualification
+
+Immutable official historical archives are evaluated under a different clock-domain contract from live causal capture.
+
+A local monotonic receive timestamp is mandatory for live/WebSocket evidence used to prove receive ordering or latency. It is **not** a meaningful required field for a file downloaded after the fact from an official exchange archive. The absence of local receive monotonic time alone must therefore not cause an otherwise valid official historical trade archive to be rejected as corrupt.
+
+This exemption is narrow and fail-closed. An archive shard may become replay-compatible only when all applicable evidence is proven, including:
+
+- an explicitly recognized official/public archive source;
+- immutable release identity and verified asset size/SHA-256;
+- source exchange timestamps for the replayed events;
+- strict parse success;
+- chronological ordering with no unresolved regressions;
+- deterministic event/trade identity and deduplication;
+- no unresolved gap/integrity failure applicable to that archive family;
+- exact trade and unique-trade accounting where required;
+- an explicit archive-verification reconciliation receipt such as `SOURCE_ARCHIVE_VERIFIED`;
+- a versioned replay schema/reason receipt.
+
+Archive replay compatibility proves historical event replay only. It does **not** invent local receive ordering, transport latency, same-runner clock evidence, or microstructure evidence that the archive does not contain. A latency-sensitive Lead-Lag proof still requires the live/synchronized timing evidence defined elsewhere in this spec.
+
+The published `TOTAL_TRADES_REPLAYABLE` metric is a qualification total derived from replay-compatible trade shards. A trade counted outside that total is not automatically proven unusable: reports must distinguish a genuinely invalid asset from an asset whose replay proof is still missing. Replay-compatibility diagnostics therefore expose both shard counts and exact trade-weighted blocker counts so remediation prioritizes the largest recoverable populations first.
+
 ### BBO/L2 versus historical repair
 
 The system must distinguish data families that are historically repairable from those that are not.
@@ -1735,6 +1758,28 @@ The scoreboard separately reports:
 - percentage of positive days.
 
 Optimization prioritizes robust scalable daily net rather than raw cumulative PnL.
+
+#### Certified lifecycle, funding and paper-order semantics
+
+Economic certification is causal and event-driven. A numeric estimate can annotate a lifecycle event, but it cannot create one.
+
+For realized-PnL extraction:
+
+- `estimated_net_pnl_usdc` or any other estimated/non-zero PnL field is never sufficient evidence of CLOSE/REDUCE/EXIT;
+- a realized close must come from explicit causal lifecycle evidence such as a close/reduce action, exit method, matched position transition, or equivalent certified event;
+- ambiguous lifecycle evidence is `UNMEASURABLE`/no-trade rather than converted into a synthetic close.
+
+For Hyperliquid funding:
+
+- continuous funding accrual may be retained as a diagnostic estimate;
+- certified settled funding comes from observed settlement events (preferably account `userFunding` evidence) or an exact reconstruction at the real settlement point using the required position/oracle/rate evidence;
+- merely crossing one or more hourly settlement boundaries does not authorize prorating a continuous accrual into settled cash;
+- if a position crosses a settlement boundary and complete settlement evidence is absent, funding-inclusive stable PnL is `UNMEASURABLE`; realized non-funding PnL may remain separately visible;
+- estimated accrual and certified settled funding remain separately labeled and are never silently merged.
+
+For Hyperliquid paper order replay, reuse the canonical lifecycle/TIF authority. The venue model supports the documented limit-order semantics `GTC`, `IOC`, and `ALO`; legacy internal `POST_ONLY` naming maps to `ALO`. The paper model also preserves `reduceOnly` and trigger/TP-SL semantics needed to reproduce lifecycle behavior. Unsupported TIF/order semantics fail closed rather than being approximated as another order type.
+
+These objects remain simulation-only evidence. They do not authorize signatures, private keys, `/exchange`, testnet execution, or real orders.
 
 ### Required stress tests before promotion
 
