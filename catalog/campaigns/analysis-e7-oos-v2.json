@@ -7,15 +7,69 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "6c39d7546274a6452f9fd6b09fdddf3fa2d64aa2",
   "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": "OOS",
+        "bundle_root": null,
+        "collection_plan_sha256": null,
+        "durable_persisted": true,
+        "evidence_release_tag": "campaign-evidence-analysis-e7-oos-v2-u0",
+        "evidence_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "output_root": "/home/runner/work/_temp/alina-replay-workspace",
+        "phases": [
+          {
+            "analysis_stage": "OOS",
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "-m",
+              "hl_observer.ops.v2_dataset_bridge",
+              "materialize"
+            ],
+            "name": "materialize_safe_v2",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "    \"hyperliquid-public-copy-l2-copy-vault-l2-aave-1791032362999-1791032658325-c903cfea5acb\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-avax-1791032362999-1791032658325-7fe162903257\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trx-1791032362999-1791032658595-03e07b4c7ac6\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hbar-1791032363007-1791032658460-626fe230c860\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bnb-1791032363025-1791032658325-8ea1a86397bd\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ada-1791032363040-1791032658325-5a61f1c3d241\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dot-1791032363063-1791032658326-db4b61f029ad\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trump-1791032363093-1791032658464-c7785cbb2f34\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-melania-1791032363101-1791032658461-f1991f96ded5\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x8825e6ed11c7f9c0874579c9f4bba192b9e81c8f-1791039946137-1791039946137-357ef15c4b32\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xf03a43e2bba474e999e3e0d5d399c1aceb39c627-1791039946138-1791039946138-86c4bda5d1da\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xf89e65e044cf00ea21009a01120c773c6660edf2-1791039946139-1791039946139-344180539daf\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x564a41d137a5c1f2895ea96020455727442e876a-1791039946141-1791039946141-c97cb4efb434\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x4bf7d22ea609980f7caca7dd2fab42019d4ddc00-1791039946142-1791039946142-f7d2e3a77420\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x73b7e8b164c361f8e3c1d8ccded3b95712446a62-1791039946143-1791039946143-4aa42319141a\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xd2183ab4437e22ea5b2079af6ce75d8fa2f63013-1791039946143-1791039946143-eeb5ea4443b2\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ena-1791039946276-1791040243107-49d3b7ce9b4f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pons-1791039946331-1791040243107-9df60b3979c0\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wld-1791039946331-1791040243220-fc0ba8496290\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-btc-1791039946332-1791040243107-5fb7e9d1dbd8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hype-1791039946332-1791040243107-fd81a28dd21d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-zec-1791039946332-1791040243220-1ebc40ac911d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-eth-1791039946348-1791040243107-6d33aa87e94c\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-aster-1791039946389-1791040243107-80d91321e650\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-jup-1791039946389-1791040243107-ee07ccaa5cda\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sol-1791039946389-1791040243107-6aef4d593c22\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ape-1791039946444-1791040243107-56c27b57c44c\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x51b62b4bf8df6f2795b3da30cb46aa47f9f230a8-1791043989669-1791043989669-7ac32fd5dcff\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xe76c9c59157c993ac3cb405defb7992661b57fed-1791043989669-1791043989669-4e93682ec655\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x1cd4b2bec45cfad412244ea62c4e976a270e9d9e-1791043989670-1791043989670-efd4718de9f1\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xe0dad338ddd435719e3f2edcd815014218e88ee8-1791043989670-1791043989670-43ee1964b032\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x4858be05ff7e454ac91bdc2f850434dc77799bd2-1791043989687-1791043989687-1f1cbc4ba2dc\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0x319d49ca456da508edd0c1e3f2585b22a72046a4-1791043989688-1791043989688-9fa6614b7c01\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xea4c9a7f31a8588fdce54b1ad18acddb39fe8f11-1791043989688-1791043989688-a9a2f8be9b57\",\n      \"hyperliquid-public-userfills-copy-vault-snapshot-0xd729aee6219c598a7dea1f71be8a3541ef285c4d-1791043989689-1791043989689-8580d04172f5\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-iota-1791043989832-1791044286073-5881cce02f1a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-fet-1791043989843-1791044286073-b49a46433136\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-btc-1791043989854-1791044285947-abed58be608d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sol-1791043989958-1791044286074-907c6a42295a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ltc-1791043989959-1791044286073-79c2fb583409\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-sui-1791043989959-1791044286075-8b06f49cf096\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-tia-1791043989959-1791044286075-47e31cbb2367\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xrp-1791043989959-1791044286199-b4e2d757902f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bnb-1791043989970-1791044285947-8c1478fab549\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-link-1791043989970-1791044286073-de8039cf686b\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-trx-1791043989970-1791044286198-548210fbfae6\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xlm-1791043989970-1791044286199-48eb31b4604f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-bch-1791043989980-1791044285947-e9fd5a489493\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-hype-1791043989986-1791044286073-b57e8d00e9ff\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-uni-1791043989997-1791044286199-2debb4086bed\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ada-1791043990086-1791044285946-62bff62f4a79\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-arb-1791043990086-1791044285946-558db116e4fd\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-avax-1791043990086-1791044285946-be72fc66a3f0\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-doge-1791043990086-1791044286073-699d134ec384\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-eth-1791043990086-1791044286073-850739dc6895\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-near-1791043990086-1791044286074-6389a3fe10d7\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wif-1791043990086-1791044286199-fb775d25ff6e\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-wld-1791043990086-1791044286199-7573b7213247\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ena-1791043990097-1791044286073-c6c32469b6cf\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-neo-1791043990108-1791044286074-9be33bf64ef2\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ftm-1791043990119-1791044286073-920ef655baa7\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-pol-1791043990130-1791044286074-fcb304f6380c\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-resolv-1791043990141-1791044286074-1692921a5c44\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-aster-1791043990152-1791044285946-54cc5740e7b7\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-xpl-1791043990163-1791044286199-b15d4f97b72f\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-zec-1791043990174-1791044286199-ff10574bdb1c\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-grass-1791043990185-1791044286073-6d3d90342bbc\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-ape-1791043990211-1791044285946-fa53dd0f590a\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-crv-1791043990211-1791044285947-40926bbfd0c8\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-rune-1791043990218-1791044286074-915018146c0d\",\n      \"hyperliquid-public-copy-l2-copy-vault-l2-dydx-1791043990229-1791044286073-6c203b25d21e\"\n    ],\n    \"dataset_selection_id\": \"a1038090eceb4c718e8570918b8b33ae6bd5cac5e3a277a8bc68a8e4d0ab0400\",\n    \"events\": 5582,\n    \"index_sha256\": \"56eb331c98d067a141307a984cac0166cac991d31e1d77e28ca15be2022a8acd\",\n    \"legacy_import\": false,\n    \"paper_only\": true,\n    \"provenance_complete\": true,\n    \"quality_status_required\": \"SAFE\",\n    \"real_execution\": false,\n    \"replay_compatible_required\": true,\n    \"safe_shards\": 128,\n    \"schema\": \"alina.dataset_v2_materialization_plan.v2\",\n    \"source_collection_epoch\": 6\n  }\n}\n"
+          },
+          {
+            "analysis_stage": "OOS",
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/run_economic_objective_campaigns.py",
+              "--root",
+              "/home/runner/work/_temp/alina-replay-workspace"
+            ],
+            "name": "economic_campaign",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "copy_vault: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\nlead_lag: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\ncross_venue_dislocation_v2: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\nreport=/home/runner/work/_temp/alina-replay-workspace/runtime/reports/economic_campaigns/HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md\n"
+          }
+        ],
+        "returncode": 0,
+        "safe_workspace": "/home/runner/work/_temp/alina-replay-workspace",
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "copy_vault: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\nlead_lag: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\ncross_venue_dislocation_v2: RESULTAT PAPER net=NON_MESURABLE | daily_mean=None | daily_min=None | objectif_fixe_non_bloquant=NON_ATTEINT\nreport=/home/runner/work/_temp/alina-replay-workspace/runtime/reports/economic_campaigns/HYPERSMART_ECONOMIC_OBJECTIVE_CAMPAIGN.md\n",
+        "universe_discovery_required": false
+      },
+      "sha256": "0dce037692c2a59c90b1d91d1f518a317634a416b7d48c79cb7c81c7853b0f05"
+    }
+  },
   "config_sha256": "fe14353cbaa6c195c02830daa47f7029b513021d4d810a4bc35b8ff0999330e5",
   "consecutive_failures": 0,
   "created_at": "2026-10-04T18:21:42.631468+00:00",
   "creation_phase": "ANALYZE",
   "cursor": {
+    "checkpoint_id": "0dce037692c2a59c90b1d91d1f518a317634a416b7d48c79cb7c81c7853b0f05",
     "end_ts_ms": 1791138102000,
     "freeze_before_evaluation": true,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 7,
+    "last_run_id": "37224080754",
     "max_shards": 128,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "start_ts_ms": 1790533302000
   },
   "dataset_generation": "V2_FRESH",
@@ -32,15 +86,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T18:24:08.186432Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "oos",
-  "lease": {
-    "acquired_at": "2026-10-04T18:23:12.861114Z",
-    "expires_at": "2026-10-05T00:08:12.861114Z",
-    "lease_token_sha256": "3a3626f9f182a50a06573dd6e90f51ac4314f923bf0d1f164940262e5e126658",
-    "owner_run_id": "37224080754"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -58,9 +113,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": 6,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T18:23:12.861183Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "0dce037692c2a59c90b1d91d1f518a317634a416b7d48c79cb7c81c7853b0f05",
+  "updated_at": "2026-10-04T18:24:08.186432Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
