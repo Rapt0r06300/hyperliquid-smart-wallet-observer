@@ -132,13 +132,25 @@ def build() -> dict[str, Any]:
     manifest_trade_identities: set[str] = set()
     manifest_identity_complete = True
     manifest_trade_shards = 0
+    unique_doc_early: dict[str, Any] = {}
+    unique_rows: dict[str, Any] = {}
+    unique_identity_current_early = False
     try:
         unique_doc_early = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
         unavailable_early = unique_doc_early.get("unavailable") if isinstance(unique_doc_early, dict) else {}
         if isinstance(unavailable_early, dict):
             unique_unavailable_ids = set(unavailable_early)
+        if isinstance(unique_doc_early, dict):
+            unique_identity_current_early = (
+                str(unique_doc_early.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
+            )
+            raw_unique_rows = unique_doc_early.get("counts")
+            if isinstance(raw_unique_rows, dict):
+                unique_rows = raw_unique_rows
     except (OSError, ValueError, TypeError):
-        pass
+        unique_doc_early = {}
+        unique_rows = {}
+        unique_identity_current_early = False
     totals["TRADE_SHARDS_UNIQUE_COUNT_UNAVAILABLE"] = 0
 
     for row in shards:
@@ -210,13 +222,25 @@ def build() -> dict[str, Any]:
             trade_exact = trade_family and row.get("trade_count_exact") is True
             trades = _int(row.get("trade_count")) if trade_exact else 0
 
+        unique_entry = unique_rows.get(dataset_id)
+        global_unique_entry_valid = (
+            trade_family
+            and unique_identity_current_early
+            and isinstance(unique_entry, dict)
+            and unique_entry.get("unique_trade_count_exact") is True
+        )
         bybit_stale_identity = (
             trade_family
             and str(row.get("venue") or "").lower() == "bybit"
             and trade_entry_valid
             and str(trade_entry.get("unique_identity_method") or "") != BYBIT_IDENTITY_VERSION
         )
-        if (
+        if global_unique_entry_valid:
+            # The global v3 scan is the canonical identity parser and therefore
+            # supersedes legacy per-shard v2 identity counts (notably Bybit).
+            unique_exact = True
+            unique_trades = _int(unique_entry.get("unique_trade_count"))
+        elif (
             trade_family
             and trade_entry_valid
             and trade_entry.get("unique_trade_count_exact") is True
@@ -354,10 +378,22 @@ def build() -> dict[str, Any]:
                     if unique_identity_current
                     else None
                 )
-                unique_scope_complete = (
-                    _int(unique_patch.get("trade_shards_in_scope")) == manifest_trade_shards
-                    and _int(unique_patch.get("unproven_trade_count_shards")) == 0
-                )
+                explicit_scope = unique_patch.get("trade_shards_in_scope")
+                if explicit_scope is not None:
+                    unique_scope_complete = (
+                        _int(explicit_scope) == manifest_trade_shards
+                        and _int(unique_patch.get("unproven_trade_count_shards")) == 0
+                    )
+                else:
+                    # v4 patches produced by the full-corpus scanner predate the
+                    # explicit scope fields but carry an equivalent complete receipt.
+                    failed_rows = unique_patch.get("failed")
+                    unique_scope_complete = (
+                        _int(unique_patch.get("candidate_trade_shards")) == manifest_trade_shards
+                        and _int(unique_patch.get("successful")) == manifest_trade_shards
+                        and _int(unique_patch.get("remaining_candidate_shards")) == 0
+                        and (not isinstance(failed_rows, list) or len(failed_rows) == 0)
+                    )
                 global_unique_complete = (
                     unique_patch.get("coverage_complete") is True
                     and unique_identity_current
