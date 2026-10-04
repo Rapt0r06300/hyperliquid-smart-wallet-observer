@@ -12602,6 +12602,7 @@
     "copy_vault_collection:PENDING": 309,
     "event_intelligence_collection:COMPLETE": 3,
     "event_intelligence_collection:UNAVAILABLE": 24,
+    "forward_paper:COMPLETE": 1,
     "market_collection:COMPLETE": 26,
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 16,
@@ -12631,6 +12632,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-04T17:11:16.888738Z"
+    },
+    {
+      "analysis_stage": "FORWARD_PAPER",
+      "attempts": 0,
+      "campaign_id": "analysis-e7-forward-paper-v2",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "ANALYZE",
+      "kind": "forward_paper",
+      "last_checkpoint_id": "23e4fc26ff91970670d5b49f69bf3a7bdba0764b0c47709e35a99a88372aac73",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 7,
+      "source_collection_epoch": 6,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-04T19:42:34.340717Z"
     },
     {
       "analysis_stage": "OOS",
@@ -36540,7 +36563,7 @@
     "unique_trade_count_exact": true,
     "valid_record_count_exact": true
   },
-  "dataset_commit": "9b289f9f1d94ea1c0ceb17db97e39f8d73d9a510",
+  "dataset_commit": "7043a8f63167ed6ce34140adb202cc7bdfaf07ad",
   "metrics_digest": "1fe217f192a6facdebd4f2f3fe57f8cf1cc476f7816f576d44765ca9867668fd",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
@@ -36548,12 +36571,12 @@
   "oldest_pending_updated_at": "2026-10-01T04:38:06.568611Z",
   "pending_campaign_count": 325,
   "phase": {
-    "analysis_stage": "OOS",
+    "analysis_stage": "PNL_PROOF",
     "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
     "collection_started_at_utc": "2026-10-01T04:50:49Z",
     "epoch": 7,
     "phase": "ANALYZE",
-    "request_id": "53c773841f72bf8a8968c0c01dfbf49234643feb66c7c7ed2764505cb08036f7",
+    "request_id": "73f295a87eaac68d4b7cd2f4ae355c02a165bf89a642010cd25dd0f1c8dd3de5",
     "requested_at_utc": "2026-10-04T12:21:46.886077Z",
     "requested_by": "chatgpt-github",
     "schema_version": 1,
@@ -37864,7 +37887,7 @@
     ],
     "status": "BLOCKED"
   },
-  "receipt_digest": "009033bb2e52aa7aaace9ae52014c6584bc8fc271d3de3bce2bb1e011f7ffb9a",
+  "receipt_digest": "b3ad889cdcba46f298fd1422ace52edcd5e8919ea383b47ccabfc248d11ff6fe",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "DUPLICATES_NOT_DEDUPED:1": 2,
