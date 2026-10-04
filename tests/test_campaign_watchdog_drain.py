@@ -3,7 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from tools.campaign_watchdog import _dispatch_successor, _reconcile_drain_stuck, _reconcile_finished_owner, _terminalize_superseded_stuck
+from tools.campaign_watchdog import (
+    _dispatch_market_handoff,
+    _dispatch_successor,
+    _reconcile_drain_stuck,
+    _reconcile_finished_owner,
+    _select_market_handoff_successor,
+    _terminalize_superseded_stuck,
+)
 
 
 def _phase():
@@ -259,4 +266,146 @@ def test_stuck_market_campaign_not_hidden_by_unprogressed_replacement():
         old, replacement, datetime(2026, 10, 1, 15, 10, tzinfo=timezone.utc)
     )
     assert old["status"] == "STUCK"
+
+def _market_handoff_row(
+    campaign_id: str,
+    *,
+    shard: int,
+    status: str,
+    created_at: str,
+    acquired_at: str | None = None,
+    owner_run_id: str | None = None,
+):
+    lease = None
+    if acquired_at is not None:
+        lease = {
+            "acquired_at": acquired_at,
+            "expires_at": "2026-10-04T06:00:00Z",
+            "owner_run_id": owner_run_id or "run-predecessor",
+        }
+    return {
+        "schema_version": "alina.resumable_campaign.v2",
+        "campaign_id": campaign_id,
+        "kind": "market_collection",
+        "creation_phase": "COLLECT",
+        "phase_epoch": 6,
+        "status": status,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "chunk_index": 0,
+        "lease": lease,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+        "cursor": {
+            "duration_s": 3500,
+            "market_shard_count": 16,
+            "market_shard_index": shard,
+            "universe_digest": "a" * 64,
+            "plan_sha256": "b" * 64,
+        },
+        "history": [],
+    }
+
+
+def test_market_handoff_selects_newest_pending_same_shard_when_due():
+    predecessor = _market_handoff_row(
+        "market-old",
+        shard=3,
+        status="RUNNING",
+        created_at="2026-10-04T00:00:00Z",
+        acquired_at="2026-10-04T00:00:00Z",
+    )
+    older = _market_handoff_row(
+        "market-next-1",
+        shard=3,
+        status="PENDING",
+        created_at="2026-10-04T00:20:00Z",
+    )
+    newest = _market_handoff_row(
+        "market-next-2",
+        shard=3,
+        status="PENDING",
+        created_at="2026-10-04T00:35:00Z",
+    )
+    wrong_shard = _market_handoff_row(
+        "market-wrong",
+        shard=4,
+        status="PENDING",
+        created_at="2026-10-04T00:40:00Z",
+    )
+
+    successor, reason = _select_market_handoff_successor(
+        predecessor,
+        [older, newest, wrong_shard],
+        datetime(2026, 10, 4, 0, 48, tzinfo=timezone.utc),
+    )
+
+    assert reason == "handoff_ready"
+    assert successor is newest
+
+
+def test_market_handoff_does_not_dispatch_too_early():
+    predecessor = _market_handoff_row(
+        "market-old",
+        shard=3,
+        status="RUNNING",
+        created_at="2026-10-04T00:00:00Z",
+        acquired_at="2026-10-04T00:00:00Z",
+    )
+    successor = _market_handoff_row(
+        "market-next",
+        shard=3,
+        status="PENDING",
+        created_at="2026-10-04T00:10:00Z",
+    )
+
+    selected, reason = _select_market_handoff_successor(
+        predecessor,
+        [successor],
+        datetime(2026, 10, 4, 0, 20, tzinfo=timezone.utc),
+    )
+
+    assert selected is None
+    assert reason == "handoff_not_due"
+
+
+def test_dispatch_market_handoff_targets_distinct_successor_and_records_lineage(monkeypatch):
+    predecessor = _market_handoff_row(
+        "market-old",
+        shard=3,
+        status="RUNNING",
+        created_at="2026-10-04T00:00:00Z",
+        acquired_at="2026-10-04T00:00:00Z",
+        owner_run_id="123456",
+    )
+    successor = _market_handoff_row(
+        "market-next",
+        shard=3,
+        status="PENDING",
+        created_at="2026-10-04T00:30:00Z",
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("tools.campaign_watchdog.subprocess.run", fake_run)
+
+    ok, detail = _dispatch_market_handoff(
+        predecessor,
+        successor,
+        "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        datetime(2026, 10, 4, 0, 48, tzinfo=timezone.utc),
+    )
+
+    assert ok is True
+    assert detail == "handoff_dispatched"
+    command = calls[0]
+    assert "campaign_id=market-next" in command
+    assert "predecessor_run_id=123456" in command
+    assert "generation=1" in command
+    assert predecessor["cursor"]["hot_handoff_successor_campaign_id"] == "market-next"
+    assert predecessor["history"][-1]["event"] == "HOT_HANDOFF_SUCCESSOR_DISPATCHED"
 
