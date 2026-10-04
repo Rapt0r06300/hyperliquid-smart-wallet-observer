@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
 import sys
 import time
 
@@ -51,6 +50,25 @@ def test_official_archive_uses_existing_backfill_tool(tmp_path):
     )
     assert cmd[1].endswith("tools/collect_official_archive_backfill.py")
     assert output is not None and output.name == "bundle"
+
+
+def test_okx_archive_campaign_requires_and_forwards_explicit_official_url(tmp_path):
+    source_url = (
+        "https://static.okx.com/cdn/okex/traderecords/trades/monthly/202609/"
+        "BTC-USDT-SWAP-trades-2026-09.zip"
+    )
+    cmd, _output = build_command(context(
+        "official_archive_collection", output_root=str(tmp_path), venue="okx",
+        coin="BTC", symbol="BTC-USDT-SWAP", start_date="2026-09-24",
+        stream_type="trades", source_url=source_url,
+    ))
+    assert cmd[cmd.index("--stream-type") + 1] == "trades"
+    assert cmd[cmd.index("--source-url") + 1] == source_url
+    with pytest.raises(ValueError, match="source_url"):
+        build_command(context(
+            "official_archive_collection", output_root=str(tmp_path), venue="okx",
+            coin="BTC", symbol="BTC-USDT-SWAP", start_date="2026-09-24",
+        ))
 
 
 def test_replay_materializes_only_v2_safe_workspace(tmp_path):
@@ -299,14 +317,14 @@ def test_module_pnl_more_data_and_kill_are_semantic_not_crashes(tmp_path):
             stdout = "ok"
             stderr = ""
 
-        def runner(cmd, **kwargs):
-            calls.append(list(cmd))
+        def runner(cmd, _calls=calls, _classifications=classifications, **kwargs):
+            _calls.append(list(cmd))
             if cmd[1].endswith("tools/audit_economic_objectives.py"):
                 _write_economic_audit(
                     tmp_path,
                     all_ledgers_valid=True,
                     all_objectives_met=False,
-                    classifications=classifications,
+                    classifications=_classifications,
                 )
             return Result()
 
@@ -493,4 +511,3 @@ def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
     assert metrics["duration_s"] == 60.0
     assert metrics["accepted_frames"] == 10
     assert metrics["persisted_frames"] == 10
-
