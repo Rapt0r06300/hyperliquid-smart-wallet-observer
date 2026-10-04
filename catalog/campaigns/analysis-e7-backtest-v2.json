@@ -25,10 +25,21 @@
     {
       "event": "operator_request",
       "request_id": "fd6112ca50bfbd24b8a00ad2cf1ab66df8a389e338aba86fc83a8a924ae463b2"
+    },
+    {
+      "at": "2026-10-04T17:10:23.151549Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
     }
   ],
   "kind": "backtest",
-  "lease": null,
+  "lease": {
+    "acquired_at": "2026-10-04T17:10:23.151502Z",
+    "expires_at": "2026-10-04T22:55:23.151502Z",
+    "lease_token_sha256": "148233a697237d0069908919025b6ce70acf0f0ad3cc321e4639982439c05299",
+    "owner_run_id": "37219345454"
+  },
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -46,9 +57,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": 6,
-  "status": "PENDING",
-  "status_reason": "created",
+  "status": "RUNNING",
+  "status_reason": "worker_started",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T17:08:53.343803Z",
+  "updated_at": "2026-10-04T17:10:23.151549Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
