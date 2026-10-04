@@ -358,6 +358,48 @@ def test_broken_historical_source_does_not_break_batch() -> None:
     assert results[0].records == ()
 
 
+def test_historical_hub_reconciliation_detects_trade_value_conflict() -> None:
+    class StaticTrades:
+        name = "binance"
+        capabilities = frozenset({HistoricalDataType.TRADES})
+
+        def fetch(self, _request):
+            return (
+                _record(
+                    HistoricalDataType.TRADES,
+                    100,
+                    event_id="42",
+                    price="100",
+                    quantity="1",
+                ),
+            )
+
+    request = BackfillRequest(
+        venue="binance",
+        canonical_coin="BTC",
+        exchange_symbol="BTCUSDT",
+        data_type=HistoricalDataType.TRADES,
+        start_timestamp=1,
+        end_timestamp=200,
+    )
+    report = HistoricalBackfillHub([StaticTrades()]).reconcile(
+        request,
+        [
+            {
+                "venue": "binance",
+                "instrument": "BTCUSDT",
+                "event_id": "42",
+                "exchange_ts_ms": 100,
+                "price": "101",
+                "quantity": "1",
+            }
+        ],
+    )
+
+    assert report["status"] == "MISMATCH"
+    assert report["value_conflicts"] == 1
+
+
 @pytest.mark.parametrize(
     ("types", "expected"),
     [
