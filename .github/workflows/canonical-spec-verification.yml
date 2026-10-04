@@ -253,7 +253,7 @@ jobs:
           # closure workflow. Dispatch it explicitly only during ANALYZE.
           for attempt in 1 2 3 4 5 6; do
             set +e
-            output="$(gh workflow run alina-dual-repository-closure-report.yml \
+            output="$(gh workflow run alina-canonical-closure-report.yml \
               --repo "$GITHUB_REPOSITORY" \
               --ref main 2>&1)"
             rc=$?
