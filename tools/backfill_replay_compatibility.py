@@ -145,8 +145,10 @@ def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str
         return False
 
     status=str(row.get("quality_status") or "").upper()
-    pending=row.get("replay_validation_pending") is True
-    if status=="SAFE" or (status=="PARTIAL" and pending):
+    # Immutable legacy SAFE/PARTIAL shards may predate replay receipts. Running
+    # the strict parser can prove deterministic replay without pretending that
+    # PARTIAL source reconciliation suddenly became SAFE.
+    if status in {"SAFE","PARTIAL"}:
         return True
 
     # Legacy official archives were historically placed in REJECT/REJECTED
