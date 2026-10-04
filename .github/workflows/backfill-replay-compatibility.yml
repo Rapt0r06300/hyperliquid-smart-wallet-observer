@@ -100,6 +100,26 @@ jobs:
           if git push origin HEAD:main; then
             exit 0
           fi
+
+          # Main advances frequently because collection and catalog workflows
+          # publish concurrently. Rebase generated evidence, but never hand-edit
+          # a semantic conflict. DATA_METRICS is deterministic and may be safely
+          # regenerated from the rebased DATA_INDEX/catalog state.
           git fetch origin main
-          git rebase origin/main
-          git push origin HEAD:main
+          if git rebase origin/main; then
+            git push origin HEAD:main
+            exit 0
+          fi
+
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          if [ "${#conflicts[@]}" -eq 1 ] && [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ]; then
+            python tools/build_catalog_metrics.py
+            git add catalog/DATA_METRICS.json
+            GIT_EDITOR=true git rebase --continue
+            git push origin HEAD:main
+            exit 0
+          fi
+
+          printf 'Unresolved replay publish conflicts:\n%s\n' "${conflicts[*]}" >&2
+          git rebase --abort || true
+          exit 1
