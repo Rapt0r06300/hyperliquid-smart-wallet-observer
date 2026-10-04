@@ -137,3 +137,81 @@ def test_release_download_falls_back_to_public_asset_url(monkeypatch,tmp_path):
     assert calls[1][-1].endswith(
         "/releases/download/tag%20with%20space/asset%20file.jsonl.gz"
     )
+
+
+
+def test_replayable_partial_trade_with_v3_unique_proof_is_repair_candidate():
+    dataset_id="bybit-archive-repair"
+    row={
+        "dataset_id":dataset_id,
+        "family":"trades",
+        "venue":"bybit",
+        "quality_status":"PARTIAL",
+        "replay_compatible":True,
+        "trade_count":10,
+        "trade_count_exact":True,
+        "unique_trade_count":None,
+        "unique_trade_count_exact":False,
+        "release_repository":"owner/repo",
+        "release_tag":"tag",
+        "release_asset":"asset.jsonl.gz",
+        "sha256":"a"*64,
+        "bytes":100,
+        "manifest_path":"datasets/quarantine/x.manifest.json",
+    }
+    unique_rows={
+        dataset_id:{
+            "trade_count_scanned":10,
+            "unique_trade_count":10,
+            "unique_trade_count_exact":True,
+        }
+    }
+    known={dataset_id:{
+        "replay_compatible":True,
+        "verifier_version":backfill.VERIFIER_VERSION,
+    }}
+    assert backfill._candidate(row,known,{"trades"},unique_rows) is True
+
+
+def test_restore_exact_counts_prefers_current_global_v3_unique_proof(tmp_path):
+    catalog=tmp_path/"catalog"
+    catalog.mkdir()
+    dataset_id="bybit-archive-repair"
+    sha="a"*64
+    (catalog/"TRADE_COUNT_PATCH.json").write_text(
+        json.dumps({"counts":{
+            dataset_id:{
+                "asset_sha256":sha,
+                "trade_count":10,
+                "trade_count_exact":True,
+                "unique_trade_count":5,
+                "unique_trade_count_exact":True,
+                "unique_identity_method":"full_native_or_deterministic_composite_string_v2",
+            }
+        }}),
+        encoding="utf-8",
+    )
+    (catalog/"TRADE_UNIQUE_COUNT_PATCH.json").write_text(
+        json.dumps({
+            "identity_version":backfill.GLOBAL_IDENTITY_VERSION,
+            "counts":{
+                dataset_id:{
+                    "trade_count_scanned":10,
+                    "unique_trade_count":10,
+                    "unique_trade_count_exact":True,
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+    manifest={
+        "dataset_id":dataset_id,
+        "venue":"bybit",
+        "sha256":sha,
+    }
+    assert backfill._restore_exact_trade_count_evidence(manifest,root=tmp_path) is True
+    assert manifest["trade_count"]==10
+    assert manifest["trade_count_exact"] is True
+    assert manifest["unique_trade_count"]==10
+    assert manifest["unique_trade_count_exact"] is True
+    assert manifest["unique_identity_method"]==backfill.GLOBAL_IDENTITY_VERSION
