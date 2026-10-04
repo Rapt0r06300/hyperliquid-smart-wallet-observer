@@ -9,6 +9,7 @@ import pytest
 
 from hl_observer.control_plane.campaign_adapters import (
     AdapterContext,
+    _collection_checkpoint_metrics,
     build_command,
     run_one_unit,
 )
@@ -461,4 +462,35 @@ def test_copy_vault_two_speed_rejects_more_than_ten_ws_users(tmp_path):
                 copy_vault_mode="two_speed_broad_rest_priority_ws",
             )
         )
+
+def test_collection_checkpoint_metrics_preserve_window_timing(tmp_path):
+    (tmp_path / "collection_summary.json").write_text(
+        """{
+          "started_at_ms": 1000,
+          "ended_at_ms": 61000,
+          "duration_s": 60.0,
+          "accepted_frames": 10,
+          "persisted_frames": 10,
+          "queue_drops": {}
+        }""",
+        encoding="utf-8",
+    )
+    (tmp_path / "BUNDLE_INDEX.json").write_text(
+        """{
+          "manifests": [],
+          "shard_count": 0,
+          "safe_count": 0,
+          "partial_count": 0,
+          "reject_count": 0
+        }""",
+        encoding="utf-8",
+    )
+
+    metrics = _collection_checkpoint_metrics(tmp_path)
+
+    assert metrics["started_at_ms"] == 1000
+    assert metrics["ended_at_ms"] == 61000
+    assert metrics["duration_s"] == 60.0
+    assert metrics["accepted_frames"] == 10
+    assert metrics["persisted_frames"] == 10
 
