@@ -15,6 +15,9 @@ def _transport() -> dict:
         "receive_mono_ns": 123_456,
         "transport_rtt_ms": 12.5,
         "clock_offset_ms": -3.0,
+        "clock_probe_rtt_ms": 10.0,
+        "clock_uncertainty_ms": 5.0,
+        "clock_probe_server_ts_ms": 1_998,
     }
 
 
@@ -55,6 +58,12 @@ def test_bybit_trade_batch_preserves_raw_and_matching_time() -> None:
     assert envelope.sequence == 10
     assert envelope.parsed_summary["event_count"] == 2
     assert envelope.parsed_summary["data_gate_ready"] is False
+    assert envelope.venue == "bybit"
+    assert envelope.matching_engine_ts_ms == 1_995
+    assert envelope.server_ts_ms == 1_998
+    assert envelope.clock_probe_rtt_ms == 10.0
+    assert envelope.observed_clock_offset_ms == -3.0
+    assert envelope.clock_offset_uncertainty_ms == 5.0
     assert "_alina_transport" not in envelope.raw_payload
 
 
@@ -304,4 +313,3 @@ def test_bitget_books15_frame_is_taped_as_l2() -> None:
     assert envelope.parsed_summary["bid_levels"] == 2
     assert envelope.parsed_summary["ask_levels"] == 2
     assert envelope.parsed_summary["depth_curve_replay_ready"] is True
-
