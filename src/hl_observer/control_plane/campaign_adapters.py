@@ -1,15 +1,16 @@
 """Deterministic bounded adapters for resumable GitHub-hosted campaigns."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[3]
 ECONOMIC_KINDS = frozenset({"backtest", "oos", "forward_paper", "module_pnl_proof", "scoreboard"})
@@ -300,14 +301,18 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
 
     if ctx.kind == "official_archive_collection":
         venue = str(ctx.partition.get("venue") or "binance").lower()
-        if venue not in {"binance", "bybit"}:
-            raise ValueError("official archive venue must be binance or bybit")
+        if venue not in {"binance", "bybit", "okx"}:
+            raise ValueError("official archive venue must be binance, bybit, or okx")
         coin = str(ctx.partition.get("coin") or "BTC").upper()
         symbol = str(ctx.partition.get("symbol") or f"{coin}USDT").upper()
         start_date = str(ctx.partition.get("start_date") or "")
         if not start_date:
             raise ValueError("official archive campaign requires start_date")
-        return [
+        source_url = str(ctx.partition.get("source_url") or "").strip()
+        if venue == "okx" and not source_url:
+            raise ValueError("OKX official archive campaign requires source_url")
+        stream_type = str(ctx.partition.get("stream_type") or "").strip()
+        command = [
             py,
             str(ROOT / "tools" / "collect_official_archive_backfill.py"),
             "--venue",
@@ -337,7 +342,12 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
                     2_000_000,
                 )
             ),
-        ], out / "bundle"
+        ]
+        if stream_type:
+            command.extend(["--stream-type", stream_type])
+        if source_url:
+            command.extend(["--source-url", source_url])
+        return command, out / "bundle"
 
     if ctx.kind == "event_intelligence_collection":
         return [
