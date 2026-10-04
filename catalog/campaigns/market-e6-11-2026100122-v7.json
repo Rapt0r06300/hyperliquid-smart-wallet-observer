@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 21,
+  "attempts": 22,
   "campaign_id": "market-e6-11-2026100122-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "ffc9cfa0d5754b9688b07af8c0d9e43ab0263bbc",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "26e59d88a3bffb2c22422483f193a39f4b6071907b2223147ca449e57e632d2e",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e6-11-2026100122-v7-u0-retry-40b4b2e5e2bb132a /home/runner/work/_temp/campaign-output/market-e6-11-2026100122-v7/0/assets/gate-public-ws-bbo-zk-usdt-1791100748108-1791104225077-58c07c32bb59.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID F400:C720:2AA7BD:420BF0:6AC22DA8 and timestamp 2026-10-04 10:42:48 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/402932270/assets?label=&name=gate-public-ws-bbo-zk-usdt-1791100748108-1791104225077-58c07c32bb59.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "9b0e1c712e5a442428d31210005317d3234d2ebef4bba0f3b8c3c0a585b6947c"
+    }
+  },
   "config_sha256": "ece159680b74be96faa363777fdabc2cb1995d10eb28be5b104d3a740abfcbc8",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-01T22:34:21.030373+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "9b0e1c712e5a442428d31210005317d3234d2ebef4bba0f3b8c3c0a585b6947c",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 6,
+    "last_run_id": "37187344326",
     "market_shard_count": 16,
     "market_shard_index": 11,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e6/2026100122/shard-11.json",
     "plan_sha256": "5169c4ebe998028165e194640aedd2421a6955d48df860a2154f69c35ec5d910",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 48,
@@ -246,15 +265,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T10:42:48.881693Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-04T07:58:25.928912Z",
-    "expires_at": "2026-10-04T13:43:25.928912Z",
-    "lease_token_sha256": "d69adb5538356cd613ded382e2ec1a829def2824f2fae308c6fbeb649607162b",
-    "owner_run_id": "37187344326"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -262,8 +282,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 0,
+  "next_due_at": "2026-10-04T10:47:48.881693Z",
+  "no_progress_count": 1,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -272,9 +292,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T07:58:25.928978Z",
+  "updated_at": "2026-10-04T10:42:48.881693Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
