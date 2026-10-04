@@ -1,0 +1,98 @@
+{
+  "analysis_stage": null,
+  "attempts": 4,
+  "campaign_id": "market-e6-15-2026100322-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "5f7d9a771021269b5801fd51dd16754d876ed8a2",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "c7d7495f5de9a0b7203adf0c7d21ddd6293da526bf92cd82b01309f0376c0335",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-03T22:47:04.446153+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "duration_s": 3500,
+    "market_shard_count": 16,
+    "market_shard_index": 15,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e6/2026100322/shard-15.json",
+    "plan_sha256": "e7ec1e41ff6e9c613161bd0968253f1c947ac5ddf84d4c5db43b8a051248134e",
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 43,
+    "universe_digest": "09b2f2f8c77a131f66df89a97e83a1a4167a95a63215891ebe7425e607cd6a41",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-10T22:47:04.446153+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-15-2026100322-v7.pending.084979e2533a.b245614ace3fdc453bc1b8c0944b51a18c8435c8ad83d3deb7924390235e7e52.json",
+      "archived_manifest_sha256": "b245614ace3fdc453bc1b8c0944b51a18c8435c8ad83d3deb7924390235e7e52",
+      "at": "2026-10-03T22:59:36.971610Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "084979e2533a732c17e80b6ccd28e8009f13c157",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-15-2026100322-v7.pending.d992b0a2eed3.108624abc34a8fe70498c2b8383cbdd85e4a1c13ecf0c6414b375033ce2dc60d.json",
+      "archived_manifest_sha256": "108624abc34a8fe70498c2b8383cbdd85e4a1c13ecf0c6414b375033ce2dc60d",
+      "at": "2026-10-03T23:06:22.781601Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "d992b0a2eed344239006f6782dba0b471e08af08",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-15-2026100322-v7.pending.8cba44dd83e5.3e0112fa588043d4d954cc4fdecb374adfa33a771093167469b94a947823b2cc.json",
+      "archived_manifest_sha256": "3e0112fa588043d4d954cc4fdecb374adfa33a771093167469b94a947823b2cc",
+      "at": "2026-10-03T23:46:30.581405Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "8cba44dd83e5b36315d7614dca95ad795c201b82",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-15-2026100322-v7.pending.241cacfb479b.a435466fb7d40dc2c4cd47c85f2acf0d40006a572a4caff5aed7e74ee23a1575.json",
+      "archived_manifest_sha256": "a435466fb7d40dc2c4cd47c85f2acf0d40006a572a4caff5aed7e74ee23a1575",
+      "at": "2026-10-04T02:29:23.117155Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-04T02:29:23.117173Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
