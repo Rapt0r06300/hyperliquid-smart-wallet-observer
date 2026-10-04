@@ -264,6 +264,8 @@ class NativeVenueCoordinator:
         transport = dict(meta) if isinstance(meta, Mapping) else {}
         transport["clock_offset_ms"] = sync.get("offset_ms")
         transport["clock_probe_rtt_ms"] = sync.get("rtt_ms")
+        transport["clock_uncertainty_ms"] = sync.get("uncertainty_ms")
+        transport["clock_probe_server_ts_ms"] = sync.get("server_ts_ms")
         message["_alina_transport"] = transport
         return message
 
