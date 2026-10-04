@@ -12607,6 +12607,7 @@
     "market_collection:PARTIAL": 15,
     "market_collection:PENDING": 16,
     "market_collection:UNAVAILABLE": 376,
+    "module_pnl_proof:COMPLETE": 1,
     "oos:COMPLETE": 1,
     "replay:COMPLETE": 2
   },
@@ -12676,6 +12677,28 @@
       "status": "COMPLETE",
       "status_reason": "unit_complete",
       "updated_at": "2026-10-04T18:24:08.186432Z"
+    },
+    {
+      "analysis_stage": "PNL_PROOF",
+      "attempts": 0,
+      "campaign_id": "analysis-e7-pnl-proof-v2",
+      "chunk_index": 0,
+      "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
+      "completed_unit_count": 1,
+      "consecutive_failures": 0,
+      "creation_phase": "ANALYZE",
+      "kind": "module_pnl_proof",
+      "last_checkpoint_id": "04cf913ab92d28b3b3882a90f6dbbd74d061b90045c8a29f299f04e95b40925f",
+      "lease": null,
+      "lease_expires_at": null,
+      "lease_owner": null,
+      "next_due_at": null,
+      "no_progress_count": 0,
+      "phase_epoch": 7,
+      "source_collection_epoch": 6,
+      "status": "COMPLETE",
+      "status_reason": "unit_complete",
+      "updated_at": "2026-10-04T21:55:17.762582Z"
     },
     {
       "analysis_stage": "REPLAY",
@@ -36563,7 +36586,7 @@
     "unique_trade_count_exact": true,
     "valid_record_count_exact": true
   },
-  "dataset_commit": "7043a8f63167ed6ce34140adb202cc7bdfaf07ad",
+  "dataset_commit": "35c46125f0a0a1774770ff66103cbf9661c9785e",
   "metrics_digest": "1fe217f192a6facdebd4f2f3fe57f8cf1cc476f7816f576d44765ca9867668fd",
   "metrics_method": "verified_manifest_or_asset_scan_counts_no_byte_estimation",
   "metrics_schema_version": "alina.data_metrics.v4",
@@ -37887,7 +37910,7 @@
     ],
     "status": "BLOCKED"
   },
-  "receipt_digest": "b3ad889cdcba46f298fd1422ace52edcd5e8919ea383b47ccabfc248d11ff6fe",
+  "receipt_digest": "915ab7e20591d7935a0f09cccc3847738dd42ee8c685556ac5cdcbfd0a366185",
   "replay_compatibility_reasons": {
     "reason_counts": {
       "DUPLICATES_NOT_DEDUPED:1": 2,
