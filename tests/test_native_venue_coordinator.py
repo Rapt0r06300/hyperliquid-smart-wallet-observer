@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+
 from hl_observer.collection.coin_universe import clear, coins
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 
@@ -507,6 +508,9 @@ def test_clock_sync_preserves_client_measurement_source() -> None:
     assert rows["bybit"]["status"] == "OK"
     assert rows["bybit"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert rows["bybit"]["rtt_ms"] == 10.0
+    enriched = coordinator._with_clock_sync({"topic": "x"}, "bybit")
+    assert enriched["_alina_transport"]["clock_probe_server_ts_ms"] == 1005
+    assert enriched["_alina_transport"]["clock_uncertainty_ms"] == 5.0
 
 
 
