@@ -8,9 +8,11 @@
     "ready": false
   },
   "dataset_id": "hyperliquid-public-ws-bbo-eth-1790063989463-1790064108790-f4137bdff36f",
+  "duplicate_count": 0,
   "end_ts_ms": 1790064108790,
   "event_count": 1003,
   "family": "bbo",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 1003,
   "observed_channels": [
     "bbo"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -34,13 +38,13 @@
     ]
   },
   "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
     "REPLAY_COMPATIBILITY_NOT_PROVEN"
   ],
   "quality_status": "PARTIAL",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 1003,
   "release": {
     "asset_id": 607733855,
     "asset_name": "hyperliquid-public-ws-bbo-eth-1790063989463-1790064108790-f4137bdff36f.jsonl.gz",
@@ -57,6 +61,9 @@
   "release_remote_size": 91946,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696479968-s1",
+  "replay_compatible": false,
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "f4137bdff36f6b21c6601a27c5241fc3621e11e706973673576a2034cc0aacac",
@@ -94,6 +101,8 @@
       "p95": null
     }
   },
+  "trade_count": 0,
+  "trade_count_exact": true,
   "validation_allowed": false,
   "venue": "hyperliquid"
 }

@@ -1,0 +1,112 @@
+{
+  "asset_sha256": "1019729677299010e4193573837400bffba7d10fd0f003476183092dea82f8e0",
+  "asset_verified": true,
+  "bytes": 4144015,
+  "collection_run_id": "archive-35707914210",
+  "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "binance-usdm-official-archive-trades-solusdt-1789841832089-1789862399764-101972967729",
+  "duplicate_count": 0,
+  "end_ts_ms": 1789862399764,
+  "event_count": 51444,
+  "family": "trades",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 51444,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "trades"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "historical_exchange_time_only"
+    ],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "method": "release_sha256_size_plus_parse_chronology",
+    "status": "SOURCE_ARCHIVE_VERIFIED"
+  },
+  "record_count": 51444,
+  "record_count_scanned": 51444,
+  "release": {
+    "asset_id": 607739370,
+    "asset_name": "binance-usdm-official-archive-trades-solusdt-1789841832089-1789862399764-101972967729.jsonl.gz",
+    "release_id": 402492674,
+    "remote_digest": "sha256:1019729677299010e4193573837400bffba7d10fd0f003476183092dea82f8e0",
+    "remote_size": 4144015,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "archive-v2-35707914210-binance-SOL"
+  },
+  "release_asset": "binance-usdm-official-archive-trades-solusdt-1789841832089-1789862399764-101972967729.jsonl.gz",
+  "release_asset_id": 607739370,
+  "release_id": 402492674,
+  "release_remote_digest": "sha256:1019729677299010e4193573837400bffba7d10fd0f003476183092dea82f8e0",
+  "release_remote_size": 4144015,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "archive-v2-35707914210-binance-SOL",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1019729677299010e4193573837400bffba7d10fd0f003476183092dea82f8e0",
+  "source": "binance_usdm_official_archive",
+  "start_ts_ms": 1789841832089,
+  "symbol": "SOLUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1789841832089,
+    "last_exchange_ts_ms": 1789862399764,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 51444,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 51444,
+  "trade_count_exact": true,
+  "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
+  "unique_trade_count": 51444,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "binance"
+}

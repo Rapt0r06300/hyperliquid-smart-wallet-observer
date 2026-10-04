@@ -9,9 +9,11 @@
     "ready": false
   },
   "dataset_id": "okx-public-ws-trades-btc-usdt-swap-1790059682328-1790060580986-2702833572d2",
+  "duplicate_count": 3041,
   "end_ts_ms": 1790060580986,
   "event_count": 6438,
   "family": "trades",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -21,9 +23,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "trades"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -36,7 +40,6 @@
   },
   "quality_reasons": [
     "REPLAY_COMPATIBILITY_NOT_PROVEN",
-    "TRADE_COUNT_NOT_EXACT",
     "UNIQUE_TRADE_COUNT_NOT_EXACT",
     "RECONCILIATION_MATCH_REQUIRED"
   ],
@@ -52,6 +55,7 @@
     "reference_count": 12609,
     "status": "MISMATCH"
   },
+  "record_count": 6438,
   "record_count_scanned": 6438,
   "release": {
     "asset_id": 607742031,
@@ -69,6 +73,9 @@
   "release_remote_size": 517025,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s0",
+  "replay_compatible": false,
+  "replay_reason": "DUPLICATES_PRESENT",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "2702833572d2b7244e92f6b530692e0a4963e7ddb2bc77ab3563dce336b91163",
@@ -106,7 +113,7 @@
       "p95": 147.943848
     }
   },
-  "trade_count": 6438,
+  "trade_count": 3397,
   "trade_count_exact": true,
   "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
   "unique_trade_count": 6438,
