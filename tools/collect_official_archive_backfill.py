@@ -98,6 +98,22 @@ def main() -> int:
         bundle,
         collector_version=args.collector_version,
         collection_run_id=args.collection_run_id,
+        collection_config={
+            "venue": args.venue,
+            "coin": args.coin.upper(),
+            "symbol": args.symbol.upper(),
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "max_days": max(1, int(args.max_days)),
+            "max_events_per_day": max(1, int(args.max_events_per_day)),
+            "stream_type": args.stream_type,
+            "archive_enabled": True,
+            "read_only": True,
+        },
+        continuation_cursor={
+            "last_date": days[-1].isoformat(),
+            "last_exchange_ts_ms": archives[-1]["last_exchange_ts_ms"],
+        },
     )
     summary = {
         "schema": "alina.official_archive_backfill.v1",
