@@ -38,16 +38,16 @@ The main Alina Smart Flow repository owns the phase state, campaign manifests, d
 
 The Alina Smart Flow repository is the only operational data repository. Every new collection Release, run manifest, catalog row, replay/backtest input and durability checkpoint must resolve to `Rapt0r06300/hyperliquid-smart-wallet-observer`. No collector, reconciler, validator or analysis workflow may require another repository at runtime.
 
-Historical assets created before repository unification are a one-time migration concern only. Migration is complete only when:
+Historical assets from the retired Dataset V2 repository are **not** an operational dependency and are **not** to be migrated into the canonical repository. The accepted architecture is fresh-main-only:
 
-- every production Release asset has been preserved in this repository with matching byte length and SHA-256;
-- every manifest-bearing Release has a target-native `RUN_MANIFEST.json` whose release references point to this repository;
-- Releases lacking a usable run manifest are preserved but quarantined and excluded from validation;
-- catalog reconciliation enumerates all matching Releases with pagination, never a fixed “latest N” window;
-- exact trade count, global trade deduplication and uncompressed-size coverage have been rebuilt from target-native evidence;
-- `control/unified-repository.json` records `legacy_collection_state_imported=true` and `external_dataset_repository_required=false`.
+- new collection, manifests, catalogs, replay inputs, backtests and durability checkpoints originate only from `Rapt0r06300/hyperliquid-smart-wallet-observer`;
+- `control/unified-repository.json` must keep `collection_origin_policy="fresh-main-only"`, `external_dataset_repository_required=false`, `dataset_v2_import_allowed=false`, `historical_external_import_allowed=false`, and `legacy_imported_releases_present=false`;
+- any temporary legacy releases previously copied into the canonical repository must be removed and their absence verified before the cleanup is considered complete;
+- `control/legacy-release-migration.json` must record cleanup completion with no imported release remaining;
+- no collector, reconciler, validator, replay, backtest, analysis workflow, or repair path may query or require the retired Dataset V2 repository;
+- historical Dataset V2 releases that were never imported are intentionally abandoned and are outside the canonical evidence set.
 
-Pre-unification storage may be retired only after all of those checks are satisfied. Current collection must continue independently throughout the migration. Once migration is complete, no operational workflow may read from or depend on pre-unification storage.
+This fresh-only policy supersedes the earlier migration-completion requirement. Deleting or retaining the retired external repository is therefore an archival choice only and must not affect Alina runtime correctness. Current collection must continue independently throughout cleanup, and no cleanup action may interrupt `COLLECT`.
 
 Create:
 
