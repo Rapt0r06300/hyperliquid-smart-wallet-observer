@@ -35,6 +35,8 @@ def test_canonical_closure_reacts_to_durable_evidence_changes() -> None:
         "catalog/UNCOMPRESSED_SIZE_PATCH.json",
         "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json",
         "catalog/RESUME_SMOKE_RECEIPT.json",
+        "catalog/COLLECT_RESUME_SMOKE_RECEIPT.json",
+        "catalog/COLLECT_RESUME_PROBE_STATE.json",
         "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json",
         "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json",
         "catalog/campaigns/**",

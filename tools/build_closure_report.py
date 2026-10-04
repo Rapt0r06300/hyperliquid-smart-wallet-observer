@@ -427,6 +427,7 @@ def main() -> int:
         "oos_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "forward_status": "MORE_DATA" if not complete_analysis else "UNMEASURABLE",
         "two_segment_resume_status": "PROVEN" if resume_proven else "UNMEASURABLE",
+        "two_segment_resume_reason": resume_reason,
         "replay_remaining_candidates": replay_remaining,
         "campaign_resilience_status": (
             resilience.get("status") if isinstance(resilience, dict) else "UNAVAILABLE"
