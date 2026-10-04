@@ -1,6 +1,12 @@
 name: analysis-stage-controller
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - phase-request-controller
+      - create-resumable-campaigns
+      - global-implementation-closure
+    types: [completed]
   schedule:
     - cron: "*/10 * * * *"
   push:
