@@ -17,7 +17,7 @@ import subprocess
 import tempfile
 from typing import Any, Mapping
 
-from manifest_policy import classify_manifest
+from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import inspect_asset
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -103,16 +103,30 @@ def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str
         return False
     if families and family not in families:
         return False
-    status=str(row.get("quality_status") or "")
-    pending=row.get("replay_validation_pending") is True
-    if status!="SAFE" and not (status=="PARTIAL" and pending):
-        return False
     if row.get("replay_compatible") is True:
         return False
-    return all(
+    if not all(
         row.get(key) not in (None,"")
         for key in ("release_repository","release_tag","release_asset","sha256","bytes","manifest_path")
-    )
+    ):
+        return False
+
+    status=str(row.get("quality_status") or "")
+    pending=row.get("replay_validation_pending") is True
+    if status=="SAFE" or (status=="PARTIAL" and pending):
+        return True
+
+    # Legacy official archives were incorrectly REJECTed solely because a
+    # downloaded historical file has no local receive monotonic timestamp.
+    # Admit those REJECT rows to the verifier; promotion still requires exact
+    # release hash/size, parse, chronology and policy checks.
+    if status=="REJECT":
+        try:
+            manifest=_load_json(ROOT/str(row.get("manifest_path") or ""))
+        except (OSError,ValueError,json.JSONDecodeError):
+            return False
+        return is_official_historical_archive(manifest)
+    return False
 
 
 def _download(row: Mapping[str,Any], destination: Path) -> Path:
@@ -179,6 +193,14 @@ def _apply_result(
             manifest[key]=result[key]
     manifest.pop("replay_validation_pending",None)
     manifest.pop("pre_replay_quality_status",None)
+
+    if result.get("replay_compatible") is True and is_official_historical_archive(manifest):
+        reconciliation=dict(manifest.get("reconciliation") or {})
+        reconciliation.update({
+            "status":"SOURCE_ARCHIVE_VERIFIED",
+            "method":"release_sha256_size_plus_parse_chronology",
+        })
+        manifest["reconciliation"]=reconciliation
 
     status,reasons=classify_manifest(manifest)
     manifest["quality_status"]=status

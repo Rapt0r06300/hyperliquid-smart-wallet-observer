@@ -123,6 +123,8 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "replay_compatible": manifest.get("replay_compatible"),
         "replay_schema_version": manifest.get("replay_schema_version"),
         "replay_reason": manifest.get("replay_reason"),
+        "quality_reasons": manifest.get("quality_reasons"),
+        "source": manifest.get("source"),
     }
     patch_path = root / "catalog" / "TRADE_COUNT_PATCH.json"
     if patch_path.is_file():

@@ -54,6 +54,36 @@ _SNAPSHOT_RECONCILIATION = {
 }
 
 
+def is_official_historical_archive(manifest: Mapping[str, Any]) -> bool:
+    """True only for immutable first-party/public archive evidence.
+
+    Historical archive rows cannot carry a local receive monotonic timestamp:
+    treating that structurally unavailable field as corruption rejects otherwise
+    replayable history. This exemption never applies to live/WebSocket capture.
+    """
+    source = str(manifest.get("source") or "").lower()
+    provenance = manifest.get("provenance")
+    if not isinstance(provenance, Mapping):
+        return False
+    transports = {
+        str(value).lower()
+        for value in (provenance.get("transports") or [])
+        if str(value).strip()
+    }
+    semantics = {
+        str(value).lower()
+        for value in (provenance.get("timestamp_semantics") or [])
+        if str(value).strip()
+    }
+    return bool(
+        manifest.get("asset_verified") is True
+        and "official_archive" in source
+        and transports
+        and transports.issubset({"http", "https"})
+        and "historical_exchange_time_only" in semantics
+    )
+
+
 def load_json(path: str | Path) -> dict[str, Any]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -154,8 +184,14 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
 
     integrity = manifest["integrity"]
     reasons: list[str] = []
+    historical_archive = is_official_historical_archive(manifest)
     for key in _FATAL_COUNTERS:
         value = _int(integrity.get(key))
+        # Local monotonic receive time is mandatory for live causal capture but
+        # does not exist in an immutable historical exchange archive. Exchange
+        # chronology is verified separately by replay inspection.
+        if key == "missing_monotonic_count" and historical_archive:
+            continue
         if value is None:
             reasons.append(f"MISSING_INTEGRITY:{key}")
         elif value > 0:
@@ -231,7 +267,10 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             transports = {str(value).lower() for value in raw_transports if str(value).strip()}
 
     if family in _MATCHED_RECONCILIATION_FAMILIES:
-        if reconciliation_status != "MATCHED":
+        if historical_archive:
+            if reconciliation_status not in {"MATCHED", "SOURCE_ARCHIVE_VERIFIED"}:
+                reasons.append("RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED")
+        elif reconciliation_status != "MATCHED":
             reasons.append("RECONCILIATION_MATCH_REQUIRED")
     elif family in {"instrument_metadata", "open_interest", "funding_settlement"} and transports and transports.issubset({"http", "https"}):
         if reconciliation_status not in _SNAPSHOT_RECONCILIATION:
@@ -294,4 +333,5 @@ __all__ = [
     "load_json",
     "validate_manifest",
     "verify_asset",
+    "is_official_historical_archive",
 ]

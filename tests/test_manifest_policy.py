@@ -220,3 +220,41 @@ def test_external_event_runtime_requires_all_bound_evidence_receipts() -> None:
     status, reasons = classify_manifest(value)
     assert status == "PARTIAL"
     assert "EVENT_INTELLIGENCE_RUNTIME_EVIDENCE_INVALID" in reasons
+
+
+def _official_archive_trade_manifest() -> dict:
+    value = manifest()
+    value["dataset_id"] = "binance-usdm-official-archive-trades-btc"
+    value["family"] = "trades"
+    value["venue"] = "binance"
+    value["source"] = "binance_usdm_official_archive"
+    value["provenance"]["transports"] = ["https"]
+    value["provenance"]["timestamp_semantics"] = ["historical_exchange_time_only"]
+    value["integrity"]["missing_monotonic_count"] = value["event_count"]
+    value["reconciliation"] = {"status": "SOURCE_ARCHIVE_VERIFIED"}
+    return value
+
+
+def test_official_historical_archive_does_not_require_local_monotonic_time():
+    value = _official_archive_trade_manifest()
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE"
+    assert not any("missing_monotonic" in reason for reason in reasons)
+
+
+def test_official_archive_still_requires_archive_verification_receipt():
+    value = _official_archive_trade_manifest()
+    value["reconciliation"] = {"status": "UNVERIFIED"}
+    status, reasons = classify_manifest(value)
+    assert status == "PARTIAL"
+    assert "RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED" in reasons
+
+
+def test_live_trade_missing_monotonic_time_is_still_rejected():
+    value = manifest()
+    value["family"] = "trades"
+    value["provenance"]["transports"] = ["websocket"]
+    value["integrity"]["missing_monotonic_count"] = value["event_count"]
+    status, reasons = classify_manifest(value)
+    assert status == "REJECT"
+    assert any(reason.startswith("FATAL_INTEGRITY:missing_monotonic_count") for reason in reasons)
