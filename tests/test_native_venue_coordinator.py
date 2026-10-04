@@ -20,6 +20,14 @@ class _EmptyDiscovery:
         return []
 
 
+class _OneShotStream:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def messages(self, _symbols):
+        yield dict(self.payload)
+
+
 def test_discovery_builds_registry_and_feeds_coin_universe() -> None:
     clear()
     coordinator = NativeVenueCoordinator(
@@ -500,3 +508,47 @@ def test_clock_sync_preserves_client_measurement_source() -> None:
     assert rows["bybit"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert rows["bybit"]["rtt_ms"] == 10.0
 
+
+
+def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
+    gate_client = _OneShotStream({"channel": "futures.trades", "result": []})
+    bitget_client = _OneShotStream(
+        {"arg": {"channel": "trade", "instId": "BTCUSDT"}, "data": []}
+    )
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_EmptyDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=gate_client,
+        bitget_client=bitget_client,
+        ccxt_snapshot_path=None,
+    )
+    coordinator.registry = {
+        "BTC": {"gate": "BTC_USDT", "bitget": "BTCUSDT"},
+    }
+    coordinator._clock_sync = {
+        "gate": {"status": "OK", "offset_ms": 7.0, "rtt_ms": 2.0},
+        "bitget": {"status": "OK", "offset_ms": -3.0, "rtt_ms": 4.0},
+    }
+    seen = {}
+
+    def capture_gate(payload, **_kwargs):
+        seen["gate"] = dict(payload)
+        return None
+
+    def capture_bitget(payload, **_kwargs):
+        seen["bitget"] = dict(payload)
+        return None
+
+    coordinator.ingest_gate = capture_gate
+    coordinator.ingest_bitget = capture_bitget
+
+    async def scenario() -> None:
+        await coordinator.run_gate()
+        await coordinator.run_bitget()
+
+    asyncio.run(scenario())
+
+    assert seen["gate"]["_alina_transport"]["clock_offset_ms"] == 7.0
+    assert seen["gate"]["_alina_transport"]["clock_probe_rtt_ms"] == 2.0
+    assert seen["bitget"]["_alina_transport"]["clock_offset_ms"] == -3.0
+    assert seen["bitget"]["_alina_transport"]["clock_probe_rtt_ms"] == 4.0

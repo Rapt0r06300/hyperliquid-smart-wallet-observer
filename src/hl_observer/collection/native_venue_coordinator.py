@@ -648,7 +648,10 @@ class NativeVenueCoordinator:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
                     now = int(time.time() * 1000)
-                    self.ingest_gate(payload, now_ms=now)
+                    self.ingest_gate(
+                        self._with_clock_sync(payload, "gate"),
+                        now_ms=now,
+                    )
         except TimeoutError:
             return
         finally:
@@ -664,7 +667,10 @@ class NativeVenueCoordinator:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.bitget_client.messages(symbols):
                     now = int(time.time() * 1000)
-                    self.ingest_bitget(payload, now_ms=now)
+                    self.ingest_bitget(
+                        self._with_clock_sync(payload, "bitget"),
+                        now_ms=now,
+                    )
         except TimeoutError:
             return
         finally:
