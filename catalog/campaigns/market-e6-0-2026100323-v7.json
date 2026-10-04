@@ -1,43 +1,24 @@
 {
   "analysis_stage": null,
-  "attempts": 2,
+  "attempts": 3,
   "campaign_id": "market-e6-0-2026100323-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 1,
+  "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
+  "code_sha": "5f7d9a771021269b5801fd51dd16754d876ed8a2",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "260fcfcc8db08e0d38ff6a8f32932bf8ac0657a86f1053017b928044bebe2a3c",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-market-e6-0-2026100323-v7-u0 --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 market-e6-0-2026100323-v7 unit 0 --notes Alina SmartFlow dataset V2 collection run. Collector SHA: 241cacfb479b66a746d66913def987a378fb6e3b Shards: 782 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 881B:2D4A54:A9D077:22E5D7E:6AC1B4D5 and timestamp 2026-10-04 02:07:17 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "66c02269c7b0e28848bdd5ca73e4a3cba507a74c1e314d428e4e329d48432a70"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "d95171ea82c02a08ed4d839f143fde1d76e2c0072e66a4e50d76acfb2f40ec2a",
-  "consecutive_failures": 1,
+  "consecutive_failures": 0,
   "created_at": "2026-10-03T23:06:46.354988+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "66c02269c7b0e28848bdd5ca73e4a3cba507a74c1e314d428e4e329d48432a70",
     "duration_s": 3500,
-    "generation": 1,
-    "handoff_generation": "1",
-    "handoff_phase_epoch": 6,
-    "last_run_id": "37165796777",
     "market_shard_count": 16,
     "market_shard_index": 0,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e6/2026100323/shard-00.json",
     "plan_sha256": "aca53ef6bc237e29cc099b29ebaa2c53733cfde58d4d31b59494034821e295e9",
-    "predecessor_run_id": "37162735563",
-    "requested_handoff_at_utc": "2026-10-04T00:43:00.772529Z",
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 52,
@@ -73,6 +54,15 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-0-2026100323-v7.continuation_required.241cacfb479b.1432382d967b053e36c40816961e20d4c6edca8af358049bdb90a01e5431ff74.json",
+      "archived_manifest_sha256": "1432382d967b053e36c40816961e20d4c6edca8af358049bdb90a01e5431ff74",
+      "at": "2026-10-04T02:29:06.627348Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
+      "prior_status": "CONTINUATION_REQUIRED",
+      "prior_status_reason": "durable_publication_failed"
     }
   ],
   "kind": "market_collection",
@@ -85,7 +75,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 1,
+  "no_progress_count": 0,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -94,9 +84,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "CONTINUATION_REQUIRED",
-  "status_reason": "durable_publication_failed",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T02:07:17.916307Z",
+  "updated_at": "2026-10-04T02:29:06.627365Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
