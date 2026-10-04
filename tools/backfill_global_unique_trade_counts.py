@@ -35,6 +35,7 @@ except ModuleNotFoundError:
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
 PATCH_PATH = ROOT / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
+EXACT_COUNT_PATCH_PATH = ROOT / "catalog" / "TRADE_COUNT_PATCH.json"
 
 
 def _persist_manifest_unique_counts(
@@ -60,6 +61,56 @@ def _persist_manifest_unique_counts(
         encoding="utf-8",
     )
     os.replace(temporary, manifest_path)
+
+
+def _restore_exact_trade_count_rows(
+    rows: list[Any],
+    *,
+    patch_path: Path | None = None,
+) -> int:
+    """Rehydrate SHA-matched exact trade counts before selecting unique-scan candidates.
+
+    Replay qualification is a separate concern and must never be able to shrink
+    the globally deduplicated trade universe by temporarily clearing
+    trade_count_exact in DATA_INDEX.
+    """
+    path=patch_path or EXACT_COUNT_PATCH_PATH
+    if not path.is_file():
+        return 0
+    try:
+        doc=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError,TypeError):
+        return 0
+    counts=doc.get("counts") if isinstance(doc,Mapping) else {}
+    if not isinstance(counts,Mapping):
+        return 0
+
+    restored=0
+    for row in rows:
+        if not isinstance(row,dict):
+            continue
+        dataset_id=str(row.get("dataset_id") or "")
+        family=str(row.get("family") or "").lower()
+        if not dataset_id or family not in TRADE_FAMILIES:
+            continue
+        evidence=counts.get(dataset_id)
+        if not isinstance(evidence,Mapping) or evidence.get("trade_count_exact") is not True:
+            continue
+        row_sha=str(row.get("sha256") or "").lower()
+        evidence_sha=str(evidence.get("asset_sha256") or "").lower()
+        if len(row_sha)!=64 or evidence_sha!=row_sha:
+            continue
+        try:
+            count=int(evidence.get("trade_count"))
+        except (TypeError,ValueError,OverflowError):
+            continue
+        if count<0:
+            continue
+        if row.get("trade_count_exact") is not True or row.get("trade_count")!=count:
+            restored+=1
+        row["trade_count"]=count
+        row["trade_count_exact"]=True
+    return restored
 
 
 def _positive_int(value: Any) -> int | None:
@@ -170,6 +221,8 @@ def main() -> None:
     rows = index.get("shards")
     if not isinstance(rows, list):
         raise SystemExit("invalid DATA_INDEX shards")
+
+    restored_exact_trade_rows=_restore_exact_trade_count_rows(rows)
 
     prior: dict[str, Any] = {}
     if PATCH_PATH.exists():
@@ -316,6 +369,7 @@ def main() -> None:
             "ambiguous missing identities fail closed"
         ),
         "candidate_trade_shards": len(all_candidates),
+        "restored_exact_trade_rows": restored_exact_trade_rows,
         "attempted": len(candidates),
         "successful": len(successful_ids),
         "failed": failed,
@@ -350,6 +404,7 @@ def main() -> None:
                 key: result[key]
                 for key in (
                     "candidate_trade_shards",
+                    "restored_exact_trade_rows",
                     "attempted",
                     "successful",
                     "remaining_candidate_shards",

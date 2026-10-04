@@ -210,3 +210,56 @@ def test_bybit_archive_trd_match_id_is_canonical_native_identity():
         symbol="BTCUSDT",
     )
     assert keys == ["bybit|trades|BTCUSDT|i|archive-match-123"]
+
+
+
+def test_restore_exact_trade_count_rows_recovers_corrupted_index(tmp_path):
+    patch=tmp_path/"TRADE_COUNT_PATCH.json"
+    patch.write_text(
+        json.dumps({
+            "counts":{
+                "bybit-archive":{
+                    "asset_sha256":"a"*64,
+                    "trade_count":190000,
+                    "trade_count_exact":True,
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    rows=[{
+        "dataset_id":"bybit-archive",
+        "family":"trades",
+        "sha256":"a"*64,
+        "trade_count":0,
+        "trade_count_exact":False,
+        "release_repository":"owner/repo",
+        "release_tag":"tag",
+        "release_asset":"asset.jsonl.gz",
+        "bytes":1,
+    }]
+    restored=global_counts._restore_exact_trade_count_rows(rows,patch_path=patch)
+    assert restored==1
+    assert rows[0]["trade_count"]==190000
+    assert rows[0]["trade_count_exact"] is True
+    assert global_counts._unique_candidate(rows[0]) is True
+
+
+def test_restore_exact_trade_count_rows_rejects_sha_mismatch(tmp_path):
+    patch=tmp_path/"TRADE_COUNT_PATCH.json"
+    patch.write_text(
+        json.dumps({
+            "counts":{
+                "x":{
+                    "asset_sha256":"b"*64,
+                    "trade_count":42,
+                    "trade_count_exact":True,
+                }
+            }
+        }),
+        encoding="utf-8",
+    )
+    rows=[{"dataset_id":"x","family":"trades","sha256":"a"*64,
+           "trade_count":0,"trade_count_exact":False}]
+    assert global_counts._restore_exact_trade_count_rows(rows,patch_path=patch)==0
+    assert rows[0]["trade_count_exact"] is False
