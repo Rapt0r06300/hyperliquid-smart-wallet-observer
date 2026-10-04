@@ -95,8 +95,13 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     base = Path(root)
     index_path = base / "catalog" / "DATA_INDEX.json"
     metrics_path = base / "catalog" / "DATA_METRICS.json"
+    record_patch_path = base / "catalog" / "RECORD_COUNT_PATCH.json"
     index = _load(index_path, {})
     metrics = _load(metrics_path, {})
+    record_patch = _load(record_patch_path, {})
+    record_rows = record_patch.get("records") if isinstance(record_patch, Mapping) else {}
+    if not isinstance(record_rows, Mapping):
+        record_rows = {}
     shards = index.get("shards") if isinstance(index, Mapping) else []
     if not isinstance(shards, list):
         raise ValueError("DATA_INDEX shards must be a list")
@@ -128,7 +133,11 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
         if stored_status not in NON_SAFE_STATUSES:
             continue
 
-        records = _count(row.get("record_count") or row.get("event_count"))
+        record_evidence = record_rows.get(str(row.get("dataset_id") or ""))
+        if isinstance(record_evidence, Mapping) and record_evidence.get("exact") is True:
+            records = _count(record_evidence.get("record_count"))
+        else:
+            records = _count(row.get("record_count") or row.get("event_count"))
         if stored_status in QUARANTINE_STATUSES:
             quarantine_records += records
         elif stored_status in REJECT_STATUSES:
@@ -205,6 +214,11 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
         "source_metrics_sha256": (
             hashlib.sha256(metrics_path.read_bytes()).hexdigest()
             if metrics_path.is_file()
+            else None
+        ),
+        "source_record_count_patch_sha256": (
+            hashlib.sha256(record_patch_path.read_bytes()).hexdigest()
+            if record_patch_path.is_file()
             else None
         ),
         "source_shard_count": len(shards),
