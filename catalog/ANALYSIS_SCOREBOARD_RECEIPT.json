@@ -1,0 +1,1980 @@
+{
+  "campaign_id": "analysis-e7-scoreboard-v2",
+  "code_sha": "8989a4c91d4ab138dbf04cd365ca9036a0866efc",
+  "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
+  "dataset_selection_id": "a1038090eceb4c718e8570918b8b33ae6bd5cac5e3a277a8bc68a8e4d0ab0400",
+  "environment_provenance": {
+    "dependency_digest": "d31ca3a2352360ba8306ae79ec7b1a785adfc8aaa296ea19fd0c18c01d6d7d00",
+    "dependency_files": [
+      "requirements.txt",
+      "pyproject.toml"
+    ],
+    "github_runner_image": "ubuntu24",
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "python_executable": "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+    "python_version": "3.12.14",
+    "runner_architecture": "x86_64",
+    "timezone": "UTC"
+  },
+  "environment_receipt_sha256": "e35ef18d1008c15041f4029008367ad3983499f7294f3628288290b4aa7a9d4b",
+  "evidence_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "evidence_tag": "campaign-evidence-analysis-e7-scoreboard-v2-u0",
+  "paper_only": true,
+  "phase_epoch": 7,
+  "read_only": true,
+  "real_execution": false,
+  "receipt_digest": "65104e4606de4242e1a4890c8a4cd06f42e40b7f588b6aaabfdba27a2fb7f184",
+  "schema": "alina.analysis_scoreboard_receipt.v1",
+  "scoreboard": {
+    "active_families": [
+      "copy_vault",
+      "lead_lag",
+      "cross_venue_dislocation_v2"
+    ],
+    "disabled_families": [
+      "cross_venue_dislocation_v1",
+      "carry"
+    ],
+    "families": {
+      "copy_vault": {
+        "assumption_snapshot_hash": "be49fdbc833528d767bb0e5041c4d8c0e81425e9621e8340d139fbe97c76b1e4",
+        "campaign_id": null,
+        "closed_positions": 0,
+        "comparison_metric_source": null,
+        "comparison_metric_usd": null,
+        "copy_checkpoint_integrity": {
+          "all_proof_trades_exact_checkpoint_bound": false,
+          "all_proof_trades_post_clean_epoch": false,
+          "all_proof_trades_same_writer_run": false,
+          "clean_epoch_ms": null,
+          "duplicate_checkpoint_ids": 0,
+          "expected_proof_trade_count": 0,
+          "proof_trade_count": 0,
+          "quarantined_checkpoint_metaorders": 0,
+          "receipt_valid": false,
+          "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+          "writer_role": null,
+          "writer_run_id": null
+        },
+        "daily_evidence": null,
+        "daily_observed": {
+          "all_days_at_or_above_target": false,
+          "complete_utc_days_only": false,
+          "completed_cutoff_exclusive_ms": 1791072000000,
+          "days": [],
+          "evaluated_at_ms": 1791155742814,
+          "excluded_incomplete_days_utc": [],
+          "excluded_incomplete_trade_count": 0,
+          "mean_daily_net_pnl_usd": null,
+          "min_daily_net_pnl_usd": null,
+          "minimum_required_days": 2,
+          "missing_trade_net": 0,
+          "missing_trade_timestamps": 0,
+          "observed_trade_count": 0,
+          "sample_count": 0,
+          "schema_version": "hypersmart.daily_net_evidence.v1",
+          "target_net_usd_per_day": 4.0,
+          "total_net_pnl_usd": null
+        },
+        "daily_target_required": true,
+        "dataset_provenance": {
+          "dataset_fingerprint": "40324b1089b33685e7cc10124bff879f3a115f572652465ecb1cec60edc08b66",
+          "files": [
+            {
+              "exists": false,
+              "path": "runtime/data/vault_fills.jsonl"
+            },
+            {
+              "exists": false,
+              "path": "runtime/data/vault_fills_live.jsonl"
+            },
+            {
+              "exists": false,
+              "path": "runtime/data/vault_episodes.jsonl"
+            },
+            {
+              "exists": false,
+              "path": "runtime/data/vault_snapshots.jsonl"
+            },
+            {
+              "exists": false,
+              "path": "runtime/data/carnet_venues.jsonl"
+            },
+            {
+              "exists": false,
+              "path": "runtime/data/copy_vault_l2_tape.jsonl"
+            }
+          ]
+        },
+        "duplicate_trade_ids": 0,
+        "economic_binding": {
+          "assumption_snapshot_hash": "be49fdbc833528d767bb0e5041c4d8c0e81425e9621e8340d139fbe97c76b1e4",
+          "bundle_hash": "582c3b40201bd7ef357cd174eff8736988f11925275f80ae19e2705b494c3ae9",
+          "family": "COPY_VAULT",
+          "formula_snapshot_hash": "c998a87d8d1a5599440e5f432df6485ca11d3c44d1929522a17f07aac3554ed6",
+          "issues": [],
+          "numeric_provenance_hash": "6f0a9bc2ba73f1c970427813c8064a952cb74e80144320a84e1c27661a9bf1f4",
+          "policy_version": "hypersmart.economic_policy.v21",
+          "ready": true,
+          "reality_model_hash": "8a1e110aab28dc18b91c38f016238011b2eed6ceb0ab42e6d0aab4601479622f",
+          "run_mode": "CERTIFIABLE"
+        },
+        "economic_contract": {
+          "assumption_snapshot": {
+            "assumptions": [
+              {
+                "assumption_id": "copy_vault.copy_delay_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "COPY_VAULT"
+                ],
+                "formula_id": null,
+                "name": "Delai de copie",
+                "observed_at": null,
+                "owner": "HyperSmart/copy_vault",
+                "revalidate_after": null,
+                "source_hash": "6542c7f8cc8391307cb4c7d2723a230ba6b4c408208fb1ad47b11eab968b89cf",
+                "source_ref": "project:backtesting/copy_vault_protocol.py#COPY_DELAY_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 60000.0
+              },
+              {
+                "assumption_id": "copy_vault.max_reference_lag_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "COPY_VAULT"
+                ],
+                "formula_id": null,
+                "name": "Age maximal reference",
+                "observed_at": null,
+                "owner": "HyperSmart/copy_vault",
+                "revalidate_after": null,
+                "source_hash": "113b4f62066c4693ab6d18eb49c8a4f8ca42d0314b9dec883af0102aee043f35",
+                "source_ref": "project:backtesting/copy_vault_protocol.py#MAX_REFERENCE_LAG_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 30000.0
+              },
+              {
+                "assumption_id": "copy_vault.max_target_lag_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "COPY_VAULT"
+                ],
+                "formula_id": null,
+                "name": "Age maximal cible",
+                "observed_at": null,
+                "owner": "HyperSmart/copy_vault",
+                "revalidate_after": null,
+                "source_hash": "be4a9cfc1f82dc87b234168764febb1563b55c4ee71bd1c52307ce6270cafd34",
+                "source_ref": "project:backtesting/copy_vault_protocol.py#MAX_TARGET_LAG_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 30000.0
+              },
+              {
+                "assumption_id": "copy_vault.paper_notional_usd",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "COPY_VAULT"
+                ],
+                "formula_id": null,
+                "name": "Notionnel paper",
+                "observed_at": null,
+                "owner": "HyperSmart/copy_vault",
+                "revalidate_after": null,
+                "source_hash": "804cd0a083a08bc538fa1f11abaaf820a4c2b3527d1635e59970ff56f7754dfa",
+                "source_ref": "project:backtesting/copy_vault_protocol.py#NOTIONAL_USD",
+                "unit": "USD",
+                "valid_until": null,
+                "value": 100.0
+              },
+              {
+                "assumption_id": "copy_vault.round_trip_fee_bps",
+                "certification_eligible": true,
+                "classification": "DERIVED",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "COPY_VAULT"
+                ],
+                "formula_id": "copy_vault.round_trip_fee.v1",
+                "name": "Frais aller-retour COPY_VAULT",
+                "observed_at": null,
+                "owner": "HyperSmart",
+                "revalidate_after": null,
+                "source_hash": "5ab6bdf2bba11a737501c577176584b14a6a56ed015c7bf7a0144f8cd25ea297",
+                "source_ref": "formula:copy_vault.round_trip_fee.v1@v1",
+                "unit": "bps_round_trip",
+                "valid_until": null,
+                "value": 9.0
+              },
+              {
+                "assumption_id": "fee.taker.hyperliquid.bps",
+                "certification_eligible": true,
+                "classification": "CONSERVATIVE_DEFAULT",
+                "effective_from": null,
+                "fallback_reason": "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT",
+                "family_scope": [
+                  "COPY_VAULT",
+                  "CROSS_VENUE",
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Frais taker HYPERLIQUID par fill",
+                "observed_at": "2026-07-13T00:00:00Z",
+                "owner": "HyperSmart/economic-config",
+                "revalidate_after": "2026-10-13T00:00:00Z",
+                "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                "unit": "bps_per_fill",
+                "valid_until": null,
+                "value": 4.5
+              }
+            ],
+            "formulas": [
+              {
+                "expression": "2*fee.taker.hyperliquid.bps",
+                "formula_id": "copy_vault.round_trip_fee.v1",
+                "output_assumption_id": "copy_vault.round_trip_fee_bps",
+                "parent_ids": [
+                  "fee.taker.hyperliquid.bps"
+                ],
+                "reality_model_version": "copy_vault_exact_checkpoint_observed_l2_vwap.v3",
+                "unit": "bps_round_trip",
+                "version": "v1"
+              }
+            ],
+            "schema": "hypersmart.economic_assumption_snapshot.v1"
+          },
+          "assumption_snapshot_hash": "be49fdbc833528d767bb0e5041c4d8c0e81425e9621e8340d139fbe97c76b1e4",
+          "certification": {
+            "assumption_snapshot_hash": "be49fdbc833528d767bb0e5041c4d8c0e81425e9621e8340d139fbe97c76b1e4",
+            "failures": [],
+            "ready": true,
+            "required_ids": [
+              "copy_vault.copy_delay_ms",
+              "copy_vault.max_reference_lag_ms",
+              "copy_vault.max_target_lag_ms",
+              "copy_vault.paper_notional_usd",
+              "copy_vault.round_trip_fee_bps",
+              "fee.taker.hyperliquid.bps"
+            ],
+            "schema": "hypersmart.economic_certification_receipt.v1"
+          },
+          "direct_measured_fields": [
+            "entry_capacity_usd",
+            "exit_capacity_usd",
+            "reference_mid",
+            "entry_bid",
+            "entry_ask",
+            "exit_bid",
+            "exit_ask",
+            "entry_price",
+            "exit_price",
+            "entry_top_price",
+            "exit_top_price",
+            "exact_l2_vwap_observed"
+          ],
+          "economic_evidence_bundle": {
+            "assumption_snapshot_hash": "be49fdbc833528d767bb0e5041c4d8c0e81425e9621e8340d139fbe97c76b1e4",
+            "bundle_hash": "582c3b40201bd7ef357cd174eff8736988f11925275f80ae19e2705b494c3ae9",
+            "family": "COPY_VAULT",
+            "formula_snapshot_hash": "c998a87d8d1a5599440e5f432df6485ca11d3c44d1929522a17f07aac3554ed6",
+            "maturity_stage": "BUILT",
+            "numeric_provenance_hash": "6f0a9bc2ba73f1c970427813c8064a952cb74e80144320a84e1c27661a9bf1f4",
+            "policy_version": "hypersmart.economic_policy.v21",
+            "reality_model_components": {
+              "fee_treatment": "copy_vault.round_trip_fee.v1:2xHL",
+              "fill_count": "copy_vault.two_fill_round_trip.v1",
+              "funding_treatment": "copy_vault.no_funding_settlement_in_closed_cycle.v1",
+              "latency_treatment": "copy_vault.adverse_latency.v1",
+              "slippage_capacity_treatment": "copy_vault.observed_side_specific_l2_vwap_full_size.v1",
+              "spread_treatment": "copy_vault.executable_bid_ask_spread.v1"
+            },
+            "reality_model_hash": "8a1e110aab28dc18b91c38f016238011b2eed6ceb0ab42e6d0aab4601479622f",
+            "reality_model_version": "copy_vault_exact_checkpoint_observed_l2_vwap.v3",
+            "required_assumption_ids": [
+              "copy_vault.copy_delay_ms",
+              "copy_vault.max_reference_lag_ms",
+              "copy_vault.max_target_lag_ms",
+              "copy_vault.paper_notional_usd",
+              "copy_vault.round_trip_fee_bps",
+              "fee.taker.hyperliquid.bps"
+            ],
+            "run_mode": "CERTIFIABLE",
+            "schema": "hypersmart.economic_evidence_bundle.v1"
+          },
+          "family": "COPY_VAULT",
+          "formula_manifest": [
+            {
+              "expression": "2*fee.taker.hyperliquid.bps",
+              "formula_id": "copy_vault.round_trip_fee.v1",
+              "output_assumption_id": "copy_vault.round_trip_fee_bps",
+              "parent_ids": [
+                "fee.taker.hyperliquid.bps"
+              ],
+              "reality_model_version": "copy_vault_exact_checkpoint_observed_l2_vwap.v3",
+              "unit": "bps_round_trip",
+              "version": "v1"
+            }
+          ],
+          "formula_snapshot_hash": "c998a87d8d1a5599440e5f432df6485ca11d3c44d1929522a17f07aac3554ed6",
+          "numeric_provenance": {
+            "copy_vault.copy_delay_ms": [
+              "copy_vault.copy_delay_ms"
+            ],
+            "copy_vault.max_reference_lag_ms": [
+              "copy_vault.max_reference_lag_ms"
+            ],
+            "copy_vault.max_target_lag_ms": [
+              "copy_vault.max_target_lag_ms"
+            ],
+            "copy_vault.paper_notional_usd": [
+              "copy_vault.paper_notional_usd"
+            ],
+            "copy_vault.round_trip_fee_bps": [
+              "fee.taker.hyperliquid.bps",
+              "copy_vault.round_trip_fee_bps"
+            ],
+            "fee.taker.hyperliquid.bps": [
+              "fee.taker.hyperliquid.bps"
+            ]
+          },
+          "numeric_provenance_hash": "6f0a9bc2ba73f1c970427813c8064a952cb74e80144320a84e1c27661a9bf1f4",
+          "numeric_provenance_pointers": {
+            "copy_vault.copy_delay_ms": {
+              "chain": [
+                "copy_vault.copy_delay_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "copy_vault.copy_delay_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "6542c7f8cc8391307cb4c7d2723a230ba6b4c408208fb1ad47b11eab968b89cf",
+                  "source_ref": "project:backtesting/copy_vault_protocol.py#COPY_DELAY_MS",
+                  "unit": "ms",
+                  "value": 60000.0
+                }
+              ],
+              "terminal_value": 60000.0
+            },
+            "copy_vault.max_reference_lag_ms": {
+              "chain": [
+                "copy_vault.max_reference_lag_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "copy_vault.max_reference_lag_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "113b4f62066c4693ab6d18eb49c8a4f8ca42d0314b9dec883af0102aee043f35",
+                  "source_ref": "project:backtesting/copy_vault_protocol.py#MAX_REFERENCE_LAG_MS",
+                  "unit": "ms",
+                  "value": 30000.0
+                }
+              ],
+              "terminal_value": 30000.0
+            },
+            "copy_vault.max_target_lag_ms": {
+              "chain": [
+                "copy_vault.max_target_lag_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "copy_vault.max_target_lag_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "be4a9cfc1f82dc87b234168764febb1563b55c4ee71bd1c52307ce6270cafd34",
+                  "source_ref": "project:backtesting/copy_vault_protocol.py#MAX_TARGET_LAG_MS",
+                  "unit": "ms",
+                  "value": 30000.0
+                }
+              ],
+              "terminal_value": 30000.0
+            },
+            "copy_vault.paper_notional_usd": {
+              "chain": [
+                "copy_vault.paper_notional_usd"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "copy_vault.paper_notional_usd",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "804cd0a083a08bc538fa1f11abaaf820a4c2b3527d1635e59970ff56f7754dfa",
+                  "source_ref": "project:backtesting/copy_vault_protocol.py#NOTIONAL_USD",
+                  "unit": "USD",
+                  "value": 100.0
+                }
+              ],
+              "terminal_value": 100.0
+            },
+            "copy_vault.round_trip_fee_bps": {
+              "chain": [
+                "fee.taker.hyperliquid.bps",
+                "copy_vault.round_trip_fee_bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                },
+                {
+                  "assumption_id": "copy_vault.round_trip_fee_bps",
+                  "classification": "DERIVED",
+                  "formula_id": "copy_vault.round_trip_fee.v1",
+                  "source_hash": "5ab6bdf2bba11a737501c577176584b14a6a56ed015c7bf7a0144f8cd25ea297",
+                  "source_ref": "formula:copy_vault.round_trip_fee.v1@v1",
+                  "unit": "bps_round_trip",
+                  "value": 9.0
+                }
+              ],
+              "terminal_value": 9.0
+            },
+            "fee.taker.hyperliquid.bps": {
+              "chain": [
+                "fee.taker.hyperliquid.bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                }
+              ],
+              "terminal_value": 4.5
+            }
+          },
+          "policy_version": "hypersmart.economic_policy.v21",
+          "reality_model_components": {
+            "fee_treatment": "copy_vault.round_trip_fee.v1:2xHL",
+            "fill_count": "copy_vault.two_fill_round_trip.v1",
+            "funding_treatment": "copy_vault.no_funding_settlement_in_closed_cycle.v1",
+            "latency_treatment": "copy_vault.adverse_latency.v1",
+            "slippage_capacity_treatment": "copy_vault.observed_side_specific_l2_vwap_full_size.v1",
+            "spread_treatment": "copy_vault.executable_bid_ask_spread.v1"
+          },
+          "reality_model_hash": "8a1e110aab28dc18b91c38f016238011b2eed6ceb0ab42e6d0aab4601479622f",
+          "reality_model_version": "copy_vault_exact_checkpoint_observed_l2_vwap.v3",
+          "required_assumption_ids": [
+            "copy_vault.copy_delay_ms",
+            "copy_vault.max_reference_lag_ms",
+            "copy_vault.max_target_lag_ms",
+            "copy_vault.paper_notional_usd",
+            "copy_vault.round_trip_fee_bps",
+            "fee.taker.hyperliquid.bps"
+          ],
+          "run_mode": "CERTIFIABLE",
+          "schema": "hypersmart.family_economic_contract.v2",
+          "values": {
+            "copy_vault.copy_delay_ms": 60000.0,
+            "copy_vault.max_reference_lag_ms": 30000.0,
+            "copy_vault.max_target_lag_ms": 30000.0,
+            "copy_vault.paper_notional_usd": 100.0,
+            "copy_vault.round_trip_fee_bps": 9.0,
+            "fee.taker.hyperliquid.bps": 4.5
+          }
+        },
+        "economic_evidence_bundle_hash": "582c3b40201bd7ef357cd174eff8736988f11925275f80ae19e2705b494c3ae9",
+        "economic_policy_version": "hypersmart.economic_policy.v21",
+        "eligible_net_pnl_usd": null,
+        "evidence_paths": [
+          "runtime/data/copy_edge_rapport_reel.json",
+          "runtime/reports/economic_campaigns/raw/copy_vault.json",
+          "runtime/reports/economic_campaigns/copy_vault.json"
+        ],
+        "family": "copy_vault",
+        "fees_usd": null,
+        "formula_snapshot_hash": "c998a87d8d1a5599440e5f432df6485ca11d3c44d1929522a17f07aac3554ed6",
+        "forward": {
+          "anti_lookahead_receipt_valid": false,
+          "causal_live_only": false,
+          "duplicate_trade_ids": 0,
+          "fees_usd": 0,
+          "gross_pnl_usd": 0,
+          "latency_cost_usd": 0,
+          "liquidatable_net": false,
+          "net_pnl_usd": 0,
+          "no_lookahead": false,
+          "post_freeze": false,
+          "sample_count": 0,
+          "slippage_cost_usd": 0,
+          "spread_cost_usd": 0,
+          "trade_ids_count": 0,
+          "trade_ids_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "generated_at_ms": 1791155742814,
+        "gross_pnl_usd": null,
+        "hit_rate": null,
+        "in_sample": null,
+        "latency_cost_usd": null,
+        "liquidatable_net": false,
+        "max_drawdown_usd": null,
+        "measurement_status": "NON_MESURABLE",
+        "net_pnl_usd": null,
+        "no_trade_count": null,
+        "numeric_provenance_hash": "6f0a9bc2ba73f1c970427813c8064a952cb74e80144320a84e1c27661a9bf1f4",
+        "objective_reasons": [
+          "PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION",
+          "POSITIONS_NOT_FULLY_OPENED_AND_CLOSED",
+          "COPY_CHECKPOINT_INTEGRITY_NOT_CLEAN",
+          "COPY_HELDOUT_VAULT_PROOF_MISSING",
+          "UNMEASURED:gross_pnl_usd",
+          "UNMEASURED:fees_usd",
+          "UNMEASURED:spread_cost_usd",
+          "UNMEASURED:slippage_cost_usd",
+          "UNMEASURED:latency_cost_usd",
+          "UNMEASURED:net_pnl_usd",
+          "NOT_LIQUIDATABLE_NET",
+          "OOS_NOT_LIQUIDATABLE_NET",
+          "OOS_TRADE_ID_PROOF_INCOMPLETE",
+          "FORWARD_NOT_LIQUIDATABLE_NET",
+          "FORWARD_TRADE_ID_PROOF_INCOMPLETE",
+          "OOS_SAMPLE_MISSING",
+          "FORWARD_SAMPLE_MISSING",
+          "PLACEBO_NOT_BEATEN",
+          "DAILY_NET_PROOF_MISSING",
+          "TARGET_NET_USD_NOT_REACHED"
+        ],
+        "objective_status": "NON_ATTEINT",
+        "oos": {
+          "anti_lookahead_receipt_valid": false,
+          "duplicate_trade_ids": 0,
+          "fees_usd": 0,
+          "gross_pnl_usd": 0,
+          "latency_cost_usd": 0,
+          "liquidatable_net": false,
+          "net_pnl_usd": 0,
+          "no_lookahead": false,
+          "purged": true,
+          "sample_count": 0,
+          "slippage_cost_usd": 0,
+          "spread_cost_usd": 0,
+          "trade_ids_count": 0,
+          "trade_ids_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "opened_positions": 0,
+        "paper_read_only": true,
+        "parameter_freeze": null,
+        "parameters_frozen": false,
+        "period": {
+          "book_meta": {
+            "capacity_semantics": "legacy_minimum_side_capacity;certification_uses_side_specific_observed_l2_vwap",
+            "causal_forward_rows": 0,
+            "checkpoint_protocol_mismatches_rejected": 0,
+            "clean_epoch_receipt": {
+              "checkpoint_rows": 0,
+              "clean_epoch_ms": null,
+              "duplicate_checkpoint_ids": 0,
+              "output_start_offset": null,
+              "quarantined_checkpoint_metaorders": 0,
+              "receipt_valid": false,
+              "schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1",
+              "writer_role": null,
+              "writer_run_id": null
+            },
+            "coins": 0,
+            "duplicate_checkpoint_ids": 0,
+            "duplicate_checkpoint_rows": 0,
+            "duplicate_rows_rejected": 0,
+            "exists": false,
+            "historical_or_noncausal_rows_excluded": 0,
+            "invalid_rows": 0,
+            "protocol_coins": 0,
+            "protocol_valid_rows": 0,
+            "quarantined_checkpoint_metaorders": 0,
+            "quarantined_checkpoint_rows": 0,
+            "rows_read": 0,
+            "source_counts": {
+              "causal_info_checkpoint": 0,
+              "causal_ws": 0,
+              "historical_observed": 0
+            },
+            "sources": [
+              "runtime/data/carnet_venues.jsonl",
+              "runtime/data/copy_vault_l2_tape.jsonl"
+            ],
+            "valid_rows": 0
+          },
+          "canonical_input_audit": {
+            "alpha_before_nav_gate": 0,
+            "alpha_entries": 0,
+            "canonical_episodes": 0,
+            "causal_alpha_before_nav_gate": 0,
+            "causal_alpha_entries": 0,
+            "causal_episodes": 0,
+            "causal_live_fill_rows": 0,
+            "causal_missing_or_stale_asof_nav_rejected": 0,
+            "causal_rows_preferred_on_duplicate": true,
+            "cross_source_or_internal_duplicates_rejected": 0,
+            "deduped_fill_rows": 0,
+            "deduped_fills": 0,
+            "duplicate_episodes_rejected": 0,
+            "duplicate_fills_rejected": 0,
+            "episode_source": "legacy_vault_episodes_fallback",
+            "historical_fill_rows": 0,
+            "live_fill_rows": 0,
+            "live_incremental_rows": 0,
+            "live_incremental_without_valid_receive_time_audit_only": 0,
+            "live_policy": "LIVE_WS_AND_NOT_SNAPSHOT_AND_VALID_LOCAL_RECEIVE_TIME",
+            "live_snapshot_rows_rejected": 0,
+            "live_unprovenanced_rows_rejected": 0,
+            "max_nav_age_ms": 21600000,
+            "merged_fill_rows": 0,
+            "missing_or_stale_asof_nav_rejected": 0,
+            "nav_age_max_ms": null,
+            "nav_age_mean_ms": null,
+            "nav_policy": "last_snapshot_at_or_before_signal",
+            "raw_episodes": 0,
+            "raw_fills": 0
+          },
+          "metaorder_audit": {
+            "action_direction_contradictions_rejected": 0,
+            "all_metaorders": 0,
+            "canonical_events": 0,
+            "causal_forward_metaorders": 0,
+            "duplicate_events_rejected": 0,
+            "entry_policy": "action_OPEN_or_ADD_and_dir_Open_Long_or_Open_Short",
+            "historical_or_noncausal_metaorders_excluded": 0,
+            "input_events": 0,
+            "invalid_events_rejected": 0,
+            "metaorders": 0,
+            "non_entry_events_rejected": 0,
+            "protocol_scope": "LIVE_WS_SIGNALS_AND_CAUSAL_HYPERLIQUID_L2_ONLY",
+            "signal_policy": "first_fill;later_slices_audit_only",
+            "sliced_fills_collapsed": 0
+          },
+          "walk_forward_bounds": {
+            "oos_end_ms": null,
+            "oos_start_ms": null,
+            "purge_ms": null,
+            "train_end_ms": null,
+            "train_start_ms": null,
+            "validation_end_ms": null,
+            "validation_start_ms": null
+          }
+        },
+        "placebos": {
+          "beaten": false,
+          "candidate_net_usd": null,
+          "method": "same_metaorders_inverted_direction",
+          "placebo_net_usd": null
+        },
+        "profit_factor": null,
+        "proof_economics": null,
+        "proof_net_pnl_usd": null,
+        "real_execution": false,
+        "roi_pct": null,
+        "schema_version": "hypersmart.economic_campaign_evidence.v1",
+        "signal_count": 0,
+        "slippage_cost_usd": null,
+        "source_status": "KILL_TRAIN_INSUFFICIENT_EXECUTABLE_EPISODES",
+        "spread_cost_usd": null,
+        "starting_capital_usd": 100.0,
+        "target_net_usd": 4.0,
+        "target_net_usd_per_day": 4.0,
+        "top_no_trade_reasons": [],
+        "trade_ids_count": 0,
+        "trade_ids_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "vault_generalization": null,
+        "verdict": "MORE_DATA",
+        "verdict_reasons": [
+          "UNMEASURED:net_pnl_usd",
+          "UNMEASURED:roi_pct",
+          "UNMEASURED:max_drawdown_usd",
+          "UNMEASURED:hit_rate",
+          "UNMEASURED:profit_factor",
+          "UNMEASURED:liquidatable_net"
+        ]
+      },
+      "cross_venue_dislocation_v2": {
+        "all_positions_two_leg_closed": false,
+        "assumption_snapshot_hash": "8badfd62065cbf93918aa815439a65d656192b70f83ddc28c9b70a4423e7c5d8",
+        "campaign_id": null,
+        "closed_positions": 0,
+        "comparison_metric_source": null,
+        "comparison_metric_usd": null,
+        "copy_checkpoint_integrity": null,
+        "daily_evidence": null,
+        "daily_observed": {
+          "all_days_at_or_above_target": false,
+          "complete_utc_days_only": false,
+          "completed_cutoff_exclusive_ms": 1791072000000,
+          "days": [],
+          "evaluated_at_ms": 1791155743412,
+          "excluded_incomplete_days_utc": [],
+          "excluded_incomplete_trade_count": 0,
+          "mean_daily_net_pnl_usd": null,
+          "min_daily_net_pnl_usd": null,
+          "minimum_required_days": 2,
+          "missing_trade_net": 0,
+          "missing_trade_timestamps": 0,
+          "observed_trade_count": 0,
+          "sample_count": 0,
+          "schema_version": "hypersmart.daily_net_evidence.v1",
+          "target_net_usd_per_day": 4.0,
+          "total_net_pnl_usd": null
+        },
+        "daily_target_required": true,
+        "dataset_provenance": {
+          "dataset_fingerprint": "6381bf8c3b0f815fcde565efd3ed901e312e14413f169e4e25bee022402f0868",
+          "files": [
+            {
+              "exists": false,
+              "path": "runtime/data/carnet_venues.jsonl"
+            }
+          ]
+        },
+        "duplicate_trade_ids": 0,
+        "economic_binding": {
+          "assumption_snapshot_hash": "8badfd62065cbf93918aa815439a65d656192b70f83ddc28c9b70a4423e7c5d8",
+          "bundle_hash": "c19c06ae7b5d95b67d973ce0fba04332f924075bc7bcba9f1531dfd5e6b2ed92",
+          "family": "CROSS_VENUE",
+          "formula_snapshot_hash": "261bde0baef71f660c69237727a72ca3d57238cceaf47ed4aaf606cf34b64c28",
+          "issues": [],
+          "numeric_provenance_hash": "fc7d2ef96118fb1d4d0d601c8589f86aee48a080a417580b503397a603fc0dd2",
+          "policy_version": "hypersmart.economic_policy.v21",
+          "ready": true,
+          "reality_model_hash": "87dc0f4b134e491f223f47cff0938eda24844b935b271b599ed2bc09060e2b50",
+          "run_mode": "CERTIFIABLE"
+        },
+        "economic_contract": {
+          "assumption_snapshot": {
+            "assumptions": [
+              {
+                "assumption_id": "cross_venue.adverse_selection_reserve_bps",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": null,
+                "name": "Reserve de selection adverse",
+                "observed_at": null,
+                "owner": "HyperSmart/cross_venue",
+                "revalidate_after": null,
+                "source_hash": "395f2ee3b6b4b18524675ffee9501637178f75e862d98b57f734fb6036536433",
+                "source_ref": "project:backtesting/cross_venue_v4_train.py#adverse-selection-reserve",
+                "unit": "bps",
+                "valid_until": null,
+                "value": 12.0
+              },
+              {
+                "assumption_id": "cross_venue.entry_latency_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": null,
+                "name": "Delai causal avant entree",
+                "observed_at": null,
+                "owner": "HyperSmart/cross_venue",
+                "revalidate_after": null,
+                "source_hash": "a8a7648edd843755146370ea9b8ebe13957ba1ea287e659bec31bf28b1b18e0b",
+                "source_ref": "project:backtesting/cross_venue_v3_train.py#LATENCY_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 400.0
+              },
+              {
+                "assumption_id": "cross_venue.max_book_age_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": null,
+                "name": "Age maximal du carnet de capacite",
+                "observed_at": null,
+                "owner": "HyperSmart/cross_venue",
+                "revalidate_after": null,
+                "source_hash": "e41b5363a3e7945f034e3704d0a0057520c8a960fcc9a7fc5457304f4802fe31",
+                "source_ref": "project:backtesting/cross_venue_v3_train.py#MAX_OBSERVATION_GAP_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 3000.0
+              },
+              {
+                "assumption_id": "cross_venue.minimum_entry_edge_bps",
+                "certification_eligible": true,
+                "classification": "DERIVED",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": "cross_venue.minimum_entry_edge.v1",
+                "name": "Edge executable minimal",
+                "observed_at": null,
+                "owner": "HyperSmart",
+                "revalidate_after": null,
+                "source_hash": "bb2513c3c96910c76a0e4bcc4672f6b93832c11f949a780b85090a0ec96a4b33",
+                "source_ref": "formula:cross_venue.minimum_entry_edge.v1@v1",
+                "unit": "bps",
+                "valid_until": null,
+                "value": 31.0
+              },
+              {
+                "assumption_id": "cross_venue.paper_notional_usd",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": null,
+                "name": "Notionnel paper par cycle",
+                "observed_at": null,
+                "owner": "HyperSmart/cross_venue",
+                "revalidate_after": null,
+                "source_hash": "7c71cb89857bfc51a5f2057e539ad668e1d06cd8453570d44918ae791548413b",
+                "source_ref": "project:backtesting/cross_venue_v3_train.py#NOTIONAL_USD",
+                "unit": "USD",
+                "valid_until": null,
+                "value": 15.0
+              },
+              {
+                "assumption_id": "cross_venue.round_trip_fee_bps",
+                "certification_eligible": true,
+                "classification": "DERIVED",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "CROSS_VENUE"
+                ],
+                "formula_id": "cross_venue.round_trip_fee.v1",
+                "name": "Frais aller-retour CROSS_VENUE",
+                "observed_at": null,
+                "owner": "HyperSmart",
+                "revalidate_after": null,
+                "source_hash": "bc47a712ef377ed7214ebc702412c295979357e7786466ac404cdf07d2500b7e",
+                "source_ref": "formula:cross_venue.round_trip_fee.v1@v1",
+                "unit": "bps_round_trip",
+                "valid_until": null,
+                "value": 19.0
+              },
+              {
+                "assumption_id": "fee.taker.binance.bps",
+                "certification_eligible": true,
+                "classification": "CONSERVATIVE_DEFAULT",
+                "effective_from": null,
+                "fallback_reason": "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT",
+                "family_scope": [
+                  "COPY_VAULT",
+                  "CROSS_VENUE",
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Frais taker BINANCE par fill",
+                "observed_at": "2026-09-09T00:00:00Z",
+                "owner": "HyperSmart/economic-config",
+                "revalidate_after": "2026-12-09T00:00:00Z",
+                "source_hash": "eb178810b755d88572e9b9c8ea4a2f1ecf76022fbf45d221f7de3fda44b5a072",
+                "source_ref": "https://www.binance.com/en-AU/support/faq/detail/360033544231#regular-user-usds-m-taker-read-2026-09-09",
+                "unit": "bps_per_fill",
+                "valid_until": null,
+                "value": 5.0
+              },
+              {
+                "assumption_id": "fee.taker.hyperliquid.bps",
+                "certification_eligible": true,
+                "classification": "CONSERVATIVE_DEFAULT",
+                "effective_from": null,
+                "fallback_reason": "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT",
+                "family_scope": [
+                  "COPY_VAULT",
+                  "CROSS_VENUE",
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Frais taker HYPERLIQUID par fill",
+                "observed_at": "2026-07-13T00:00:00Z",
+                "owner": "HyperSmart/economic-config",
+                "revalidate_after": "2026-10-13T00:00:00Z",
+                "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                "unit": "bps_per_fill",
+                "valid_until": null,
+                "value": 4.5
+              }
+            ],
+            "formulas": [
+              {
+                "expression": "round_trip_fee_bps + adverse_selection_reserve_bps",
+                "formula_id": "cross_venue.minimum_entry_edge.v1",
+                "output_assumption_id": "cross_venue.minimum_entry_edge_bps",
+                "parent_ids": [
+                  "cross_venue.round_trip_fee_bps",
+                  "cross_venue.adverse_selection_reserve_bps"
+                ],
+                "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+                "unit": "bps",
+                "version": "v1"
+              },
+              {
+                "expression": "2*fee.taker.binance.bps + 2*fee.taker.hyperliquid.bps",
+                "formula_id": "cross_venue.round_trip_fee.v1",
+                "output_assumption_id": "cross_venue.round_trip_fee_bps",
+                "parent_ids": [
+                  "fee.taker.binance.bps",
+                  "fee.taker.hyperliquid.bps"
+                ],
+                "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+                "unit": "bps_round_trip",
+                "version": "v1"
+              }
+            ],
+            "schema": "hypersmart.economic_assumption_snapshot.v1"
+          },
+          "assumption_snapshot_hash": "8badfd62065cbf93918aa815439a65d656192b70f83ddc28c9b70a4423e7c5d8",
+          "certification": {
+            "assumption_snapshot_hash": "8badfd62065cbf93918aa815439a65d656192b70f83ddc28c9b70a4423e7c5d8",
+            "failures": [],
+            "ready": true,
+            "required_ids": [
+              "cross_venue.adverse_selection_reserve_bps",
+              "cross_venue.entry_latency_ms",
+              "cross_venue.max_book_age_ms",
+              "cross_venue.minimum_entry_edge_bps",
+              "cross_venue.paper_notional_usd",
+              "cross_venue.round_trip_fee_bps",
+              "fee.taker.binance.bps",
+              "fee.taker.hyperliquid.bps"
+            ],
+            "schema": "hypersmart.economic_certification_receipt.v1"
+          },
+          "direct_measured_fields": [
+            "entry_capacity_usd",
+            "exit_capacity_usd",
+            "bid",
+            "ask"
+          ],
+          "economic_evidence_bundle": {
+            "assumption_snapshot_hash": "8badfd62065cbf93918aa815439a65d656192b70f83ddc28c9b70a4423e7c5d8",
+            "bundle_hash": "c19c06ae7b5d95b67d973ce0fba04332f924075bc7bcba9f1531dfd5e6b2ed92",
+            "family": "CROSS_VENUE",
+            "formula_snapshot_hash": "261bde0baef71f660c69237727a72ca3d57238cceaf47ed4aaf606cf34b64c28",
+            "maturity_stage": "BUILT",
+            "numeric_provenance_hash": "fc7d2ef96118fb1d4d0d601c8589f86aee48a080a417580b503397a603fc0dd2",
+            "policy_version": "hypersmart.economic_policy.v21",
+            "reality_model_components": {
+              "fee_treatment": "cross_venue.round_trip_fee.v1:2xHL+2xBINANCE",
+              "fill_count": "cross_venue.four_fill_two_venue.v1",
+              "funding_treatment": "cross_venue.no_funding_settlement_in_closed_cycle.v1",
+              "latency_treatment": "cross_venue.causal_delayed_entry.v1",
+              "slippage_capacity_treatment": "cross_venue.full_depth_capacity_or_reject.v1",
+              "spread_treatment": "cross_venue.executable_bid_ask_fills.v1"
+            },
+            "reality_model_hash": "87dc0f4b134e491f223f47cff0938eda24844b935b271b599ed2bc09060e2b50",
+            "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+            "required_assumption_ids": [
+              "cross_venue.adverse_selection_reserve_bps",
+              "cross_venue.entry_latency_ms",
+              "cross_venue.max_book_age_ms",
+              "cross_venue.minimum_entry_edge_bps",
+              "cross_venue.paper_notional_usd",
+              "cross_venue.round_trip_fee_bps",
+              "fee.taker.binance.bps",
+              "fee.taker.hyperliquid.bps"
+            ],
+            "run_mode": "CERTIFIABLE",
+            "schema": "hypersmart.economic_evidence_bundle.v1"
+          },
+          "family": "CROSS_VENUE",
+          "formula_manifest": [
+            {
+              "expression": "round_trip_fee_bps + adverse_selection_reserve_bps",
+              "formula_id": "cross_venue.minimum_entry_edge.v1",
+              "output_assumption_id": "cross_venue.minimum_entry_edge_bps",
+              "parent_ids": [
+                "cross_venue.round_trip_fee_bps",
+                "cross_venue.adverse_selection_reserve_bps"
+              ],
+              "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+              "unit": "bps",
+              "version": "v1"
+            },
+            {
+              "expression": "2*fee.taker.binance.bps + 2*fee.taker.hyperliquid.bps",
+              "formula_id": "cross_venue.round_trip_fee.v1",
+              "output_assumption_id": "cross_venue.round_trip_fee_bps",
+              "parent_ids": [
+                "fee.taker.binance.bps",
+                "fee.taker.hyperliquid.bps"
+              ],
+              "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+              "unit": "bps_round_trip",
+              "version": "v1"
+            }
+          ],
+          "formula_snapshot_hash": "261bde0baef71f660c69237727a72ca3d57238cceaf47ed4aaf606cf34b64c28",
+          "numeric_provenance": {
+            "cross_venue.adverse_selection_reserve_bps": [
+              "cross_venue.adverse_selection_reserve_bps"
+            ],
+            "cross_venue.entry_latency_ms": [
+              "cross_venue.entry_latency_ms"
+            ],
+            "cross_venue.max_book_age_ms": [
+              "cross_venue.max_book_age_ms"
+            ],
+            "cross_venue.minimum_entry_edge_bps": [
+              "fee.taker.binance.bps",
+              "fee.taker.hyperliquid.bps",
+              "cross_venue.round_trip_fee_bps",
+              "cross_venue.adverse_selection_reserve_bps",
+              "cross_venue.minimum_entry_edge_bps"
+            ],
+            "cross_venue.paper_notional_usd": [
+              "cross_venue.paper_notional_usd"
+            ],
+            "cross_venue.round_trip_fee_bps": [
+              "fee.taker.binance.bps",
+              "fee.taker.hyperliquid.bps",
+              "cross_venue.round_trip_fee_bps"
+            ],
+            "fee.taker.binance.bps": [
+              "fee.taker.binance.bps"
+            ],
+            "fee.taker.hyperliquid.bps": [
+              "fee.taker.hyperliquid.bps"
+            ]
+          },
+          "numeric_provenance_hash": "fc7d2ef96118fb1d4d0d601c8589f86aee48a080a417580b503397a603fc0dd2",
+          "numeric_provenance_pointers": {
+            "cross_venue.adverse_selection_reserve_bps": {
+              "chain": [
+                "cross_venue.adverse_selection_reserve_bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "cross_venue.adverse_selection_reserve_bps",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "395f2ee3b6b4b18524675ffee9501637178f75e862d98b57f734fb6036536433",
+                  "source_ref": "project:backtesting/cross_venue_v4_train.py#adverse-selection-reserve",
+                  "unit": "bps",
+                  "value": 12.0
+                }
+              ],
+              "terminal_value": 12.0
+            },
+            "cross_venue.entry_latency_ms": {
+              "chain": [
+                "cross_venue.entry_latency_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "cross_venue.entry_latency_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "a8a7648edd843755146370ea9b8ebe13957ba1ea287e659bec31bf28b1b18e0b",
+                  "source_ref": "project:backtesting/cross_venue_v3_train.py#LATENCY_MS",
+                  "unit": "ms",
+                  "value": 400.0
+                }
+              ],
+              "terminal_value": 400.0
+            },
+            "cross_venue.max_book_age_ms": {
+              "chain": [
+                "cross_venue.max_book_age_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "cross_venue.max_book_age_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "e41b5363a3e7945f034e3704d0a0057520c8a960fcc9a7fc5457304f4802fe31",
+                  "source_ref": "project:backtesting/cross_venue_v3_train.py#MAX_OBSERVATION_GAP_MS",
+                  "unit": "ms",
+                  "value": 3000.0
+                }
+              ],
+              "terminal_value": 3000.0
+            },
+            "cross_venue.minimum_entry_edge_bps": {
+              "chain": [
+                "fee.taker.binance.bps",
+                "fee.taker.hyperliquid.bps",
+                "cross_venue.round_trip_fee_bps",
+                "cross_venue.adverse_selection_reserve_bps",
+                "cross_venue.minimum_entry_edge_bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.binance.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "eb178810b755d88572e9b9c8ea4a2f1ecf76022fbf45d221f7de3fda44b5a072",
+                  "source_ref": "https://www.binance.com/en-AU/support/faq/detail/360033544231#regular-user-usds-m-taker-read-2026-09-09",
+                  "unit": "bps_per_fill",
+                  "value": 5.0
+                },
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                },
+                {
+                  "assumption_id": "cross_venue.round_trip_fee_bps",
+                  "classification": "DERIVED",
+                  "formula_id": "cross_venue.round_trip_fee.v1",
+                  "source_hash": "bc47a712ef377ed7214ebc702412c295979357e7786466ac404cdf07d2500b7e",
+                  "source_ref": "formula:cross_venue.round_trip_fee.v1@v1",
+                  "unit": "bps_round_trip",
+                  "value": 19.0
+                },
+                {
+                  "assumption_id": "cross_venue.adverse_selection_reserve_bps",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "395f2ee3b6b4b18524675ffee9501637178f75e862d98b57f734fb6036536433",
+                  "source_ref": "project:backtesting/cross_venue_v4_train.py#adverse-selection-reserve",
+                  "unit": "bps",
+                  "value": 12.0
+                },
+                {
+                  "assumption_id": "cross_venue.minimum_entry_edge_bps",
+                  "classification": "DERIVED",
+                  "formula_id": "cross_venue.minimum_entry_edge.v1",
+                  "source_hash": "bb2513c3c96910c76a0e4bcc4672f6b93832c11f949a780b85090a0ec96a4b33",
+                  "source_ref": "formula:cross_venue.minimum_entry_edge.v1@v1",
+                  "unit": "bps",
+                  "value": 31.0
+                }
+              ],
+              "terminal_value": 31.0
+            },
+            "cross_venue.paper_notional_usd": {
+              "chain": [
+                "cross_venue.paper_notional_usd"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "cross_venue.paper_notional_usd",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "7c71cb89857bfc51a5f2057e539ad668e1d06cd8453570d44918ae791548413b",
+                  "source_ref": "project:backtesting/cross_venue_v3_train.py#NOTIONAL_USD",
+                  "unit": "USD",
+                  "value": 15.0
+                }
+              ],
+              "terminal_value": 15.0
+            },
+            "cross_venue.round_trip_fee_bps": {
+              "chain": [
+                "fee.taker.binance.bps",
+                "fee.taker.hyperliquid.bps",
+                "cross_venue.round_trip_fee_bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.binance.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "eb178810b755d88572e9b9c8ea4a2f1ecf76022fbf45d221f7de3fda44b5a072",
+                  "source_ref": "https://www.binance.com/en-AU/support/faq/detail/360033544231#regular-user-usds-m-taker-read-2026-09-09",
+                  "unit": "bps_per_fill",
+                  "value": 5.0
+                },
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                },
+                {
+                  "assumption_id": "cross_venue.round_trip_fee_bps",
+                  "classification": "DERIVED",
+                  "formula_id": "cross_venue.round_trip_fee.v1",
+                  "source_hash": "bc47a712ef377ed7214ebc702412c295979357e7786466ac404cdf07d2500b7e",
+                  "source_ref": "formula:cross_venue.round_trip_fee.v1@v1",
+                  "unit": "bps_round_trip",
+                  "value": 19.0
+                }
+              ],
+              "terminal_value": 19.0
+            },
+            "fee.taker.binance.bps": {
+              "chain": [
+                "fee.taker.binance.bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.binance.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "eb178810b755d88572e9b9c8ea4a2f1ecf76022fbf45d221f7de3fda44b5a072",
+                  "source_ref": "https://www.binance.com/en-AU/support/faq/detail/360033544231#regular-user-usds-m-taker-read-2026-09-09",
+                  "unit": "bps_per_fill",
+                  "value": 5.0
+                }
+              ],
+              "terminal_value": 5.0
+            },
+            "fee.taker.hyperliquid.bps": {
+              "chain": [
+                "fee.taker.hyperliquid.bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                }
+              ],
+              "terminal_value": 4.5
+            }
+          },
+          "policy_version": "hypersmart.economic_policy.v21",
+          "reality_model_components": {
+            "fee_treatment": "cross_venue.round_trip_fee.v1:2xHL+2xBINANCE",
+            "fill_count": "cross_venue.four_fill_two_venue.v1",
+            "funding_treatment": "cross_venue.no_funding_settlement_in_closed_cycle.v1",
+            "latency_treatment": "cross_venue.causal_delayed_entry.v1",
+            "slippage_capacity_treatment": "cross_venue.full_depth_capacity_or_reject.v1",
+            "spread_treatment": "cross_venue.executable_bid_ask_fills.v1"
+          },
+          "reality_model_hash": "87dc0f4b134e491f223f47cff0938eda24844b935b271b599ed2bc09060e2b50",
+          "reality_model_version": "cross_venue_four_fill_executable_bbo.v1",
+          "required_assumption_ids": [
+            "cross_venue.adverse_selection_reserve_bps",
+            "cross_venue.entry_latency_ms",
+            "cross_venue.max_book_age_ms",
+            "cross_venue.minimum_entry_edge_bps",
+            "cross_venue.paper_notional_usd",
+            "cross_venue.round_trip_fee_bps",
+            "fee.taker.binance.bps",
+            "fee.taker.hyperliquid.bps"
+          ],
+          "run_mode": "CERTIFIABLE",
+          "schema": "hypersmart.family_economic_contract.v2",
+          "values": {
+            "cross_venue.adverse_selection_reserve_bps": 12.0,
+            "cross_venue.entry_latency_ms": 400.0,
+            "cross_venue.max_book_age_ms": 3000.0,
+            "cross_venue.minimum_entry_edge_bps": 31.0,
+            "cross_venue.paper_notional_usd": 15.0,
+            "cross_venue.round_trip_fee_bps": 19.0,
+            "fee.taker.binance.bps": 5.0,
+            "fee.taker.hyperliquid.bps": 4.5
+          }
+        },
+        "economic_evidence_bundle_hash": "c19c06ae7b5d95b67d973ce0fba04332f924075bc7bcba9f1531dfd5e6b2ed92",
+        "economic_policy_version": "hypersmart.economic_policy.v21",
+        "eligible_net_pnl_usd": null,
+        "evidence_paths": [
+          "runtime/research/dislocation_final_verdict.json",
+          "runtime/reports/economic_campaigns/raw/cross_venue_dislocation_v2.json",
+          "runtime/reports/economic_campaigns/cross_venue_dislocation_v2.json"
+        ],
+        "family": "cross_venue_dislocation_v2",
+        "fees_usd": null,
+        "formula_snapshot_hash": "261bde0baef71f660c69237727a72ca3d57238cceaf47ed4aaf606cf34b64c28",
+        "forward": {
+          "anti_lookahead_receipt_valid": false,
+          "duplicate_trade_ids": null,
+          "fees_usd": null,
+          "gross_pnl_usd": null,
+          "latency_cost_usd": null,
+          "liquidatable_net": false,
+          "net_pnl_usd": 0.0,
+          "no_lookahead": false,
+          "post_freeze": false,
+          "sample_count": 0,
+          "slippage_cost_usd": null,
+          "spread_cost_usd": null,
+          "trade_ids_count": null,
+          "trade_ids_sha256": null
+        },
+        "generated_at_ms": 1791155743412,
+        "gross_pnl_usd": null,
+        "hit_rate": 0.0,
+        "hypothesis_audit": {
+          "forward": {
+            "net_pnl_usd": 0.0,
+            "profit_factor": 0.0,
+            "sample_count": 0
+          },
+          "frozen_mechanism_status": "KILL",
+          "hypothesis_id": "CROSS_VENUE_BASIS_CONVERGENCE_V2",
+          "inverted_direction_control": {
+            "net_pnl_usd": 0.0,
+            "non_promotion_reason": "OOS_CONTROL_NOT_A_PREDECLARED_STRATEGY",
+            "positive_oos": false,
+            "profit_factor": 0.0,
+            "promotable": false,
+            "sample_count": 0
+          },
+          "new_mechanism_required": true,
+          "next_action": "KILL_CURRENT_MECHANISM_AND_FORMULATE_A_MATERIALLY_NEW_HYPOTHESIS",
+          "oos": {
+            "net_pnl_usd": 0.0,
+            "profit_factor": 0.0,
+            "sample_count": 0
+          },
+          "retrospective_direction_switch_forbidden": true,
+          "source_walk_forward_status": "INVALID_OR_INCOMPLETE_FREEZE",
+          "train": {
+            "net_pnl_usd": 0.0,
+            "profit_factor": 0.0,
+            "sample_count": 0
+          },
+          "validation": {
+            "net_pnl_usd": 0.0,
+            "profit_factor": 0.0,
+            "sample_count": 0
+          }
+        },
+        "in_sample": null,
+        "latency_cost_usd": null,
+        "liquidatable_net": false,
+        "max_drawdown_usd": 0.0,
+        "measurement_status": "NON_MESURABLE",
+        "net_pnl_usd": null,
+        "no_trade_count": null,
+        "numeric_provenance_hash": "fc7d2ef96118fb1d4d0d601c8589f86aee48a080a417580b503397a603fc0dd2",
+        "objective_reasons": [
+          "PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION",
+          "POSITIONS_NOT_FULLY_OPENED_AND_CLOSED",
+          "CROSS_VENUE_TWO_LEG_CLOSE_PROOF_MISSING",
+          "CROSS_VENUE_CERTIFIED_SNAPSHOT_PROOF_MISSING",
+          "CROSS_VENUE_MAPPING_PROOF_MISSING",
+          "CROSS_VENUE_SKEW_PROOF_MISSING",
+          "UNMEASURED:gross_pnl_usd",
+          "UNMEASURED:fees_usd",
+          "UNMEASURED:spread_cost_usd",
+          "UNMEASURED:slippage_cost_usd",
+          "UNMEASURED:latency_cost_usd",
+          "UNMEASURED:net_pnl_usd",
+          "NOT_LIQUIDATABLE_NET",
+          "OOS_UNMEASURED:gross_pnl_usd",
+          "OOS_UNMEASURED:fees_usd",
+          "OOS_UNMEASURED:spread_cost_usd",
+          "OOS_UNMEASURED:slippage_cost_usd",
+          "OOS_UNMEASURED:latency_cost_usd",
+          "OOS_NOT_LIQUIDATABLE_NET",
+          "OOS_DUPLICATE_TRADE_IDENTITIES",
+          "OOS_TRADE_ID_PROOF_INCOMPLETE",
+          "FORWARD_UNMEASURED:gross_pnl_usd",
+          "FORWARD_UNMEASURED:fees_usd",
+          "FORWARD_UNMEASURED:spread_cost_usd",
+          "FORWARD_UNMEASURED:slippage_cost_usd",
+          "FORWARD_UNMEASURED:latency_cost_usd",
+          "FORWARD_NOT_LIQUIDATABLE_NET",
+          "FORWARD_DUPLICATE_TRADE_IDENTITIES",
+          "FORWARD_TRADE_ID_PROOF_INCOMPLETE",
+          "OOS_SAMPLE_MISSING",
+          "FORWARD_SAMPLE_MISSING",
+          "PLACEBO_NOT_BEATEN",
+          "DAILY_NET_PROOF_MISSING",
+          "TARGET_NET_USD_NOT_REACHED"
+        ],
+        "objective_status": "NON_ATTEINT",
+        "oos": {
+          "anti_lookahead_receipt_valid": false,
+          "duplicate_trade_ids": null,
+          "fees_usd": null,
+          "gross_pnl_usd": null,
+          "latency_cost_usd": null,
+          "liquidatable_net": false,
+          "net_pnl_usd": 0.0,
+          "no_lookahead": false,
+          "post_freeze": false,
+          "sample_count": 0,
+          "slippage_cost_usd": null,
+          "spread_cost_usd": null,
+          "trade_ids_count": null,
+          "trade_ids_sha256": null
+        },
+        "opened_positions": 0,
+        "paper_read_only": true,
+        "parameter_freeze": null,
+        "parameters_frozen": false,
+        "period": {
+          "collection_meta": {
+            "capacity_definition": "minimum USD capacity on the four BBO top levels",
+            "certified_snapshots": 0,
+            "coins": 0,
+            "dataset_source_manifest": "/home/runner/work/_temp/alina-replay-workspace/runtime/reports/datasets/FAMILY_SOURCES.json",
+            "dataset_sources_discovered": {
+              "bytes": 0,
+              "file_count": 0
+            },
+            "duplicates_rejected": 0,
+            "four_fill_contract_version": "cross_four_fill_aon_v1",
+            "invalid_rows": 0,
+            "legacy_bbo_budget_s_unused": 20.0,
+            "legacy_current_only_unused": false,
+            "legacy_rows_never_upgraded": true,
+            "legacy_uncertified_rows_rejected": 0,
+            "lines_read": 0,
+            "mapping_verified": false,
+            "max_venue_skew_ms": 250.0,
+            "normalization_receipt": null,
+            "paper_read_only": true,
+            "real_execution": false,
+            "skew_verified": false,
+            "source": "runtime/data/carnet_venues.jsonl",
+            "source_mode": "CERTIFIED_ATOMIC_FOUR_SIDE_BOOK_V2"
+          },
+          "first_detection_ms": null,
+          "last_close_ms": null
+        },
+        "placebos": {
+          "beaten": false,
+          "candidate_count": 0,
+          "candidate_net_usd": 0.0,
+          "placebo_count": 0,
+          "placebo_net_usd": 0.0
+        },
+        "profit_factor": 0.0,
+        "proof_economics": null,
+        "proof_net_pnl_usd": null,
+        "real_execution": false,
+        "roi_pct": 0.0,
+        "schema_version": "hypersmart.economic_campaign_evidence.v1",
+        "signal_count": 0,
+        "slippage_cost_usd": null,
+        "source_status": "INSUFFISANT",
+        "spread_cost_usd": null,
+        "starting_capital_usd": 100.0,
+        "target_net_usd": 4.0,
+        "target_net_usd_per_day": 4.0,
+        "top_no_trade_reasons": [],
+        "trade_ids_count": 0,
+        "trade_ids_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "verdict": "MORE_DATA",
+        "verdict_reasons": [
+          "UNMEASURED:net_pnl_usd",
+          "UNMEASURED:liquidatable_net"
+        ]
+      },
+      "lead_lag": {
+        "assumption_snapshot_hash": "e62931ceb34e3ae83acabf272869b2b6b61d136eaa99f8c84886c93b86aea256",
+        "campaign_id": null,
+        "closed_positions": null,
+        "comparison_metric_source": null,
+        "comparison_metric_usd": null,
+        "copy_checkpoint_integrity": null,
+        "daily_evidence": null,
+        "daily_observed": {
+          "all_days_at_or_above_target": false,
+          "complete_utc_days_only": false,
+          "completed_cutoff_exclusive_ms": 1791072000000,
+          "days": [],
+          "evaluated_at_ms": 1791155743408,
+          "excluded_incomplete_days_utc": [],
+          "excluded_incomplete_trade_count": 0,
+          "mean_daily_net_pnl_usd": null,
+          "min_daily_net_pnl_usd": null,
+          "minimum_required_days": 2,
+          "missing_trade_net": 0,
+          "missing_trade_timestamps": 0,
+          "observed_trade_count": 0,
+          "sample_count": 0,
+          "schema_version": "hypersmart.daily_net_evidence.v1",
+          "target_net_usd_per_day": 4.0,
+          "total_net_pnl_usd": null
+        },
+        "daily_target_required": true,
+        "dataset_provenance": {
+          "dataset_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "files": []
+        },
+        "duplicate_trade_ids": null,
+        "economic_binding": {
+          "assumption_snapshot_hash": "e62931ceb34e3ae83acabf272869b2b6b61d136eaa99f8c84886c93b86aea256",
+          "bundle_hash": "bc657ffd38da808c540bcdd2c522ac787ccccdf921b6eff54d17b954209ff575",
+          "family": "LEAD_LAG",
+          "formula_snapshot_hash": "469c9c1d3517341c2f776c56901e7d43122ce2b541dc3fcbe153d1f918523466",
+          "issues": [],
+          "numeric_provenance_hash": "5d059ebd74f88b576534cb0de4d5eb5cd0333b110db2ca3dfb613cb2e0ad7901",
+          "policy_version": "hypersmart.economic_policy.v21",
+          "ready": true,
+          "reality_model_hash": "32f6e9b0e820bfc412a374aedfba8be3662002014326b4caceb9336d04a45cca",
+          "run_mode": "CERTIFIABLE"
+        },
+        "economic_contract": {
+          "assumption_snapshot": {
+            "assumptions": [
+              {
+                "assumption_id": "fee.maker.hyperliquid.bps",
+                "certification_eligible": true,
+                "classification": "CONSERVATIVE_DEFAULT",
+                "effective_from": null,
+                "fallback_reason": "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT",
+                "family_scope": [
+                  "CROSS_VENUE",
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Frais maker HYPERLIQUID par fill",
+                "observed_at": "2026-07-13T00:00:00Z",
+                "owner": "HyperSmart/economic-config",
+                "revalidate_after": "2026-10-13T00:00:00Z",
+                "source_hash": "40dd1e20ac70668fad223ef1f3a2236a430b69766c7e76abfc26f9d11e44ee92",
+                "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-maker-read-2026-09-09",
+                "unit": "bps_per_fill",
+                "valid_until": null,
+                "value": 1.5
+              },
+              {
+                "assumption_id": "fee.taker.hyperliquid.bps",
+                "certification_eligible": true,
+                "classification": "CONSERVATIVE_DEFAULT",
+                "effective_from": null,
+                "fallback_reason": "NO_EXPLICIT_OVERRIDE_USE_PREDECLARED_DEFAULT",
+                "family_scope": [
+                  "COPY_VAULT",
+                  "CROSS_VENUE",
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Frais taker HYPERLIQUID par fill",
+                "observed_at": "2026-07-13T00:00:00Z",
+                "owner": "HyperSmart/economic-config",
+                "revalidate_after": "2026-10-13T00:00:00Z",
+                "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                "unit": "bps_per_fill",
+                "valid_until": null,
+                "value": 4.5
+              },
+              {
+                "assumption_id": "lead_lag.maker_round_trip_fee_bps",
+                "certification_eligible": true,
+                "classification": "DERIVED",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "LEAD_LAG"
+                ],
+                "formula_id": "lead_lag.maker_entry_taker_exit_fee.v1",
+                "name": "Frais maker entree et taker sortie Lead-Lag",
+                "observed_at": null,
+                "owner": "HyperSmart",
+                "revalidate_after": null,
+                "source_hash": "894b57ea2335052720682a6de3a89ad9f4fb17cc938ab1c4c39b7fa34168edec",
+                "source_ref": "formula:lead_lag.maker_entry_taker_exit_fee.v1@v1",
+                "unit": "bps_round_trip",
+                "valid_until": null,
+                "value": 6.0
+              },
+              {
+                "assumption_id": "lead_lag.max_book_age_ms",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Age maximal carnet maker",
+                "observed_at": null,
+                "owner": "HyperSmart/lead_lag",
+                "revalidate_after": null,
+                "source_hash": "225ab8b6117625444f2371581e2be66950c8cfd3965f03ba25ad9ed74a1bd61e",
+                "source_ref": "project:backtesting/lead_lag_queue_replay.py#MAX_BOOK_DELAY_MS",
+                "unit": "ms",
+                "valid_until": null,
+                "value": 750.0
+              },
+              {
+                "assumption_id": "lead_lag.paper_notional_usd",
+                "certification_eligible": true,
+                "classification": "ASSUMPTION",
+                "effective_from": null,
+                "fallback_reason": null,
+                "family_scope": [
+                  "LEAD_LAG"
+                ],
+                "formula_id": null,
+                "name": "Notionnel paper maker",
+                "observed_at": null,
+                "owner": "HyperSmart/lead_lag",
+                "revalidate_after": null,
+                "source_hash": "c4993b430a60746fa8122196da9822e640e5debc39e100ba57de2dd40975643c",
+                "source_ref": "project:backtesting/lead_lag_queue_replay.py#NOTIONAL_USD",
+                "unit": "USD",
+                "valid_until": null,
+                "value": 25.0
+              }
+            ],
+            "formulas": [
+              {
+                "expression": "1*fee.maker.hyperliquid.bps + 1*fee.taker.hyperliquid.bps",
+                "formula_id": "lead_lag.maker_entry_taker_exit_fee.v1",
+                "output_assumption_id": "lead_lag.maker_round_trip_fee_bps",
+                "parent_ids": [
+                  "fee.maker.hyperliquid.bps",
+                  "fee.taker.hyperliquid.bps"
+                ],
+                "reality_model_version": "lead_lag_queue_maker_taker.v1",
+                "unit": "bps_round_trip",
+                "version": "v1"
+              }
+            ],
+            "schema": "hypersmart.economic_assumption_snapshot.v1"
+          },
+          "assumption_snapshot_hash": "e62931ceb34e3ae83acabf272869b2b6b61d136eaa99f8c84886c93b86aea256",
+          "certification": {
+            "assumption_snapshot_hash": "e62931ceb34e3ae83acabf272869b2b6b61d136eaa99f8c84886c93b86aea256",
+            "failures": [],
+            "ready": true,
+            "required_ids": [
+              "fee.maker.hyperliquid.bps",
+              "fee.taker.hyperliquid.bps",
+              "lead_lag.maker_round_trip_fee_bps",
+              "lead_lag.max_book_age_ms",
+              "lead_lag.paper_notional_usd"
+            ],
+            "schema": "hypersmart.economic_certification_receipt.v1"
+          },
+          "direct_measured_fields": [
+            "runtime_latency_p95_ms",
+            "initial_qty_ahead",
+            "paper_order_qty",
+            "queue_traded_qty",
+            "entry_price",
+            "exit_price",
+            "exit_top_capacity_usd"
+          ],
+          "economic_evidence_bundle": {
+            "assumption_snapshot_hash": "e62931ceb34e3ae83acabf272869b2b6b61d136eaa99f8c84886c93b86aea256",
+            "bundle_hash": "bc657ffd38da808c540bcdd2c522ac787ccccdf921b6eff54d17b954209ff575",
+            "family": "LEAD_LAG",
+            "formula_snapshot_hash": "469c9c1d3517341c2f776c56901e7d43122ce2b541dc3fcbe153d1f918523466",
+            "maturity_stage": "BUILT",
+            "numeric_provenance_hash": "5d059ebd74f88b576534cb0de4d5eb5cd0333b110db2ca3dfb613cb2e0ad7901",
+            "policy_version": "hypersmart.economic_policy.v21",
+            "reality_model_components": {
+              "fee_treatment": "lead_lag.maker_entry_taker_exit_fee.v1",
+              "fill_count": "lead_lag.one_maker_one_taker_fill.v1",
+              "funding_treatment": "lead_lag.no_funding_settlement_in_closed_cycle.v1",
+              "latency_treatment": "lead_lag.frozen_measured_p95_entry.v1",
+              "slippage_capacity_treatment": "lead_lag.full_fifo_and_top_capacity.v1",
+              "spread_treatment": "lead_lag.maker_entry_taker_exit_prices.v1"
+            },
+            "reality_model_hash": "32f6e9b0e820bfc412a374aedfba8be3662002014326b4caceb9336d04a45cca",
+            "reality_model_version": "lead_lag_queue_maker_taker.v1",
+            "required_assumption_ids": [
+              "fee.maker.hyperliquid.bps",
+              "fee.taker.hyperliquid.bps",
+              "lead_lag.maker_round_trip_fee_bps",
+              "lead_lag.max_book_age_ms",
+              "lead_lag.paper_notional_usd"
+            ],
+            "run_mode": "CERTIFIABLE",
+            "schema": "hypersmart.economic_evidence_bundle.v1"
+          },
+          "family": "LEAD_LAG",
+          "formula_manifest": [
+            {
+              "expression": "1*fee.maker.hyperliquid.bps + 1*fee.taker.hyperliquid.bps",
+              "formula_id": "lead_lag.maker_entry_taker_exit_fee.v1",
+              "output_assumption_id": "lead_lag.maker_round_trip_fee_bps",
+              "parent_ids": [
+                "fee.maker.hyperliquid.bps",
+                "fee.taker.hyperliquid.bps"
+              ],
+              "reality_model_version": "lead_lag_queue_maker_taker.v1",
+              "unit": "bps_round_trip",
+              "version": "v1"
+            }
+          ],
+          "formula_snapshot_hash": "469c9c1d3517341c2f776c56901e7d43122ce2b541dc3fcbe153d1f918523466",
+          "numeric_provenance": {
+            "fee.maker.hyperliquid.bps": [
+              "fee.maker.hyperliquid.bps"
+            ],
+            "fee.taker.hyperliquid.bps": [
+              "fee.taker.hyperliquid.bps"
+            ],
+            "lead_lag.maker_round_trip_fee_bps": [
+              "fee.maker.hyperliquid.bps",
+              "fee.taker.hyperliquid.bps",
+              "lead_lag.maker_round_trip_fee_bps"
+            ],
+            "lead_lag.max_book_age_ms": [
+              "lead_lag.max_book_age_ms"
+            ],
+            "lead_lag.paper_notional_usd": [
+              "lead_lag.paper_notional_usd"
+            ]
+          },
+          "numeric_provenance_hash": "5d059ebd74f88b576534cb0de4d5eb5cd0333b110db2ca3dfb613cb2e0ad7901",
+          "numeric_provenance_pointers": {
+            "fee.maker.hyperliquid.bps": {
+              "chain": [
+                "fee.maker.hyperliquid.bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.maker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "40dd1e20ac70668fad223ef1f3a2236a430b69766c7e76abfc26f9d11e44ee92",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-maker-read-2026-09-09",
+                  "unit": "bps_per_fill",
+                  "value": 1.5
+                }
+              ],
+              "terminal_value": 1.5
+            },
+            "fee.taker.hyperliquid.bps": {
+              "chain": [
+                "fee.taker.hyperliquid.bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                }
+              ],
+              "terminal_value": 4.5
+            },
+            "lead_lag.maker_round_trip_fee_bps": {
+              "chain": [
+                "fee.maker.hyperliquid.bps",
+                "fee.taker.hyperliquid.bps",
+                "lead_lag.maker_round_trip_fee_bps"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "fee.maker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "40dd1e20ac70668fad223ef1f3a2236a430b69766c7e76abfc26f9d11e44ee92",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-maker-read-2026-09-09",
+                  "unit": "bps_per_fill",
+                  "value": 1.5
+                },
+                {
+                  "assumption_id": "fee.taker.hyperliquid.bps",
+                  "classification": "CONSERVATIVE_DEFAULT",
+                  "formula_id": null,
+                  "source_hash": "1a7d904c6ae20a13584a1bda77d2994d3eb36f7b6a34300a277b3653e327c1a0",
+                  "source_ref": "https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees#perps-tier-0-read-2026-07-13",
+                  "unit": "bps_per_fill",
+                  "value": 4.5
+                },
+                {
+                  "assumption_id": "lead_lag.maker_round_trip_fee_bps",
+                  "classification": "DERIVED",
+                  "formula_id": "lead_lag.maker_entry_taker_exit_fee.v1",
+                  "source_hash": "894b57ea2335052720682a6de3a89ad9f4fb17cc938ab1c4c39b7fa34168edec",
+                  "source_ref": "formula:lead_lag.maker_entry_taker_exit_fee.v1@v1",
+                  "unit": "bps_round_trip",
+                  "value": 6.0
+                }
+              ],
+              "terminal_value": 6.0
+            },
+            "lead_lag.max_book_age_ms": {
+              "chain": [
+                "lead_lag.max_book_age_ms"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "lead_lag.max_book_age_ms",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "225ab8b6117625444f2371581e2be66950c8cfd3965f03ba25ad9ed74a1bd61e",
+                  "source_ref": "project:backtesting/lead_lag_queue_replay.py#MAX_BOOK_DELAY_MS",
+                  "unit": "ms",
+                  "value": 750.0
+                }
+              ],
+              "terminal_value": 750.0
+            },
+            "lead_lag.paper_notional_usd": {
+              "chain": [
+                "lead_lag.paper_notional_usd"
+              ],
+              "nodes": [
+                {
+                  "assumption_id": "lead_lag.paper_notional_usd",
+                  "classification": "ASSUMPTION",
+                  "formula_id": null,
+                  "source_hash": "c4993b430a60746fa8122196da9822e640e5debc39e100ba57de2dd40975643c",
+                  "source_ref": "project:backtesting/lead_lag_queue_replay.py#NOTIONAL_USD",
+                  "unit": "USD",
+                  "value": 25.0
+                }
+              ],
+              "terminal_value": 25.0
+            }
+          },
+          "policy_version": "hypersmart.economic_policy.v21",
+          "reality_model_components": {
+            "fee_treatment": "lead_lag.maker_entry_taker_exit_fee.v1",
+            "fill_count": "lead_lag.one_maker_one_taker_fill.v1",
+            "funding_treatment": "lead_lag.no_funding_settlement_in_closed_cycle.v1",
+            "latency_treatment": "lead_lag.frozen_measured_p95_entry.v1",
+            "slippage_capacity_treatment": "lead_lag.full_fifo_and_top_capacity.v1",
+            "spread_treatment": "lead_lag.maker_entry_taker_exit_prices.v1"
+          },
+          "reality_model_hash": "32f6e9b0e820bfc412a374aedfba8be3662002014326b4caceb9336d04a45cca",
+          "reality_model_version": "lead_lag_queue_maker_taker.v1",
+          "required_assumption_ids": [
+            "fee.maker.hyperliquid.bps",
+            "fee.taker.hyperliquid.bps",
+            "lead_lag.maker_round_trip_fee_bps",
+            "lead_lag.max_book_age_ms",
+            "lead_lag.paper_notional_usd"
+          ],
+          "run_mode": "CERTIFIABLE",
+          "schema": "hypersmart.family_economic_contract.v2",
+          "values": {
+            "fee.maker.hyperliquid.bps": 1.5,
+            "fee.taker.hyperliquid.bps": 4.5,
+            "lead_lag.maker_round_trip_fee_bps": 6.0,
+            "lead_lag.max_book_age_ms": 750.0,
+            "lead_lag.paper_notional_usd": 25.0
+          }
+        },
+        "economic_evidence_bundle_hash": "bc657ffd38da808c540bcdd2c522ac787ccccdf921b6eff54d17b954209ff575",
+        "economic_policy_version": "hypersmart.economic_policy.v21",
+        "eligible_net_pnl_usd": null,
+        "evidence_paths": [
+          "runtime/data/bbo_tape.jsonl",
+          "runtime/reports/economic_campaigns/raw/lead_lag.json",
+          "runtime/reports/economic_campaigns/lead_lag.json"
+        ],
+        "family": "lead_lag",
+        "fees_usd": null,
+        "formula_snapshot_hash": "469c9c1d3517341c2f776c56901e7d43122ce2b541dc3fcbe153d1f918523466",
+        "forward": null,
+        "generated_at_ms": 1791155743408,
+        "gross_pnl_usd": null,
+        "hit_rate": null,
+        "in_sample": null,
+        "latency_cost_usd": null,
+        "liquidatable_net": false,
+        "max_drawdown_usd": null,
+        "measurement_status": "NON_MESURABLE",
+        "net_pnl_usd": null,
+        "no_trade_count": null,
+        "numeric_provenance_hash": "5d059ebd74f88b576534cb0de4d5eb5cd0333b110db2ca3dfb613cb2e0ad7901",
+        "objective_reasons": [
+          "PARAMETERS_NOT_FROZEN_BEFORE_EVALUATION",
+          "POSITIONS_NOT_FULLY_OPENED_AND_CLOSED",
+          "UNMEASURED:gross_pnl_usd",
+          "UNMEASURED:fees_usd",
+          "UNMEASURED:spread_cost_usd",
+          "UNMEASURED:slippage_cost_usd",
+          "UNMEASURED:latency_cost_usd",
+          "UNMEASURED:net_pnl_usd",
+          "NOT_LIQUIDATABLE_NET",
+          "DUPLICATE_TRADE_IDENTITIES",
+          "TRADE_ID_PROOF_INCOMPLETE",
+          "OOS_PROOF_MISSING",
+          "FORWARD_POST_FREEZE_PROOF_MISSING",
+          "PLACEBO_NOT_BEATEN",
+          "DAILY_NET_PROOF_MISSING",
+          "TARGET_NET_USD_NOT_REACHED"
+        ],
+        "objective_status": "NON_ATTEINT",
+        "oos": null,
+        "opened_positions": null,
+        "paper_read_only": true,
+        "parameter_freeze": null,
+        "parameters_frozen": false,
+        "period": {
+          "hl_intervals": null,
+          "observable_horizons_ms": null
+        },
+        "placebos": null,
+        "profit_factor": null,
+        "proof_economics": null,
+        "proof_net_pnl_usd": null,
+        "real_execution": false,
+        "roi_pct": null,
+        "schema_version": "hypersmart.economic_campaign_evidence.v1",
+        "signal_count": null,
+        "slippage_cost_usd": null,
+        "source_detail": "tape certifiee vide",
+        "source_status": "NEED_MORE_DATA",
+        "spread_cost_usd": null,
+        "starting_capital_usd": 100.0,
+        "target_net_usd": 4.0,
+        "target_net_usd_per_day": 4.0,
+        "top_no_trade_reasons": [],
+        "trade_ids_count": null,
+        "trade_ids_sha256": null,
+        "verdict": "MORE_DATA",
+        "verdict_reasons": [
+          "UNMEASURED:closed_positions",
+          "UNMEASURED:net_pnl_usd",
+          "UNMEASURED:roi_pct",
+          "UNMEASURED:max_drawdown_usd",
+          "UNMEASURED:hit_rate",
+          "UNMEASURED:profit_factor",
+          "UNMEASURED:oos",
+          "UNMEASURED:forward",
+          "UNMEASURED:placebos",
+          "UNMEASURED:liquidatable_net"
+        ]
+      }
+    },
+    "paper_read_only": true,
+    "real_execution": false,
+    "schema_version": "hypersmart.economic_family_scoreboards.v2",
+    "starting_capital_usd": 100.0
+  },
+  "scoreboard_sha256": "7024384cb4b7643ef0bddaa76c68c7eb35a7c0ecad264879ea83127df946c649",
+  "source_collection_epoch": 6,
+  "unit_id": "0"
+}
