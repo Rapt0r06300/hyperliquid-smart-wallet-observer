@@ -58,6 +58,10 @@ PREFIXES_EXCLUS = (
     # GitHub-hosted runners. It is not executable runtime state and must not
     # make an otherwise relocatable Windows release non-portable.
     "catalog/campaign-history/",
+    # Resumable campaign manifests are GitHub-hosted orchestration state. They
+    # can contain ephemeral runner paths such as /home/runner/... and are not
+    # required by the extracted Windows runtime. Preserve the rest of catalog/.
+    "catalog/campaigns/",
 )
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",

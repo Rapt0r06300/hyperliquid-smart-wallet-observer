@@ -110,7 +110,9 @@ def test_est_exclu_regles():
     assert AP.est_exclu("db.sqlite3-wal") and AP.est_exclu("db.sqlite3-shm")
     assert AP.est_exclu("archive/racine-machine/trace.txt")
     assert AP.est_exclu("catalog/campaign-history/old.failed.json")
+    assert AP.est_exclu("catalog/campaigns/market-e6-0.json")
     assert not AP.est_exclu("catalog/DATA_METRICS.json")
+    assert not AP.est_exclu("catalog/CAMPAIGN_RESILIENCE_RECEIPT.json")
     assert AP.est_exclu(".portable-preflight-abc/test/cert.pem")
     assert AP.est_exclu("_validation_workspace/pytest/test.db")
     for sortie in (
