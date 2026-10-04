@@ -21,6 +21,11 @@
     {
       "event": "operator_request",
       "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "at_utc": "2026-10-04T12:21:46.886077Z",
+      "event": "COLLECTION_CUTOFF_SEALED_UNCLAIMED",
+      "previous_status": "PENDING"
     }
   ],
   "kind": "event_intelligence_collection",
@@ -42,9 +47,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "created",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T02:29:50.050457Z",
+  "status": "UNAVAILABLE",
+  "status_reason": "COLLECTION_CUTOFF_BEFORE_CLAIM",
+  "terminal_evidence_digest": "987e9030c5d5c9405c81ce6253d3f505831140e5aa740e1344a82e4e91ae1fb2",
+  "updated_at": "2026-10-04T12:21:46.886077Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }

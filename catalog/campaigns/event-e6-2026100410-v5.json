@@ -30,6 +30,11 @@
       "prior_code_sha": "643e393b63228b5bfb83acff1f5ffa9c6c5312ad",
       "prior_status": "PENDING",
       "prior_status_reason": "created"
+    },
+    {
+      "at_utc": "2026-10-04T12:21:46.886077Z",
+      "event": "COLLECTION_CUTOFF_SEALED_UNCLAIMED",
+      "previous_status": "PENDING"
     }
   ],
   "kind": "event_intelligence_collection",
@@ -51,9 +56,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "refresh_collect_after_code_fix",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T10:48:55.924138Z",
+  "status": "UNAVAILABLE",
+  "status_reason": "COLLECTION_CUTOFF_BEFORE_CLAIM",
+  "terminal_evidence_digest": "10b90007ad4efcfca39e2ba9be9bc9e2006d602b20b548cc7be0e9b5c69da992",
+  "updated_at": "2026-10-04T12:21:46.886077Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
