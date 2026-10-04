@@ -24,6 +24,17 @@ def test_complete_unit_requires_publication_receipt():
     assert _unit_requires_publication_receipt(unit) is True
 
 
+def test_complete_unit_without_durable_claim_does_not_require_receipt():
+    unit = {
+        "sha256": "c" * 64,
+        "result": {
+            "status": "COMPLETE",
+            "bundle_root": "/runner/temp/collection-output",
+        },
+    }
+    assert _unit_requires_publication_receipt(unit) is False
+
+
 def test_malformed_unit_does_not_create_false_publication_requirement():
     assert _unit_requires_publication_receipt(None) is False
     assert _unit_requires_publication_receipt({}) is False
