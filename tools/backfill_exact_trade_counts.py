@@ -31,6 +31,7 @@ TRADE_FAMILIES = {
     "user_fills",
     "copy_vault_fills",
 }
+IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
 
 
 class BackfillError(RuntimeError):
@@ -386,7 +387,7 @@ def inspect_asset(path: Path, row: Mapping[str, Any]) -> dict[str, Any]:
         "trade_count_exact": trade_count_exact,
         "unique_trade_count": len(unique_identities) if unique_proven else None,
         "unique_trade_count_exact": unique_proven,
-        "unique_identity_method": "full_native_or_deterministic_composite_string_v3",
+        "unique_identity_method": IDENTITY_VERSION,
         "record_count_scanned": records,
         "asset_sha256": actual_sha,
     }
@@ -470,18 +471,65 @@ def _load_patch() -> dict[str, Any]:
     return value
 
 
-def _candidate(row: Mapping[str, Any], patch: Mapping[str, Any]) -> bool:
+def _patch_evidence_matches(row: Mapping[str, Any], evidence: Mapping[str, Any]) -> bool:
+    expected = str(row.get("sha256") or "").lower()
+    observed = str(evidence.get("asset_sha256") or "").lower()
+    return len(expected) == 64 and observed == expected
+
+
+def _restore_patch_evidence(row: dict[str, Any], evidence: Mapping[str, Any]) -> bool:
+    """Restore SHA-matched exact counts independently of replay classification."""
+    if not _patch_evidence_matches(row, evidence):
+        return False
+    if evidence.get("trade_count_exact") is not True:
+        return False
+    trade_count = evidence.get("trade_count")
+    if isinstance(trade_count, bool) or not isinstance(trade_count, int) or trade_count < 0:
+        return False
+    restored: dict[str, Any] = {
+        "trade_count": trade_count,
+        "trade_count_exact": True,
+        "asset_sha256": evidence.get("asset_sha256"),
+        "record_count_scanned": evidence.get("record_count_scanned"),
+        "unique_identity_method": evidence.get("unique_identity_method"),
+    }
+    method = str(evidence.get("unique_identity_method") or "")
+    if str(row.get("venue") or "").lower() == "bybit" and method != IDENTITY_VERSION:
+        restored["unique_trade_count"] = None
+        restored["unique_trade_count_exact"] = False
+    elif evidence.get("unique_trade_count_exact") is True:
+        restored["unique_trade_count"] = evidence.get("unique_trade_count")
+        restored["unique_trade_count_exact"] = True
+    row.update(restored)
+    _persist_manifest_counts(row, restored)
+    return True
+
+
+def _candidate(row: Mapping[str, Any], counts: Mapping[str, Any]) -> bool:
     family = str(row.get("family") or "").lower()
     if family not in TRADE_FAMILIES:
         return False
     dataset_id = str(row.get("dataset_id") or "")
-    counts = patch.get("counts") if isinstance(patch, Mapping) else {}
-    if not isinstance(counts, Mapping):
-        counts = {}
-    if not dataset_id or dataset_id in counts:
+    if not dataset_id:
         return False
+
+    existing = counts.get(dataset_id) if isinstance(counts, Mapping) else None
+    if isinstance(existing, Mapping) and _patch_evidence_matches(row, existing):
+        needs_bybit_v3 = (
+            str(row.get("venue") or "").lower() == "bybit"
+            and str(existing.get("unique_identity_method") or "") != IDENTITY_VERSION
+        )
+        if not needs_bybit_v3:
+            return False
+
     if row.get("trade_count_exact") is True and int(row.get("trade_count") or 0) > 0:
-        return False
+        if not (
+            str(row.get("venue") or "").lower() == "bybit"
+            and isinstance(existing, Mapping)
+            and str(existing.get("unique_identity_method") or "") != IDENTITY_VERSION
+        ):
+            return False
+
     return bool(
         row.get("release_repository")
         and row.get("release_tag")
@@ -521,6 +569,14 @@ def backfill(limit: int) -> dict[str, Any]:
     counts = patch_doc.get("counts")
     if not isinstance(counts, dict):
         raise BackfillError("invalid trade count patch counts")
+
+    restored_from_patch = 0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        evidence = counts.get(str(row.get("dataset_id") or ""))
+        if isinstance(evidence, Mapping) and _restore_patch_evidence(row, evidence):
+            restored_from_patch += 1
 
     candidates = sorted(
         [
@@ -571,6 +627,7 @@ def backfill(limit: int) -> dict[str, Any]:
     )
     return {
         "updated": updated,
+        "restored_from_patch": restored_from_patch,
         "attempted": len(candidates),
         "failed": failed,
         "remaining_candidate_shards": patch_doc["remaining_candidate_shards"],

@@ -20,6 +20,11 @@ from typing import Any, Mapping
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
 
+try:
+    from tools.backfill_exact_trade_counts import IDENTITY_VERSION
+except ModuleNotFoundError:
+    from backfill_exact_trade_counts import IDENTITY_VERSION
+
 ROOT=Path(__file__).resolve().parents[1]
 INDEX_PATH=ROOT/"catalog"/"DATA_INDEX.json"
 PATCH_PATH=ROOT/"catalog"/"REPLAY_COMPAT_PATCH.json"
@@ -204,41 +209,47 @@ def _verify_asset(path: Path, row: Mapping[str,Any]) -> None:
         raise BackfillError("asset sha256 mismatch")
 
 
-def _restore_exact_trade_count_evidence(manifest: dict[str,Any], *, root: Path) -> None:
-    """Restore immutable exact-count evidence before applying replay receipts.
-
-    Replay verification is allowed to fail, but it must never erase an exact
-    count already proven by a separate SHA-verified full-asset scan.
-    """
+def _restore_exact_trade_count_evidence(manifest: dict[str,Any], *, root: Path) -> bool:
+    """Restore SHA-matched exact-count proof before applying replay receipts."""
     dataset_id=str(manifest.get("dataset_id") or "")
     if not dataset_id:
-        return
+        return False
     path=root/"catalog"/"TRADE_COUNT_PATCH.json"
     if not path.is_file():
-        return
+        return False
     try:
         patch=_load_json(path)
     except (OSError,ValueError,json.JSONDecodeError):
-        return
+        return False
     counts=patch.get("counts")
     if not isinstance(counts,Mapping):
-        return
+        return False
     evidence=counts.get(dataset_id)
     if not isinstance(evidence,Mapping):
-        return
+        return False
     expected_sha=str(manifest.get("sha256") or "").lower()
     evidence_sha=str(evidence.get("asset_sha256") or "").lower()
     if len(expected_sha)!=64 or evidence_sha!=expected_sha:
-        return
-    if evidence.get("trade_count_exact") is True:
-        manifest["trade_count"]=evidence.get("trade_count")
-        manifest["trade_count_exact"]=True
-    if evidence.get("unique_trade_count_exact") is True:
+        return False
+    if evidence.get("trade_count_exact") is not True:
+        return False
+
+    manifest["trade_count"]=evidence.get("trade_count")
+    manifest["trade_count_exact"]=True
+    method=str(evidence.get("unique_identity_method") or "")
+    if (
+        str(manifest.get("venue") or "").lower()=="bybit"
+        and method!=IDENTITY_VERSION
+    ):
+        manifest["unique_trade_count"]=None
+        manifest["unique_trade_count_exact"]=False
+    elif evidence.get("unique_trade_count_exact") is True:
         manifest["unique_trade_count"]=evidence.get("unique_trade_count")
         manifest["unique_trade_count_exact"]=True
     for key in ("record_count_scanned","asset_sha256","unique_identity_method"):
         if key in evidence:
             manifest[key]=evidence[key]
+    return True
 
 
 def _apply_result(
@@ -254,7 +265,7 @@ def _apply_result(
     if str(manifest.get("sha256") or "").lower()!=str(row.get("sha256") or "").lower():
         raise BackfillError("manifest/index sha256 mismatch")
 
-    _restore_exact_trade_count_evidence(manifest,root=root)
+    authoritative_count=_restore_exact_trade_count_evidence(manifest,root=root)
 
     for key in (
         "record_count",
@@ -270,14 +281,15 @@ def _apply_result(
         if key in result:
             manifest[key]=result[key]
 
-    # Never downgrade exact trade-count evidence because replay parsing failed.
-    # Only a replay scan that itself proves an exact count may replace it.
-    if result.get("trade_count_exact") is True:
-        manifest["trade_count"]=result.get("trade_count")
-        manifest["trade_count_exact"]=True
-    elif manifest.get("trade_count_exact") is not True:
-        manifest["trade_count"]=result.get("trade_count")
-        manifest["trade_count_exact"]=False
+    # Replay inspection and exact counting are independent proofs. If a
+    # SHA-matched exact-count receipt exists, replay can never overwrite it.
+    if not authoritative_count:
+        if result.get("trade_count_exact") is True:
+            manifest["trade_count"]=result.get("trade_count")
+            manifest["trade_count_exact"]=True
+        elif manifest.get("trade_count_exact") is not True:
+            manifest["trade_count"]=result.get("trade_count")
+            manifest["trade_count_exact"]=False
     manifest.pop("replay_validation_pending",None)
     manifest.pop("pre_replay_quality_status",None)
 
@@ -308,6 +320,9 @@ def _apply_result(
         "record_count":manifest.get("record_count",manifest.get("event_count")),
         "trade_count":manifest.get("trade_count"),
         "trade_count_exact":manifest.get("trade_count_exact"),
+        "unique_trade_count":manifest.get("unique_trade_count"),
+        "unique_trade_count_exact":manifest.get("unique_trade_count_exact"),
+        "unique_identity_method":manifest.get("unique_identity_method"),
         "replay_compatible":manifest.get("replay_compatible"),
         "replay_schema_version":manifest.get("replay_schema_version"),
         "replay_reason":manifest.get("replay_reason"),

@@ -15,6 +15,7 @@ REGISTRY_PATH = ROOT / "catalog" / "DATA_QUALITY_REGISTRY.json"
 CATALOG_PATH = ROOT / "catalog" / "DATA_CATALOG.json"
 TRADE_COUNT_PATCH_PATH = ROOT / "catalog" / "TRADE_COUNT_PATCH.json"
 REPLAY_COMPAT_PATCH_PATH = ROOT / "catalog" / "REPLAY_COMPAT_PATCH.json"
+BYBIT_IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
 
 _STAGE_BY_STATUS = {
     "SAFE": "safe",
@@ -53,6 +54,53 @@ def _load_replay_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
     }
 
 
+def _load_trade_count_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
+    path = root / "catalog" / "TRADE_COUNT_PATCH.json"
+    if not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    results = value.get("counts") if isinstance(value, Mapping) else {}
+    if not isinstance(results, Mapping):
+        return {}
+    return {
+        str(key): dict(item)
+        for key, item in results.items()
+        if isinstance(item, Mapping)
+    }
+
+
+def _apply_trade_count_patch(
+    manifest: dict[str, Any],
+    patch_results: Mapping[str, Mapping[str, Any]],
+) -> None:
+    dataset_id = str(manifest.get("dataset_id") or "")
+    patch = patch_results.get(dataset_id)
+    if not isinstance(patch, Mapping):
+        return
+    expected_sha = str(manifest.get("sha256") or "").lower()
+    patched_sha = str(patch.get("asset_sha256") or "").lower()
+    if len(expected_sha) != 64 or patched_sha != expected_sha:
+        return
+    if patch.get("trade_count_exact") is True:
+        manifest["trade_count"] = patch.get("trade_count")
+        manifest["trade_count_exact"] = True
+    method = str(patch.get("unique_identity_method") or "")
+    if (
+        str(manifest.get("venue") or "").lower() == "bybit"
+        and method != BYBIT_IDENTITY_VERSION
+    ):
+        manifest["unique_trade_count"] = None
+        manifest["unique_trade_count_exact"] = False
+    elif patch.get("unique_trade_count_exact") is True:
+        manifest["unique_trade_count"] = patch.get("unique_trade_count")
+        manifest["unique_trade_count_exact"] = True
+    if method:
+        manifest["unique_identity_method"] = method
+
+
 def _apply_replay_patch(
     manifest: dict[str, Any],
     patch_results: Mapping[str, Mapping[str, Any]],
@@ -67,7 +115,6 @@ def _apply_replay_patch(
         return
     for key in (
         "record_count",
-        "trade_count",
         "invalid_record_count",
         "out_of_order_count",
         "duplicate_count",
@@ -118,6 +165,7 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "trade_count_exact": manifest.get("trade_count_exact"),
         "unique_trade_count": manifest.get("unique_trade_count"),
         "unique_trade_count_exact": manifest.get("unique_trade_count_exact"),
+        "unique_identity_method": manifest.get("unique_identity_method"),
         "trade_identity_digests": manifest.get("trade_identity_digests"),
         "trade_identity_digests_exact": manifest.get("trade_identity_digests_exact"),
         "replay_compatible": manifest.get("replay_compatible"),
@@ -135,10 +183,24 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         counts = patch_doc.get("counts") if isinstance(patch_doc, Mapping) else {}
         patched = counts.get(str(manifest.get("dataset_id") or "")) if isinstance(counts, Mapping) else None
         if isinstance(patched, Mapping):
-            row["trade_count"] = patched.get("trade_count")
-            row["trade_count_exact"] = patched.get("trade_count_exact") is True
-            row["unique_trade_count"] = patched.get("unique_trade_count")
-            row["unique_trade_count_exact"] = patched.get("unique_trade_count_exact") is True
+            expected_sha = str(manifest.get("sha256") or "").lower()
+            patched_sha = str(patched.get("asset_sha256") or "").lower()
+            if len(expected_sha) == 64 and patched_sha == expected_sha:
+                if patched.get("trade_count_exact") is True:
+                    row["trade_count"] = patched.get("trade_count")
+                    row["trade_count_exact"] = True
+                method = str(patched.get("unique_identity_method") or "")
+                if (
+                    str(manifest.get("venue") or "").lower() == "bybit"
+                    and method != BYBIT_IDENTITY_VERSION
+                ):
+                    row["unique_trade_count"] = None
+                    row["unique_trade_count_exact"] = False
+                elif patched.get("unique_trade_count_exact") is True:
+                    row["unique_trade_count"] = patched.get("unique_trade_count")
+                    row["unique_trade_count_exact"] = True
+                if method:
+                    row["unique_identity_method"] = method
 
     unique_patch_path = root / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
     if unique_patch_path.is_file():
@@ -190,6 +252,7 @@ def index_run_manifests(
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     replay_patch_results = _load_replay_patch_results(base)
+    trade_count_patch_results = _load_trade_count_patch_results(base)
     rows_by_id = {
         str(row.get("dataset_id")): dict(row)
         for row in (index.get("shards") or [])
@@ -220,6 +283,7 @@ def index_run_manifests(
             if not dataset_id:
                 raise ValueError("dataset_id required")
             _apply_replay_patch(manifest, replay_patch_results)
+            _apply_trade_count_patch(manifest, trade_count_patch_results)
             status, reasons = classify_manifest(manifest)
             if status == "SAFE" and manifest.get("replay_compatible") is not True:
                 status = "PARTIAL"

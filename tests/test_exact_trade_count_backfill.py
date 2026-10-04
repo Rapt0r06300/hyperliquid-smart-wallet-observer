@@ -4,7 +4,12 @@ import gzip
 import hashlib
 import json
 
-from tools.backfill_exact_trade_counts import _candidate_priority, inspect_asset
+from tools.backfill_exact_trade_counts import (
+    IDENTITY_VERSION,
+    _candidate,
+    _candidate_priority,
+    inspect_asset,
+)
 
 
 def _write(path, rows):
@@ -107,3 +112,58 @@ def test_bybit_official_archive_prefers_trd_match_id_over_composite(tmp_path):
     assert out["trade_count"] == 2
     assert out["unique_trade_count"] == 2
     assert out["unique_trade_count_exact"] is True
+
+
+
+def test_bybit_v2_exact_patch_is_requeued_for_native_identity_upgrade():
+    row = {
+        "dataset_id": "bybit-archive",
+        "venue": "bybit",
+        "family": "trades",
+        "sha256": "a" * 64,
+        "bytes": 100,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "archive-test",
+        "release_asset": "bybit.jsonl.gz",
+        "trade_count": 190000,
+        "trade_count_exact": True,
+    }
+    counts = {
+        "bybit-archive": {
+            "asset_sha256": "a" * 64,
+            "trade_count": 190000,
+            "trade_count_exact": True,
+            "unique_trade_count": 138698,
+            "unique_trade_count_exact": True,
+            "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
+        }
+    }
+    assert _candidate(row, counts) is True
+    counts["bybit-archive"]["unique_identity_method"] = IDENTITY_VERSION
+    assert _candidate(row, counts) is False
+
+
+def test_non_bybit_sha_matched_exact_patch_is_not_needlessly_rescanned():
+    row = {
+        "dataset_id": "binance-archive",
+        "venue": "binance",
+        "family": "trades",
+        "sha256": "b" * 64,
+        "bytes": 100,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "archive-test",
+        "release_asset": "binance.jsonl.gz",
+        "trade_count": 0,
+        "trade_count_exact": False,
+    }
+    counts = {
+        "binance-archive": {
+            "asset_sha256": "b" * 64,
+            "trade_count": 200000,
+            "trade_count_exact": True,
+            "unique_trade_count": 200000,
+            "unique_trade_count_exact": True,
+            "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
+        }
+    }
+    assert _candidate(row, counts) is False

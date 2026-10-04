@@ -22,6 +22,8 @@ TRADE_FAMILIES = {
     "user_fills",
     "copy_vault_fills",
 }
+BYBIT_IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
+GLOBAL_IDENTITY_VERSION = "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string"
 
 
 def _int(value: Any) -> int:
@@ -69,6 +71,15 @@ def build() -> dict[str, Any]:
     record_rows = record_doc.get("records") if isinstance(record_doc, dict) else {}
     if not isinstance(record_rows, dict):
         record_rows = {}
+
+    trade_doc = {}
+    try:
+        trade_doc = json.loads(TRADE_COUNT_PATCH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        trade_doc = {}
+    trade_rows = trade_doc.get("counts") if isinstance(trade_doc, dict) else {}
+    if not isinstance(trade_rows, dict):
+        trade_rows = {}
     totals: dict[str, Any] = {
         "TOTAL_SHARDS": len(shards),
         "TOTAL_RELEASES": 0,
@@ -136,6 +147,13 @@ def build() -> dict[str, Any]:
         status = str(row.get("quality_status") or "")
         replay = row.get("replay_compatible") is True
         dataset_id = str(row.get("dataset_id") or "")
+        trade_entry = trade_rows.get(dataset_id)
+        trade_entry_valid = (
+            isinstance(trade_entry, dict)
+            and len(str(row.get("sha256") or "")) == 64
+            and str(trade_entry.get("asset_sha256") or "").lower()
+                == str(row.get("sha256") or "").lower()
+        )
         record_entry = record_rows.get(dataset_id)
         if isinstance(record_entry, dict) and record_entry.get("exact") is True:
             records = _int(record_entry.get("record_count"))
@@ -184,10 +202,34 @@ def build() -> dict[str, Any]:
             totals["UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS"] += 1
         family = str(row.get("family") or "").lower()
         trade_family = family in TRADE_FAMILIES
-        trade_exact = trade_family and row.get("trade_count_exact") is True
-        unique_exact = trade_family and row.get("unique_trade_count_exact") is True
-        trades = _int(row.get("trade_count")) if trade_exact else 0
-        unique_trades = _int(row.get("unique_trade_count")) if unique_exact else 0
+
+        if trade_family and trade_entry_valid and trade_entry.get("trade_count_exact") is True:
+            trade_exact = True
+            trades = _int(trade_entry.get("trade_count"))
+        else:
+            trade_exact = trade_family and row.get("trade_count_exact") is True
+            trades = _int(row.get("trade_count")) if trade_exact else 0
+
+        bybit_stale_identity = (
+            trade_family
+            and str(row.get("venue") or "").lower() == "bybit"
+            and trade_entry_valid
+            and str(trade_entry.get("unique_identity_method") or "") != BYBIT_IDENTITY_VERSION
+        )
+        if (
+            trade_family
+            and trade_entry_valid
+            and trade_entry.get("unique_trade_count_exact") is True
+            and not bybit_stale_identity
+        ):
+            unique_exact = True
+            unique_trades = _int(trade_entry.get("unique_trade_count"))
+        elif bybit_stale_identity:
+            unique_exact = False
+            unique_trades = 0
+        else:
+            unique_exact = trade_family and row.get("unique_trade_count_exact") is True
+            unique_trades = _int(row.get("unique_trade_count")) if unique_exact else 0
         if family in {"l2book", "copy_vault_l2", "native_market"}:
             totals["TOTAL_L2_RECORDS"] += records
         if family == "bbo":
@@ -283,12 +325,11 @@ def build() -> dict[str, Any]:
     totals["MIN_COLLECTION_TS_MS"] = min(start_times) if start_times else None
     totals["MAX_COLLECTION_TS_MS"] = max(end_times) if end_times else None
 
-    if TRADE_COUNT_PATCH.is_file():
-        try:
-            trade_patch = json.loads(TRADE_COUNT_PATCH.read_text(encoding="utf-8"))
-            totals["TRADE_COUNT_FAILURE_REASON_COUNT"] = len(trade_patch.get("failure_reasons") or {})
-        except (OSError, ValueError, TypeError):
-            totals["TRADE_COUNT_FAILURE_REASON_COUNT"] = 0
+    totals["TRADE_COUNT_FAILURE_REASON_COUNT"] = (
+        len(trade_doc.get("failure_reasons") or {})
+        if isinstance(trade_doc, dict)
+        else 0
+    )
     totals["TOTAL_TRADES_COUNT_COVERAGE_COMPLETE"] = (
         totals["TRADE_SHARDS_MISSING_EXACT_COUNT"] == 0
     )
@@ -300,9 +341,23 @@ def build() -> dict[str, Any]:
         try:
             unique_patch = json.loads(UNIQUE_PATCH.read_text(encoding="utf-8"))
             if isinstance(unique_patch, dict):
-                global_unique = unique_patch.get("global_unique_trade_count")
-                global_unique_digest = unique_patch.get("global_identity_digest")
-                global_unique_complete = unique_patch.get("coverage_complete") is True
+                unique_identity_current = (
+                    str(unique_patch.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
+                )
+                global_unique = (
+                    unique_patch.get("global_unique_trade_count")
+                    if unique_identity_current
+                    else None
+                )
+                global_unique_digest = (
+                    unique_patch.get("global_identity_digest")
+                    if unique_identity_current
+                    else None
+                )
+                global_unique_complete = (
+                    unique_patch.get("coverage_complete") is True
+                    and unique_identity_current
+                )
                 totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = len(unique_patch.get("failure_reasons") or {})
                 totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(unique_patch.get("cross_shard_overlap_count"))
         except (OSError, ValueError, TypeError):
