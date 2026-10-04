@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -109,3 +110,30 @@ def test_current_failed_receipt_does_not_loop(monkeypatch, tmp_path):
         }
     }
     assert backfill._candidate(row, known, {"trades"}) is False
+
+
+
+def test_release_download_falls_back_to_public_asset_url(monkeypatch,tmp_path):
+    calls=[]
+    def fake_run(argv,**kwargs):
+        calls.append(list(argv))
+        if argv[0]=="gh":
+            return SimpleNamespace(returncode=1,stderr="API rate limit",stdout="")
+        assert argv[0]=="curl"
+        output=Path(argv[argv.index("--output")+1])
+        output.write_bytes(b"immutable")
+        return SimpleNamespace(returncode=0,stderr="",stdout="")
+
+    monkeypatch.setattr(backfill.subprocess,"run",fake_run)
+    row={
+        "release_repository":"owner/repo",
+        "release_tag":"tag with space",
+        "release_asset":"asset file.jsonl.gz",
+    }
+    path=backfill._download(row,tmp_path)
+    assert path.read_bytes()==b"immutable"
+    assert calls[0][0]=="gh"
+    assert calls[1][0]=="curl"
+    assert calls[1][-1].endswith(
+        "/releases/download/tag%20with%20space/asset%20file.jsonl.gz"
+    )
