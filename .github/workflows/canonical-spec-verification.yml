@@ -6,6 +6,23 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/canonical-spec-verification.yml"
+      - "docs/superpowers/specs/2026-09-25-manual-phase-orchestrator-design.md"
+      - "src/hl_observer/backtest/pnl_from_logs.py"
+      - "src/hl_observer/funding/carry_positions_store.py"
+      - "src/hl_observer/order_lifecycle/time_in_force_matrix.py"
+      - "src/hl_observer/paper_trading/funding_settlement.py"
+      - "src/hl_observer/paper_trading/order_types.py"
+      - "tools/manifest_policy.py"
+      - "tools/backfill_replay_compatibility.py"
+      - "tools/replay_compatibility.py"
+      - "tools/build_replay_compatibility_reasons.py"
+      - "tools/index_run_manifest.py"
+      - "tests/test_pnl_from_logs_and_exit_env.py"
+      - "tests/test_funding_settlement.py"
+      - "tests/test_time_in_force_matrix.py"
+      - "tests/test_v12_paper_journal_orders.py"
+      - "tests/test_manifest_policy.py"
+      - "tests/test_replay_compatibility.py"
       - "tools/build_closure_report.py"
       - "tools/validate_closure_receipt.py"
       - "tools/generate_gate_registry.py"
@@ -109,6 +126,14 @@ jobs:
              python tools/validate_github_hosted_workflows.py'
 
           run_group main_control_and_closure python -m pytest -q             tests/test_build_closure_current_scoreboard.py             tests/test_closure_report_current_epoch.py             tests/test_ci_workflows.py
+
+          run_group main_certification_and_replay_policy python -m pytest -q \
+            tests/test_pnl_from_logs_and_exit_env.py \
+            tests/test_funding_settlement.py \
+            tests/test_time_in_force_matrix.py \
+            tests/test_v12_paper_journal_orders.py \
+            tests/test_manifest_policy.py \
+            tests/test_replay_compatibility.py
 
           run_group main_parity_and_economics python -m pytest -q             tests/test_dataset_economic_runner_purity.py             tests/test_dataset_economic_runner_wrapper.py             tests/test_dataset_economic_source_wiring.py             tests/test_backtest_live_parity.py             tests/test_historical_live_schema_parity.py             tests/test_economic_campaigns.py             tests/test_economic_family_scoreboard.py
 
