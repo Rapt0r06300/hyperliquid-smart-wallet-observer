@@ -74,7 +74,11 @@ jobs:
         run: |
           ROOT="$RUNNER_TEMP/source-capability-native-$GITHUB_RUN_ID"
           echo "SOURCE_CAPABILITY_NATIVE_ROOT=$ROOT" >> "$GITHUB_ENV"
-          mkdir -p "$ROOT"
+          mkdir -p "$ROOT/data"
+          # Reuse the canonical CCXT-scout priority input only for this bounded
+          # smoke so active markets are sampled before alphabetical tail assets.
+          # This never supplies prices or events; native venue feeds remain authoritative.
+          printf '%s\n' '{"native_collection_candidates":["BTC","ETH","SOL","XRP","DOGE"]}'             > "$ROOT/data/ccxt_universe.json"
           python tools/collecter_native_venues.py             --root "$ROOT"             --max-symbols 25             --duration-s 20
       - name: Bounded HL/Binance public-network smoke
         id: bbo_smoke
