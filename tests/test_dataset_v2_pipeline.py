@@ -81,6 +81,27 @@ def test_bundle_compacts_compatible_small_shards_without_changing_raw(tmp_path) 
     }
 
 
+def test_bundle_index_preserves_collection_config_and_continuation_cursor(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
+    writer.append(_event(1000))
+    writer.rotate_all()
+
+    index = build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="a" * 40,
+        collection_config={"venue": "bybit", "symbols": ["BTCUSDT"], "tier": "A"},
+        continuation_cursor={"last_exchange_ts_ms": 1000},
+    )
+
+    assert index["collection_config"] == {
+        "venue": "bybit",
+        "symbols": ["BTCUSDT"],
+        "tier": "A",
+    }
+    assert index["continuation_cursor"] == {"last_exchange_ts_ms": 1000}
+
+
 def test_remote_digest_is_required_before_safe(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
     writer.append(_event(1000))
