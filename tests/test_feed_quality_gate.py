@@ -247,6 +247,40 @@ def test_sparse_event_stream_does_not_invent_a_transport_gap() -> None:
     assert "TEMPORAL_GAP" not in gap.reasons
 
 
+def test_common_rate_failure_and_trade_metrics_are_exposed() -> None:
+    gate = FeedQualityGate(
+        source_id="kraken_public",
+        channel="trades",
+        instrument="BTC/USD",
+        mode=FeedMode.EVENT_STREAM,
+        config=_config(min_coherent_events=1),
+    )
+    gate.mark_heartbeat(received_ts_ms=1_000)
+    gate.ingest_event(
+        payload={"trade_id": "a"}, exchange_ts_ms=990, received_ts_ms=1_000,
+        event_id="a", event_bytes=100,
+    )
+    snapshot = gate.ingest_event(
+        payload={"trade_id": "b"}, exchange_ts_ms=1_990, received_ts_ms=2_000,
+        event_id="b", event_bytes=300,
+    )
+    assert snapshot.first_ts_ms == 990
+    assert snapshot.last_ts_ms == 1_990
+    assert snapshot.events_per_second == 2.0
+    assert snapshot.bytes_per_second == 400.0
+    assert snapshot.trade_count == 2
+    assert snapshot.total_bytes == 400
+
+    gate.mark_sequence_failure(reason="PREV_SEQUENCE_MISMATCH")
+    gate.mark_checksum_failure()
+    gate.mark_resync(received_ts_ms=2_010)
+    failures = gate.snapshot(now_ms=2_010)
+    assert failures.sequence_failures == 1
+    assert failures.checksum_failures == 1
+    assert failures.resync_count == 1
+    assert not failures.synchronized
+
+
 def test_event_stream_explicit_gap_recovers_after_distinct_coherent_frames() -> None:
     gate = FeedQualityGate(
         source_id="hyperliquid_mainnet_readonly",
