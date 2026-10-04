@@ -1,7 +1,7 @@
 from hl_observer.collection.bitget_market_data import BitgetPublicClient
 from hl_observer.collection.bybit_market_data import BybitPublicClient
 from hl_observer.collection.gate_market_data import GatePublicClient
-from hl_observer.collection.market_capture_tiers import CaptureTier
+from hl_observer.collection.market_capture_tiers import CaptureTier, capture_profile
 from hl_observer.collection.native_venue_coordinator import NativeVenueCoordinator
 from hl_observer.collection.okx_market_data import OkxPublicClient
 
@@ -23,7 +23,7 @@ def test_clients_build_tier_specific_public_subscriptions() -> None:
     bitget = BitgetPublicClient()
     bitget.set_capture_profile(CaptureTier.B)
     assert {row["channel"] for row in bitget.subscription_args(["BTCUSDT"])} == {
-        "books50", "books1", "ticker", "trade"
+        "books15", "books1", "ticker", "trade"
     }
 
     gate = GatePublicClient()
@@ -68,3 +68,12 @@ def test_clock_sync_covers_every_native_venue() -> None:
         ccxt_snapshot_path=None,
     )
     assert set(coordinator.refresh_clock_sync()) == {"bybit", "okx", "gate", "bitget"}
+
+
+def test_all_supported_market_venues_have_deterministic_abc_profiles() -> None:
+    venues = {"binance", "hyperliquid", "deribit", "kraken", "coinbase", "htx"}
+    for venue in venues:
+        profiles = [capture_profile(venue, tier) for tier in CaptureTier]
+        assert [profile.tier for profile in profiles] == list(CaptureTier)
+        assert profiles[0].depth >= profiles[1].depth >= profiles[2].depth
+        assert any("trade" in channel.lower() for channel in profiles[0].channels)
