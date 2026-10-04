@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import tempfile
 from typing import Any, Mapping
+from urllib.parse import quote
 
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
@@ -175,11 +176,14 @@ def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str
 
 
 def _download(row: Mapping[str,Any], destination: Path) -> Path:
+    """Download immutable release assets with a quota-resilient public fallback."""
     repo=str(row["release_repository"])
     tag=str(row["release_tag"])
     asset=str(row["release_asset"])
     destination.mkdir(parents=True,exist_ok=True)
-    process=subprocess.run(
+    path=destination/asset
+
+    first=subprocess.run(
         [
             "gh","release","download",tag,
             "--repo",repo,
@@ -191,11 +195,39 @@ def _download(row: Mapping[str,Any], destination: Path) -> Path:
         capture_output=True,
         check=False,
     )
-    if process.returncode!=0:
-        raise BackfillError((process.stderr or process.stdout or "download failed").strip())
-    path=destination/asset
-    if not path.is_file():
-        raise BackfillError("downloaded asset missing")
+    if first.returncode==0 and path.is_file():
+        return path
+
+    parts=repo.split("/",1)
+    if len(parts)!=2 or not all(parts):
+        raise BackfillError("invalid release repository")
+    owner,name=parts
+    url=(
+        "https://github.com/"+quote(owner,safe="")+"/"+quote(name,safe="")
+        +"/releases/download/"+quote(tag,safe="")
+        +"/"+quote(asset,safe="")
+    )
+    fallback=subprocess.run(
+        [
+            "curl","--fail","--location","--silent","--show-error",
+            "--retry","4","--retry-all-errors","--retry-delay","2",
+            "--connect-timeout","20","--max-time","180",
+            "--output",os.fspath(path),url,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if fallback.returncode!=0 or not path.is_file():
+        detail=" | ".join(
+            value.strip()
+            for value in (
+                first.stderr or first.stdout or "",
+                fallback.stderr or fallback.stdout or "",
+            )
+            if value and value.strip()
+        )
+        raise BackfillError(("release download failed: "+detail)[-700:])
     return path
 
 
@@ -415,7 +447,11 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
                 replayable+=int(result.get("replay_compatible") is True)
                 demoted+=int(before=="SAFE" and after!="SAFE")
             except Exception as exc:
-                failed.append({"dataset_id":dataset_id,"error":type(exc).__name__})
+                failed.append({
+                    "dataset_id":dataset_id,
+                    "error":type(exc).__name__,
+                    "detail":str(exc)[-500:],
+                })
             finally:
                 shutil.rmtree(tmp_root/dataset_id,ignore_errors=True)
 
