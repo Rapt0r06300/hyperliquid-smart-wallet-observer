@@ -371,12 +371,12 @@ def build() -> dict[str, Any]:
                 unique_identity_current = (
                     str(unique_patch.get("identity_version") or "") == GLOBAL_IDENTITY_VERSION
                 )
-                global_unique = (
+                candidate_global_unique = (
                     unique_patch.get("global_unique_trade_count")
                     if unique_identity_current
                     else None
                 )
-                global_unique_digest = (
+                candidate_global_unique_digest = (
                     unique_patch.get("global_identity_digest")
                     if unique_identity_current
                     else None
@@ -403,7 +403,19 @@ def build() -> dict[str, Any]:
                     and unique_scope_complete
                 )
                 totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = len(unique_patch.get("failure_reasons") or {})
-                totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(unique_patch.get("cross_shard_overlap_count"))
+                if global_unique_complete:
+                    global_unique = candidate_global_unique
+                    global_unique_digest = candidate_global_unique_digest
+                    totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(
+                        unique_patch.get("cross_shard_overlap_count")
+                    )
+                else:
+                    # Fail closed: a partial/global-scope-mismatched receipt may
+                    # remain useful diagnostically, but it must not publish a
+                    # global unique count/digest/overlap as corpus-wide proof.
+                    global_unique = None
+                    global_unique_digest = None
+                    totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = 0
         except (OSError, ValueError, TypeError):
             global_unique = None
     if (
