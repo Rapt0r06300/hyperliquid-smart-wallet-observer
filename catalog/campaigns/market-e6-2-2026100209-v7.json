@@ -310,6 +310,15 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "STUCK"
+    },
+    {
+      "at": "2026-10-04T16:58:03.577755Z",
+      "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
+      "event": "ANALYSIS_DRAIN_FINALIZED",
+      "from": "STUCK",
+      "reason": "analysis_drain_inactive_lease_with_checkpoint",
+      "source_collection_epoch": 6,
+      "to": "PARTIAL"
     }
   ],
   "kind": "market_collection",
@@ -321,7 +330,7 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": "2026-10-04T14:55:19.476757Z",
+  "next_due_at": null,
   "no_progress_count": 1,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
@@ -331,9 +340,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "durable_publication_failed",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T14:50:19.476757Z",
+  "status": "PARTIAL",
+  "status_reason": "analysis_drain_inactive_lease_with_checkpoint",
+  "terminal_evidence_digest": "742dbacc3b789cd0e189ac79035c5068bd5b1914ad2a5b602ab700bca909655e",
+  "updated_at": "2026-10-04T16:58:03.577755Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
