@@ -30,10 +30,10 @@ from hl_observer.realtime.feed_quality import FeedEventKind
 
 REST_BASE_URL = "https://fapi.binance.com"
 WS_BASE_URL = "wss://fstream.binance.com/public/stream"
-# Binance's current USD-M Public catalog lists both fstream.binance.com and
-# stream.binancefuture.com as mainnet endpoints. The distinct testnet hostname is
-# fstream.binancefuture.com. Keep the alternate mainnet path failover-only.
-WS_FALLBACK_BASE_URLS = ("wss://stream.binancefuture.com/public/stream",)
+# Production-only: the official Binance Futures connector labels
+# stream.binancefuture.com as Testnet UM. Full-L2 fallback stays on the separate
+# production WS API (ws-fapi.binance.com), never on a testnet stream host.
+WS_FALLBACK_BASE_URLS: tuple[str, ...] = ()
 WS_API_URL = "wss://ws-fapi.binance.com/ws-fapi/v1"
 SCHEMA_VERSION = "alina.binance_usdm_l2_live.v1"
 

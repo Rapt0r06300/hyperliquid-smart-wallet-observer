@@ -37,15 +37,10 @@ from hl_observer.config.cross_venue_instruments import (  # noqa: E402
 
 WS_HL = "wss://api.hyperliquid.xyz/ws"
 INFO_HL = "https://api.hyperliquid.xyz/info"
-# Current official USD-M mainnet endpoints. Binance's 2026 API catalog lists
-# BOTH fstream.binance.com and stream.binancefuture.com for Public + Market:
-# /api/ws-streams/public and /api/ws-streams/market.
-# Do not confuse stream.binancefuture.com with fstream.binancefuture.com, which
-# Binance documents separately for Futures testnet.
-BINANCE_WS_HOSTS = (
-    "wss://fstream.binance.com",
-    "wss://stream.binancefuture.com",
-)
+# USD-M production only. Binance's official Futures connector documents
+# wss://fstream.binance.com as Main UM and wss://stream.binancefuture.com
+# as Testnet UM. Replay-grade evidence must never cross that boundary.
+BINANCE_WS_HOSTS = ("wss://fstream.binance.com",)
 BINANCE_PUBLIC_WS_CANDIDATES = tuple(
     f"{host}/public/stream" for host in BINANCE_WS_HOSTS
 )

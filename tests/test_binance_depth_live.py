@@ -45,13 +45,10 @@ def test_binance_depth_ws_candidates_include_documented_mainnet_failover() -> No
         )
         assert collector._ws_candidates() == (
             "wss://fstream.binance.com/public/stream",
-            "wss://stream.binancefuture.com/public/stream",
         )
-        assert collector.websocket_url(
-            "wss://stream.binancefuture.com/public/stream"
-        ) == (
-            "wss://stream.binancefuture.com/public/stream?"
-            "streams=btcusdt@depth@100ms/btcusdt@depth20@100ms"
+        assert all(
+            "binancefuture.com" not in endpoint
+            for endpoint in collector._ws_candidates()
         )
         assert all(
             "fstream.binancefuture.com" not in endpoint
