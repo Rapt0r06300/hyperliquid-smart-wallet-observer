@@ -1,0 +1,101 @@
+{
+  "analysis_stage": null,
+  "attempts": 4,
+  "campaign_id": "market-e6-1-2026100323-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "ffc9cfa0d5754b9688b07af8c0d9e43ab0263bbc",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "b851b387e1c7f86bb7171530ff2d2fd0969be8a22bf1c8ad9631c56f6bf33def",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-03T23:06:46.496206+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "duration_s": 3500,
+    "market_shard_count": 16,
+    "market_shard_index": 1,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e6/2026100323/shard-01.json",
+    "plan_sha256": "6b1132f5a2d3380d174b1bc87106c9d08f4bb276eaa189d7f46e40d75f4bf87f",
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 47,
+    "universe_digest": "5206cb82391556a7c3913bf1a5b810539158e659d1c156e266a44c07da779fa2",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-10T23:06:46.496206+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-1-2026100323-v7.pending.8cba44dd83e5.6503619b3d1f7257a7adc5a64cf07bbe0b66a5c7540520d4894576a58ae301cf.json",
+      "archived_manifest_sha256": "6503619b3d1f7257a7adc5a64cf07bbe0b66a5c7540520d4894576a58ae301cf",
+      "at": "2026-10-03T23:46:43.534337Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "8cba44dd83e5b36315d7614dca95ad795c201b82",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-04T00:47:50.785273Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T02:09:20.578055Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-1-2026100323-v7.continuation_required.241cacfb479b.e6c84b2f2015da2aa421d265aae6d8da72eec10d5ad2127c411c1032dcd55f4c.json",
+      "archived_manifest_sha256": "e6c84b2f2015da2aa421d265aae6d8da72eec10d5ad2127c411c1032dcd55f4c",
+      "at": "2026-10-04T02:29:09.793101Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
+      "prior_status": "CONTINUATION_REQUIRED",
+      "prior_status_reason": "durable_publication_failed"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-1-2026100323-v7.pending.5f7d9a771021.bf5075a56ae0648c50f6c63feca558cdb518bce1d06ae21681202e51c3b72c7b.json",
+      "archived_manifest_sha256": "bf5075a56ae0648c50f6c63feca558cdb518bce1d06ae21681202e51c3b72c7b",
+      "at": "2026-10-04T05:31:08.159500Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "5f7d9a771021269b5801fd51dd16754d876ed8a2",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-04T05:31:08.159514Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
