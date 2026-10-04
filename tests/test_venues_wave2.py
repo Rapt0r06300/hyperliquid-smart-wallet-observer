@@ -131,3 +131,57 @@ def test_kraken_public_subscription_plan_is_bounded():
     plan = kraken.public_subscription_plan(["PI_XBTUSD", "PI_ETHUSD"], max_symbols=1)
     assert plan["product_ids"] == ["PI_ETHUSD"]
     assert plan["feeds"] == ["book", "trade", "ticker"]
+
+
+def test_kraken_v2_crc32_matches_official_fixture():
+    bids = [
+        {"price": "45283.5", "qty": "0.10000000"},
+        {"price": "45283.4", "qty": "1.54582015"},
+        {"price": "45282.1", "qty": "0.10000000"},
+        {"price": "45281.0", "qty": "0.10000000"},
+        {"price": "45280.3", "qty": "1.54592586"},
+        {"price": "45279.0", "qty": "0.07990000"},
+        {"price": "45277.6", "qty": "0.03310103"},
+        {"price": "45277.5", "qty": "0.30000000"},
+        {"price": "45277.3", "qty": "1.54602737"},
+        {"price": "45276.6", "qty": "0.15445238"},
+    ]
+    asks = [
+        {"price": "45285.2", "qty": "0.00100000"},
+        {"price": "45286.4", "qty": "1.54571953"},
+        {"price": "45286.6", "qty": "1.54571109"},
+        {"price": "45289.6", "qty": "1.54560911"},
+        {"price": "45290.2", "qty": "0.15890660"},
+        {"price": "45291.8", "qty": "1.54553491"},
+        {"price": "45294.7", "qty": "0.04454749"},
+        {"price": "45296.1", "qty": "0.35380000"},
+        {"price": "45297.5", "qty": "0.09945542"},
+        {"price": "45299.5", "qty": "0.18772827"},
+    ]
+    assert kraken.book_checksum_v2(bids, asks) == 3310070434
+
+
+def test_kraken_checksum_mismatch_forces_resync():
+    snapshot = {
+        "feed": "book_snapshot",
+        "product_id": "BTC/USD",
+        "seq": 1,
+        "bids": [{"price": "100.0", "qty": "1.0"}],
+        "asks": [{"price": "101.0", "qty": "1.0"}],
+    }
+    snapshot["checksum"] = kraken.book_checksum_v2(snapshot["bids"], snapshot["asks"])
+    result = kraken.appliquer_flux_book([
+        snapshot,
+        {
+            "feed": "book",
+            "product_id": "BTC/USD",
+            "seq": 2,
+            "side": "buy",
+            "price": "100.0",
+            "qty": "2.0",
+            "checksum": 1,
+        },
+    ])
+    assert result["synchronise"] is False
+    assert result["checksum_failures"] == 1
+    assert result["resyncs"][-1]["raison"] == "checksum_mismatch"
