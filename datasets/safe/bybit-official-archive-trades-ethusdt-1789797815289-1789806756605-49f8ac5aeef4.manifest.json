@@ -1,16 +1,16 @@
 {
-  "asset_sha256": "d0439ebac0f30eadc45ec8cbf2c8772f13a3b0e823aacefce8e9588824dae060",
+  "asset_sha256": "49f8ac5aeef4c03c9c4ea95c515cb3f540389682206b99f58fd5e7979a426139",
   "asset_verified": true,
-  "bytes": 16238870,
+  "bytes": 16280854,
   "collection_run_id": "archive-35707914210",
   "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "bybit-official-archive-trades-ethusdt-1789776000168-1789784664474-d0439ebac0f3",
+  "dataset_id": "bybit-official-archive-trades-ethusdt-1789797815289-1789806756605-49f8ac5aeef4",
   "duplicate_count": 0,
-  "end_ts_ms": 1789784664474,
+  "end_ts_ms": 1789806756605,
   "event_count": 190000,
   "family": "trades",
   "gap_count": 0,
@@ -40,10 +40,8 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "UNIQUE_TRADE_COUNT_NOT_EXACT"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "method": "release_sha256_size_plus_parse_chronology",
     "status": "SOURCE_ARCHIVE_VERIFIED"
@@ -51,19 +49,19 @@
   "record_count": 190000,
   "record_count_scanned": 190000,
   "release": {
-    "asset_id": 607738854,
-    "asset_name": "bybit-official-archive-trades-ethusdt-1789776000168-1789784664474-d0439ebac0f3.jsonl.gz",
+    "asset_id": 607738950,
+    "asset_name": "bybit-official-archive-trades-ethusdt-1789797815289-1789806756605-49f8ac5aeef4.jsonl.gz",
     "release_id": 402492509,
-    "remote_digest": "sha256:d0439ebac0f30eadc45ec8cbf2c8772f13a3b0e823aacefce8e9588824dae060",
-    "remote_size": 16238870,
+    "remote_digest": "sha256:49f8ac5aeef4c03c9c4ea95c515cb3f540389682206b99f58fd5e7979a426139",
+    "remote_size": 16280854,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "archive-v2-35707914210-bybit-ETH"
   },
-  "release_asset": "bybit-official-archive-trades-ethusdt-1789776000168-1789784664474-d0439ebac0f3.jsonl.gz",
-  "release_asset_id": 607738854,
+  "release_asset": "bybit-official-archive-trades-ethusdt-1789797815289-1789806756605-49f8ac5aeef4.jsonl.gz",
+  "release_asset_id": 607738950,
   "release_id": 402492509,
-  "release_remote_digest": "sha256:d0439ebac0f30eadc45ec8cbf2c8772f13a3b0e823aacefce8e9588824dae060",
-  "release_remote_size": 16238870,
+  "release_remote_digest": "sha256:49f8ac5aeef4c03c9c4ea95c515cb3f540389682206b99f58fd5e7979a426139",
+  "release_remote_size": 16280854,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "archive-v2-35707914210-bybit-ETH",
   "replay_compatible": true,
@@ -71,9 +69,9 @@
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "d0439ebac0f30eadc45ec8cbf2c8772f13a3b0e823aacefce8e9588824dae060",
+  "sha256": "49f8ac5aeef4c03c9c4ea95c515cb3f540389682206b99f58fd5e7979a426139",
   "source": "bybit_official_archive",
-  "start_ts_ms": 1789776000168,
+  "start_ts_ms": 1789797815289,
   "symbol": "ETHUSDT",
   "synchronization": {
     "clock_offset_ms": {
@@ -85,8 +83,8 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1789776000168,
-    "last_exchange_ts_ms": 1789784664474,
+    "first_exchange_ts_ms": 1789797815289,
+    "last_exchange_ts_ms": 1789806756605,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 190000,
@@ -106,10 +104,10 @@
   },
   "trade_count": 190000,
   "trade_count_exact": true,
-  "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
-  "unique_trade_count": null,
-  "unique_trade_count_exact": false,
-  "validation_allowed": false,
+  "unique_identity_method": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
+  "unique_trade_count": 190000,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
   "venue": "bybit",
   "verifier_version": "alina.replay.compatibility.v3"
 }

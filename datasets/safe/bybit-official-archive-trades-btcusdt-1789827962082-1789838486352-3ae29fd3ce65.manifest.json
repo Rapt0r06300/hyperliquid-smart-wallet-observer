@@ -1,16 +1,16 @@
 {
-  "asset_sha256": "fed67beee7b2b9fcb9fac93cf58e8d02c74f99412cc4cb057600159c551c5fd2",
+  "asset_sha256": "3ae29fd3ce65182b19e28ddf2e763b2f3286587c1cd4e7a68e2a95a0d1cfb191",
   "asset_verified": true,
-  "bytes": 16210998,
+  "bytes": 16671063,
   "collection_run_id": "archive-35707914210",
   "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "bybit-official-archive-trades-ethusdt-1789814995252-1789828324081-fed67beee7b2",
+  "dataset_id": "bybit-official-archive-trades-btcusdt-1789827962082-1789838486352-3ae29fd3ce65",
   "duplicate_count": 0,
-  "end_ts_ms": 1789828324081,
+  "end_ts_ms": 1789838486352,
   "event_count": 190000,
   "family": "trades",
   "gap_count": 0,
@@ -40,10 +40,8 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "UNIQUE_TRADE_COUNT_NOT_EXACT"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "method": "release_sha256_size_plus_parse_chronology",
     "status": "SOURCE_ARCHIVE_VERIFIED"
@@ -51,30 +49,30 @@
   "record_count": 190000,
   "record_count_scanned": 190000,
   "release": {
-    "asset_id": 607739047,
-    "asset_name": "bybit-official-archive-trades-ethusdt-1789814995252-1789828324081-fed67beee7b2.jsonl.gz",
-    "release_id": 402492509,
-    "remote_digest": "sha256:fed67beee7b2b9fcb9fac93cf58e8d02c74f99412cc4cb057600159c551c5fd2",
-    "remote_size": 16210998,
+    "asset_id": 607737605,
+    "asset_name": "bybit-official-archive-trades-btcusdt-1789827962082-1789838486352-3ae29fd3ce65.jsonl.gz",
+    "release_id": 402492150,
+    "remote_digest": "sha256:3ae29fd3ce65182b19e28ddf2e763b2f3286587c1cd4e7a68e2a95a0d1cfb191",
+    "remote_size": 16671063,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-    "tag": "archive-v2-35707914210-bybit-ETH"
+    "tag": "archive-v2-35707914210-bybit-BTC"
   },
-  "release_asset": "bybit-official-archive-trades-ethusdt-1789814995252-1789828324081-fed67beee7b2.jsonl.gz",
-  "release_asset_id": 607739047,
-  "release_id": 402492509,
-  "release_remote_digest": "sha256:fed67beee7b2b9fcb9fac93cf58e8d02c74f99412cc4cb057600159c551c5fd2",
-  "release_remote_size": 16210998,
+  "release_asset": "bybit-official-archive-trades-btcusdt-1789827962082-1789838486352-3ae29fd3ce65.jsonl.gz",
+  "release_asset_id": 607737605,
+  "release_id": 402492150,
+  "release_remote_digest": "sha256:3ae29fd3ce65182b19e28ddf2e763b2f3286587c1cd4e7a68e2a95a0d1cfb191",
+  "release_remote_size": 16671063,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "release_tag": "archive-v2-35707914210-bybit-ETH",
+  "release_tag": "archive-v2-35707914210-bybit-BTC",
   "replay_compatible": true,
   "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "fed67beee7b2b9fcb9fac93cf58e8d02c74f99412cc4cb057600159c551c5fd2",
+  "sha256": "3ae29fd3ce65182b19e28ddf2e763b2f3286587c1cd4e7a68e2a95a0d1cfb191",
   "source": "bybit_official_archive",
-  "start_ts_ms": 1789814995252,
-  "symbol": "ETHUSDT",
+  "start_ts_ms": 1789827962082,
+  "symbol": "BTCUSDT",
   "synchronization": {
     "clock_offset_ms": {
       "count": 0,
@@ -85,8 +83,8 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1789814995252,
-    "last_exchange_ts_ms": 1789828324081,
+    "first_exchange_ts_ms": 1789827962082,
+    "last_exchange_ts_ms": 1789838486352,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 190000,
@@ -106,10 +104,10 @@
   },
   "trade_count": 190000,
   "trade_count_exact": true,
-  "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
-  "unique_trade_count": null,
-  "unique_trade_count_exact": false,
-  "validation_allowed": false,
+  "unique_identity_method": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
+  "unique_trade_count": 190000,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
   "venue": "bybit",
   "verifier_version": "alina.replay.compatibility.v3"
 }

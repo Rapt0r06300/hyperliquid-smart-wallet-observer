@@ -1,16 +1,16 @@
 {
-  "asset_sha256": "7def78acc8c0b7b8a9fe76be596df5a78ee876967647f79c17ccf83e2709acd2",
+  "asset_sha256": "cf6a01b57f6367d3229a0f1a30136554ef3bb93122e09187eb3bc3f34aba7853",
   "asset_verified": true,
-  "bytes": 16540022,
+  "bytes": 16653291,
   "collection_run_id": "archive-35707914210",
   "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "bybit-official-archive-trades-btcusdt-1789776000016-1789785214309-7def78acc8c0",
+  "dataset_id": "bybit-official-archive-trades-btcusdt-1789838486357-1789853917645-cf6a01b57f63",
   "duplicate_count": 0,
-  "end_ts_ms": 1789785214309,
+  "end_ts_ms": 1789853917645,
   "event_count": 190000,
   "family": "trades",
   "gap_count": 0,
@@ -40,10 +40,8 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "UNIQUE_TRADE_COUNT_NOT_EXACT"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "method": "release_sha256_size_plus_parse_chronology",
     "status": "SOURCE_ARCHIVE_VERIFIED"
@@ -51,19 +49,19 @@
   "record_count": 190000,
   "record_count_scanned": 190000,
   "release": {
-    "asset_id": 607737455,
-    "asset_name": "bybit-official-archive-trades-btcusdt-1789776000016-1789785214309-7def78acc8c0.jsonl.gz",
+    "asset_id": 607737680,
+    "asset_name": "bybit-official-archive-trades-btcusdt-1789838486357-1789853917645-cf6a01b57f63.jsonl.gz",
     "release_id": 402492150,
-    "remote_digest": "sha256:7def78acc8c0b7b8a9fe76be596df5a78ee876967647f79c17ccf83e2709acd2",
-    "remote_size": 16540022,
+    "remote_digest": "sha256:cf6a01b57f6367d3229a0f1a30136554ef3bb93122e09187eb3bc3f34aba7853",
+    "remote_size": 16653291,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "archive-v2-35707914210-bybit-BTC"
   },
-  "release_asset": "bybit-official-archive-trades-btcusdt-1789776000016-1789785214309-7def78acc8c0.jsonl.gz",
-  "release_asset_id": 607737455,
+  "release_asset": "bybit-official-archive-trades-btcusdt-1789838486357-1789853917645-cf6a01b57f63.jsonl.gz",
+  "release_asset_id": 607737680,
   "release_id": 402492150,
-  "release_remote_digest": "sha256:7def78acc8c0b7b8a9fe76be596df5a78ee876967647f79c17ccf83e2709acd2",
-  "release_remote_size": 16540022,
+  "release_remote_digest": "sha256:cf6a01b57f6367d3229a0f1a30136554ef3bb93122e09187eb3bc3f34aba7853",
+  "release_remote_size": 16653291,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "archive-v2-35707914210-bybit-BTC",
   "replay_compatible": true,
@@ -71,9 +69,9 @@
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "7def78acc8c0b7b8a9fe76be596df5a78ee876967647f79c17ccf83e2709acd2",
+  "sha256": "cf6a01b57f6367d3229a0f1a30136554ef3bb93122e09187eb3bc3f34aba7853",
   "source": "bybit_official_archive",
-  "start_ts_ms": 1789776000016,
+  "start_ts_ms": 1789838486357,
   "symbol": "BTCUSDT",
   "synchronization": {
     "clock_offset_ms": {
@@ -85,8 +83,8 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1789776000016,
-    "last_exchange_ts_ms": 1789785214309,
+    "first_exchange_ts_ms": 1789838486357,
+    "last_exchange_ts_ms": 1789853917645,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 190000,
@@ -106,10 +104,10 @@
   },
   "trade_count": 190000,
   "trade_count_exact": true,
-  "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
-  "unique_trade_count": null,
-  "unique_trade_count_exact": false,
-  "validation_allowed": false,
+  "unique_identity_method": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
+  "unique_trade_count": 190000,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
   "venue": "bybit",
   "verifier_version": "alina.replay.compatibility.v3"
 }

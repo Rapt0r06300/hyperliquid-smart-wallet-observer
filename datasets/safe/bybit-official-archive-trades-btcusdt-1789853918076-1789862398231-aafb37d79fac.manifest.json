@@ -1,17 +1,17 @@
 {
-  "asset_sha256": "4c71e053eb66bcfa2d89d5975216c433545d4d8d0539cf2752c7a9987fccd2a3",
+  "asset_sha256": "aafb37d79fac168648a3d7d325e33baede754e6ac4871f293bc6547d99cb215e",
   "asset_verified": true,
-  "bytes": 16423678,
+  "bytes": 6125522,
   "collection_run_id": "archive-35707914210",
   "collector_version": "337afb3950a1234eb87ce6a2b5f038319b356a2c",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "bybit-official-archive-trades-ethusdt-1789847438291-1789861451637-4c71e053eb66",
+  "dataset_id": "bybit-official-archive-trades-btcusdt-1789853918076-1789862398231-aafb37d79fac",
   "duplicate_count": 0,
-  "end_ts_ms": 1789861451637,
-  "event_count": 190000,
+  "end_ts_ms": 1789862398231,
+  "event_count": 70330,
   "family": "trades",
   "gap_count": 0,
   "integrity": {
@@ -19,7 +19,7 @@
     "duplicate_count": 0,
     "duplicates_deduped": true,
     "gap_count": 0,
-    "missing_monotonic_count": 190000,
+    "missing_monotonic_count": 70330,
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
@@ -40,41 +40,39 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "UNIQUE_TRADE_COUNT_NOT_EXACT"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "method": "release_sha256_size_plus_parse_chronology",
     "status": "SOURCE_ARCHIVE_VERIFIED"
   },
-  "record_count": 190000,
-  "record_count_scanned": 190000,
+  "record_count": 70330,
+  "record_count_scanned": 70330,
   "release": {
-    "asset_id": 607739167,
-    "asset_name": "bybit-official-archive-trades-ethusdt-1789847438291-1789861451637-4c71e053eb66.jsonl.gz",
-    "release_id": 402492509,
-    "remote_digest": "sha256:4c71e053eb66bcfa2d89d5975216c433545d4d8d0539cf2752c7a9987fccd2a3",
-    "remote_size": 16423678,
+    "asset_id": 607737770,
+    "asset_name": "bybit-official-archive-trades-btcusdt-1789853918076-1789862398231-aafb37d79fac.jsonl.gz",
+    "release_id": 402492150,
+    "remote_digest": "sha256:aafb37d79fac168648a3d7d325e33baede754e6ac4871f293bc6547d99cb215e",
+    "remote_size": 6125522,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-    "tag": "archive-v2-35707914210-bybit-ETH"
+    "tag": "archive-v2-35707914210-bybit-BTC"
   },
-  "release_asset": "bybit-official-archive-trades-ethusdt-1789847438291-1789861451637-4c71e053eb66.jsonl.gz",
-  "release_asset_id": 607739167,
-  "release_id": 402492509,
-  "release_remote_digest": "sha256:4c71e053eb66bcfa2d89d5975216c433545d4d8d0539cf2752c7a9987fccd2a3",
-  "release_remote_size": 16423678,
+  "release_asset": "bybit-official-archive-trades-btcusdt-1789853918076-1789862398231-aafb37d79fac.jsonl.gz",
+  "release_asset_id": 607737770,
+  "release_id": 402492150,
+  "release_remote_digest": "sha256:aafb37d79fac168648a3d7d325e33baede754e6ac4871f293bc6547d99cb215e",
+  "release_remote_size": 6125522,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "release_tag": "archive-v2-35707914210-bybit-ETH",
+  "release_tag": "archive-v2-35707914210-bybit-BTC",
   "replay_compatible": true,
   "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "4c71e053eb66bcfa2d89d5975216c433545d4d8d0539cf2752c7a9987fccd2a3",
+  "sha256": "aafb37d79fac168648a3d7d325e33baede754e6ac4871f293bc6547d99cb215e",
   "source": "bybit_official_archive",
-  "start_ts_ms": 1789847438291,
-  "symbol": "ETHUSDT",
+  "start_ts_ms": 1789853918076,
+  "symbol": "BTCUSDT",
   "synchronization": {
     "clock_offset_ms": {
       "count": 0,
@@ -85,11 +83,11 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1789847438291,
-    "last_exchange_ts_ms": 1789861451637,
+    "first_exchange_ts_ms": 1789853918076,
+    "last_exchange_ts_ms": 1789862398231,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
-      "count": 190000,
+      "count": 70330,
       "max": 0.0,
       "min": 0.0,
       "p50": 0.0,
@@ -104,12 +102,12 @@
       "p95": null
     }
   },
-  "trade_count": 190000,
+  "trade_count": 70330,
   "trade_count_exact": true,
-  "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
-  "unique_trade_count": null,
-  "unique_trade_count_exact": false,
-  "validation_allowed": false,
+  "unique_identity_method": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
+  "unique_trade_count": 70330,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
   "venue": "bybit",
   "verifier_version": "alina.replay.compatibility.v3"
 }
