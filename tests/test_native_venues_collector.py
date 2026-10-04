@@ -113,3 +113,9 @@ def test_native_final_heartbeat_preserves_coordinator_health() -> None:
     final_block = text.split("final = {", 1)[1]
     assert '"coordinator_health": final_health' in final_block
 
+def test_native_heartbeat_exposes_per_channel_counts() -> None:
+    text = Path("tools/collecter_native_venues.py").read_text(encoding="utf-8")
+    assert "channel_counts: dict[str, dict[str, int]]" in text
+    assert 'venue_counts[channel] = int(venue_counts.get(channel, 0)) + 1' in text
+    assert '"channel_counts": {' in text
+

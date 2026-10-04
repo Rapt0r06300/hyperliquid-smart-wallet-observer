@@ -208,6 +208,9 @@ async def _run(
     reconnects = {venue: 0 for venue in enabled_venues}
     last_event_ms = {venue: 0 for venue in enabled_venues}
     last_exchange_ts = {venue: 0 for venue in enabled_venues}
+    channel_counts: dict[str, dict[str, int]] = {
+        venue: {} for venue in enabled_venues
+    }
     canonical_last_written = 0
     canonical_last_beat_ns = 0
     started = time.time()
@@ -228,6 +231,11 @@ async def _run(
             queue.popleft()
             dropped += 1
         venue = envelope.source_id.split("_", 1)[0].lower()
+        if venue in channel_counts:
+            channel = str(envelope.channel or "")
+            if channel:
+                venue_counts = channel_counts[venue]
+                venue_counts[channel] = int(venue_counts.get(channel, 0)) + 1
         if venue in last_event_ms:
             last_event_ms[venue] = int(envelope.received_ts_ms)
             if envelope.exchange_ts_ms is not None:
@@ -478,6 +486,10 @@ async def _run(
                     "reconnects": reconnects,
                     "last_event_ms": last_event_ms,
                     "last_exchange_ts": last_exchange_ts,
+                    "channel_counts": {
+                        venue: dict(sorted(channel_counts.get(venue, {}).items()))
+                        for venue in enabled_venues
+                    },
                     "required_venues": list(required),
                     "required_venues_ready": all(
                         counts.get(venue, 0) > 0 and last_event_ms.get(venue, 0) > 0
@@ -560,6 +572,10 @@ async def _run(
             "reconnects": reconnects,
             "last_event_ms": last_event_ms,
             "last_exchange_ts": last_exchange_ts,
+            "channel_counts": {
+                venue: dict(sorted(channel_counts.get(venue, {}).items()))
+                for venue in enabled_venues
+            },
             "funding_history_counts": funding_history_counts,
             "funding_history_errors": funding_history_errors,
             "required_venues": [

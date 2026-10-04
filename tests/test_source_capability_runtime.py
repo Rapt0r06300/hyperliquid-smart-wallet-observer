@@ -498,3 +498,73 @@ def test_bybit_native_ws_clock_evidence_promotes_clock_sync(tmp_path: Path) -> N
     assert bybit["clock_sync_evidence"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert bybit["clock_sync_evidence"]["rtt_ms"] == 10.0
 
+def test_bybit_channel_counts_are_fail_closed(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 10,
+                "last_event_ms": {
+                    "bybit": 123,
+                    "okx": 1,
+                    "gate": 2,
+                    "bitget": 3,
+                },
+                "channel_counts": {
+                    "bybit": {
+                        "bbo": 4,
+                        "l2Book": 7,
+                        "trades": 0,
+                        "ticker": 5,
+                    }
+                },
+                "coordinator_health": {
+                    "clock_sync": {
+                        "bybit": {
+                            "status": "OK",
+                            "source": "websocket_public_ping:stream.bybit.com:option",
+                            "server_ts_ms": 1005,
+                            "send_wall_ts_ms": 1000,
+                            "receive_wall_ts_ms": 1010,
+                            "rtt_ms": 10.0,
+                            "offset_ms": 0.0,
+                            "uncertainty_ms": 5.0,
+                        }
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            return {"serverTime": 123}
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit REST blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        github_sha="1" * 40,
+        github_run_id="105",
+        request_json=fake_request,
+        now_utc="2026-10-04T00:00:00Z",
+    )
+
+    bybit = receipt["venues"]["bybit"]
+    assert bybit["runtime_status"] == "HEALTHY"
+    assert bybit["capability_runtime"]["bbo"] == "HEALTHY"
+    assert bybit["capability_runtime"]["l2"] == "HEALTHY"
+    assert bybit["capability_runtime"]["trades"] == "DEGRADED"
+    assert bybit["capability_runtime"]["clock_sync"] == "HEALTHY"
+    assert bybit["channel_counts"]["bbo"] == 4
+    assert bybit["channel_counts"]["l2Book"] == 7
+    assert bybit["channel_counts"]["trades"] == 0
+    assert "channels=bbo:4,l2:7,trades:0" in bybit["reason"]
+

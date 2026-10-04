@@ -177,6 +177,11 @@ def build_receipt(
     hb = _load_native_heartbeat(native_heartbeat)
     bbo_hb = _load_json(bbo_heartbeat)
     last_event = hb.get("last_event_ms") if isinstance(hb.get("last_event_ms"), dict) else {}
+    channel_counts = (
+        hb.get("channel_counts")
+        if isinstance(hb.get("channel_counts"), dict)
+        else {}
+    )
     coordinator_health = (
         hb.get("coordinator_health")
         if isinstance(hb.get("coordinator_health"), dict)
@@ -309,6 +314,21 @@ def build_receipt(
                 details.append(f"WS={transport_error}")
             reason = ";".join(details)[:1800]
         venue_caps = {name: runtime for name in CAPABILITIES}
+        venue_channel_counts = (
+            channel_counts.get(venue)
+            if isinstance(channel_counts.get(venue), dict)
+            else {}
+        )
+        bbo_events = int(venue_channel_counts.get("bbo") or 0)
+        l2_events = int(venue_channel_counts.get("l2Book") or 0)
+        trade_events = int(venue_channel_counts.get("trades") or 0)
+        if venue == "bybit" and venue_channel_counts:
+            venue_caps["bbo"] = "HEALTHY" if bbo_events > 0 else "DEGRADED"
+            venue_caps["l2"] = "HEALTHY" if l2_events > 0 else "DEGRADED"
+            venue_caps["trades"] = "HEALTHY" if trade_events > 0 else "DEGRADED"
+            reason = (
+                f"{reason};channels=bbo:{bbo_events},l2:{l2_events},trades:{trade_events}"
+            )[:1800]
         native_clock = (
             native_clock_sync.get(venue)
             if isinstance(native_clock_sync.get(venue), dict)
@@ -329,6 +349,7 @@ def build_receipt(
             "observed_at_utc": observed_at,
             "network_observed": ok,
             "last_event_ms": event_ms,
+            "channel_counts": dict(venue_channel_counts),
             "capability_runtime": venue_caps,
         }
         if venue == "bybit":
