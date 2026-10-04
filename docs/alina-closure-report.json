@@ -1074,7 +1074,7 @@
   },
   "dataset_health_digest": "607ec2d8638ccf7de60dc5bc78c014925a2ae7284616e349341f7c6a26309685",
   "dataset_selection_id": null,
-  "dataset_v2_head": "c2716b4b0c222993b13609e57f35ea5c4da48768",
+  "dataset_v2_head": "23ff1a805d49a0f443ec768080fe2ff1a0c3536f",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "ab141d514a9837dc6ea714c15dd4a5d5b20d878c3d6d9875db78053551d5ee1d",
@@ -1107,7 +1107,7 @@
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-03T23:20:10.849612Z",
+  "generated_at_utc": "2026-10-04T00:21:44.814713Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1159,7 +1159,7 @@
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "c2716b4b0c222993b13609e57f35ea5c4da48768",
+  "main_alina_head": "23ff1a805d49a0f443ec768080fe2ff1a0c3536f",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1194,7 +1194,7 @@
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "623782980d2dd2bd480c072e539c9dc5fadf9b87c8798ffcc621e8e0a2b7a84e",
+  "receipt_digest": "d7324a4112b1a319db5d4c5a064ec43f491a66e8f9e0b3f0b94ff20a3c199c8a",
   "rejected_count": 1149,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
@@ -1224,69 +1224,8 @@
   },
   "self_hosted_used": false,
   "source_collection_epoch": null,
-  "source_degraded_capabilities": [
-    {
-      "capability": "bbo",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "clock_sync",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "l2",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "official_archive",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "recovery",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "replay_adapter",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "sequence_integrity",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "trades",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "venue_status",
-      "runtime_reason": "BINANCE_WS_NOT_OBSERVED:bbo=0:trades=0:l2_full=0:l2_partial=0:l2_exploitable=0;rest=BINANCE_UNAVAILABLE:HTTP_451:{ \"code\": 0, \"msg\": \"Service unavailable from a restricted location according to 'b. Eligibility' in https://www.binance.com/en/terms. Please contact customer service if you believe you received this message in error.\" }",
-      "runtime_status": "DEGRADED",
-      "venue": "binance"
-    },
-    {
-      "capability": "clock_sync",
-      "runtime_reason": "NATIVE_EVENT_OBSERVED:1791068753173",
-      "runtime_status": "DEGRADED",
-      "venue": "bybit"
-    }
-  ],
-  "source_degraded_capability_count": 10,
+  "source_degraded_capabilities": [],
+  "source_degraded_capability_count": 0,
   "source_unvalidated_capabilities": [],
   "source_unvalidated_capability_count": 0,
   "trade_count_exact": false,
@@ -1364,6 +1303,7 @@
     "37131894621",
     "37135946399",
     "37142095040",
-    "37147010304"
+    "37147010304",
+    "37160585305"
   ]
 }
