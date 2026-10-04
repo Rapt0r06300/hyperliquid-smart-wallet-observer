@@ -7,10 +7,6 @@
     "PARTIAL_EVIDENCE": {
       "records": 804252,
       "shards": 834
-    },
-    "STALE_CLASSIFICATION_NOW_SAFE": {
-      "records": 5,
-      "shards": 3
     }
   },
   "by_family": {
@@ -27,8 +23,8 @@
       "shards": 3
     },
     "copy_vault_fills": {
-      "records": 35,
-      "shards": 5
+      "records": 30,
+      "shards": 2
     },
     "copy_vault_l2": {
       "records": 183,
@@ -81,8 +77,8 @@
   },
   "by_status": {
     "PARTIAL": {
-      "records": 804257,
-      "shards": 837
+      "records": 804252,
+      "shards": 834
     },
     "REJECT": {
       "records": 1680,
@@ -99,8 +95,8 @@
       "shards": 109
     },
     "hyperliquid": {
-      "records": 190080,
-      "shards": 1365
+      "records": 190075,
+      "shards": 1362
     },
     "okx": {
       "records": 559182,
@@ -112,10 +108,6 @@
     }
   },
   "current_reason_counts": {
-    "CURRENTLY_SAFE": {
-      "records": 5,
-      "shards": 3
-    },
     "DUPLICATES_NOT_DEDUPED:1": {
       "records": 382,
       "shards": 11
@@ -304,8 +296,8 @@
   "historical_live_only_false_reject_count": 0,
   "historical_live_only_false_reject_records": 0,
   "historical_non_safe_shard_count": 0,
-  "metrics_quarantined_record_count": 804257,
-  "non_safe_shard_count": 1957,
+  "metrics_quarantined_record_count": 804252,
+  "non_safe_shard_count": 1954,
   "non_safe_shards": [
     {
       "category": "PARTIAL_EVIDENCE",
@@ -5390,57 +5382,6 @@
         "UNIQUE_TRADE_COUNT_NOT_EXACT"
       ],
       "symbol": "0x07fd993f0fa3a185f7207adccd29f7a87404689d",
-      "venue": "hyperliquid"
-    },
-    {
-      "category": "STALE_CLASSIFICATION_NOW_SAFE",
-      "current_classification": "SAFE",
-      "current_reasons": [],
-      "dataset_id": "hyperliquid-public-userfills-copy-vault-fills-0x374b8890dbc7aef957ec44e9b80766118789f1a4-1790875094066-1790875094066-312080309a23",
-      "family": "copy_vault_fills",
-      "historical_archive": false,
-      "manifest_path": "datasets/quarantine/hyperliquid-public-userfills-copy-vault-fills-0x374b8890dbc7aef957ec44e9b80766118789f1a4-1790875094066-1790875094066-312080309a23.manifest.json",
-      "quality_status": "PARTIAL",
-      "record_count": 1,
-      "replay_compatible": true,
-      "stored_reasons": [
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "symbol": "0x374b8890dbc7aef957ec44e9b80766118789f1a4",
-      "venue": "hyperliquid"
-    },
-    {
-      "category": "STALE_CLASSIFICATION_NOW_SAFE",
-      "current_classification": "SAFE",
-      "current_reasons": [],
-      "dataset_id": "hyperliquid-public-userfills-copy-vault-fills-0x4102ef9de91d1a1fa99839293b3a878f94679499-1790949447779-1790949663965-d54c5e1ef3c5",
-      "family": "copy_vault_fills",
-      "historical_archive": false,
-      "manifest_path": "datasets/quarantine/hyperliquid-public-userfills-copy-vault-fills-0x4102ef9de91d1a1fa99839293b3a878f94679499-1790949447779-1790949663965-d54c5e1ef3c5.manifest.json",
-      "quality_status": "PARTIAL",
-      "record_count": 3,
-      "replay_compatible": true,
-      "stored_reasons": [
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "symbol": "0x4102ef9de91d1a1fa99839293b3a878f94679499",
-      "venue": "hyperliquid"
-    },
-    {
-      "category": "STALE_CLASSIFICATION_NOW_SAFE",
-      "current_classification": "SAFE",
-      "current_reasons": [],
-      "dataset_id": "hyperliquid-public-userfills-copy-vault-fills-0x65aee08c9235025355ac6c5ad020fb167ecef4fe-1790943870752-1790943870752-ec6797814887",
-      "family": "copy_vault_fills",
-      "historical_archive": false,
-      "manifest_path": "datasets/quarantine/hyperliquid-public-userfills-copy-vault-fills-0x65aee08c9235025355ac6c5ad020fb167ecef4fe-1790943870752-1790943870752-ec6797814887.manifest.json",
-      "quality_status": "PARTIAL",
-      "record_count": 1,
-      "replay_compatible": true,
-      "stored_reasons": [
-        "UNIQUE_TRADE_COUNT_NOT_EXACT"
-      ],
-      "symbol": "0x65aee08c9235025355ac6c5ad020fb167ecef4fe",
       "venue": "hyperliquid"
     },
     {
@@ -42940,20 +42881,20 @@
     }
   ],
   "paper_only": true,
-  "potential_false_non_safe_count": 3,
+  "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
-  "quarantined_record_count": 804257,
+  "quarantined_record_count": 804252,
   "read_only": true,
   "real_execution": false,
   "reason_record_counts_overlap": true,
-  "receipt_digest": "61a6bb043b90c0f8929071cbf9141bd594420b0c8e297d97062463193013fcea",
+  "receipt_digest": "8e51c9eca4d307ececee10440aa3d508f5dcfcefa7262d566198d69d35ae9600",
   "rejected_record_count": 1680,
   "schema": "alina.quarantine_audit.v1",
-  "source_index_sha256": "50fa9b0bd0b41f1607963f638e826e46d2bcbd2770a7d9998e66ad3ec73bc808",
-  "source_metrics_sha256": "e2643dad9a3c2e4950a866a082120678f45481f922ad4a63d492254ddb450a96",
+  "source_index_sha256": "1e0fb9fad16d1612d04200083c115a47579c8fdc1483de7c62564f3bc3409de9",
+  "source_metrics_sha256": "cdbcbfed2b80761645fed30c74e9aea0af856c97c894ef23c54ea8dc8a5c2e41",
   "source_record_count_patch_sha256": "f22325e5ca9116f0d4ee92c9b220c6b1094d89cc0f8242e3bdfefc6288f59fb8",
   "source_shard_count": 4421,
-  "stale_classification_count": 3,
+  "stale_classification_count": 0,
   "stale_record_count": 0,
   "stored_reason_counts": {
     "DUPLICATES_NOT_DEDUPED:1": {
@@ -43141,8 +43082,8 @@
       "shards": 104
     },
     "UNIQUE_TRADE_COUNT_NOT_EXACT": {
-      "records": 5609,
-      "shards": 54
+      "records": 5604,
+      "shards": 51
     },
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
       "records": 366149,
