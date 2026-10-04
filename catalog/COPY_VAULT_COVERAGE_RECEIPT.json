@@ -3131,11 +3131,11 @@
     "users_per_largest_lane": 10
   },
   "candidate_campaign_count": 313,
-  "collection_cutoff_at_utc": null,
+  "collection_cutoff_at_utc": "2026-10-04T12:21:46.886077Z",
   "invalid_manifest_paths": [],
   "paper_only": true,
-  "phase": "COLLECT",
-  "phase_epoch": 6,
+  "phase": "ANALYZE",
+  "phase_epoch": 7,
   "plans": [
     {
       "active_lane_count": 0,
@@ -6351,20 +6351,20 @@
       "users_per_largest_lane": 3088
     },
     {
-      "active_lane_count": 1,
+      "active_lane_count": 0,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e6-broad-2026100410-v8",
-          "collected": false,
-          "completed_units": 0,
-          "published": false,
+          "collected": true,
+          "completed_units": 2,
+          "published": true,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
         }
       ],
-      "collected_lane_count": 0,
-      "completed_unit_count": 0,
+      "collected_lane_count": 1,
+      "completed_unit_count": 2,
       "created_at_max": "2026-10-04T10:37:45.757025+00:00",
       "declared_universe_count": 3087,
       "duplicate_lane_indices": [],
@@ -6379,22 +6379,22 @@
       "no_silent_loss": true,
       "out_of_range_lane_indices": [],
       "plan_valid": false,
-      "published_lane_count": 0,
-      "qualified_shard_count": 0,
+      "published_lane_count": 1,
+      "qualified_shard_count": 45,
       "scheduled_lane_count": 1,
       "selected_count": 3087,
       "selection_file": "catalog/copy_vault_selections/e6/2026100410.json",
       "selection_sha256": "7b6c59bc93ecedaac55320cf098c9fa3649ff8f5ad5e16191b649d6855826d12",
       "selection_verified": true,
       "status": "BLOCKED",
-      "terminal_lane_count": 0,
+      "terminal_lane_count": 1,
       "unexpected_failures": [],
       "users_per_largest_lane": 3087
     }
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "0f9f21950495b0c3f24029f31066d065defcb6dadf28c85a2fecf74c6aaa91ab",
+  "receipt_digest": "b3ba3d766c21b353f88da838a09178095cd071b66f7810079bf4e7e010bae1dd",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
