@@ -1,5 +1,10 @@
 name: create-resumable-campaigns
 on:
+  workflow_run:
+    workflows:
+      - phase-request-controller
+      - analysis-stage-controller
+    types: [completed]
   schedule:
     - cron: '2 * * * *'
   push:
