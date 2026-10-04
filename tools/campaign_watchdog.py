@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PENDING_CONTROLLER_SLO_SECONDS = 15 * 60
+HOT_HANDOFF_LEAD_SECONDS = 15 * 60
+HOT_HANDOFF_DISPATCH_COOLDOWN_SECONDS = 30 * 60
 
 
 def parse(value):
@@ -106,6 +108,203 @@ def _reconcile_finished_owner(
         "reason": reason,
     })
     return True
+
+
+
+def _campaign_created_at(row: dict) -> datetime | None:
+    raw = row.get("created_at_utc") or row.get("created_at") or row.get("updated_at")
+    if not raw:
+        return None
+    try:
+        return parse(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_handoff_key(row: dict) -> tuple[int, int, int] | None:
+    if (
+        not isinstance(row, dict)
+        or row.get("kind") != "market_collection"
+        or row.get("creation_phase") != "COLLECT"
+    ):
+        return None
+    cursor = row.get("cursor") if isinstance(row.get("cursor"), dict) else {}
+    try:
+        epoch = int(row.get("phase_epoch"))
+        shard_count = int(cursor.get("market_shard_count"))
+        shard_index = int(cursor.get("market_shard_index"))
+    except (TypeError, ValueError):
+        return None
+    if shard_count < 1 or shard_index < 0 or shard_index >= shard_count:
+        return None
+    return epoch, shard_count, shard_index
+
+
+def _select_market_handoff_successor(
+    predecessor: dict,
+    candidates: list[dict],
+    now: datetime,
+    *,
+    lead_seconds: float = HOT_HANDOFF_LEAD_SECONDS,
+) -> tuple[dict | None, str]:
+    """Select the newest pending campaign for the same stable market shard.
+
+    Existing coins keep the same shard because market plans use sha256_coin_mod.
+    The successor has a different campaign id, so its lease/concurrency domain is
+    independent and can overlap the predecessor without sharing mutable ownership.
+    """
+    if predecessor.get("status") != "RUNNING":
+        return None, "predecessor_not_running"
+    key = _market_handoff_key(predecessor)
+    if key is None:
+        return None, "invalid_predecessor_shard"
+
+    cursor = predecessor.get("cursor") if isinstance(predecessor.get("cursor"), dict) else {}
+    marker = cursor.get("hot_handoff_successor_campaign_id")
+    if marker:
+        return None, "handoff_already_dispatched"
+
+    lease = predecessor.get("lease")
+    if not isinstance(lease, dict):
+        return None, "predecessor_lease_missing"
+    owner_run_id = str(
+        lease.get("owner_run_id") or lease.get("owner") or lease.get("owner_id") or ""
+    )
+    if not owner_run_id:
+        return None, "predecessor_owner_missing"
+    acquired_raw = lease.get("acquired_at") or lease.get("acquired_at_utc")
+    try:
+        acquired_at = parse(acquired_raw)
+        duration_s = max(1.0, float(cursor.get("duration_s") or 0))
+    except (TypeError, ValueError):
+        return None, "predecessor_timing_missing"
+    elapsed_s = max(0.0, (now - acquired_at).total_seconds())
+    trigger_after_s = max(0.0, duration_s - max(0.0, float(lead_seconds)))
+    if elapsed_s < trigger_after_s:
+        return None, "handoff_not_due"
+
+    predecessor_created = _campaign_created_at(predecessor)
+    viable: list[tuple[datetime, dict]] = []
+    predecessor_id = str(predecessor.get("campaign_id") or "")
+    for candidate in candidates:
+        if candidate is predecessor:
+            continue
+        if candidate.get("status") != "PENDING" or candidate.get("lease") is not None:
+            continue
+        if _market_handoff_key(candidate) != key:
+            continue
+        candidate_id = str(candidate.get("campaign_id") or "")
+        if not candidate_id or candidate_id == predecessor_id:
+            continue
+        # Keep all explicit safety declarations fail-closed.
+        if (
+            candidate.get("paper_only") is False
+            or candidate.get("read_only") is False
+            or candidate.get("real_execution") is True
+        ):
+            continue
+        candidate_created = _campaign_created_at(candidate)
+        if candidate_created is None:
+            continue
+        if predecessor_created is not None and candidate_created <= predecessor_created:
+            continue
+        viable.append((candidate_created, candidate))
+
+    if not viable:
+        return None, "handoff_successor_unavailable"
+    viable.sort(key=lambda item: item[0], reverse=True)
+    return viable[0][1], "handoff_ready"
+
+
+def _dispatch_market_handoff(
+    predecessor: dict,
+    successor: dict,
+    repository: str,
+    now: datetime,
+) -> tuple[bool, str]:
+    predecessor_cursor = (
+        predecessor.get("cursor") if isinstance(predecessor.get("cursor"), dict) else {}
+    )
+    lease = predecessor.get("lease") if isinstance(predecessor.get("lease"), dict) else {}
+    predecessor_run_id = str(
+        lease.get("owner_run_id") or lease.get("owner") or lease.get("owner_id") or ""
+    )
+    successor_id = str(successor.get("campaign_id") or "")
+    if not predecessor_run_id or not successor_id:
+        return False, "handoff_identity_missing"
+
+    marker_raw = predecessor_cursor.get("hot_handoff_dispatch_at_utc")
+    if marker_raw:
+        try:
+            if (
+                parse(marker_raw)
+                + timedelta(seconds=HOT_HANDOFF_DISPATCH_COOLDOWN_SECONDS)
+                > now
+            ):
+                return False, "handoff_dispatch_recent"
+        except (TypeError, ValueError):
+            pass
+
+    generation = int(
+        predecessor_cursor.get("generation")
+        if predecessor_cursor.get("generation") is not None
+        else predecessor.get("chunk_index") or 0
+    ) + 1
+    timestamp = now.isoformat().replace("+00:00", "Z")
+    command = [
+        "gh", "workflow", "run", "resumable-campaign-worker.yml",
+        "--repo", repository,
+        "--ref", "main",
+        "-f", f"campaign_id={successor_id}",
+        "-f", f"phase_epoch={predecessor.get('phase_epoch')}",
+        "-f", f"generation={generation}",
+        "-f", f"predecessor_run_id={predecessor_run_id}",
+        "-f", f"requested_handoff_at_utc={timestamp}",
+    ]
+    last_detail = "dispatch_failed"
+    for attempt in range(1, 7):
+        cp = subprocess.run(command, text=True, capture_output=True, check=False)
+        if cp.returncode == 0:
+            successor_cursor = (
+                successor.get("cursor")
+                if isinstance(successor.get("cursor"), dict)
+                else {}
+            )
+            predecessor_cursor["hot_handoff_successor_campaign_id"] = successor_id
+            predecessor_cursor["hot_handoff_dispatch_at_utc"] = timestamp
+            predecessor_cursor["hot_handoff_predecessor_run_id"] = predecessor_run_id
+            predecessor_cursor["hot_handoff_generation"] = generation
+            predecessor_cursor["hot_handoff_predecessor_universe_digest"] = (
+                predecessor_cursor.get("universe_digest")
+            )
+            predecessor_cursor["hot_handoff_successor_universe_digest"] = (
+                successor_cursor.get("universe_digest")
+            )
+            predecessor["cursor"] = predecessor_cursor
+            predecessor["updated_at"] = timestamp
+            predecessor.setdefault("history", []).append({
+                "at": timestamp,
+                "event": "HOT_HANDOFF_SUCCESSOR_DISPATCHED",
+                "predecessor_run_id": predecessor_run_id,
+                "successor_campaign_id": successor_id,
+                "generation": generation,
+            })
+            return True, "handoff_dispatched"
+
+        last_detail = (cp.stderr or cp.stdout or "dispatch_failed").strip()[-500:]
+        transient = any(
+            marker in last_detail.lower()
+            for marker in (
+                "rate limit", "http 403", "http 429", "secondary rate",
+                "temporar", "timeout", "timed out", "connection reset",
+                "502", "503", "504",
+            )
+        )
+        if not transient:
+            return False, last_detail
+        if attempt < 6:
+            time.sleep(min(5 * attempt * attempt, 60))
+    return False, f"bounded transient handoff retry exhausted: {last_detail}"
 
 
 def _dispatch_successor(row: dict, repository: str, now: datetime) -> tuple[bool, str]:
