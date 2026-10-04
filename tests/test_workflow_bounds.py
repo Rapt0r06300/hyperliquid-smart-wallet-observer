@@ -55,16 +55,18 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "copy_vault_collection" in text
     assert "freeze_copy_vault_selection.py" in text
     assert "COPY_COUNT" in text
-    assert "COPY_LANES" in text
     assert "ACTIVE_COPY_CAMPAIGNS" in text
-    assert "active Copy-Vault sweep already exists" in text
-    assert "CONTINUATION_REQUIRED" in text
-    assert "(COPY_COUNT + 9) / 10" in text
-    assert "COPY_MAX_USERS_PER_LANE" in text
-    assert 'COPY_MAX_USERS_PER_LANE" -le 10' in text
+    assert "active Copy-Vault lane still running" in text
     assert "supersede_copy_vault_fanout.py" in text
-    assert "COPY_LANE<COPY_LANES" in text
-    assert "copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7" in text
+    assert "--legacy-version=-v7" in text
+    assert "--preserve-running" in text
+    assert '"max_vaults":int(sys.argv[1])' in text
+    assert '"max_ws_vaults":10' in text
+    assert '"vault_shard_count":1' in text
+    assert '"vault_shard_index":0' in text
+    assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
+    assert "copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8" in text
+    assert "copy-vault-two-speed-broad-rest-priority-ws-v8" in text
     assert "selection_file" in text
     assert "selection_sha256" in text
     assert "catalog/copy_vault_selections" in text
@@ -93,8 +95,9 @@ def test_resumable_creator_encodes_copy_vault_cursor_as_valid_json():
     assert "COPY_CURSOR=" in text
     assert "json.dumps" in text
     assert '"$COPY_CURSOR"' in text
-    assert '"{"duration_s":3500' not in text
-    assert '{"duration_s":300' in text
+    assert '{"duration_s":3500' in text
+    assert '"max_ws_vaults":10' in text
+    assert '"copy_vault_mode":"two_speed_broad_rest_priority_ws"' in text
 
 
 def test_controller_worker_are_bounded_hosted_and_collect_relayed():
@@ -140,8 +143,12 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "alina-smartflow-datasets-v2" not in controller
     assert "alina-smartflow-datasets-v2" not in worker
     assert 'os.path.abspath(str(part["selection_file"]))' in worker
-    assert "COPY_VAULT_SWEEP_DURATION_CAP_S=300" in worker
-    assert 'part["duration_s"] = min' in worker
+    assert 'part.setdefault("duration_s",3500)' in worker
+    assert 'part.setdefault("max_ws_vaults",10)' in worker
+    assert 'part.setdefault("vault_shard_count",1)' in worker
+    assert 'part.setdefault("vault_shard_index",0)' in worker
+    assert "COPY_VAULT_SWEEP_DURATION_CAP_S=300" not in worker
+    assert 'part["duration_s"] = min' not in worker
     assert 'part.setdefault("market_shard_count",1)' in worker
     assert 'part.setdefault("market_shard_index",0)' in worker
     assert "MARKET_SHARD_COUNT" in worker
