@@ -307,6 +307,229 @@ def _dispatch_market_handoff(
     return False, f"bounded transient handoff retry exhausted: {last_detail}"
 
 
+def _durable_collection_window(row: dict) -> dict | None:
+    completed = row.get("completed_units")
+    if not isinstance(completed, dict):
+        return None
+    candidates = []
+    for unit_id, unit in completed.items():
+        if not isinstance(unit, dict):
+            continue
+        result = unit.get("result")
+        if not isinstance(result, dict) or result.get("durable_persisted") is not True:
+            continue
+        metrics = result.get("collection_metrics")
+        if not isinstance(metrics, dict):
+            continue
+        try:
+            started_at_ms = int(metrics.get("started_at_ms") or 0)
+            ended_at_ms = int(metrics.get("ended_at_ms") or 0)
+            record_count = int(metrics.get("record_count_observed") or 0)
+            shard_count = int(metrics.get("shard_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if (
+            started_at_ms <= 0
+            or ended_at_ms <= started_at_ms
+            or record_count <= 0
+            or shard_count <= 0
+            or metrics.get("trade_count_coverage_complete") is not True
+            or metrics.get("uncompressed_size_coverage_complete") is not True
+        ):
+            continue
+        candidates.append({
+            "unit_id": str(unit_id),
+            "unit_sha256": str(unit.get("sha256") or ""),
+            "started_at_ms": started_at_ms,
+            "ended_at_ms": ended_at_ms,
+            "record_count_observed": record_count,
+            "shard_count": shard_count,
+            "release_tag": result.get("release_tag"),
+            "release_repository": result.get("release_repository"),
+            "collection_plan_sha256": result.get("collection_plan_sha256"),
+        })
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item["ended_at_ms"], item["unit_id"]), reverse=True)
+    return candidates[0]
+
+
+def _build_market_handoff_proof(
+    predecessor: dict,
+    successor: dict,
+    *,
+    observed_at: datetime,
+) -> dict | None:
+    predecessor_cursor = (
+        predecessor.get("cursor") if isinstance(predecessor.get("cursor"), dict) else {}
+    )
+    successor_cursor = (
+        successor.get("cursor") if isinstance(successor.get("cursor"), dict) else {}
+    )
+    successor_id = str(successor.get("campaign_id") or "")
+    if (
+        not successor_id
+        or predecessor_cursor.get("hot_handoff_successor_campaign_id") != successor_id
+    ):
+        return None
+    if _market_handoff_key(predecessor) != _market_handoff_key(successor):
+        return None
+
+    expected_predecessor_run = str(
+        predecessor_cursor.get("hot_handoff_predecessor_run_id") or ""
+    )
+    observed_predecessor_run = str(successor_cursor.get("predecessor_run_id") or "")
+    if (
+        not expected_predecessor_run
+        or observed_predecessor_run != expected_predecessor_run
+    ):
+        return None
+
+    predecessor_window = _durable_collection_window(predecessor)
+    successor_window = _durable_collection_window(successor)
+    if predecessor_window is None or successor_window is None:
+        return None
+
+    overlap_start_ms = max(
+        predecessor_window["started_at_ms"],
+        successor_window["started_at_ms"],
+    )
+    overlap_end_ms = min(
+        predecessor_window["ended_at_ms"],
+        successor_window["ended_at_ms"],
+    )
+    overlap_ms = overlap_end_ms - overlap_start_ms
+    if overlap_ms <= 0:
+        return None
+
+    epoch, shard_count, shard_index = _market_handoff_key(predecessor) or (0, 0, 0)
+    proof = {
+        "schema_version": "alina.collection_handoff_proof.v1",
+        "phase": "COLLECT",
+        "phase_epoch": epoch,
+        "market_shard_count": shard_count,
+        "market_shard_index": shard_index,
+        "predecessor_campaign_id": predecessor.get("campaign_id"),
+        "successor_campaign_id": successor_id,
+        "predecessor_run_id": expected_predecessor_run,
+        "successor_run_id": successor_cursor.get("last_run_id"),
+        "requested_handoff_at_utc": successor_cursor.get(
+            "requested_handoff_at_utc"
+        ),
+        "dispatch_at_utc": predecessor_cursor.get("hot_handoff_dispatch_at_utc"),
+        "predecessor_universe_digest": predecessor_cursor.get("universe_digest"),
+        "successor_universe_digest": successor_cursor.get("universe_digest"),
+        "predecessor_window": predecessor_window,
+        "successor_window": successor_window,
+        "overlap_start_ms": overlap_start_ms,
+        "overlap_end_ms": overlap_end_ms,
+        "overlap_ms": overlap_ms,
+        "durable_overlap_proven": True,
+        "dedupe_required": True,
+        "dedupe_contract": "canonical_dataset_v2_identity_reconciliation",
+        "observed_at_utc": observed_at.isoformat().replace("+00:00", "Z"),
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    proof["proof_digest"] = hashlib.sha256(
+        json.dumps(proof, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return proof
+
+
+def _update_collection_handoff_receipt(
+    target: Path,
+    rows: list[dict],
+    phase: dict,
+    now: datetime,
+) -> dict:
+    existing = {}
+    if target.exists():
+        try:
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        except (OSError, ValueError, TypeError):
+            existing = {}
+    proofs_by_pair = {}
+    for proof in existing.get("proofs") or []:
+        if not isinstance(proof, dict):
+            continue
+        key = (
+            str(proof.get("predecessor_campaign_id") or ""),
+            str(proof.get("successor_campaign_id") or ""),
+        )
+        if all(key):
+            proofs_by_pair[key] = proof
+
+    rows_by_id = {
+        str(row.get("campaign_id")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("campaign_id")
+    }
+    for predecessor in rows_by_id.values():
+        cursor = (
+            predecessor.get("cursor")
+            if isinstance(predecessor.get("cursor"), dict)
+            else {}
+        )
+        successor_id = str(cursor.get("hot_handoff_successor_campaign_id") or "")
+        if not successor_id:
+            continue
+        successor = rows_by_id.get(successor_id)
+        if successor is None:
+            continue
+        proof = _build_market_handoff_proof(
+            predecessor,
+            successor,
+            observed_at=now,
+        )
+        if proof is not None:
+            proofs_by_pair[
+                (
+                    str(proof["predecessor_campaign_id"]),
+                    str(proof["successor_campaign_id"]),
+                )
+            ] = proof
+
+    proofs = sorted(
+        proofs_by_pair.values(),
+        key=lambda item: (
+            int(item.get("phase_epoch") or 0),
+            int(item.get("overlap_end_ms") or 0),
+            str(item.get("predecessor_campaign_id") or ""),
+        ),
+    )
+    current_epoch = int(phase.get("epoch") or 0)
+    current_proofs = [
+        proof
+        for proof in proofs
+        if proof.get("phase") == "COLLECT"
+        and int(proof.get("phase_epoch") or 0) == current_epoch
+        and proof.get("durable_overlap_proven") is True
+    ]
+    receipt = {
+        "schema_version": "alina.collection_handoff_receipt.v1",
+        "generated_at_utc": now.isoformat().replace("+00:00", "Z"),
+        "phase": phase.get("phase"),
+        "phase_epoch": current_epoch,
+        "status": "READY" if current_proofs else "PENDING",
+        "proof_count": len(proofs),
+        "current_epoch_proof_count": len(current_proofs),
+        "latest_current_epoch_proof": current_proofs[-1] if current_proofs else None,
+        "proofs": proofs,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    receipt["receipt_digest"] = hashlib.sha256(
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    _write_atomic(target, receipt)
+    return receipt
+
+
 def _dispatch_successor(row: dict, repository: str, now: datetime) -> tuple[bool, str]:
     campaign_id = str(row.get("campaign_id") or "")
     cursor = row.get("cursor") if isinstance(row.get("cursor"), dict) else {}
@@ -532,6 +755,10 @@ def main():
     p.add_argument("--campaign-root", default="catalog/campaigns")
     p.add_argument("--phase-state", default="control/alina-phase.json")
     p.add_argument("--output", default="catalog/CAMPAIGN_WATCHDOG_RECEIPT.json")
+    p.add_argument(
+        "--handoff-output",
+        default="catalog/COLLECTION_HANDOFF_RECEIPT.json",
+    )
     p.add_argument("--dispatch", action="store_true")
     a = p.parse_args()
     now = datetime.now(timezone.utc)
@@ -842,6 +1069,21 @@ def main():
                 row["updated_at"] = now.isoformat().replace("+00:00", "Z")
                 lease_repairs.append(campaign_id)
                 _write_atomic(path, row)
+    final_rows = []
+    for manifest_path in manifests:
+        try:
+            loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if isinstance(loaded, dict):
+            final_rows.append(loaded)
+    handoff_receipt = _update_collection_handoff_receipt(
+        Path(a.handoff_output),
+        final_rows,
+        phase,
+        now,
+    )
+
     receipt = {
         "schema": "alina.campaign_watchdog_receipt.v1",
         "generated_at_utc": now.isoformat().replace("+00:00", "Z"),
@@ -877,6 +1119,11 @@ def main():
                 item["predecessor_campaign_id"],
                 str(item.get("successor_campaign_id") or ""),
             ),
+        ),
+        "collection_handoff_status": handoff_receipt.get("status"),
+        "collection_handoff_receipt_digest": handoff_receipt.get("receipt_digest"),
+        "collection_handoff_current_epoch_proof_count": handoff_receipt.get(
+            "current_epoch_proof_count"
         ),
         "phase_checked": phase,
         "phase_error": phase_error,
