@@ -69,7 +69,11 @@ def test_collect_campaign_identity_and_frozen_inputs_are_epoch_scoped() -> None:
     assert 'MARKET_PLAN_DIR="catalog/market_collection_plans/e$PHASE_EPOCH/$BUCKET"' in text
     assert '"market-e$PHASE_EPOCH-$MARKET_SHARD-$BUCKET-v7"' in text
     assert 'COPY_SELECTION="catalog/copy_vault_selections/e$PHASE_EPOCH/$BUCKET.json"' in text
-    assert '"copy-vault-e$PHASE_EPOCH-$COPY_LANE-$BUCKET-v7"' in text
+    assert '"copy-vault-e$PHASE_EPOCH-broad-$BUCKET-v8"' in text
+    assert '"copy-vault-two-speed-broad-rest-priority-ws-v8"' in text
+    assert '"max_ws_vaults":10' in text
+    assert '"vault_shard_count":1' in text
+    assert '"vault_shard_index":0' in text
     assert '"event-e$PHASE_EPOCH-$BUCKET-v5"' in text
     assert '"archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"' in text
     assert '"archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"' in text
