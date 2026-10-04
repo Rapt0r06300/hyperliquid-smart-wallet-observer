@@ -62,6 +62,16 @@ def decide_capture_tier(
 
 
 _PROFILES: Mapping[str, Mapping[CaptureTier, CaptureProfile]] = {
+    "binance": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 1000, ("depth", "bookTicker", "aggTrade", "markPrice", "forceOrder")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 100, ("depth", "bookTicker", "aggTrade", "markPrice")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 5, ("bookTicker", "aggTrade")),
+    },
+    "hyperliquid": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 20, ("l2Book", "bbo", "trades", "allMids", "activeAssetCtx")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 10, ("l2Book", "bbo", "trades", "activeAssetCtx")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("bbo", "trades", "allMids")),
+    },
     "bybit": {
         CaptureTier.A: CaptureProfile(CaptureTier.A, 1000, ("orderbook", "bbo", "trades", "ticker", "liquidations")),
         CaptureTier.B: CaptureProfile(CaptureTier.B, 200, ("orderbook", "bbo", "trades", "ticker")),
@@ -81,6 +91,26 @@ _PROFILES: Mapping[str, Mapping[CaptureTier, CaptureProfile]] = {
         CaptureTier.A: CaptureProfile(CaptureTier.A, 100, ("futures.order_book_update", "futures.book_ticker", "futures.trades", "futures.tickers")),
         CaptureTier.B: CaptureProfile(CaptureTier.B, 50, ("futures.order_book_update", "futures.book_ticker", "futures.trades")),
         CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("futures.book_ticker", "futures.trades")),
+    },
+    "deribit": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 1000, ("book", "trades", "ticker")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 100, ("book", "trades", "ticker")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("ticker", "trades")),
+    },
+    "kraken": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 1000, ("book", "trade", "ticker")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 100, ("book", "trade", "ticker")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("ticker", "trade")),
+    },
+    "coinbase": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 1000, ("level2", "market_trades", "heartbeats")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 100, ("level2", "market_trades", "heartbeats")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("ticker", "market_trades", "heartbeats")),
+    },
+    "htx": {
+        CaptureTier.A: CaptureProfile(CaptureTier.A, 400, ("mbp", "trade", "bbo")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 150, ("mbp", "trade", "bbo")),
+        CaptureTier.C: CaptureProfile(CaptureTier.C, 5, ("mbp", "trade", "bbo")),
     },
 }
 
