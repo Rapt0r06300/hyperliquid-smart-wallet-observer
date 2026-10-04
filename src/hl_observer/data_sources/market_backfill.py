@@ -230,10 +230,15 @@ class HistoricalBackfillHub:
         live = tuple(live_records)
         reference = tuple(
             {
+                "venue": row.venue,
                 "event_id": row.event_id,
                 "exchange_symbol": row.exchange_symbol,
+                "channel": row.data_type.value.lower(),
                 "exchange_timestamp": row.exchange_timestamp,
+                "received_ts_ms": row.receive_timestamp,
                 "sequence": row.sequence,
+                "provenance": row.provenance,
+                "raw_payload": dict(row.payload),
             }
             for row in result.records
         )
