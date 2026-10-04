@@ -98,29 +98,31 @@ def finalize(
             continue
 
         # A worker claimed before the cutoff may finish while its bounded lease is
-        # still live.  No new source-epoch lease can be acquired in ANALYZE.
+        # still live. No new source-epoch lease can be acquired in ANALYZE.
         if _lease_is_live(row, current) and current <= deadline:
             remaining.append(str(row.get("campaign_id") or path.stem))
             continue
 
-        # Before the grace deadline an unclaimed pending unit may still represent a
-        # controller race.  After the deadline every non-terminal source-epoch unit
-        # is explicitly closed so DRAIN cannot deadlock forever.
-        if current <= deadline and status == "PENDING":
-            remaining.append(str(row.get("campaign_id") or path.stem))
-            continue
-        if current <= deadline and status in {"RUNNING", "CONTINUATION_REQUIRED", "STUCK"}:
-            remaining.append(str(row.get("campaign_id") or path.stem))
-            continue
-
+        # Once ANALYZE owns the phase, an inactive/expired source-epoch lease can
+        # never be renewed. Keeping such a manifest active until the six-hour
+        # grace deadline only deadlocks DRAIN. Close it immediately from the
+        # durable checkpoint already present (if any). A still-running worker
+        # with an expired lease cannot checkpoint because verify_lease() fails.
         completed = row.get("completed_units")
         has_completed = isinstance(completed, dict) and bool(completed)
         terminal_status = "PARTIAL" if has_completed else "UNAVAILABLE"
-        reason = (
-            "analysis_drain_deadline_expired_with_checkpoint"
-            if has_completed
-            else "analysis_drain_deadline_expired_without_checkpoint"
-        )
+        if current <= deadline:
+            reason = (
+                "analysis_drain_inactive_lease_with_checkpoint"
+                if has_completed
+                else "analysis_drain_inactive_lease_without_checkpoint"
+            )
+        else:
+            reason = (
+                "analysis_drain_deadline_expired_with_checkpoint"
+                if has_completed
+                else "analysis_drain_deadline_expired_without_checkpoint"
+            )
         previous = status
         timestamp = current.isoformat().replace("+00:00", "Z")
         row["status"] = terminal_status
