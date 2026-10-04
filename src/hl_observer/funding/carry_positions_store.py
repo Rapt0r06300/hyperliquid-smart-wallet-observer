@@ -436,11 +436,24 @@ def etat_carry(root: str | Path = ".", *, mode: str = MODE_LIVE) -> dict[str, An
         d = agreger(g.ouvertes, now_ms=int(_t.time() * 1000))
         r["net_funding_settled"] = d["net_funding_settled"]
         r["funding_accrual_estimate"] = d["funding_accrual_estimate"]
-        r["stable_net_pnl"] = pnl_stable(r.get("realized_net_pnl_usdc") or 0.0,
-                                         d["net_funding_settled"])
-        if r.get("realized_net_pnl_usdc_session") is not None:
-            r["stable_net_pnl_session"] = pnl_stable(r["realized_net_pnl_usdc_session"],
-                                                     d["net_funding_settled"])
+        r["funding_certification_status"] = d["funding_certification_status"]
+        r["funding_settlement_evidence_count"] = d["settlement_evidence_count"]
+        if d["funding_certified"] is True:
+            r["stable_net_pnl"] = pnl_stable(
+                r.get("realized_net_pnl_usdc") or 0.0,
+                d["net_funding_settled"],
+            )
+            if r.get("realized_net_pnl_usdc_session") is not None:
+                r["stable_net_pnl_session"] = pnl_stable(
+                    r["realized_net_pnl_usdc_session"],
+                    d["net_funding_settled"],
+                )
+        else:
+            # Fail closed: realized PnL remains visible, but total PnL cannot be
+            # certified while settlement evidence is incomplete.
+            r["stable_net_pnl"] = None
+            if r.get("realized_net_pnl_usdc_session") is not None:
+                r["stable_net_pnl_session"] = None
     except Exception:  # noqa: BLE001 — un decoupage rate ne fait pas disparaitre l'etat
         _noter_echec("hl_observer/funding/carry_positions_store.py:etat_carry_session")
     return r

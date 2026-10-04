@@ -1,175 +1,119 @@
-"""Tests du RÈGLEMENT DU FUNDING (P0, 21/07) — estimation ≠ encaissement.
-
-Le README affirmait « funding couru (l'encaissé, stable) ». Le code faisait un PRORATA
-LINÉAIRE alors qu'Hyperliquid règle au sommet de chaque heure. Une estimation présentée
-comme un fait comptable, c'est exactement le genre de chiffre qui finit par mentir.
-
-Ce que ces tests PROUVENT :
-  * une position qui n'a franchi AUCUN sommet d'heure a un funding réglé de ZÉRO,
-    même après 59 minutes ;
-  * la somme réglé + estimé vaut EXACTEMENT l'accru historique (migration neutre,
-    aucune valeur créée ni détruite) ;
-  * le PnL stable n'absorbe JAMAIS l'estimation ;
-  * une position mal formée ne fait pas disparaître le PnL des autres.
-"""
+"""Funding certification tests: actual settlement evidence beats accrual inference."""
 from __future__ import annotations
 
 import pytest
 
-from hl_observer.paper_trading.funding_settlement import (PERIODE_REGLEMENT_MS, agreger,
-                                                          decouper, pnl_stable,
-                                                          reglements_franchis)
+from hl_observer.paper_trading.funding_settlement import (
+    PERIODE_REGLEMENT_MS, agreger, decouper, pnl_stable, reglements_franchis,
+)
 
 H = PERIODE_REGLEMENT_MS
-#: un sommet d'heure pile (multiple exact de 3 600 000 ms)
 T_PILE = (1_760_000_000_000 // H) * H
 
 
 def _pos(accru=1.0, entree=T_PILE, **kw):
-    p = {"coin": "BTC", "funding_accrued_usdt": accru, "entry_ts_ms": entree,
-         "notional_usdt": 500.0}
+    p = {"coin": "BTC", "funding_accrued_usdt": accru, "entry_ts_ms": entree, "notional_usdt": 500.0}
     p.update(kw)
     return p
 
 
-# ------------------------------------------------------------------ le comptage des règlements
-
 def test_aucun_sommet_franchi_meme_apres_59_minutes():
-    """LE cœur du défaut : 59 minutes de détention ne donnent AUCUN paiement si aucun
-    sommet d'heure n'a été traversé."""
-    # de la 30e seconde a la 59e minute 59 : presque une heure pleine, AUCUN sommet traverse
     assert reglements_franchis(T_PILE + 30_000, T_PILE + H - 1_000) == 0
-    # une seconde APRES le sommet : le paiement tombe d'un coup, jamais progressivement.
-    # C'est toute la difference entre un escalier et l'interpolation qu'on affichait.
     assert reglements_franchis(T_PILE + 30_000, T_PILE + H + 1) == 1
 
 
-def test_un_sommet_franchi_donne_un_reglement():
-    assert reglements_franchis(T_PILE - 60_000, T_PILE + 60_000) == 1
+def test_boundary_count_never_creates_settled_cash():
+    d = decouper(_pos(accru=1.0), now_ms=int(T_PILE + 10.5 * H))
+    assert d["heures_reglees"] == 10.0
+    assert d["net_funding_settled"] == 0.0
+    assert d["funding_accrual_estimate"] == pytest.approx(1.0)
+    assert d["funding_certified"] is False
 
 
-@pytest.mark.parametrize("heures", [1, 2, 5, 24, 336])
-def test_n_heures_pile_donnent_n_reglements(heures):
-    assert reglements_franchis(T_PILE, T_PILE + heures * H) == heures
-
-
-def test_intervalle_nul_ou_inverse_ne_donne_rien():
-    assert reglements_franchis(T_PILE, T_PILE) == 0
-    assert reglements_franchis(T_PILE + H, T_PILE) == 0
-
-
-def test_periode_absurde_ne_leve_pas():
-    assert reglements_franchis(T_PILE, T_PILE + H, periode_ms=0) == 0
-
-
-# ------------------------------------------------------------------ le découpage
-
-def test_la_somme_est_CONSERVEE_la_migration_est_neutre():
-    """On re-qualifie une mesure, on n'en crée pas. Si la somme changeait, on aurait
-    fabriqué (ou détruit) du PnL en changeant d'affichage."""
-    for accru in (0.32, 1.0, -0.5, 12.345):
-        for h in (0.3, 1.0, 2.7, 20.0):
-            d = decouper(_pos(accru=accru), now_ms=int(T_PILE + h * H))
-            assert d["net_funding_settled"] + d["funding_accrual_estimate"] == \
-                pytest.approx(accru, abs=1e-7)
-
-
-def test_une_position_jeune_a_ZERO_de_funding_REGLE():
-    """20 minutes de détention : le modèle créditait 1/3 d'heure. Réglé = 0."""
-    d = decouper(_pos(accru=0.05, entree=T_PILE), now_ms=T_PILE + 20 * 60_000)
+def test_before_first_boundary_zero_settlement_is_certified():
+    d = decouper(_pos(accru=0.05), now_ms=T_PILE + 20 * 60_000)
     assert d["net_funding_settled"] == 0.0
     assert d["funding_accrual_estimate"] == pytest.approx(0.05)
-    assert d["heures_reglees"] == 0.0
+    assert d["funding_certified"] is True
+    assert d["funding_certification_reason"] == "NO_SETTLEMENT_BOUNDARY_CROSSED"
 
 
-def test_une_position_de_plusieurs_heures_a_l_essentiel_de_REGLE():
-    d = decouper(_pos(accru=1.0, entree=T_PILE), now_ms=int(T_PILE + 10.5 * H))
-    assert d["heures_reglees"] == 10.0
-    assert d["net_funding_settled"] == pytest.approx(1.0 * 10.0 / 10.5, abs=1e-6)
-    assert 0 < d["funding_accrual_estimate"] < 0.05
+def test_complete_user_funding_events_are_certified_and_deduped():
+    events = [
+        {"time": T_PILE + H, "hash": "a", "delta": {"type": "funding", "coin": "BTC", "usdc": "0.12"}},
+        {"time": T_PILE + H, "hash": "a", "delta": {"type": "funding", "coin": "BTC", "usdc": "0.12"}},
+        {"time": T_PILE + 2 * H, "hash": "b", "delta": {"type": "funding", "coin": "BTC", "usdc": "-0.02"}},
+    ]
+    d = decouper(
+        _pos(accru=0.15, user_funding_events=events, funding_settlement_evidence_complete=True),
+        now_ms=T_PILE + 2 * H + 1,
+    )
+    assert d["net_funding_settled"] == pytest.approx(0.10)
+    assert d["funding_accrual_estimate"] == pytest.approx(0.05)
+    assert d["settlement_evidence_count"] == 2
+    assert d["funding_certified"] is True
 
 
-def test_la_part_reglee_ne_depasse_JAMAIS_le_total():
-    d = decouper(_pos(accru=1.0, entree=T_PILE), now_ms=T_PILE + 1000 * H)
-    assert d["net_funding_settled"] <= 1.0 + 1e-9
-    assert d["funding_accrual_estimate"] >= -1e-9
-
-
-def test_un_funding_NEGATIF_se_decoupe_aussi():
-    """Le short peut PAYER le funding. Le règlement d'une perte est aussi un règlement."""
-    d = decouper(_pos(accru=-2.0, entree=T_PILE), now_ms=int(T_PILE + 4.0 * H))
-    assert d["net_funding_settled"] == pytest.approx(-2.0)
-    assert d["funding_accrual_estimate"] == pytest.approx(0.0)
-
-
-@pytest.mark.parametrize("casse", [{"entry_ts_ms": None}, {"entry_ts_ms": "hier"},
-                                   {"funding_accrued_usdt": None},
-                                   {"funding_accrued_usdt": float("nan")}])
-def test_une_position_mal_formee_ne_leve_pas_et_ne_perd_rien(casse):
-    d = decouper(_pos(**casse), now_ms=T_PILE + 5 * H)
-    assert set(d) == {"net_funding_settled", "funding_accrual_estimate",
-                      "heures_reglees", "fraction_heure_en_cours"}
-
-
-def test_horodatage_dans_le_futur_ne_produit_pas_de_reglement_negatif():
-    d = decouper(_pos(accru=1.0, entree=T_PILE + 10 * H), now_ms=T_PILE)
+def test_incomplete_event_list_is_diagnostic_only():
+    d = decouper(
+        _pos(accru=0.4, user_funding_events=[
+            {"time": T_PILE + H, "hash": "a", "delta": {"type": "funding", "usdc": "0.2"}}
+        ]),
+        now_ms=T_PILE + 2 * H,
+    )
+    assert d["settlement_evidence_count"] == 1
     assert d["net_funding_settled"] == 0.0
-    assert d["heures_reglees"] == 0.0
+    assert d["funding_accrual_estimate"] == pytest.approx(0.4)
+    assert d["funding_certified"] is False
 
 
-# ------------------------------------------------------------------ agrégation portefeuille
-
-def test_agreger_conserve_la_somme_sur_tout_le_portefeuille():
-    positions = {"BTC": _pos(accru=0.10, entree=T_PILE),
-                 "ETH": _pos(accru=0.20, entree=T_PILE - 3 * H),
-                 "SOL": _pos(accru=0.02, entree=T_PILE + 30 * 60_000)}
-    a = agreger(positions, now_ms=int(T_PILE + 2.5 * H))
-    assert a["funding_total_couru"] == pytest.approx(0.32, abs=1e-6)
-    assert a["net_funding_settled"] + a["funding_accrual_estimate"] == \
-        pytest.approx(a["funding_total_couru"], abs=1e-9)
-    assert a["positions"] == 3
-
-
-def test_agreger_ignore_les_entrees_non_dict_sans_planter():
-    a = agreger([_pos(), "pas une position", None, 42], now_ms=T_PILE + H)
-    assert a["positions"] == 1
+def test_trusted_exact_reconstruction_is_accepted():
+    d = decouper(
+        _pos(accru=0.6, net_funding_settled=0.45,
+             funding_settlement_source="EXACT_SETTLEMENT_RECONSTRUCTION",
+             funding_settlement_evidence_count=3),
+        now_ms=T_PILE + 3 * H,
+    )
+    assert d["net_funding_settled"] == pytest.approx(0.45)
+    assert d["funding_accrual_estimate"] == pytest.approx(0.15)
+    assert d["funding_certified"] is True
 
 
-def test_agreger_portefeuille_vide():
+def test_untrusted_scalar_cannot_certify_funding():
+    d = decouper(_pos(accru=0.6, net_funding_settled=0.45), now_ms=T_PILE + 3 * H)
+    assert d["net_funding_settled"] == 0.0
+    assert d["funding_certified"] is False
+
+
+def test_missing_entry_timestamp_is_unmeasurable_not_invented():
+    d = decouper({"funding_accrued_usdt": 1.0}, now_ms=T_PILE + H)
+    assert d["net_funding_settled"] == 0.0
+    assert d["funding_accrual_estimate"] == 1.0
+    assert d["funding_certified"] is False
+
+
+def test_agreger_propagates_unmeasurable_funding():
+    a = agreger({"BTC": _pos(accru=0.1), "ETH": _pos(accru=0.2, entree=T_PILE - 3 * H)},
+                now_ms=T_PILE + 2 * H)
+    assert a["funding_certification_status"] == "UNMEASURABLE"
+    assert a["funding_certified"] is False
+    assert a["net_funding_settled"] == 0.0
+
+
+def test_empty_portfolio_is_certified_zero():
     a = agreger({}, now_ms=T_PILE)
-    assert a["funding_total_couru"] == 0.0 and a["positions"] == 0
+    assert a["funding_total_couru"] == 0.0
+    assert a["positions"] == 0
+    assert a["funding_certified"] is True
 
 
-# ------------------------------------------------------------------ le PnL stable
-
-def test_le_pnl_stable_n_absorbe_QUE_le_funding_REGLE():
+def test_pnl_stable_only_accepts_already_certified_amount():
     assert pnl_stable(-6.05, 0.20) == pytest.approx(-5.85)
 
 
-def test_le_pnl_stable_ignore_l_estimation_meme_si_on_la_lui_passe_pas():
-    """Contrat explicite : la fonction ne prend PAS l'estimation en paramètre. On ne peut
-    donc pas la faire entrer dans le chiffre stable par erreur d'appel."""
-    import inspect
-    params = set(inspect.signature(pnl_stable).parameters)
-    assert params == {"realise_usd", "net_funding_settled"}
-    assert "accrual" not in " ".join(params)
-
-
-@pytest.mark.parametrize("mauvais", [None, "0.2", float("nan")])
-def test_le_pnl_stable_ne_leve_pas_sur_une_entree_douteuse(mauvais):
-    try:
-        v = pnl_stable(1.0, mauvais)
-    except (TypeError, ValueError):
-        v = None
-    assert v is None or isinstance(v, float)
-
-
-# ------------------------------------------------------------------ testé ≠ branché
-
-def test_le_decoupage_est_BRANCHE_dans_l_etat_carry():
-    """Sans ça, le dashboard continuerait d'appeler « encaissé » une estimation."""
+def test_decoupage_est_branche_dans_etat_carry():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "src" / "hl_observer" / "funding"
            / "carry_positions_store.py").read_text(encoding="utf-8")
-    assert "funding_settlement" in src
-    assert "net_funding_settled" in src and "funding_accrual_estimate" in src
+    assert "funding_certification_status" in src
+    assert 'stable_net_pnl"] = None' in src

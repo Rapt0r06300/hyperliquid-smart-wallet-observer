@@ -18,10 +18,21 @@ def test_load_skips_malformed_and_reads_closed(tmp_path):
     with open(p, "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"exit_method": "SLTP_TAKE_PROFIT", "estimated_net_pnl_usdc": 3.0}) + "\n")
         fh.write(json.dumps({"exit_method": "SLTP_STOP_LOSS", "estimated_net_pnl_usdc": -1.0}) + "\n")
-        fh.write(json.dumps({"paper_action_type": "OPEN", "estimated_net_pnl_usdc": 0.0}) + "\n")  # pas clôture
-        fh.write('{"exit_method": "SLTP_TAKE_PROFIT", "estimated_net_pnl_usdc": 2.\n')  # tronque
+        fh.write(json.dumps({"paper_action_type": "OPEN", "estimated_net_pnl_usdc": 0.0}) + "\n")
+        fh.write('{"exit_method": "SLTP_TAKE_PROFIT", "estimated_net_pnl_usdc": 2.\n')
     pnls = load_realized_pnls(str(p))
-    assert sorted(pnls) == [-1.0, 3.0]  # ligne tronquée ignorée, OPEN ignoré
+    assert sorted(pnls) == [-1.0, 3.0]
+
+
+def test_nonzero_estimated_pnl_never_creates_a_close(tmp_path):
+    p = tmp_path / "estimated_only.jsonl"
+    _write(p, [
+        {"paper_action_type": "OPEN", "estimated_net_pnl_usdc": 12.5},
+        {"bot_replay_action": "HOLD", "estimated_net_pnl_usdc": -3.0},
+        {"estimated_net_pnl_usdc": 99.0},
+        {"paper_action_type": "CLOSE", "estimated_net_pnl_usdc": 1.25},
+    ])
+    assert load_realized_pnls(str(p)) == [1.25]
 
 
 def test_summarize_log_profit_factor(tmp_path):

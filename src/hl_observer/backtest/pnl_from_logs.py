@@ -22,13 +22,17 @@ _CLOSE_HINTS = ("CLOSE", "REDUCE", "EXIT")
 
 
 def _is_closed_trade(row: dict, pnl_key: str) -> bool:
+    """Return True only when explicit causal close/reduce evidence is present.
+
+    The PnL field is deliberately ignored. A non-zero estimated PnL is an
+    economic annotation, never lifecycle evidence, and cannot manufacture a
+    CLOSE/REDUCE event.
+    """
+    _ = pnl_key  # kept for API compatibility; PnL must not decide lifecycle state.
     if row.get("exit_method"):
         return True
     pat = str(row.get("paper_action_type") or row.get("bot_replay_action") or "").upper()
-    if any(h in pat for h in _CLOSE_HINTS):
-        return True
-    v = row.get(pnl_key)
-    return v not in (None, 0, 0.0)
+    return any(h in pat for h in _CLOSE_HINTS)
 
 
 def load_realized_pnls(path: str, *, pnl_key: str = DEFAULT_PNL_KEY, close_only: bool = True) -> list[float]:
@@ -41,7 +45,7 @@ def load_realized_pnls(path: str, *, pnl_key: str = DEFAULT_PNL_KEY, close_only:
             try:
                 row = json.loads(line)
             except (json.JSONDecodeError, ValueError):
-                continue  # ligne tronquée/malformée -> ignorée (jamais inventée)
+                continue
             if not isinstance(row, dict):
                 continue
             if close_only and not _is_closed_trade(row, pnl_key):

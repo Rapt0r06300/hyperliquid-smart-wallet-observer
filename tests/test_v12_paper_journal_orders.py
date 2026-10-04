@@ -4,7 +4,9 @@ import pytest
 
 from hl_observer.paper_trading.journal import PaperTradeJournal
 from hl_observer.paper_trading.position_tracking import PaperPositionTracker
-from hl_observer.paper_trading.order_types import MaeMfeTracker, OrderType, PaperOrder, time_stop_hit
+from hl_observer.paper_trading.order_types import (
+    MaeMfeTracker, OrderType, PaperOrder, TimeInForce, TriggerSpec, TriggerType, time_stop_hit,
+)
 from hl_observer.risk.breach_alerts import check_breaches
 
 
@@ -24,13 +26,13 @@ def test_position_tracking_avg_and_unrealized():
     t.open_or_add(coin="BTC", side="LONG", size=1, price=110)
     pos = t.position("BTC", "LONG")
     assert pos["size"] == 2 and pos["avg_price"] == 105
-    assert t.unrealized_pnl_usdc({"BTC": 115}) == 20.0   # (115-105)*2
+    assert t.unrealized_pnl_usdc({"BTC": 115}) == 20.0
     t.reduce_or_close(coin="BTC", side="LONG", size=2)
     assert t.open_count() == 0
 
 
 def test_breach_alerts_warn_and_breach():
-    alerts = check_breaches(daily_loss_pct=5.5, monthly_loss_pct=12.5)  # daily breach, monthly warn(>=12)
+    alerts = check_breaches(daily_loss_pct=5.5, monthly_loss_pct=12.5)
     by = {a["layer"]: a["severity"] for a in alerts}
     assert by.get("daily") == "BREACH" and by.get("monthly") == "WARN"
     assert check_breaches() == []
@@ -40,9 +42,9 @@ def test_paper_order_types_are_simulation_only():
     assert PaperOrder(order_type=OrderType.MARKET, side="LONG", notional_usdt=40).simulation_only is True
     PaperOrder(order_type=OrderType.LIMIT, side="LONG", limit_price=100.0)
     with pytest.raises(ValueError):
-        PaperOrder(order_type=OrderType.LIMIT, side="LONG")          # missing limit price
+        PaperOrder(order_type=OrderType.LIMIT, side="LONG")
     with pytest.raises(ValueError):
-        PaperOrder(order_type=OrderType.MARKET, side="LONG", external_action=True)  # forbidden
+        PaperOrder(order_type=OrderType.MARKET, side="LONG", external_action=True)
 
 
 def test_time_stop_and_mae_mfe():
@@ -52,3 +54,28 @@ def test_time_stop_and_mae_mfe():
     for v in (5, -8, 12, -3):
         m.update(v)
     assert m.mae_bps == -8 and m.mfe_bps == 12
+
+
+def test_hyperliquid_paper_order_semantics_are_explicit_and_safe():
+    gtc = PaperOrder(order_type=OrderType.LIMIT, side="LONG", limit_price=100.0, reduce_only=True)
+    assert gtc.time_in_force == TimeInForce.GTC
+    assert gtc.reduce_only is True
+    assert gtc.external_action is False
+
+    ioc = PaperOrder(order_type=OrderType.LIMIT, side="SHORT", limit_price=99.0,
+                     time_in_force=TimeInForce.IOC)
+    assert ioc.time_in_force == TimeInForce.IOC
+
+    alo = PaperOrder(order_type=OrderType.POST_ONLY, side="LONG", limit_price=98.0)
+    assert alo.time_in_force == TimeInForce.ALO
+
+
+def test_trigger_tp_sl_is_modelled_without_external_execution():
+    trigger = TriggerSpec(trigger_price=110.0, trigger_type=TriggerType.TAKE_PROFIT, is_market=True)
+    order = PaperOrder(order_type=OrderType.LIMIT, side="LONG", limit_price=109.5,
+                       reduce_only=True, trigger=trigger)
+    assert order.trigger == trigger
+    assert order.not_an_order is True
+    assert order.simulation_only is True
+    with pytest.raises(ValueError):
+        TriggerSpec(trigger_price=0.0, trigger_type=TriggerType.STOP_LOSS)
