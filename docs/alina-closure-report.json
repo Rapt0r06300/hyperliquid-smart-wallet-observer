@@ -1034,14 +1034,9 @@
   "cross_shard_overlap_trade_count": 3801,
   "cross_venue_status": "UNMEASURABLE",
   "data_exploitability": {
-    "analysis_eligible": false,
+    "analysis_eligible": true,
     "analysis_stage": null,
-    "blockers": [
-      "TRADE_COUNT_COVERAGE_INCOMPLETE",
-      "GLOBAL_UNIQUE_TRADE_COVERAGE_INCOMPLETE",
-      "GLOBAL_UNIQUE_TRADE_COUNT_UNAVAILABLE",
-      "GLOBAL_UNIQUE_IDENTITY_FAILURES_PRESENT"
-    ],
+    "blockers": [],
     "cross_shard_overlap_trade_count": 3801,
     "economic_proof": {
       "cost_latency_evidence_current": false,
@@ -1049,8 +1044,8 @@
       "reason": "CURRENT_SCOREBOARD_RECEIPT_MISSING",
       "status": "PENDING_ANALYZE"
     },
-    "global_unique_failure_reason_count": 32,
-    "global_unique_trade_ratio": 0.0,
+    "global_unique_failure_reason_count": 0,
+    "global_unique_trade_ratio": 0.80419543,
     "partial_shard_count": 996,
     "phase": "COLLECT",
     "phase_epoch": 6,
@@ -1062,19 +1057,19 @@
     "replay_compatible_shard_count": 2429,
     "replay_unclassified_candidate_count": 0,
     "safe_shard_count": 2276,
-    "status": "NOT_ANALYSIS_ELIGIBLE",
-    "trade_count_exact": false,
+    "status": "ANALYSIS_ELIGIBLE",
+    "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
-    "unique_record_count": 31216,
-    "unique_record_ratio": 0.00402494,
-    "unique_trade_count_exact": false,
-    "unique_trade_count_global": null,
-    "valid_record_count": 31216,
-    "valid_record_ratio": 0.00402494
+    "unique_record_count": 7755643,
+    "unique_record_ratio": 1.0,
+    "unique_trade_count_exact": true,
+    "unique_trade_count_global": 3978929,
+    "valid_record_count": 7755643,
+    "valid_record_ratio": 1.0
   },
   "dataset_health_digest": "607ec2d8638ccf7de60dc5bc78c014925a2ae7284616e349341f7c6a26309685",
   "dataset_selection_id": null,
-  "dataset_v2_head": "23ff1a805d49a0f443ec768080fe2ff1a0c3536f",
+  "dataset_v2_head": "8a73da4330787a38480a66510dde1493f2d6d7fb",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "ab141d514a9837dc6ea714c15dd4a5d5b20d878c3d6d9875db78053551d5ee1d",
@@ -1087,8 +1082,8 @@
     },
     {
       "id": "global-unique-trade-identity",
-      "reason": "global unique trade identity backfill/reconciliation remains incomplete",
-      "state": "IN_PROGRESS"
+      "reason": "global unique trade identity coverage is exact",
+      "state": "DONE"
     },
     {
       "id": "analysis-chain",
@@ -1102,12 +1097,12 @@
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "8 canonical closure blocker(s) remain",
+      "reason": "5 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-04T00:21:44.814713Z",
+  "generated_at_utc": "2026-10-04T00:26:21.036709Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1115,7 +1110,7 @@
     "receipt_digest": null,
     "valid": false
   },
-  "global_unique_failure_reason_count": 32,
+  "global_unique_failure_reason_count": 0,
   "implementation_backlog": [
     {
       "id": "BLOCKER-01",
@@ -1129,37 +1124,22 @@
     },
     {
       "id": "BLOCKER-03",
-      "reason": "exact trade count coverage is incomplete",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-04",
-      "reason": "global unique trade count coverage is incomplete",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-05",
       "reason": "campaign resilience receipt is not READY",
       "status": "UNRESOLVED"
     },
     {
-      "id": "BLOCKER-06",
+      "id": "BLOCKER-04",
       "reason": "fresh-runner two-segment resume proof is unavailable",
       "status": "UNRESOLVED"
     },
     {
-      "id": "BLOCKER-07",
+      "id": "BLOCKER-05",
       "reason": "analysis campaigns are not all terminal COMPLETE",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-08",
-      "reason": "uncompressed size coverage is incomplete",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "23ff1a805d49a0f443ec768080fe2ff1a0c3536f",
+  "main_alina_head": "8a73da4330787a38480a66510dde1493f2d6d7fb",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1194,17 +1174,14 @@
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "d7324a4112b1a319db5d4c5a064ec43f491a66e8f9e0b3f0b94ff20a3c199c8a",
+  "receipt_digest": "ecdeba6101e8e09065e875f2de9df7bfd3b5d6bd23206b1cd5548c449fbf7101",
   "rejected_count": 1149,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
-    "exact trade count coverage is incomplete",
-    "global unique trade count coverage is incomplete",
     "campaign resilience receipt is not READY",
     "fresh-runner two-segment resume proof is unavailable",
-    "analysis campaigns are not all terminal COMPLETE",
-    "uncompressed size coverage is incomplete"
+    "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 2429,
   "replay_remaining_candidates": 0,
@@ -1228,17 +1205,17 @@
   "source_degraded_capability_count": 0,
   "source_unvalidated_capabilities": [],
   "source_unvalidated_capability_count": 0,
-  "trade_count_exact": false,
+  "trade_count_exact": true,
   "trade_count_failure_reason_count": 0,
   "two_segment_resume_status": "UNMEASURABLE",
-  "uncompressed_size_coverage": false,
-  "uncompressed_size_exact": false,
-  "uncompressed_size_exact_assets": 3361,
+  "uncompressed_size_coverage": true,
+  "uncompressed_size_exact": true,
+  "uncompressed_size_exact_assets": 4421,
   "uncompressed_size_unavailable_assets": 0,
-  "unique_record_count": 31216,
-  "unique_trade_count_exact": false,
-  "unique_trade_count_global": null,
-  "valid_record_count": 31216,
+  "unique_record_count": 7755643,
+  "unique_trade_count_exact": true,
+  "unique_trade_count_global": 3978929,
+  "valid_record_count": 7755643,
   "workflow_run_ids": [
     "36815986616",
     "36817451158",
