@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from tools.build_closure_report import _current_dataset_coverage
 from tools.build_global_implementation_closure import (
     digest,
     validate_current_scoreboard_receipt,
@@ -170,3 +171,42 @@ def test_frozen_coverage_receipt_rejects_non_exact_or_stale_evidence(tmp_path):
     )
     assert valid is False
     assert reason == "FROZEN_COVERAGE_NOT_EXACT"
+
+def test_current_dataset_coverage_uses_exact_metrics_without_global_closure() -> None:
+    coverage = _current_dataset_coverage(
+        {
+            "TOTAL_SHARDS": 4421,
+            "TOTAL_TRADES_COUNT_COVERAGE_COMPLETE": True,
+            "TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE": True,
+            "UNCOMPRESSED_SIZE_COVERAGE_COMPLETE": True,
+            "UNCOMPRESSED_SIZE_EXACT_ASSETS": 4421,
+            "UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS": 0,
+            "UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS": 0,
+        }
+    )
+
+    assert coverage["trade_count_exact"] is True
+    assert coverage["unique_trade_count_exact"] is True
+    assert coverage["uncompressed_size_coverage"] is True
+    assert coverage["uncompressed_size_exact"] is True
+    assert coverage["uncompressed_size_exact_assets"] == 4421
+
+
+def test_current_dataset_coverage_fails_closed_on_missing_size_assets() -> None:
+    coverage = _current_dataset_coverage(
+        {
+            "TOTAL_SHARDS": 10,
+            "TOTAL_TRADES_COUNT_COVERAGE_COMPLETE": True,
+            "TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE": True,
+            "UNCOMPRESSED_SIZE_COVERAGE_COMPLETE": True,
+            "UNCOMPRESSED_SIZE_EXACT_ASSETS": 9,
+            "UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS": 0,
+            "UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS": 1,
+        }
+    )
+
+    assert coverage["trade_count_exact"] is True
+    assert coverage["unique_trade_count_exact"] is True
+    assert coverage["uncompressed_size_coverage"] is True
+    assert coverage["uncompressed_size_exact"] is False
+
