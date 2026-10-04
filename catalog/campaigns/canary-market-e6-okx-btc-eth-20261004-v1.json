@@ -1,25 +1,44 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "canary-market-e6-okx-btc-eth-20261004-v1",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "e854a51b0d01e079edbc54541026400df81152d8",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "da377070dbcf0236b3feb649df5c6449f420b9a0411ab33e825b230345c82aa2",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-canary-market-e6-okx-btc-eth-20261004-v1-u0 --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 canary-market-e6-okx-btc-eth-20261004-v1 unit 0 --notes Alina SmartFlow dataset V2 collection run. Collector SHA: e854a51b0d01e079edbc54541026400df81152d8 Shards: 13 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 1422:19B002:2B11FC2:8F138DA:6AC24683 and timestamp 2026-10-04 12:28:51 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "b690205ff5ebdf5607e778c195312d7a87cdf799b05822d3d42fcf1d5df7886e"
+    }
+  },
   "config_sha256": "683f994e2989d78006bf1e07a5185e71397ca3335cd54cc57a3ffcfa09e44206",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-04T11:33:04Z",
   "creation_phase": "COLLECT",
   "cursor": {
     "canary": true,
+    "checkpoint_id": "b690205ff5ebdf5607e778c195312d7a87cdf799b05822d3d42fcf1d5df7886e",
     "duration_s": 180,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 6,
+    "last_run_id": "37200714934",
     "market_shard_count": 1,
     "market_shard_index": 0,
     "max_coins": 2,
     "plan_file": "catalog/market_collection_plans/e6/canary-20261004/okx-btc-eth.json",
     "plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 16,
     "selected_coin_count": 2,
@@ -40,15 +59,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T12:28:51.589310Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-04T12:07:54.561929Z",
-    "expires_at": "2026-10-04T17:52:54.561929Z",
-    "lease_token_sha256": "dccba3caa0226c8f0214f052c050ea8ec4594487d3a2666474fab88f43e8735f",
-    "owner_run_id": "37200714934"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 1,
     "max_chunks": 1,
@@ -56,8 +76,8 @@
     "max_no_progress": 1,
     "max_wall_clock_s": 1200
   },
-  "next_due_at": "2026-10-01T00:00:00Z",
-  "no_progress_count": 0,
+  "next_due_at": "2026-10-04T12:33:51.589310Z",
+  "no_progress_count": 1,
   "operator_request_id": "6639033a2c2a1b81c854e104f351b8003e0e5217c239ad15d3fcb77f35efb272",
   "outputs": [],
   "paper_only": true,
@@ -66,9 +86,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T12:07:54.561982Z",
+  "updated_at": "2026-10-04T12:28:51.589310Z",
   "work_plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589"
 }
