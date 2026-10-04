@@ -1,9 +1,9 @@
 {
   "analysis_stage": null,
-  "attempts": 1,
+  "attempts": 2,
   "campaign_id": "copy-vault-e6-broad-2026100321-v8",
   "checkpoint_lineage": [],
-  "chunk_index": 1,
+  "chunk_index": 2,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "0131a090c000f6cf9c38d7dd161d0325efbac3dd",
   "collection_cutoff_at_utc": null,
@@ -15,20 +15,31 @@
         "status": "FAILED"
       },
       "sha256": "b79b8404116d5c897ca55e0594342ac2655d0737edd5aff95eed9ba2bb1c8a7f"
+    },
+    "1": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "6f7d8758e0184f00e1a1bf1520528be10cb2e959252bbbc4683a1a0127de8c67",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-copy-vault-e6-broad-2026100321-v8-u1 /home/runner/work/_temp/campaign-output/copy-vault-e6-broad-2026100321-v8/1/assets/hyperliquid-public-copy-l2-copy-vault-l2-aave-1791074125244-1791074125244-a86bd2f03fbf.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID E420:D5EF7:5E353:D633C:6AC1B9ED and timestamp 2026-10-04 02:29:01 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/402755432/assets?label=&name=hyperliquid-public-copy-l2-copy-vault-l2-aave-1791074125244-1791074125244-a86bd2f03fbf.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "00de75b7441984b88aa58c18887c5c5cc553042bc7ddad9f3e102c3ef78fcc0c"
     }
   },
   "config_sha256": "da68efd641aefcd586bcd93a0c8a36ab47a79f173ef3a3044c2a42422b131008",
-  "consecutive_failures": 1,
+  "consecutive_failures": 2,
   "created_at": "2026-10-03T21:19:19.860479+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "b79b8404116d5c897ca55e0594342ac2655d0737edd5aff95eed9ba2bb1c8a7f",
+    "checkpoint_id": "00de75b7441984b88aa58c18887c5c5cc553042bc7ddad9f3e102c3ef78fcc0c",
     "copy_vault_mode": "two_speed_broad_rest_priority_ws",
     "duration_s": 3500,
-    "generation": 1,
+    "generation": 2,
     "handoff_generation": null,
     "handoff_phase_epoch": 6,
-    "last_run_id": "37160585305",
+    "last_run_id": "37162735563",
     "max_vaults": 3089,
     "max_ws_vaults": 10,
     "predecessor_run_id": null,
@@ -65,15 +76,16 @@
       "from": "CONTINUATION_REQUIRED",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T02:29:02.020942Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "copy_vault_collection",
-  "lease": {
-    "acquired_at": "2026-10-03T23:46:17.218809Z",
-    "expires_at": "2026-10-04T05:31:17.218809Z",
-    "lease_token_sha256": "29e53ae30e4c91291a9101884280477049647e924833c38169eca7bcf34549e4",
-    "owner_run_id": "37162735563"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -82,7 +94,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 1,
+  "no_progress_count": 2,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -91,9 +103,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-03T23:46:17.218845Z",
+  "updated_at": "2026-10-04T02:29:02.020942Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
