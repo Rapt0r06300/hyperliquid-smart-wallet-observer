@@ -108,6 +108,8 @@ def native_instrument_metadata_envelope(
             ),
             "data_gate_ready": False,
         },
+        venue=venue_key,
+        server_ts_ms=observed_server_ts_ms,
     )
 
 
@@ -145,6 +147,8 @@ def native_tick_envelope(
         "transport_rtt_ms": _float(transport.get("transport_rtt_ms")),
         "clock_offset_ms": _float(transport.get("clock_offset_ms")),
         "clock_probe_rtt_ms": _float(transport.get("clock_probe_rtt_ms")),
+        "clock_uncertainty_ms": _float(transport.get("clock_uncertainty_ms")),
+        "clock_probe_server_ts_ms": _int(transport.get("clock_probe_server_ts_ms")),
         # Raw frames are not promoted here. Window QC + reconciliation owns SAFE.
         "data_gate_ready": False,
     }
@@ -168,6 +172,12 @@ def native_tick_envelope(
             "real_execution": False,
         },
         parsed_summary=summary,
+        venue=venue_key,
+        matching_engine_ts_ms=(exchange_ts_ms if venue_key == "bybit" else None),
+        server_ts_ms=_int(transport.get("clock_probe_server_ts_ms")),
+        clock_probe_rtt_ms=_float(transport.get("clock_probe_rtt_ms")),
+        observed_clock_offset_ms=_float(transport.get("clock_offset_ms")),
+        clock_offset_uncertainty_ms=_float(transport.get("clock_uncertainty_ms")),
     )
 
 
