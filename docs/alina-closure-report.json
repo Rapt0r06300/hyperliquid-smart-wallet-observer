@@ -1051,9 +1051,11 @@
   "cross_shard_overlap_trade_count": 3801,
   "cross_venue_status": "UNMEASURABLE",
   "data_exploitability": {
-    "analysis_eligible": true,
+    "analysis_eligible": false,
     "analysis_stage": null,
-    "blockers": [],
+    "blockers": [
+      "REPLAY_COMPATIBILITY_CLASSIFICATION_INCOMPLETE"
+    ],
     "cross_shard_overlap_trade_count": 3801,
     "economic_proof": {
       "cost_latency_evidence_current": false,
@@ -1072,9 +1074,9 @@
     "raw_trade_count": 4947714,
     "rejected_shard_count": 1149,
     "replay_compatible_shard_count": 2429,
-    "replay_unclassified_candidate_count": 0,
+    "replay_unclassified_candidate_count": 106,
     "safe_shard_count": 2276,
-    "status": "ANALYSIS_ELIGIBLE",
+    "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
     "unique_record_count": 7755643,
@@ -1086,7 +1088,7 @@
   },
   "dataset_health_digest": "b279d2ac2bf128871640f82ebe79b3692163bed5bbaee29f37452ac0d7887768",
   "dataset_selection_id": null,
-  "dataset_v2_head": "81200067f214c1d99f367fbf466205387d9b9439",
+  "dataset_v2_head": "37f8e668b8cdb91a7ce40a205863835c2018f01c",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "ab141d514a9837dc6ea714c15dd4a5d5b20d878c3d6d9875db78053551d5ee1d",
@@ -1114,12 +1116,12 @@
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "4 canonical closure blocker(s) remain",
+      "reason": "5 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-04T02:33:00.258368Z",
+  "generated_at_utc": "2026-10-04T02:46:45.873342Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1141,17 +1143,22 @@
     },
     {
       "id": "BLOCKER-03",
-      "reason": "fresh-runner two-segment resume proof is unavailable",
+      "reason": "SAFE to replay-compatible migration has 106 unclassified candidates",
       "status": "UNRESOLVED"
     },
     {
       "id": "BLOCKER-04",
+      "reason": "fresh-runner two-segment resume proof is unavailable",
+      "status": "UNRESOLVED"
+    },
+    {
+      "id": "BLOCKER-05",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "81200067f214c1d99f367fbf466205387d9b9439",
+  "main_alina_head": "37f8e668b8cdb91a7ce40a205863835c2018f01c",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1186,16 +1193,17 @@
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "7ab69b3b2643934dfd8a28f5aedaed346b83d749ee57c3660f0c8ae0d5ea32e4",
+  "receipt_digest": "deb1ea6f149320dd5bb08a679d7edb31191c2f23d0c06ee84523a64de4201128",
   "rejected_count": 1149,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
+    "SAFE to replay-compatible migration has 106 unclassified candidates",
     "fresh-runner two-segment resume proof is unavailable",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 2429,
-  "replay_remaining_candidates": 0,
+  "replay_remaining_candidates": 106,
   "safe_count": 2276,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
@@ -1293,6 +1301,11 @@
     "37142095040",
     "37147010304",
     "37162735563",
-    "37165801975"
+    "37165801975",
+    "37165807817",
+    "37165809123",
+    "37165810323",
+    "37165811645",
+    "37165813191"
   ]
 }
