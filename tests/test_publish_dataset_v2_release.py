@@ -143,6 +143,14 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
     assert uploaded == ["asset-0.jsonl.gz", "asset-1.jsonl.gz", "RUN_MANIFEST.json"]
     assert not any(name.startswith("dataset-") and name.endswith(".json") for name in uploaded)
     assert result["shard_count"] == 2
+    assert result["code_sha"] == "a" * 40
+    assert result["event_count"] == 2
+    assert result["gap_count"] == 0
+    assert result["start_ts_ms"] == 1000
+    assert result["end_ts_ms"] == 1001
+    assert result["venues"] == ["bybit"]
+    assert result["symbols"] == ["BTCUSDT"]
+    assert result["asset_sha256s"] == [row["sha256"] for row in result["manifests"]]
     # PARTIAL fixtures must never be presented as SAFE replay coverage.
     assert result["safe_coverage_matrix"]["safe_partitions"] == 0
     assert result["safe_coverage_matrix"]["coins"] == []
