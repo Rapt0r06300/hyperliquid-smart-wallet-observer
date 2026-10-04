@@ -35,6 +35,12 @@ def test_tick_dataset_preserves_raw_payload_three_clocks_and_provenance(tmp_path
                 "access": "read_only",
             },
             parsed_summary={"best_bid": 100, "best_ask": 101},
+            venue="hyperliquid",
+            matching_engine_ts_ms=999,
+            server_ts_ms=1_001,
+            clock_probe_rtt_ms=12.5,
+            observed_clock_offset_ms=-3.25,
+            clock_offset_uncertainty_ms=6.25,
         )
     )
     [record] = list(writer.iter_records())
@@ -49,6 +55,12 @@ def test_tick_dataset_preserves_raw_payload_three_clocks_and_provenance(tmp_path
     assert record["write_wall_ts_ms"] == 1_020
     assert record["recv_mono_ns"] == 123_456
     assert record["event_kind"] == "SNAPSHOT"
+    assert record["venue"] == "hyperliquid"
+    assert record["matching_engine_ts_ms"] == 999
+    assert record["server_ts_ms"] == 1_001
+    assert record["clock_probe_rtt_ms"] == 12.5
+    assert record["observed_clock_offset_ms"] == -3.25
+    assert record["clock_offset_uncertainty_ms"] == 6.25
     assert record["provenance"]["access"] == "read_only"
     assert record["real_execution"] is False
 
