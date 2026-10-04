@@ -4,7 +4,9 @@ interest, funding/basis, CVD (cumulative volume delta) et volume de liquidation 
 Pull LIVE derriere une frontiere REQUIRES_NETWORK. stdlib pure, 0 reseau, 0 cle, 0 ordre reel."""
 from __future__ import annotations
 
+import zlib
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, InvalidOperation
 
 from ._canon import (
     OFFLINE_READY,
@@ -98,21 +100,76 @@ def volume_liquidation(records: Sequence[Mapping]) -> dict:
     return {"venue": VENUE, "vol_buy": buy, "vol_sell": sell, "n": len(list(records))}
 
 
+def _checksum_component(value: object) -> str:
+    text = str(value).replace(".", "")
+    return text.lstrip("0") or "0"
+
+
+def _numeric_price(row: Mapping) -> Decimal:
+    try:
+        return Decimal(str(row.get("price")))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(0)
+
+
+def book_checksum_v2(bids: Sequence[Mapping], asks: Sequence[Mapping]) -> int:
+    """Return Kraken v2's unsigned CRC32 over the exact top-10 decimal strings."""
+    ordered_asks = sorted(asks or (), key=_numeric_price)[:10]
+    ordered_bids = sorted(bids or (), key=_numeric_price, reverse=True)[:10]
+    payload = "".join(
+        _checksum_component(row.get("price")) + _checksum_component(row.get("qty"))
+        for row in (*ordered_asks, *ordered_bids)
+    )
+    return zlib.crc32(payload.encode("utf-8")) & 0xFFFFFFFF
+
+
 def appliquer_flux_book(messages: Sequence[Mapping]) -> dict:
-    """seq continu : snapshot pose la base, chaque delta doit incrementer seq de 1 (DATA-079)."""
+    """Apply sequence and optional Kraken v2 checksum validation fail-closed."""
     det = DetecteurSequence()
     resyncs, ok = [], 0
+    checksum_failures = 0
+    bids: dict[str, str] = {}
+    asks: dict[str, str] = {}
     for m in messages:
         if m.get("feed") == "book_snapshot":
+            bids = {str(row.get("price")): str(row.get("qty")) for row in m.get("bids") or ()}
+            asks = {str(row.get("price")): str(row.get("qty")) for row in m.get("asks") or ()}
             det.snapshot(m.get("seq"))
-            ok += 1
         else:
             r = det.delta(m.get("seq"))
             if r["resync"]:
                 resyncs.append({"seq": m.get("seq"), "raison": r["raison"]})
+                bids.clear()
+                asks.clear()
+                continue
+            side = bids if norm_side(m.get("side")) == "buy" else asks
+            price = str(m.get("price"))
+            qty = str(m.get("qty"))
+            if to_float(qty) == 0.0:
+                side.pop(price, None)
             else:
-                ok += 1
-    return {"applique": ok, "resyncs": resyncs, "synchronise": det.synchronise}
+                side[price] = qty
+
+        checksum = m.get("checksum")
+        if checksum is not None:
+            local = book_checksum_v2(
+                [{"price": price, "qty": qty} for price, qty in bids.items()],
+                [{"price": price, "qty": qty} for price, qty in asks.items()],
+            )
+            if local != int(checksum):
+                checksum_failures += 1
+                resyncs.append({"seq": m.get("seq"), "raison": "checksum_mismatch"})
+                det = DetecteurSequence()
+                bids.clear()
+                asks.clear()
+                continue
+        ok += 1
+    return {
+        "applique": ok,
+        "resyncs": resyncs,
+        "synchronise": det.synchronise,
+        "checksum_failures": checksum_failures,
+    }
 
 
 def mapping_silver() -> dict:
@@ -135,4 +192,4 @@ class LiveClientKraken(ClientLiveBase):
         super().__init__(venue=VENUE)
 
     def souscrire(self, feed, product_id):
-        self._refuser("%s %s" % (feed, product_id))
+        self._refuser(f"{feed} {product_id}")
