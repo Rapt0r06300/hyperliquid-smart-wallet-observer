@@ -112,3 +112,61 @@ def test_live_pre_deadline_lease_is_not_finalized(tmp_path: Path) -> None:
     assert result["changed"] == 0
     assert result["remaining_active"] == 1
     assert json.loads(manifest.read_text(encoding="utf-8"))["status"] == "RUNNING"
+
+def test_predeadline_inactive_source_campaign_is_closed_without_checkpoint(tmp_path: Path) -> None:
+    phase = tmp_path / "control/alina-phase.json"
+    campaigns = tmp_path / "catalog/campaigns"
+    _write(
+        phase,
+        {
+            "phase": "ANALYZE",
+            "epoch": 3,
+            "source_collection_epoch": 2,
+            "collection_cutoff_at_utc": "2026-09-29T10:00:00Z",
+        },
+    )
+    manifest = campaigns / "market-e2.json"
+    _write(manifest, _manifest(status="PENDING"))
+
+    result = finalize(
+        phase_path=phase,
+        campaign_root=campaigns,
+        drain_grace_s=3600,
+        now=datetime(2026, 9, 29, 10, 30, tzinfo=timezone.utc),
+    )
+
+    saved = json.loads(manifest.read_text(encoding="utf-8"))
+    assert result["changed"] == 1
+    assert result["remaining_active"] == 0
+    assert saved["status"] == "UNAVAILABLE"
+    assert saved["status_reason"] == "analysis_drain_inactive_lease_without_checkpoint"
+
+
+def test_predeadline_inactive_source_campaign_keeps_checkpoint_as_partial(tmp_path: Path) -> None:
+    phase = tmp_path / "control/alina-phase.json"
+    campaigns = tmp_path / "catalog/campaigns"
+    _write(
+        phase,
+        {
+            "phase": "ANALYZE",
+            "epoch": 3,
+            "source_collection_epoch": 2,
+            "collection_cutoff_at_utc": "2026-09-29T10:00:00Z",
+        },
+    )
+    manifest = campaigns / "market-e2.json"
+    _write(manifest, _manifest(status="CONTINUATION_REQUIRED", completed=True))
+
+    result = finalize(
+        phase_path=phase,
+        campaign_root=campaigns,
+        drain_grace_s=3600,
+        now=datetime(2026, 9, 29, 10, 30, tzinfo=timezone.utc),
+    )
+
+    saved = json.loads(manifest.read_text(encoding="utf-8"))
+    assert result["changed"] == 1
+    assert result["remaining_active"] == 0
+    assert saved["status"] == "PARTIAL"
+    assert saved["status_reason"] == "analysis_drain_inactive_lease_with_checkpoint"
+
