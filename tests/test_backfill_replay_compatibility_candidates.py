@@ -70,3 +70,42 @@ def test_non_official_rejected_dump_stays_excluded(monkeypatch, tmp_path):
     }
 
     assert backfill._candidate(row, {}, {"trades"}) is False
+
+
+def test_stale_failed_receipt_is_retried_after_verifier_upgrade(monkeypatch, tmp_path):
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    dataset_id = "binance-official-archive-trades-btc-retry"
+    row = {
+        "dataset_id": dataset_id,
+        "family": "trades",
+        "quality_status": "REJECT",
+        "replay_compatible": False,
+        "manifest_path": _write_manifest(tmp_path, dataset_id=dataset_id),
+    }
+    known = {
+        dataset_id: {
+            "replay_compatible": False,
+            "replay_reason": "INVALID_RECORD",
+        }
+    }
+    assert backfill._candidate(row, known, {"trades"}) is True
+
+
+def test_current_failed_receipt_does_not_loop(monkeypatch, tmp_path):
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    dataset_id = "binance-official-archive-trades-btc-current"
+    row = {
+        "dataset_id": dataset_id,
+        "family": "trades",
+        "quality_status": "REJECT",
+        "replay_compatible": False,
+        "manifest_path": _write_manifest(tmp_path, dataset_id=dataset_id),
+    }
+    known = {
+        dataset_id: {
+            "replay_compatible": False,
+            "replay_reason": "INVALID_RECORD",
+            "verifier_version": backfill.VERIFIER_VERSION,
+        }
+    }
+    assert backfill._candidate(row, known, {"trades"}) is False

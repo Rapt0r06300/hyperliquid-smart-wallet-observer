@@ -226,7 +226,13 @@ def _native_trade_keys(
 
     if venue == "bybit":
         for row in rows:
-            native = row.get("i") or row.get("trade_id") or row.get("execId")
+            native = (
+                row.get("i")
+                or row.get("trdMatchID")
+                or row.get("trade_id")
+                or row.get("tradeId")
+                or row.get("execId")
+            )
             if native is not None:
                 add("i", native)
                 continue
@@ -380,7 +386,7 @@ def inspect_asset(path: Path, row: Mapping[str, Any]) -> dict[str, Any]:
         "trade_count_exact": trade_count_exact,
         "unique_trade_count": len(unique_identities) if unique_proven else None,
         "unique_trade_count_exact": unique_proven,
-        "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
+        "unique_identity_method": "full_native_or_deterministic_composite_string_v3",
         "record_count_scanned": records,
         "asset_sha256": actual_sha,
     }

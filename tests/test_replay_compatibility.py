@@ -61,3 +61,57 @@ def test_official_archive_rows_are_replayable_from_exchange_chronology():
         )
         assert out["replay_compatible"] is True
         assert out["replay_reason"] == "STRICT_PARSE_CHRONOLOGY_OK"
+
+
+def test_bybit_tick_envelope_reads_trade_identity_from_raw_payload():
+    with tempfile.TemporaryDirectory() as d:
+        p=Path(d)/"bybit.jsonl.gz"
+        rows=[
+            {
+                "exchange_ts_ms":1000,
+                "sequence":None,
+                "raw_payload":{
+                    "timestamp":"1.000",
+                    "symbol":"BTCUSDT",
+                    "side":"Buy",
+                    "size":"0.1",
+                    "price":"100",
+                    "trdMatchID":"match-a",
+                },
+            },
+            {
+                "exchange_ts_ms":1001,
+                "sequence":None,
+                "raw_payload":{
+                    "timestamp":"1.001",
+                    "symbol":"BTCUSDT",
+                    "side":"Sell",
+                    "size":"0.2",
+                    "price":"101",
+                    "trdMatchID":"match-b",
+                },
+            },
+        ]
+        with gzip.open(p,"wt",encoding="utf-8") as h:
+            for row in rows:
+                h.write(json.dumps(row)+"\n")
+        out=inspect_asset(p,{"family":"trades","venue":"bybit","symbol":"BTCUSDT"})
+        assert out["trade_count"]==2
+        assert out["invalid_record_count"]==0
+        assert out["duplicate_count"]==0
+        assert out["replay_compatible"] is True
+
+
+def test_non_trade_replay_does_not_require_a_trade_identity():
+    with tempfile.TemporaryDirectory() as d:
+        p=Path(d)/"bbo.jsonl.gz"
+        rows=[
+            {"exchange_ts_ms":1000,"raw_payload":{"bid":"100","ask":"101"}},
+            {"exchange_ts_ms":1001,"raw_payload":{"bid":"100.5","ask":"101.5"}},
+        ]
+        with gzip.open(p,"wt",encoding="utf-8") as h:
+            for row in rows:
+                h.write(json.dumps(row)+"\n")
+        out=inspect_asset(p,{"family":"bbo","venue":"hyperliquid","symbol":"BTC"})
+        assert out["invalid_record_count"]==0
+        assert out["replay_compatible"] is True

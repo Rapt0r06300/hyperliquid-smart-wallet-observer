@@ -45,6 +45,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Validate exact trade parser before catalog mutation
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_exact_trade_count_backfill.py --tb=line
+
       - name: Scan immutable release assets exactly
         shell: bash
         run: |

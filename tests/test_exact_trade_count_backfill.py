@@ -75,3 +75,35 @@ def test_candidate_priority_prefers_replayable_safe_before_rejected():
     rejected = {"quality_status": "REJECT", "replay_compatible": False, "end_ts_ms": 600}
     rows = [rejected, partial, safe, replayable]
     assert sorted(rows, key=_candidate_priority) == [replayable, safe, partial, rejected]
+
+
+def test_bybit_official_archive_prefers_trd_match_id_over_composite(tmp_path):
+    path = tmp_path / "bybit-archive.jsonl.gz"
+    _write(path, [
+        {
+            "exchange_ts_ms": 1000,
+            "raw_payload": {
+                "timestamp": "1.000",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "size": "0.1",
+                "price": "100",
+                "trdMatchID": "match-a",
+            },
+        },
+        {
+            "exchange_ts_ms": 1000,
+            "raw_payload": {
+                "timestamp": "1.000",
+                "symbol": "BTCUSDT",
+                "side": "Buy",
+                "size": "0.1",
+                "price": "100",
+                "trdMatchID": "match-b",
+            },
+        },
+    ])
+    out = inspect_asset(path, _index_row(path, venue="bybit"))
+    assert out["trade_count"] == 2
+    assert out["unique_trade_count"] == 2
+    assert out["unique_trade_count_exact"] is True

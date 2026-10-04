@@ -190,3 +190,23 @@ def test_native_trade_keys_support_hyperliquid_userfills_nested_envelope():
         "hyperliquid|copy_vault_fills|0xabc|tid|102",
     ]
 
+
+
+def test_bybit_archive_trd_match_id_is_canonical_native_identity():
+    row = {
+        "raw_payload": {
+            "timestamp": "1790000000.125",
+            "symbol": "BTCUSDT",
+            "side": "Buy",
+            "size": "0.1",
+            "price": "100.5",
+            "trdMatchID": "archive-match-123",
+        }
+    }
+    keys = global_unique._native_trade_keys(
+        row,
+        venue="bybit",
+        family="trades",
+        symbol="BTCUSDT",
+    )
+    assert keys == ["bybit|trades|BTCUSDT|i|archive-match-123"]

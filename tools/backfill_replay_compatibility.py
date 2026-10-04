@@ -18,13 +18,14 @@ import tempfile
 from typing import Any, Mapping
 
 from manifest_policy import classify_manifest, is_official_historical_archive
-from replay_compatibility import inspect_asset
+from replay_compatibility import VERIFIER_VERSION, inspect_asset
 
 ROOT=Path(__file__).resolve().parents[1]
 INDEX_PATH=ROOT/"catalog"/"DATA_INDEX.json"
 PATCH_PATH=ROOT/"catalog"/"REPLAY_COMPAT_PATCH.json"
 CATALOG_PATH=ROOT/"catalog"/"DATA_CATALOG.json"
 REGISTRY_PATH=ROOT/"catalog"/"DATA_QUALITY_REGISTRY.json"
+TRADE_COUNT_PATCH_PATH=ROOT/"catalog"/"TRADE_COUNT_PATCH.json"
 
 _STAGE_BY_STATUS={
     "SAFE":"safe",
@@ -127,12 +128,21 @@ def _hydrate_release_fields(row: dict[str,Any], manifest: Mapping[str,Any] | Non
 def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str]) -> bool:
     dataset_id=str(row.get("dataset_id") or "")
     family=str(row.get("family") or "").lower()
-    if not dataset_id or dataset_id in known:
+    if not dataset_id:
         return False
     if families and family not in families:
         return False
     if row.get("replay_compatible") is True:
         return False
+
+    prior=known.get(dataset_id)
+    if isinstance(prior,Mapping):
+        if prior.get("replay_compatible") is True:
+            return False
+        # Failed receipts from older verifier semantics must be retried once.
+        # A failure produced by the current verifier is stable and must not loop.
+        if str(prior.get("verifier_version") or "") == VERIFIER_VERSION:
+            return False
 
     manifest=_manifest_for_row(row)
     if isinstance(row,dict):
@@ -194,6 +204,43 @@ def _verify_asset(path: Path, row: Mapping[str,Any]) -> None:
         raise BackfillError("asset sha256 mismatch")
 
 
+def _restore_exact_trade_count_evidence(manifest: dict[str,Any], *, root: Path) -> None:
+    """Restore immutable exact-count evidence before applying replay receipts.
+
+    Replay verification is allowed to fail, but it must never erase an exact
+    count already proven by a separate SHA-verified full-asset scan.
+    """
+    dataset_id=str(manifest.get("dataset_id") or "")
+    if not dataset_id:
+        return
+    path=root/"catalog"/"TRADE_COUNT_PATCH.json"
+    if not path.is_file():
+        return
+    try:
+        patch=_load_json(path)
+    except (OSError,ValueError,json.JSONDecodeError):
+        return
+    counts=patch.get("counts")
+    if not isinstance(counts,Mapping):
+        return
+    evidence=counts.get(dataset_id)
+    if not isinstance(evidence,Mapping):
+        return
+    expected_sha=str(manifest.get("sha256") or "").lower()
+    evidence_sha=str(evidence.get("asset_sha256") or "").lower()
+    if len(expected_sha)!=64 or evidence_sha!=expected_sha:
+        return
+    if evidence.get("trade_count_exact") is True:
+        manifest["trade_count"]=evidence.get("trade_count")
+        manifest["trade_count_exact"]=True
+    if evidence.get("unique_trade_count_exact") is True:
+        manifest["unique_trade_count"]=evidence.get("unique_trade_count")
+        manifest["unique_trade_count_exact"]=True
+    for key in ("record_count_scanned","asset_sha256","unique_identity_method"):
+        if key in evidence:
+            manifest[key]=evidence[key]
+
+
 def _apply_result(
     row: dict[str,Any],
     result: Mapping[str,Any],
@@ -207,10 +254,10 @@ def _apply_result(
     if str(manifest.get("sha256") or "").lower()!=str(row.get("sha256") or "").lower():
         raise BackfillError("manifest/index sha256 mismatch")
 
+    _restore_exact_trade_count_evidence(manifest,root=root)
+
     for key in (
         "record_count",
-        "trade_count",
-        "trade_count_exact",
         "invalid_record_count",
         "out_of_order_count",
         "duplicate_count",
@@ -218,9 +265,19 @@ def _apply_result(
         "replay_compatible",
         "replay_schema_version",
         "replay_reason",
+        "verifier_version",
     ):
         if key in result:
             manifest[key]=result[key]
+
+    # Never downgrade exact trade-count evidence because replay parsing failed.
+    # Only a replay scan that itself proves an exact count may replace it.
+    if result.get("trade_count_exact") is True:
+        manifest["trade_count"]=result.get("trade_count")
+        manifest["trade_count_exact"]=True
+    elif manifest.get("trade_count_exact") is not True:
+        manifest["trade_count"]=result.get("trade_count")
+        manifest["trade_count_exact"]=False
     manifest.pop("replay_validation_pending",None)
     manifest.pop("pre_replay_quality_status",None)
 
@@ -334,6 +391,7 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
                 result["asset_size"]=asset.stat().st_size
                 result["verified_from_release"]=True
                 result["method"]="parse_chronology_smoke"
+                result["verifier_version"]=VERIFIER_VERSION
                 before=str(row.get("quality_status") or "")
                 _apply_result(row,result,root=ROOT)
                 after=str(row.get("quality_status") or "")

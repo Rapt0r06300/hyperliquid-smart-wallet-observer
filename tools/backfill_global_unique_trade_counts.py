@@ -269,7 +269,7 @@ def main() -> None:
                 "unique_trade_count_exact": True,
                 "global_new_identity_count": global_new,
                 "cross_shard_overlap_count": max(0, unique_count - global_new),
-                "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
+                "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
             }
             _persist_manifest_unique_counts(
                 row,
@@ -308,9 +308,9 @@ def main() -> None:
     )
 
     result = {
-        "schema": "alina.global_unique_trade_patch.v3",
+        "schema": "alina.global_unique_trade_patch.v4",
         "method": "full_trade_corpus_parallel_scan_then_deterministic_sqlite_merge",
-        "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v2-full-string",
+        "identity_version": "native-id-or-venue-family-symbol-time-side-price-size-v3-full-string",
         "collision_policy": (
             "full canonical identity strings; native identifiers preferred; "
             "ambiguous missing identities fail closed"
