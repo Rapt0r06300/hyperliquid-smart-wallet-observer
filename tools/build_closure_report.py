@@ -10,6 +10,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from tools.build_global_implementation_closure import validate_current_resume_receipt
+except ModuleNotFoundError:
+    from build_global_implementation_closure import validate_current_resume_receipt
+
 
 def load(path: Path, default=None):
     try:
@@ -201,7 +206,7 @@ def main() -> int:
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     replay_patch = load(root / "catalog/REPLAY_COMPAT_PATCH.json", {})
     resilience = load(root / "catalog/CAMPAIGN_RESILIENCE_RECEIPT.json", {})
-    resume_receipt = load(root / "catalog/RESUME_SMOKE_RECEIPT.json", {})
+    resume_valid, resume_reason, resume_receipt = validate_current_resume_receipt(root, phase)
     event = load(Path("docs/event-intelligence-120-status.json"), {})
     source_matrix = load(Path("docs/source-capability-matrix.json"), {})
     gate_registry = load(Path("docs/normative-gate-registry.json"), {})
@@ -250,13 +255,7 @@ def main() -> int:
                 source_unvalidated.append(row)
             elif runtime_status == "DEGRADED":
                 source_degraded.append(row)
-    resume_proven = (
-        isinstance(resume_receipt, dict)
-        and resume_receipt.get("segment_a_workflow_result") == "success"
-        and resume_receipt.get("segment_b_workflow_result") == "success"
-        and resume_receipt.get("terminal_campaign_status") == "COMPLETE"
-        and int(resume_receipt.get("terminal_completed_units") or 0) > 0
-    )
+    resume_proven = bool(resume_valid)
     campaign_ids = sorted(str(row.get("campaign_id")) for row in campaigns if row.get("campaign_id"))
     analysis_kinds = (
         "replay",
