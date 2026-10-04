@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from tools.build_quarantine_audit import build
+from tools.repair_stale_safe_classifications import repair
 
 
 def _manifest(dataset_id: str, *, safe_now: bool) -> dict:
@@ -93,3 +94,73 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
     assert report["potential_false_non_safe_count"] == 1
     assert report["by_category"]["HISTORICAL_LIVE_RULE_FALSE_QUARANTINE"]["shards"] == 1
     assert report["by_category"]["PARTIAL_EVIDENCE"]["shards"] == 1
+
+
+def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
+    catalog = tmp_path / "catalog"
+    quarantine = tmp_path / "datasets" / "quarantine"
+    catalog.mkdir()
+    quarantine.mkdir(parents=True)
+
+    manifest = _manifest("stale-safe", safe_now=True)
+    manifest_path = quarantine / "stale-safe.manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    row = {
+        "dataset_id": "stale-safe",
+        "venue": "bybit",
+        "family": "trades",
+        "symbol": "BTCUSDT",
+        "quality_status": "PARTIAL",
+        "quality_reasons": ["UNIQUE_TRADE_COUNT_NOT_EXACT"],
+        "record_count": 10,
+        "event_count": 10,
+        "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "trade_count": 10,
+        "trade_count_exact": True,
+        "unique_trade_count": 10,
+        "unique_trade_count_exact": True,
+        "custom_evidence": "keep-me",
+        "manifest_path": "datasets/quarantine/stale-safe.manifest.json",
+    }
+    (catalog / "DATA_INDEX.json").write_text(
+        json.dumps({"active_data_status": "PARTIAL", "shards": [row]}),
+        encoding="utf-8",
+    )
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text(
+        json.dumps({"active_dataset": {}}),
+        encoding="utf-8",
+    )
+    (catalog / "DATA_CATALOG.json").write_text(
+        json.dumps({"active_data_status": "PARTIAL"}),
+        encoding="utf-8",
+    )
+
+    result = repair(tmp_path)
+
+    assert result["repaired_count"] == 1
+    assert result["repaired_record_count"] == 10
+    safe_path = tmp_path / "datasets" / "safe" / "stale-safe.manifest.json"
+    assert safe_path.is_file()
+    assert not manifest_path.exists()
+    repaired_manifest = json.loads(safe_path.read_text(encoding="utf-8"))
+    assert repaired_manifest["quality_status"] == "SAFE"
+    assert repaired_manifest["quality_reasons"] == []
+    assert repaired_manifest["validation_allowed"] is True
+
+    index = json.loads((catalog / "DATA_INDEX.json").read_text(encoding="utf-8"))
+    repaired_row = index["shards"][0]
+    assert repaired_row["quality_status"] == "SAFE"
+    assert repaired_row["manifest_path"] == "datasets/safe/stale-safe.manifest.json"
+    assert repaired_row["replay_compatible"] is True
+    assert repaired_row["trade_count_exact"] is True
+    assert repaired_row["unique_trade_count_exact"] is True
+    assert repaired_row["custom_evidence"] == "keep-me"
+
+    registry = json.loads((catalog / "DATA_QUALITY_REGISTRY.json").read_text(encoding="utf-8"))
+    data_catalog = json.loads((catalog / "DATA_CATALOG.json").read_text(encoding="utf-8"))
+    assert registry["active_dataset"]["safe_count"] == 1
+    assert registry["active_dataset"]["partial_count"] == 0
+    assert data_catalog["safe_shard_count"] == 1
+    assert data_catalog["partial_shard_count"] == 0
