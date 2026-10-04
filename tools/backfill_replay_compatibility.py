@@ -96,6 +96,34 @@ def _load_patch() -> dict[str,Any]:
     return value
 
 
+def _manifest_for_row(row: Mapping[str,Any]) -> dict[str,Any] | None:
+    manifest_path=str(row.get("manifest_path") or "")
+    if not manifest_path:
+        return None
+    try:
+        return _load_json(ROOT/manifest_path)
+    except (OSError,ValueError,json.JSONDecodeError):
+        return None
+
+
+def _hydrate_release_fields(row: dict[str,Any], manifest: Mapping[str,Any] | None) -> None:
+    """Recover immutable release coordinates from the manifest when an old index row lacks them."""
+    if not isinstance(manifest,Mapping):
+        return
+    release=manifest.get("release")
+    release_map=release if isinstance(release,Mapping) else {}
+    fallback={
+        "release_repository": manifest.get("release_repository") or release_map.get("repository"),
+        "release_tag": manifest.get("release_tag") or release_map.get("tag"),
+        "release_asset": manifest.get("release_asset") or release_map.get("asset_name"),
+        "sha256": manifest.get("sha256"),
+        "bytes": manifest.get("bytes"),
+    }
+    for key,value in fallback.items():
+        if row.get(key) in (None,"") and value not in (None,""):
+            row[key]=value
+
+
 def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str]) -> bool:
     dataset_id=str(row.get("dataset_id") or "")
     family=str(row.get("family") or "").lower()
@@ -105,27 +133,27 @@ def _candidate(row: Mapping[str,Any], known: Mapping[str,Any], families: set[str
         return False
     if row.get("replay_compatible") is True:
         return False
+
+    manifest=_manifest_for_row(row)
+    if isinstance(row,dict):
+        _hydrate_release_fields(row,manifest)
+
     if not all(
         row.get(key) not in (None,"")
         for key in ("release_repository","release_tag","release_asset","sha256","bytes","manifest_path")
     ):
         return False
 
-    status=str(row.get("quality_status") or "")
+    status=str(row.get("quality_status") or "").upper()
     pending=row.get("replay_validation_pending") is True
     if status=="SAFE" or (status=="PARTIAL" and pending):
         return True
 
-    # Legacy official archives were incorrectly REJECTed solely because a
-    # downloaded historical file has no local receive monotonic timestamp.
-    # Admit those REJECT rows to the verifier; promotion still requires exact
-    # release hash/size, parse, chronology and policy checks.
-    if status=="REJECT":
-        try:
-            manifest=_load_json(ROOT/str(row.get("manifest_path") or ""))
-        except (OSError,ValueError,json.JSONDecodeError):
-            return False
-        return is_official_historical_archive(manifest)
+    # Legacy official archives were historically placed in REJECT/REJECTED
+    # because local receive-monotonic timestamps cannot exist in downloaded
+    # history. Admit only verified official archives to the strict verifier.
+    if status in {"REJECT","REJECTED","PARTIAL"}:
+        return bool(manifest and is_official_historical_archive(manifest))
     return False
 
 
