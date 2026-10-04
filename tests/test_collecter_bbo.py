@@ -81,9 +81,11 @@ def test_binance_ws_candidates_include_documented_mainnet_failover():
     m = _mod()
     assert m.BINANCE_PUBLIC_WS_CANDIDATES == (
         "wss://fstream.binance.com/public/stream",
+        "wss://stream.binancefuture.com/public/stream",
     )
     assert m.BINANCE_MARKET_WS_CANDIDATES == (
         "wss://fstream.binance.com/market/stream",
+        "wss://stream.binancefuture.com/market/stream",
     )
     assert all("fstream.binancefuture.com" not in endpoint for endpoint in (
         *m.BINANCE_PUBLIC_WS_CANDIDATES,
