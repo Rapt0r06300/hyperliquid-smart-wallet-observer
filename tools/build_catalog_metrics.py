@@ -354,9 +354,14 @@ def build() -> dict[str, Any]:
                     if unique_identity_current
                     else None
                 )
+                unique_scope_complete = (
+                    _int(unique_patch.get("trade_shards_in_scope")) == manifest_trade_shards
+                    and _int(unique_patch.get("unproven_trade_count_shards")) == 0
+                )
                 global_unique_complete = (
                     unique_patch.get("coverage_complete") is True
                     and unique_identity_current
+                    and unique_scope_complete
                 )
                 totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = len(unique_patch.get("failure_reasons") or {})
                 totals["TOTAL_CROSS_SHARD_OVERLAP_TRADES"] = _int(unique_patch.get("cross_shard_overlap_count"))

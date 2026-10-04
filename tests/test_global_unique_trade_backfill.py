@@ -263,3 +263,22 @@ def test_restore_exact_trade_count_rows_rejects_sha_mismatch(tmp_path):
            "trade_count":0,"trade_count_exact":False}]
     assert global_counts._restore_exact_trade_count_rows(rows,patch_path=patch)==0
     assert rows[0]["trade_count_exact"] is False
+
+
+
+def test_scope_counts_missing_exact_trade_rows_as_unproven():
+    rows = [
+        {"dataset_id": "a", "family": "trades", "trade_count_exact": True, "trade_count": 1},
+        {"dataset_id": "b", "family": "trades", "trade_count_exact": False, "trade_count": 0},
+        {"dataset_id": "c", "family": "bbo", "trade_count_exact": False, "trade_count": 0},
+    ]
+    trade_rows = [
+        row for row in rows
+        if str(row.get("family") or "").lower() in global_counts.TRADE_FAMILIES
+    ]
+    unproven = [
+        row["dataset_id"] for row in trade_rows
+        if row.get("trade_count_exact") is not True
+    ]
+    assert len(trade_rows) == 2
+    assert unproven == ["b"]

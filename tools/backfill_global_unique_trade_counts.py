@@ -236,11 +236,21 @@ def main() -> None:
         else {}
     )
 
+    trade_rows_in_scope = [
+        row for row in rows
+        if isinstance(row, Mapping)
+        and str(row.get("family") or "").lower() in TRADE_FAMILIES
+    ]
+    unproven_trade_count_ids = sorted(
+        str(row.get("dataset_id") or "")
+        for row in trade_rows_in_scope
+        if row.get("trade_count_exact") is not True
+    )
     all_candidates = sorted(
         (
             row
-            for row in rows
-            if isinstance(row, Mapping) and _unique_candidate(row)
+            for row in trade_rows_in_scope
+            if _unique_candidate(row)
         ),
         key=lambda row: str(row.get("dataset_id") or ""),
     )
@@ -353,7 +363,12 @@ def main() -> None:
     }
     remaining_ids = sorted(all_candidate_ids - successful_ids)
     unscanned_count = max(0, len(all_candidates) - len(candidates))
-    coverage_complete = not remaining_ids and not failed and unscanned_count == 0
+    coverage_complete = (
+        not unproven_trade_count_ids
+        and not remaining_ids
+        and not failed
+        and unscanned_count == 0
+    )
     cross_shard_overlap_count = sum(
         int(value.get("cross_shard_overlap_count") or 0)
         for value in counts.values()
@@ -368,6 +383,9 @@ def main() -> None:
             "full canonical identity strings; native identifiers preferred; "
             "ambiguous missing identities fail closed"
         ),
+        "trade_shards_in_scope": len(trade_rows_in_scope),
+        "unproven_trade_count_shards": len(unproven_trade_count_ids),
+        "unproven_trade_count_dataset_ids": unproven_trade_count_ids,
         "candidate_trade_shards": len(all_candidates),
         "restored_exact_trade_rows": restored_exact_trade_rows,
         "attempted": len(candidates),
@@ -403,6 +421,8 @@ def main() -> None:
             {
                 key: result[key]
                 for key in (
+                    "trade_shards_in_scope",
+                    "unproven_trade_count_shards",
                     "candidate_trade_shards",
                     "restored_exact_trade_rows",
                     "attempted",

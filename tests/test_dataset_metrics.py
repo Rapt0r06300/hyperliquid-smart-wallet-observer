@@ -186,3 +186,70 @@ def test_metrics_ignore_trade_patch_when_asset_sha_does_not_match(tmp_path, monk
     totals = metrics.build()["totals"]
     assert totals["TOTAL_TRADES_COLLECTED"] == 0
     assert totals["TRADE_SHARDS_MISSING_EXACT_COUNT"] == 1
+
+
+
+def test_metrics_reject_v3_global_unique_patch_that_did_not_cover_all_trade_shards(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    (catalog / "DATA_INDEX.json").write_text(
+        json.dumps({
+            "shards": [
+                {
+                    "dataset_id": "a",
+                    "family": "trades",
+                    "venue": "x",
+                    "symbol": "BTC",
+                    "quality_status": "PARTIAL",
+                    "event_count": 1,
+                    "trade_count": 1,
+                    "trade_count_exact": True,
+                    "unique_trade_count": 1,
+                    "unique_trade_count_exact": True,
+                    "replay_compatible": False,
+                    "sha256": "a" * 64,
+                    "bytes": 1,
+                },
+                {
+                    "dataset_id": "b",
+                    "family": "trades",
+                    "venue": "x",
+                    "symbol": "ETH",
+                    "quality_status": "PARTIAL",
+                    "event_count": 1,
+                    "trade_count": 1,
+                    "trade_count_exact": True,
+                    "unique_trade_count": 1,
+                    "unique_trade_count_exact": True,
+                    "replay_compatible": False,
+                    "sha256": "b" * 64,
+                    "bytes": 1,
+                },
+            ]
+        }),
+        encoding="utf-8",
+    )
+    (catalog / "TRADE_UNIQUE_COUNT_PATCH.json").write_text(
+        json.dumps({
+            "identity_version": metrics.GLOBAL_IDENTITY_VERSION,
+            "coverage_complete": True,
+            "trade_shards_in_scope": 1,
+            "unproven_trade_count_shards": 0,
+            "global_unique_trade_count": 1,
+            "global_identity_digest": "d" * 64,
+            "failure_reasons": {},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "INDEX", catalog / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", catalog / "TRADE_UNIQUE_COUNT_PATCH.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", catalog / "missing-trade-patch.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", catalog / "missing-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", catalog / "missing-sizes.json")
+
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
+    assert totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
