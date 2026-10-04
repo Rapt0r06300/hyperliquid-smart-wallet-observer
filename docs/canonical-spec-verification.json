@@ -1,68 +1,68 @@
 {
-  "dataset_v2_head": "6059032514a26a0d3026a5b24df6e6fe8fc2f369",
-  "generated_at_utc": "2026-10-04T02:39:45.105705Z",
+  "dataset_v2_head": "7642645927804926d92bf5c6a692cf68e0ade365",
+  "generated_at_utc": "2026-10-04T10:29:24.019655Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "7f6f9407f6c0a232d35de6bab923cd018b86dfcb7bcb56688ee346bffe15beb5",
-      "output_tail": "......................................                                   [100%]\n38 passed in 2.55s\n",
+      "output_sha256": "ac1f623e6b4cd4e549517d0d6de4f108d3b5d821dcb616e6c1721d99a1363a3f",
+      "output_tail": "......................................                                   [100%]\n38 passed in 1.33s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "b8662e8c77606338910503a3467eb0be87bc272ecf0d45cff9dc9e46dd36b3c8",
-      "output_tail": "..................................                                       [100%]\n34 passed in 2.87s\n",
-      "returncode": 0,
-      "status": "PASS"
+      "output_sha256": "f4d47f83f9e4920467a0908ba2647a9dfbad97dd157b7a945064d04bb11a4d43",
+      "output_tail": "..............F..F....................                                   [100%]\n=================================== FAILURES ===================================\n_________ test_bybit_archive_trd_match_id_is_canonical_native_identity _________\n\n    def test_bybit_archive_trd_match_id_is_canonical_native_identity():\n        row = {\n            \"raw_payload\": {\n                \"timestamp\": \"1790000000.125\",\n                \"symbol\": \"BTCUSDT\",\n                \"side\": \"Buy\",\n                \"size\": \"0.1\",\n                \"price\": \"100.5\",\n                \"trdMatchID\": \"archive-match-123\",\n            }\n        }\n>       keys = global_unique._native_trade_keys(\n               ^^^^^^^^^^^^^\n            row,\n            venue=\"bybit\",\n            family=\"trades\",\n            symbol=\"BTCUSDT\",\n        )\nE       NameError: name 'global_unique' is not defined\n\ntests/test_global_unique_trade_backfill.py:206: NameError\n___________ test_tick_envelope_trade_batch_counts_underlying_trades ____________\n\n    def test_tick_envelope_trade_batch_counts_underlying_trades():\n        with tempfile.TemporaryDirectory() as d:\n            p=Path(d)/\"x.jsonl.gz\"\n            row={\n                \"exchange_ts_ms\":1,\n                \"sequence\":7,\n                \"parsed_summary\":{\"event_count\":3},\n                \"raw_payload\":\"{}\"\n            }\n            with gzip.open(p,\"wt\",encoding=\"utf-8\") as h:\n                h.write(json.dumps(row)+\"\\n\")\n            out=inspect_asset(p,{\"family\":\"trades\",\"venue\":\"hyperliquid\",\"symbol\":\"BTC\"})\n            assert out[\"record_count\"]==1\n>           assert out[\"trade_count\"]==3\nE           assert 0 == 3\n\ntests/test_replay_compatibility.py:39: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_global_unique_trade_backfill.py::test_bybit_archive_trd_match_id_is_canonical_native_identity - NameError: name 'global_unique' is not defined\nFAILED tests/test_replay_compatibility.py::test_tick_envelope_trade_batch_counts_underlying_trades - assert 0 == 3\n2 failed, 36 passed in 1.49s\n",
+      "returncode": 1,
+      "status": "FAIL"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "6853a0416d502a6b76ed0e8c3a8f58bcd460e342bfeed2eb6d243072747d246e",
-      "output_tail": "..................................................                       [100%]\n50 passed in 3.81s\n",
-      "returncode": 0,
-      "status": "PASS"
+      "output_sha256": "df7144d08bcd5b6b655c37b88bdb51ac2963194f02edca490cd889ad474c8c4f",
+      "output_tail": "..............................................F.......                   [100%]\n=================================== FAILURES ===================================\n___________ test_tick_envelope_trade_batch_counts_underlying_trades ____________\n\n    def test_tick_envelope_trade_batch_counts_underlying_trades():\n        with tempfile.TemporaryDirectory() as d:\n            p=Path(d)/\"x.jsonl.gz\"\n            row={\n                \"exchange_ts_ms\":1,\n                \"sequence\":7,\n                \"parsed_summary\":{\"event_count\":3},\n                \"raw_payload\":\"{}\"\n            }\n            with gzip.open(p,\"wt\",encoding=\"utf-8\") as h:\n                h.write(json.dumps(row)+\"\\n\")\n            out=inspect_asset(p,{\"family\":\"trades\",\"venue\":\"hyperliquid\",\"symbol\":\"BTC\"})\n            assert out[\"record_count\"]==1\n>           assert out[\"trade_count\"]==3\nE           assert 0 == 3\n\ntests/test_replay_compatibility.py:39: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_compatibility.py::test_tick_envelope_trade_batch_counts_underlying_trades - assert 0 == 3\n1 failed, 53 passed in 2.00s\n",
+      "returncode": 1,
+      "status": "FAIL"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "e2d9524f32c6d02b42cd29c677b945760b594437dac6f5e11804fa163fce1225",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.44s\n",
+      "output_sha256": "7cd357de600d0a9f182c9f86a385a0059e61a33b213793e78080258266e393b5",
+      "output_tail": ".........                                                                [100%]\n9 passed in 0.74s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "57245c385f18170d7942b4a2442d1c4fe2968fefa953de737743db21bcf18b7d",
-      "output_tail": "................................................                         [100%]\n48 passed in 3.29s\n",
+      "output_sha256": "a5e5d67e3975345962eade9a2e0eacbf7a9caeaaebf032a9f523a943b7b5ee34",
+      "output_tail": "................................................                         [100%]\n48 passed in 1.87s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "582305f6a5964750789db7c941db861f44769f1f6595a77f068763198f4684fc",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.84s\n",
+      "output_sha256": "1a18a4a087eb33b2b80ad130668cf8ffa7dfba9f54b1db43c83700f8aa903975",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.14/x64/lib/python3.12/site-packages/fastapi/applications.py:4744: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 3.32s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_validators",
-      "output_sha256": "7b47fa8a24e1ce4d6c484d8e14cfa00396257bd016c5df5d4c6b990e21cf5a86",
-      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"ab141d514a9837dc6ea714c15dd4a5d5b20d878c3d6d9875db78053551d5ee1d\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=75\n",
+      "output_sha256": "6d25204d4f4b62c94c3775d8be06320f2cf83f8f208ec5f138934d9183c25b13",
+      "output_tail": "{\"output\": \"docs/normative-gate-registry.json\", \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"gate_count\": 13, \"registry_digest\": \"5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a\"}\n{\"events\": 120, \"registry_digest\": \"9be4c968f4d5cf92d5cf5ab1f9097f04ee629e7a891e5fc2f715b52426dd4b1a\"}\nGITHUB_HOSTED_WORKFLOWS_OK files=75\n",
       "returncode": 0,
       "status": "PASS"
     }
   ],
-  "main_alina_head": "6059032514a26a0d3026a5b24df6e6fe8fc2f369",
+  "main_alina_head": "7642645927804926d92bf5c6a692cf68e0ade365",
   "paper_only": true,
   "python_version": "3.12.14",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "eb8295c04667c142f6ac7906bb18a9e5b9bd3246584e76a80af84169bed42259",
+  "receipt_digest": "3f76514062acf4010f518a7d3790c565de9edd1c65e008e308284b4d712e6f8a",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
-  "status": "PASS",
+  "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "37171685170"
+  "workflow_run_id": "37195480893"
 }
