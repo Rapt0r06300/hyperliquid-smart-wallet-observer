@@ -281,6 +281,8 @@ def build_bundle(
     collection_queue_drops: int = 0,
     collection_run_id: str | None = None,
     compact_target_bytes: int = 0,
+    collection_config: Mapping[str, Any] | None = None,
+    continuation_cursor: Mapping[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -387,6 +389,12 @@ def build_bundle(
         "repository": V2_REPOSITORY,
         "collector_version": str(collector_version),
         "collection_run_id": run_id,
+        "collection_config": dict(collection_config or {}),
+        "continuation_cursor": (
+            dict(continuation_cursor)
+            if isinstance(continuation_cursor, Mapping)
+            else continuation_cursor
+        ),
         "collection_queue_drops": max(0, int(collection_queue_drops)),
         "shard_count": len(manifests),
         "source_shard_count": len(shard_paths),
