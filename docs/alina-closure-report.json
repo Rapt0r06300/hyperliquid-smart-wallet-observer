@@ -1015,10 +1015,10 @@
     "market-e6-9-2026100322-v7",
     "market-e6-9-2026100323-v7"
   ],
-  "campaign_resilience_status": "BLOCKED",
+  "campaign_resilience_status": "READY",
   "canonical_spec_blob": "f598097d51e9a5e3bdaff9e81413d6960bc88ed0",
   "copy_vault_coverage_receipt": {
-    "digest": "4e227a594c0c33108c379d8170dfd28af59eb08bf1472f10a28ac3a6452146e6",
+    "digest": "f7bbcc77794e4697707d181f3554a2448b0444927a5532135b0338dcb8c3ebca",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
@@ -1067,9 +1067,9 @@
     "valid_record_count": 7755643,
     "valid_record_ratio": 1.0
   },
-  "dataset_health_digest": "607ec2d8638ccf7de60dc5bc78c014925a2ae7284616e349341f7c6a26309685",
+  "dataset_health_digest": "b74cd1fcb95fe9ec5a3f51a7e38410ba41e5b470b727886e366f61c2e3336851",
   "dataset_selection_id": null,
-  "dataset_v2_head": "8a73da4330787a38480a66510dde1493f2d6d7fb",
+  "dataset_v2_head": "01e7d7276bf40d8d51bd3758812ee8654137899e",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "ab141d514a9837dc6ea714c15dd4a5d5b20d878c3d6d9875db78053551d5ee1d",
@@ -1097,12 +1097,12 @@
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "5 canonical closure blocker(s) remain",
+      "reason": "4 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-04T00:26:21.036709Z",
+  "generated_at_utc": "2026-10-04T00:33:59.350839Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1124,22 +1124,17 @@
     },
     {
       "id": "BLOCKER-03",
-      "reason": "campaign resilience receipt is not READY",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-04",
       "reason": "fresh-runner two-segment resume proof is unavailable",
       "status": "UNRESOLVED"
     },
     {
-      "id": "BLOCKER-05",
+      "id": "BLOCKER-04",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "8a73da4330787a38480a66510dde1493f2d6d7fb",
+  "main_alina_head": "01e7d7276bf40d8d51bd3758812ee8654137899e",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1174,12 +1169,11 @@
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "ecdeba6101e8e09065e875f2de9df7bfd3b5d6bd23206b1cd5548c449fbf7101",
+  "receipt_digest": "de0f75bbba637fb5620c52fa9de4ceea96769208ef33bd2a574fb5b23275976c",
   "rejected_count": 1149,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
-    "campaign resilience receipt is not READY",
     "fresh-runner two-segment resume proof is unavailable",
     "analysis campaigns are not all terminal COMPLETE"
   ],
