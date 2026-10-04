@@ -16,13 +16,16 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
 from hl_observer.collection.tick_dataset import TickEnvelope
 
 BINANCE_USDM_ARCHIVE = "https://data.binance.vision/data/futures/um/daily/aggTrades"
+BINANCE_USDM_TRADES_ARCHIVE = "https://data.binance.vision/data/futures/um/daily/trades"
 BYBIT_TRADING_ARCHIVE = "https://public.bybit.com/trading"
+OKX_ARCHIVE_HOST = "static.okx.com"
 DEFAULT_MAX_COMPRESSED_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_DECOMPRESSED_BYTES = 1024 * 1024 * 1024
 DEFAULT_MAX_EVENTS = 2_000_000
@@ -57,6 +60,7 @@ class ArchiveDay:
     source_url: str
     compressed_sha256: str
     checksum_verified: bool
+    stream_type: str
     events: tuple[TickEnvelope, ...]
 
 
@@ -69,6 +73,7 @@ class ArchiveStream:
     source_url: str
     compressed_sha256: str
     checksum_verified: bool
+    stream_type: str
     events: Iterable[TickEnvelope]
 
 
@@ -88,6 +93,12 @@ def binance_usdm_aggtrades_url(symbol: str, day: date) -> str:
     return f"{BINANCE_USDM_ARCHIVE}/{normalized}/{normalized}-aggTrades-{stamp}.zip"
 
 
+def binance_usdm_trades_url(symbol: str, day: date) -> str:
+    normalized = _symbol(symbol)
+    stamp = day.isoformat()
+    return f"{BINANCE_USDM_TRADES_ARCHIVE}/{normalized}/{normalized}-trades-{stamp}.zip"
+
+
 def bybit_trades_url(symbol: str, day: date) -> str:
     normalized = _symbol(symbol)
     return f"{BYBIT_TRADING_ARCHIVE}/{normalized}/{normalized}{day.isoformat()}.csv.gz"
@@ -103,6 +114,8 @@ def fetch_official_archive_stream(
     max_compressed_bytes: int = DEFAULT_MAX_COMPRESSED_BYTES,
     max_decompressed_bytes: int = DEFAULT_MAX_DECOMPRESSED_BYTES,
     max_events: int = DEFAULT_MAX_EVENTS,
+    stream_type: str | None = None,
+    source_url: str | None = None,
 ) -> ArchiveStream:
     venue_key = str(venue or "").strip().lower()
     normalized_coin = str(coin or "").strip().upper()
@@ -111,8 +124,16 @@ def fetch_official_archive_stream(
         raise ValueError("coin is required")
     getter = fetch_bytes or _http_get_bytes
 
+    requested_stream = str(stream_type or ("aggTrades" if venue_key == "binance" else "trades"))
+    stream_key = requested_stream.strip().lower()
+
     if venue_key == "binance":
-        url = binance_usdm_aggtrades_url(normalized_symbol, day)
+        if stream_key == "aggtrades":
+            url = binance_usdm_aggtrades_url(normalized_symbol, day)
+        elif stream_key == "trades":
+            url = binance_usdm_trades_url(normalized_symbol, day)
+        else:
+            raise ValueError("Binance stream_type must be 'aggTrades' or 'trades'")
         payload = _bounded_download(getter, url, max_compressed_bytes)
         checksum_payload = _bounded_download(getter, url + ".CHECKSUM", 64 * 1024)
         digest = hashlib.sha256(payload).hexdigest()
@@ -128,11 +149,14 @@ def fetch_official_archive_stream(
                 archive_sha256=digest,
                 checksum_verified=True,
                 max_decompressed_bytes=max_decompressed_bytes,
+                stream_type=stream_key,
             ),
             max_events,
         )
         verified = True
     elif venue_key == "bybit":
+        if stream_key != "trades":
+            raise ValueError("Bybit stream_type must be 'trades'")
         url = bybit_trades_url(normalized_symbol, day)
         payload = _bounded_download(getter, url, max_compressed_bytes)
         digest = hashlib.sha256(payload).hexdigest()
@@ -147,8 +171,26 @@ def fetch_official_archive_stream(
             max_events,
         )
         verified = False
+    elif venue_key == "okx":
+        if stream_key != "trades":
+            raise ValueError("OKX stream_type must be 'trades'")
+        url = _validated_okx_archive_url(source_url)
+        payload = _bounded_download(getter, url, max_compressed_bytes)
+        digest = hashlib.sha256(payload).hexdigest()
+        events = _limit(
+            _iter_okx_archive_payload(
+                payload,
+                coin=normalized_coin,
+                symbol=normalized_symbol,
+                source_url=url,
+                archive_sha256=digest,
+                max_decompressed_bytes=max_decompressed_bytes,
+            ),
+            max_events,
+        )
+        verified = False
     else:
-        raise ValueError("venue must be 'binance' or 'bybit'")
+        raise ValueError("venue must be 'binance', 'bybit', or 'okx'")
 
     return ArchiveStream(
         venue=venue_key,
@@ -158,6 +200,7 @@ def fetch_official_archive_stream(
         source_url=url,
         compressed_sha256=digest,
         checksum_verified=verified,
+        stream_type=requested_stream,
         events=events,
     )
 
@@ -172,6 +215,8 @@ def fetch_official_archive_day(
     max_compressed_bytes: int = DEFAULT_MAX_COMPRESSED_BYTES,
     max_decompressed_bytes: int = DEFAULT_MAX_DECOMPRESSED_BYTES,
     max_events: int = DEFAULT_MAX_EVENTS,
+    stream_type: str | None = None,
+    source_url: str | None = None,
 ) -> ArchiveDay:
     stream = fetch_official_archive_stream(
         venue=venue,
@@ -182,6 +227,8 @@ def fetch_official_archive_day(
         max_compressed_bytes=max_compressed_bytes,
         max_decompressed_bytes=max_decompressed_bytes,
         max_events=max_events,
+        stream_type=stream_type,
+        source_url=source_url,
     )
     events = tuple(stream.events)
     if not events:
@@ -194,6 +241,7 @@ def fetch_official_archive_day(
         source_url=stream.source_url,
         compressed_sha256=stream.compressed_sha256,
         checksum_verified=stream.checksum_verified,
+        stream_type=stream.stream_type,
         events=events,
     )
 
@@ -208,6 +256,25 @@ def parse_binance_aggtrades_csv(
     checksum_verified: bool,
 ) -> Iterable[TickEnvelope]:
     return _parse_binance_reader(
+        csv.reader(io.StringIO(text)),
+        coin=coin,
+        symbol=symbol,
+        source_url=source_url,
+        archive_sha256=archive_sha256,
+        checksum_verified=checksum_verified,
+    )
+
+
+def parse_binance_trades_csv(
+    text: str,
+    *,
+    coin: str,
+    symbol: str,
+    source_url: str,
+    archive_sha256: str,
+    checksum_verified: bool,
+) -> Iterable[TickEnvelope]:
+    return _parse_binance_trades_reader(
         csv.reader(io.StringIO(text)),
         coin=coin,
         symbol=symbol,
@@ -283,6 +350,68 @@ def _parse_binance_reader(
                 source_url=source_url,
                 archive_sha256=archive_sha256,
                 checksum_verified=checksum_verified,
+                native_event_kind="aggregate_trade",
+            )
+    return generate()
+
+
+def _parse_binance_trades_reader(
+    reader: Iterable[list[str]],
+    *,
+    coin: str,
+    symbol: str,
+    source_url: str,
+    archive_sha256: str,
+    checksum_verified: bool,
+) -> Iterable[TickEnvelope]:
+    iterator = iter(reader)
+    first = next(iterator, None)
+    if first is None:
+        return ()
+    header = [str(value).strip().lower() for value in first]
+    has_header = any(token in {"id", "trade_id", "price", "qty", "time"} for token in header)
+    rows = iterator if has_header else _prepend(first, iterator)
+    positions = {name: index for index, name in enumerate(header)} if has_header else {}
+
+    def field(row: list[str], names: tuple[str, ...], fallback: int) -> str:
+        for name in names:
+            index = positions.get(name)
+            if index is not None and index < len(row):
+                return row[index]
+        return row[fallback] if fallback < len(row) else ""
+
+    def generate() -> Iterable[TickEnvelope]:
+        for row in rows:
+            try:
+                trade_id = field(row, ("id", "trade_id", "tradeid"), 0)
+                price = field(row, ("price",), 1)
+                quantity = field(row, ("qty", "quantity"), 2)
+                quote_quantity = field(row, ("quote_qty", "quoteqty"), 3)
+                timestamp = _epoch_ms(field(row, ("time", "timestamp"), 4))
+                maker = _boolish(field(row, ("is_buyer_maker", "isbuyermaker"), 5))
+                sequence = int(trade_id)
+                float(price)
+                float(quantity)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            yield _historical_trade_envelope(
+                source_id="binance_usdm_official_archive",
+                coin=coin,
+                symbol=symbol,
+                exchange_ts_ms=timestamp,
+                sequence=sequence,
+                raw={
+                    "trade_id": str(trade_id),
+                    "price": price,
+                    "quantity": quantity,
+                    "quote_quantity": quote_quantity,
+                    "time": timestamp,
+                    "is_buyer_maker": maker,
+                },
+                source_url=source_url,
+                archive_sha256=archive_sha256,
+                checksum_verified=checksum_verified,
+                native_event_kind="individual_trade",
             )
     return generate()
 
@@ -332,6 +461,7 @@ def _parse_bybit_reader(
                 source_url=source_url,
                 archive_sha256=archive_sha256,
                 checksum_verified=False,
+                native_event_kind="individual_trade",
             )
     return generate()
 
@@ -345,6 +475,7 @@ def _iter_binance_archive_payload(
     archive_sha256: str,
     checksum_verified: bool,
     max_decompressed_bytes: int,
+    stream_type: str,
 ) -> Iterable[TickEnvelope]:
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
         files = [info for info in archive.infolist() if not info.is_dir()]
@@ -353,16 +484,20 @@ def _iter_binance_archive_payload(
         info = files[0]
         if info.file_size > max(1, int(max_decompressed_bytes)):
             raise ValueError("archive exceeds decompressed size limit")
-        with archive.open(info, "r") as raw:
-            with io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text:
-                yield from _parse_binance_reader(
-                    csv.reader(text),
-                    coin=coin,
-                    symbol=symbol,
-                    source_url=source_url,
-                    archive_sha256=archive_sha256,
-                    checksum_verified=checksum_verified,
-                )
+        with (
+            archive.open(info, "r") as raw,
+            io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text,
+        ):
+            parser = (
+                _parse_binance_trades_reader
+                if stream_type == "trades"
+                else _parse_binance_reader
+            )
+            yield from parser(
+                csv.reader(text), coin=coin, symbol=symbol,
+                source_url=source_url, archive_sha256=archive_sha256,
+                checksum_verified=checksum_verified,
+            )
 
 
 def _iter_bybit_archive_payload(
@@ -373,14 +508,95 @@ def _iter_bybit_archive_payload(
     source_url: str,
     archive_sha256: str,
 ) -> Iterable[TickEnvelope]:
-    with gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as raw:
-        with io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text:
-            yield from _parse_bybit_reader(
-                csv.DictReader(text),
+    with (
+        gzip.GzipFile(fileobj=io.BytesIO(payload), mode="rb") as raw,
+        io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text,
+    ):
+        yield from _parse_bybit_reader(
+            csv.DictReader(text),
+            coin=coin,
+            symbol=symbol,
+            source_url=source_url,
+            archive_sha256=archive_sha256,
+        )
+
+
+def parse_okx_trades_csv(
+    text: str,
+    *,
+    coin: str,
+    symbol: str,
+    source_url: str,
+    archive_sha256: str,
+) -> Iterable[TickEnvelope]:
+    return _parse_okx_trades_reader(
+        csv.DictReader(io.StringIO(text)), coin=coin, symbol=symbol,
+        source_url=source_url, archive_sha256=archive_sha256,
+    )
+
+
+def _parse_okx_trades_reader(
+    reader: Iterable[dict[str, Any]],
+    *,
+    coin: str,
+    symbol: str,
+    source_url: str,
+    archive_sha256: str,
+) -> Iterable[TickEnvelope]:
+    def generate() -> Iterable[TickEnvelope]:
+        for row in reader:
+            try:
+                trade_id = str(row.get("trade_id") or row.get("tradeId") or row.get("id") or "")
+                instrument = str(row.get("instrument_name") or row.get("instId") or symbol)
+                price = str(row.get("price") or row.get("px") or "")
+                size = str(row.get("size") or row.get("sz") or row.get("qty") or "")
+                timestamp = _epoch_ms(row.get("timestamp") or row.get("ts") or row.get("time"))
+                if not trade_id:
+                    raise ValueError("missing trade id")
+                float(price)
+                float(size)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            raw = {str(key): value for key, value in row.items() if key is not None}
+            raw.update({"trade_id": trade_id, "instrument_name": instrument})
+            yield _historical_trade_envelope(
+                source_id="okx_official_archive",
                 coin=coin,
-                symbol=symbol,
+                symbol=instrument,
+                exchange_ts_ms=timestamp,
+                sequence=None,
+                raw=raw,
                 source_url=source_url,
                 archive_sha256=archive_sha256,
+                checksum_verified=False,
+                native_event_kind="individual_trade",
+            )
+    return generate()
+
+
+def _iter_okx_archive_payload(
+    payload: bytes,
+    *,
+    coin: str,
+    symbol: str,
+    source_url: str,
+    archive_sha256: str,
+    max_decompressed_bytes: int,
+) -> Iterable[TickEnvelope]:
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        files = [info for info in archive.infolist() if not info.is_dir()]
+        if len(files) != 1:
+            raise ValueError("expected exactly one file in OKX archive")
+        info = files[0]
+        if info.file_size > max(1, int(max_decompressed_bytes)):
+            raise ValueError("archive exceeds decompressed size limit")
+        with (
+            archive.open(info, "r") as raw,
+            io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as text,
+        ):
+            yield from _parse_okx_trades_reader(
+                csv.DictReader(text), coin=coin, symbol=symbol,
+                source_url=source_url, archive_sha256=archive_sha256,
             )
 
 
@@ -395,6 +611,7 @@ def _historical_trade_envelope(
     source_url: str,
     archive_sha256: str,
     checksum_verified: bool,
+    native_event_kind: str,
 ) -> TickEnvelope:
     return TickEnvelope(
         source_id=source_id,
@@ -422,8 +639,22 @@ def _historical_trade_envelope(
             "historical_archive": True,
             "historical_receive_timestamp_available": False,
             "archive_checksum_verified": bool(checksum_verified),
+            "native_event_kind": native_event_kind,
         },
     )
+
+
+def _validated_okx_archive_url(value: str | None) -> str:
+    url = str(value or "").strip()
+    parsed = urlparse(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != OKX_ARCHIVE_HOST
+        or not parsed.path.startswith("/cdn/okex/traderecords/")
+        or not parsed.path.lower().endswith(".zip")
+    ):
+        raise ValueError("OKX requires an explicit official static.okx.com archive URL")
+    return url
 
 
 def _bounded_download(fetch_bytes: Callable[[str], bytes], url: str, maximum: int) -> bytes:
@@ -488,12 +719,16 @@ __all__ = [
     "ArchiveDay",
     "ArchiveStream",
     "BINANCE_USDM_ARCHIVE",
+    "BINANCE_USDM_TRADES_ARCHIVE",
     "BYBIT_TRADING_ARCHIVE",
     "binance_usdm_aggtrades_url",
+    "binance_usdm_trades_url",
     "bybit_trades_url",
     "fetch_official_archive_day",
     "fetch_official_archive_stream",
     "iter_days",
     "parse_binance_aggtrades_csv",
+    "parse_binance_trades_csv",
     "parse_bybit_trades_csv",
+    "parse_okx_trades_csv",
 ]
