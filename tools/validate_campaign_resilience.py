@@ -20,16 +20,23 @@ LEGACY_TERMINAL_STATUSES = {"COMPLETE", "FAILED", "UNAVAILABLE", "PARTIAL", "REJ
 
 
 def _unit_requires_publication_receipt(unit) -> bool:
-    """Only a successfully completed publishable unit requires a publication receipt.
+    """Require a receipt only for a unit that claims durable publication.
 
-    A CONTINUATION_REQUIRED checkpoint is durable resume state, not a published
-    terminal artefact. Requiring a publication receipt for it contradicts the
-    worker contract, which publishes receipts only for COMPLETE durable units.
+    A COMPLETE adapter result is not by itself proof that bytes were durably
+    published. The worker annotates successful durable publication with
+    durable_persisted=true before checkpointing, and the canonical publication
+    reconciler uses the same predicate. Missing receipts for those durable units
+    remain fail-closed; historical COMPLETE checkpoints without a durable claim
+    are not retroactively treated as published.
     """
     if not isinstance(unit, dict):
         return False
     result = unit.get("result")
-    return isinstance(result, dict) and result.get("status") == "COMPLETE"
+    return (
+        isinstance(result, dict)
+        and result.get("status") == "COMPLETE"
+        and result.get("durable_persisted") is True
+    )
 
 
 def canonical(value):
