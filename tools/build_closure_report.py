@@ -24,6 +24,29 @@ def digest(value):
     ).hexdigest()
 
 
+def _current_dataset_coverage(totals):
+    """Derive live Dataset V2 exactness from canonical DATA_METRICS totals."""
+    totals = totals if isinstance(totals, dict) else {}
+    total_shards = int(totals.get("TOTAL_SHARDS") or 0)
+    exact_assets = int(totals.get("UNCOMPRESSED_SIZE_EXACT_ASSETS") or 0)
+    unavailable_assets = int(totals.get("UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS") or 0)
+    unclassified_assets = int(totals.get("UNCOMPRESSED_SIZE_UNCLASSIFIED_ASSETS") or 0)
+    uncompressed_coverage = totals.get("UNCOMPRESSED_SIZE_COVERAGE_COMPLETE") is True
+    return {
+        "trade_count_exact": totals.get("TOTAL_TRADES_COUNT_COVERAGE_COMPLETE") is True,
+        "unique_trade_count_exact": totals.get("TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE") is True,
+        "uncompressed_size_coverage": uncompressed_coverage,
+        "uncompressed_size_exact": (
+            uncompressed_coverage
+            and unavailable_assets == 0
+            and unclassified_assets == 0
+            and (total_shards == 0 or exact_assets == total_shards)
+        ),
+        "uncompressed_size_exact_assets": exact_assets,
+        "uncompressed_size_unavailable_assets": unavailable_assets,
+    }
+
+
 def _current_analysis_campaigns(campaigns, phase):
     """Return only campaigns bound to the canonical current ANALYZE epoch."""
     if not isinstance(phase, dict) or phase.get("phase") != "ANALYZE":
@@ -173,6 +196,7 @@ def main() -> int:
             "updated_at_utc": row.get("updated_at_utc"),
         })
     health = load(root / "catalog/DATASET_HEALTH_RECEIPT.json", {})
+    metrics = load(root / "catalog/DATA_METRICS.json", {})
     global_closure = load(root / "catalog/GLOBAL_IMPLEMENTATION_CLOSURE.json", {})
     copy_vault_coverage = load(root / "catalog/COPY_VAULT_COVERAGE_RECEIPT.json", {})
     replay_patch = load(root / "catalog/REPLAY_COMPAT_PATCH.json", {})
@@ -198,7 +222,9 @@ def main() -> int:
         row = load(path)
         if isinstance(row, dict):
             campaigns.append(row)
-    totals = (health.get("totals") or {}) if isinstance(health, dict) else {}
+    health_totals = (health.get("totals") or {}) if isinstance(health, dict) else {}
+    metrics_totals = (metrics.get("totals") or {}) if isinstance(metrics, dict) else {}
+    totals = metrics_totals if metrics_totals else health_totals
     items = event.get("items") if isinstance(event, dict) else []
     event_terminal_statuses = {"IMPLEMENTED_AND_WIRED", "NOT_APPLICABLE"}
     event_wired = (
@@ -275,10 +301,11 @@ def main() -> int:
         if isinstance(frozen_coverage_provenance, dict)
         else {}
     )
-    trade_count_exact = frozen_coverage.get("trade_count_exact") is True
-    unique_trade_count_exact = frozen_coverage.get("unique_trade_count_exact") is True
-    uncompressed_size_exact = frozen_coverage.get("uncompressed_bytes_exact") is True
-    uncompressed_size_coverage = uncompressed_size_exact
+    current_dataset_coverage = _current_dataset_coverage(totals)
+    trade_count_exact = current_dataset_coverage["trade_count_exact"]
+    unique_trade_count_exact = current_dataset_coverage["unique_trade_count_exact"]
+    uncompressed_size_exact = current_dataset_coverage["uncompressed_size_exact"]
+    uncompressed_size_coverage = current_dataset_coverage["uncompressed_size_coverage"]
 
     workflow_run_ids = sorted({
         str((row.get("cursor") or {}).get("last_run_id"))
@@ -393,8 +420,8 @@ def main() -> int:
         "cross_shard_overlap_trade_count": int(totals.get("TOTAL_CROSS_SHARD_OVERLAP_TRADES") or 0),
         "uncompressed_size_coverage": uncompressed_size_coverage,
         "uncompressed_size_exact": uncompressed_size_exact,
-        "uncompressed_size_exact_assets": (health.get("coverage") or {}).get("uncompressed_size_exact_assets", 0) if isinstance(health, dict) else 0,
-        "uncompressed_size_unavailable_assets": (health.get("coverage") or {}).get("uncompressed_size_unavailable_assets", 0) if isinstance(health, dict) else 0,
+        "uncompressed_size_exact_assets": current_dataset_coverage["uncompressed_size_exact_assets"],
+        "uncompressed_size_unavailable_assets": current_dataset_coverage["uncompressed_size_unavailable_assets"],
         "copy_vault_status": modules["copy_vault"]["status"],
         "lead_lag_status": modules["lead_lag"]["status"],
         "cross_venue_status": modules["cross_venue_dislocation"]["status"],
