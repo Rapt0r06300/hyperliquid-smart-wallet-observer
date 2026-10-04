@@ -3130,7 +3130,7 @@
     "unexpected_failures": [],
     "users_per_largest_lane": 10
   },
-  "candidate_campaign_count": 312,
+  "candidate_campaign_count": 313,
   "collection_cutoff_at_utc": null,
   "invalid_manifest_paths": [],
   "paper_only": true,
@@ -6349,11 +6349,52 @@
       "terminal_lane_count": 1,
       "unexpected_failures": [],
       "users_per_largest_lane": 3088
+    },
+    {
+      "active_lane_count": 1,
+      "campaigns": [
+        {
+          "campaign_id": "copy-vault-e6-broad-2026100410-v8",
+          "collected": false,
+          "completed_units": 0,
+          "published": false,
+          "shard_index": 0,
+          "status": "RUNNING",
+          "status_reason": "worker_started"
+        }
+      ],
+      "collected_lane_count": 0,
+      "completed_unit_count": 0,
+      "created_at_max": "2026-10-04T10:37:45.757025+00:00",
+      "declared_universe_count": 3087,
+      "duplicate_lane_indices": [],
+      "explicit_unavailable_lane_count": 0,
+      "fully_published": false,
+      "lane_indices": [
+        0
+      ],
+      "manifest_lane_count": 1,
+      "max_users_per_lane_contract": 10,
+      "missing_lane_indices": [],
+      "no_silent_loss": true,
+      "out_of_range_lane_indices": [],
+      "plan_valid": false,
+      "published_lane_count": 0,
+      "qualified_shard_count": 0,
+      "scheduled_lane_count": 1,
+      "selected_count": 3087,
+      "selection_file": "catalog/copy_vault_selections/e6/2026100410.json",
+      "selection_sha256": "7b6c59bc93ecedaac55320cf098c9fa3649ff8f5ad5e16191b649d6855826d12",
+      "selection_verified": true,
+      "status": "BLOCKED",
+      "terminal_lane_count": 0,
+      "unexpected_failures": [],
+      "users_per_largest_lane": 3087
     }
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "f6b8dbb943e6823f4b75249494c62905c035263d60fa042ccd955fbd1043d20b",
+  "receipt_digest": "0f9f21950495b0c3f24029f31066d065defcb6dadf28c85a2fecf74c6aaa91ab",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
