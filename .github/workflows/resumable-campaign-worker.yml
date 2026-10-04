@@ -424,10 +424,39 @@ jobs:
               fi
               tar -C "$EVIDENCE_DIR" -czf "$EVIDENCE" .
               TAG="campaign-evidence-$CAMPAIGN_ID-u$UNIT"
-              if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-                gh release upload "$TAG" "$EVIDENCE" --clobber --repo "$GITHUB_REPOSITORY"
-              else
-                gh release create "$TAG" "$EVIDENCE"                   --repo "$GITHUB_REPOSITORY"                   --target main                   --title "Alina campaign evidence $CAMPAIGN_ID unit $UNIT"                   --notes "Paper/read-only evidence. No real execution."
+              EVIDENCE_PUBLISH_OK=0
+              for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                set +e
+                if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                  EVIDENCE_OUTPUT="$(gh release upload "$TAG" "$EVIDENCE" --clobber --repo "$GITHUB_REPOSITORY" 2>&1)"
+                  rc=$?
+                else
+                  EVIDENCE_OUTPUT="$(gh release create "$TAG" "$EVIDENCE" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --target main \
+                    --title "Alina campaign evidence $CAMPAIGN_ID unit $UNIT" \
+                    --notes "Paper/read-only evidence. No real execution." 2>&1)"
+                  rc=$?
+                fi
+                set -e
+                printf '%s\n' "$EVIDENCE_OUTPUT"
+                if [ "$rc" -eq 0 ]; then
+                  EVIDENCE_PUBLISH_OK=1
+                  break
+                fi
+                if printf '%s' "$EVIDENCE_OUTPUT" | grep -Eqi 'already_exists|already exists|rate limit|secondary rate|abuse detection|HTTP 403|HTTP 429|HTTP 502|HTTP 503|HTTP 504|502 bad gateway|503 service unavailable|504 gateway timeout|timeout|timed out|connection reset'; then
+                  if [ "$attempt" -lt 12 ]; then
+                    delay="$((5 + attempt * 5))"
+                    [ "$delay" -le 60 ] || delay=60
+                    sleep "$delay"
+                    continue
+                  fi
+                fi
+                exit "$rc"
+              done
+              if [ "$EVIDENCE_PUBLISH_OK" -ne 1 ]; then
+                echo "Durable analysis evidence publication exhausted bounded transient retries." >&2
+                exit 2
               fi
               python tools/augment_campaign_result.py evidence                 --result "$RESULT"                 --tag "$TAG"                 --repository "$GITHUB_REPOSITORY"
               SCOREBOARD="$WORKSPACE/runtime/reports/economic_family_scoreboards.json"
