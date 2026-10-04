@@ -103,6 +103,8 @@ When the user says to stop collection and analyze:
 
 No new collection campaign may be created after the cutoff.
 
+A transient GitHub Actions dispatch/API rate limit after the durable phase commit must not invalidate an otherwise successful transition. Immediate cross-workflow dispatches use bounded retries; scheduled controllers remain the durable recovery path if those retries are exhausted. Event-driven wake-ups must be acyclic so a recovery mechanism cannot create a workflow feedback loop.
+
 A collection worker that was already claimed before the transition may finish and publish its current bounded unit. New claims for collection work from the prior collection epoch are refused after the phase transition.
 
 Pending or continuation-required collection campaigns from old epochs remain inert and are not resumed in a later session.
