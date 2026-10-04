@@ -549,11 +549,14 @@ def main():
     unsafe = []
     manifests = sorted(Path(a.campaign_root).glob("*.json"))
     market_replacements = {}
+    market_handoff_candidates = []
     for candidate_path in manifests:
         try:
             candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
             continue
+        if isinstance(candidate, dict) and candidate.get("kind") == "market_collection":
+            market_handoff_candidates.append(candidate)
         if not isinstance(candidate, dict) or not _progressed_market_replacement(candidate):
             continue
         key = _market_replacement_key(candidate)
@@ -580,6 +583,8 @@ def main():
             market_replacements[key] = candidate
     dispatched = []
     dispatch_failures = []
+    hot_handoff_dispatches = []
+    hot_handoff_failures = []
     lease_repairs = []
     drain_reconciled = []
     phase = {}
@@ -735,6 +740,69 @@ def main():
             and phase.get("phase") == "COLLECT"
             and row.get("creation_phase") == "COLLECT"
             and row.get("phase_epoch") == phase.get("epoch")
+            and kind == "market_collection"
+            and status == "RUNNING"
+            and repository
+        ):
+            successor, handoff_reason = _select_market_handoff_successor(
+                row,
+                market_handoff_candidates,
+                now,
+            )
+            if successor is not None:
+                ok, detail = _dispatch_market_handoff(
+                    row,
+                    successor,
+                    repository,
+                    now,
+                )
+                predecessor_id = str(row.get("campaign_id") or path.stem)
+                successor_id = str(successor.get("campaign_id") or "")
+                if ok:
+                    dispatched.append(successor_id)
+                    hot_handoff_dispatches.append({
+                        "predecessor_campaign_id": predecessor_id,
+                        "successor_campaign_id": successor_id,
+                        "predecessor_run_id": (
+                            (row.get("cursor") or {}).get(
+                                "hot_handoff_predecessor_run_id"
+                            )
+                        ),
+                        "generation": (
+                            (row.get("cursor") or {}).get("hot_handoff_generation")
+                        ),
+                        "dispatched_at_utc": (
+                            (row.get("cursor") or {}).get(
+                                "hot_handoff_dispatch_at_utc"
+                            )
+                        ),
+                    })
+                    _write_atomic(path, row)
+                elif detail not in {"handoff_dispatch_recent"}:
+                    hot_handoff_failures.append({
+                        "predecessor_campaign_id": predecessor_id,
+                        "successor_campaign_id": successor_id,
+                        "reason": detail,
+                    })
+            elif handoff_reason not in {
+                "handoff_not_due",
+                "handoff_already_dispatched",
+                "handoff_successor_unavailable",
+                "predecessor_not_running",
+            }:
+                hot_handoff_failures.append({
+                    "predecessor_campaign_id": str(
+                        row.get("campaign_id") or path.stem
+                    ),
+                    "successor_campaign_id": None,
+                    "reason": handoff_reason,
+                })
+
+        if (
+            a.dispatch
+            and phase.get("phase") == "COLLECT"
+            and row.get("creation_phase") == "COLLECT"
+            and row.get("phase_epoch") == phase.get("epoch")
             and status == "CONTINUATION_REQUIRED"
             and repository
         ):
@@ -792,9 +860,23 @@ def main():
         "lease_repairs": sorted(set(lease_repairs)),
         "drain_reconciled_campaigns": sorted(set(drain_reconciled)),
         "unsafe_campaigns": sorted(unsafe),
-        "successors_dispatched": sorted(dispatched),
+        "successors_dispatched": sorted(set(dispatched)),
         "successor_dispatch_failures": sorted(
             dispatch_failures, key=lambda item: item["campaign_id"]
+        ),
+        "hot_handoff_dispatches": sorted(
+            hot_handoff_dispatches,
+            key=lambda item: (
+                item["predecessor_campaign_id"],
+                item["successor_campaign_id"],
+            ),
+        ),
+        "hot_handoff_failures": sorted(
+            hot_handoff_failures,
+            key=lambda item: (
+                item["predecessor_campaign_id"],
+                str(item.get("successor_campaign_id") or ""),
+            ),
         ),
         "phase_checked": phase,
         "phase_error": phase_error,
@@ -804,7 +886,17 @@ def main():
         "watchdog_status": (
             "BLOCKED"
             if unsafe or phase_error
-            else ("ATTENTION" if stuck or expired_leases or dispatch_failures or stalled_pending else "HEALTHY")
+            else (
+                "ATTENTION"
+                if (
+                    stuck
+                    or expired_leases
+                    or dispatch_failures
+                    or hot_handoff_failures
+                    or stalled_pending
+                )
+                else "HEALTHY"
+            )
         ),
     }
     target = Path(a.output)
