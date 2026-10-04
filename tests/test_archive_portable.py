@@ -109,6 +109,8 @@ def test_est_exclu_regles():
     assert AP.est_exclu("x/y/.git/config") and AP.est_exclu("a.lock") and AP.est_exclu("b/c.tmp")
     assert AP.est_exclu("db.sqlite3-wal") and AP.est_exclu("db.sqlite3-shm")
     assert AP.est_exclu("archive/racine-machine/trace.txt")
+    assert AP.est_exclu("catalog/campaign-history/old.failed.json")
+    assert not AP.est_exclu("catalog/DATA_METRICS.json")
     assert AP.est_exclu(".portable-preflight-abc/test/cert.pem")
     assert AP.est_exclu("_validation_workspace/pytest/test.db")
     for sortie in (

@@ -54,6 +54,10 @@ PREFIXES_DOSSIERS_TRANSITOIRES = (".portable-",)
 PREFIXES_EXCLUS = (
     "runtime/research/", "logs/", "data/", "_to_delete/", "archive/",
     "outils de test/rapports/",
+    # Historical orchestration evidence can contain absolute paths from old
+    # GitHub-hosted runners. It is not executable runtime state and must not
+    # make an otherwise relocatable Windows release non-portable.
+    "catalog/campaign-history/",
 )
 SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    ".sqlite3-wal", ".sqlite3-shm", ".sqlite-wal", ".sqlite-shm",
