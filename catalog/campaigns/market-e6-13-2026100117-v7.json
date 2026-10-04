@@ -1,43 +1,24 @@
 {
   "analysis_stage": null,
-  "attempts": 34,
+  "attempts": 35,
   "campaign_id": "market-e6-13-2026100117-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 1,
+  "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "ffc9cfa0d5754b9688b07af8c0d9e43ab0263bbc",
+  "code_sha": "a3d10e0f75006aa71562150511321d6024da5262",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "4143932cf01b6a51b749adda8c8e1d2e3b1c3f5921e5f7da44158133879debdd",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e6-13-2026100117-v7-u0-retry-81fef91512554760 /home/runner/work/_temp/campaign-output/market-e6-13-2026100117-v7/0/assets/gate-public-ws-bbo-gpro-usdt-1791100768399-1791104257234-1625d16294e3.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 1040:3750F8:2A39A:12D78D:6AC22E00 and timestamp 2026-10-04 10:44:17 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/402932352/assets?label=&name=gate-public-ws-bbo-gpro-usdt-1791100768399-1791104257234-1625d16294e3.jsonl.gz)",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "551e26f9eeb473a99f92172d1415e8a32c2c133b569f3f793a4ff3fbe77d12ab"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "00fe507623948f5543789ab8b15c034961bac4dcd5a5a61b9efe3a14eb6fbfd1",
-  "consecutive_failures": 1,
+  "consecutive_failures": 0,
   "created_at": "2026-10-01T17:21:26.780773+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "551e26f9eeb473a99f92172d1415e8a32c2c133b569f3f793a4ff3fbe77d12ab",
     "duration_s": 3500,
-    "generation": 1,
-    "handoff_generation": null,
-    "handoff_phase_epoch": 6,
-    "last_run_id": "37187344326",
     "market_shard_count": 16,
     "market_shard_index": 13,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e6/2026100117/shard-13.json",
     "plan_sha256": "a1bcdefdff4c82bebf28814e4af5da372d318b502f021a0fce0a60d377da7333",
-    "predecessor_run_id": null,
-    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 42,
@@ -391,6 +372,15 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "STUCK"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-13-2026100117-v7.stuck.ffc9cfa0d575.3e87e1c671cfd1a5921665af98264edcc678dc9b53577baf58c480c0f486d446.json",
+      "archived_manifest_sha256": "3e87e1c671cfd1a5921665af98264edcc678dc9b53577baf58c480c0f486d446",
+      "at": "2026-10-04T10:48:28.265717Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "ffc9cfa0d5754b9688b07af8c0d9e43ab0263bbc",
+      "prior_status": "STUCK",
+      "prior_status_reason": "durable_publication_failed"
     }
   ],
   "kind": "market_collection",
@@ -402,8 +392,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": "2026-10-04T10:49:17.433605Z",
-  "no_progress_count": 1,
+  "next_due_at": null,
+  "no_progress_count": 0,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -412,9 +402,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "durable_publication_failed",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T10:44:17.433605Z",
+  "updated_at": "2026-10-04T10:48:28.265733Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }

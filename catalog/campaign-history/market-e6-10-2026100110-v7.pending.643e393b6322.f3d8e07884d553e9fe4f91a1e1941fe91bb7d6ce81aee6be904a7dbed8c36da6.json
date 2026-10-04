@@ -1,0 +1,317 @@
+{
+  "analysis_stage": null,
+  "attempts": 25,
+  "campaign_id": "market-e6-10-2026100110-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "643e393b63228b5bfb83acff1f5ffa9c6c5312ad",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "585d13e8a8143936d7a08540f3c0c83eeec8c172a4a9f30ab6dd46dba761109e",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-01T10:32:56.535883+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "duration_s": 3500,
+    "market_shard_count": 16,
+    "market_shard_index": 10,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e6/2026100110/shard-10.json",
+    "plan_sha256": "e496355327434cb006ff17b7c94a9b4dc1f5f09cb005fe26c0312e6e1ad540e4",
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 52,
+    "universe_digest": "f4e0cdbeae6c451e36c3de156f59643cc57bdbd39e48c9c075f9d7d5462f1b14",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-08T10:32:56.535883+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.21d4767e2afc.206329d55872a6139188ecdfa1ff16769f39f84cae2f84378ed0f4cfe5f8f0b1.json",
+      "archived_manifest_sha256": "206329d55872a6139188ecdfa1ff16769f39f84cae2f84378ed0f4cfe5f8f0b1",
+      "at": "2026-10-01T10:51:47.727080Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "21d4767e2afc4b9037fb94045e724ac25f2407f4",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-01T21:55:42.495011Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at_utc": "2026-10-02T01:10:46.906388Z",
+      "event": "WATCHDOG_OWNER_RUN_TERMINATED",
+      "owner_run_conclusion": "failure",
+      "owner_run_id": "36931736800",
+      "owner_run_status": "completed",
+      "previous_lease": {
+        "acquired_at": "2026-10-01T21:55:42.494966Z",
+        "expires_at": "2026-10-02T03:40:42.494966Z",
+        "lease_token_sha256": "d2b6e299049b9a2d15b1ed81bbbc8709a3949fe0e60fb945f2c32088c2ccc612",
+        "owner_run_id": "36931736800"
+      },
+      "previous_status": "RUNNING",
+      "reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE"
+    },
+    {
+      "at_utc": "2026-10-02T07:01:58.723385Z",
+      "event": "WATCHDOG_STUCK_SUPERSEDED",
+      "previous_reason": "OWNER_RUN_COMPLETED_WITH_ACTIVE_LEASE",
+      "previous_status": "STUCK",
+      "reason": "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN",
+      "replacement_campaign_id": "market-e6-10-2026100115-v7"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.failed.90409c91e02c.ba0912ac58be95921b3274e97e2836c3fba4400b87731eca4551ba8b6f56a8b4.json",
+      "archived_manifest_sha256": "ba0912ac58be95921b3274e97e2836c3fba4400b87731eca4551ba8b6f56a8b4",
+      "at": "2026-10-02T17:49:08.930776Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "90409c91e02ca947e3f8781211c72a58ffb63d32",
+      "prior_status": "FAILED",
+      "prior_status_reason": "SUPERSEDED_BY_NEWER_MARKET_CAMPAIGN"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.543104bc87a3.958a08741574fe1571df833e67aa6920b7b69024b4e2580d4169c02e04e2118a.json",
+      "archived_manifest_sha256": "958a08741574fe1571df833e67aa6920b7b69024b4e2580d4169c02e04e2118a",
+      "at": "2026-10-02T17:52:02.230946Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "543104bc87a3d1674614ef6488cb4413aa3dfba9",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.aeeff07238f2.12f21d2accc531060236369de0448b2a06cffbb798f86dc54ee5df768c3db4aa.json",
+      "archived_manifest_sha256": "12f21d2accc531060236369de0448b2a06cffbb798f86dc54ee5df768c3db4aa",
+      "at": "2026-10-02T17:58:10.170089Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "aeeff07238f2c84ddf4cec2a6ce2652eb1e708dc",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.0a49ea72902b.bc6fab8ac0f37cc6b1d7e453ff28a63b72fb399dfb64c0ed5d8cd26ba74c1758.json",
+      "archived_manifest_sha256": "bc6fab8ac0f37cc6b1d7e453ff28a63b72fb399dfb64c0ed5d8cd26ba74c1758",
+      "at": "2026-10-02T18:11:29.306738Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "0a49ea72902b8f1a6dd29741d6ccc1fc168feac3",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.e07540fac199.b6c9d5aeaeb9592ca9a4d04b929368e4f453588531516d19da51e5eddfcab7f8.json",
+      "archived_manifest_sha256": "b6c9d5aeaeb9592ca9a4d04b929368e4f453588531516d19da51e5eddfcab7f8",
+      "at": "2026-10-02T22:04:31.540622Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "e07540fac1993e81f385753ab092b183c13e63cd",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.a30b7be66aca.fa4f59566fdf207db9f6221a4a83ef0811543f1b4441aa206ae93d2685347322.json",
+      "archived_manifest_sha256": "fa4f59566fdf207db9f6221a4a83ef0811543f1b4441aa206ae93d2685347322",
+      "at": "2026-10-03T01:43:00.025709Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "a30b7be66acae019aa72525c2132d081660c610f",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.508b8f184c29.b0edfe931af3479dd346e7333dcc6111a64d3f5ef0c0a199b8eac26f46a33c0f.json",
+      "archived_manifest_sha256": "b0edfe931af3479dd346e7333dcc6111a64d3f5ef0c0a199b8eac26f46a33c0f",
+      "at": "2026-10-03T01:56:24.033694Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "508b8f184c29a6900e0b311dce07724cbfb1a776",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.ca83640eb6c2.27a0ff9d38cc8fc4623033c180b4ec9b5e25ffd2cdb6e9637d27777b9a7fd4a2.json",
+      "archived_manifest_sha256": "27a0ff9d38cc8fc4623033c180b4ec9b5e25ffd2cdb6e9637d27777b9a7fd4a2",
+      "at": "2026-10-03T07:55:28.737207Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "ca83640eb6c28124de2ef805e30177986a86d4e4",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.a35eae034c5c.f1dbe06e1aab79b81d00f0219b058a614ad081df809f16b309c865c50c48a8b6.json",
+      "archived_manifest_sha256": "f1dbe06e1aab79b81d00f0219b058a614ad081df809f16b309c865c50c48a8b6",
+      "at": "2026-10-03T13:16:43.062925Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "a35eae034c5c87a9172f3690e3968ee9c2d13e0d",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.2189241d9ef4.a438549a44c698581f1679201a821e32f8f5ee18d83a2e6986b251014a949950.json",
+      "archived_manifest_sha256": "a438549a44c698581f1679201a821e32f8f5ee18d83a2e6986b251014a949950",
+      "at": "2026-10-03T16:32:54.659719Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "2189241d9ef4be43727c1a0426840e4fe1fce946",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.25e8a1c24aea.af47d4bf21e1df73d1eb0728601ffee3f4e406cf48f55c3f920bda153fe78aae.json",
+      "archived_manifest_sha256": "af47d4bf21e1df73d1eb0728601ffee3f4e406cf48f55c3f920bda153fe78aae",
+      "at": "2026-10-03T16:48:33.252097Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "25e8a1c24aea69c5c6569dab115b7fad6ac00fc9",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.29c59e69b78f.f075e18f8c71df0e634b6ea2d0135121009b656a5f34af263777c485b2c4590d.json",
+      "archived_manifest_sha256": "f075e18f8c71df0e634b6ea2d0135121009b656a5f34af263777c485b2c4590d",
+      "at": "2026-10-03T17:53:14.157020Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "29c59e69b78fbedd3b28e1b6ae9e43703a183087",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.c5344e003d01.e748ab8b9439f9e1e0fc3bfac42926757efefa6afd2add7228afba44905741b0.json",
+      "archived_manifest_sha256": "e748ab8b9439f9e1e0fc3bfac42926757efefa6afd2add7228afba44905741b0",
+      "at": "2026-10-03T20:43:08.235118Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "c5344e003d018c6df3c7595240b33c1a334bb9c0",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.9c021505a4dd.8576fb4de1b5db3a06aca7afa5dcb07174dd20f68e7b4c150d2138dc6f5d991f.json",
+      "archived_manifest_sha256": "8576fb4de1b5db3a06aca7afa5dcb07174dd20f68e7b4c150d2138dc6f5d991f",
+      "at": "2026-10-03T20:52:24.072634Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "9c021505a4dd98b34082be39827ff449f8202f41",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.efc8c8cd87ea.d8bf7e955792470df98eb54929400948cc32b412aab64886069618d22f6aac6e.json",
+      "archived_manifest_sha256": "d8bf7e955792470df98eb54929400948cc32b412aab64886069618d22f6aac6e",
+      "at": "2026-10-03T20:59:30.574261Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "efc8c8cd87ea97b92da7f9fb34df40932868739f",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.20193e9e78ba.c1ddea21c348ee0a353ea2de670e78cd345be3b01472389f394907d2c16c2319.json",
+      "archived_manifest_sha256": "c1ddea21c348ee0a353ea2de670e78cd345be3b01472389f394907d2c16c2319",
+      "at": "2026-10-03T21:09:50.340948Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "20193e9e78ba0cc7a86c3e86269988e279008866",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.5b563b7977ae.306b3929703ca0f3dcf8cf8e784afa768670952a7bc97eef355ff06cffa13398.json",
+      "archived_manifest_sha256": "306b3929703ca0f3dcf8cf8e784afa768670952a7bc97eef355ff06cffa13398",
+      "at": "2026-10-03T21:18:54.826292Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "5b563b7977aeb18a65b596c9997cdfc490d44159",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.0131a090c000.c4cb50fd0d747c9c2319732045d3394c962835dcefab08eb39c4dc110ee49a9b.json",
+      "archived_manifest_sha256": "c4cb50fd0d747c9c2319732045d3394c962835dcefab08eb39c4dc110ee49a9b",
+      "at": "2026-10-03T22:46:24.978758Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "0131a090c000f6cf9c38d7dd161d0325efbac3dd",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.084979e2533a.f4c4a4a51811c80beb65263021d6f9b573268960ec0acd23c50c562dbb1f2f9f.json",
+      "archived_manifest_sha256": "f4c4a4a51811c80beb65263021d6f9b573268960ec0acd23c50c562dbb1f2f9f",
+      "at": "2026-10-03T22:58:58.027799Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "084979e2533a732c17e80b6ccd28e8009f13c157",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.d992b0a2eed3.2ce547338da2b790bdc526cd27d7f66480535c6e0fd5ccbe18a8426cc669be26.json",
+      "archived_manifest_sha256": "2ce547338da2b790bdc526cd27d7f66480535c6e0fd5ccbe18a8426cc669be26",
+      "at": "2026-10-03T23:06:10.523579Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "d992b0a2eed344239006f6782dba0b471e08af08",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.8cba44dd83e5.27067f522ccbdc5d8b336de7b96e7d48d594493089abb2852e1c7b9e19785b2b.json",
+      "archived_manifest_sha256": "27067f522ccbdc5d8b336de7b96e7d48d594493089abb2852e1c7b9e19785b2b",
+      "at": "2026-10-03T23:46:22.163466Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "8cba44dd83e5b36315d7614dca95ad795c201b82",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.241cacfb479b.2f85edcdc9e93e83e775f6fd23af89f54a98ca5dd027b34c2e1a1fe8527da980.json",
+      "archived_manifest_sha256": "2f85edcdc9e93e83e775f6fd23af89f54a98ca5dd027b34c2e1a1fe8527da980",
+      "at": "2026-10-04T02:29:10.098965Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "241cacfb479b66a746d66913def987a378fb6e3b",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.5f7d9a771021.85271b5e01c3ab696ed865232dda0874c5f6cea1dec87cb3e6822ed2a0e0a660.json",
+      "archived_manifest_sha256": "85271b5e01c3ab696ed865232dda0874c5f6cea1dec87cb3e6822ed2a0e0a660",
+      "at": "2026-10-04T05:31:08.547981Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "5f7d9a771021269b5801fd51dd16754d876ed8a2",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e6-10-2026100110-v7.pending.ffc9cfa0d575.412a69d7d47619176e254fd27d5dffacef8829f29c534956ef924caf590f4880.json",
+      "archived_manifest_sha256": "412a69d7d47619176e254fd27d5dffacef8829f29c534956ef924caf590f4880",
+      "at": "2026-10-04T10:37:01.517228Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "ffc9cfa0d5754b9688b07af8c0d9e43ab0263bbc",
+      "prior_status": "PENDING",
+      "prior_status_reason": "refresh_collect_after_code_fix"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 6,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
+  "stuck_reason": null,
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-04T10:37:01.517244Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
