@@ -11,6 +11,8 @@ on:
       - 'tools/replay_compatibility.py'
       - 'tools/build_replay_compatibility_reasons.py'
       - 'tools/index_run_manifest.py'
+      - 'tests/test_manifest_policy.py'
+      - 'tests/test_replay_compatibility.py'
       - '.github/workflows/backfill-replay-compatibility.yml'
   schedule:
     - cron: '6,16,26,36,46,56 * * * *'
