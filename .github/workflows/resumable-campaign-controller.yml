@@ -6,6 +6,7 @@ on:
       - '.github/workflows/resumable-campaign-controller.yml'
       - 'control/alina-phase.json'
       - 'catalog/campaigns/analysis-*.json'
+      - 'catalog/campaigns/canary-market-*.json'
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
