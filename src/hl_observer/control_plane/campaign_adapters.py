@@ -504,6 +504,15 @@ def _collection_checkpoint_metrics(output_root: Path) -> dict[str, Any]:
         queue_drops = _bounded_int(drops, 0, 0, 2**63 - 1)
 
     return {
+        "started_at_ms": _bounded_int(
+            summary.get("started_at_ms"), 0, 0, 2**63 - 1
+        ),
+        "ended_at_ms": _bounded_int(
+            summary.get("ended_at_ms"), 0, 0, 2**63 - 1
+        ),
+        "duration_s": _bounded_float(
+            summary.get("duration_s"), 0.0, float(2**31 - 1)
+        ),
         "trade_count_observed": trade_count,
         "trade_count_coverage_complete": trade_shards == trade_shards_exact,
         "trade_shard_count": trade_shards,
