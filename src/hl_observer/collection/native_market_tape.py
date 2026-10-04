@@ -398,7 +398,7 @@ def _bitget_identity(
         "source_channel": channel_raw,
         "action": str(payload.get("action") or ""),
     }
-    if channel_raw in {"books", "books1"}:
+    if channel_raw in {"books", "books1", "books5", "books15"}:
         summary.update(_depth_summary(first.get("bids"), first.get("asks")))
         summary["prev_sequence"] = _int(first.get("pseq") or first.get("prevSeqId"))
     elif channel_raw == "ticker":
