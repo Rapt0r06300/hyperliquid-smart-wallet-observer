@@ -322,7 +322,7 @@ def build_receipt(
         bbo_events = int(venue_channel_counts.get("bbo") or 0)
         l2_events = int(venue_channel_counts.get("l2Book") or 0)
         trade_events = int(venue_channel_counts.get("trades") or 0)
-        if venue == "bybit" and venue_channel_counts:
+        if venue_channel_counts:
             venue_caps["bbo"] = "HEALTHY" if bbo_events > 0 else "DEGRADED"
             venue_caps["l2"] = "HEALTHY" if l2_events > 0 else "DEGRADED"
             venue_caps["trades"] = "HEALTHY" if trade_events > 0 else "DEGRADED"

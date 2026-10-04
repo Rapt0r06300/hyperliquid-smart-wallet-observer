@@ -74,7 +74,7 @@ _PROFILES: Mapping[str, Mapping[CaptureTier, CaptureProfile]] = {
     },
     "bitget": {
         CaptureTier.A: CaptureProfile(CaptureTier.A, 400, ("books", "books1", "ticker", "trade", "liquidation")),
-        CaptureTier.B: CaptureProfile(CaptureTier.B, 50, ("books50", "books1", "ticker", "trade")),
+        CaptureTier.B: CaptureProfile(CaptureTier.B, 15, ("books15", "books1", "ticker", "trade")),
         CaptureTier.C: CaptureProfile(CaptureTier.C, 1, ("books1", "trade")),
     },
     "gate": {

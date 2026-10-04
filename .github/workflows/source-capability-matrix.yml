@@ -75,7 +75,7 @@ jobs:
           ROOT="$RUNNER_TEMP/source-capability-native-$GITHUB_RUN_ID"
           echo "SOURCE_CAPABILITY_NATIVE_ROOT=$ROOT" >> "$GITHUB_ENV"
           mkdir -p "$ROOT"
-          python tools/collecter_native_venues.py             --root "$ROOT"             --max-symbols 2             --duration-s 12
+          python tools/collecter_native_venues.py             --root "$ROOT"             --max-symbols 25             --duration-s 20
       - name: Bounded HL/Binance public-network smoke
         id: bbo_smoke
         continue-on-error: true

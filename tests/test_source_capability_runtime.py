@@ -568,3 +568,52 @@ def test_bybit_channel_counts_are_fail_closed(tmp_path: Path) -> None:
     assert bybit["channel_counts"]["trades"] == 0
     assert "channels=bbo:4,l2:7,trades:0" in bybit["reason"]
 
+def test_native_channel_counts_fail_closed_for_every_native_venue(tmp_path: Path) -> None:
+    module = _module()
+    native = tmp_path / "native.json"
+    native.write_text(
+        json.dumps(
+            {
+                "records_written": 20,
+                "last_event_ms": {
+                    "bybit": 1,
+                    "okx": 2,
+                    "gate": 3,
+                    "bitget": 4,
+                },
+                "channel_counts": {
+                    "bybit": {"bbo": 1, "l2Book": 1, "trades": 1},
+                    "okx": {"bbo": 1, "l2Book": 1, "trades": 0},
+                    "gate": {"bbo": 1, "l2Book": 0, "trades": 1},
+                    "bitget": {"bbo": 0, "l2Book": 1, "trades": 1},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_request(url: str, **kwargs):
+        if "ipify" in url:
+            return {"ip": "20.42.1.2"}
+        if "hyperliquid" in url:
+            return {"universe": [{"name": "BTC"}]}
+        if "fapi.binance.com" in url:
+            return {"serverTime": 123}
+        if "api.bybit" in url or "api.bytick" in url:
+            raise OSError("Bybit REST blocked")
+        raise AssertionError(url)
+
+    receipt = module.build_receipt(
+        native_heartbeat=native,
+        github_sha="2" * 40,
+        github_run_id="106",
+        request_json=fake_request,
+        now_utc="2026-10-04T00:00:00Z",
+    )
+
+    assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
+    assert receipt["venues"]["okx"]["capability_runtime"]["trades"] == "DEGRADED"
+    assert receipt["venues"]["gate"]["capability_runtime"]["l2"] == "DEGRADED"
+    assert receipt["venues"]["bitget"]["capability_runtime"]["bbo"] == "DEGRADED"
+    assert receipt["venues"]["bitget"]["capability_runtime"]["l2"] == "HEALTHY"
+

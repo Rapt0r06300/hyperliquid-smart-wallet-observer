@@ -274,3 +274,34 @@ def test_bitget_instrument_metadata_snapshot_is_replayable() -> None:
     assert row["parsed_summary"]["quantity_step"] == "0.001"
     assert row["parsed_summary"]["contract_multiplier"] is None
     assert row["parsed_summary"]["min_notional"] == "5"
+
+def test_bitget_books15_frame_is_taped_as_l2() -> None:
+    envelope = native_tick_envelope(
+        "bitget",
+        {
+            "arg": {
+                "instType": "USDT-FUTURES",
+                "channel": "books15",
+                "instId": "BTCUSDT",
+            },
+            "action": "snapshot",
+            "data": [
+                {
+                    "bids": [["100", "2"], ["99", "3"]],
+                    "asks": [["101", "4"], ["102", "5"]],
+                    "seq": 123,
+                    "pseq": 0,
+                    "ts": "1995",
+                }
+            ],
+            "_alina_transport": _transport(),
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "l2Book"
+    assert envelope.instrument == "BTCUSDT"
+    assert envelope.exchange_ts_ms == 1995
+    assert envelope.parsed_summary["bid_levels"] == 2
+    assert envelope.parsed_summary["ask_levels"] == 2
+    assert envelope.parsed_summary["depth_curve_replay_ready"] is True
+

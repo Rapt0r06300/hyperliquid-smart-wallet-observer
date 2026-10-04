@@ -93,7 +93,7 @@ class BitgetMarketState:
             self.quality, self.reason = DESYNC, "SYMBOL_MISMATCH"
             return self.quality
         channel = str(arg.get("channel", "")).lower()
-        if channel in {"books", "books1"}:
+        if channel in {"books", "books1", "books5", "books15"}:
             seq = _i(item.get("seq") or item.get("seqId"))
             prev = _i(item.get("pseq") or item.get("prevSeqId"))
             if self.sequence is not None and seq is not None:

@@ -384,6 +384,8 @@ def _bitget_identity(
         return None
     channel = {
         "books": "l2Book",
+        "books5": "l2Book",
+        "books15": "l2Book",
         "books1": "bbo",
         "ticker": "ticker",
         "trade": "trades",
