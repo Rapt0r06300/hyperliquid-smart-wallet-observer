@@ -53,6 +53,17 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _venue_from_source(source_id: str) -> str | None:
+    lowered = str(source_id).lower()
+    for venue in (
+        "hyperliquid", "binance", "bybit", "okx", "bitget", "gate",
+        "deribit", "kraken", "coinbase", "htx",
+    ):
+        if venue in lowered:
+            return venue
+    return None
+
+
 @dataclass(slots=True)
 class TickEnvelope:
     source_id: str
@@ -70,9 +81,17 @@ class TickEnvelope:
     provenance: dict[str, Any] = field(default_factory=dict)
     parsed_summary: dict[str, Any] = field(default_factory=dict)
     written_ts_ms: int | None = None
+    venue: str | None = None
+    matching_engine_ts_ms: int | None = None
+    server_ts_ms: int | None = None
+    clock_probe_rtt_ms: float | None = None
+    observed_clock_offset_ms: float | None = None
+    clock_offset_uncertainty_ms: float | None = None
 
     def as_record(self, *, written_ts_ms: int) -> dict[str, Any]:
         raw = _raw_text(self.raw_payload)
+        provenance = dict(self.provenance)
+        summary = dict(self.parsed_summary)
         kind = (
             self.event_kind.value
             if isinstance(self.event_kind, FeedEventKind)
@@ -87,11 +106,31 @@ class TickEnvelope:
         return {
             "schema_version": SCHEMA_VERSION,
             "source_id": str(self.source_id),
+            "venue": self.venue or provenance.get("venue") or _venue_from_source(self.source_id),
             "channel": str(self.channel),
             "instrument": str(self.instrument),
             "event_kind": kind,
             "exchange_ts_ms": (
                 None if self.exchange_ts_ms is None else int(self.exchange_ts_ms)
+            ),
+            "matching_engine_ts_ms": (
+                None
+                if self.matching_engine_ts_ms is None
+                and summary.get("matching_engine_ts_ms") is None
+                else int(
+                    self.matching_engine_ts_ms
+                    if self.matching_engine_ts_ms is not None
+                    else summary["matching_engine_ts_ms"]
+                )
+            ),
+            "server_ts_ms": (
+                None
+                if self.server_ts_ms is None and summary.get("clock_probe_server_ts_ms") is None
+                else int(
+                    self.server_ts_ms
+                    if self.server_ts_ms is not None
+                    else summary["clock_probe_server_ts_ms"]
+                )
             ),
             "received_ts_ms": int(self.received_ts_ms),
             "written_ts_ms": write_wall_ts_ms,
@@ -102,12 +141,35 @@ class TickEnvelope:
             "write_wall_ts_ms": write_wall_ts_ms,
             "connection_id": self.connection_id,
             "sequence": None if self.sequence is None else int(self.sequence),
+            "clock_probe_rtt_ms": (
+                None
+                if self.clock_probe_rtt_ms is None and summary.get("clock_probe_rtt_ms") is None
+                else float(
+                    self.clock_probe_rtt_ms
+                    if self.clock_probe_rtt_ms is not None
+                    else summary["clock_probe_rtt_ms"]
+                )
+            ),
+            "observed_clock_offset_ms": (
+                None
+                if self.observed_clock_offset_ms is None and summary.get("clock_offset_ms") is None
+                else float(
+                    self.observed_clock_offset_ms
+                    if self.observed_clock_offset_ms is not None
+                    else summary["clock_offset_ms"]
+                )
+            ),
+            "clock_offset_uncertainty_ms": (
+                None
+                if self.clock_offset_uncertainty_ms is None
+                else float(self.clock_offset_uncertainty_ms)
+            ),
             "reconnect_count": int(self.reconnect_count),
             "gap_count": int(self.gap_count),
             "raw_sha256": _sha256(raw),
             "raw_payload": raw,
-            "provenance": dict(self.provenance),
-            "parsed_summary": dict(self.parsed_summary),
+            "provenance": provenance,
+            "parsed_summary": summary,
             "read_only": True,
             "real_execution": False,
         }
