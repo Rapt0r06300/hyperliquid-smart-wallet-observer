@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect bounded official Binance/Bybit public archives into dataset V2."""
+"""Collect bounded official public archives into dataset V2."""
 from __future__ import annotations
 
 import argparse
@@ -18,7 +18,7 @@ from hl_observer.datasets.v2_pipeline import build_bundle
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--venue", choices=("binance", "bybit"), required=True)
+    parser.add_argument("--venue", choices=("binance", "bybit", "okx"), required=True)
     parser.add_argument("--coin", required=True)
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--start-date", required=True)
@@ -29,11 +29,18 @@ def main() -> int:
     parser.add_argument("--max-days", type=int, default=3)
     parser.add_argument("--max-events-per-day", type=int, default=2_000_000)
     parser.add_argument("--rotate-mb", type=int, default=256)
+    parser.add_argument("--stream-type")
+    parser.add_argument(
+        "--source-url",
+        help="Explicit official archive URL (required for OKX; one bounded archive/day)",
+    )
     args = parser.parse_args()
 
     start = date.fromisoformat(args.start_date)
     end = date.fromisoformat(args.end_date or args.start_date)
     days = iter_days(start, end, max_days=args.max_days)
+    if args.venue == "okx" and len(days) != 1:
+        raise SystemExit("OKX_EXPLICIT_SOURCE_URL_REQUIRES_SINGLE_DAY")
     root = Path(args.output)
     raw = root / "raw"
     bundle = root / "bundle"
@@ -52,6 +59,8 @@ def main() -> int:
             symbol=args.symbol,
             day=day,
             max_events=max(1, int(args.max_events_per_day)),
+            stream_type=args.stream_type,
+            source_url=args.source_url,
         )
         stats = ArchiveObservationStats()
         batch = []
@@ -74,6 +83,7 @@ def main() -> int:
             "source_url": result.source_url,
             "compressed_sha256": result.compressed_sha256,
             "checksum_verified": result.checksum_verified,
+            "stream_type": result.stream_type,
             "event_count": stats.event_count,
             "first_exchange_ts_ms": stats.first_exchange_ts_ms,
             "last_exchange_ts_ms": stats.last_exchange_ts_ms,
