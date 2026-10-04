@@ -158,6 +158,118 @@ def validate_current_resume_receipt(
     dataset: Path,
     phase: Mapping[str, Any],
 ) -> tuple[bool, str, dict[str, Any]]:
+    structural_path = dataset / "catalog/COLLECT_RESUME_SMOKE_RECEIPT.json"
+    structural = load(structural_path, {})
+    if (
+        isinstance(structural, dict)
+        and structural.get("schema") == "alina.two_segment_resume_receipt.v3"
+    ):
+        stored_digest = str(structural.get("receipt_digest") or "")
+        receipt_body = dict(structural)
+        receipt_body.pop("receipt_digest", None)
+        if len(stored_digest) != 64 or digest(receipt_body) != stored_digest:
+            return False, "CURRENT_RESUME_RECEIPT_DIGEST_INVALID", structural
+
+        required_true = (
+            "distinct_github_job_ids",
+            "fresh_runner_for_segment_b",
+            "durable_dataset_state_required",
+            "segment_a_checkpoint_verified",
+            "resumed_from_durable_checkpoint",
+            "paper_only",
+            "read_only",
+        )
+        if any(structural.get(key) is not True for key in required_true):
+            return False, "CURRENT_RESUME_INVARIANT_MISSING", structural
+        if (
+            structural.get("runner_filesystem_reused") is not False
+            or structural.get("real_execution") is not False
+            or structural.get("network_used") is not False
+            or structural.get("replay_run") is not False
+            or structural.get("backtest_run") is not False
+        ):
+            return False, "CURRENT_RESUME_SAFETY_INVALID", structural
+        if structural.get("terminal_campaign_status") != "COMPLETE":
+            return False, "CURRENT_RESUME_SEGMENT_NOT_COMPLETE", structural
+        if int(structural.get("terminal_completed_units") or 0) != 2:
+            return False, "CURRENT_RESUME_TOO_FEW_UNITS", structural
+        if int(structural.get("duplicate_completed_unit_count") or 0) != 0:
+            return False, "CURRENT_RESUME_DUPLICATE_COMPLETED_UNIT", structural
+        if int(structural.get("duplicate_replay_work_count") or 0) != 0:
+            return False, "CURRENT_RESUME_DUPLICATE_REPLAY_WORK", structural
+
+        segment_a_job = str(structural.get("segment_a_job_id") or "")
+        segment_b_job = str(structural.get("segment_b_job_id") or "")
+        workflow_run_id = str(structural.get("workflow_run_id") or "")
+        if (
+            not workflow_run_id
+            or not segment_a_job
+            or not segment_b_job
+            or segment_a_job == segment_b_job
+        ):
+            return False, "CURRENT_RESUME_JOB_IDENTITY_INVALID", structural
+
+        state_path = dataset / "catalog/COLLECT_RESUME_PROBE_STATE.json"
+        state = load(state_path, {})
+        cursor = state.get("cursor") if isinstance(state, dict) and isinstance(state.get("cursor"), dict) else {}
+        if (
+            not isinstance(state, dict)
+            or state.get("schema_version") != "alina.resumable_campaign.v2"
+            or state.get("kind") != "market_collection"
+            or state.get("creation_phase") != "COLLECT"
+            or state.get("status") != "COMPLETE"
+            or cursor.get("resume_proof") is not True
+        ):
+            return False, "CURRENT_RESUME_CAMPAIGN_NOT_COMPLETE", structural
+        if structural.get("campaign_id") != state.get("campaign_id"):
+            return False, "CURRENT_RESUME_CAMPAIGN_MISMATCH", structural
+        if structural.get("state_machine_schema") != state.get("schema_version"):
+            return False, "CURRENT_RESUME_STATE_MACHINE_MISMATCH", structural
+        if structural.get("phase_epoch_at_proof") != state.get("phase_epoch"):
+            return False, "CURRENT_RESUME_PROOF_EPOCH_MISMATCH", structural
+        if structural.get("terminal_checkpoint_id") != cursor.get("checkpoint_id"):
+            return False, "CURRENT_RESUME_CHECKPOINT_MISMATCH", structural
+        if structural.get("terminal_evidence_digest") != state.get("terminal_evidence_digest"):
+            return False, "CURRENT_RESUME_EVIDENCE_DIGEST_MISMATCH", structural
+        completed = state.get("completed_units")
+        if not isinstance(completed, dict) or len(completed) != 2:
+            return False, "CURRENT_RESUME_TOO_FEW_UNITS", structural
+        lineage = state.get("checkpoint_lineage")
+        if not isinstance(lineage, list) or not lineage:
+            return False, "CURRENT_RESUME_CHECKPOINT_LINEAGE_MISSING", structural
+        if (
+            state.get("paper_only") is not True
+            or state.get("read_only") is not True
+            or state.get("real_execution") is not False
+        ):
+            return False, "CURRENT_RESUME_SAFETY_INVALID", structural
+
+        if not state_path.is_file():
+            return False, "CURRENT_RESUME_STATE_MISSING", structural
+        if hashlib.sha256(state_path.read_bytes()).hexdigest() != str(
+            structural.get("probe_state_sha256") or ""
+        ):
+            return False, "CURRENT_RESUME_STATE_HASH_MISMATCH", structural
+
+        control_files = structural.get("control_plane_files")
+        required_control_paths = (
+            "src/hl_observer/control_plane/resumable_campaign.py",
+            "tools/collect_resume_probe.py",
+            ".github/workflows/collect-two-segment-resume-smoke.yml",
+        )
+        if not isinstance(control_files, dict):
+            return False, "CURRENT_RESUME_CONTROL_PLANE_HASHES_MISSING", structural
+        for relative in required_control_paths:
+            expected = str(control_files.get(relative) or "")
+            path = dataset / relative
+            if len(expected) != 64 or not path.is_file():
+                return False, "CURRENT_RESUME_CONTROL_PLANE_HASHES_MISSING", structural
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if actual != expected:
+                return False, f"CURRENT_RESUME_CONTROL_PLANE_CHANGED:{relative}", structural
+
+        return True, "CURRENT_RESUME_STRUCTURAL_RECEIPT_VALID", structural
+
     receipt = load(dataset / "catalog/RESUME_SMOKE_RECEIPT.json", {})
     if not isinstance(receipt, dict) or receipt.get("schema") != "alina.two_segment_resume_receipt.v2":
         return False, "CURRENT_RESUME_RECEIPT_MISSING", {}

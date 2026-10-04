@@ -189,3 +189,107 @@ def test_analysis_closure_rejects_incomplete_or_selection_drift(tmp_path):
     assert coherent is False
     assert status["by_kind"]["scoreboard"]["complete"] is False
     assert status["selection_ids"] == ["selection-a", "selection-b"]
+
+
+def _write_structural_resume_receipt(root):
+    control_paths = (
+        "src/hl_observer/control_plane/resumable_campaign.py",
+        "tools/collect_resume_probe.py",
+        ".github/workflows/collect-two-segment-resume-smoke.yml",
+    )
+    hashes = {}
+    import hashlib
+    for relative in control_paths:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative, encoding="utf-8")
+        hashes[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    state = {
+        "schema_version": "alina.resumable_campaign.v2",
+        "campaign_id": "collect-resume-probe-e6-run123",
+        "kind": "market_collection",
+        "creation_phase": "COLLECT",
+        "phase_epoch": 6,
+        "status": "COMPLETE",
+        "cursor": {"resume_proof": True, "checkpoint_id": "c" * 64},
+        "completed_units": {
+            "a": {"sha256": "1" * 64, "result": {"status": "COMPLETE"}},
+            "b": {"sha256": "2" * 64, "result": {"status": "COMPLETE"}},
+        },
+        "checkpoint_lineage": [{"digest": "3" * 64}],
+        "terminal_evidence_digest": "e" * 64,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    state_path = root / "catalog/COLLECT_RESUME_PROBE_STATE.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    body = {
+        "schema": "alina.two_segment_resume_receipt.v3",
+        "proof_scope": "control_plane_state_resume",
+        "workflow_run_id": "123",
+        "segment_a_job_id": "456",
+        "segment_b_job_id": "789",
+        "distinct_github_job_ids": True,
+        "fresh_runner_for_segment_b": True,
+        "runner_filesystem_reused": False,
+        "durable_dataset_state_required": True,
+        "segment_a_checkpoint_verified": True,
+        "resumed_from_durable_checkpoint": True,
+        "campaign_id": state["campaign_id"],
+        "probe_kind": "market_collection",
+        "probe_creation_phase": "COLLECT",
+        "phase_epoch_at_proof": 6,
+        "state_machine_schema": state["schema_version"],
+        "terminal_campaign_status": "COMPLETE",
+        "terminal_completed_units": 2,
+        "completed_unit_identities": ["a", "b"],
+        "duplicate_completed_unit_count": 0,
+        "duplicate_replay_work_count": 0,
+        "terminal_checkpoint_id": state["cursor"]["checkpoint_id"],
+        "terminal_evidence_digest": state["terminal_evidence_digest"],
+        "checkpoint_lineage": state["checkpoint_lineage"],
+        "probe_state_sha256": hashlib.sha256(state_path.read_bytes()).hexdigest(),
+        "control_plane_files": hashes,
+        "network_used": False,
+        "replay_run": False,
+        "backtest_run": False,
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    body["receipt_digest"] = digest(body)
+    (root / "catalog/COLLECT_RESUME_SMOKE_RECEIPT.json").write_text(
+        json.dumps(body), encoding="utf-8"
+    )
+    return body
+
+
+def test_structural_collect_resume_receipt_is_valid_without_entering_analyze(tmp_path):
+    receipt = _write_structural_resume_receipt(tmp_path)
+    phase = {
+        "phase": "COLLECT",
+        "epoch": 6,
+        "source_collection_epoch": None,
+        "analysis_stage": None,
+    }
+
+    valid, reason, loaded = validate_current_resume_receipt(tmp_path, phase)
+
+    assert valid is True
+    assert reason == "CURRENT_RESUME_STRUCTURAL_RECEIPT_VALID"
+    assert loaded["workflow_run_id"] == receipt["workflow_run_id"]
+
+
+def test_structural_resume_receipt_fails_when_control_plane_changes(tmp_path):
+    _write_structural_resume_receipt(tmp_path)
+    changed = tmp_path / "tools/collect_resume_probe.py"
+    changed.write_text("changed", encoding="utf-8")
+    phase = {"phase": "COLLECT", "epoch": 6}
+
+    valid, reason, _ = validate_current_resume_receipt(tmp_path, phase)
+
+    assert valid is False
+    assert reason.startswith("CURRENT_RESUME_CONTROL_PLANE_CHANGED:")

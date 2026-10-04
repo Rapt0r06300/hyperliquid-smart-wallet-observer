@@ -11814,6 +11814,8 @@ If a runner dies:
 
 If GitHub scheduling is delayed, the next watchdog run continues from the phase file and durable stage state without creating duplicate proof evidence.
 
+A fresh-runner resume proof may be produced while the system remains in `COLLECT` by a dedicated paper/read-only control-plane probe. The probe must use the real resumable-campaign V2 state machine, persist Segment A state durably to `main`, resume Segment B in a distinct GitHub-hosted job from a fresh checkout, and prove that no completed unit was repeated. It must not start replay, backtest, market orders, or any extra market-data feed merely to prove resume capability. The structural proof remains current only while the hashed control-plane files named by the receipt are unchanged.
+
 ## User interaction contract
 
 The intended user commands are deliberately simple:
