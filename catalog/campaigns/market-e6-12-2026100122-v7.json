@@ -14,6 +14,12 @@
   "creation_phase": "COLLECT",
   "cursor": {
     "duration_s": 3500,
+    "hot_handoff_dispatch_at_utc": "2026-10-04T00:43:00.772529Z",
+    "hot_handoff_generation": 1,
+    "hot_handoff_predecessor_run_id": "37162735563",
+    "hot_handoff_predecessor_universe_digest": "44922afb2d4b7297d897b06aff7d345486764a01a4687c19a78324403f634991",
+    "hot_handoff_successor_campaign_id": "market-e6-12-2026100323-v7",
+    "hot_handoff_successor_universe_digest": "5206cb82391556a7c3913bf1a5b810539158e659d1c156e266a44c07da779fa2",
     "market_shard_count": 16,
     "market_shard_index": 12,
     "max_coins": 0,
@@ -240,6 +246,13 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T00:43:00.772529Z",
+      "event": "HOT_HANDOFF_SUCCESSOR_DISPATCHED",
+      "generation": 1,
+      "predecessor_run_id": "37162735563",
+      "successor_campaign_id": "market-e6-12-2026100323-v7"
     }
   ],
   "kind": "market_collection",
@@ -269,6 +282,6 @@
   "status": "RUNNING",
   "status_reason": "worker_started",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-03T23:49:27.848586Z",
+  "updated_at": "2026-10-04T00:43:00.772529Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
