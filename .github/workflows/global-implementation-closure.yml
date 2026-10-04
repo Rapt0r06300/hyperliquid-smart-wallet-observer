@@ -39,18 +39,20 @@ jobs:
         run: |
           set -euo pipefail
           PHASE="$(python -c 'import json; print(json.load(open("control/alina-phase.json"))["phase"])')"
+          STAGE="$(python -c 'import json; print(json.load(open("control/alina-phase.json")).get("analysis_stage") or "")')"
           echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
-          echo "phase=$PHASE"
+          echo "stage=$STAGE" >> "$GITHUB_OUTPUT"
+          echo "phase=$PHASE stage=$STAGE"
 
       - name: Build fail-closed global closure receipt
-        if: steps.phase.outputs.phase == 'ANALYZE'
+        if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
         run: |
           set -euo pipefail
           python tools/build_analysis_frozen_coverage_receipt.py
           python tools/build_global_implementation_closure.py --alina-root .
 
       - name: Publish closure receipt from latest canonical head
-        if: steps.phase.outputs.phase == 'ANALYZE'
+        if: steps.phase.outputs.phase == 'ANALYZE' && steps.phase.outputs.stage != 'DRAIN' && steps.phase.outputs.stage != 'QUALITY' && steps.phase.outputs.stage != 'REPLAY'
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
