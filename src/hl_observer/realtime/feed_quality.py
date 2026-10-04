@@ -83,6 +83,8 @@ class FeedQualitySnapshot:
     last_exchange_ts_ms: int | None
     last_received_ts_ms: int | None
     last_heartbeat_ts_ms: int | None
+    first_ts_ms: int | None
+    last_ts_ms: int | None
     latest_age_ms: float | None
     heartbeat_age_ms: float | None
     latency_p50_ms: float | None
@@ -98,6 +100,8 @@ class FeedQualitySnapshot:
     duplicate_rate: float | None
     out_of_order_rate: float | None
     reconnect_rate: float | None
+    events_per_second: float | None
+    bytes_per_second: float | None
     coherent_events: int
     total_events: int
     events_unique: int
@@ -118,6 +122,11 @@ class FeedQualitySnapshot:
     crossed_books: int
     outliers: int
     reconnects: int
+    resync_count: int
+    checksum_failures: int
+    sequence_failures: int
+    trade_count: int
+    total_bytes: int
     snapshot_conflicts: int
     unresolved_gap: bool
     reason_counts: Mapping[str, int]
@@ -159,6 +168,8 @@ class FeedQualityGate:
         self._last_mid: float | None = None
         self._last_exchange_ts_ms: int | None = None
         self._last_received_ts_ms: int | None = None
+        self._first_exchange_ts_ms: int | None = None
+        self._first_received_ts_ms: int | None = None
         self._last_heartbeat_ts_ms: int | None = None
         self._last_sequence: int | None = None
         self._connection_id: str | None = None
@@ -188,6 +199,11 @@ class FeedQualityGate:
         self.outliers = 0
         self.reconnects = 0
         self.snapshot_conflicts = 0
+        self.resync_count = 0
+        self.checksum_failures = 0
+        self.sequence_failures = 0
+        self.trade_count = 0
+        self.total_bytes = 0
 
     @property
     def bids(self) -> dict[float, float]:
@@ -224,6 +240,29 @@ class FeedQualityGate:
         self._last_recovery_frame_ts_ms = None
         self._record_reason(reason)
 
+    def mark_sequence_failure(self, *, reason: str = "SEQUENCE_FAILURE") -> None:
+        self.sequence_failures += 1
+        self.mark_gap(reason=reason)
+
+    def mark_checksum_failure(self) -> None:
+        self.checksum_failures += 1
+        self.mark_gap(reason="CHECKSUM_MISMATCH")
+
+    def mark_resync(self, *, received_ts_ms: int) -> None:
+        self.resync_count += 1
+        self._snapshot_seen = False
+        self._incremental_seen = False
+        self._synchronized = False
+        self._unresolved_gap = True
+        self._coherent_events = 0
+        self._bids.clear()
+        self._asks.clear()
+        self._last_mid = None
+        self._last_sequence = None
+        self._last_recovery_frame_ts_ms = None
+        self._last_received_ts_ms = int(received_ts_ms)
+        self._record_reason("RESYNC_REQUIRED")
+
     def ingest_book_snapshot(
         self,
         *,
@@ -233,7 +272,10 @@ class FeedQualityGate:
         received_ts_ms: int,
         event_id: str | None = None,
         sequence: int | None = None,
+        event_bytes: int | None = None,
     ) -> FeedQualitySnapshot:
+        if event_bytes is not None:
+            self.total_bytes += max(0, int(event_bytes))
         reasons = self._start_observation(
             exchange_ts_ms=exchange_ts_ms,
             received_ts_ms=received_ts_ms,
@@ -285,7 +327,10 @@ class FeedQualityGate:
         received_ts_ms: int,
         event_id: str | None = None,
         sequence: int | None = None,
+        event_bytes: int | None = None,
     ) -> FeedQualitySnapshot:
+        if event_bytes is not None:
+            self.total_bytes += max(0, int(event_bytes))
         reasons = self._start_observation(
             exchange_ts_ms=exchange_ts_ms,
             received_ts_ms=received_ts_ms,
@@ -338,9 +383,12 @@ class FeedQualityGate:
         event_id: str | None = None,
         sequence: int | None = None,
         is_snapshot: bool = False,
+        event_bytes: int | None = None,
     ) -> FeedQualitySnapshot:
         if self.mode is FeedMode.FULL_SNAPSHOT:
             raise ValueError("use ingest_book_snapshot for FULL_SNAPSHOT feeds")
+        if event_bytes is not None:
+            self.total_bytes += max(0, int(event_bytes))
         reasons = self._start_observation(
             exchange_ts_ms=exchange_ts_ms,
             received_ts_ms=received_ts_ms,
@@ -364,6 +412,8 @@ class FeedQualityGate:
             return self._reject(reasons, received_ts_ms)
 
         self.accepted_events += 1
+        if "trade" in self.channel.lower():
+            self.trade_count += 1
         if self.mode is FeedMode.EVENT_STREAM:
             self._advance_event_stream_recovery(
                 reasons=reasons,
@@ -387,6 +437,7 @@ class FeedQualityGate:
         received_ts_ms: int,
         frame_sequence: int | None = None,
         is_snapshot: bool = False,
+        frame_bytes: int | None = None,
     ) -> list[FeedQualitySnapshot]:
         """Ingest all items from one transport frame without false sequence gaps.
 
@@ -395,6 +446,8 @@ class FeedQualityGate:
         items in that same frame are post-snapshot incrementals.
         """
 
+        if frame_bytes is not None:
+            self.total_bytes += max(0, int(frame_bytes))
         events = canonicalize_frame(
             payloads,
             source=self.source_id,
@@ -429,6 +482,8 @@ class FeedQualityGate:
                 snapshots.append(self._reject(reasons, received_ts_ms))
                 continue
             self.accepted_events += 1
+            if "trade" in self.channel.lower():
+                self.trade_count += 1
             accepted_in_frame = True
             frame_reasons.extend(reasons)
             if self.mode is not FeedMode.EVENT_STREAM:
@@ -495,6 +550,21 @@ class FeedQualityGate:
         )
         best_bid = max(self._bids) if self._bids else None
         best_ask = min(self._asks) if self._asks else None
+        observed_duration_ms = (
+            None
+            if self._first_received_ts_ms is None or self._last_received_ts_ms is None
+            else self._last_received_ts_ms - self._first_received_ts_ms
+        )
+        events_per_second = (
+            None
+            if observed_duration_ms is None or observed_duration_ms <= 0
+            else round(self.total_events * 1_000.0 / observed_duration_ms, 6)
+        )
+        bytes_per_second = (
+            None
+            if observed_duration_ms is None or observed_duration_ms <= 0
+            else round(self.total_bytes * 1_000.0 / observed_duration_ms, 6)
+        )
 
         def depth_usd(bps: float) -> float:
             bid_floor = None if best_bid is None else best_bid * (1.0 - bps / 10_000.0)
@@ -516,6 +586,8 @@ class FeedQualityGate:
             last_exchange_ts_ms=self._last_exchange_ts_ms,
             last_received_ts_ms=self._last_received_ts_ms,
             last_heartbeat_ts_ms=self._last_heartbeat_ts_ms,
+            first_ts_ms=self._first_exchange_ts_ms,
+            last_ts_ms=self._last_exchange_ts_ms,
             latest_age_ms=latest_age,
             heartbeat_age_ms=heartbeat_age,
             latency_p50_ms=_percentile(tuple(self._latencies), 0.50),
@@ -531,6 +603,8 @@ class FeedQualityGate:
             duplicate_rate=ratio(self.duplicates),
             out_of_order_rate=ratio(self.non_monotonic),
             reconnect_rate=ratio(self.reconnects),
+            events_per_second=events_per_second,
+            bytes_per_second=bytes_per_second,
             coherent_events=self._coherent_events,
             total_events=self.total_events,
             events_unique=max(0, self.total_events - self.duplicates),
@@ -551,6 +625,11 @@ class FeedQualityGate:
             crossed_books=self.crossed_books,
             outliers=self.outliers,
             reconnects=self.reconnects,
+            resync_count=self.resync_count,
+            checksum_failures=self.checksum_failures,
+            sequence_failures=self.sequence_failures,
+            trade_count=self.trade_count,
+            total_bytes=self.total_bytes,
             snapshot_conflicts=self.snapshot_conflicts,
             unresolved_gap=self._unresolved_gap,
             reason_counts=dict(self._reason_counts),
@@ -567,6 +646,10 @@ class FeedQualityGate:
         self.total_events += 1
         exchange_ts = int(exchange_ts_ms)
         received_ts = int(received_ts_ms)
+        if self._first_exchange_ts_ms is None:
+            self._first_exchange_ts_ms = exchange_ts
+        if self._first_received_ts_ms is None:
+            self._first_received_ts_ms = received_ts
         reasons: list[str] = []
 
         if event_id and not self._remember_event(event_id):
@@ -625,9 +708,11 @@ class FeedQualityGate:
             if self._last_sequence is not None:
                 if seq <= self._last_sequence:
                     self.non_monotonic += 1
+                    self.sequence_failures += 1
                     reasons.append("NON_MONOTONIC_SEQUENCE")
                 elif seq > self._last_sequence + 1:
                     self.gaps += 1
+                    self.sequence_failures += 1
                     self._unresolved_gap = True
                     self._synchronized = False
                     self._coherent_events = 0
