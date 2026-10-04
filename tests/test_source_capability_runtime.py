@@ -54,7 +54,7 @@ def test_runtime_receipt_is_fail_closed_and_paper_only(tmp_path: Path) -> None:
     assert receipt["runner_kind"] == "github-hosted"
     assert receipt["venues"]["hyperliquid"]["runtime_status"] == "HEALTHY"
     assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
-    assert receipt["venues"]["bybit"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["bybit"]["runtime_status"] == "DEGRADED"
     assert receipt["venues"]["bitget"]["runtime_status"] == "DEGRADED"
     assert len(receipt["receipt_digest"]) == 64
 
@@ -146,7 +146,7 @@ def test_runtime_receipt_records_runner_ip_and_uses_real_binance_ws_evidence(
     )
 
     assert receipt["runner_network"]["public_ip"] == "20.42.1.2"
-    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["runtime_status"] == "DEGRADED"
     assert receipt["venues"]["binance"]["ws_frames"]["bbo"] == 12
     assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "HEALTHY"
     assert receipt["venues"]["binance"]["capability_runtime"]["clock_sync"] == "DEGRADED"
@@ -206,7 +206,7 @@ def test_runtime_receipt_does_not_promote_partial_binance_l2_to_full(tmp_path: P
         now_utc="2026-10-03T00:00:00Z",
     )
 
-    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["runtime_status"] == "DEGRADED"
     assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "DEGRADED"
     assert receipt["venues"]["binance"]["ws_frames"]["l2_partial_publications"] == 4
     assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 0
@@ -256,9 +256,9 @@ def test_bybit_live_ws_does_not_fake_clock_sync_when_rest_is_blocked(tmp_path: P
         now_utc="2026-10-03T00:00:00Z",
     )
 
-    assert receipt["venues"]["bybit"]["runtime_status"] == "HEALTHY"
-    assert receipt["venues"]["bybit"]["capability_runtime"]["bbo"] == "HEALTHY"
-    assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
+    assert receipt["venues"]["bybit"]["runtime_status"] == "DEGRADED"
+    assert receipt["venues"]["bybit"]["capability_runtime"]["bbo"] == "DEGRADED"
+    assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "DEGRADED"
     assert receipt["venues"]["bybit"]["capability_runtime"]["clock_sync"] == "DEGRADED"
     assert receipt["venues"]["bybit"]["clock_sync_evidence"]["status"] == "UNAVAILABLE"
     assert "WS public clock probe unavailable" in receipt["venues"]["bybit"]["clock_sync_evidence"]["error"]
@@ -380,7 +380,7 @@ def test_full_publication_without_exploitable_book_stays_l2_degraded(tmp_path: P
         now_utc="2026-10-03T00:00:00Z",
     )
 
-    assert receipt["venues"]["binance"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["binance"]["runtime_status"] == "DEGRADED"
     assert receipt["venues"]["binance"]["capability_runtime"]["l2"] == "DEGRADED"
     assert receipt["venues"]["binance"]["ws_frames"]["l2_full_publications"] == 3
     assert receipt["venues"]["binance"]["ws_frames"]["l2_exploitable_frames"] == 0
@@ -493,7 +493,7 @@ def test_bybit_native_ws_clock_evidence_promotes_clock_sync(tmp_path: Path) -> N
     )
 
     bybit = receipt["venues"]["bybit"]
-    assert bybit["runtime_status"] == "HEALTHY"
+    assert bybit["runtime_status"] == "DEGRADED"
     assert bybit["capability_runtime"]["clock_sync"] == "HEALTHY"
     assert bybit["clock_sync_evidence"]["source"] == "websocket_public_ping:stream.bybit.com:option"
     assert bybit["clock_sync_evidence"]["rtt_ms"] == 10.0
@@ -558,11 +558,12 @@ def test_bybit_channel_counts_are_fail_closed(tmp_path: Path) -> None:
     )
 
     bybit = receipt["venues"]["bybit"]
-    assert bybit["runtime_status"] == "HEALTHY"
+    assert bybit["runtime_status"] == "DEGRADED"
     assert bybit["capability_runtime"]["bbo"] == "HEALTHY"
     assert bybit["capability_runtime"]["l2"] == "HEALTHY"
     assert bybit["capability_runtime"]["trades"] == "DEGRADED"
     assert bybit["capability_runtime"]["clock_sync"] == "HEALTHY"
+    assert bybit["capability_runtime"]["venue_status"] == "DEGRADED"
     assert bybit["channel_counts"]["bbo"] == 4
     assert bybit["channel_counts"]["l2Book"] == 7
     assert bybit["channel_counts"]["trades"] == 0
@@ -586,6 +587,16 @@ def test_native_channel_counts_fail_closed_for_every_native_venue(tmp_path: Path
                     "okx": {"bbo": 1, "l2Book": 1, "trades": 0},
                     "gate": {"bbo": 1, "l2Book": 0, "trades": 1},
                     "bitget": {"bbo": 0, "l2Book": 1, "trades": 1},
+                },
+                "coordinator_health": {
+                    "clock_sync": {
+                        venue: {
+                            "status": "OK",
+                            "offset_ms": 0.0,
+                            "rtt_ms": 1.0,
+                        }
+                        for venue in ("bybit", "okx", "gate", "bitget")
+                    }
                 },
             }
         ),
@@ -611,6 +622,10 @@ def test_native_channel_counts_fail_closed_for_every_native_venue(tmp_path: Path
         now_utc="2026-10-04T00:00:00Z",
     )
 
+    assert receipt["venues"]["bybit"]["runtime_status"] == "HEALTHY"
+    assert receipt["venues"]["okx"]["runtime_status"] == "DEGRADED"
+    assert receipt["venues"]["gate"]["runtime_status"] == "DEGRADED"
+    assert receipt["venues"]["bitget"]["runtime_status"] == "DEGRADED"
     assert receipt["venues"]["bybit"]["capability_runtime"]["trades"] == "HEALTHY"
     assert receipt["venues"]["okx"]["capability_runtime"]["trades"] == "DEGRADED"
     assert receipt["venues"]["gate"]["capability_runtime"]["l2"] == "DEGRADED"

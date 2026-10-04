@@ -272,9 +272,16 @@ def build_receipt(
         bin_caps["bbo"] = "HEALTHY" if frames_bbo > 0 else "DEGRADED"
         bin_caps["trades"] = "HEALTHY" if frames_trades > 0 else "DEGRADED"
         bin_caps["l2"] = "HEALTHY" if frames_l2_exploitable > 0 else "DEGRADED"
-        bin_caps["clock_sync"] = (
-            "HEALTHY" if (bin_rest_ok or bin_ws_clock_ok) else "DEGRADED"
+        bin_caps["clock_sync"] = "HEALTHY" if bin_ws_clock_ok else "DEGRADED"
+        bin_runtime = (
+            "HEALTHY"
+            if all(
+                bin_caps[name] == "HEALTHY"
+                for name in ("bbo", "trades", "l2", "clock_sync")
+            )
+            else "DEGRADED"
         )
+        bin_caps["venue_status"] = bin_runtime
     venues["binance"] = {
         "runtime_status": bin_runtime,
         "reason": bin_reason,
@@ -322,6 +329,7 @@ def build_receipt(
         bbo_events = int(venue_channel_counts.get("bbo") or 0)
         l2_events = int(venue_channel_counts.get("l2Book") or 0)
         trade_events = int(venue_channel_counts.get("trades") or 0)
+        channel_evidence_ok = bool(venue_channel_counts)
         if venue_channel_counts:
             venue_caps["bbo"] = "HEALTHY" if bbo_events > 0 else "DEGRADED"
             venue_caps["l2"] = "HEALTHY" if l2_events > 0 else "DEGRADED"
@@ -329,6 +337,11 @@ def build_receipt(
             reason = (
                 f"{reason};channels=bbo:{bbo_events},l2:{l2_events},trades:{trade_events}"
             )[:1800]
+        else:
+            venue_caps["bbo"] = "DEGRADED"
+            venue_caps["l2"] = "DEGRADED"
+            venue_caps["trades"] = "DEGRADED"
+            reason = f"{reason};channels=missing"[:1800]
         native_clock = (
             native_clock_sync.get(venue)
             if isinstance(native_clock_sync.get(venue), dict)
@@ -339,10 +352,19 @@ def build_receipt(
             and isinstance(native_clock.get("offset_ms"), (int, float))
             and isinstance(native_clock.get("rtt_ms"), (int, float))
         )
-        if venue == "bybit" and ok:
-            venue_caps["clock_sync"] = (
-                "HEALTHY" if (bybit_rest_ok or native_clock_ok) else "DEGRADED"
-            )
+        venue_caps["clock_sync"] = "HEALTHY" if native_clock_ok else "DEGRADED"
+        critical_channels_ok = (
+            channel_evidence_ok
+            and bbo_events > 0
+            and l2_events > 0
+            and trade_events > 0
+        )
+        runtime = (
+            "HEALTHY"
+            if ok and critical_channels_ok and native_clock_ok
+            else "DEGRADED"
+        )
+        venue_caps["venue_status"] = runtime
         venues[venue] = {
             "runtime_status": runtime,
             "reason": reason,
