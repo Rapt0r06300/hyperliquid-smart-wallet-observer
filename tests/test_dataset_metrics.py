@@ -335,3 +335,75 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
     assert totals["TOTAL_UNIQUE_TRADES_GLOBAL"] == 190000
     assert totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
     assert totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
+
+
+
+def test_metrics_rejects_v3_unique_row_when_scanned_trade_count_mismatches(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    sha = "a" * 64
+    (catalog / "DATA_INDEX.json").write_text(
+        json.dumps({"shards": [{
+            "dataset_id": "bybit-archive",
+            "family": "trades",
+            "venue": "bybit",
+            "symbol": "BTCUSDT",
+            "quality_status": "PARTIAL",
+            "event_count": 10,
+            "trade_count": 10,
+            "trade_count_exact": True,
+            "unique_trade_count": 5,
+            "unique_trade_count_exact": True,
+            "replay_compatible": False,
+            "sha256": sha,
+            "bytes": 10,
+        }]}),
+        encoding="utf-8",
+    )
+    (catalog / "TRADE_COUNT_PATCH.json").write_text(
+        json.dumps({"counts": {
+            "bybit-archive": {
+                "asset_sha256": sha,
+                "trade_count": 10,
+                "trade_count_exact": True,
+                "unique_trade_count": 5,
+                "unique_trade_count_exact": True,
+                "unique_identity_method": "full_native_or_deterministic_composite_string_v2",
+            }
+        }}),
+        encoding="utf-8",
+    )
+    (catalog / "TRADE_UNIQUE_COUNT_PATCH.json").write_text(
+        json.dumps({
+            "identity_version": metrics.GLOBAL_IDENTITY_VERSION,
+            "coverage_complete": True,
+            "candidate_trade_shards": 1,
+            "successful": 1,
+            "remaining_candidate_shards": 0,
+            "failed": [],
+            "global_unique_trade_count": 10,
+            "global_identity_digest": "d" * 64,
+            "counts": {
+                "bybit-archive": {
+                    "trade_count_scanned": 9,
+                    "unique_trade_count": 9,
+                    "unique_trade_count_exact": True,
+                }
+            },
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "INDEX", catalog / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", catalog / "TRADE_COUNT_PATCH.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", catalog / "TRADE_UNIQUE_COUNT_PATCH.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", catalog / "missing-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", catalog / "missing-sizes.json")
+
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_TRADES_COLLECTED"] == 10
+    assert totals["TOTAL_UNIQUE_TRADES_WITHIN_SHARDS"] == 0
+    assert totals["TRADE_SHARDS_MISSING_EXACT_UNIQUE_COUNT"] == 1
+    assert totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
