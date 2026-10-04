@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 26,
+  "attempts": 27,
   "campaign_id": "market-e6-13-2026100202-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "a3d10e0f75006aa71562150511321d6024da5262",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "fc1fea30702014a53395eddc04c53d7387d950992b3157f2793426f62c9d7c05",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e6-13-2026100202-v7-u0-retry-792aa9cd0a1f7d43 /home/runner/work/_temp/campaign-output/market-e6-13-2026100202-v7/0/assets/okx-derived-capacity-capacity-tape-ionq-usdt-swap-1791115703245-1791119199902-56a8f5fe9c1d.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 5C00:2B4D16:1DEDCD:448231:6AC267AA and timestamp 2026-10-04 14:50:18 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/403027812/assets?label=&name=okx-derived-capacity-capacity-tape-ionq-usdt-swap-1791115703245-1791119199902-56a8f5fe9c1d.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "b28b81c43c90aa5cc9aab1e84d18a252611bcfcc7edf09ba0a7cb886cd913102"
+    }
+  },
   "config_sha256": "dfca602ea0181b7b02a75da1ce6a6aa7b4bef3d221cdb73b72df8f82fa46043c",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-02T02:06:32.060357+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "b28b81c43c90aa5cc9aab1e84d18a252611bcfcc7edf09ba0a7cb886cd913102",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 6,
+    "last_run_id": "37200714934",
     "market_shard_count": 16,
     "market_shard_index": 13,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e6/2026100202/shard-13.json",
     "plan_sha256": "64530349b32d5624e25b99ef336c055095f72c854586def0cc1cbf7d504e8c53",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 42,
@@ -279,15 +298,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-04T14:50:18.392402Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-04T12:07:52.717716Z",
-    "expires_at": "2026-10-04T17:52:52.717716Z",
-    "lease_token_sha256": "b99056a012012a618d38382728369b8fd10c5c1bfadef947876f9c71f580ddce",
-    "owner_run_id": "37200714934"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -295,8 +315,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 0,
+  "next_due_at": "2026-10-04T14:55:18.392402Z",
+  "no_progress_count": 1,
   "operator_request_id": "19cde6d1bdbdbf751b6ba72b221f750182d657bb3be6ad2ae48361f08adb0588",
   "outputs": [],
   "paper_only": true,
@@ -305,9 +325,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-04T12:07:52.717769Z",
+  "updated_at": "2026-10-04T14:50:18.392402Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
