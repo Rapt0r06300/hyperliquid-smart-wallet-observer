@@ -12293,12 +12293,14 @@ The 2026-09-26 audit of the current repository confirms that the modern final ec
 
 Confirmed examples:
 
-- `src/hl_observer/control_plane/module_pnl_proof.py` currently reads missing `gross_pnl`, `fees`, `slippage`, or `funding_financing` with zero defaults. Missing economic evidence must never become zero in a certifying path.
-- `src/hl_observer/backtest/pnl_from_logs.py` can use a non-zero `estimated_net_pnl_usdc` value as a fallback hint that a trade is closed. A non-zero estimate is not lifecycle proof.
-- `src/hl_observer/paper_trading/funding_settlement.py` can derive a “settled” portion from a prorated accrued estimate. This can remain diagnostic/migration evidence, but certified funding must come from actual settlement events or an exact point-in-time settlement reconstruction.
-- `PaperLedger.mark_to_market()` can retain the last known mark when a fresh mark is missing. That is acceptable for continuity diagnostics, but stale carried-forward marks cannot certify current unrealized or liquidation-equivalent PnL.
-- `PaperLedger.apply_funding()` accepts an amount without an explicit settlement identity/idempotency key at that API boundary. Certified accounting requires exactly-once funding identity so replay/reconnect cannot credit or debit the same settlement twice.
-- `PaperLedger.open_position()` accepts both requested notional and optional quantity without itself proving `filled_notional == abs(quantity * fill_price)` within tolerance. Certified fees and position economics must be based on actual filled quantity/notional, not inconsistent requested values.
+Verified closure update (2026-10-04):
+
+- `src/hl_observer/control_plane/module_pnl_proof.py` no longer converts missing gross PnL, fees, slippage, or funding/financing evidence into certifying zero values.
+- `src/hl_observer/backtest/pnl_from_logs.py` now requires explicit causal CLOSE/REDUCE/EXIT evidence; a non-zero `estimated_net_pnl_usdc` cannot manufacture lifecycle closure.
+- `src/hl_observer/paper_trading/funding_settlement.py` keeps continuous accrual diagnostic-only and certifies settled funding only from complete settlement events or an explicitly trusted exact settlement reconstruction.
+- `PaperLedger.mark_to_market()` may retain a last mark only for diagnostic continuity; any missing fresh mark makes the proof interval fail closed for `strict_pnl_allowed` / `strict_roi_allowed`.
+- `PaperLedger.apply_funding()` records proof completeness and enforces exactly-once application for identified settlement IDs; unidentified legacy funding remains visible diagnostically but cannot certify strict PnL.
+- `PaperLedger.open_position()` verifies supplied quantity × fill price against requested/filled notional within deterministic tolerance and rejects inconsistent fill evidence before fees, turnover, or position state can mutate.
 - historical project audits already recorded snapshot/ledger divergence, diagnostics incorrectly resembling accepted trades, missing entry costs, missing funding, and the risk of double-counting spread/slippage. Those failure classes are permanent regression targets.
 
 These findings do not mean every listed helper currently feeds final certification. They mean **no alternate helper may become, directly or indirectly, a proof source unless it satisfies the canonical accounting contract below**.

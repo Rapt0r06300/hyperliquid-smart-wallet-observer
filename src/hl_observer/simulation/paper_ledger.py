@@ -79,6 +79,11 @@ class PaperLedger:
     high_water_equity_usdc: float | None = None
     drawdown_usdc: float = 0.0
     turnover_usdc: float = 0.0
+    mark_evidence_complete: bool = True
+    mark_evidence_gap_count: int = 0
+    funding_evidence_complete: bool = True
+    funding_settlement_ids: set[str] = field(default_factory=set, repr=False)
+    last_missing_mark_position_ids: tuple[str, ...] = ()
     capital_tracker: CapitalAccountingTracker = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -135,6 +140,23 @@ class PaperLedger:
             if quantity is not None
             else float(notional_usdc) / float(fill_price)
         )
+        filled_notional = abs(qty * float(fill_price))
+        if quantity is not None and not math.isclose(
+            filled_notional,
+            float(notional_usdc),
+            rel_tol=1e-8,
+            abs_tol=1e-8,
+        ):
+            return self.no_trade(
+                coin=coin,
+                reason="FILL_NOTIONAL_MISMATCH",
+                timestamp_ms=timestamp_ms,
+                refs={
+                    **dict(refs or {}),
+                    "requested_notional_usdc": float(notional_usdc),
+                    "quantity_price_notional_usdc": filled_notional,
+                },
+            )
         if not _finite_positive(leverage_effective):
             return self.no_trade(
                 coin=coin,
@@ -145,7 +167,7 @@ class PaperLedger:
         leverage = max(1.0, float(leverage_effective))
         new_leg_notional = tuple(
             float(value)
-            for value in (leg_notional_usd or (float(notional_usdc),))
+            for value in (leg_notional_usd or (filled_notional,))
         )
         new_leg_direction = tuple(
             int(value)
@@ -232,7 +254,7 @@ class PaperLedger:
             self.turnover_usdc + sum(new_leg_notional),
             10,
         )
-        fee = compute_fee_usdc(notional_usdc, fee_bps)
+        fee = compute_fee_usdc(filled_notional, fee_bps)
         fee_event = self._charge_fee(
             fee,
             coin=coin,
@@ -255,7 +277,7 @@ class PaperLedger:
             side=normalized_side,
             quantity=qty,
             price=float(fill_price),
-            notional_usdc=float(notional_usdc),
+            notional_usdc=filled_notional,
             fee_usdc=fee,
             refs=event_refs,
         )
@@ -368,15 +390,24 @@ class PaperLedger:
         liquidatable_marks: dict[str, float] | None = None,
     ) -> PaperEvent:
         total = 0.0
+        missing_mark_ids: list[str] = []
         for pos in self.positions.values():
-            mark = marks.get(pos.coin, pos.last_mark_price)
-            if mark and mark > 0:
-                pos.last_mark_price = float(mark)
+            supplied_mark = marks.get(pos.coin)
+            if _finite_positive(supplied_mark):
+                pos.last_mark_price = float(supplied_mark)
+            else:
+                # Continuity diagnostics may carry the last observed mark, but
+                # the proof interval is no longer eligible for strict PnL.
+                missing_mark_ids.append(pos.position_id)
             pos.last_liquidatable_price = _position_mark(
                 pos,
                 liquidatable_marks or {},
             )
             total += pos.unrealized()
+        self.last_missing_mark_position_ids = tuple(sorted(missing_mark_ids))
+        if missing_mark_ids:
+            self.mark_evidence_complete = False
+            self.mark_evidence_gap_count += len(missing_mark_ids)
         self.unrealized_pnl_usdc = round(total, 10)
         equity = self.equity_usdc
         high_water = first_not_none(self.high_water_equity_usdc, equity)
@@ -388,7 +419,12 @@ class PaperLedger:
             unrealized_pnl_usdc=self.unrealized_pnl_usdc,
             equity_usdc=equity,
             drawdown_usdc=self.drawdown_usdc,
-            refs={"marks": dict(marks)},
+            refs={
+                "marks": dict(marks),
+                "mark_evidence_complete": not missing_mark_ids,
+                "missing_mark_position_ids": list(sorted(missing_mark_ids)),
+                "diagnostic_last_mark_fallback_used": bool(missing_mark_ids),
+            },
         )
         appended = self._append(event)
         self._observe_capital()
@@ -409,6 +445,28 @@ class PaperLedger:
             return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
         if not math.isfinite(funding_amount):
             return self.no_trade(coin=coin, reason="FUNDING_INVALID", timestamp_ms=timestamp_ms, refs=refs)
+        funding_refs = dict(refs or {})
+        settlement_id = _funding_settlement_id(funding_refs)
+        if settlement_id is None:
+            # Retain the amount for legacy/diagnostic continuity, but never let
+            # an unidentified cash flow certify economic PnL.
+            self.funding_evidence_complete = False
+            funding_refs["funding_identity_status"] = "UNIDENTIFIED_DIAGNOSTIC_ONLY"
+        else:
+            if settlement_id in self.funding_settlement_ids:
+                return self.no_trade(
+                    coin=coin,
+                    reason="DUPLICATE_FUNDING_SETTLEMENT",
+                    timestamp_ms=timestamp_ms,
+                    refs={
+                        **funding_refs,
+                        "funding_settlement_id": settlement_id,
+                        "funding_identity_status": "DUPLICATE_REJECTED",
+                    },
+                )
+            self.funding_settlement_ids.add(settlement_id)
+            funding_refs["funding_settlement_id"] = settlement_id
+            funding_refs["funding_identity_status"] = "EXACTLY_ONCE_IDENTIFIED"
         self.funding_net_usdc += funding_amount
         cash = first_not_none(self.cash_balance_usdc, 0.0)
         self.cash_balance_usdc = float(cash) + funding_amount
@@ -420,7 +478,7 @@ class PaperLedger:
                 coin=str(coin).upper(),
                 side=str(side).upper(),
                 funding_usdc=funding_amount,
-                refs=refs or {},
+                refs=funding_refs,
             )
         )
         self._observe_capital()
@@ -471,6 +529,13 @@ class PaperLedger:
             "equity_usdc": self.equity_usdc,
             "drawdown_usdc": self.drawdown_usdc,
             "turnover_usdc": round(self.turnover_usdc, 10),
+            "economic_evidence": {
+                "mark_evidence_complete": self.mark_evidence_complete,
+                "mark_evidence_gap_count": self.mark_evidence_gap_count,
+                "last_missing_mark_position_ids": list(self.last_missing_mark_position_ids),
+                "funding_evidence_complete": self.funding_evidence_complete,
+                "identified_funding_settlement_count": len(self.funding_settlement_ids),
+            },
             "positions": {
                 key: {
                     "coin": pos.coin,
@@ -513,9 +578,16 @@ class PaperLedger:
         payload["pnl_audit"] = pnl_audit.to_dict()
         capital = self.capital_snapshot()
         payload["authoritative_equity_usdc"] = capital.liquidatable_equity_usd
-        payload["strict_pnl_allowed"] = pnl_audit.pnl_valid
+        economic_evidence_complete = (
+            self.mark_evidence_complete
+            and self.funding_evidence_complete
+        )
+        payload["strict_pnl_allowed"] = (
+            pnl_audit.pnl_valid and economic_evidence_complete
+        )
         payload["strict_roi_allowed"] = (
             pnl_audit.pnl_valid
+            and economic_evidence_complete
             and capital.liquidatable_equity_usd is not None
         )
         return payload
@@ -651,6 +723,14 @@ class ScopedLedgerBook:
             "positions_isolated": True,
             "drawdown_isolated": True,
         }
+
+
+def _funding_settlement_id(refs: dict[str, object]) -> str | None:
+    for key in ("funding_settlement_id", "settlement_id", "user_funding_id"):
+        value = refs.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
 
 
 def _finite_positive(value: object) -> bool:

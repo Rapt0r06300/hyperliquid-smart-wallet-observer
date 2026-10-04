@@ -27,10 +27,10 @@ on:
 permissions:
   contents: write
 concurrency:
-  group: dataset-v2-global-unique-counts-v2
-  # A newer parser/catalog push may supersede stale code. A delayed schedule
-  # must never cancel useful work already running on the current code.
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # Global dedup mutates DATA_INDEX/DATA_METRICS, so it shares the same
+  # publication lane as exact-count/replay qualification writers.
+  group: dataset-v2-control-plane-index
+  cancel-in-progress: false
 jobs:
   deduplicate:
     runs-on: ubuntu-latest
