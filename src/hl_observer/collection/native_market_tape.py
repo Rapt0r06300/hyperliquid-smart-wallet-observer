@@ -253,6 +253,7 @@ def _okx_identity(
         "books5": "l2Book",
         "bbo-tbt": "bbo",
         "trades": "trades",
+        "trades-all": "trades",
         "tickers": "ticker",
         "funding-rate": "funding",
         "open-interest": "open_interest",
@@ -270,6 +271,7 @@ def _okx_identity(
     summary = {
         "event_count": len(rows),
         "source_channel": channel_raw,
+        "individual_trade_feed": channel_raw == "trades-all",
         "action": str(payload.get("action") or ""),
         "prev_sequence": _int(first.get("prevSeqId")),
     }

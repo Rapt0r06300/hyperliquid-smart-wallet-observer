@@ -31,6 +31,7 @@ from hl_observer.collection.native_venue_market import (
 SCHEMA_VERSION = "alina.okx_market_data.v1"
 REST_BASE_URL = "https://www.okx.com"
 PUBLIC_WS_URL = "wss://ws.okx.com/ws/v5/public"
+BUSINESS_WS_URL = "wss://ws.okx.com:8443/ws/v5/business"
 
 
 def _float(value: object) -> float | None:
@@ -334,10 +335,12 @@ class OkxPublicClient:
         *,
         rest_base_url: str = REST_BASE_URL,
         ws_url: str = PUBLIC_WS_URL,
+        business_ws_url: str = BUSINESS_WS_URL,
         session_refresh_s: float = 900.0,
     ) -> None:
         self.rest_base_url = rest_base_url.rstrip("/")
         self.ws_url = ws_url
+        self.business_ws_url = business_ws_url
         self.session_refresh_s = max(60.0, float(session_refresh_s))
         self.capture_tier = CaptureTier.B
         self.capture_tiers_by_symbol: dict[str, CaptureTier] = {}
@@ -354,12 +357,28 @@ class OkxPublicClient:
 
     def subscription_args(self, inst_ids: Iterable[str]) -> list[dict[str, str]]:
         return [
-            {"channel": channel, "instId": inst_id}
+            {
+                # The public ``trades`` channel aggregates maker matches. The
+                # unauthenticated business ``trades-all`` channel emits one
+                # native trade per row and is therefore exactly reconcilable.
+                "channel": "trades-all" if channel == "trades" else channel,
+                "instId": inst_id,
+            }
             for inst_id in sorted({str(v).upper() for v in inst_ids if str(v).strip()})
             for channel in capture_profile(
                 "okx", self.capture_tiers_by_symbol.get(inst_id, self.capture_tier)
             ).channels
         ]
+
+    def subscription_groups(
+        self, inst_ids: Iterable[str]
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Split public and business subscriptions without duplicating trades."""
+        public: list[dict[str, str]] = []
+        business: list[dict[str, str]] = []
+        for arg in self.subscription_args(inst_ids):
+            (business if arg["channel"] == "trades-all" else public).append(arg)
+        return public, business
 
     def discover_usdt_perpetuals(self, *, timeout_s: float = 10.0) -> list[tuple[str, str]]:
         with httpx.Client(timeout=timeout_s) as client:
@@ -404,17 +423,66 @@ class OkxPublicClient:
         inst_ids = tuple(sorted({str(value).upper() for value in inst_ids if str(value).strip()}))
         if not inst_ids:
             return
-        args = self.subscription_args(inst_ids)
+        public_args, business_args = self.subscription_groups(inst_ids)
         # OKX may change tick size / minimum trade amount while a collector is
         # running. Capture the public instruments stream once per connection so
         # the replay tape contains the exact rule changes effective at that time.
-        args.append({"channel": "instruments", "instType": "SWAP"})
+        public_args.append({"channel": "instruments", "instType": "SWAP"})
+
+        streams = [
+            self._messages_from_endpoint(
+                self.ws_url,
+                public_args,
+                connection_prefix="okx-public",
+            )
+        ]
+        if business_args:
+            streams.append(
+                self._messages_from_endpoint(
+                    self.business_ws_url,
+                    business_args,
+                    connection_prefix="okx-business",
+                )
+            )
+        pending = {
+            asyncio.create_task(anext(stream)): stream for stream in streams
+        }
+        try:
+            while pending:
+                done, _ = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    stream = pending.pop(task)
+                    try:
+                        payload = task.result()
+                    except StopAsyncIteration:
+                        continue
+                    yield payload
+                    pending[asyncio.create_task(anext(stream))] = stream
+        finally:
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            await asyncio.gather(
+                *(stream.aclose() for stream in streams),
+                return_exceptions=True,
+            )
+
+    async def _messages_from_endpoint(
+        self,
+        url: str,
+        args: list[dict[str, str]],
+        *,
+        connection_prefix: str,
+    ) -> AsyncIterator[dict[str, object]]:
+        """Run one independently reconnecting OKX public socket."""
         attempt = 0
         while True:
             try:
-                connection_id = f"okx-{uuid.uuid4().hex}"
+                connection_id = f"{connection_prefix}-{uuid.uuid4().hex}"
                 session_started = time.monotonic()
-                async with websockets.connect(self.ws_url, ping_interval=20, ping_timeout=10) as socket:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as socket:
                     await socket.send(json.dumps({"op": "subscribe", "args": args}))
                     attempt = 0
                     async for raw in socket:
@@ -433,16 +501,20 @@ class OkxPublicClient:
                             }
                             yield payload
                             if time.monotonic() - session_started >= self.session_refresh_s:
-                                return
+                                break
             except asyncio.CancelledError:
                 raise
             except Exception:
-                delay = compute_backoff_delay(attempt=attempt, shard_key="okx-public-ws")
+                delay = compute_backoff_delay(
+                    attempt=attempt,
+                    shard_key=f"{connection_prefix}-ws",
+                )
                 attempt += 1
                 await asyncio.sleep(delay.delay_seconds)
 
 
 __all__ = [
+    "BUSINESS_WS_URL",
     "OkxMarketState",
     "OkxPublicClient",
     "PUBLIC_WS_URL",

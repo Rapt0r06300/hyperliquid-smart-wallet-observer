@@ -1,3 +1,5 @@
+import asyncio
+
 from hl_observer.collection.bitget_market_data import BitgetPublicClient
 from hl_observer.collection.bybit_market_data import BybitPublicClient
 from hl_observer.collection.gate_market_data import GatePublicClient
@@ -17,8 +19,13 @@ def test_clients_build_tier_specific_public_subscriptions() -> None:
     okx = OkxPublicClient()
     okx.set_capture_profile(CaptureTier.A)
     assert {row["channel"] for row in okx.subscription_args(["BTC-USDT-SWAP"])} >= {
-        "books", "bbo-tbt", "trades", "funding-rate", "open-interest"
+        "books", "bbo-tbt", "trades-all", "funding-rate", "open-interest"
     }
+    public, business = okx.subscription_groups(["BTC-USDT-SWAP"])
+    assert all(row["channel"] != "trades-all" for row in public)
+    assert business == [
+        {"channel": "trades-all", "instId": "BTC-USDT-SWAP"}
+    ]
 
     bitget = BitgetPublicClient()
     bitget.set_capture_profile(CaptureTier.B)
@@ -49,6 +56,37 @@ def test_mixed_symbol_tiers_do_not_force_deep_book_on_every_symbol() -> None:
     assert "orderbook.1000.BTCUSDT" in topics
     assert "orderbook.1.ETHUSDT" in topics
     assert "orderbook.1000.ETHUSDT" not in topics
+
+
+def test_okx_messages_merge_public_and_individual_trade_endpoints(monkeypatch) -> None:
+    client = OkxPublicClient()
+    calls = []
+
+    async def fake_endpoint(url, args, *, connection_prefix):
+        calls.append((url, args, connection_prefix))
+        trade = connection_prefix == "okx-business"
+        yield {
+            "arg": {
+                "channel": "trades-all" if trade else "bbo-tbt",
+                "instId": "BTC-USDT-SWAP",
+            },
+            "data": [{"tradeId": "1", "ts": "1000"}] if trade else [
+                {"bids": [["1", "1"]], "asks": [["2", "1"]], "ts": "1000"}
+            ],
+        }
+
+    monkeypatch.setattr(client, "_messages_from_endpoint", fake_endpoint)
+
+    async def collect():
+        return [row async for row in client.messages(["BTC-USDT-SWAP"])]
+
+    rows = asyncio.run(collect())
+    assert {row["arg"]["channel"] for row in rows} == {"bbo-tbt", "trades-all"}
+    assert {call[2] for call in calls} == {"okx-public", "okx-business"}
+    business_args = next(call[1] for call in calls if call[2] == "okx-business")
+    assert business_args == [
+        {"channel": "trades-all", "instId": "BTC-USDT-SWAP"}
+    ]
 
 
 class _ClockClient:

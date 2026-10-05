@@ -118,6 +118,31 @@ def test_okx_trade_frame_carries_sequence_and_provenance() -> None:
     assert envelope.provenance["authenticated"] is False
 
 
+def test_okx_all_trades_frame_is_canonical_individual_trade() -> None:
+    envelope = native_tick_envelope(
+        "okx",
+        {
+            "arg": {"channel": "trades-all", "instId": "BTC-USDT-SWAP"},
+            "_alina_transport": _transport(),
+            "data": [
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "tradeId": "43",
+                    "px": "100",
+                    "sz": "0.5",
+                    "side": "sell",
+                    "ts": "1996",
+                }
+            ],
+        },
+    )
+    assert envelope is not None
+    assert envelope.channel == "trades"
+    assert envelope.parsed_summary["source_channel"] == "trades-all"
+    assert envelope.parsed_summary["individual_trade_feed"] is True
+    assert envelope.parsed_summary["event_count"] == 1
+
+
 def test_native_tape_refuses_frame_without_receive_clock() -> None:
     assert (
         native_tick_envelope(
