@@ -4,7 +4,8 @@
     "forward_paper": "COMPLETE",
     "module_pnl_proof": "COMPLETE",
     "oos": "COMPLETE",
-    "replay": "COMPLETE"
+    "replay": "COMPLETE",
+    "scoreboard": "COMPLETE"
   },
   "analysis_stage": "SCOREBOARD",
   "campaign_ids": [
@@ -14,6 +15,7 @@
     "analysis-e7-pnl-proof-v2",
     "analysis-e7-replay-v2",
     "analysis-e7-resume-proof-v1",
+    "analysis-e7-scoreboard-v2",
     "canary-market-e6-okx-btc-eth-20261004-v1",
     "copy-vault-0-2026100104-v7",
     "copy-vault-1-2026100104-v7",
@@ -1113,19 +1115,19 @@
     },
     "status": "MORE_DATA"
   },
-  "copy_vault_status": "UNMEASURABLE",
+  "copy_vault_status": "MORE_DATA",
   "cross_shard_overlap_trade_count": 3796,
-  "cross_venue_status": "UNMEASURABLE",
+  "cross_venue_status": "MORE_DATA",
   "data_exploitability": {
     "analysis_eligible": true,
     "analysis_stage": "SCOREBOARD",
     "blockers": [],
     "cross_shard_overlap_trade_count": 3796,
     "economic_proof": {
-      "cost_latency_evidence_current": false,
-      "current": false,
-      "reason": "CURRENT_SCOREBOARD_RECEIPT_MISSING",
-      "status": "UNMEASURABLE"
+      "cost_latency_evidence_current": true,
+      "current": true,
+      "reason": "current-epoch economic scoreboard evidence is loaded",
+      "status": "CURRENT_SCOREBOARD_AVAILABLE"
     },
     "global_unique_failure_reason_count": 0,
     "global_unique_trade_ratio": 0.99923278,
@@ -1152,9 +1154,21 @@
   },
   "dataset_health_digest": "915ab7e20591d7935a0f09cccc3847738dd42ee8c685556ac5cdcbfd0a366185",
   "dataset_selection_id": "a1038090eceb4c718e8570918b8b33ae6bd5cac5e3a277a8bc68a8e4d0ab0400",
-  "dataset_v2_head": "a1e14888fff81e81a41208d40e0c6b72676f220d",
+  "dataset_v2_head": "bb190a3ae4eddfa9c3c65f17a220ac2edbcaa38f",
   "declared_spec_requirements": [],
-  "environment_provenance": null,
+  "environment_provenance": {
+    "dependency_digest": "d31ca3a2352360ba8306ae79ec7b1a785adfc8aaa296ea19fd0c18c01d6d7d00",
+    "dependency_files": [
+      "requirements.txt",
+      "pyproject.toml"
+    ],
+    "github_runner_image": "ubuntu24",
+    "os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+    "python_executable": "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+    "python_version": "3.12.14",
+    "runner_architecture": "x86_64",
+    "timezone": "UTC"
+  },
   "event_intelligence_registry_digest": "f747bfa0048d6b5ecfdc82d66c6c8b3a076f6d29a4a93da03409435b148169b3",
   "event_intelligence_wiring_complete": true,
   "execution_ledger": [
@@ -1170,8 +1184,8 @@
     },
     {
       "id": "analysis-chain",
-      "reason": "current-epoch analysis stages cannot be declared complete yet",
-      "state": "BLOCKED"
+      "reason": "current-epoch replay/backtest/OOS/forward/PnL/scoreboard campaigns are terminal",
+      "state": "DONE"
     },
     {
       "id": "two-segment-resume-proof",
@@ -1180,12 +1194,12 @@
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "3 canonical closure blocker(s) remain",
+      "reason": "1 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
-  "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-04T23:12:24.639277Z",
+  "forward_status": "UNMEASURABLE",
+  "generated_at_utc": "2026-10-05T01:03:57.733243Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1197,42 +1211,32 @@
   "implementation_backlog": [
     {
       "id": "BLOCKER-01",
-      "reason": "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-02",
       "reason": "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
-      "status": "UNRESOLVED"
-    },
-    {
-      "id": "BLOCKER-03",
-      "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
-  "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "a1e14888fff81e81a41208d40e0c6b72676f220d",
+  "lead_lag_status": "MORE_DATA",
+  "main_alina_head": "bb190a3ae4eddfa9c3c65f17a220ac2edbcaa38f",
   "modules": {
     "copy_vault": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "7abd5b04fe6288926111c710e58e04dfae4df8e4fd5c91af890dca7f5328b32f",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "cross_venue_dislocation": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "d0796ad93474d39feeb10dc5030500bfcf139d479423427b1e715370bf4aa93e",
+      "reason": "UNMEASURED:net_pnl_usd; UNMEASURED:liquidatable_net",
+      "status": "MORE_DATA"
     },
     "lead_lag": {
-      "certificate_digest": null,
-      "reason": "no independent economic scoreboard evidence loaded",
-      "status": "UNMEASURABLE"
+      "certificate_digest": "7f370fc8876d0af604c70612502835b69a246d1c3a344cc9192a6210c97bdb85",
+      "reason": "UNMEASURED:closed_positions; UNMEASURED:net_pnl_usd; UNMEASURED:roi_pct; UNMEASURED:max_drawdown_usd; UNMEASURED:hit_rate; UNMEASURED:profit_factor; UNMEASURED:oos; UNMEASURED:forward",
+      "status": "MORE_DATA"
     }
   },
   "normative_gate_count": 13,
   "normative_gate_registry_digest": "5f23c627a3fce57dce9a6781e9cf5d3853d3a96b4493bdb31cca7a1d07e9ea3a",
-  "oos_status": "MORE_DATA",
+  "oos_status": "UNMEASURABLE",
   "operator_status": {
     "count": 0,
     "invalid_files": [],
@@ -1247,28 +1251,26 @@
   "raw_record_count": 7755643,
   "raw_trade_count": 4947714,
   "real_execution_reachable": false,
-  "receipt_digest": "72125a35670731ab703d892b1ac7929a8e92cec0b4d7f0157420d8091cea1538",
+  "receipt_digest": "7a26338376c6943e4c1f3626f9354d899f545475bef5a2869aad4365910a37c0",
   "rejected_count": 1120,
   "remaining_blockers": [
-    "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_RECEIPT_MISSING",
-    "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
-    "analysis campaigns are not all terminal COMPLETE"
+    "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING"
   ],
   "replay_compatible_count": 2732,
   "replay_remaining_candidates": 0,
   "safe_count": 2467,
   "schema_version": "alina.final_closure_receipt.v1",
-  "scoreboard_artifact": null,
+  "scoreboard_artifact": "campaign-evidence-analysis-e7-scoreboard-v2-u0",
   "scoreboard_provenance": {
-    "campaign_id": null,
-    "dataset_selection_id": null,
-    "environment_receipt_sha256": null,
-    "evidence_tag": null,
-    "phase_epoch": null,
-    "reason": "CURRENT_SCOREBOARD_RECEIPT_MISSING",
-    "scoreboard_sha256": null,
-    "source_collection_epoch": null,
-    "valid": false
+    "campaign_id": "analysis-e7-scoreboard-v2",
+    "dataset_selection_id": "a1038090eceb4c718e8570918b8b33ae6bd5cac5e3a277a8bc68a8e4d0ab0400",
+    "environment_receipt_sha256": "e35ef18d1008c15041f4029008367ad3983499f7294f3628288290b4aa7a9d4b",
+    "evidence_tag": "campaign-evidence-analysis-e7-scoreboard-v2-u0",
+    "phase_epoch": 7,
+    "reason": "CURRENT_SCOREBOARD_RECEIPT_VALID",
+    "scoreboard_sha256": "7024384cb4b7643ef0bddaa76c68c7eb35a7c0ecad264879ea83127df946c649",
+    "source_collection_epoch": 6,
+    "valid": true
   },
   "self_hosted_used": false,
   "source_collection_epoch": 6,
@@ -1364,6 +1366,7 @@
     "37219345454",
     "37224080754",
     "37229091306",
-    "37237756647"
+    "37237756647",
+    "37242908575"
   ]
 }
