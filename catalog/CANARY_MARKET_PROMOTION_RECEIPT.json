@@ -1,0 +1,134 @@
+{
+  "schema_version": "alina.market_canary_promotion_receipt.v1",
+  "generated_at_utc": "2026-10-05T13:21:00Z",
+  "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "branch": "main",
+  "evaluated_head_sha": "5e01dfc894dd6e3c29e1b8a4cb05a959498bdd70",
+  "phase_observed": {
+    "phase": "ANALYZE",
+    "epoch": 7,
+    "analysis_stage": "SCOREBOARD",
+    "changed_by_this_receipt": false
+  },
+  "canary": {
+    "campaign_id": "canary-market-e6-okx-btc-eth-20261004-v1",
+    "workflow_run_id": "37200714934",
+    "job_id": "111432504268",
+    "collector_code_sha": "e854a51b0d01e079edbc54541026400df81152d8",
+    "venue": "okx",
+    "symbols": [
+      "BTC-USDT-SWAP",
+      "ETH-USDT-SWAP"
+    ],
+    "requested_duration_s": 180,
+    "observed_duration_s": 187.498,
+    "read_only": true,
+    "paper_only": true,
+    "real_execution": false,
+    "stop_reason": "DURATION_REACHED",
+    "campaign_terminal_status": "PARTIAL",
+    "campaign_status_reason": "analysis_drain_inactive_lease_with_checkpoint"
+  },
+  "collection_metrics": {
+    "accepted_frames": 18392,
+    "persisted_frames": 18392,
+    "events_per_second": 98.092,
+    "bbo_frames": 7415,
+    "bbo_per_second": 39.547,
+    "l2_frames": 3516,
+    "l2_per_second": 18.752,
+    "trade_count_observed": 1658,
+    "trades_per_second": 8.843,
+    "queue_drops": 0,
+    "compressed_bytes": 2893864,
+    "compressed_bytes_per_second": 15434.106,
+    "uncompressed_bytes": 56935993,
+    "uncompressed_bytes_per_second": 303661.868,
+    "shard_count": 13,
+    "safe_count": 0,
+    "partial_count": 13,
+    "reject_count": 0,
+    "safe_ratio": 0,
+    "l2_expected_symbol_count": 2,
+    "l2_observed_symbol_count": 2,
+    "l2_coverage_complete": true,
+    "clock_sync_observed": true,
+    "timing_defects_by_symbol": {},
+    "trade_reconciliation_defects_by_symbol": {
+      "BTC-USDT-SWAP": [
+        "PARTIAL"
+      ],
+      "ETH-USDT-SWAP": [
+        "PARTIAL"
+      ]
+    },
+    "replay_grade_coverage_complete": false
+  },
+  "publication": {
+    "durable": false,
+    "release_created": false,
+    "run_manifest_catalogable": false,
+    "failure_category": "INFRASTRUCTURE",
+    "failure_reason": "GITHUB_INSTALLATION_API_RATE_LIMIT",
+    "observed_http_status": 403
+  },
+  "contextual_baselines": {
+    "comparable_like_for_like": false,
+    "caveat": "Broad 3500-second multi-symbol campaigns; rates are context only and cannot prove uplift for this two-symbol OKX canary.",
+    "campaigns": [
+      {
+        "campaign_id": "market-e6-0-2026100122-v7",
+        "collector_code_sha": "c5344e003d018c6df3c7595240b33c1a334bb9c0",
+        "duration_s": 3500,
+        "events_per_second": 1331.874,
+        "bbo_per_second": 64.937,
+        "l2_per_second": 117.632,
+        "trades_per_second": 8.855,
+        "queue_drops_per_second": 355.229,
+        "safe_count": 0,
+        "partial_count": 277,
+        "reject_count": 806
+      },
+      {
+        "campaign_id": "market-e6-7-2026100117-v7",
+        "collector_code_sha": "c5344e003d018c6df3c7595240b33c1a334bb9c0",
+        "duration_s": 3500,
+        "events_per_second": 1564.283,
+        "bbo_per_second": 65.748,
+        "l2_per_second": 123.857,
+        "trades_per_second": 7.531,
+        "queue_drops_per_second": 0,
+        "safe_count": 0,
+        "partial_count": 1046,
+        "reject_count": 61
+      }
+    ]
+  },
+  "promotion_gate": {
+    "collection_executed": true,
+    "expected_symbols_observed": true,
+    "l2_coverage_complete": true,
+    "zero_queue_drops": true,
+    "zero_rejected_shards": true,
+    "safe_ratio_acceptable": false,
+    "replay_grade_complete": false,
+    "durable_publication_valid": false,
+    "comparable_uplift_proven": false
+  },
+  "verdict": "RETAIN_PREVIOUS_CONFIGURATION",
+  "promote": false,
+  "reasons": [
+    "No SAFE shard was produced.",
+    "Replay-grade coverage remained incomplete because trade reconciliation stayed PARTIAL for both symbols.",
+    "The release and RUN_MANIFEST were not durably published because the GitHub App installation API rate limit returned HTTP 403.",
+    "The available historical baselines are not like-for-like, so throughput uplift is not proven."
+  ],
+  "safety": {
+    "active_campaigns_cancelled": false,
+    "active_campaign_code_sha_modified": false,
+    "self_hosted_runner_used": false,
+    "user_pc_used": false,
+    "real_orders_enabled": false,
+    "real_mainnet_trading": false
+  }
+}
