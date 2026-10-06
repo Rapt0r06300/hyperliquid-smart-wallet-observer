@@ -1,22 +1,22 @@
 {
   "analysis_stage": null,
   "attempts": 1,
-  "campaign_id": "collect-resume-probe-e6-run37199548942",
+  "campaign_id": "collect-resume-probe-e8-run37473314609",
   "checkpoint_lineage": [
     {
-      "at": "2026-10-04T11:41:23.792040Z",
-      "digest": "3b9c9b084d3f7bb1b3777dc39fdd0eb3917ce29054e2624dd80377fb5807d7d4",
+      "at": "2026-10-06T13:46:07.299638Z",
+      "digest": "ce78578b942b6826eea49660048ab90c25a5373b3445d6631ecf2366fac74091",
       "next_probe_unit": 1,
       "result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-      "unit_id": "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13"
+      "unit_id": "d49cb79e4eefc1bdc609b60db87de84319660f5ead102d99bf78de8547f70d1c"
     }
   ],
   "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "225f8eb1f2cda5cb771f5f59522af16f950e6881",
+  "code_sha": "ac8ad610755d214c03f6db48566c7ae40b778fef",
   "collection_cutoff_at_utc": null,
   "completed_units": {
-    "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13": {
+    "d49cb79e4eefc1bdc609b60db87de84319660f5ead102d99bf78de8547f70d1c": {
       "result": {
         "network_used": false,
         "operation": "durable_checkpoint_write",
@@ -27,64 +27,36 @@
         "unit": 0
       },
       "sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079"
-    },
-    "1f296b54ffd1e85ab6971198aefc4fcb5e279e5eaf54817f247668b296641317": {
-      "result": {
-        "network_used": false,
-        "operation": "fresh_runner_resume",
-        "paper_only": true,
-        "read_only": true,
-        "real_execution": false,
-        "resumed_from_checkpoint": true,
-        "status": "COMPLETE",
-        "unit": 1
-      },
-      "sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934"
     }
   },
-  "config_sha256": "762e6d980010f14cf2d316f302d12b7055fc7ea7ea3afaf68f574442b1398530",
+  "config_sha256": "e3074b6cb84523f035c6055607530f0d3db03c06d883c93b3a6d035c7e303a4f",
   "consecutive_failures": 0,
-  "created_at": "2026-10-04T11:41:23.789958Z",
+  "created_at": "2026-10-06T13:46:07.297321Z",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
     "network_used": false,
-    "next_probe_unit": 2,
+    "next_probe_unit": 1,
     "proof_scope": "control_plane_state_resume",
     "resume_proof": true,
     "segment_a_result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-    "segment_a_unit_id": "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13",
-    "segment_b_result_sha256": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
-    "segment_b_unit_id": "1f296b54ffd1e85ab6971198aefc4fcb5e279e5eaf54817f247668b296641317"
+    "segment_a_unit_id": "d49cb79e4eefc1bdc609b60db87de84319660f5ead102d99bf78de8547f70d1c"
   },
   "dataset_generation": "V2_FRESH",
   "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "dataset_selection_id": null,
-  "expires_at": "2026-10-04T13:41:23.789958Z",
+  "expires_at": "2026-10-06T15:46:07.297321Z",
   "history": [
     {
-      "at": "2026-10-04T11:41:23.791984Z",
+      "at": "2026-10-06T13:46:07.299567Z",
       "from": "PENDING",
       "reason": "collect_resume_probe_segment_a",
       "to": "RUNNING"
     },
     {
-      "at": "2026-10-04T11:41:23.792040Z",
+      "at": "2026-10-06T13:46:07.299638Z",
       "from": "RUNNING",
       "reason": "fresh_runner_resume_required",
       "to": "CONTINUATION_REQUIRED"
-    },
-    {
-      "at": "2026-10-04T11:44:09.014809Z",
-      "from": "CONTINUATION_REQUIRED",
-      "reason": "collect_resume_probe_segment_b",
-      "to": "RUNNING"
-    },
-    {
-      "at": "2026-10-04T11:44:09.014904Z",
-      "from": "RUNNING",
-      "reason": "fresh_runner_resume_proven",
-      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
@@ -101,14 +73,14 @@
   "operator_request_id": null,
   "outputs": [],
   "paper_only": true,
-  "phase_epoch": 6,
+  "phase_epoch": 8,
   "read_only": true,
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "COMPLETE",
-  "status_reason": "fresh_runner_resume_proven",
-  "terminal_evidence_digest": "c91e0e66554e55779fe7be601713a39e8dc6ca91703b17fb6fd4b70e44f6e1be",
-  "updated_at": "2026-10-04T11:44:09.014904Z",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "fresh_runner_resume_required",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-06T13:46:07.299638Z",
   "work_plan_sha256": "14fd231a242fb2b825354a4923149e86609c63054677dc4ebe6d624048e60ebf"
 }
