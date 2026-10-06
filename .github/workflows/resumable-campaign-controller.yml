@@ -122,7 +122,8 @@ jobs:
                   continue
               if (
                   row.get("creation_phase")!="COLLECT"
-                  or int(row.get("phase_epoch") or 0)!=phase_epoch
+                  or int(row.get("phase_epoch") or 0)<1
+                  or int(row.get("phase_epoch") or 0)>phase_epoch
                   or row.get("status")!="RUNNING"
               ):
                   continue
@@ -213,6 +214,7 @@ jobs:
           done
 
 
+
   advance_analysis:
     needs: [select, copy_work, other_work]
     if: ${{ always() && needs.select.outputs.phase == 'ANALYZE' && needs.select.result == 'success' && (needs.copy_work.result == 'success' || needs.copy_work.result == 'skipped') && (needs.other_work.result == 'success' || needs.other_work.result == 'skipped') }}
@@ -255,4 +257,3 @@ jobs:
             fi
             exit "$rc"
           done
-

@@ -82,9 +82,7 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "archives-bybit-btc-" in text
     assert "REPLAY_START_MS" in text
     assert "ECON_START_MS" in text
-    assert "max_shards" in text
-    assert "64" in text
-    assert "128" in text
+    assert '"max_shards":0' in text
     assert "gh workflow run resumable-campaign-controller.yml" not in text
     assert "uses: ./.github/workflows/resumable-campaign-controller.yml" in text
     assert "actions: write" in text

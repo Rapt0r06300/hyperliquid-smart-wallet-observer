@@ -134,7 +134,7 @@ def _dataset_bridge_command(
 ) -> list[str]:
     if action not in {"plan", "materialize"}:
         raise ValueError("dataset bridge action must be plan or materialize")
-    return [
+    command = [
         sys.executable,
         "-m",
         "hl_observer.ops.v2_dataset_bridge",
@@ -143,6 +143,9 @@ def _dataset_bridge_command(
         str(workspace),
         *_selection_args(ctx),
     ]
+    if ctx.kind == "replay" or ctx.kind in ECONOMIC_KINDS:
+        command.append("--require-trade-events")
+    return command
 
 
 def _materialize_command(ctx: AdapterContext, workspace: Path) -> list[str]:
@@ -728,6 +731,27 @@ def run_one_unit(
             ).strip().split()[0]
     stdout = phases[-1]["stdout"] if phases else ""
     stderr = phases[-1]["stderr"] if phases else ""
+    collection_kinds = {
+        "market_collection", "copy_vault_collection",
+        "official_archive_collection", "event_intelligence_collection",
+    }
+    collection_metrics = (
+        _collection_checkpoint_metrics(output_root)
+        if ctx.kind in collection_kinds and output_root is not None else None
+    )
+    if collection_metrics is not None and (
+        int(collection_metrics["record_count_observed"]) <= 0
+        or int(collection_metrics["shard_count"]) <= 0
+    ):
+        unavailable = {
+            "status": "UNAVAILABLE",
+            "reason": "no_durable_collection_events",
+            "failure_category": "DATA_AVAILABILITY",
+            "output_root": str(output_root),
+            "collection_metrics": collection_metrics,
+            "phases": phases,
+        }
+        return AdapterResult("UNAVAILABLE", _digest(unavailable), unavailable, False)
     payload = {
         "status": "COMPLETE",
         "analysis_stage": (
@@ -744,27 +768,16 @@ def run_one_unit(
         ),
         "bundle_root": (
             str(output_root)
-            if ctx.kind in {
-                "market_collection",
-                "copy_vault_collection",
-                "official_archive_collection",
-                "event_intelligence_collection",
-            }
+            if ctx.kind in collection_kinds
             and output_root is not None
             else None
         ),
         "phases": phases,
     }
     if (
-        ctx.kind in {
-            "market_collection",
-            "copy_vault_collection",
-            "official_archive_collection",
-            "event_intelligence_collection",
-        }
-        and output_root is not None
+        collection_metrics is not None
     ):
-        payload["collection_metrics"] = _collection_checkpoint_metrics(output_root)
+        payload["collection_metrics"] = collection_metrics
     if ctx.kind == "module_pnl_proof":
         payload["economic_proof_status"] = economic_proof_status
         payload["economic_proof_certifying"] = economic_proof_status == "PASS"

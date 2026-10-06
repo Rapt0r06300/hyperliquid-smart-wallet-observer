@@ -270,7 +270,7 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         if historical_archive:
             if reconciliation_status not in {"MATCHED", "SOURCE_ARCHIVE_VERIFIED"}:
                 reasons.append("RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED")
-        elif reconciliation_status != "MATCHED":
+        elif reconciliation_status not in _CONTINUITY_RECONCILIATION:
             reasons.append("RECONCILIATION_MATCH_REQUIRED")
     elif family in {"instrument_metadata", "open_interest", "funding_settlement"} and transports and transports.issubset({"http", "https"}):
         if reconciliation_status not in _SNAPSHOT_RECONCILIATION:

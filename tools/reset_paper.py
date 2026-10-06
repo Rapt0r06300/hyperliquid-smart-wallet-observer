@@ -43,7 +43,7 @@ def sauvegarder(root: Path = RACINE, *, ts: str | None = None) -> Path:
     return dst
 
 
-def reset(root: Path = RACINE, *, starting_equity: float = 100.0, runner=None) -> int:
+def reset(root: Path = RACINE, *, starting_equity: float = 200.0, runner=None) -> int:
     """Remise à zéro via la commande CLI existante `reset-simulation-state`. `runner` injectable (test)."""
     if runner is not None:
         return int(runner())

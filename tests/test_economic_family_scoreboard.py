@@ -68,7 +68,7 @@ def test_scoreboards_keep_families_separate_and_deny_incomplete_evidence(tmp_pat
     assert cross["net_pnl_usd"] == -0.1366
     assert cross["liquidatable_net"] is False
     assert result["disabled_families"] == ["cross_venue_dislocation_v1", "carry"]
-    assert result["starting_capital_usd"] == 100.0
+    assert result["starting_capital_usd"] == 200.0
     assert result["real_execution"] is False
 
 
@@ -104,7 +104,7 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
     ).receipt()
     campaign = {
         "family": "cross_venue_dislocation_v2",
-        "starting_capital_usd": 100.0,
+        "starting_capital_usd": 200.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

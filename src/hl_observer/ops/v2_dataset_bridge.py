@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from collections import Counter
 from pathlib import Path
 
 from hl_observer.datasets.v2_repository import (
@@ -14,6 +15,28 @@ from hl_observer.datasets.v2_repository import (
 )
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_TRADE_FAMILIES = {"trades", "agg_trades", "fills", "userfills", "user_fills", "copy_vault_fills"}
+
+
+def _balanced_recent_shards(shards, limit: int):
+    if limit <= 0 or len(shards) <= limit:
+        return list(shards)
+    buckets = {}
+    for shard in shards:
+        buckets.setdefault((shard.venue, shard.family), []).append(shard)
+    for rows in buckets.values():
+        rows.sort(key=lambda row: (row.end_ts_ms, row.dataset_id), reverse=True)
+    selected = []
+    keys = sorted(buckets)
+    while len(selected) < limit:
+        progressed = False
+        for key in keys:
+            if buckets[key] and len(selected) < limit:
+                selected.append(buckets[key].pop(0))
+                progressed = True
+        if not progressed:
+            break
+    return sorted(selected, key=lambda row: (row.start_ts_ms, row.dataset_id))
 
 
 def _csv(value: str) -> list[str]:
@@ -43,7 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dataset-selection-id")
     parser.add_argument("--source-collection-epoch", type=int)
     parser.add_argument("--collection-cutoff-at-utc")
-    parser.add_argument("--max-shards", type=int, default=0, help="Bound to newest N matching SAFE shards (0 = all).")
+    parser.add_argument("--max-shards", type=int, default=0, help="Balanced recent venue/family bound (0 = all).")
+    parser.add_argument("--require-trade-events", action="store_true")
     args = parser.parse_args(argv)
 
     try:
@@ -63,15 +87,24 @@ def main(argv: list[str] | None = None) -> int:
             end_ts_ms=args.end_ts_ms,
         )
         if args.max_shards:
-            shards = shards[-args.max_shards:]
+            shards = _balanced_recent_shards(shards, args.max_shards)
         if not shards:
             raise DatasetV2Error("no SAFE replay-compatible shards match the selection")
+        trade_shards = [row for row in shards if row.family.lower() in _TRADE_FAMILIES and row.event_count > 0]
+        if args.require_trade_events and not trade_shards:
+            raise DatasetV2Error("selection contains no SAFE trade events")
+        by_family = Counter(row.family for row in shards)
+        by_venue = Counter(row.venue for row in shards)
         plan = {
             "schema": "alina.dataset_v2_materialization_plan.v2",
             "index_sha256": digest,
             "safe_shards": len(shards),
             "events": sum(item.event_count for item in shards),
             "bytes": sum(item.bytes for item in shards),
+            "selection_by_family": dict(sorted(by_family.items())),
+            "selection_by_venue": dict(sorted(by_venue.items())),
+            "trade_event_shards": len(trade_shards),
+            "trade_events": sum(item.event_count for item in trade_shards),
             "dataset_ids": [item.dataset_id for item in shards],
             "dataset_selection_id": (
                 args.dataset_selection_id.lower()

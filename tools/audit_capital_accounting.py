@@ -15,7 +15,7 @@ def main() -> int:
     args = parser.parse_args()
 
     ledger = PaperLedger(
-        starting_balance_usdc=100.0,
+        starting_balance_usdc=200.0,
         session_id="audit:capital-accounting:v2",
     )
     ledger.open_position(

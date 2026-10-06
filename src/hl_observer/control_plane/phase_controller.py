@@ -96,7 +96,7 @@ class PhaseController:
                 state=self._state.to_dict(),
             )
 
-        if self._state.phase not in ("IDLE", "COLLECT"):
+        if self._state.phase not in ("IDLE", "COLLECT", "ANALYZE"):
             raise ValueError(f"Cannot transition to COLLECT from phase {self._state.phase}")
 
         prev_epoch = self._state.epoch

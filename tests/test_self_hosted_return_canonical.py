@@ -61,7 +61,7 @@ def _campaign(family: str) -> dict:
     economic_contract = _economic_contract(family)
     row = {
         "family": family,
-        "starting_capital_usd": 100.0,
+        "starting_capital_usd": 200.0,
         "paper_read_only": True,
         "real_execution": False,
         "economic_contract": economic_contract,

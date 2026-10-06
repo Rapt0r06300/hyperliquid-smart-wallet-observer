@@ -33,7 +33,7 @@ class RealtimeCopyRiskConfig:
     crowding_penalty_bps_per_wallet: float = 2.0
     max_copy_degradation_bps: float = DEFAULT_SIMULATION_MAX_COPY_DEGRADATION_BPS
     max_price_deviation_bps: float = 18.0
-    starting_equity_usdt: float = 100.0
+    starting_equity_usdt: float = 200.0
     max_position_notional_usdt: float = 50.0
     min_position_notional_usdt: float = 5.0
     max_total_exposure_usdt: float = 100.0

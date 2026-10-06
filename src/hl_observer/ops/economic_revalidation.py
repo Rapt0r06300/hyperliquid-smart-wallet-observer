@@ -369,7 +369,7 @@ def _capacite_du_lot(racine: Path, episodes: Sequence[Episode], carnet_relpath: 
     return resume
 
 
-def revalider(root: Path | str, *, starting_equity_usd: float = 100.0,
+def revalider(root: Path | str, *, starting_equity_usd: float = 200.0,
               ledgers: Mapping[str, str] | None = None,
               carnet_relpath: str | None = "runtime/data/carnet_venues.jsonl") -> dict[str, Any]:
     """Revalide chaque ledger connu. Ledger absent ou non appariable ⇒ statut explicite, jamais un zéro."""

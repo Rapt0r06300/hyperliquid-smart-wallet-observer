@@ -115,14 +115,14 @@ def test_l2_websocket_continuity_can_be_safe() -> None:
     assert reasons == []
 
 
-def test_trade_requires_matched_reconciliation() -> None:
+def test_clean_live_trade_continuity_can_be_safe() -> None:
     value = manifest()
     value["family"] = "trades"
     value["provenance"]["transports"] = ["websocket"]
     value["reconciliation"] = {"status": "SOURCE_CONTINUITY_VERIFIED"}
     status, reasons = classify_manifest(value)
-    assert status == "PARTIAL"
-    assert "RECONCILIATION_MATCH_REQUIRED" in reasons
+    assert status == "SAFE"
+    assert reasons == []
 
     value["reconciliation"] = {"status": "MATCHED"}
     assert classify_manifest(value)[0] == "SAFE"

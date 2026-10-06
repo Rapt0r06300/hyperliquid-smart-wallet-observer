@@ -1016,7 +1016,7 @@ def _portfolio_open_refusal(
     try:
         from hl_observer.risk.directional_exposure import directional_refusal
 
-        _equity = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
+        _equity = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 200.0)) or 200.0)
         _dir = directional_refusal(
             positions,
             coin=str(coin or ""),
@@ -1038,7 +1038,7 @@ def _portfolio_open_refusal(
 
         _mode = str(strategy_mode or "").upper()
         if _mode:
-            _equity_b = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
+            _equity_b = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 200.0)) or 200.0)
             _budget = engine_budget_refusal(
                 getattr(state, "simulation_ledger_events", None) or [],
                 moteur=_mode,
@@ -1076,7 +1076,7 @@ def _portfolio_open_refusal(
 
         _cote = _normaliser_sens(side)
         if _cote:
-            _equity_c = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
+            _equity_c = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 200.0)) or 200.0)
             _pct_grp = _env_float("HYPERSMART_MAX_GROUP_NET_EXPOSURE_PCT", 80.0)
             _cap_grp = _equity_c * max(0.0, _pct_grp) / 100.0
             if _cap_grp > 0.0:
@@ -1226,7 +1226,7 @@ def _opens_today(ledger_events: list) -> int:
 def _day_pnl_pct(state: UiState) -> float:
     """PnL du jour en % de l'equity de depart. 0.0 si inconnu -> le verrou de gain ne mord pas
     (il est de toute facon DESACTIVE par defaut : HYPERSMART_DAILY_PROFIT_TARGET_PCT=0)."""
-    equity0 = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0)) or 100.0)
+    equity0 = abs(_safe_float(getattr(state, "simulation_starting_equity_usdt", 200.0)) or 200.0)
     if equity0 <= 0:
         return 0.0
     realized = _safe_float(getattr(state, "simulation_realized_pnl_usdt", 0.0)) or 0.0
@@ -1326,7 +1326,7 @@ def _copy_like_direct_order_refusal(value: dict[str, Any], *, state: UiState | N
             min_edge_required_bps=float(min_edge),
             consensus_wallets=int(consensus),
             liquidity_score=float(liquidity),
-            starting_equity_usdt=float(getattr(state, "simulation_starting_equity_usdt", 100.0) or 100.0),
+            starting_equity_usdt=float(getattr(state, "simulation_starting_equity_usdt", 200.0) or 200.0),
             extra_edge_after_loss_bps=abs(_env_float("HYPERSMART_DIRECT_COPY_RECOVERY_EDGE_BONUS_BPS", 24.0)),
             min_consensus_after_loss=max(min_consensus, _env_int("HYPERSMART_DIRECT_COPY_RECOVERY_MIN_CONSENSUS", 4)),
             min_liquidity_after_loss=max(min_liquidity, _env_float("HYPERSMART_DIRECT_COPY_RECOVERY_MIN_LIQUIDITY", 0.60)),

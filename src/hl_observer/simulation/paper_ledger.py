@@ -67,7 +67,7 @@ class LedgerPosition:
 
 @dataclass(slots=True)
 class PaperLedger:
-    starting_balance_usdc: float = 100.0
+    starting_balance_usdc: float = 200.0
     session_id: str = field(default_factory=lambda: f"paper:{uuid.uuid4().hex}")
     events: list[PaperEvent] = field(default_factory=list)
     positions: dict[str, LedgerPosition] = field(default_factory=dict)
@@ -693,8 +693,8 @@ class LedgerScope(str, Enum):
 class ScopedLedgerBook:
     """Independent capital, positions, drawdown and reports per research lane."""
 
-    strict_starting_balance_usdc: float = 100.0
-    experimental_starting_balance_usdc: float = 100.0
+    strict_starting_balance_usdc: float = 200.0
+    experimental_starting_balance_usdc: float = 200.0
     session_id: str = field(default_factory=lambda: f"paper-book:{uuid.uuid4().hex}")
     _ledgers: dict[LedgerScope, PaperLedger] = field(init=False)
 

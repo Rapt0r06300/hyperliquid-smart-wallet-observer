@@ -349,7 +349,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         state; it performs no DB scan and invents no positions or PnL.
         """
 
-        starting = safe_float(getattr(state, "simulation_starting_equity_usdt", 100.0), 100.0)
+        starting = safe_float(getattr(state, "simulation_starting_equity_usdt", 200.0), 200.0)
         realized = safe_float(getattr(state, "simulation_realized_pnl_usdc", 0.0), 0.0)
         history = getattr(state, "simulation_equity_history", None)
         if not isinstance(history, list):
@@ -726,7 +726,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         *,
         mid_prices: dict[str, float] | None = None,
         orderbooks_by_coin: dict[str, dict[str, Any]] | None = None,
-        starting_equity_usdt: float = 100.0,
+        starting_equity_usdt: float = 200.0,
         max_position_notional_usdt: float = 50.0,
         max_open_positions: int = 6,
         max_events: int = 2_000,
@@ -1030,7 +1030,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
 
         def recent_paper_return_fractions(*, limit: int = 80) -> list[float]:
             returns: list[float] = []
-            denominator = max(1.0, float(starting_equity_usdt or 100.0))
+            denominator = max(1.0, float(starting_equity_usdt or 200.0))
             for item in ledger_events[-limit:]:
                 if not isinstance(item, dict) or item.get("status") != "LOCAL_REPLAY":
                     continue
@@ -2767,7 +2767,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         return {
             "timestamp_ms": int(timestamp_ms or state.simulation_started_at_ms or now_ms()),
             "current_pnl_usdc": 0.0,
-            "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 100.0), 6),
+            "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 200.0), 6),
             "realized_pnl_usdc": 0.0,
             "unrealized_pnl_usdc": 0.0,
             "open_exposure_usdt": 0.0,
@@ -2837,7 +2837,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
                 {
                     "timestamp_ms": int(event.get("observed_at_ms") or timestamp_ms),
                     "current_pnl_usdc": round(next_pnl, 6),
-                    "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 100.0) + next_pnl, 6),
+                    "current_equity_usdt": round(float(state.simulation_starting_equity_usdt or 200.0) + next_pnl, 6),
                     "realized_pnl_usdc": round(next_pnl, 6),
                     "unrealized_pnl_usdc": 0.0,
                     "open_exposure_usdt": previous.get("open_exposure_usdt") or 0.0,
@@ -2901,7 +2901,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
         return candles
 
     def build_pnl_consistency(equity: dict[str, Any]) -> dict[str, Any]:
-        starting = safe_float(equity.get("starting_equity_usdt"), 100.0)
+        starting = safe_float(equity.get("starting_equity_usdt"), 200.0)
         realized = safe_float(equity.get("realized_pnl_usdc"), 0.0)
         unrealized = safe_float(equity.get("unrealized_pnl_usdc"), 0.0)
         reported_total = safe_float(equity.get("current_pnl_usdc"), 0.0)
@@ -5376,7 +5376,7 @@ def create_router(settings: Settings, state: UiState, bus: UiEventBus) -> APIRou
     async def actions(request: UiActionRequest) -> dict[str, Any]:
         if request.action == "reset_simulation_session":
             state.simulation_started_at_ms = now_ms()
-            state.simulation_starting_equity_usdt = 100.0
+            state.simulation_starting_equity_usdt = 200.0
             state.simulation_processed_delta_keys.clear()
             state.simulation_virtual_positions.clear()
             state.simulation_ledger_events.clear()

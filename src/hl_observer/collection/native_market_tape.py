@@ -6,6 +6,8 @@ not an automatic claim that the surrounding window is SAFE.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -179,6 +181,50 @@ def native_tick_envelope(
         observed_clock_offset_ms=_float(transport.get("clock_offset_ms")),
         clock_offset_uncertainty_ms=_float(transport.get("clock_uncertainty_ms")),
     )
+
+
+def native_tick_envelopes(
+    venue: str,
+    payload: Mapping[str, Any],
+) -> list[TickEnvelope]:
+    """Split native websocket trade batches into exactly replayable events."""
+    message = dict(payload)
+    venue_key = str(venue or "").strip().lower()
+    rows_key: str | None = None
+    if venue_key == "bybit" and str(message.get("topic") or "").startswith("publicTrade."):
+        rows_key = "data"
+    elif venue_key in {"okx", "bitget"}:
+        arg = message.get("arg")
+        channel = str(arg.get("channel") or "") if isinstance(arg, Mapping) else ""
+        if channel in {"trades", "trades-all", "trade"}:
+            rows_key = "data"
+    elif venue_key == "gate" and message.get("channel") == "futures.trades":
+        rows_key = "result"
+    rows = message.get(rows_key) if rows_key else None
+    if not isinstance(rows, list) or len(rows) <= 1:
+        envelope = native_tick_envelope(venue_key, message)
+        return [envelope] if envelope is not None else []
+    raw_batch = dict(message)
+    raw_batch.pop("_alina_transport", None)
+    batch_digest = hashlib.sha256(json.dumps(
+        raw_batch, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), default=str,
+    ).encode("utf-8")).hexdigest()
+    envelopes = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            continue
+        individual = dict(message)
+        individual[rows_key] = [dict(row)]
+        envelope = native_tick_envelope(venue_key, individual)
+        if envelope is not None:
+            envelope.parsed_summary.update({
+                "source_batch_size": len(rows),
+                "source_batch_index": index,
+                "source_batch_sha256": batch_digest,
+            })
+            envelopes.append(envelope)
+    return envelopes
 
 
 def _bybit_identity(
@@ -479,4 +525,4 @@ def _max_int(values: Any) -> int | None:
     return max(parsed) if parsed else None
 
 
-__all__ = ["native_instrument_metadata_envelope", "native_tick_envelope"]
+__all__ = ["native_instrument_metadata_envelope", "native_tick_envelope", "native_tick_envelopes"]

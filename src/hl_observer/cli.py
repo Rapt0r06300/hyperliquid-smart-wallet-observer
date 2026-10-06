@@ -1337,7 +1337,7 @@ def opportunity_report(
         risk_config=RealtimeCopyRiskConfig(
             min_edge_required_bps=max(1.0, simulation_min_edge_bps),
             max_signal_age_ms=max_signal_age_ms,
-            starting_equity_usdt=100.0,
+            starting_equity_usdt=200.0,
         ),
     )
     typer.echo(format_fresh_opportunity_report(report))
@@ -1397,7 +1397,7 @@ def simulation_report(
     typer.echo("simulation_report=local_without_money")
     typer.echo(f"period={period}")
     typer.echo(f"state_path={simulation_state_path(settings)}")
-    typer.echo("starting_equity_usdt=100.00")
+    typer.echo("starting_equity_usdt=200.00")
 
 
 @app.command("simulation-loss-report")
@@ -3791,7 +3791,7 @@ def testnet_loop_observe(
 
 @app.command("reset-simulation-state")
 def reset_simulation_state_command(
-    starting_equity: float = typer.Option(100.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
+    starting_equity: float = typer.Option(200.0, "--starting-equity", help="Fresh local simulated USDT balance for the next UI session."),
 ) -> None:
     """Reset the local UI simulation session; no orders, no network, no testnet."""
     settings = _settings()

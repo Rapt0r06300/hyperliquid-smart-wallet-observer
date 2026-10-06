@@ -5,6 +5,7 @@ import json
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
     native_tick_envelope,
+    native_tick_envelopes,
 )
 
 
@@ -65,6 +66,12 @@ def test_bybit_trade_batch_preserves_raw_and_matching_time() -> None:
     assert envelope.observed_clock_offset_ms == -3.0
     assert envelope.clock_offset_uncertainty_ms == 5.0
     assert "_alina_transport" not in envelope.raw_payload
+
+    split = native_tick_envelopes("bybit", payload)
+    assert len(split) == 2
+    assert [row.exchange_ts_ms for row in split] == [1_990, 1_995]
+    assert all(row.parsed_summary["event_count"] == 1 for row in split)
+    assert all(row.parsed_summary["source_batch_size"] == 2 for row in split)
 
 
 def test_bybit_liquidations_are_kept_as_distinct_family() -> None:

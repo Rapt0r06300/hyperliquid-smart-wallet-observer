@@ -107,12 +107,19 @@ def main() -> int:
     if creation_phase not in PHASES:
         raise SystemExit("manifest creation_phase invalid")
     manifest_epoch = manifest.get("phase_epoch")
+    pinned_collect_continuation = (
+        state["phase"] == "COLLECT"
+        and creation_phase == "COLLECT"
+        and isinstance(manifest_epoch, int)
+        and not isinstance(manifest_epoch, bool)
+        and 0 < manifest_epoch <= state["epoch"]
+    )
     if (
         isinstance(manifest_epoch, bool)
         or not isinstance(manifest_epoch, int)
         or manifest_epoch < 1
         or creation_phase != state["phase"]
-        or manifest_epoch != state["epoch"]
+        or (manifest_epoch != state["epoch"] and not pinned_collect_continuation)
     ):
         raise SystemExit("manifest phase/epoch mismatch")
     kind = str(manifest.get("kind") or "")

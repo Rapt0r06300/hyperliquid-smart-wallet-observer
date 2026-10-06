@@ -219,10 +219,17 @@ def acquire_lease(
 
     # Phase/Epoch Guard for V2
     if m.schema_version == SCHEMA_VERSION_V2:
-        if expected_epoch is not None and m.phase_epoch != expected_epoch:
-            raise ValueError(f"Stale phase epoch: manifest={m.phase_epoch}, current={expected_epoch}")
         if expected_phase is not None and m.creation_phase != expected_phase:
             raise ValueError(f"Phase mismatch: manifest={m.creation_phase}, current={expected_phase}")
+        if expected_epoch is not None and m.phase_epoch != expected_epoch:
+            pinned_collect_continuation = (
+                expected_phase == "COLLECT"
+                and m.creation_phase == "COLLECT"
+                and isinstance(m.phase_epoch, int)
+                and m.phase_epoch < expected_epoch
+            )
+            if not pinned_collect_continuation:
+                raise ValueError(f"Stale phase epoch: manifest={m.phase_epoch}, current={expected_epoch}")
 
     if m.lease and _parse_ts(m.lease["expires_at"]) > current:
         raise ValueError("active lease")
@@ -352,7 +359,13 @@ def select_due_campaigns(
             if current_phase is not None and m.creation_phase != current_phase:
                 continue
             if current_epoch is not None and m.phase_epoch != current_epoch:
-                continue
+                if not (
+                    current_phase == "COLLECT"
+                    and m.creation_phase == "COLLECT"
+                    and isinstance(m.phase_epoch, int)
+                    and m.phase_epoch < current_epoch
+                ):
+                    continue
             if current_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
                 continue
             if current_phase == "ANALYZE" and m.kind not in ANALYZE_CAMPAIGN_KINDS:

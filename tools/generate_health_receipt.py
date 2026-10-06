@@ -66,7 +66,14 @@ def main() -> int:
     for row in campaigns:
         if row["status"] not in active_statuses:
             continue
-        if row.get("phase_epoch") != phase.get("epoch"):
+        campaign_epoch = int(row.get("phase_epoch") or 0)
+        phase_epoch = int(phase.get("epoch") or 0)
+        pinned_collect_continuation = (
+            phase.get("phase") == "COLLECT"
+            and row.get("creation_phase") == "COLLECT"
+            and 0 < campaign_epoch <= phase_epoch
+        )
+        if campaign_epoch != phase_epoch and not pinned_collect_continuation:
             phase_mismatches.append({
                 "campaign_id": row.get("campaign_id"),
                 "reason": "PHASE_EPOCH_MISMATCH",

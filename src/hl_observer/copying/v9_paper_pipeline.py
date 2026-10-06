@@ -35,7 +35,7 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 @dataclass(frozen=True, slots=True)
 class V9PipelineConfig:
-    starting_equity_usdt: float = 100.0
+    starting_equity_usdt: float = 200.0
     max_position_notional_usdt: float = 50.0
     max_total_exposure_usdt: float = 100.0
     min_edge_bps: float = 10.0

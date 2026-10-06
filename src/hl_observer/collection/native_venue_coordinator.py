@@ -27,7 +27,7 @@ from hl_observer.collection.gate_market_data import GateMarketState, GatePublicC
 from hl_observer.collection.market_capture_tiers import CaptureProfile, CaptureTier, capture_profile
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
-    native_tick_envelope,
+    native_tick_envelopes,
 )
 from hl_observer.collection.native_venue_market import (
     MarketLevel,
@@ -272,12 +272,13 @@ class NativeVenueCoordinator:
     def _record_native_frame(self, venue: str, payload: Mapping[str, object]) -> None:
         if self.tick_writer is None:
             return
-        envelope = native_tick_envelope(venue, payload)
-        if envelope is None:
+        envelopes = native_tick_envelopes(venue, payload)
+        if not envelopes:
             return
         # A configured durable writer is evidence-critical: write failures propagate
         # instead of silently producing a partial window that looks complete.
-        self.tick_writer.append(envelope)
+        for envelope in envelopes:
+            self.tick_writer.append(envelope)
 
     async def run_clock_sync(self) -> None:
         while True:

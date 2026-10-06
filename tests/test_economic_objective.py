@@ -45,7 +45,7 @@ def _proof(**overrides):
         "family": "copy_vault",
         "paper_read_only": True,
         "real_execution": False,
-        "starting_capital_usd": 100.0,
+        "starting_capital_usd": 200.0,
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
@@ -123,8 +123,8 @@ def _proof(**overrides):
     return row
 
 
-def test_canonical_capital_contract_is_100_usd_for_every_family_and_keeps_four_usd_target():
-    assert STARTING_CAPITAL_USD == 100.0
+def test_canonical_capital_contract_is_200_usd_for_every_family_and_keeps_four_usd_target():
+    assert STARTING_CAPITAL_USD == 200.0
     assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 4.0
     assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
 

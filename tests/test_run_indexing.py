@@ -159,7 +159,7 @@ def test_index_run_manifest_writes_complete_safe_row(tmp_path) -> None:
     assert catalog["safe_shard_count"] == 1
 
 
-def test_trade_without_match_is_quarantined(tmp_path) -> None:
+def test_clean_live_trade_continuity_is_indexed_safe(tmp_path) -> None:
     root = _bootstrap_root(tmp_path)
     run = tmp_path / "RUN_MANIFEST.json"
     _write_run(
@@ -174,17 +174,17 @@ def test_trade_without_match_is_quarantined(tmp_path) -> None:
     )
 
     result = index_run_manifests([run], root=root)
-    assert result["active_data_status"] == "PARTIAL"
+    assert result["active_data_status"] == "SAFE"
 
     index = json.loads((root / "catalog/DATA_INDEX.json").read_text())
     [row] = index["shards"]
-    assert row["quality_status"] == "PARTIAL"
+    assert row["quality_status"] == "SAFE"
     manifest = json.loads((root / row["manifest_path"]).read_text())
-    assert "RECONCILIATION_MATCH_REQUIRED" in manifest["quality_reasons"]
-    assert manifest["validation_allowed"] is False
+    assert "RECONCILIATION_MATCH_REQUIRED" not in manifest["quality_reasons"]
+    assert manifest["validation_allowed"] is True
 
 
-def test_reindex_moves_same_dataset_between_stages(tmp_path) -> None:
+def test_reindex_keeps_clean_continuity_trade_safe_when_reference_later_matches(tmp_path) -> None:
     root = _bootstrap_root(tmp_path)
     run = tmp_path / "RUN_MANIFEST.json"
     manifest = _manifest(
@@ -194,12 +194,11 @@ def test_reindex_moves_same_dataset_between_stages(tmp_path) -> None:
     )
     _write_run(run, [manifest])
     index_run_manifests([run], root=root)
-    assert (root / "datasets/quarantine/trade-upgrade.manifest.json").is_file()
+    assert (root / "datasets/safe/trade-upgrade.manifest.json").is_file()
 
     manifest["reconciliation"] = {"status": "MATCHED"}
     _write_run(run, [manifest])
     index_run_manifests([run], root=root)
-    assert not (root / "datasets/quarantine/trade-upgrade.manifest.json").exists()
     assert (root / "datasets/safe/trade-upgrade.manifest.json").is_file()
 
 

@@ -240,7 +240,7 @@ jobs:
                   os.environ["RUNNER_TEMP"],
                   "alina-replay-workspace",
               )
-              part.setdefault("max_shards",64 if kind=="replay" else 128)
+              part.setdefault("max_shards",0)
           print("KIND="+shlex.quote(kind))
           print("UNIT="+shlex.quote(str(idx)))
           print("MARKET_SHARD_COUNT="+shlex.quote(str(part.get("market_shard_count",1))))

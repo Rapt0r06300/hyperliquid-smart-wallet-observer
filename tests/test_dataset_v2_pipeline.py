@@ -221,7 +221,7 @@ def test_collection_queue_drop_rejects_every_native_bundle_shard(tmp_path) -> No
     assert "SEQUENCE_OR_QUEUE_GAP" in manifest["quality_reasons"]
 
 
-def test_trade_shard_requires_explicit_matched_reconciliation(tmp_path) -> None:
+def test_clean_live_trade_shard_can_use_source_continuity(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
     trade = TickEnvelope(
         source_id="bybit_public_ws",
@@ -252,9 +252,10 @@ def test_trade_shard_requires_explicit_matched_reconciliation(tmp_path) -> None:
     manifest_path = next((tmp_path / "bundle" / "manifests").glob("*.json"))
     manifest = json.loads(manifest_path.read_text())
     assert manifest["family"] == "trades"
-    assert manifest["reconciliation"]["status"] == "UNVERIFIED"
+    assert manifest["reconciliation"]["status"] == "SOURCE_CONTINUITY_VERIFIED"
     assert manifest["quality_status"] == "PARTIAL"
-    assert "RECONCILIATION_MATCH_REQUIRED" in manifest["quality_reasons"]
+    assert "RECONCILIATION_MATCH_REQUIRED" not in manifest["quality_reasons"]
+    assert "REMOTE_ASSET_NOT_VERIFIED" in manifest["quality_reasons"]
 
     asset = tmp_path / "bundle" / "assets" / manifest["release_asset"]
     digest = hashlib.sha256(asset.read_bytes()).hexdigest()
@@ -268,7 +269,7 @@ def test_trade_shard_requires_explicit_matched_reconciliation(tmp_path) -> None:
         remote_size=asset.stat().st_size,
         remote_digest="sha256:" + digest,
     )
-    assert verified["quality_status"] == "PARTIAL"
+    assert verified["quality_status"] == "SAFE"
 
     reconciled = attach_reconciliation(
         verified,
