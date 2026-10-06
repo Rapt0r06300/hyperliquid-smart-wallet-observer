@@ -7,18 +7,79 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/market-e8-10-2026100613-v7/0",
+        "collection_metrics": {
+          "accepted_frames": 4758535,
+          "basis": "published_bundle_manifests",
+          "bbo_frames": 586798,
+          "compressed_bytes": 259368225,
+          "duration_s": 3886.325,
+          "ended_at_ms": 1791317980586,
+          "l2_frames": 717574,
+          "partial_count": 800,
+          "persisted_frames": 4758535,
+          "queue_drops": 0,
+          "record_count_observed": 2013082,
+          "reject_count": 45,
+          "safe_count": 0,
+          "shard_count": 845,
+          "started_at_ms": 1791314094261,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 161176,
+          "trade_shard_count": 133,
+          "trade_shards_exact": 133,
+          "uncompressed_bytes": 4443552074,
+          "uncompressed_size_coverage_complete": true
+        },
+        "collection_plan_sha256": "ff6235ec4c9dbc40455f6767713b96d3339d331cfa0dcfd658e261eb5de61d69",
+        "output_root": "/home/runner/work/_temp/campaign-output/market-e8-10-2026100613-v7/0",
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-e8-10-2026100613-v7/0"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "   ],\n          \"CAT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CHZ_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CNPY_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COHR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COOKIE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CVX_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DEEP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DRAM_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"GENIUS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"HIVE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IWM_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KGEN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KNC_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KWEB_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"LA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MANTRA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MEME_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MERL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MVLL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"OGN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PEOPLE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PEPE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PNUT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"RARE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SHELL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SMH_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SOFI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"STONK_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SUI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SUN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XAU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XPT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XRP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZEST_USDT\": [\n            \"MISMATCH\"\n          ]\n        }\n      },\n      \"hyperliquid\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": false,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"ARB\": [\n            \"PARTIAL\"\n          ],\n          \"CAKE\": [\n            \"PARTIAL\"\n          ],\n          \"IO\": [\n            \"PARTIAL\"\n          ],\n          \"MEME\": [\n            \"PARTIAL\"\n          ],\n          \"MERL\": [\n            \"PARTIAL\"\n          ],\n          \"PEOPLE\": [\n            \"PARTIAL\"\n          ],\n          \"PNUT\": [\n            \"PARTIAL\"\n          ],\n          \"SUI\": [\n            \"PARTIAL\"\n          ],\n          \"XRP\": [\n            \"PARTIAL\"\n          ]\n        }\n      },\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"AGLD-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ANTHROPIC-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"APR-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ARB-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"BARD-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CAP-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CHZ-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CNPY-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"COHR-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CVX-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"DRAM-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"KO-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"LA-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MEME-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MERL-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MVLL-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PEOPLE-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PEPE-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PNUT-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"SUI-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"XAU-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"XRP-USDT-SWAP\": [\n            \"PARTIAL\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791314094261,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ABNBUSDT\",\n      \"AGLDUSDT\",\n      \"ANETUSDT\",\n      \"ANTHROPICUSDT\",\n      \"APRUSDT\",\n      \"ARBUSDT\",\n      \"B200USDT\",\n      \"BARDUSDT\",\n      \"BLESSUSDT\",\n      \"CAKEUSDT\",\n      \"CAPUSDT\",\n      \"CARVUSDT\",\n      \"CATUSDT\",\n      \"CHZUSDT\",\n      \"COHRUSDT\",\n      \"COOKIEUSDT\",\n      \"CVXUSDT\",\n      \"DEEPUSDT\",\n      \"DRAMUSDT\",\n      \"GENIUSUSDT\",\n      \"GNRCUSDT\",\n      \"HIVEUSDT\",\n      \"IOUSDT\",\n      \"IWMUSDT\",\n      \"KGENUSDT\",\n      \"KNCUSDT\",\n      \"KOUSDT\",\n      \"KWEBUSDT\",\n      \"LAUSDT\",\n      \"MANTRAUSDT\",\n      \"MEMEUSDT\",\n      \"MERLUSDT\",\n      \"MVLLUSDT\",\n      \"NOCUSDT\",\n      \"OGNUSDT\",\n      \"PATHUSDT\",\n      \"PEOPLEUSDT\",\n      \"PEPEUSDT\",\n      \"PNUTUSDT\",\n      \"RAREUSDT\",\n      \"SHELLUSDT\",\n      \"SIMOUSDT\",\n      \"SMHUSDT\",\n      \"SOFIUSDT\",\n      \"STONKUSDT\",\n      \"SUIUSDT\",\n      \"SUNUSDT\",\n      \"XAUUSDT\",\n      \"XPTUSDT\",\n      \"XRPUSDT\",\n      \"ZESTUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ABNB_USDT\",\n      \"AGLD_USDT\",\n      \"ANET_USDT\",\n      \"ANTHROPIC_USDT\",\n      \"APR_USDT\",\n      \"ARB_USDT\",\n      \"B200_USDT\",\n      \"BARD_USDT\",\n      \"BLESS_USDT\",\n      \"CAKE_USDT\",\n      \"CAP_USDT\",\n      \"CARV_USDT\",\n      \"CAT_USDT\",\n      \"CHZ_USDT\",\n      \"CNPY_USDT\",\n      \"COHR_USDT\",\n      \"COOKIE_USDT\",\n      \"CVX_USDT\",\n      \"DEEP_USDT\",\n      \"DRAM_USDT\",\n      \"GENIUS_USDT\",\n      \"GNRC_USDT\",\n      \"HIVE_USDT\",\n      \"IO_USDT\",\n      \"IWM_USDT\",\n      \"KGEN_USDT\",\n      \"KNC_USDT\",\n      \"KO_USDT\",\n      \"KWEB_USDT\",\n      \"LA_USDT\",\n      \"MANTRA_USDT\",\n      \"MEME_USDT\",\n      \"MERL_USDT\",\n      \"MVLL_USDT\",\n      \"NOC_USDT\",\n      \"OGN_USDT\",\n      \"PATH_USDT\",\n      \"PEOPLE_USDT\",\n      \"PEPE_USDT\",\n      \"PNUT_USDT\",\n      \"RARE_USDT\",\n      \"SHELL_USDT\",\n      \"SMH_USDT\",\n      \"SOFI_USDT\",\n      \"STONK_USDT\",\n      \"SUI_USDT\",\n      \"SUN_USDT\",\n      \"XAU_USDT\",\n      \"XPT_USDT\",\n      \"XRP_USDT\",\n      \"ZEST_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"ARB\",\n      \"CAKE\",\n      \"IO\",\n      \"MEME\",\n      \"MERL\",\n      \"PEOPLE\",\n      \"PNUT\",\n      \"SUI\",\n      \"XRP\"\n    ],\n    \"okx\": [\n      \"AGLD-USDT-SWAP\",\n      \"ANTHROPIC-USDT-SWAP\",\n      \"APR-USDT-SWAP\",\n      \"ARB-USDT-SWAP\",\n      \"BARD-USDT-SWAP\",\n      \"CAP-USDT-SWAP\",\n      \"CHZ-USDT-SWAP\",\n      \"CNPY-USDT-SWAP\",\n      \"COHR-USDT-SWAP\",\n      \"CVX-USDT-SWAP\",\n      \"DRAM-USDT-SWAP\",\n      \"IWM-USDT-SWAP\",\n      \"KGEN-USDT-SWAP\",\n      \"KO-USDT-SWAP\",\n      \"LA-USDT-SWAP\",\n      \"MEME-USDT-SWAP\",\n      \"MERL-USDT-SWAP\",\n      \"MVLL-USDT-SWAP\",\n      \"PEOPLE-USDT-SWAP\",\n      \"PEPE-USDT-SWAP\",\n      \"PNUT-USDT-SWAP\",\n      \"SHELL-USDT-SWAP\",\n      \"SIMO-USDT-SWAP\",\n      \"SMH-USDT-SWAP\",\n      \"SUI-USDT-SWAP\",\n      \"XAU-USDT-SWAP\",\n      \"XPT-USDT-SWAP\",\n      \"XRP-USDT-SWAP\"\n    ]\n  }\n}\n"
+          }
+        ],
+        "returncode": 0,
+        "safe_workspace": null,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "   ],\n          \"CAT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CHZ_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CNPY_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COHR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COOKIE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CVX_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DEEP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DRAM_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"GENIUS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"HIVE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IWM_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KGEN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KNC_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KWEB_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"LA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MANTRA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MEME_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MERL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MVLL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"OGN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PEOPLE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PEPE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PNUT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"RARE_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SHELL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SMH_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SOFI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"STONK_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SUI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SUN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XAU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XPT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XRP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZEST_USDT\": [\n            \"MISMATCH\"\n          ]\n        }\n      },\n      \"hyperliquid\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": false,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"ARB\": [\n            \"PARTIAL\"\n          ],\n          \"CAKE\": [\n            \"PARTIAL\"\n          ],\n          \"IO\": [\n            \"PARTIAL\"\n          ],\n          \"MEME\": [\n            \"PARTIAL\"\n          ],\n          \"MERL\": [\n            \"PARTIAL\"\n          ],\n          \"PEOPLE\": [\n            \"PARTIAL\"\n          ],\n          \"PNUT\": [\n            \"PARTIAL\"\n          ],\n          \"SUI\": [\n            \"PARTIAL\"\n          ],\n          \"XRP\": [\n            \"PARTIAL\"\n          ]\n        }\n      },\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"AGLD-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ANTHROPIC-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"APR-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ARB-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"BARD-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CAP-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CHZ-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CNPY-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"COHR-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"CVX-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"DRAM-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"KO-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"LA-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MEME-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MERL-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"MVLL-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PEOPLE-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PEPE-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"PNUT-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"SUI-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"XAU-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"XRP-USDT-SWAP\": [\n            \"PARTIAL\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791314094261,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ABNBUSDT\",\n      \"AGLDUSDT\",\n      \"ANETUSDT\",\n      \"ANTHROPICUSDT\",\n      \"APRUSDT\",\n      \"ARBUSDT\",\n      \"B200USDT\",\n      \"BARDUSDT\",\n      \"BLESSUSDT\",\n      \"CAKEUSDT\",\n      \"CAPUSDT\",\n      \"CARVUSDT\",\n      \"CATUSDT\",\n      \"CHZUSDT\",\n      \"COHRUSDT\",\n      \"COOKIEUSDT\",\n      \"CVXUSDT\",\n      \"DEEPUSDT\",\n      \"DRAMUSDT\",\n      \"GENIUSUSDT\",\n      \"GNRCUSDT\",\n      \"HIVEUSDT\",\n      \"IOUSDT\",\n      \"IWMUSDT\",\n      \"KGENUSDT\",\n      \"KNCUSDT\",\n      \"KOUSDT\",\n      \"KWEBUSDT\",\n      \"LAUSDT\",\n      \"MANTRAUSDT\",\n      \"MEMEUSDT\",\n      \"MERLUSDT\",\n      \"MVLLUSDT\",\n      \"NOCUSDT\",\n      \"OGNUSDT\",\n      \"PATHUSDT\",\n      \"PEOPLEUSDT\",\n      \"PEPEUSDT\",\n      \"PNUTUSDT\",\n      \"RAREUSDT\",\n      \"SHELLUSDT\",\n      \"SIMOUSDT\",\n      \"SMHUSDT\",\n      \"SOFIUSDT\",\n      \"STONKUSDT\",\n      \"SUIUSDT\",\n      \"SUNUSDT\",\n      \"XAUUSDT\",\n      \"XPTUSDT\",\n      \"XRPUSDT\",\n      \"ZESTUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ABNB_USDT\",\n      \"AGLD_USDT\",\n      \"ANET_USDT\",\n      \"ANTHROPIC_USDT\",\n      \"APR_USDT\",\n      \"ARB_USDT\",\n      \"B200_USDT\",\n      \"BARD_USDT\",\n      \"BLESS_USDT\",\n      \"CAKE_USDT\",\n      \"CAP_USDT\",\n      \"CARV_USDT\",\n      \"CAT_USDT\",\n      \"CHZ_USDT\",\n      \"CNPY_USDT\",\n      \"COHR_USDT\",\n      \"COOKIE_USDT\",\n      \"CVX_USDT\",\n      \"DEEP_USDT\",\n      \"DRAM_USDT\",\n      \"GENIUS_USDT\",\n      \"GNRC_USDT\",\n      \"HIVE_USDT\",\n      \"IO_USDT\",\n      \"IWM_USDT\",\n      \"KGEN_USDT\",\n      \"KNC_USDT\",\n      \"KO_USDT\",\n      \"KWEB_USDT\",\n      \"LA_USDT\",\n      \"MANTRA_USDT\",\n      \"MEME_USDT\",\n      \"MERL_USDT\",\n      \"MVLL_USDT\",\n      \"NOC_USDT\",\n      \"OGN_USDT\",\n      \"PATH_USDT\",\n      \"PEOPLE_USDT\",\n      \"PEPE_USDT\",\n      \"PNUT_USDT\",\n      \"RARE_USDT\",\n      \"SHELL_USDT\",\n      \"SMH_USDT\",\n      \"SOFI_USDT\",\n      \"STONK_USDT\",\n      \"SUI_USDT\",\n      \"SUN_USDT\",\n      \"XAU_USDT\",\n      \"XPT_USDT\",\n      \"XRP_USDT\",\n      \"ZEST_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"ARB\",\n      \"CAKE\",\n      \"IO\",\n      \"MEME\",\n      \"MERL\",\n      \"PEOPLE\",\n      \"PNUT\",\n      \"SUI\",\n      \"XRP\"\n    ],\n    \"okx\": [\n      \"AGLD-USDT-SWAP\",\n      \"ANTHROPIC-USDT-SWAP\",\n      \"APR-USDT-SWAP\",\n      \"ARB-USDT-SWAP\",\n      \"BARD-USDT-SWAP\",\n      \"CAP-USDT-SWAP\",\n      \"CHZ-USDT-SWAP\",\n      \"CNPY-USDT-SWAP\",\n      \"COHR-USDT-SWAP\",\n      \"CVX-USDT-SWAP\",\n      \"DRAM-USDT-SWAP\",\n      \"IWM-USDT-SWAP\",\n      \"KGEN-USDT-SWAP\",\n      \"KO-USDT-SWAP\",\n      \"LA-USDT-SWAP\",\n      \"MEME-USDT-SWAP\",\n      \"MERL-USDT-SWAP\",\n      \"MVLL-USDT-SWAP\",\n      \"PEOPLE-USDT-SWAP\",\n      \"PEPE-USDT-SWAP\",\n      \"PNUT-USDT-SWAP\",\n      \"SHELL-USDT-SWAP\",\n      \"SIMO-USDT-SWAP\",\n      \"SMH-USDT-SWAP\",\n      \"SUI-USDT-SWAP\",\n      \"XAU-USDT-SWAP\",\n      \"XPT-USDT-SWAP\",\n      \"XRP-USDT-SWAP\"\n    ]\n  }\n}\n",
+        "universe_discovery_required": true
+      },
+      "sha256": "ba37c362ff892b59440c19a2a4d2f41d8fa0f8b8bf777510545e4d4185f7c3b5"
+    }
+  },
   "config_sha256": "e909663016beb75fe4cd25084c042d93c00cfcf9f34c3ccd18f5a1a1ff0c135f",
   "consecutive_failures": 0,
   "created_at": "2026-10-06T13:47:32.830609+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "ba37c362ff892b59440c19a2a4d2f41d8fa0f8b8bf777510545e4d4185f7c3b5",
     "duration_s": 3500,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37497805214",
     "market_shard_count": 16,
     "market_shard_index": 10,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100613/shard-10.json",
     "plan_sha256": "ff6235ec4c9dbc40455f6767713b96d3339d331cfa0dcfd658e261eb5de61d69",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 52,
@@ -57,15 +118,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-06T21:33:38.141459Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-06T19:14:45.198188Z",
-    "expires_at": "2026-10-07T00:59:45.198188Z",
-    "lease_token_sha256": "156433d7cabd8e564707274ada034ac32e09da00495a78fe633654aa02c0cb1d",
-    "owner_run_id": "37497805214"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -83,9 +145,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-06T19:14:45.198248Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "ba37c362ff892b59440c19a2a4d2f41d8fa0f8b8bf777510545e4d4185f7c3b5",
+  "updated_at": "2026-10-06T21:33:38.141459Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
