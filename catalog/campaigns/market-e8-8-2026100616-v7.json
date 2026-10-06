@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 1,
+  "attempts": 2,
   "campaign_id": "market-e8-8-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "ca34ee98691daf8d466d2a8951755c8ebaba1eda8426797d78cf1ea6b96c4193",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-market-e8-8-2026100616-v7-u0 --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 market-e8-8-2026100616-v7 unit 0 --notes Alina SmartFlow dataset V2 collection run. Collector SHA: 4e9602696f75736cd15f35a0231842ca100f1af1 Shards: 1002 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 9809:6900E:A3D4D7:21C0444:6AC57DBE and timestamp 2026-10-06 23:01:18 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "b6c1ab95616cfbbb6dd7ecd58d11ceac44995c7847c5585d74faeaf317299801"
+    }
+  },
   "config_sha256": "fd4dfc740c12a8ba22916ab1a5217a87ec0d06ac0e339dc14933c5de1c11f110",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-06T16:16:19.814213+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "b6c1ab95616cfbbb6dd7ecd58d11ceac44995c7847c5585d74faeaf317299801",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37528159770",
     "market_shard_count": 16,
     "market_shard_index": 8,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-08.json",
     "plan_sha256": "3552de30a770061bba95407f77aad37f7a3d583e54fc37663f3c9468ee567eb5",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 60,
@@ -48,15 +67,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-06T23:01:18.940366Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-06T21:39:07.137075Z",
-    "expires_at": "2026-10-07T03:24:07.137075Z",
-    "lease_token_sha256": "069b896b6efc23c5e942b6e5e82e21f508e60472eae927a115f7baa4d4976856",
-    "owner_run_id": "37528159770"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -65,7 +85,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -74,9 +94,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-06T21:39:07.137145Z",
+  "updated_at": "2026-10-06T23:01:18.940366Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
