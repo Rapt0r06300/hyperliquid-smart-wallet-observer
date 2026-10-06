@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 1,
+  "attempts": 2,
   "campaign_id": "market-3-2026100104-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "453ac83c731f921c3a56ff78952ba63ecf56a2ff",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "56733f9e2c18f46404aff74963d03dcdd1e7f8e324204e7f6b14f7c24e680a86",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-3-2026100104-v7-u0 /home/runner/work/_temp/campaign-output/market-3-2026100104-v7/0/assets/okx-public-ws-trades-iota-usdt-swap-1791303939930-1791304808171-c996561dbaf1.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID D100:22AF67:4FC7E0:71E98D:6AC545E8 and timestamp 2026-10-06 19:03:04 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/404978059/assets?label=&name=okx-public-ws-trades-iota-usdt-swap-1791303939930-1791304808171-c996561dbaf1.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "eeee775a7e78c7c593fc8ee05ab576878239996d9897343c9f6f7f1841c170cc"
+    }
+  },
   "config_sha256": "9f0b92aa005f380bb23259e2d8b3df5cc23b265e00ed3c925ac9244686376c1f",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-01T04:38:03.012304+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "eeee775a7e78c7c593fc8ee05ab576878239996d9897343c9f6f7f1841c170cc",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 4,
+    "last_run_id": "37495214637",
     "market_shard_count": 16,
     "market_shard_index": 3,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/2026100104/shard-03.json",
     "plan_sha256": "c082b8192724e8e6cce11906b0409b8522a17528613cc9950e817b21a5f70b63",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 38,
@@ -60,15 +79,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-06T19:03:04.544404Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-06T16:24:55.913156Z",
-    "expires_at": "2026-10-06T22:09:55.913156Z",
-    "lease_token_sha256": "7d4304d2c52e3bf7fedcc739dfa6150e94bf402f5feaff36267d4ab33f26db7c",
-    "owner_run_id": "37495214637"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -76,8 +96,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 0,
+  "next_due_at": "2026-10-06T19:08:04.544404Z",
+  "no_progress_count": 1,
   "operator_request_id": "4f466e5b296c2d6fb074985a392cfc24ccba4fffe8150146bec6b15fde689ac1",
   "outputs": [],
   "paper_only": true,
@@ -86,9 +106,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-06T16:24:55.913213Z",
+  "updated_at": "2026-10-06T19:03:04.544404Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
