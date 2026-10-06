@@ -1,22 +1,22 @@
 {
   "backtest_run": false,
-  "campaign_id": "collect-resume-probe-e6-run37199548942",
+  "campaign_id": "collect-resume-probe-e8-run37473314609",
   "checkpoint_lineage": [
     {
-      "at": "2026-10-04T11:41:23.792040Z",
-      "digest": "3b9c9b084d3f7bb1b3777dc39fdd0eb3917ce29054e2624dd80377fb5807d7d4",
+      "at": "2026-10-06T13:46:07.299638Z",
+      "digest": "ce78578b942b6826eea49660048ab90c25a5373b3445d6631ecf2366fac74091",
       "next_probe_unit": 1,
       "result_sha256": "4b2745ea779a72986e699e83508fbab6d14ee254c9b8c712dd8aa1f1fe212079",
-      "unit_id": "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13"
+      "unit_id": "d49cb79e4eefc1bdc609b60db87de84319660f5ead102d99bf78de8547f70d1c"
     }
   ],
   "completed_unit_identities": [
-    "0324f3ee6223f4e5c189729bc9deae415ba18724da0fc8d228d866ec01ffda13",
-    "1f296b54ffd1e85ab6971198aefc4fcb5e279e5eaf54817f247668b296641317"
+    "c934ee5d55810e77bfdc9cbc462f1b7dc01ce0d425358e540475dda1da71bee4",
+    "d49cb79e4eefc1bdc609b60db87de84319660f5ead102d99bf78de8547f70d1c"
   ],
   "control_plane_files": {
     ".github/workflows/collect-two-segment-resume-smoke.yml": "25a955e96107f3b5811d2d39c53549e2a3c1166ba1a0553e25027d02aef530fe",
-    "src/hl_observer/control_plane/resumable_campaign.py": "13086cf2212b7f1edd7c942b021eb0d8c76b0de53e0f07632047446a36151307",
+    "src/hl_observer/control_plane/resumable_campaign.py": "a7be9a217591c87c72fdbad4cf85ff56eff96f935c2c55c1c75c7915e5837ab3",
     "tools/collect_resume_probe.py": "6c289ccbe16171d3a4df762c3e0188cbd19bb8ee11358ce4f0b51b687708b8b5"
   },
   "distinct_github_job_ids": true,
@@ -26,25 +26,25 @@
   "fresh_runner_for_segment_b": true,
   "network_used": false,
   "paper_only": true,
-  "phase_epoch_at_proof": 6,
+  "phase_epoch_at_proof": 8,
   "probe_creation_phase": "COLLECT",
   "probe_kind": "market_collection",
-  "probe_state_sha256": "6ddeecc27249f3365c70494a345196c93516c81731f6a2423ed5cd48e23745b7",
+  "probe_state_sha256": "06e39f26c3b86da3075afad1d4c8bd3d0c542318b8d71d621eccc734b29f99ce",
   "proof_scope": "control_plane_state_resume",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "273645801a4e5fa864b4e189380d0384e80747901a2462e5b90823134dd189fd",
+  "receipt_digest": "63e31effbb2b40f451fca85890e056563b039860aa79ba1c03e4bce1dc0896c4",
   "replay_run": false,
   "resumed_from_durable_checkpoint": true,
   "runner_filesystem_reused": false,
   "schema": "alina.two_segment_resume_receipt.v3",
   "segment_a_checkpoint_verified": true,
-  "segment_a_job_id": "111428223961",
-  "segment_b_job_id": "111428334766",
+  "segment_a_job_id": "112302159106",
+  "segment_b_job_id": "112302570365",
   "state_machine_schema": "alina.resumable_campaign.v2",
   "terminal_campaign_status": "COMPLETE",
   "terminal_checkpoint_id": "6899b6071d4f47d8457afc11c4ea56faf8a9debf70ebae74c6f94240c6fc4934",
   "terminal_completed_units": 2,
-  "terminal_evidence_digest": "c91e0e66554e55779fe7be601713a39e8dc6ca91703b17fb6fd4b70e44f6e1be",
-  "workflow_run_id": "37199548942"
+  "terminal_evidence_digest": "571fd4f519cbd67a3aa04442da0b190a098b9cbf2b7a9b5031c1abf99e223d5d",
+  "workflow_run_id": "37473314609"
 }
