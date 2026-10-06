@@ -1,11 +1,11 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "event-e8-2026100616-v5",
   "checkpoint_lineage": [],
   "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "a04827d45df87d4f44fef1fe34e24366f20bdb28",
+  "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
   "collection_cutoff_at_utc": null,
   "completed_units": {},
   "config_sha256": "dd35ebf6332244b5890c47cc9d000e3bb6ba7006ecb9b4efe08aeda14fe370d0",
@@ -21,6 +21,15 @@
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/event-e8-2026100616-v5.pending.a04827d45df8.77f472c3e612a5af40ebafc988250be72aa5ab4c6b7a32b369ceacd1ae855078.json",
+      "archived_manifest_sha256": "77f472c3e612a5af40ebafc988250be72aa5ab4c6b7a32b369ceacd1ae855078",
+      "at": "2026-10-06T16:43:45.032714Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "a04827d45df87d4f44fef1fe34e24366f20bdb28",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
     }
   ],
   "kind": "event_intelligence_collection",
@@ -43,8 +52,8 @@
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
   "status": "PENDING",
-  "status_reason": "created",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-06T16:16:20.922574Z",
+  "updated_at": "2026-10-06T16:43:45.032728Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
