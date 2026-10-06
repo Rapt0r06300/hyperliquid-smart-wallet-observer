@@ -23,7 +23,7 @@ from hl_observer.ops.autonomous_research_status import status_path, write_status
 
 SCHEMA = "alina.autonomous_research_job.v1"
 CANONICAL_RELEASE_ID = 371149058
-CANONICAL_DATASET_REPOSITORY = "Rapt0r06300/hypersmart-datasets"
+CANONICAL_DATASET_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 ALLOWED_MODES = {"prepare-only", "economic", "historical", "historical-full", "historical-deep"}
 ECONOMIC_SUITES = {"economic-core", "economic-full"}
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")

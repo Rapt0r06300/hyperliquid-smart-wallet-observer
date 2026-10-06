@@ -56,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m hl_observer.ops.dataset_bridge",
         description=(
-            "Pont sûr entre la Release privée hypersmart-datasets et les replays locaux. "
+            "Pont sûr entre les Releases du repository Alina principal et les replays locaux. "
             "Aucun ordre réel, aucune écriture sur un exchange."
         ),
     )

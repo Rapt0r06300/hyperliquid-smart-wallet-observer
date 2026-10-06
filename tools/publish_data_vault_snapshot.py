@@ -16,7 +16,7 @@ from data_vault_core import sha256_file, utc_now
 API_HOST = "api.github.com"
 UPLOAD_HOST = "uploads.github.com"
 API_VERSION = "2022-11-28"
-DEFAULT_REPOSITORY = "Rapt0r06300/hypersmart-datasets"
+DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 
 
 class PublishError(RuntimeError):

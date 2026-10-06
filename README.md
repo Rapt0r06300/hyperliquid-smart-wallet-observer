@@ -142,12 +142,10 @@ doit pas devenir une architecture concurrente.**
 
 ### Ancien repository Dataset V2
 
-`Rapt0r06300/alina-smartflow-datasets-v2` est **historique et inactif**.
-
-Il peut être conservé pour la provenance des anciennes releases/manifests, mais il ne détient
-plus l'autorité de phase, ne lance plus les campagnes actives et ne reçoit plus les nouvelles
-données. Toute nouvelle collecte, replay, backtest, OOS/forward, preuve PnL ou scoreboard part
-du repository Alina unique ci-dessus.
+`Rapt0r06300/alina-smartflow-datasets-v2` est **retiré de l'architecture active** et peut être
+supprimé sans interrompre Alina. Aucun workflow ni chemin de données actif ne doit en dépendre.
+Toute nouvelle collecte, publication de shards, replay, backtest, OOS/forward, preuve PnL ou
+scoreboard part du repository Alina unique ci-dessus et de sa branche `main`.
 
 ---
 

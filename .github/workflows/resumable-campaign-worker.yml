@@ -164,8 +164,10 @@ jobs:
                   print(value)
           PY
           )
-          DIGEST="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py validate "$M")"
-          CLAIM="$(PYTHONPATH=alina/src python alina/tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "${{ steps.pin.outputs.phase }}"             --expected-epoch "${{ steps.pin.outputs.phase_epoch }}")"
+          # Lease/checkpoint state belongs to the current main control plane.
+          # The collection unit below remains pinned to its historical code SHA.
+          DIGEST="$(PYTHONPATH=src python tools/resumable_campaign.py validate "$M")"
+          CLAIM="$(PYTHONPATH=src python tools/resumable_campaign.py start "$M"             --owner "$GITHUB_RUN_ID" --ttl-s 20700 --expected-digest "$DIGEST"             --expected-phase "${{ steps.pin.outputs.phase }}"             --expected-epoch "${{ steps.pin.outputs.phase_epoch }}")"
           TOKEN="$(printf '%s\n' "$CLAIM" | sed -n 's/^lease_token=//p' | tail -1)"
           test -n "$TOKEN"
           echo "::add-mask::$TOKEN"

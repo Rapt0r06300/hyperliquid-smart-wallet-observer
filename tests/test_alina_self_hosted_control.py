@@ -39,7 +39,7 @@ def test_construit_une_requete_worker_verrouillee_sur_main_et_paper() -> None:
     assert request["paper_only"] is True
     assert request["real_execution"] is False
     assert request["start_live_collection"] is False
-    assert request["dataset_repository"] == "Rapt0r06300/hypersmart-datasets"
+    assert request["dataset_repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
 
 
 def test_un_json_de_commande_ne_peut_pas_activer_le_trading_ni_la_collecte_live() -> None:

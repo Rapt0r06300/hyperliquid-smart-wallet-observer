@@ -245,6 +245,40 @@ def test_single_repo_collect_and_analysis_chain_never_targets_legacy_dataset_rep
     assert canonical in campaign_cli
 
 
+def test_all_active_data_defaults_target_main_repository_only():
+    canonical = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    legacy_repositories = (
+        "Rapt0r06300/alina-smartflow-datasets-v2",
+        "Rapt0r06300/hypersmart-datasets",
+    )
+    active_defaults = (
+        "src/hl_observer/ops/autonomous_research_job.py",
+        "tools/publish_data_vault_snapshot.py",
+    )
+    for relative in active_defaults:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert canonical in text, relative
+        for legacy in legacy_repositories:
+            assert legacy not in text, relative
+
+
+def test_live_collectors_enable_deterministic_publication_compaction():
+    for relative in (
+        "tools/collecter_native_venues.py",
+        "tools/collecter_bbo.py",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert "compact_target_bytes=64 * 1024 * 1024" in text, relative
+
+
+def test_old_pinned_collectors_use_current_main_control_plane_for_leases():
+    worker = _workflow("resumable-campaign-worker.yml")
+    assert 'PYTHONPATH=src python tools/resumable_campaign.py validate "$M"' in worker
+    assert 'PYTHONPATH=src python tools/resumable_campaign.py start "$M"' in worker
+    assert 'PYTHONPATH=alina/src python alina/tools/run_resumable_campaign.py' in worker
+    assert 'PYTHONPATH=alina/src python alina/tools/resumable_campaign.py' not in worker
+
+
 def test_campaign_watchdog_recomputes_on_concurrent_receipt_writers():
     text = _workflow("campaign-watchdog.yml")
     assert "git fetch origin main" in text
