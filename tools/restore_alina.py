@@ -32,9 +32,13 @@ class RestoreError(RuntimeError):
 
 
 def _safe_component(value: str) -> str:
-    cleaned = SAFE_COMPONENT.sub("_", str(value)).strip("._")
+    raw = str(value)
+    cleaned = SAFE_COMPONENT.sub("_", raw).strip("._")
     if not cleaned:
         raise RestoreError(f"unsafe empty path component derived from {value!r}")
+    if cleaned != raw or len(cleaned) > 200:
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+        cleaned = f"{cleaned[:200]}--{digest}"
     return cleaned[:220]
 
 
