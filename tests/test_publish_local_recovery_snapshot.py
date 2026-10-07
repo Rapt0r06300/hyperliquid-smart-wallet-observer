@@ -171,3 +171,42 @@ def test_chunk_writer_refuses_mismatched_remote_chunk(tmp_path, monkeypatch):
         assert "existing remote bytes differ" in str(exc)
     else:
         raise AssertionError("resuming onto different remote bytes must fail closed")
+
+
+def test_resume_tag_is_persisted_and_reused(tmp_path):
+    module = _module()
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    first = module._load_or_create_resume_tag(root, "owner/repo")
+    second = module._load_or_create_resume_tag(root, "owner/repo")
+
+    assert first == second
+    assert first.startswith("alina-local-snapshot-")
+    state = json.loads(module._snapshot_state_path(root).read_text(encoding="utf-8"))
+    assert state["tag"] == first
+    assert state["repository"] == "owner/repo"
+
+
+def test_resume_state_rejects_repository_mismatch(tmp_path):
+    module = _module()
+    root = tmp_path / "repo"
+    state_path = module._snapshot_state_path(root)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema": "alina.local_snapshot_state.v1",
+                "repository": "other/repo",
+                "tag": "alina-local-snapshot-test",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        module._load_or_create_resume_tag(root, "owner/repo")
+    except module.SnapshotError as exc:
+        assert "another repository" in str(exc)
+    else:
+        raise AssertionError("resume state must never cross repositories")
