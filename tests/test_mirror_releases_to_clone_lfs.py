@@ -179,3 +179,54 @@ def test_public_fallback_strips_authorization_but_keeps_api_headers():
     assert "authorization" not in headers
     assert headers["accept"] == "application/vnd.github+json"
     assert headers["user-agent"] == "test-agent"
+
+
+def test_release_pagination_fails_closed_without_link(monkeypatch):
+    module = _module()
+
+    def full_page(_repository, *, page, per_page, token):
+        assert page == 1
+        return [{"id": n, "assets": []} for n in range(per_page)], {}
+
+    monkeypatch.setattr(module, "_api_page", full_page)
+
+    try:
+        list(module.iter_releases_oldest_first("owner/repo"))
+    except module.MirrorError as exc:
+        assert "pagination" in str(exc)
+    else:
+        raise AssertionError("A truncated Release inventory must never be complete")
+
+
+def test_release_pagination_reads_every_page_oldest_first(monkeypatch):
+    module = _module()
+    observed = []
+
+    def pages(_repository, *, page, per_page, token):
+        assert per_page == 5
+        observed.append(page)
+        rows = {
+            1: [{"id": n, "assets": []} for n in range(11, 16)],
+            2: [{"id": n, "assets": []} for n in range(6, 11)],
+            3: [{"id": n, "assets": []} for n in range(1, 6)],
+        }
+        headers = {
+            "Link": '<https://api.github.com/repos/o/r/releases?per_page=5&page=3>; rel="last"'
+        }
+        return rows[page], headers
+
+    monkeypatch.setattr(module, "_api_page", pages)
+    items = list(module.iter_releases_oldest_first("owner/repo"))
+
+    assert [row["id"] for row in items] == list(range(1, 16))
+    assert observed == [1, 3, 2]
+
+
+def test_release_pagination_rejects_expensive_page_size():
+    module = _module()
+    try:
+        list(module.iter_releases_oldest_first("owner/repo", per_page=100))
+    except module.MirrorError as exc:
+        assert "between 1 and 10" in str(exc)
+    else:
+        raise AssertionError("Unbounded Release pagination must be rejected")
