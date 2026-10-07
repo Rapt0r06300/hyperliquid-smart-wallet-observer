@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 1,
+  "attempts": 2,
   "campaign_id": "market-e8-11-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "33a4eab5401b23fa4ceafbd2b2e09b16ff8c7cd3dbfde53a01848ad0e75faba9",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-11-2026100616-v7-u0 /home/runner/work/_temp/campaign-output/market-e8-11-2026100616-v7/0/assets/gate-derived-capacity-capacity-tape-red-usdt-1791322794278-1791326285078-e8d3cd120839.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 4C20:3A9BD5:C9D3E:140539:6AC58FE0 and timestamp 2026-10-07 00:18:41 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405197149/assets?label=&name=gate-derived-capacity-capacity-tape-red-usdt-1791322794278-1791326285078-e8d3cd120839.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "3c197f078d84515fcf7741c7d635f7f2b3a9feb1ecbe41eb820a1ba81a5be68c"
+    }
+  },
   "config_sha256": "9105caa79021e5a3677a3c851c62fda942fde815c6f00e8f416d659c43ee4b48",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-06T16:16:20.172696+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "3c197f078d84515fcf7741c7d635f7f2b3a9feb1ecbe41eb820a1ba81a5be68c",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37528159770",
     "market_shard_count": 16,
     "market_shard_index": 11,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-11.json",
     "plan_sha256": "cd615ac16f40a42632f4acf7efec8c8a004a80e85f88f53d5394e0664c18c21e",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 48,
@@ -48,15 +67,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T00:18:41.286147Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-06T21:39:06.621791Z",
-    "expires_at": "2026-10-07T03:24:06.621791Z",
-    "lease_token_sha256": "8591d876811c909bf3783bf5315f0f5e3162ad723ada140b5c0da77a06ce3d44",
-    "owner_run_id": "37528159770"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -65,7 +85,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -74,9 +94,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-06T21:39:06.621839Z",
+  "updated_at": "2026-10-07T00:18:41.286147Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
