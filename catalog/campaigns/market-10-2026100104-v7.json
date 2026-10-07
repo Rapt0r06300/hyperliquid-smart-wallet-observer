@@ -18,6 +18,61 @@
         "status": "FAILED"
       },
       "sha256": "4b68edf86707624f0105972641c1089b4121dd96fb34c0377312bc42e70576fe"
+    },
+    "1": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/market-10-2026100104-v7/1",
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_run_manifest",
+          "compressed_bytes": 88321231,
+          "frame_metrics_complete": false,
+          "l2_frames": 0,
+          "partial_count": 85,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 843210,
+          "reject_count": 0,
+          "safe_count": 369,
+          "shard_count": 454,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 15686,
+          "trade_shard_count": 88,
+          "trade_shards_exact": 88
+        },
+        "collection_plan_sha256": "144bab1501c39c86024f31e788a3f1ffde7fbea30bb8c78ce9d35bf48b11c64a",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/market-10-2026100104-v7/1",
+        "partial_count": 85,
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-10-2026100104-v7/1"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "\",\n      \"release_asset\": \"okx-public-ws-trades-xau-usdt-swap-1791352981684-1791353877434-fd5a4a21eabc.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XAU-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-xpt-usdt-swap-1791352980367-1791353799551-9df85a0c4265\",\n      \"event_count\": 27,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-xpt-usdt-swap-1791352980367-1791353799551-9df85a0c4265.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XPT-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-xrp-usdt-swap-1791352979761-1791353877570-07ee90b60279\",\n      \"event_count\": 1433,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-xrp-usdt-swap-1791352979761-1791353877570-07ee90b60279.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XRP-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"last_error\": \"\",\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0\n  },\n  \"bundle_index\": {\n    \"partial_count\": 454,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 454\n  },\n  \"coins\": [\n    \"ABNB\",\n    \"AGLD\",\n    \"ANET\",\n    \"ANTHROPIC\",\n    \"APR\",\n    \"ARB\",\n    \"B200\",\n    \"BARD\",\n    \"BLESS\",\n    \"CAKE\",\n    \"CAP\",\n    \"CARV\",\n    \"CAT\",\n    \"CHZ\",\n    \"CNPY\",\n    \"COHR\",\n    \"COOKIE\",\n    \"CVX\",\n    \"DEEP\",\n    \"DRAM\",\n    \"GENIUS\",\n    \"GNRC\",\n    \"HIVE\",\n    \"IO\",\n    \"IWM\",\n    \"KGEN\",\n    \"KNC\",\n    \"KO\",\n    \"KWEB\",\n    \"LA\",\n    \"MANTRA\",\n    \"MEME\",\n    \"MERL\",\n    \"MVLL\",\n    \"NOC\",\n    \"OGN\",\n    \"PATH\",\n    \"PEOPLE\",\n    \"PEPE\",\n    \"PNUT\",\n    \"RARE\",\n    \"SHELL\",\n    \"SIMO\",\n    \"SMH\",\n    \"SOFI\",\n    \"STONK\",\n    \"SUI\",\n    \"SUN\",\n    \"XAU\",\n    \"XPT\",\n    \"XRP\",\n    \"ZEST\"\n  ],\n  \"collection_run_id\": \"market-10-2026100104-v7-1\",\n  \"collector_version\": \"453ac83c731f921c3a56ff78952ba63ecf56a2ff\",\n  \"disk_free_bytes_at_stop\": 88617000960,\n  \"duration_s\": 3577.525,\n  \"ended_at_ms\": 1791356555820,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 9,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"accepted_samples\": 58,\n    \"attempts\": 477,\n    \"clock_offset_ms\": -535.0,\n    \"clock_probe_receive_wall_ts_ms\": 1791356477385,\n    \"clock_probe_rtt_ms\": 68.0,\n    \"clock_probe_server_ts_ms\": 1791356476816,\n    \"clock_source\": \"webData3.userState.serverTime\",\n    \"failures\": 419,\n    \"last_error\": \"\",\n    \"status\": \"OK\"\n  },\n  \"hyperliquid_trade_reference\": {\n    \"base_weight_budget_per_min\": 480.0,\n    \"effective_interval_s\": 23.0,\n    \"estimated_base_weight_per_min\": 469.565,\n    \"poll_errors\": {\n      \"ARB\": 0,\n      \"CAKE\": 0,\n      \"IO\": 0,\n      \"MEME\": 0,\n      \"MERL\": 0,\n      \"PEOPLE\": 0,\n      \"PNUT\": 0,\n      \"SUI\": 0,\n      \"XRP\": 0\n    },\n    \"polls\": 152,\n    \"reference_trade_ids\": {\n      \"ARB\": 1424,\n      \"CAKE\": 202,\n      \"IO\": 98,\n      \"MEME\": 32,\n      \"MERL\": 92,\n      \"PEOPLE\": 132,\n      \"PNUT\": 139,\n      \"SUI\": 933,\n      \"XRP\": 756\n    },\n    \"requested_interval_s\": 5.0,\n    \"successful_polls\": {\n      \"ARB\": 152,\n      \"CAKE\": 152,\n      \"IO\": 152,\n      \"MEME\": 152,\n      \"MERL\": 152,\n      \"PEOPLE\": 152,\n      \"PNUT\": 152,\n      \"SUI\": 152,\n      \"XRP\": 152\n    }\n  },\n  \"instrument_metadata\": {\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 9,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 28,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"bitget\": 40644,\n      \"gate\": 346154,\n      \"hyperliquid\": 5877,\n      \"okx\": 80563\n    },\n    \"expected_symbol_count\": 139,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 139,\n    \"required\": true,\n    \"required_venues\": [\n      \"bitget\",\n      \"gate\",\n      \"hyperliquid\",\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 843210,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791352978295,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ABNBUSDT\",\n      \"AGLDUSDT\",\n      \"ANETUSDT\",\n      \"ANTHROPICUSDT\",\n      \"APRUSDT\",\n      \"ARBUSDT\",\n      \"B200USDT\",\n      \"BARDUSDT\",\n      \"BLESSUSDT\",\n      \"CAKEUSDT\",\n      \"CAPUSDT\",\n      \"CARVUSDT\",\n      \"CATUSDT\",\n      \"CHZUSDT\",\n      \"COHRUSDT\",\n      \"COOKIEUSDT\",\n      \"CVXUSDT\",\n      \"DEEPUSDT\",\n      \"DRAMUSDT\",\n      \"GENIUSUSDT\",\n      \"GNRCUSDT\",\n      \"HIVEUSDT\",\n      \"IOUSDT\",\n      \"IWMUSDT\",\n      \"KGENUSDT\",\n      \"KNCUSDT\",\n      \"KOUSDT\",\n      \"KWEBUSDT\",\n      \"LAUSDT\",\n      \"MANTRAUSDT\",\n      \"MEMEUSDT\",\n      \"MERLUSDT\",\n      \"MVLLUSDT\",\n      \"NOCUSDT\",\n      \"OGNUSDT\",\n      \"PATHUSDT\",\n      \"PEOPLEUSDT\",\n      \"PEPEUSDT\",\n      \"PNUTUSDT\",\n      \"RAREUSDT\",\n      \"SHELLUSDT\",\n      \"SIMOUSDT\",\n      \"SMHUSDT\",\n      \"SOFIUSDT\",\n      \"STONKUSDT\",\n      \"SUIUSDT\",\n      \"SUNUSDT\",\n      \"XAUUSDT\",\n      \"XPTUSDT\",\n      \"XRPUSDT\",\n      \"ZESTUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ABNB_USDT\",\n      \"AGLD_USDT\",\n      \"ANET_USDT\",\n      \"ANTHROPIC_USDT\",\n      \"APR_USDT\",\n      \"ARB_USDT\",\n      \"B200_USDT\",\n      \"BARD_USDT\",\n      \"BLESS_USDT\",\n      \"CAKE_USDT\",\n      \"CAP_USDT\",\n      \"CARV_USDT\",\n      \"CAT_USDT\",\n      \"CHZ_USDT\",\n      \"CNPY_USDT\",\n      \"COHR_USDT\",\n      \"COOKIE_USDT\",\n      \"CVX_USDT\",\n      \"DEEP_USDT\",\n      \"DRAM_USDT\",\n      \"GENIUS_USDT\",\n      \"GNRC_USDT\",\n      \"HIVE_USDT\",\n      \"IO_USDT\",\n      \"IWM_USDT\",\n      \"KGEN_USDT\",\n      \"KNC_USDT\",\n      \"KO_USDT\",\n      \"KWEB_USDT\",\n      \"LA_USDT\",\n      \"MANTRA_USDT\",\n      \"MEME_USDT\",\n      \"MERL_USDT\",\n      \"MVLL_USDT\",\n      \"NOC_USDT\",\n      \"OGN_USDT\",\n      \"PATH_USDT\",\n      \"PEOPLE_USDT\",\n      \"PEPE_USDT\",\n      \"PNUT_USDT\",\n      \"RARE_USDT\",\n      \"SHELL_USDT\",\n      \"SMH_USDT\",\n      \"SOFI_USDT\",\n      \"STONK_USDT\",\n      \"SUI_USDT\",\n      \"SUN_USDT\",\n      \"XAU_USDT\",\n      \"XPT_USDT\",\n      \"XRP_USDT\",\n      \"ZEST_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"ARB\",\n      \"CAKE\",\n      \"IO\",\n      \"MEME\",\n      \"MERL\",\n      \"PEOPLE\",\n      \"PNUT\",\n      \"SUI\",\n      \"XRP\"\n    ],\n    \"okx\": [\n      \"AGLD-USDT-SWAP\",\n      \"ANTHROPIC-USDT-SWAP\",\n      \"APR-USDT-SWAP\",\n      \"ARB-USDT-SWAP\",\n      \"BARD-USDT-SWAP\",\n      \"CAP-USDT-SWAP\",\n      \"CHZ-USDT-SWAP\",\n      \"CNPY-USDT-SWAP\",\n      \"COHR-USDT-SWAP\",\n      \"CVX-USDT-SWAP\",\n      \"DRAM-USDT-SWAP\",\n      \"IWM-USDT-SWAP\",\n      \"KGEN-USDT-SWAP\",\n      \"KO-USDT-SWAP\",\n      \"LA-USDT-SWAP\",\n      \"MEME-USDT-SWAP\",\n      \"MERL-USDT-SWAP\",\n      \"MVLL-USDT-SWAP\",\n      \"PEOPLE-USDT-SWAP\",\n      \"PEPE-USDT-SWAP\",\n      \"PNUT-USDT-SWAP\",\n      \"SHELL-USDT-SWAP\",\n      \"SIMO-USDT-SWAP\",\n      \"SMH-USDT-SWAP\",\n      \"SUI-USDT-SWAP\",\n      \"XAU-USDT-SWAP\",\n      \"XPT-USDT-SWAP\",\n      \"XRP-USDT-SWAP\"\n    ]\n  }\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-campaign-market-10-2026100104-v7-u1",
+        "returncode": 0,
+        "safe_count": 369,
+        "safe_workspace": null,
+        "shard_count": 454,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "\",\n      \"release_asset\": \"okx-public-ws-trades-xau-usdt-swap-1791352981684-1791353877434-fd5a4a21eabc.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XAU-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-xpt-usdt-swap-1791352980367-1791353799551-9df85a0c4265\",\n      \"event_count\": 27,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-xpt-usdt-swap-1791352980367-1791353799551-9df85a0c4265.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XPT-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-xrp-usdt-swap-1791352979761-1791353877570-07ee90b60279\",\n      \"event_count\": 1433,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-xrp-usdt-swap-1791352979761-1791353877570-07ee90b60279.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"XRP-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"last_error\": \"\",\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0\n  },\n  \"bundle_index\": {\n    \"partial_count\": 454,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 454\n  },\n  \"coins\": [\n    \"ABNB\",\n    \"AGLD\",\n    \"ANET\",\n    \"ANTHROPIC\",\n    \"APR\",\n    \"ARB\",\n    \"B200\",\n    \"BARD\",\n    \"BLESS\",\n    \"CAKE\",\n    \"CAP\",\n    \"CARV\",\n    \"CAT\",\n    \"CHZ\",\n    \"CNPY\",\n    \"COHR\",\n    \"COOKIE\",\n    \"CVX\",\n    \"DEEP\",\n    \"DRAM\",\n    \"GENIUS\",\n    \"GNRC\",\n    \"HIVE\",\n    \"IO\",\n    \"IWM\",\n    \"KGEN\",\n    \"KNC\",\n    \"KO\",\n    \"KWEB\",\n    \"LA\",\n    \"MANTRA\",\n    \"MEME\",\n    \"MERL\",\n    \"MVLL\",\n    \"NOC\",\n    \"OGN\",\n    \"PATH\",\n    \"PEOPLE\",\n    \"PEPE\",\n    \"PNUT\",\n    \"RARE\",\n    \"SHELL\",\n    \"SIMO\",\n    \"SMH\",\n    \"SOFI\",\n    \"STONK\",\n    \"SUI\",\n    \"SUN\",\n    \"XAU\",\n    \"XPT\",\n    \"XRP\",\n    \"ZEST\"\n  ],\n  \"collection_run_id\": \"market-10-2026100104-v7-1\",\n  \"collector_version\": \"453ac83c731f921c3a56ff78952ba63ecf56a2ff\",\n  \"disk_free_bytes_at_stop\": 88617000960,\n  \"duration_s\": 3577.525,\n  \"ended_at_ms\": 1791356555820,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 9,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"accepted_samples\": 58,\n    \"attempts\": 477,\n    \"clock_offset_ms\": -535.0,\n    \"clock_probe_receive_wall_ts_ms\": 1791356477385,\n    \"clock_probe_rtt_ms\": 68.0,\n    \"clock_probe_server_ts_ms\": 1791356476816,\n    \"clock_source\": \"webData3.userState.serverTime\",\n    \"failures\": 419,\n    \"last_error\": \"\",\n    \"status\": \"OK\"\n  },\n  \"hyperliquid_trade_reference\": {\n    \"base_weight_budget_per_min\": 480.0,\n    \"effective_interval_s\": 23.0,\n    \"estimated_base_weight_per_min\": 469.565,\n    \"poll_errors\": {\n      \"ARB\": 0,\n      \"CAKE\": 0,\n      \"IO\": 0,\n      \"MEME\": 0,\n      \"MERL\": 0,\n      \"PEOPLE\": 0,\n      \"PNUT\": 0,\n      \"SUI\": 0,\n      \"XRP\": 0\n    },\n    \"polls\": 152,\n    \"reference_trade_ids\": {\n      \"ARB\": 1424,\n      \"CAKE\": 202,\n      \"IO\": 98,\n      \"MEME\": 32,\n      \"MERL\": 92,\n      \"PEOPLE\": 132,\n      \"PNUT\": 139,\n      \"SUI\": 933,\n      \"XRP\": 756\n    },\n    \"requested_interval_s\": 5.0,\n    \"successful_polls\": {\n      \"ARB\": 152,\n      \"CAKE\": 152,\n      \"IO\": 152,\n      \"MEME\": 152,\n      \"MERL\": 152,\n      \"PEOPLE\": 152,\n      \"PNUT\": 152,\n      \"SUI\": 152,\n      \"XRP\": 152\n    }\n  },\n  \"instrument_metadata\": {\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 9,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 28,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"bitget\": 40644,\n      \"gate\": 346154,\n      \"hyperliquid\": 5877,\n      \"okx\": 80563\n    },\n    \"expected_symbol_count\": 139,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 139,\n    \"required\": true,\n    \"required_venues\": [\n      \"bitget\",\n      \"gate\",\n      \"hyperliquid\",\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 843210,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791352978295,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ABNBUSDT\",\n      \"AGLDUSDT\",\n      \"ANETUSDT\",\n      \"ANTHROPICUSDT\",\n      \"APRUSDT\",\n      \"ARBUSDT\",\n      \"B200USDT\",\n      \"BARDUSDT\",\n      \"BLESSUSDT\",\n      \"CAKEUSDT\",\n      \"CAPUSDT\",\n      \"CARVUSDT\",\n      \"CATUSDT\",\n      \"CHZUSDT\",\n      \"COHRUSDT\",\n      \"COOKIEUSDT\",\n      \"CVXUSDT\",\n      \"DEEPUSDT\",\n      \"DRAMUSDT\",\n      \"GENIUSUSDT\",\n      \"GNRCUSDT\",\n      \"HIVEUSDT\",\n      \"IOUSDT\",\n      \"IWMUSDT\",\n      \"KGENUSDT\",\n      \"KNCUSDT\",\n      \"KOUSDT\",\n      \"KWEBUSDT\",\n      \"LAUSDT\",\n      \"MANTRAUSDT\",\n      \"MEMEUSDT\",\n      \"MERLUSDT\",\n      \"MVLLUSDT\",\n      \"NOCUSDT\",\n      \"OGNUSDT\",\n      \"PATHUSDT\",\n      \"PEOPLEUSDT\",\n      \"PEPEUSDT\",\n      \"PNUTUSDT\",\n      \"RAREUSDT\",\n      \"SHELLUSDT\",\n      \"SIMOUSDT\",\n      \"SMHUSDT\",\n      \"SOFIUSDT\",\n      \"STONKUSDT\",\n      \"SUIUSDT\",\n      \"SUNUSDT\",\n      \"XAUUSDT\",\n      \"XPTUSDT\",\n      \"XRPUSDT\",\n      \"ZESTUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ABNB_USDT\",\n      \"AGLD_USDT\",\n      \"ANET_USDT\",\n      \"ANTHROPIC_USDT\",\n      \"APR_USDT\",\n      \"ARB_USDT\",\n      \"B200_USDT\",\n      \"BARD_USDT\",\n      \"BLESS_USDT\",\n      \"CAKE_USDT\",\n      \"CAP_USDT\",\n      \"CARV_USDT\",\n      \"CAT_USDT\",\n      \"CHZ_USDT\",\n      \"CNPY_USDT\",\n      \"COHR_USDT\",\n      \"COOKIE_USDT\",\n      \"CVX_USDT\",\n      \"DEEP_USDT\",\n      \"DRAM_USDT\",\n      \"GENIUS_USDT\",\n      \"GNRC_USDT\",\n      \"HIVE_USDT\",\n      \"IO_USDT\",\n      \"IWM_USDT\",\n      \"KGEN_USDT\",\n      \"KNC_USDT\",\n      \"KO_USDT\",\n      \"KWEB_USDT\",\n      \"LA_USDT\",\n      \"MANTRA_USDT\",\n      \"MEME_USDT\",\n      \"MERL_USDT\",\n      \"MVLL_USDT\",\n      \"NOC_USDT\",\n      \"OGN_USDT\",\n      \"PATH_USDT\",\n      \"PEOPLE_USDT\",\n      \"PEPE_USDT\",\n      \"PNUT_USDT\",\n      \"RARE_USDT\",\n      \"SHELL_USDT\",\n      \"SMH_USDT\",\n      \"SOFI_USDT\",\n      \"STONK_USDT\",\n      \"SUI_USDT\",\n      \"SUN_USDT\",\n      \"XAU_USDT\",\n      \"XPT_USDT\",\n      \"XRP_USDT\",\n      \"ZEST_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"ARB\",\n      \"CAKE\",\n      \"IO\",\n      \"MEME\",\n      \"MERL\",\n      \"PEOPLE\",\n      \"PNUT\",\n      \"SUI\",\n      \"XRP\"\n    ],\n    \"okx\": [\n      \"AGLD-USDT-SWAP\",\n      \"ANTHROPIC-USDT-SWAP\",\n      \"APR-USDT-SWAP\",\n      \"ARB-USDT-SWAP\",\n      \"BARD-USDT-SWAP\",\n      \"CAP-USDT-SWAP\",\n      \"CHZ-USDT-SWAP\",\n      \"CNPY-USDT-SWAP\",\n      \"COHR-USDT-SWAP\",\n      \"CVX-USDT-SWAP\",\n      \"DRAM-USDT-SWAP\",\n      \"IWM-USDT-SWAP\",\n      \"KGEN-USDT-SWAP\",\n      \"KO-USDT-SWAP\",\n      \"LA-USDT-SWAP\",\n      \"MEME-USDT-SWAP\",\n      \"MERL-USDT-SWAP\",\n      \"MVLL-USDT-SWAP\",\n      \"PEOPLE-USDT-SWAP\",\n      \"PEPE-USDT-SWAP\",\n      \"PNUT-USDT-SWAP\",\n      \"SHELL-USDT-SWAP\",\n      \"SIMO-USDT-SWAP\",\n      \"SMH-USDT-SWAP\",\n      \"SUI-USDT-SWAP\",\n      \"XAU-USDT-SWAP\",\n      \"XPT-USDT-SWAP\",\n      \"XRP-USDT-SWAP\"\n    ]\n  }\n}\n",
+        "universe_discovery_required": true
+      },
+      "sha256": "c4389aab0ec9db8985f9344a42cab9654567a83e0ebf55fe51fe1ae7759392d8"
     }
   },
   "config_sha256": "d1e5dccf1cf4fa911b528735902a658eac70383c788e85cc360dcdb68ca6c46c",
@@ -25,12 +80,12 @@
   "created_at": "2026-10-01T04:38:03.983163+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "4b68edf86707624f0105972641c1089b4121dd96fb34c0377312bc42e70576fe",
+    "checkpoint_id": "c4389aab0ec9db8985f9344a42cab9654567a83e0ebf55fe51fe1ae7759392d8",
     "duration_s": 3500,
     "generation": 1,
     "handoff_generation": null,
     "handoff_phase_epoch": 4,
-    "last_run_id": "37495214637",
+    "last_run_id": "37578426041",
     "market_shard_count": 16,
     "market_shard_index": 10,
     "max_coins": 0,
@@ -91,15 +146,16 @@
       "from": "STUCK",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T08:22:46.684272Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T06:02:28.821780Z",
-    "expires_at": "2026-10-07T11:47:28.821780Z",
-    "lease_token_sha256": "df7fbe3109b3dc5ace0b98af364cdc043f8279bf8a9478bb0dada02eb2a49bd6",
-    "owner_run_id": "37578426041"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -117,9 +173,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T06:02:28.821835Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "c4389aab0ec9db8985f9344a42cab9654567a83e0ebf55fe51fe1ae7759392d8",
+  "updated_at": "2026-10-07T08:22:46.684272Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
