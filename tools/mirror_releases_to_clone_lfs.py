@@ -153,15 +153,30 @@ def iter_releases_oldest_first(
     repository: str,
     *,
     token: str | None = None,
-    per_page: int = 100,
+    per_page: int = 5,
 ) -> Iterable[Mapping[str, Any]]:
+    # Some collection Releases carry hundreds of assets. Requesting 100 such
+    # Releases per response repeatedly triggers GitHub API 504 timeouts.
+    # Paginate in small, bounded responses and never silently truncate.
+    if per_page < 1 or per_page > 10:
+        raise MirrorError("Release pagination per_page must be between 1 and 10")
     first, headers = _api_page(
         repository,
         page=1,
         per_page=per_page,
         token=token,
     )
-    last_page = _last_page_from_link(headers.get("Link"), default=1)
+    link = headers.get("Link") or headers.get("link")
+    if len(first) == per_page and not link:
+        raise MirrorError(
+            "GitHub omitted pagination metadata for a full Release page; "
+            "refusing an incomplete source inventory"
+        )
+    last_page = _last_page_from_link(link, default=1)
+    if len(first) == per_page and last_page == 1:
+        raise MirrorError(
+            "GitHub Release pagination is incomplete; refusing to report byte parity"
+        )
 
     for page in range(last_page, 0, -1):
         rows = (
