@@ -58,8 +58,8 @@ def test_audit_reports_exact_byte_parity(monkeypatch, tmp_path):
     monkeypatch.setattr(module.mirror, "load_manifest", lambda _path: manifest)
     monkeypatch.setattr(
         module,
-        "git_pointer_for_path",
-        lambda *_args, **_kwargs: (sha, 42),
+        "git_pointers_for_paths",
+        lambda _root, paths: {path: (sha, 42) for path in paths},
     )
 
     report = module.audit(
@@ -114,3 +114,37 @@ def test_audit_fails_closed_on_one_missing_asset(monkeypatch, tmp_path):
     assert report["clone_bytes"] == 5
     assert report["missing_asset_count"] == 1
     assert report["missing_asset_ids_sample"] == [2]
+
+
+def test_git_pointers_for_paths_reads_many_blobs_in_one_batch(tmp_path):
+    module = _module()
+    import subprocess
+
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
+        check=True,
+    )
+    paths = []
+    expected = {}
+    for index in range(3):
+        sha = f"{index + 1:x}" * 64
+        path = tmp_path / "clone_payload" / "releases" / f"{index}.bin"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "version https://git-lfs.github.com/spec/v1\n"
+            f"oid sha256:{sha}\n"
+            f"size {100 + index}\n",
+            encoding="utf-8",
+        )
+        rel = path.relative_to(tmp_path).as_posix()
+        paths.append(rel)
+        expected[rel] = (sha, 100 + index)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "pointers"], check=True, capture_output=True)
+
+    assert module.git_pointers_for_paths(tmp_path, paths) == expected
