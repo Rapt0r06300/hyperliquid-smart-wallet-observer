@@ -42,13 +42,9 @@ def recovery_release_tag(base_tag: str, collection_run_id: object) -> str:
 
 
 def recovery_capsule_enabled() -> bool:
-    """Enable capsules on GitHub-hosted production runs, or explicitly in tests/tools."""
+    """Enable capsules only when the production caller opts in explicitly."""
     explicit = str(os.getenv("ALINA_RECOVERY_CAPSULE") or "").strip().lower()
-    if explicit in {"0", "false", "no", "off"}:
-        return False
-    return explicit in {"1", "true", "yes", "on"} or str(
-        os.getenv("GITHUB_ACTIONS") or ""
-    ).lower() == "true"
+    return explicit in {"1", "true", "yes", "on"}
 
 
 
