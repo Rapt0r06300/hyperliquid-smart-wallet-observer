@@ -7,14 +7,77 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "de591de1053b269544a09acc43671e29a686354b",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/copy-vault-10-2026100104-v7/0",
+        "collection_metrics": {
+          "accepted_frames": 52,
+          "basis": "published_run_manifest",
+          "compressed_bytes": 59812,
+          "frame_metrics_complete": true,
+          "l2_frames": 13,
+          "partial_count": 20,
+          "persisted_frames": 52,
+          "queue_drops": 0,
+          "record_count_observed": 52,
+          "reject_count": 0,
+          "safe_count": 22,
+          "shard_count": 42,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 0,
+          "trade_shard_count": 0,
+          "trade_shards_exact": 0
+        },
+        "collection_plan_sha256": null,
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/copy-vault-10-2026100104-v7/0",
+        "partial_count": 20,
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_copy_vault.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/copy-vault-10-2026100104-v7/0"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "{\n  \"accepted_frames\": 52,\n  \"bundle\": {\n    \"partial_count\": 42,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"shard_count\": 42\n  },\n  \"collection_launch_ts_ms\": 1791390609155,\n  \"collection_run_id\": \"copy-vault-10-2026100104-v7-0\",\n  \"collection_start_ts_ms\": 1791390609529,\n  \"duration_s\": 300.63,\n  \"end_ts_ms\": 1791390910159,\n  \"l2_coin_count\": 32,\n  \"l2_frames\": 13,\n  \"l2_heartbeats\": 0,\n  \"l2_reconnects\": 14,\n  \"live_fill_counts\": {},\n  \"persisted_frames\": 52,\n  \"position_snapshots_end\": 10,\n  \"position_snapshots_start\": 10,\n  \"queue_drops\": 0,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"reconciliation\": {\n    \"0x088e85a24eca6f31a73efe8da6e733dcfe9e349f\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609994,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x1b0f01e4d3866258962c83d8e07c5cb83c6d499d\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609983,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x208a80fb4731f90498cd35db40c5e291ac9bad1f\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390610145,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x47cdb9891e2c7ed84fca61fb0e5dd8416fb61688\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609692,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x5414ed5e1a6cf6e3ca46ae58d92fb2e1c9651611\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390610134,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x68f29d63c2ba915d37ec942f25fd038f0fe48429\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609680,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x71452212b2cc4dc2d73fb13035bec6c0fb79ce80\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609831,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xa6a34f0bf2ccea9a1ddf9e9a973f17c498dc5e40\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609529,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xb2ab9b219651e38cff6ac26cd9890b6cb592bc42\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609542,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xf99860885da5b6c07b9e4659b187e680f13a9bea\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609843,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    }\n  },\n  \"reconnect_counts\": {},\n  \"schema\": \"alina.copy_vault_cloud_window.v1\",\n  \"selection_ts_ms\": 1790829486087,\n  \"socket_groups\": 2,\n  \"vault_count\": 10,\n  \"vault_observation_start_ts_ms\": {\n    \"0x088e85a24eca6f31a73efe8da6e733dcfe9e349f\": 1791390609994,\n    \"0x1b0f01e4d3866258962c83d8e07c5cb83c6d499d\": 1791390609983,\n    \"0x208a80fb4731f90498cd35db40c5e291ac9bad1f\": 1791390610145,\n    \"0x47cdb9891e2c7ed84fca61fb0e5dd8416fb61688\": 1791390609692,\n    \"0x5414ed5e1a6cf6e3ca46ae58d92fb2e1c9651611\": 1791390610134,\n    \"0x68f29d63c2ba915d37ec942f25fd038f0fe48429\": 1791390609680,\n    \"0x71452212b2cc4dc2d73fb13035bec6c0fb79ce80\": 1791390609831,\n    \"0xa6a34f0bf2ccea9a1ddf9e9a973f17c498dc5e40\": 1791390609529,\n    \"0xb2ab9b219651e38cff6ac26cd9890b6cb592bc42\": 1791390609542,\n    \"0xf99860885da5b6c07b9e4659b187e680f13a9bea\": 1791390609843\n  },\n  \"vault_shard_count\": 310,\n  \"vault_shard_index\": 10,\n  \"vault_universe_count\": 3093\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-campaign-copy-vault-10-2026100104-v7-u0",
+        "returncode": 0,
+        "safe_count": 22,
+        "safe_workspace": null,
+        "shard_count": 42,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "{\n  \"accepted_frames\": 52,\n  \"bundle\": {\n    \"partial_count\": 42,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"shard_count\": 42\n  },\n  \"collection_launch_ts_ms\": 1791390609155,\n  \"collection_run_id\": \"copy-vault-10-2026100104-v7-0\",\n  \"collection_start_ts_ms\": 1791390609529,\n  \"duration_s\": 300.63,\n  \"end_ts_ms\": 1791390910159,\n  \"l2_coin_count\": 32,\n  \"l2_frames\": 13,\n  \"l2_heartbeats\": 0,\n  \"l2_reconnects\": 14,\n  \"live_fill_counts\": {},\n  \"persisted_frames\": 52,\n  \"position_snapshots_end\": 10,\n  \"position_snapshots_start\": 10,\n  \"queue_drops\": 0,\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"reconciliation\": {\n    \"0x088e85a24eca6f31a73efe8da6e733dcfe9e349f\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609994,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x1b0f01e4d3866258962c83d8e07c5cb83c6d499d\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609983,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x208a80fb4731f90498cd35db40c5e291ac9bad1f\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390610145,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x47cdb9891e2c7ed84fca61fb0e5dd8416fb61688\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609692,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x5414ed5e1a6cf6e3ca46ae58d92fb2e1c9651611\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390610134,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x68f29d63c2ba915d37ec942f25fd038f0fe48429\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609680,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0x71452212b2cc4dc2d73fb13035bec6c0fb79ce80\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609831,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xa6a34f0bf2ccea9a1ddf9e9a973f17c498dc5e40\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609529,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xb2ab9b219651e38cff6ac26cd9890b6cb592bc42\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609542,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    },\n    \"0xf99860885da5b6c07b9e4659b187e680f13a9bea\": {\n      \"audit\": {\n        \"cap_blocked_windows\": [],\n        \"failed_windows\": [],\n        \"pending_windows\": 0,\n        \"request_budget_exhausted\": false,\n        \"requested_end_ms\": 1791390910159,\n        \"requested_start_ms\": 1791390609843,\n        \"requests\": 1,\n        \"rows\": 0,\n        \"splits\": 0,\n        \"status\": \"COMPLETE\"\n      },\n      \"duplicate_live_keys\": 0,\n      \"live_count\": 0,\n      \"live_only\": 0,\n      \"matched_count\": 0,\n      \"missing_from_live\": 0,\n      \"reference_count\": 0,\n      \"status\": \"MATCHED\"\n    }\n  },\n  \"reconnect_counts\": {},\n  \"schema\": \"alina.copy_vault_cloud_window.v1\",\n  \"selection_ts_ms\": 1790829486087,\n  \"socket_groups\": 2,\n  \"vault_count\": 10,\n  \"vault_observation_start_ts_ms\": {\n    \"0x088e85a24eca6f31a73efe8da6e733dcfe9e349f\": 1791390609994,\n    \"0x1b0f01e4d3866258962c83d8e07c5cb83c6d499d\": 1791390609983,\n    \"0x208a80fb4731f90498cd35db40c5e291ac9bad1f\": 1791390610145,\n    \"0x47cdb9891e2c7ed84fca61fb0e5dd8416fb61688\": 1791390609692,\n    \"0x5414ed5e1a6cf6e3ca46ae58d92fb2e1c9651611\": 1791390610134,\n    \"0x68f29d63c2ba915d37ec942f25fd038f0fe48429\": 1791390609680,\n    \"0x71452212b2cc4dc2d73fb13035bec6c0fb79ce80\": 1791390609831,\n    \"0xa6a34f0bf2ccea9a1ddf9e9a973f17c498dc5e40\": 1791390609529,\n    \"0xb2ab9b219651e38cff6ac26cd9890b6cb592bc42\": 1791390609542,\n    \"0xf99860885da5b6c07b9e4659b187e680f13a9bea\": 1791390609843\n  },\n  \"vault_shard_count\": 310,\n  \"vault_shard_index\": 10,\n  \"vault_universe_count\": 3093\n}\n",
+        "universe_discovery_required": false
+      },
+      "sha256": "247c35ddb8942b9d370f82c89ec56119c1193cb8b5e0e6f9586a50217acd5a25"
+    }
+  },
   "config_sha256": "c5f517822f86d59ee7a67bdac988447b13cce9896f98b2148bbfc35c8eae5203",
   "consecutive_failures": 0,
   "created_at": "2026-10-01T04:38:07.813943+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "247c35ddb8942b9d370f82c89ec56119c1193cb8b5e0e6f9586a50217acd5a25",
     "duration_s": 300,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 4,
+    "last_run_id": "37652282487",
     "max_vaults": 3093,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "rotate_mb": 64,
     "selection_file": "catalog/copy_vault_selections/2026100104.json",
     "selection_sha256": "adbc831da11c18ebe8d07b3bf8ff8076426ae2fc76519548022c23e8d93fda98",
@@ -35,15 +98,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T16:37:11.867700Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "copy_vault_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T16:29:53.608856Z",
-    "expires_at": "2026-10-07T22:14:53.608856Z",
-    "lease_token_sha256": "9dd7d6a91caff08b12c0675a7d21b6634212e983fcf7013bf7e598bbb8eeca66",
-    "owner_run_id": "37652282487"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -61,9 +125,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T16:29:53.608908Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "247c35ddb8942b9d370f82c89ec56119c1193cb8b5e0e6f9586a50217acd5a25",
+  "updated_at": "2026-10-07T16:37:11.867700Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
