@@ -78,6 +78,54 @@ def _json(url: str, *, token: str | None = None) -> Any:
     except json.JSONDecodeError as exc:
         raise RestoreError(f"GitHub returned invalid JSON for {url}") from exc
 
+def _download_to_path(
+    url: str,
+    target: Path,
+    *,
+    token: str | None = None,
+    retries: int = 8,
+) -> tuple[int, str]:
+    """Stream one potentially multi-GB Release asset without loading it into RAM."""
+    headers = {"Accept": "application/octet-stream", "User-Agent": USER_AGENT}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        headers["X-GitHub-Api-Version"] = "2022-11-28"
+
+    for attempt in range(1, retries + 1):
+        target.unlink(missing_ok=True)
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            digest = hashlib.sha256()
+            size = 0
+            with urllib.request.urlopen(request, timeout=120) as response:
+                with target.open("wb") as output:
+                    while True:
+                        chunk = response.read(8 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        digest.update(chunk)
+                        size += len(chunk)
+            return size, digest.hexdigest()
+        except urllib.error.HTTPError as exc:
+            target.unlink(missing_ok=True)
+            transient = exc.code in {403, 429, 500, 502, 503, 504}
+            if not transient or attempt >= retries:
+                detail = exc.read().decode("utf-8", errors="replace")[:800]
+                raise RestoreError(f"HTTP {exc.code} for {url}: {detail}") from exc
+            reset = exc.headers.get("X-RateLimit-Reset")
+            delay = min(120.0, float(2 ** min(attempt, 6)))
+            if reset and reset.isdigit():
+                delay = max(delay, min(120.0, int(reset) - time.time() + 2.0))
+            time.sleep(max(1.0, delay))
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            target.unlink(missing_ok=True)
+            if attempt >= retries:
+                raise RestoreError(f"streaming download failure for {url}: {exc}") from exc
+            time.sleep(min(60.0, float(2 ** attempt)))
+    raise RestoreError(f"unreachable streaming retry state for {url}")
+
+
 
 def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapping[str, Any]]:
     page = 1
@@ -130,13 +178,13 @@ def download_asset(
 
     tmp = target.with_suffix(target.suffix + ".partial")
     tmp.unlink(missing_ok=True)
-    tmp.write_bytes(_request(url, token=token))
+    actual_size, actual_sha = _download_to_path(url, tmp, token=token)
     expected_size = int(asset.get("size") or 0)
-    if expected_size > 0 and tmp.stat().st_size != expected_size:
+    if expected_size > 0 and actual_size != expected_size:
         tmp.unlink(missing_ok=True)
         raise RestoreError(f"size mismatch for {name}")
     expected_sha = _expected_digest(asset)
-    if expected_sha and _sha256(tmp) != expected_sha:
+    if expected_sha and actual_sha != expected_sha:
         tmp.unlink(missing_ok=True)
         raise RestoreError(f"sha256 mismatch for {name}")
     tmp.replace(target)
@@ -228,11 +276,12 @@ def materialize_latest_local_snapshot(
         except json.JSONDecodeError:
             continue
         if isinstance(payload, Mapping) and payload.get("schema") == "alina.local_snapshot.v1":
-            candidates.append((directory.name, directory, payload))
+            created_at = str(payload.get("created_at_utc") or directory.name)
+            candidates.append((created_at, directory, payload))
     if not candidates:
         return None
 
-    _name, directory, index = sorted(candidates, key=lambda row: row[0])[-1]
+    _created_at, directory, index = sorted(candidates, key=lambda row: row[0])[-1]
     chunk_rows = index.get("chunks")
     file_rows = index.get("files")
     if not isinstance(chunk_rows, list) or not isinstance(file_rows, list):
