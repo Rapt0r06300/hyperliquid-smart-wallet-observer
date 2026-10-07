@@ -25,6 +25,15 @@ python tools/restore_alina.py --everything
 
 The second command is mandatory for a complete disaster restore.
 
+Convenience launchers are committed at repository root:
+
+- Windows: `RESTORE_ALINA.cmd`
+- Linux/macOS: `RESTORE_ALINA.sh`
+
+The restore streams large assets to disk instead of loading them into RAM, checks
+free disk space before starting, and verifies hashes before accepting restored
+evidence.
+
 ## What `restore_alina.py --everything` restores
 
 It enumerates every GitHub Release in the canonical repository and downloads all
@@ -63,6 +72,10 @@ backtests, databases, reports or research-lab files), publish it with:
 ```bash
 python tools/publish_local_recovery_snapshot.py
 ```
+
+On Windows, `BACKUP_LOCAL_ALINA.cmd` runs this snapshot command directly.
+Interrupted snapshots keep a small resume state under `runtime/recovery/` and
+reuse already uploaded 1 GB chunks only when byte size and SHA-256 match.
 
 The command snapshots ignored `data/`, `logs/`, `reports/` and `runtime/` roots
 into chunked Release assets. Files larger than one Release asset are split into
