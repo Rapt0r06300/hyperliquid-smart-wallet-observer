@@ -1,9 +1,9 @@
 {
   "analysis_stage": null,
-  "attempts": 3,
+  "attempts": 4,
   "campaign_id": "market-e8-3-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 2,
+  "chunk_index": 3,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
   "collection_cutoff_at_utc": null,
@@ -29,19 +29,30 @@
         "status": "FAILED"
       },
       "sha256": "fef660d457679925232255a05fd49aa037c3f45f21a707b3853b5fa4615f3299"
+    },
+    "2": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "5611a564892d2f823fa0e85940dac7e5a43dcad67d0c42ff278adbcf701498e2",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-3-2026100616-v7-u2 /home/runner/work/_temp/campaign-output/market-e8-3-2026100616-v7/2/assets/gate-public-ws-bbo-strc-usdt-1791342964820-1791346428827-c15ef7315103.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID B018:8AF25:59516:8D47A:6AC5DF3D and timestamp 2026-10-07 05:57:17 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405373471/assets?label=&name=gate-public-ws-bbo-strc-usdt-1791342964820-1791346428827-c15ef7315103.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "a0fecbf27788308339e98af8b90eb5adb9477f33a0536269be4d8f97e0d2fe26"
     }
   },
   "config_sha256": "b5896ee6c4153c075cb4a1d413ff6bff75e2c472660daf7bafbec8c9fcaf162f",
-  "consecutive_failures": 2,
+  "consecutive_failures": 3,
   "created_at": "2026-10-06T16:16:19.201447+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "fef660d457679925232255a05fd49aa037c3f45f21a707b3853b5fa4615f3299",
+    "checkpoint_id": "a0fecbf27788308339e98af8b90eb5adb9477f33a0536269be4d8f97e0d2fe26",
     "duration_s": 3500,
-    "generation": 2,
+    "generation": 3,
     "handoff_generation": null,
     "handoff_phase_epoch": 8,
-    "last_run_id": "37550360263",
+    "last_run_id": "37556718310",
     "market_shard_count": 16,
     "market_shard_index": 3,
     "max_coins": 0,
@@ -102,15 +113,16 @@
       "from": "CONTINUATION_REQUIRED",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T05:57:18.176477Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T03:15:23.755069Z",
-    "expires_at": "2026-10-07T09:00:23.755069Z",
-    "lease_token_sha256": "2a2687af84fa0c1dbb511f9ac0f4d8a347d44af907d9c795373b68c79d5784f7",
-    "owner_run_id": "37556718310"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -118,8 +130,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 2,
+  "next_due_at": "2026-10-07T06:02:18.176477Z",
+  "no_progress_count": 3,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -128,9 +140,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T03:15:23.755105Z",
+  "updated_at": "2026-10-07T05:57:18.176477Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
