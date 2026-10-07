@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 5,
+  "attempts": 6,
   "campaign_id": "market-e8-2-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "c349b9ea2cd5f5d047d00a3fcd4b58839ee43b9c",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "9c96311faa753c6936f2d3e90adb3a560949d0e7433221916b1e7a12a0f4ee02",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-2-2026100616-v7-u0-retry-4735de22effb4bf4 /home/runner/work/_temp/campaign-output/market-e8-2-2026100616-v7/0/assets/gate-derived-capacity-capacity-tape-aevo-usdt-1791363165468-1791363165468-3c8b247dc93c.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID C009:27BE31:29526:C74D4:6AC62E3D and timestamp 2026-10-07 11:34:22 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405618346/assets?label=&name=gate-derived-capacity-capacity-tape-aevo-usdt-1791363165468-1791363165468-3c8b247dc93c.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "ed68ab22dfafeea09d0de82b36891f8537aea02dbf060f897b87610d37274be4"
+    }
+  },
   "config_sha256": "85aae837676b98e4accec49ef963b03d3f8734bf157a92325df167273a4d2c39",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-06T16:16:19.078934+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "ed68ab22dfafeea09d0de82b36891f8537aea02dbf060f897b87610d37274be4",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37594036714",
     "market_shard_count": 16,
     "market_shard_index": 2,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-02.json",
     "plan_sha256": "17e86e6f14315c9b12128834d06a881a2a87572aa8406275e50cc64a92892d52",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 50,
@@ -93,15 +112,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T11:34:22.443139Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T08:52:26.763971Z",
-    "expires_at": "2026-10-07T14:37:26.763971Z",
-    "lease_token_sha256": "0ca31648b9ef2e9cee399ef32decc3a1db55e7bd68f8a924ed5dfb8440c349c1",
-    "owner_run_id": "37594036714"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -110,7 +130,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -119,9 +139,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T08:52:26.764036Z",
+  "updated_at": "2026-10-07T11:34:22.443139Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
