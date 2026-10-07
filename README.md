@@ -702,6 +702,29 @@ Cette surface est une **fondation de contrôle**. Le statut cloud final doit ref
 
 ---
 
+## 20.1 Reprise complète sur un nouveau PC
+
+Un simple `git clone` récupère l'historique Git, mais Git ne télécharge pas les assets des GitHub Releases. Pour récupérer aussi les trades, L2, preuves de replay/backtest/OOS/forward, scoreboards et snapshots locaux publiés :
+
+~~~text
+Windows : RESTORE_ALINA.cmd
+Linux/macOS : ./RESTORE_ALINA.sh
+~~~
+
+Ces lanceurs exécutent `tools/restore_alina.py --everything`, téléchargent les Releases du repository canonique, vérifient les identités SHA-256 et reconstruisent le dernier snapshot local explicite.
+
+Avant d'abandonner l'ancien PC, les données importantes encore uniquement locales et ignorées par Git peuvent être envoyées une fois vers les Releases avec :
+
+~~~text
+BACKUP_LOCAL_ALINA.cmd
+~~~
+
+Cette sauvegarde locale est chunkée, reprenable après interruption et exclut les chemins de secrets/clés. Le cloud Alina ne dépend jamais de cette machine : cette commande sert uniquement à sauver des données historiques qui n'existent pas encore sur GitHub.
+
+Voir `docs/DISASTER_RECOVERY.md`.
+
+---
+
 ## 21. Tests et CI
 
 Suite locale :
