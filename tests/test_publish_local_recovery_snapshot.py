@@ -41,6 +41,7 @@ def test_local_snapshot_chunks_large_ignored_runtime_and_excludes_secrets(
         stderr = ""
 
     monkeypatch.setattr(module, "_gh", lambda *_args, **_kwargs: Result())
+    monkeypatch.setattr(module, "_ensure_release", lambda _repository, _tag: {})
     uploaded = {}
 
     def fake_upload(_repository, _tag, path):
@@ -103,3 +104,70 @@ def test_chunk_writer_snapshots_only_prefix_visible_at_open(tmp_path, monkeypatc
     assert b"".join(uploaded[name] for name in sorted(uploaded)) == b"stable-prefix"
     assert sum(segment["bytes"] for segment in segments) == len(b"stable-prefix")
     assert digest.hexdigest() == hashlib.sha256(b"stable-prefix").hexdigest()
+
+
+def test_chunk_writer_resumes_matching_remote_chunk_without_upload(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "CHUNK_BYTES", 16)
+    payload = b"0123456789abcdef"
+    digest = hashlib.sha256(payload).hexdigest()
+    remote_assets = {
+        "ALINA_LOCAL_SNAPSHOT.chunk0000.bin": {
+            "name": "ALINA_LOCAL_SNAPSHOT.chunk0000.bin",
+            "size": len(payload),
+            "digest": "sha256:" + digest,
+        }
+    }
+    uploads = []
+    monkeypatch.setattr(
+        module,
+        "_upload_with_retry",
+        lambda *_args, **_kwargs: uploads.append("called"),
+    )
+
+    writer = module.ChunkWriter(
+        tmp_path,
+        "owner/repo",
+        "alina-local-snapshot-test",
+        remote_assets=remote_assets,
+    )
+    file_digest = hashlib.sha256()
+    segments = writer.write_stream(
+        io.BytesIO(payload),
+        file_digest,
+        limit_bytes=len(payload),
+    )
+    writer.finish()
+
+    assert uploads == []
+    assert writer.parts[0]["sha256"] == digest
+    assert sum(row["bytes"] for row in segments) == len(payload)
+
+
+def test_chunk_writer_refuses_mismatched_remote_chunk(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "CHUNK_BYTES", 16)
+    payload = b"0123456789abcdef"
+    remote_assets = {
+        "ALINA_LOCAL_SNAPSHOT.chunk0000.bin": {
+            "name": "ALINA_LOCAL_SNAPSHOT.chunk0000.bin",
+            "size": len(payload),
+            "digest": "sha256:" + ("0" * 64),
+        }
+    }
+    writer = module.ChunkWriter(
+        tmp_path,
+        "owner/repo",
+        "alina-local-snapshot-test",
+        remote_assets=remote_assets,
+    )
+    try:
+        writer.write_stream(
+            io.BytesIO(payload),
+            hashlib.sha256(),
+            limit_bytes=len(payload),
+        )
+    except module.SnapshotError as exc:
+        assert "existing remote bytes differ" in str(exc)
+    else:
+        raise AssertionError("resuming onto different remote bytes must fail closed")
