@@ -117,6 +117,100 @@ def _sqlite_backup(source: Path, destination: Path) -> Path:
     return destination
 
 
+def _release_assets(repository: str, release_id: int) -> dict[str, dict]:
+    assets: dict[str, dict] = {}
+    page = 1
+    while True:
+        result = _gh(
+            [
+                "api",
+                f"repos/{repository}/releases/{release_id}/assets?per_page=100&page={page}",
+            ]
+        )
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise SnapshotError("GitHub returned invalid release-asset JSON") from exc
+        if not isinstance(payload, list):
+            raise SnapshotError("GitHub release assets payload is not an array")
+        for row in payload:
+            if isinstance(row, dict) and row.get("name"):
+                assets[str(row["name"])] = row
+        if len(payload) < 100:
+            return assets
+        page += 1
+
+
+def _ensure_release(repository: str, tag: str) -> dict[str, dict]:
+    result = _gh(
+        ["api", f"repos/{repository}/releases/tags/{tag}"],
+        check=False,
+    )
+    if result.returncode != 0:
+        created = _gh(
+            [
+                "release",
+                "create",
+                tag,
+                "--repo",
+                repository,
+                "--target",
+                "main",
+                "--title",
+                f"Alina local recovery snapshot {tag}",
+                "--notes",
+                (
+                    "Explicit local disaster-recovery snapshot. It contains ignored "
+                    "runtime evidence only; no private keys, .env files or trading "
+                    "credentials are allowed."
+                ),
+            ],
+            check=False,
+        )
+        if created.returncode != 0:
+            detail = (created.stderr or created.stdout or "").lower()
+            if "already exists" not in detail and "already_exists" not in detail:
+                raise SnapshotError((created.stderr or created.stdout or "").strip())
+        result = _gh(["api", f"repos/{repository}/releases/tags/{tag}"])
+
+    try:
+        release = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SnapshotError("GitHub returned invalid Release JSON") from exc
+    release_id = int(release.get("id") or 0) if isinstance(release, dict) else 0
+    if release_id <= 0:
+        raise SnapshotError("GitHub Release id is missing")
+    assets = _release_assets(repository, release_id)
+    if INDEX_NAME in assets:
+        raise SnapshotError(
+            f"snapshot tag {tag} is already finalized; use a new tag for a new snapshot"
+        )
+    return assets
+
+
+def _remote_matches(record: dict, remote: dict) -> bool:
+    expected_sha = str(record.get("sha256") or "").lower()
+    expected_size = int(record.get("bytes") or 0)
+    remote_size = int(remote.get("size") or 0)
+    raw_digest = str(remote.get("digest") or "")
+    remote_sha = (
+        raw_digest.split(":", 1)[1].lower()
+        if raw_digest.lower().startswith("sha256:")
+        else ""
+    )
+    if len(expected_sha) != 64 or expected_size <= 0:
+        raise SnapshotError("local snapshot asset identity is incomplete")
+    if len(remote_sha) != 64:
+        raise SnapshotError(
+            f"cannot safely resume {record.get('name')}: remote SHA-256 is unavailable"
+        )
+    if remote_size != expected_size or remote_sha != expected_sha:
+        raise SnapshotError(
+            f"cannot safely resume {record.get('name')}: existing remote bytes differ"
+        )
+    return True
+
+
 def _upload_with_retry(repository: str, tag: str, path: Path) -> None:
     args = [
         "release",
@@ -152,7 +246,14 @@ def _upload_with_retry(repository: str, tag: str, path: Path) -> None:
 
 
 class ChunkWriter:
-    def __init__(self, directory: Path, repository: str, tag: str) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        repository: str,
+        tag: str,
+        *,
+        remote_assets: dict[str, dict] | None = None,
+    ) -> None:
         self.directory = directory
         self.repository = repository
         self.tag = tag
@@ -162,6 +263,7 @@ class ChunkWriter:
         self.size = 0
         self.digest = hashlib.sha256()
         self.parts: list[dict] = []
+        self.remote_assets = remote_assets if remote_assets is not None else {}
 
     def _open(self) -> None:
         if self.handle is not None:
@@ -181,7 +283,16 @@ class ChunkWriter:
                 "bytes": self.size,
                 "sha256": self.digest.hexdigest(),
             }
-            _upload_with_retry(self.repository, self.tag, self.path)
+            remote = self.remote_assets.get(self.path.name)
+            if remote is not None:
+                _remote_matches(record, remote)
+            else:
+                _upload_with_retry(self.repository, self.tag, self.path)
+                self.remote_assets[self.path.name] = {
+                    "name": self.path.name,
+                    "size": self.size,
+                    "digest": "sha256:" + self.digest.hexdigest(),
+                }
             self.parts.append(record)
             self.index += 1
         self.path.unlink(missing_ok=True)
@@ -242,29 +353,17 @@ def publish_snapshot(
     if not files:
         raise SnapshotError("no eligible local runtime files found")
 
-    _gh(
-        [
-            "release",
-            "create",
-            tag,
-            "--repo",
-            repository,
-            "--target",
-            "main",
-            "--title",
-            f"Alina local recovery snapshot {tag}",
-            "--notes",
-            (
-                "Explicit local disaster-recovery snapshot. It contains ignored runtime "
-                "evidence only; no private keys, .env files or trading credentials are allowed."
-            ),
-        ]
-    )
+    remote_assets = _ensure_release(repository, tag)
 
     manifest_files: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="alina-local-snapshot-") as tmp:
         tmp_root = Path(tmp)
-        writer = ChunkWriter(tmp_root, repository, tag)
+        writer = ChunkWriter(
+            tmp_root,
+            repository,
+            tag,
+            remote_assets=remote_assets,
+        )
         for source_path in files:
             relative = _safe_relative(source_path, root)
             prepared = source_path
@@ -315,7 +414,16 @@ def publish_snapshot(
         }
         index_path = tmp_root / INDEX_NAME
         index_path.write_text(json.dumps(index, indent=2, sort_keys=True), encoding="utf-8")
-        _upload_with_retry(repository, tag, index_path)
+        index_record = {
+            "name": INDEX_NAME,
+            "bytes": index_path.stat().st_size,
+            "sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        }
+        remote_index = remote_assets.get(INDEX_NAME)
+        if remote_index is not None:
+            _remote_matches(index_record, remote_index)
+        else:
+            _upload_with_retry(repository, tag, index_path)
     return index
 
 
