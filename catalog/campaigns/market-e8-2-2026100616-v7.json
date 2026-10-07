@@ -1,65 +1,24 @@
 {
   "analysis_stage": null,
-  "attempts": 8,
+  "attempts": 9,
   "campaign_id": "market-e8-2-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 3,
+  "chunk_index": 0,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "c349b9ea2cd5f5d047d00a3fcd4b58839ee43b9c",
+  "code_sha": "02b0249c9d18e6d5ab1c2ed33e1d3ce68b9b87ca",
   "collection_cutoff_at_utc": null,
-  "completed_units": {
-    "0": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "9c96311faa753c6936f2d3e90adb3a560949d0e7433221916b1e7a12a0f4ee02",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-2-2026100616-v7-u0-retry-4735de22effb4bf4 /home/runner/work/_temp/campaign-output/market-e8-2-2026100616-v7/0/assets/gate-derived-capacity-capacity-tape-aevo-usdt-1791363165468-1791363165468-3c8b247dc93c.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID C009:27BE31:29526:C74D4:6AC62E3D and timestamp 2026-10-07 11:34:22 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405618346/assets?label=&name=gate-derived-capacity-capacity-tape-aevo-usdt-1791363165468-1791363165468-3c8b247dc93c.jsonl.gz)",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "ed68ab22dfafeea09d0de82b36891f8537aea02dbf060f897b87610d37274be4"
-    },
-    "1": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "b5be3fda063f5094ead374528a8f562fb355cdebd99768f3f52ec182302e97b0",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-2-2026100616-v7-u1-retry-4cafece435461f5e /home/runner/work/_temp/campaign-output/market-e8-2-2026100616-v7/1/assets/gate-public-rest-instrument-metadata-luna-usdt-1791374886069-1791374886069-532a87b1eab1.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID D440:C3E3F:7008D:E01F8:6AC65CB0 and timestamp 2026-10-07 14:52:32 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405779692/assets?label=&name=gate-public-rest-instrument-metadata-luna-usdt-1791374886069-1791374886069-532a87b1eab1.jsonl.gz)",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "3865eed55b10146028d5a32e3cf41f4fbbb7e53267ed8dc9387489a28f99f8b2"
-    },
-    "2": {
-      "result": {
-        "failure_category": "INFRASTRUCTURE",
-        "previous_sha256": "a8801365928f7836cb55ee1a891bdc81b0b0f69cac4bc9e62e74c6833263ec12",
-        "previous_status": "COMPLETE",
-        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-2-2026100616-v7-u2-retry-8414eefa09e6af85 /home/runner/work/_temp/campaign-output/market-e8-2-2026100616-v7/2/assets/gate-public-rest-l2book-glw-usdt-1791389445027-1791389445027-ec95c4ae6a06.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID AC42:4EA51:28E8F:3933F:6AC69575 and timestamp 2026-10-07 18:54:45 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405988791/assets?label=&name=gate-public-rest-l2book-glw-usdt-1791389445027-1791389445027-ec95c4ae6a06.jsonl.gz)",
-        "reason": "durable_publication_failed",
-        "status": "FAILED"
-      },
-      "sha256": "ceffe4c02e6e696d6510c0c8a257dfa523c6bc1067757ad0298f80eabc75f02b"
-    }
-  },
+  "completed_units": {},
   "config_sha256": "85aae837676b98e4accec49ef963b03d3f8734bf157a92325df167273a4d2c39",
-  "consecutive_failures": 3,
+  "consecutive_failures": 0,
   "created_at": "2026-10-06T16:16:19.078934+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "ceffe4c02e6e696d6510c0c8a257dfa523c6bc1067757ad0298f80eabc75f02b",
     "duration_s": 3500,
-    "generation": 3,
-    "handoff_generation": "2",
-    "handoff_phase_epoch": 8,
-    "last_run_id": "37649834605",
     "market_shard_count": 16,
     "market_shard_index": 2,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-02.json",
     "plan_sha256": "17e86e6f14315c9b12128834d06a881a2a87572aa8406275e50cc64a92892d52",
-    "predecessor_run_id": "37618639042",
-    "requested_handoff_at_utc": "2026-10-07T16:09:11.259546Z",
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 50,
@@ -165,6 +124,15 @@
       "from": "RUNNING",
       "reason": "durable_publication_failed",
       "to": "STUCK"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-2-2026100616-v7.stuck.c349b9ea2cd5.b4302ee8d2eececf954023da853cfc28925013b3ad9e189b00c6633d217374b7.json",
+      "archived_manifest_sha256": "b4302ee8d2eececf954023da853cfc28925013b3ad9e189b00c6633d217374b7",
+      "at": "2026-10-07T21:31:18.552962Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "c349b9ea2cd5f5d047d00a3fcd4b58839ee43b9c",
+      "prior_status": "STUCK",
+      "prior_status_reason": "durable_publication_failed"
     }
   ],
   "kind": "market_collection",
@@ -176,8 +144,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": "2026-10-07T18:59:45.434398Z",
-  "no_progress_count": 3,
+  "next_due_at": null,
+  "no_progress_count": 0,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -186,9 +154,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "STUCK",
-  "status_reason": "durable_publication_failed",
+  "status": "PENDING",
+  "status_reason": "refresh_collect_after_code_fix",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T18:54:45.434398Z",
+  "updated_at": "2026-10-07T21:31:18.552977Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
