@@ -1,20 +1,39 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "copy-vault-5-2026100104-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "de591de1053b269544a09acc43671e29a686354b",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "48083caf9acee8ae106365a1a8d02c7a74cbcb436da19b825d5b6382b466b8b5",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-copy-vault-5-2026100104-v7-u0 --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 copy-vault-5-2026100104-v7 unit 0 --notes Alina SmartFlow dataset V2 collection run. Collector SHA: de591de1053b269544a09acc43671e29a686354b Shards: 55 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID A412:3DE1E0:27857EA:81EBDFD:6AC5BE8A and timestamp 2026-10-07 03:37:46 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "2697c3b16df92fe9ab06f7691bf789f0521cba16aa0f57a6ac1c1c406599e4c2"
+    }
+  },
   "config_sha256": "fa1a762303f972756e3da59b960cd75f6e772e21c586a40394b8fac8119fbf13",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-01T04:38:07.122351+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "2697c3b16df92fe9ab06f7691bf789f0521cba16aa0f57a6ac1c1c406599e4c2",
     "duration_s": 300,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 4,
+    "last_run_id": "37556718310",
     "max_vaults": 3093,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "rotate_mb": 64,
     "selection_file": "catalog/copy_vault_selections/2026100104.json",
     "selection_sha256": "adbc831da11c18ebe8d07b3bf8ff8076426ae2fc76519548022c23e8d93fda98",
@@ -35,15 +54,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T03:37:46.441283Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "copy_vault_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T03:15:27.838939Z",
-    "expires_at": "2026-10-07T09:00:27.838939Z",
-    "lease_token_sha256": "b3428c38315338e51c9a1e163e0da38c6a82dd2dfde748837240d18e5a266c80",
-    "owner_run_id": "37556718310"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -51,8 +71,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 0,
+  "next_due_at": "2026-10-07T03:42:46.441283Z",
+  "no_progress_count": 1,
   "operator_request_id": "4f466e5b296c2d6fb074985a392cfc24ccba4fffe8150146bec6b15fde689ac1",
   "outputs": [],
   "paper_only": true,
@@ -61,9 +81,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T03:15:27.838990Z",
+  "updated_at": "2026-10-07T03:37:46.441283Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
