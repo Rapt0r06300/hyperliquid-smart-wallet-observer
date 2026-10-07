@@ -32,15 +32,33 @@ class ExecuteurPaper:
         coin = candidat["coin"]
         cote = candidat["cote"]
         notional = float(candidat["notional"])
+        book_ts_ms = book.get("received_ts_ms", book.get("timestamp_ms"))
+        book_age_ms = (
+            max(0, int(ts_ms) - int(book_ts_ms))
+            if book_ts_ms is not None
+            else None
+        )
         fill = simulate_orderbook_execution(
             side="BUY" if cote == "BUY" else "SELL", notional_usdc=notional, mid_price=float(mid),
             asks=tuple(book.get("asks", ())), bids=tuple(book.get("bids", ())),
-            fee_bps=self.fee_bps, min_fill_ratio=self.min_fill_ratio)
+            fee_bps=self.fee_bps,
+            min_fill_ratio=self.min_fill_ratio,
+            latency_ms=int(candidat.get("latency_ms", 0)),
+            book_age_ms=book_age_ms,
+            max_book_age_ms=candidat.get("max_book_age_ms"),
+            latency_cost_bps=candidat.get("latency_cost_bps"),
+            adverse_selection_bps=candidat.get("adverse_selection_bps"),
+            residual_impact_bps=candidat.get("residual_impact_bps"),
+        )
         if fill.missed or fill.average_fill_price is None or fill.filled_notional_usdc <= 0:
-            ev = self.ledger.no_trade(coin=coin, reason="MISSED_FILL", timestamp_ms=ts_ms)
-            return {"execute": False, "raison": "MISSED_FILL", "fill": fill, "event": ev,
+            ev = self.ledger.no_trade(coin=coin, reason=fill.reason, timestamp_ms=ts_ms)
+            return {"execute": False, "raison": fill.reason, "fill": fill, "event": ev,
                     "fill_ratio": fill.fill_ratio}
-        fill_price = float(fill.average_fill_price)
+        fill_price = float(
+            fill.economic_fill_price
+            if fill.replay_safe and fill.economic_fill_price is not None
+            else fill.average_fill_price
+        )
         filled = float(fill.filled_notional_usdc)
         cur = self._side.get(coin)
         want = "LONG" if cote == "BUY" else "SHORT"

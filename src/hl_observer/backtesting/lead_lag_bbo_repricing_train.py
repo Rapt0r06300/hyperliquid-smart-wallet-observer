@@ -28,6 +28,7 @@ from hl_observer.backtesting.lead_lag_source_alignment import (
     infer_bbo_source_windows,
 )
 from hl_observer.backtesting.train_statistics import stable_hash
+from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 from hl_observer.simulation.lead_lag_measured_replay import (
     ADMISSION_PREDECLARED_ALL_SIGNALS,
     load_runtime_latency_evidence,
@@ -46,7 +47,7 @@ TRAIN_FRACTION = 0.60
 NOTIONAL_USD = 25.0
 MIN_TRAIN_FILLS = 30
 MIN_DISTINCT_DAYS = 3
-TARGET_DAILY_NET_USD = 4.0
+TARGET_DAILY_NET_USD = TARGET_NET_USD_PER_DAY
 PRIOR_FAMILY_TRIAL_COUNT = 2_934
 NEW_TRIAL_COUNT = (
     len(CANDIDATE_COINS)

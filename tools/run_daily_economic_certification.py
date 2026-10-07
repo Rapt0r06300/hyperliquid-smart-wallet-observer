@@ -1,4 +1,4 @@
-"""Run the strict +4 USD/day per-family paper certification."""
+"""Run the strict +5 USD/day per-family paper certification."""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +13,7 @@ from hl_observer.ops.daily_economic_certification import certify_daily_workspace
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Certify Alina SmartFlow at +4 USD net/day/family")
+    parser = argparse.ArgumentParser(description="Certify Alina SmartFlow at +5 USD net/day/family")
     parser.add_argument("workspace", nargs="?", type=Path, default=Path("."))
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)

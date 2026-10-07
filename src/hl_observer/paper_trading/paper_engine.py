@@ -28,7 +28,7 @@ from hl_observer.simulation.paper_ledger import PaperLedger
 
 @dataclass(frozen=True, slots=True)
 class PaperEngineConfig:
-    starting_cash_usdt: float = 100.0
+    starting_cash_usdt: float = 200.0
     max_position_usdt: float = 40.0  # Margin per position.
     # Backward-compatible name: this setting has always capped margin, not
     # gross notional. New callers should prefer max_total_margin_usdt.
@@ -374,8 +374,13 @@ class PaperEngine:
             )
         assert exec_result.fill_price is not None
         assert exec_result.net_cost_bps is not None
-        quantity = exec_result.filled_quantity
         filled_notional = exec_result.filled_notional_usdc
+        # The canonical execution price is all-in (spread, slippage, fee and
+        # latency). Keep the risk-capped notional fixed and derive the paper
+        # quantity from that all-in price. This models costs as less acquired
+        # quantity and preserves both ledger identity and the capital cap.
+        economic_filled_notional = filled_notional
+        quantity = economic_filled_notional / exec_result.fill_price
 
         existing = self._find_entry_position(delta, side)
         if delta.action in {LifecycleAction.ADD, LifecycleAction.INCREASE} and existing is None:
@@ -399,14 +404,14 @@ class PaperEngine:
                 existing,
                 quantity=total_quantity,
                 entry_price=average_entry,
-                notional_usdt=existing.notional_usdt + filled_notional,
+                notional_usdt=existing.notional_usdt + economic_filled_notional,
                 source_delta_id=delta.delta_id,
                 margin_locked_usdt=(
                     existing.margin_locked_usdt
-                    + filled_notional / max(1.0, float(self.config.leverage))
+                    + economic_filled_notional / max(1.0, float(self.config.leverage))
                 ),
                 leg_notional_usdt=(
-                    existing.notional_usdt + filled_notional,
+                    existing.notional_usdt + economic_filled_notional,
                 ),
             )
             trade_action = "ADD"
@@ -424,28 +429,28 @@ class PaperEngine:
                 side=side,
                 quantity=quantity,
                 entry_price=exec_result.fill_price,
-                notional_usdt=filled_notional,
+                notional_usdt=economic_filled_notional,
                 opened_at_ms=observed_at_ms,
                 source_delta_id=delta.delta_id,
                 leader_wallet=delta.wallet,
                 margin_locked_usdt=(
-                    filled_notional / max(1.0, float(self.config.leverage))
+                    economic_filled_notional / max(1.0, float(self.config.leverage))
                 ),
                 leverage_effective=max(1.0, float(self.config.leverage)),
-                leg_notional_usdt=(filled_notional,),
+                leg_notional_usdt=(economic_filled_notional,),
             )
             trade_action = "OPEN"
         self._positions[position_id] = position
         self.ledger.open_position(
             coin=delta.coin,
             side=side,
-            notional_usdc=filled_notional,
+            notional_usdc=economic_filled_notional,
             quantity=quantity,
             fill_price=exec_result.fill_price,
             timestamp_ms=observed_at_ms,
             fee_bps=0.0,
             leverage_effective=max(1.0, float(self.config.leverage)),
-            leg_notional_usd=(filled_notional,),
+            leg_notional_usd=(economic_filled_notional,),
             leg_direction=((1 if side == "LONG" else -1),),
             position_id=position_id,
             refs=_ledger_refs(
@@ -462,7 +467,7 @@ class PaperEngine:
             side=side,
             quantity=quantity,
             fill_price=exec_result.fill_price,
-            notional_usdt=filled_notional,
+            notional_usdt=economic_filled_notional,
             realized_pnl_usdt=0.0,
             fees_and_cost_bps=exec_result.net_cost_bps,
             source_delta_id=delta.delta_id,

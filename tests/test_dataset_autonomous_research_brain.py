@@ -193,7 +193,7 @@ def test_max_data_sarrete_quand_les_trois_objectifs_independants_sont_prouves() 
     )
     assert result["status"] == "STOP_PROOF_REACHED"
     assert result["recommended_suite"] is None
-    assert result["target_contract"]["target_net_usd_per_family"] == 4.0
+    assert result["target_contract"]["target_net_usd_per_family"] == 5.0
 
 
 def test_un_seul_module_atteint_ne_peut_pas_compter_comme_trois() -> None:

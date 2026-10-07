@@ -135,7 +135,7 @@ Interdit notamment :
 - compenser l'échec d'une famille par le profit d'une autre ;
 - transformer `MORE_DATA` ou `UNMEASURABLE` en `PROVEN` sans preuve.
 
-La cible **>= +4 USD NET/jour** par famille n'a jamais priorité sur l'intégrité de la preuve.
+La cible de recherche **>= +5 USD NET/jour** par famille, sur 200 USD paper, n'a jamais priorité sur l'intégrité de la preuve.
 
 ## 8. Sécurité des trois familles actives
 
@@ -212,7 +212,7 @@ Les schedules sont des watchdogs, pas une horloge exacte.
 Repositories canoniques :
 
 - `Rapt0r06300/hyperliquid-smart-wallet-observer`
-- `Rapt0r06300/alina-smartflow-datasets-v2`
+- aucun dépôt de données externe ; l'ancien `Rapt0r06300/alina-smartflow-datasets-v2` est retiré et interdit comme dépendance
 
 Un dispatch cross-repo doit être lié autant que nécessaire à :
 

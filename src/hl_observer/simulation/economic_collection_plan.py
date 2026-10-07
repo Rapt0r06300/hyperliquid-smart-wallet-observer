@@ -24,6 +24,7 @@ from .economic_campaigns import REPORT_DIR
 from .economic_objective import (
     CANONICAL_FAMILIES,
     STARTING_CAPITAL_USD,
+    TARGET_NET_USD_PER_DAY,
     canonical_family,
 )
 
@@ -679,7 +680,7 @@ def build_collection_plan(
         "paper_read_only": True,
         "real_execution": False,
         "starting_capital_usd_per_family": STARTING_CAPITAL_USD,
-        "target_net_usd_per_family": 4.0,
+        "target_net_usd_per_family": TARGET_NET_USD_PER_DAY,
         "goal_complete": goal_complete,
         "all_software_pipelines_ready": all(
             row["software_pipeline_ready"] for row in families
@@ -695,7 +696,7 @@ def build_collection_plan(
             "tools\\run_economic_objective_campaigns.py"
         ),
         "promotion_rule": (
-            "all three families must independently have >= +4 USD reconciled net, positive "
+            f"all three families must independently have >= +{TARGET_NET_USD_PER_DAY:g} USD reconciled net, positive "
             "purged OOS, positive true post-freeze forward, liquidatable evidence and placebo beaten"
         ),
     }

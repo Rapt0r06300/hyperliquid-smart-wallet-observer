@@ -58,7 +58,7 @@ def run_copy_votes_through_paper_engine(
     *,
     market_price: float,
     observed_at_ms: int,
-    starting_cash_usdt: float = 100.0,
+    starting_cash_usdt: float = 200.0,
     admission_floor_power: float | None = None,
 ) -> FusionPaperEngineSummary:
     max_position_usdt = _env_float("HYPERSMART_MAX_POSITION_USDT", 40.0)
@@ -313,7 +313,7 @@ def run_distilled_opportunities_through_paper_engine(
     *,
     market_prices: dict[str, float],
     observed_at_ms: int,
-    starting_cash_usdt: float = 100.0,
+    starting_cash_usdt: float = 200.0,
 ) -> FusionPaperEngineSummary:
     """Evaluate distilled GitHub-inspired opportunities through PaperEngine.
 

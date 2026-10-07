@@ -22,7 +22,7 @@ def _common():
         config_sha256="c" * 64,
         suite="economic-full",
         runtime_proof_sha256="d" * 64,
-        net_pnl_usd=4.25,
+        net_pnl_usd=5.25,
         analysis_complete=True,
         certified=True,
     )
@@ -42,7 +42,7 @@ def test_memory_is_partitioned_by_family_and_exact_provenance(tmp_path):
         suite="economic-full",
         runtime_proof_sha256="d" * 64,
     )
-    assert loaded["net_pnl_usd"] == pytest.approx(4.25)
+    assert loaded["net_pnl_usd"] == pytest.approx(5.25)
 
 
 def test_memory_refuses_incomplete_stale_or_silent_overwrite(tmp_path):

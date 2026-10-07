@@ -1,7 +1,7 @@
 """Executable requirement-specific Cross-Venue gate for controls 466..545.
 
 The scenarios exercise strict production certification primitives. They prove
-technical behavior only; synthetic rows never count as economic +4 USD evidence.
+technical behavior only; synthetic rows never count as economic +5 USD evidence.
 """
 from __future__ import annotations
 

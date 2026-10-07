@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import statistics
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
@@ -19,10 +20,17 @@ from hl_observer.backtesting.cross_venue_certified import (
     SOURCE_MODE as CROSS_CERTIFIED_SOURCE_MODE,
 )
 
-TARGET_NET_USD = 4.0
-TARGET_NET_USD_PER_DAY = 4.0
+TARGET_NET_USD = 5.0
+TARGET_NET_USD_PER_DAY = 5.0
 MIN_PROOF_DAYS = 2
 STARTING_CAPITAL_USD = 200.0
+ECONOMIC_CONTRACT_VERSION = "alina.economic_objective.200usd-5usd-day.v1"
+EVIDENCE_LEVEL_THRESHOLDS = (
+    ("PROVEN", 30, 150),
+    ("PROVISIONAL", 14, 75),
+    ("PROMISING", 7, 30),
+    ("EARLY_EVIDENCE", 2, 10),
+)
 COPY_HELDOUT_MIN_N = 20
 CANONICAL_FAMILIES = ("copy_vault", "lead_lag", "cross_venue_dislocation_v2")
 _ALIASES = {
@@ -60,6 +68,7 @@ def evaluate_daily_net(
     completed_cutoff_exclusive_ms = int(evaluated_at // day_ms) * day_ms
     daily: dict[str, float] = {}
     counts: dict[str, int] = {}
+    regimes: set[str] = set()
     excluded_incomplete_trade_count = 0
     excluded_incomplete_days: set[str] = set()
     missing_trade_timestamps = 0
@@ -125,6 +134,9 @@ def evaluate_daily_net(
             continue
         daily[day] = daily.get(day, 0.0) + net
         counts[day] = counts.get(day, 0) + 1
+        regime = str(trade.get("regime") or trade.get("market_regime") or "").strip()
+        if regime:
+            regimes.add(regime)
 
     days = [
         {
@@ -136,8 +148,50 @@ def evaluate_daily_net(
         for day, value in sorted(daily.items())
     ]
     values = [float(row["net_pnl_usd"]) for row in days]
+    eligible_trade_count = sum(counts.values())
+    evidence_level = "MORE_DATA"
+    for level, minimum_days, minimum_trades in EVIDENCE_LEVEL_THRESHOLDS:
+        if (
+            missing_trade_timestamps == 0
+            and missing_trade_net == 0
+            and len(values) >= minimum_days
+            and eligible_trade_count >= minimum_trades
+        ):
+            evidence_level = level
+            break
+    positives = sum(value for value in values if value > 0.0)
+    losses = -sum(value for value in values if value < 0.0)
+    profit_factor = positives / losses if losses > 0.0 else None
+    mean = statistics.fmean(values) if values else None
+    stdev = statistics.stdev(values) if len(values) >= 2 else None
+    downside = [min(value, 0.0) for value in values]
+    downside_deviation = (
+        math.sqrt(statistics.fmean(value * value for value in downside))
+        if downside
+        else None
+    )
+    running = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for value in values:
+        running += value
+        peak = max(peak, running)
+        max_drawdown = max(max_drawdown, peak - running)
+
+    def quantile(fraction: float) -> float | None:
+        if not values:
+            return None
+        ordered = sorted(values)
+        position = (len(ordered) - 1) * fraction
+        lower = math.floor(position)
+        upper = math.ceil(position)
+        if lower == upper:
+            return ordered[lower]
+        return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
+
     return {
-        "schema_version": "hypersmart.daily_net_evidence.v1",
+        "schema_version": "hypersmart.daily_net_evidence.v2",
+        "economic_contract_version": ECONOMIC_CONTRACT_VERSION,
         "target_net_usd_per_day": float(target),
         "minimum_required_days": MIN_PROOF_DAYS,
         "evaluated_at_ms": int(evaluated_at),
@@ -147,14 +201,26 @@ def evaluate_daily_net(
         "excluded_incomplete_days_utc": sorted(excluded_incomplete_days),
         "sample_count": len(values),
         "observed_trade_count": observed_trades,
+        "eligible_trade_count": eligible_trade_count,
+        "observed_regime_count": len(regimes),
+        "observed_regimes": sorted(regimes),
+        "evidence_level": evidence_level,
         "missing_trade_timestamps": missing_trade_timestamps,
         "missing_trade_net": missing_trade_net,
         "days": days,
         "total_net_pnl_usd": round(sum(values), 8) if values else None,
-        "mean_daily_net_pnl_usd": (
-            round(sum(values) / len(values), 8) if values else None
-        ),
+        "mean_daily_net_pnl_usd": round(mean, 8) if mean is not None else None,
+        "median_daily_net_pnl_usd": round(statistics.median(values), 8) if values else None,
+        "p10_daily_net_pnl_usd": round(quantile(0.10), 8) if values else None,
+        "p25_daily_net_pnl_usd": round(quantile(0.25), 8) if values else None,
+        "p75_daily_net_pnl_usd": round(quantile(0.75), 8) if values else None,
+        "p90_daily_net_pnl_usd": round(quantile(0.90), 8) if values else None,
         "min_daily_net_pnl_usd": round(min(values), 8) if values else None,
+        "max_daily_net_pnl_usd": round(max(values), 8) if values else None,
+        "max_drawdown_usd": round(max_drawdown, 8) if values else None,
+        "profit_factor": round(profit_factor, 8) if profit_factor is not None else None,
+        "sharpe": round(mean / stdev, 8) if mean is not None and stdev not in (None, 0.0) else None,
+        "sortino": round(mean / downside_deviation, 8) if mean is not None and downside_deviation not in (None, 0.0) else None,
         "all_days_at_or_above_target": bool(
             values
             and len(values) >= MIN_PROOF_DAYS
@@ -343,7 +409,7 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
                 issues.append("DAILY_NET_PROOF_HAS_INCOMPLETE_DAY")
             if not (
                 daily_evidence.get("schema_version")
-                == "hypersmart.daily_net_evidence.v1"
+                in {"hypersmart.daily_net_evidence.v1", "hypersmart.daily_net_evidence.v2"}
                 and _number(daily_evidence.get("target_net_usd_per_day"))
                 == TARGET_NET_USD_PER_DAY
                 and daily_evidence.get("complete_utc_days_only") is True
@@ -368,4 +434,4 @@ def evaluate_objective(evidence: Mapping[str, Any], *, target_net_usd: float = T
     return {"family": family, "target_net_usd": float(target_net_usd), "target_net_usd_per_day": TARGET_NET_USD_PER_DAY, "daily_target_required": daily_target_required, "daily_evidence": dict(daily_evidence) if isinstance(daily_evidence, Mapping) else None, "copy_checkpoint_integrity": dict(evidence["copy_checkpoint_integrity"]) if isinstance(evidence.get("copy_checkpoint_integrity"), Mapping) else None, "proof_economics": proof_economics, "proof_net_pnl_usd": proof_net, "eligible_net_pnl_usd": proof_net if not unique_issues else None, "objective_status": "ATTEINT" if not unique_issues else "NON_ATTEINT", "objective_reasons": unique_issues}
 
 
-__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]
+__all__ = ["CANONICAL_FAMILIES", "COPY_HELDOUT_MIN_N", "ECONOMIC_CONTRACT_VERSION", "EVIDENCE_LEVEL_THRESHOLDS", "MIN_PROOF_DAYS", "STARTING_CAPITAL_USD", "TARGET_NET_USD", "TARGET_NET_USD_PER_DAY", "canonical_family", "evaluate_daily_net", "evaluate_objective"]

@@ -39,7 +39,7 @@ ANTI_OVERFIT_REQUIREMENTS = (
     ("holdout_veto", "veto holdout et absence de retuning après observation"),
 )
 MAXDATA_REQUIREMENTS = (
-    ("target_4usd", "objectif 4 USD par famille"),
+    ("target_5usd", "objectif 5 USD par famille"),
     ("completed_suites_truth", "COMPLETED_SUITES uniquement pour les succès réels"),
     ("state_sha", "état lié au SHA exact"),
     ("state_dataset", "état lié au snapshot dataset"),
@@ -83,7 +83,7 @@ OBSERVABILITY_REQUIREMENTS = (
     ("cockpit_runtime", "cockpit: progression, ressources et runtime"),
     ("github_online_truth", "vérité GitHub en ligne, pas seulement service Running"),
 )
-DOCS_REQUIREMENTS = (("readme_truth", "README: scope courant, objectif +4, données/replay/safety et runner non installé"),)
+DOCS_REQUIREMENTS = (("readme_truth", "README: scope courant, objectif +5, données/replay/safety et runner non installé"),)
 REHEARSALS_REQUIREMENTS = (
     ("ordered_rehearsals", "répétitions pré-full ~180GB avec crash/restart/RAM/disque/consommation runtime"),
     ("final_go_gate", "GO final: main propre, CI verte, ledger ~180GB, PnL réconcilié, 3 familles certifiables, anti-overfit/placebos/sanitisation/reproductibilité/docs"),
@@ -359,7 +359,7 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     def memory_probe() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            common = dict(project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=4.2, analysis_complete=True, certified=True)
+            common = dict(project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=5.2, analysis_complete=True, certified=True)
             a = record_certified_proof(tmp, family="copy_vault", **common)
             b = record_certified_proof(tmp, family="lead_lag", **common)
             exact = load_exact_proof(tmp, family="copy_vault", project_sha="a" * 40, dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64)
@@ -367,7 +367,7 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     def memory_negative() -> bool:
         with tempfile.TemporaryDirectory() as tmp:
-            common = dict(project_sha="a" * 40, family="copy_vault", dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=4.2, analysis_complete=True, certified=True)
+            common = dict(project_sha="a" * 40, family="copy_vault", dataset_snapshot_sha256="b" * 64, config_sha256="c" * 64, suite="economic-full", runtime_proof_sha256="d" * 64, net_pnl_usd=5.2, analysis_complete=True, certified=True)
             record_certified_proof(tmp, **common)
             try:
                 record_certified_proof(tmp, **{**common, "runtime_proof_sha256": "e" * 64})
@@ -396,7 +396,7 @@ def _maxdata_probes(root: Path) -> dict[str, Probe]:
 
     common_mem = (memory_path,)
     return {
-        "target_4usd": Probe(_contains(root, policy_path, "TARGET_NET_USD_PER_FAMILY = 4.0") and TARGET_NET_USD_PER_FAMILY == 4.0 and TARGET_NET_USD == 4.0, _safe(select_ready), _safe(lambda: not targets_reached_from_brain(decisions)), _safe(lambda: TARGET_NET_USD_PER_FAMILY == TARGET_NET_USD == 4.0), (policy_path, "src/hl_observer/simulation/economic_objective.py")),
+        "target_5usd": Probe(TARGET_NET_USD_PER_FAMILY == 5.0 and TARGET_NET_USD == 5.0, _safe(select_ready), _safe(lambda: not targets_reached_from_brain(decisions)), _safe(lambda: TARGET_NET_USD_PER_FAMILY == TARGET_NET_USD == 5.0), (policy_path, "src/hl_observer/simulation/economic_objective.py")),
         "completed_suites_truth": Probe(_contains(root, policy_path, "_explicit_zero", "analysis_complete", "completion_recorded"), _safe(completed_registry_probe), _safe(completed_registry_negative), _safe(completed_registry_probe), (policy_path, completion_path)),
         "state_sha": Probe(_contains(root, policy_path, "project_sha"), _safe(completed_registry_probe), _safe(lambda: completed_suites_from_registry(tempfile.mkdtemp(), project_sha="a" * 40) == ()), _safe(completed_registry_probe), (policy_path,)),
         "state_dataset": Probe(_contains(root, memory_path, "dataset_snapshot_sha256"), _safe(memory_probe), _safe(memory_negative), _safe(memory_probe), common_mem),
@@ -605,7 +605,7 @@ def _docs_probes(root: Path) -> dict[str, Probe]:
     readme_text = _read(root, readme)
     completion_text = _read(root, completion)
     core = all(token in readme_text for token in ("Alina Smart Flow", "Copy-Vault", "Lead-Lag", "Cross-Venue", "paper"))
-    extended = all(token in (readme_text + completion_text) for token in ("4.00 USD", "FULL/COLD", "180", "MAX DATA", "GitHub-hosted"))
+    extended = all(token in (readme_text + completion_text) for token in ("5.00 USD", "FULL/COLD", "180", "MAX DATA", "GitHub-hosted"))
     deterministic = all(token in readme_text for token in ("spec canonique", "IDLE", "COLLECT", "ANALYZE"))
     return {"readme_truth": Probe(core and extended, core, any(token in readme_text.casefold() for token in ("aucune exécution réelle", "aucun ordre réel", "aucun ordre reel", "real_execution")), deterministic, (readme, completion, source))}
 

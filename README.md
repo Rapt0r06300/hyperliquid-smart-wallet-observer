@@ -55,18 +55,19 @@ Autres statuts encodés dans `src/hl_observer/strategies/active_scope.py` :
 
 La cible du projet est :
 
-**>= +4.00 USD NET/jour PROUVÉS pour chacune des trois familles actives, séparément.**
+**>= +5.00 USD NET/jour PROUVÉS pour chacune des trois familles actives, séparément, sur 200 USD de capital paper.**
 
 Aucune compensation n'est autorisée entre familles. Un Copy-Vault négatif ne peut pas être “sauvé” par un Lead-Lag positif.
 
 Les conclusions honnêtes sont :
 
 - `PROVEN`
+- `PROMISING`
 - `MORE_DATA`
 - `UNMEASURABLE`
-- `KILL`
+- `REJECTED`
 
-La cible de +4 USD n'est jamais obtenue en abaissant artificiellement les frais, le slippage, la latence, les exigences statistiques ou les gates de qualité.
+La cible de +5 USD n'est jamais obtenue en abaissant artificiellement les frais, le slippage, la latence, l'impact, les exigences statistiques ou les gates de qualité.
 
 ---
 

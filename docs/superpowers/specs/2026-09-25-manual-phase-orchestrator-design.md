@@ -1113,13 +1113,13 @@ The collection architecture is necessary but not sufficient. The three active re
 
 The long-term economic milestone is standardized across all three modules:
 
-> **at least +4 USD net per UTC day per module**, measured after fees, spread, slippage, latency, capacity, funding where applicable, and realistic fill assumptions.
+> **at least +5 USD net per UTC day per module on 200 USD paper capital**, measured after fees, spread, slippage, latency, impact, capacity, funding where applicable, and realistic fill assumptions.
 
-This is a research target, not a guarantee, and it is **not an ANALYZE stage-completion gate**. The operational calibration rule is monotone per module: every measurable new replay/backtest result is compared with the retained reference under the same proof semantics, and it replaces that reference only when its comparable after-cost net PnL is strictly better. Improvement may therefore be negative-to-less-negative — for example -4 USD to -2 USD — while the module remains economically unproven. Non-measurable runs are recorded but never promoted; missing, stale, duplicated or corrupt evidence never counts as improvement.
+This is a research target, not a guarantee, and it is **not an ANALYZE stage-completion gate**. Historical evidence produced with 100 USD capital or a 4 USD/day target remains historical and cannot prove the current contract. The operational calibration rule is monotone per module: every measurable new replay/backtest result is compared with the retained reference under the same proof semantics, and it replaces that reference only when its comparable after-cost net PnL is strictly better. Improvement may therefore be negative-to-less-negative — for example -4 USD to -2 USD — while the module remains economically unproven. Non-measurable runs are recorded but never promoted; missing, stale, duplicated or corrupt evidence never counts as improvement.
 
 Promotion of an actual economic strategy remains fail-closed. Thresholds, costs, OOS/forward separation or validation rules may not be weakened merely to obtain a higher number.
 
-For the three active families, **carry/funding is not an alpha source**. Funding may be measured and deducted when a held position crosses a settlement, but Copy-Vault, Lead-Lag and Cross-Venue may not claim the +4 USD/day target from carry.
+For the three active families, **carry/funding is not an alpha source**. Funding may be measured and deducted when a held position crosses a settlement, but Copy-Vault, Lead-Lag and Cross-Venue may not claim the +5 USD/day target from carry.
 
 Current implementation contract for the economic-acceleration path:
 
@@ -1128,7 +1128,7 @@ Current implementation contract for the economic-acceleration path:
 - **Cross-Venue**: native Bybit/OKX/Gate/Bitget collection persists replayable full-L2 normalized snapshots plus instrument rules and receive-clock evidence. Venue-specific maker/taker fees come from one versioned source. The native replay path computes exact depth/VWAP and conservative four-leg fee floors across synchronized venue pairs. Maker fee scenarios remain diagnostic until passive fill probability, queue position and adverse-selection markout are causally proven; the prefilter can never certify closed-cycle profit by itself.
 - Existing certified Hyperliquid/Binance evidence remains valid and separate; the native multi-venue path extends rather than replaces it. A six-venue economic claim still requires compatible same-clock evidence for the exact legs used by that claim.
 
-After the +4 USD/day milestone, optimization continues to target the highest scalable daily net PnL compatible with the approved paper-capital, drawdown, capacity, causality, OOS and forward constraints.
+After the +5 USD/day milestone, optimization continues to target the highest scalable daily net PnL compatible with the approved 200 USD paper-capital, drawdown, capacity, causality, OOS and forward constraints.
 
 ### Speed-to-proof principle
 
@@ -1750,7 +1750,7 @@ For every module publish:
 - concentration;
 - OOS/forward status.
 
-The canonical +4 USD/day milestone requires positive after-cost daily performance under the frozen proof policy; it cannot be inferred from one exceptional trade or a single profitable day.
+The canonical +5 USD/day milestone requires positive after-cost daily performance under the frozen proof policy; it cannot be inferred from one exceptional trade or a single profitable day.
 
 The scoreboard separately reports:
 
@@ -1818,7 +1818,7 @@ with:
 
 This decomposition is reported for every candidate.
 
-A module that misses +4 USD/day must therefore identify **which lever is insufficient**:
+A module that misses +5 USD/day must therefore identify **which lever is insufficient**:
 
 - too few valid opportunities;
 - weak gross edge;
@@ -3894,7 +3894,7 @@ This specification intentionally preserves all previously validated design layer
 - **Manual Phase Orchestrator:** `IDLE / COLLECT / ANALYZE`;
 - **Autonomous COLLECT relay:** automatic successor jobs until the user changes phase;
 - **Collector V4 Extreme Replay-Grade:** raw WAL, handoff overlap, L2 certification, repair/quarantine, module-complete evidence;
-- **Strategy / PnL Acceleration VNext:** +4 USD net/day/module first milestone and scalable after-cost PnL;
+- **Strategy / PnL Acceleration VNext:** +5 USD net/day/module first milestone on 200 USD paper capital and scalable after-cost PnL;
 - **Edge Research Program V2:** broad defensible edge library with anti-overfitting controls;
 - **Acceptance Architecture V2:** scoped G0-G5 gates, dependency DAG and graceful degradation;
 - **Module Optimization V3:** edge portfolios, champion/challenger, decay monitoring and compute prioritization;
@@ -3932,9 +3932,9 @@ The preferred resolution to conflict is:
 4. reduce optional breadth/complexity before weakening quality;
 5. use narrower scopes/tiers/cascades rather than global blocking.
 
-### Profitability Convergence V6 — friction-first path to +4 USD net/day
+### Profitability Convergence V6 — friction-first path to +5 USD net/day
 
-The next architecture layer treats the first economic milestone — **+4 USD net/day proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
+The next architecture layer treats the current economic milestone — **+5 USD net/day per module on 200 USD paper capital, proven under Alina's paper/replay evidence contract** — as a research-allocation target, not as a promise and not as a reason to weaken gates.
 
 The core diagnosis from existing Alina evidence is that many simple ideas have shown **small gross predictability but insufficient economic amplitude after friction**. Therefore the system must stop treating every statistically interesting signal as an equally valuable research direction.
 
@@ -4305,7 +4305,7 @@ Promotion requires:
 5. forward/shadow confirmation where required;
 6. positive net after all realistic costs;
 7. sufficient effective independent events;
-8. capacity sufficient to matter toward the +4 USD/day target;
+8. capacity sufficient to matter toward the +5 USD/day target;
 9. conservative target-gap improvement;
 10. no conflict with safety/paper-only invariants.
 
@@ -4627,7 +4627,7 @@ Maintain a dedicated V6.1 scoreboard:
 
 The scoreboard is allowed to say `UNMEASURABLE`, `KILL`, `SHADOW` or `PROMOTE`.
 
-It is not allowed to fill missing data with assumptions just to compute progress toward 4 USD/day.
+It is not allowed to fill missing data with assumptions just to compute progress toward 5 USD/day.
 
 ### Profitability Convergence V6.2 — public-bot intelligence and market-structure expansion
 
@@ -5369,7 +5369,7 @@ Proof policy:
 
 - do not credit a fee tier, staking discount, maker rebate or referral benefit that the paper account/evidence contract has not explicitly made achievable;
 - baseline proof should use the conservative achievable cost state;
-- lower-cost hypothetical tiers may be shown as sensitivity/capacity scenarios but cannot prove the +4 USD/day milestone;
+- lower-cost hypothetical tiers may be shown as sensitivity/capacity scenarios but cannot prove the +5 USD/day milestone;
 - historical replay uses the rules effective at the historical timestamp whenever rule history is available;
 - rule-history unknowns are `UNMEASURABLE`, not silently replaced by current fees.
 
@@ -6933,7 +6933,7 @@ A HIP-4 sleeve can be promoted only if:
 - all fee/settlement/collateral costs are modeled;
 - effective independent event count is sufficient;
 - frozen OOS economics are positive;
-- capacity and capital-time contribution can matter toward the +4 USD/day milestone;
+- capacity and capital-time contribution can matter toward the +5 USD/day milestone;
 - edge does not rely on unavailable latency.
 
 ### V6.7 research basis
@@ -8764,7 +8764,7 @@ Success includes:
 - exposing infeasible quote throughput;
 - reducing queue/rule uncertainty enough to confidently `KILL` or `PROMOTE` a candidate.
 
-This directly improves the credibility of the +4 USD/day milestone.
+This directly improves the credibility of the +5 USD/day milestone.
 
 ### V6.13 research basis
 
@@ -8785,7 +8785,7 @@ Exa and Parallel Search were used to discover/cross-check the relevant details. 
 
 ### Profitability Convergence V6.14 — exact fee, priority and reference-price semantics
 
-V6.14 closes the remaining protocol details that can change after-cost PnL by only a few basis points but are material relative to the +4 USD/day proof target.
+V6.14 closes the remaining protocol details that can change after-cost PnL by only a few basis points but are material relative to the +5 USD/day proof target.
 
 The governing rule is:
 
@@ -8913,7 +8913,7 @@ Rules:
 - do not infer future VIP/MM tier from volume accumulated later in the backtest;
 - a sub-account cannot be assigned a fee state inconsistent with current master-account aggregation rules;
 - vault fee economics are modeled under vault rules, not automatically inherited from the master account;
-- referral/staking discounts cannot prove +4 USD/day unless the paper proof contract explicitly allows and can sustain them;
+- referral/staking discounts cannot prove +5 USD/day unless the paper proof contract explicitly allows and can sustain them;
 - fee rebates remain negative cost and are reconciled fill-by-fill;
 - current fee rules are never back-applied across known rule changes.
 
@@ -10648,7 +10648,7 @@ V6.21 closes the final two pages in the current official Hyperliquid Trading doc
 
 The governing rule is:
 
-> **frontend analytics are useful reconciliation views, but they cannot replace event-level ledger truth for proving net PnL, drawdown, capacity or the +4 USD/day milestone.**
+> **frontend analytics are useful reconciliation views, but they cannot replace event-level ledger truth for proving net PnL, drawdown, capacity or the +5 USD/day milestone.**
 
 ### Portfolio-graph sampling contract
 
@@ -10781,7 +10781,7 @@ Therefore:
 - `feeToken` is explicit and any conversion to USD/reference value uses point-in-time conversion;
 - builder/deployer/referral/priority attribution must reconcile to total fee/cost ledgers without double counting.
 
-A candidate is invalid if its +4 USD/day proof depends on adding or subtracting a component twice.
+A candidate is invalid if its +5 USD/day proof depends on adding or subtracting a component twice.
 
 ### Maker/taker truth from fill evidence
 
@@ -11632,7 +11632,7 @@ High-signal external research reviewed on 2026-09-25 motivates these hypotheses,
 - **_The Quarter-Hour Effect: Periodic Algorithmic Trading and Return Predictability in Cryptocurrency Futures_ (2026 preprint):** motivates a tightly scoped periodic-flow lane with placebo testing rather than an assumed universal clock-time edge.
 - **recent matched-market short-horizon mean-reversion evidence:** statistically detectable reversal can remain smaller than round-trip cost, reinforcing V6's rule that small standalone micro-signals should not outrank larger structural mechanisms.
 
-External research creates hypotheses only. It cannot mark an Alina module `PROMOTED`, cannot prove +4 USD/day, and cannot override an Alina `KILL` verdict without a materially new preregistered experiment.
+External research creates hypotheses only. It cannot mark an Alina module `PROVEN`, cannot prove +5 USD/day, and cannot override an Alina `REJECTED` verdict without a materially new preregistered experiment.
 
 ### Research basis for Ultra-Scale V5
 
@@ -11723,7 +11723,7 @@ Run strictly paper/read-only forward evaluation on evidence arriving after the f
 
 Evaluate module-level net PnL after explicit fees, spread, slippage, latency, capacity, and fill assumptions.
 
-The first standardized target is a separately proven net result of at least 4 USD per UTC day per module under the frozen proof contract. PnL may not be combined across modules to rescue a failing module. After that milestone, the objective is the highest robust scalable daily net PnL supported by OOS/forward evidence.
+The current standardized target is a separately proven net result of at least 5 USD per UTC day per module on 200 USD paper capital under the frozen proof contract. PnL may not be combined across modules to rescue a failing module. After that milestone, the objective is the highest robust scalable daily net PnL supported by OOS/forward evidence.
 
 ### SCOREBOARD
 
@@ -11947,7 +11947,7 @@ Blocks only the claim that a module has achieved a specified economic milestone.
 
 It does **not** block further collection or research.
 
-For the +4 USD net/day milestone, G5 requires the frozen proof contract for that module/path set, including after-cost PnL, causal/OOS/forward validity, capacity, fill realism, and stress survival.
+For the +5 USD net/day milestone, G5 requires the frozen proof contract for that module/path set, including after-cost PnL, causal/OOS/forward validity, capacity, fill realism, and stress survival.
 
 Copy-Vault failing G5 does not prevent Lead-Lag or Cross-Venue from proving their own milestones.
 

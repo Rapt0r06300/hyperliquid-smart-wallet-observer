@@ -1,4 +1,4 @@
-"""Final fail-closed economic certification for the real +4 USD/day target.
+"""Final fail-closed economic certification for the +5 USD/day research target.
 
 The existing canonical certification proves economic integrity, OOS,
 post-freeze forward evidence, costs, provenance and cross-family identity. This
@@ -18,12 +18,15 @@ from hl_observer.ops.final_economic_certification import (
     certify_campaign,
     certify_workspace,
 )
-from hl_observer.simulation.economic_objective import CANONICAL_FAMILIES
+from hl_observer.simulation.economic_objective import (
+    CANONICAL_FAMILIES,
+    TARGET_NET_USD_PER_DAY,
+)
 
 SCHEMA = "hypersmart.daily_economic_certification.v1"
-TARGET_NET_USD_PER_DAY = 4.0
-MIN_FORWARD_OBSERVATION_SECONDS = 86_400.0
+MIN_FORWARD_OBSERVATION_SECONDS = 30 * 86_400.0
 MIN_FORWARD_COVERAGE_RATIO = 0.99
+MIN_FORWARD_TRADE_COUNT = 30
 
 
 def _number(value: object) -> float | None:
@@ -50,7 +53,7 @@ def apply_daily_gate(
     min_forward_observation_seconds: float = MIN_FORWARD_OBSERVATION_SECONDS,
     min_forward_coverage_ratio: float = MIN_FORWARD_COVERAGE_RATIO,
 ) -> dict[str, Any]:
-    """Add the verified +4 USD/day requirement without weakening base proof."""
+    """Add the verified +5 USD/day requirement without weakening base proof."""
 
     result = dict(base_result)
     reasons = [str(value) for value in result.get("reasons", []) if str(value)]
@@ -70,6 +73,12 @@ def apply_daily_gate(
     coverage_verified = forward.get("observation_coverage_verified") is True
     observation_source = str(forward.get("observation_source") or "").strip()
     net = _number(forward.get("net_pnl_usd"))
+    trade_count = _number(forward.get("sample_count"))
+
+    if trade_count is None:
+        reasons.append("FORWARD_TRADE_COUNT_MISSING")
+    elif trade_count < MIN_FORWARD_TRADE_COUNT:
+        reasons.append("FORWARD_TRADE_COUNT_TOO_SMALL")
 
     clock_seconds: float | None = None
     clock_consistent = False
@@ -139,6 +148,8 @@ def apply_daily_gate(
         and coverage_ratio is not None
         and coverage_ratio >= float(min_forward_coverage_ratio)
         and observation_source
+        and trade_count is not None
+        and trade_count >= MIN_FORWARD_TRADE_COUNT
         and rate is not None
         and rate >= float(target_net_usd_per_day)
     )
@@ -150,6 +161,8 @@ def apply_daily_gate(
             "target_net_usd_per_day": float(target_net_usd_per_day),
             "minimum_forward_observation_seconds": float(min_forward_observation_seconds),
             "minimum_forward_coverage_ratio": float(min_forward_coverage_ratio),
+            "minimum_forward_trade_count": MIN_FORWARD_TRADE_COUNT,
+            "forward_trade_count": int(trade_count) if trade_count is not None else None,
             "forward_observation_start_ms": start_ms,
             "forward_observation_end_ms": end_ms,
             "forward_observation_seconds": verified_seconds,
@@ -173,7 +186,7 @@ def certify_daily_campaign(
     expected_family: str,
     payload: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Run the existing strict certification, then the +4 USD/day gate."""
+    """Run the existing strict certification, then the +5 USD/day gate."""
 
     return apply_daily_gate(certify_campaign(expected_family, payload), payload)
 
@@ -208,6 +221,7 @@ def certify_daily_workspace(workspace: str | Path) -> dict[str, Any]:
         "target_net_usd_per_day_per_family": TARGET_NET_USD_PER_DAY,
         "minimum_forward_observation_seconds_per_family": MIN_FORWARD_OBSERVATION_SECONDS,
         "minimum_forward_coverage_ratio_per_family": MIN_FORWARD_COVERAGE_RATIO,
+        "minimum_forward_trade_count_per_family": MIN_FORWARD_TRADE_COUNT,
         "daily_rate_basis": "VERIFIED_STRICT_POST_FREEZE_FORWARD_WALL_CLOCK",
         "families": rows,
     }
@@ -216,6 +230,7 @@ def certify_daily_workspace(workspace: str | Path) -> dict[str, Any]:
 __all__ = [
     "MIN_FORWARD_COVERAGE_RATIO",
     "MIN_FORWARD_OBSERVATION_SECONDS",
+    "MIN_FORWARD_TRADE_COUNT",
     "SCHEMA",
     "TARGET_NET_USD_PER_DAY",
     "apply_daily_gate",

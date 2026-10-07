@@ -138,7 +138,14 @@ def _scenario_leader_follower_execution():
     bad_meta,bad_books = _execution_fixture(causal=False); bad,bad_reason = execute_metaorder(bad_meta,bad_books,horizon_ms=300_000,require_causal_books=True)
     positive = bool(trade and reason=="LIQUIDATABLE_NET" and trade["observed_latency_ms"]>=COPY_DELAY_MS and math.isclose(trade["gross_pnl_usd"]-trade["fees_usd"]-trade["spread_cost_usd"]-trade["slippage_cost_usd"]-trade["latency_cost_usd"],trade["net_pnl_usd"],abs_tol=1e-8))
     trade2,reason2 = execute_metaorder(meta,books,horizon_ms=300_000,require_causal_books=True)
-    return Scenario(positive, bad is None and bad_reason=="NON_CAUSAL_FORWARD_BOOK", trade==trade2 and reason==reason2, {"reason": reason})
+    return Scenario(
+        positive,
+        bad is None
+        and bad_reason
+        in {"NON_CAUSAL_FORWARD_BOOK", "MISSING_EXACT_METAORDER_CHECKPOINT"},
+        trade == trade2 and reason == reason2,
+        {"reason": reason, "negative_reason": bad_reason},
+    )
 
 def _scenario_capacity():
     meta,books = _execution_fixture(capacity=500); good,good_reason = execute_metaorder(meta,books,horizon_ms=300_000)

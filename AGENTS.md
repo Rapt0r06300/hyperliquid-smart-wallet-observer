@@ -20,7 +20,7 @@ En cas de conflit : sécurité et constitution, puis spec canonique, puis HEAD r
 ## Dépôts et runtime
 
 - Principal : `Rapt0r06300/hyperliquid-smart-wallet-observer`, branche `main`.
-- Dataset : `Rapt0r06300/alina-smartflow-datasets-v2`, branche `main`.
+- Données et code : dépôt unique `Rapt0r06300/hyperliquid-smart-wallet-observer`, branche `main`. L'ancien dépôt Dataset V2 est retiré et ne doit être ni requis ni interrogé.
 - Runtime actif : `src/hl_observer/`.
 - `hyper_smart_observer/` est une surface legacy/compatibilité, pas un second runtime.
 
@@ -44,7 +44,7 @@ Familles actives :
 
 Carry/Funding Carry : **DISABLED_BY_SCOPE**.
 
-Cible de preuve : au moins +4 USD net/jour pour chaque famille, indépendamment. États honnêtes : `PROVEN`, `MORE_DATA`, `UNMEASURABLE`, `KILL`. Aucun résultat ne doit être forcé ; aucune compensation entre familles.
+Cible de recherche : au moins +5 USD net/jour pour chaque famille, indépendamment, avec 200 USD de capital paper. États honnêtes : `PROVEN`, `PROMISING`, `MORE_DATA`, `UNMEASURABLE`, `REJECTED`. Aucun résultat ne doit être forcé ; aucune compensation entre familles.
 
 ## Control plane et données
 
@@ -56,7 +56,7 @@ Phases : `IDLE -> COLLECT -> ANALYZE`.
 
 Respecter strictement les phase epochs, `source_collection_epoch`, cutoff figé, manifests, migrations, leases, checkpoints, resume, watchdogs, anti split-brain et idempotence cross-repo.
 
-Seuls les shards Dataset V2 explicitement `SAFE`, replay-compatible, vérifiés par taille/hash, avec exact counts et unique counts globaux peuvent alimenter les preuves. Les collecteurs/normalizers doivent conserver timestamps source/réception, identité native, provenance, clock sync, L2/BBO/trades, gaps et recovery.
+Seuls les shards du dépôt principal explicitement `SAFE`, replay-compatible, vérifiés par taille/hash, avec exact counts et unique counts globaux peuvent alimenter les preuves. Les collecteurs/normalizers doivent conserver timestamps source/réception, identité native, provenance, clock sync, L2/BBO/trades, gaps et recovery.
 
 ## Discipline d’implémentation
 

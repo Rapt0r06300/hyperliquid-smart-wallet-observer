@@ -36,3 +36,24 @@ def test_open_puis_reduce_realise_reconcilie():
     sell = {"coin": "BTC", "cote": "SELL", "quantite": 0.008, "prix": 60000.0, "notional": 500.0, "valide": True}
     r = ex.executer(sell, book=BOOK, mid=60000.0, ts_ms=2)
     assert r["action"] == "REDUCE_OR_CLOSE" and ex.pnl()["reconcilie"] is True
+
+
+def test_stale_book_est_refuse_et_couts_mesures_affectent_le_fill():
+    ex = ExecuteurPaper(fee_bps=5.0)
+    cand = {
+        "coin": "BTC",
+        "cote": "BUY",
+        "notional": 100.0,
+        "max_book_age_ms": 100,
+        "latency_cost_bps": 1.0,
+        "adverse_selection_bps": 2.0,
+        "residual_impact_bps": 3.0,
+    }
+    stale = ex.executer(cand, book={**BOOK, "received_ts_ms": 1}, mid=60000.0, ts_ms=200)
+    assert stale["execute"] is False
+    assert stale["raison"] == "STALE_BOOK"
+
+    fresh = ex.executer(cand, book={**BOOK, "received_ts_ms": 150}, mid=60000.0, ts_ms=200)
+    assert fresh["execute"] is True
+    assert fresh["fill"].replay_safe is True
+    assert fresh["fill_price"] > fresh["fill"].average_fill_price

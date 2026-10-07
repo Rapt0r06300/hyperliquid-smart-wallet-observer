@@ -13,12 +13,12 @@ def _proof(meta):
         "family": "cross_venue_dislocation_v2", "paper_read_only": True, "real_execution": False,
         "starting_capital_usd": 200.0, "parameters_frozen": True,
         "opened_positions": 4, "closed_positions": 4,
-        "gross_pnl_usd": 5.8, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 4.4,
+        "gross_pnl_usd": 6.4, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 5.0,
         "liquidatable_net": True, "all_positions_two_leg_closed": True,
         "duplicate_trade_ids": 0, "trade_ids_count": 4, "trade_ids_sha256": "a" * 64,
         "period": {"collection_meta": meta},
-        "oos": _segment(2.2, 2.6, "b", oos=True),
-        "forward": _segment(2.2, 2.6, "c", forward=True),
+        "oos": _segment(2.5, 2.9, "b", oos=True),
+        "forward": _segment(2.5, 2.9, "c", forward=True),
         "placebos": {"beaten": True},
     }
 
@@ -30,7 +30,7 @@ def _certified_meta():
 def test_cross_venue_certified_atomic_provenance_peut_seule_etre_eligible():
     result = evaluate_objective(_proof(_certified_meta()))
     assert result["objective_status"] == "ATTEINT"
-    assert result["eligible_net_pnl_usd"] == 4.4
+    assert result["eligible_net_pnl_usd"] == 5.0
 
 
 def test_ancien_atomic_sans_mapping_ni_skew_est_explicitement_refuse():

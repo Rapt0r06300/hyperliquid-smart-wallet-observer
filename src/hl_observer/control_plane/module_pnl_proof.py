@@ -11,6 +11,7 @@ from hl_observer.strategies.active_scope import (
     canonical_strategy_family,
     strategy_can_materialize,
 )
+from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 
 MODULES = ("copy_vault", "lead_lag", "cross_venue_dislocation")
 
@@ -37,7 +38,7 @@ def _canonical_module(module: str) -> str:
 def prove_module(
     module: str,
     rows: Iterable[Mapping[str, Any]],
-    threshold_usd: float = 4.0,
+    threshold_usd: float = TARGET_NET_USD_PER_DAY,
 ) -> dict[str, Any]:
     canonical_module = _canonical_module(module)
     if canonical_module not in MODULES or not strategy_can_materialize(module):
@@ -91,7 +92,7 @@ def prove_module(
 def independent_module_verdict(
     module: str,
     rows: Iterable[Mapping[str, Any]],
-    threshold_usd: float = 4.0,
+    threshold_usd: float = TARGET_NET_USD_PER_DAY,
 ) -> dict[str, Any]:
     """Return a fail-closed independent certificate without cross-module compensation."""
     evidence = list(rows)
@@ -109,7 +110,7 @@ def independent_module_verdict(
             verdict = {"module": canonical_module, "status": "UNMEASURABLE", "reason": f"PNL_EVIDENCE_INVALID:{exc}", "proof_of_pnl": False, "sample_size": len(evidence)}
         else:
             verdict = dict(result)
-            verdict["status"] = "PROVEN" if result["threshold_met"] else "KILL"
+            verdict["status"] = "PROVEN" if result["threshold_met"] else "REJECTED"
             verdict["reason"] = "NET_DAILY_THRESHOLD_MET" if result["threshold_met"] else "NET_DAILY_THRESHOLD_NOT_MET"
     verdict["certificate_digest"] = hashlib.sha256(json.dumps(verdict, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return verdict
@@ -117,7 +118,7 @@ def independent_module_verdict(
 
 def independent_module_certificates(
     evidence: Mapping[str, Iterable[Mapping[str, Any]]],
-    threshold_usd: float = 4.0,
+    threshold_usd: float = TARGET_NET_USD_PER_DAY,
 ) -> dict[str, Any]:
     certificates = {
         module: independent_module_verdict(module, evidence.get(module, ()), threshold_usd)
@@ -136,7 +137,7 @@ def independent_module_certificates(
 
 def prove_all(
     evidence: Mapping[str, Iterable[Mapping[str, Any]]],
-    threshold_usd: float = 4.0,
+    threshold_usd: float = TARGET_NET_USD_PER_DAY,
 ) -> dict[str, Any]:
     out = {
         module: prove_module(module, evidence[module], threshold_usd)

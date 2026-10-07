@@ -442,13 +442,13 @@ def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
             "trades": [
                 {
                     "exit_ts_ns": 1_725_571_200_000_000_000,
-                    "net_pnl_usd": 4.5,
+                    "net_pnl_usd": 5.5,
                     "liquidatable_net": True,
                     "walk_forward_segment": "oos",
                 },
                 {
                     "exit_ts_ns": 1_725_657_600_000_000_000,
-                    "net_pnl_usd": 4.1,
+                    "net_pnl_usd": 5.1,
                     "liquidatable_net": True,
                     "walk_forward_segment": "forward",
                 },
@@ -469,7 +469,7 @@ def test_lead_lag_daily_proof_uses_only_liquidatable_proof_trades() -> None:
         require_daily=True,
     )
 
-    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 8.6
+    assert campaign["daily_evidence"]["total_net_pnl_usd"] == 10.6
     assert campaign["daily_evidence"]["all_days_at_or_above_target"] is True
 
 
@@ -577,9 +577,9 @@ def test_markdown_starts_each_family_with_exact_objective_verdict() -> None:
     ]
     report = render_campaign_report(rows)
 
-    assert "Copy-Vault - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
-    assert "Cross-Venue (Lead-Lag) - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
-    assert "Arbitrage (Cross-Venue Dislocation v2) - OBJECTIF +4 USD / JOUR : NON_ATTEINT" in report
+    assert "Copy-Vault - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
+    assert "Cross-Venue (Lead-Lag) - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
+    assert "Arbitrage (Cross-Venue Dislocation v2) - OBJECTIF +5 USD / JOUR : NON_ATTEINT" in report
     assert "Carry OFF" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
 
@@ -603,7 +603,7 @@ def test_markdown_never_presents_provisional_positive_pnl_as_proven() -> None:
 
     assert "PnL net observe (diagnostic): +9.000000 USD" in report
     assert "PnL net eligible a la preuve: NON ELIGIBLE A LA PREUVE" in report
-    assert "OBJECTIF +4 USD / JOUR : ATTEINT" not in report
+    assert "OBJECTIF +5 USD / JOUR : ATTEINT" not in report
 
 
 def test_markdown_separe_les_couts_de_preuve_des_couts_globaux() -> None:

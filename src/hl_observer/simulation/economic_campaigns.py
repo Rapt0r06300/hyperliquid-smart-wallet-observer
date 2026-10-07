@@ -2,7 +2,7 @@
 
 This module converts family-specific paper replays into one strict proof
 shape.  It never creates market data, signals, fills, or execution.  Missing
-measurements remain ``None`` and therefore fail the shared +4 USD objective.
+measurements remain ``None`` and therefore fail the shared +5 USD objective.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from hl_observer.simulation.economic_campaign_provenance import (
 
 from .economic_objective import (
     STARTING_CAPITAL_USD,
+    TARGET_NET_USD_PER_DAY,
     canonical_family,
     evaluate_daily_net,
     evaluate_objective,
@@ -654,7 +655,7 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
     lines = [
         "# Campagnes economiques HyperSmart",
         "",
-        "Capital paper consolide: 1 000 USD. Cible: +4 USD nets par jour et par module. Carry OFF. Cross-Venue v1 OFF.",
+        f"Capital paper: {STARTING_CAPITAL_USD:g} USD. Cible: +{TARGET_NET_USD_PER_DAY:g} USD nets par jour et par module. Carry OFF. Cross-Venue v1 OFF.",
         "Chaque resultat est separe; aucun PnL latent ou inter-famille n'est additionne.",
         "",
     ]
@@ -697,7 +698,7 @@ def render_campaign_report(campaigns: Iterable[Mapping[str, Any]]) -> str:
         )
         lines.extend(
             [
-                f"## {labels.get(family, family)} - OBJECTIF +4 USD / JOUR : {status}",
+                f"## {labels.get(family, family)} - OBJECTIF +{TARGET_NET_USD_PER_DAY:g} USD / JOUR : {status}",
                 "",
                 f"- PnL net observe (diagnostic): {net_text}",
                 f"- PnL net de preuve OOS + forward: {campaign.get('proof_net_pnl_usd')}",

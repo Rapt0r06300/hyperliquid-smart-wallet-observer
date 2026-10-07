@@ -2,7 +2,7 @@
 
 It converts observed Binance shocks and Hyperliquid BBO reactions into causal
 ``SignalLeadLag`` objects, replays them through the closed paper ledger, then
-emits the strict +4 USD evidence shape. It never opens a network connection or
+emits the strict +5 USD evidence shape. It never opens a network connection or
 executes. Historical replay is never mislabeled as post-freeze forward.
 """
 from __future__ import annotations

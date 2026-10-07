@@ -101,11 +101,11 @@ def test_record_family_memory_fail_closed_branches(monkeypatch, tmp_path) -> Non
     assert family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA) is None
 
     monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 3.99})
-    with pytest.raises(RuntimeError, match=">=4 USD"):
+    with pytest.raises(RuntimeError, match=">=5 USD"):
         family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA)
 
     workspace, _ = _campaign_workspace(tmp_path, coverage={"families": {}})
-    monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 4.1})
+    monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 5.1})
     with pytest.raises(RuntimeError, match="coverage missing"):
         family.record_family_economic_memory(lab_root=tmp_path, workspace=workspace, suite="copy-vault-full", project_sha=SHA)
 
@@ -116,7 +116,7 @@ def test_record_family_memory_fail_closed_branches(monkeypatch, tmp_path) -> Non
 
 def test_record_family_memory_success_records_canonical_proof(monkeypatch, tmp_path) -> None:
     workspace, _ = _campaign_workspace(tmp_path)
-    monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 4.25})
+    monkeypatch.setattr(family, "certify_campaign", lambda *args: {"certified": True, "eligible_net_pnl_usd": 5.25})
     calls = []
     monkeypatch.setattr(family, "record_certified_proof", lambda root, **kwargs: calls.append((root, kwargs)) or {"saved": True})
     result = family.record_family_economic_memory(
@@ -126,7 +126,7 @@ def test_record_family_memory_success_records_canonical_proof(monkeypatch, tmp_p
     root, kwargs = calls[0]
     assert root == tmp_path / "lab"
     assert kwargs["family"] == "copy_vault"
-    assert kwargs["net_pnl_usd"] == 4.25
+    assert kwargs["net_pnl_usd"] == 5.25
     assert kwargs["paper_only"] is True and kwargs["real_execution"] is False
     assert kwargs["runtime_proof_sha256"]
 

@@ -27,7 +27,7 @@ def test_launcher_forces_execution_off():
 def test_launcher_names_only_three_canonical_economic_families():
     text = _text()
     assert "Copy-Vault / Lead-Lag / Cross-Venue Dislocation v2" in text
-    assert "+4 USD NET" in text
+    assert "+5 USD NET" in text
     assert "Carry" not in text
 
 

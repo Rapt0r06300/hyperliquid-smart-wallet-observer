@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from hl_observer.datasets.archive_library import suite_names
+from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
 
 SCHEMA = "alina.max_data_policy.v1"
 COMPLETED_REGISTRY_SCHEMA = "alina.completed_dataset_suites.v1"
@@ -18,7 +19,7 @@ COMPLETED_REGISTRY_RELATIVE = (
 COMPLETED_HISTORY_LIMIT = 100
 DEFAULT_RESERVE_GIB = 25.0
 MAX_JOB_DOWNLOAD_GIB = 220.0
-TARGET_NET_USD_PER_FAMILY = 4.0
+TARGET_NET_USD_PER_FAMILY = TARGET_NET_USD_PER_DAY
 ANALYSIS_MODES = {"economic", "historical", "historical-full", "historical-deep"}
 
 FAMILY_SUITES = {
@@ -432,7 +433,7 @@ def write_decision(output_dir: str | Path, decision: Mapping[str, Any]) -> tuple
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +4 USD par famille."
+        description="Choisit la prochaine suite FULL/COLD utile avec garde disque et objectif +5 USD par famille."
     )
     parser.add_argument("--brain-json", required=True)
     parser.add_argument("--lab-root", required=True)

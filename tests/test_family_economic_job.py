@@ -136,18 +136,18 @@ def _valid_copy_campaign() -> dict:
         "parameters_frozen": True,
         "opened_positions": 2,
         "closed_positions": 2,
-        "gross_pnl_usd": 5.0,
+        "gross_pnl_usd": 6.0,
         "fees_usd": 0.1,
         "spread_cost_usd": 0.1,
         "slippage_cost_usd": 0.1,
         "latency_cost_usd": 0.1,
-        "net_pnl_usd": 4.6,
+        "net_pnl_usd": 5.6,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
         "trade_ids_count": 2,
         "trade_ids_sha256": "a" * 64,
-        "oos": _segment(net=2.1, hash_char="b", no_lookahead=True),
-        "forward": _segment(net=2.1, hash_char="c", post_freeze=True, no_lookahead=True),
+        "oos": _segment(net=2.6, hash_char="b", no_lookahead=True),
+        "forward": _segment(net=2.6, hash_char="c", post_freeze=True, no_lookahead=True),
         "placebos": {"beaten": True},
         "vault_generalization": {"sample_count": 20, "net_bps": 1.0},
         "copy_checkpoint_integrity": {
@@ -176,7 +176,7 @@ def _valid_copy_campaign() -> dict:
     }
     campaign.update(evaluate_objective(campaign))
     assert campaign["objective_status"] == "ATTEINT"
-    assert campaign["eligible_net_pnl_usd"] == pytest.approx(4.2)
+    assert campaign["eligible_net_pnl_usd"] == pytest.approx(5.2)
     return campaign
 
 
@@ -225,7 +225,7 @@ def test_economic_memory_est_branchee_sur_une_preuve_recertifiee_full(tmp_path) 
         lab_root=lab, workspace=workspace, suite="copy-vault-full", project_sha="a" * 40
     )
     assert record is not None and record["family"] == "copy_vault"
-    assert record["net_pnl_usd"] == pytest.approx(4.2)
+    assert record["net_pnl_usd"] == pytest.approx(5.2)
     memory = load_memory(lab)
     assert memory["proof_count"] == 1
 

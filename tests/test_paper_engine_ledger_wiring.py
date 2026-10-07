@@ -11,6 +11,12 @@ from hl_observer.ui.status_routes import _paper_ledger_projection_from_status_st
 WALLET = "0x" + "d" * 40
 
 
+def test_default_paper_balance_is_200_usd_with_prudent_100_usd_margin_cap() -> None:
+    config = PaperEngineConfig()
+    assert config.starting_cash_usdt == 200.0
+    assert config.max_total_exposure_usdt == 100.0
+
+
 def _delta(action: LifecycleAction, previous: float, current: float, ts: int) -> LeaderDelta:
     return LeaderDelta(
         delta_id=f"ld:ledger:{action.value}:{previous}:{current}:{ts}",

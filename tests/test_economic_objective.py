@@ -92,8 +92,8 @@ def _proof(**overrides):
         },
         "daily_target_required": True,
         "daily_evidence": {
-            "schema_version": "hypersmart.daily_net_evidence.v1",
-            "target_net_usd_per_day": 4.0,
+            "schema_version": "hypersmart.daily_net_evidence.v2",
+            "target_net_usd_per_day": 5.0,
             "complete_utc_days_only": True,
             "sample_count": 2,
             "observed_trade_count": 4,
@@ -102,20 +102,20 @@ def _proof(**overrides):
             "days": [
                 {
                     "date_utc": "2024-09-05",
-                    "net_pnl_usd": 4.1,
+                    "net_pnl_usd": 5.1,
                     "trade_count": 2,
                     "at_or_above_target": True,
                 },
                 {
                     "date_utc": "2024-09-06",
-                    "net_pnl_usd": 4.5,
+                    "net_pnl_usd": 5.5,
                     "trade_count": 2,
                     "at_or_above_target": True,
                 }
             ],
-            "total_net_pnl_usd": 8.6,
-            "mean_daily_net_pnl_usd": 4.3,
-            "min_daily_net_pnl_usd": 4.1,
+            "total_net_pnl_usd": 10.6,
+            "mean_daily_net_pnl_usd": 5.3,
+            "min_daily_net_pnl_usd": 5.1,
             "all_days_at_or_above_target": True,
         },
     }
@@ -123,9 +123,9 @@ def _proof(**overrides):
     return row
 
 
-def test_canonical_capital_contract_is_200_usd_for_every_family_and_keeps_four_usd_target():
+def test_canonical_capital_contract_is_200_usd_and_five_usd_per_day():
     assert STARTING_CAPITAL_USD == 200.0
-    assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 4.0
+    assert TARGET_NET_USD == TARGET_NET_USD_PER_DAY == 5.0
     assert PaperLedger().starting_balance_usdc == STARTING_CAPITAL_USD
 
     for family in ("copy_vault", "lead_lag", "cross_venue_dislocation_v2"):
@@ -293,15 +293,15 @@ def test_copy_checkpoint_integrity_gate_fails_closed_without_clean_epoch() -> No
 def test_daily_net_groups_only_supplied_closed_trades_by_utc_day() -> None:
     result = evaluate_daily_net(
         [
-            {"exit_ts_ms": 1_725_571_200_000, "net_pnl_usd": 4.25},
+            {"exit_ts_ms": 1_725_571_200_000, "net_pnl_usd": 5.25},
             {"exit_ts_ms": 1_725_571_200_001, "net_pnl_usd": -0.25},
-            {"exit_ts_ms": 1_725_657_600_000, "net_pnl_usd": 5.0},
+            {"exit_ts_ms": 1_725_657_600_000, "net_pnl_usd": 6.0},
         ]
     )
 
-    assert result["total_net_pnl_usd"] == 9.0
-    assert result["mean_daily_net_pnl_usd"] == 4.5
-    assert result["min_daily_net_pnl_usd"] == 4.0
+    assert result["total_net_pnl_usd"] == 11.0
+    assert result["mean_daily_net_pnl_usd"] == 5.5
+    assert result["min_daily_net_pnl_usd"] == 5.0
     assert result["all_days_at_or_above_target"] is True
 
 
@@ -328,6 +328,34 @@ def test_daily_net_accepts_nanosecond_close_timestamps() -> None:
     assert result["all_days_at_or_above_target"] is False
 
 
+def test_daily_net_reports_distribution_risk_and_evidence_level() -> None:
+    day_ms = 86_400_000
+    start_ms = 1_725_571_200_000
+    trades = [
+        {
+            "exit_ts_ms": start_ms + day * day_ms,
+            "net_pnl_usd": -1.0 if day % 7 == 0 else 4.0 + (day % 4),
+            "regime": ("high_vol", "low_vol", "range")[day % 3],
+        }
+        for day in range(30)
+        for _ in range(5)
+    ]
+
+    result = evaluate_daily_net(trades, as_of_ms=start_ms + 31 * day_ms)
+
+    assert result["sample_count"] == 30
+    assert result["observed_trade_count"] == 150
+    assert result["median_daily_net_pnl_usd"] is not None
+    assert result["p10_daily_net_pnl_usd"] is not None
+    assert result["p90_daily_net_pnl_usd"] is not None
+    assert result["max_drawdown_usd"] >= 0.0
+    assert result["profit_factor"] is not None
+    assert result["sharpe"] is not None
+    assert result["sortino"] is not None
+    assert result["observed_regime_count"] == 3
+    assert result["evidence_level"] == "PROVEN"
+
+
 def test_daily_net_excludes_the_open_utc_day_from_proof() -> None:
     day_ms = 86_400_000
     day_one = 1_725_580_800_000
@@ -336,8 +364,8 @@ def test_daily_net_excludes_the_open_utc_day_from_proof() -> None:
 
     result = evaluate_daily_net(
         [
-            {"exit_ts_ms": day_one + 1, "net_pnl_usd": 4.1},
-            {"exit_ts_ms": day_two + 1, "net_pnl_usd": 4.2},
+            {"exit_ts_ms": day_one + 1, "net_pnl_usd": 5.1},
+            {"exit_ts_ms": day_two + 1, "net_pnl_usd": 5.2},
             {"exit_ts_ms": current_day + 1, "net_pnl_usd": -20.0},
         ],
         as_of_ms=current_day + 12 * 60 * 60 * 1000,
@@ -347,7 +375,7 @@ def test_daily_net_excludes_the_open_utc_day_from_proof() -> None:
     assert result["sample_count"] == 2
     assert result["excluded_incomplete_trade_count"] == 1
     assert result["excluded_incomplete_days_utc"] == ["2024-09-08"]
-    assert result["min_daily_net_pnl_usd"] == 4.1
+    assert result["min_daily_net_pnl_usd"] == 5.1
     assert result["all_days_at_or_above_target"] is True
 
 

@@ -114,12 +114,12 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
         "signal_count": 40,
         "opened_positions": 30,
         "closed_positions": 30,
-        "gross_pnl_usd": 7.0,
+        "gross_pnl_usd": 8.0,
         "fees_usd": 1.0,
         "spread_cost_usd": 0.5,
         "slippage_cost_usd": 0.5,
         "latency_cost_usd": 0.5,
-        "net_pnl_usd": 4.5,
+        "net_pnl_usd": 5.5,
         "roi_pct": 0.45,
         "max_drawdown_usd": 0.8,
         "hit_rate": 0.6,
@@ -138,12 +138,12 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
             }
         },
         "oos": {
-            "gross_pnl_usd": 2.5,
+            "gross_pnl_usd": 3.0,
             "fees_usd": 0.2,
             "spread_cost_usd": 0.1,
             "slippage_cost_usd": 0.1,
             "latency_cost_usd": 0.1,
-            "net_pnl_usd": 2.0,
+            "net_pnl_usd": 2.5,
             "sample_count": 15,
             "liquidatable_net": True,
             "duplicate_trade_ids": 0,
@@ -152,12 +152,12 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
             "no_lookahead": True,
         },
         "forward": {
-            "gross_pnl_usd": 3.0,
+            "gross_pnl_usd": 3.5,
             "fees_usd": 0.2,
             "spread_cost_usd": 0.1,
             "slippage_cost_usd": 0.1,
             "latency_cost_usd": 0.1,
-            "net_pnl_usd": 2.5,
+            "net_pnl_usd": 3.0,
             "sample_count": 15,
             "liquidatable_net": True,
             "duplicate_trade_ids": 0,
@@ -182,8 +182,8 @@ def test_strict_campaign_is_preferred_and_never_double_counts_arbitrage(tmp_path
     row = result["families"]["cross_venue_dislocation_v2"]
 
     assert row["objective_status"] == "ATTEINT"
-    assert row["eligible_net_pnl_usd"] == 4.5
-    assert row["comparison_metric_usd"] == 4.5
+    assert row["eligible_net_pnl_usd"] == 5.5
+    assert row["comparison_metric_usd"] == 5.5
     assert row["comparison_metric_source"] == "proof_net_pnl_usd"
     assert row["measurement_status"] == "MEASURED"
     assert row["signal_count"] == 40

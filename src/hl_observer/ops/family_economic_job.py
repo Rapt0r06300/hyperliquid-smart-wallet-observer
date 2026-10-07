@@ -19,6 +19,7 @@ from hl_observer.datasets.replay_workspace import prepare_replay_workspace
 from hl_observer.ops import autonomous_research_job as canonical_job
 from hl_observer.ops.autonomous_research_status import status_path, write_status
 from hl_observer.ops.final_economic_certification import certify_campaign
+from hl_observer.simulation.economic_objective import TARGET_NET_USD
 
 FAMILY_ECONOMIC_SUITES = frozenset(
     {"copy-vault-full", "lead-lag-full", "cross-venue-full"}
@@ -63,7 +64,7 @@ def record_family_economic_memory(
     suite: str,
     project_sha: str,
 ) -> dict[str, Any] | None:
-    """Persist only a canonically re-certified +4 USD family proof."""
+    """Persist only a canonically re-certified current-target family proof."""
     campaign_family = SUITE_CAMPAIGN_FAMILY.get(suite)
     coverage_family = SUITE_COVERAGE_FAMILY.get(suite)
     if campaign_family is None or coverage_family is None:
@@ -84,8 +85,10 @@ def record_family_economic_memory(
         return None
 
     eligible_net = recertified.get("eligible_net_pnl_usd")
-    if eligible_net is None or float(eligible_net) < 4.0:
-        raise RuntimeError("canonically certified campaign has no eligible >=4 USD proof")
+    if eligible_net is None or float(eligible_net) < TARGET_NET_USD:
+        raise RuntimeError(
+            f"canonically certified campaign has no eligible >={TARGET_NET_USD:g} USD proof"
+        )
 
     coverage_path = workspace / "runtime" / "reports" / "datasets" / "SOURCE_CONSUMPTION_COVERAGE.json"
     coverage = _load_json_object(coverage_path)

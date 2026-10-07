@@ -1,6 +1,6 @@
 """Gate économique commune aux trois familles actives HyperSmart.
 
-La cible +4 USD est INDÉPENDANTE par famille. Une somme globale positive ne
+La cible +5 USD est INDÉPENDANTE par famille. Une somme globale positive ne
 peut jamais compenser une famille non prouvée. Ce module ne crée ni signal,
 ni fill, ni ordre : il ne fait qu'agréger les preuves paper existantes.
 """

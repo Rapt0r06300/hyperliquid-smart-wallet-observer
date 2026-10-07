@@ -13,6 +13,8 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from hl_observer.simulation.economic_objective import TARGET_NET_USD_PER_DAY
+
 SCHEMA_VERSION = "hypersmart.lead_lag_microstructure_confirmation.v1"
 MECHANISM = "lead_lag_v10_external_shock_book_flow_confirmation_taker"
 SHOCK_WINDOWS_MS = (250, 1_000)
@@ -25,7 +27,7 @@ MIN_FLOW_TRADES = 3
 MAX_BOOK_AGE_MS = 250
 MIN_TRAIN_FILLS = 30
 NOTIONALS_USD = (25.0, 75.0, 150.0, 300.0)
-ECONOMIC_TARGET_USD_DAY = 4.0
+ECONOMIC_TARGET_USD_DAY = TARGET_NET_USD_PER_DAY
 
 
 def trial_count(coin_count: int) -> int:

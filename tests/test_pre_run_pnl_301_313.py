@@ -28,8 +28,8 @@ def _copy_integrity():
     return {"schema_version": "hypersmart.copy_vault_checkpoint_integrity.v1", "receipt_valid": True, "writer_role": "BOUND_WRITER", "writer_run_id": "test-writer", "clean_epoch_ms": 1_000, "duplicate_checkpoint_ids": 0, "quarantined_checkpoint_metaorders": 0, "proof_trade_count": 4, "expected_proof_trade_count": 4, "all_proof_trades_exact_checkpoint_bound": True, "all_proof_trades_same_writer_run": True, "all_proof_trades_post_clean_epoch": True}
 
 
-def _proof(family: str, *, oos_net: float = 2.2, forward_net: float = 2.2):
-    row = {"family": family, "paper_read_only": True, "real_execution": False, "starting_capital_usd": 100.0, "parameters_frozen": True, "opened_positions": 4, "closed_positions": 4, "gross_pnl_usd": 5.8, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 4.4, "liquidatable_net": True, "duplicate_trade_ids": 0, "trade_ids_count": 4, "trade_ids_sha256": "a" * 64, "oos": _segment(oos_net, 2, "b", no_lookahead=True), "forward": _segment(forward_net, 2, "c", post_freeze=True), "placebos": {"beaten": True}}
+def _proof(family: str, *, oos_net: float = 2.6, forward_net: float = 2.6):
+    row = {"family": family, "paper_read_only": True, "real_execution": False, "starting_capital_usd": 200.0, "parameters_frozen": True, "opened_positions": 4, "closed_positions": 4, "gross_pnl_usd": 5.8, "fees_usd": 0.5, "spread_cost_usd": 0.4, "slippage_cost_usd": 0.3, "latency_cost_usd": 0.2, "net_pnl_usd": 4.4, "liquidatable_net": True, "duplicate_trade_ids": 0, "trade_ids_count": 4, "trade_ids_sha256": "a" * 64, "oos": _segment(oos_net, 2, "b", no_lookahead=True), "forward": _segment(forward_net, 2, "c", post_freeze=True), "placebos": {"beaten": True}}
     if family == "copy_vault":
         row["vault_generalization"] = {"sample_count": 20, "net_bps": 3.0}
         row["copy_checkpoint_integrity"] = _copy_integrity()
@@ -45,8 +45,8 @@ def test_301_couts_incomplets_interdisent_la_promotion():
     assert "FAMILY_TARGET_NOT_REACHED:lead_lag" in result["objective_reasons"]
 
 
-def test_cible_quatre_dollars_est_constante_et_independante_par_famille():
-    assert TARGET_NET_USD == 4.0
+def test_cible_cinq_dollars_est_constante_et_independante_par_famille():
+    assert TARGET_NET_USD == 5.0
     result = evaluate_all_families([_proof("copy_vault", oos_net=4, forward_net=4), _proof("lead_lag", oos_net=.4, forward_net=.5), _proof("cross_venue_dislocation_v2", oos_net=4, forward_net=4)])
     assert result["display_total_proof_net_usd"] > 4.0 and result["global_compensation_allowed"] is False
     assert result["objective_status"] == "NON_ATTEINT" and result["family_status"]["lead_lag"] == "NON_ATTEINT"
@@ -59,7 +59,7 @@ def test_les_trois_familles_doivent_toutes_etre_presentes_une_seule_fois():
 
 def test_preuve_complete_des_trois_familles_peut_seule_passer():
     result = evaluate_all_families([_proof("copy_vault"), _proof("lead_lag"), _proof("cross_venue_dislocation_v2")])
-    assert result["target_net_usd_per_family"] == 4.0 and result["all_families_independently_reached"] is True and result["objective_status"] == "ATTEINT"
+    assert result["target_net_usd_per_family"] == 5.0 and result["all_families_independently_reached"] is True and result["objective_status"] == "ATTEINT"
 
 
 def test_garde_775_refuse_explicitement_l_ancien_master_v6():

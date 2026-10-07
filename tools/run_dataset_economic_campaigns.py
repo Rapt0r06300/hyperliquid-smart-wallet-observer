@@ -406,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         net = row.get("net_pnl_usd")
         exact = "NON_MESURABLE" if net is None else f"{float(net):+.6f} USD"
         print(
-            f"{row['family']}: OBJECTIF +4 USD {row['objective_status']} | net={exact}",
+            f"{row['family']}: OBJECTIF +5 USD {row['objective_status']} | net={exact}",
             flush=True,
         )
     coverage = result.get("source_coverage") or {}

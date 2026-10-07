@@ -1374,12 +1374,12 @@ def consensus_report(
 
 @app.command("simulate-magic-bot")
 def simulate_magic_bot(
-    capital: float = typer.Option(100.0, "--capital", min=1.0, help="Virtual local starting capital."),
+    capital: float = typer.Option(200.0, "--capital", min=1.0, help="Virtual local starting capital."),
     scenario: str = typer.Option("conservative", "--scenario", help="Simulation scenario label."),
 ) -> None:
     """Start/report a local simulation plan; no order, no network."""
-    if abs(capital - 100.0) > 0.001:
-        typer.echo("Safety warning: product default is 100 USDT fictive; custom capital is report-only.")
+    if abs(capital - 200.0) > 0.001:
+        typer.echo("Safety warning: product default is 200 USDT fictive; custom capital is report-only.")
     typer.echo("simulate_magic_bot=local_simulation_without_money")
     typer.echo(f"capital={capital:.2f}")
     typer.echo(f"scenario={scenario}")

@@ -5,7 +5,7 @@ import math
 import hl_observer.simulation.economic_objective as objective
 
 
-def _segment(*, net: float = 2.3, count: int = 2, hash_char: str = "b", **overrides):
+def _segment(*, net: float = 2.6, count: int = 2, hash_char: str = "b", **overrides):
     row = {
         "gross_pnl_usd": net + 0.4,
         "fees_usd": 0.1,
@@ -32,18 +32,18 @@ def _proof(**overrides):
         "parameters_frozen": True,
         "opened_positions": 4,
         "closed_positions": 4,
-        "gross_pnl_usd": 5.8,
+        "gross_pnl_usd": 6.4,
         "fees_usd": 0.3,
         "spread_cost_usd": 0.3,
         "slippage_cost_usd": 0.3,
         "latency_cost_usd": 0.3,
-        "net_pnl_usd": 4.6,
+        "net_pnl_usd": 5.2,
         "liquidatable_net": True,
         "duplicate_trade_ids": 0,
         "trade_ids_count": 4,
         "trade_ids_sha256": "a" * 64,
-        "oos": _segment(net=2.3, hash_char="b", no_lookahead=True),
-        "forward": _segment(net=2.3, hash_char="c", post_freeze=True),
+        "oos": _segment(net=2.6, hash_char="b", no_lookahead=True),
+        "forward": _segment(net=2.6, hash_char="c", post_freeze=True),
         "placebos": {"beaten": True},
     }
     row.update(overrides)
@@ -190,7 +190,7 @@ def test_forward_failure_modes_cover_missing_negative_and_post_freeze() -> None:
 def test_placebo_and_target_threshold_fail_closed_without_hiding_proof_net() -> None:
     placebo = objective.evaluate_objective(_proof(placebos={"beaten": False}))
     assert "PLACEBO_NOT_BEATEN" in placebo["objective_reasons"]
-    assert placebo["proof_net_pnl_usd"] == 4.6
+    assert placebo["proof_net_pnl_usd"] == 5.2
     assert placebo["eligible_net_pnl_usd"] is None
 
     below = objective.evaluate_objective(
@@ -204,10 +204,10 @@ def test_placebo_and_target_threshold_fail_closed_without_hiding_proof_net() -> 
 
     exact = objective.evaluate_objective(
         _proof(
-            oos=_segment(net=2.0, gross_pnl_usd=2.4, hash_char="f", no_lookahead=True),
-            forward=_segment(net=2.0, gross_pnl_usd=2.4, hash_char="0", post_freeze=True),
+            oos=_segment(net=2.5, gross_pnl_usd=2.9, hash_char="f", no_lookahead=True),
+            forward=_segment(net=2.5, gross_pnl_usd=2.9, hash_char="0", post_freeze=True),
         )
     )
-    assert exact["proof_net_pnl_usd"] == 4.0
+    assert exact["proof_net_pnl_usd"] == 5.0
     assert exact["objective_status"] == "ATTEINT"
-    assert exact["eligible_net_pnl_usd"] == 4.0
+    assert exact["eligible_net_pnl_usd"] == 5.0

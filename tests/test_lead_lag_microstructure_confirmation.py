@@ -33,7 +33,7 @@ def _trade(ts: int, direction: float, qty: float, source: str = "same") -> dict:
 
 def test_microstructure_economic_grid_is_predeclared_and_counted() -> None:
     assert NOTIONALS_USD == (25.0, 75.0, 150.0, 300.0)
-    assert ECONOMIC_TARGET_USD_DAY == 4.0
+    assert ECONOMIC_TARGET_USD_DAY == 5.0
     assert trial_count(2) == (
         2
         * len(SHOCK_WINDOWS_MS)

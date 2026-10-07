@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-objectives",
         action="store_true",
-        help="return non-zero unless all three +4 USD objectives are proven",
+        help="return non-zero unless all three +5 USD objectives are proven",
     )
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()

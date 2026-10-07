@@ -37,7 +37,7 @@ Runtime actif :
 
 Dataset/data plane :
 
-`Rapt0r06300/alina-smartflow-datasets-v2` — `main`
+Le dépôt de données externe est retiré. Code, collecte et preuves durables utilisent uniquement `Rapt0r06300/hyperliquid-smart-wallet-observer` — `main`.
 
 `hyper_smart_observer/` est legacy/compatibilité : ne pas y construire une nouvelle architecture.
 
@@ -51,7 +51,7 @@ Familles économiques actives :
 
 `Carry / Funding Carry = DISABLED_BY_SCOPE`.
 
-Objectif final : **>= +4.00 USD NET/jour PROUVÉS par famille séparément**.
+Objectif de recherche : **>= +5.00 USD NET/jour PROUVÉS par famille séparément, sur 200 USD paper**.
 
 Les statuts honnêtes restent :
 
