@@ -1,0 +1,94 @@
+name: clone-lfs-probe
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/clone-lfs-probe.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clone-lfs-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      GIT_LFS_SKIP_SMUDGE: "1"
+      REAL_MAINNET_TRADING: "false"
+      ENABLE_REAL_ORDERS: "0"
+    steps:
+      - name: Checkout main without old LFS payload
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+          lfs: false
+
+      - name: Prepare Git LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs version
+          git lfs install --local
+          test "$(git check-attr filter -- clone_payload/probe/lfs-probe.bin | awk '{print $3}')" = "lfs"
+
+      - name: Create deterministic LFS probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p clone_payload/probe
+          printf 'ALINA_GIT_LFS_CLONE_PROBE_V1\n' > clone_payload/probe/lfs-probe.bin
+          git add clone_payload/probe/lfs-probe.bin
+          git show :clone_payload/probe/lfs-probe.bin | grep -Fx 'version https://git-lfs.github.com/spec/v1'
+          git show :clone_payload/probe/lfs-probe.bin | grep -E '^oid sha256:[0-9a-f]{64}$'
+          git show :clone_payload/probe/lfs-probe.bin | grep -E '^size [0-9]+$'
+
+      - name: Commit and push probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          if git diff --cached --quiet; then
+            echo "probe already committed"
+          else
+            git commit -m "test(lfs): prove clone payload upload path"
+            gh auth setup-git
+            pushed=0
+            for attempt in 1 2 3 4 5 6; do
+              if git pull --rebase origin main && git push origin HEAD:main; then
+                pushed=1
+                break
+              fi
+              [ "$attempt" -lt 6 ] || exit 1
+              sleep $((attempt * 5))
+            done
+            test "$pushed" -eq 1
+          fi
+
+      - name: Purge local probe object then re-fetch from GitHub LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          POINTER="$(git show HEAD:clone_payload/probe/lfs-probe.bin)"
+          OID="$(printf '%s\n' "$POINTER" | sed -n 's/^oid sha256://p')"
+          SIZE="$(printf '%s\n' "$POINTER" | sed -n 's/^size //p')"
+          test -n "$OID"
+          test -n "$SIZE"
+          GIT_DIR="$(git rev-parse --git-dir)"
+          rm -f "$GIT_DIR/lfs/objects/${OID:0:2}/${OID:2:2}/$OID"
+          rm -f clone_payload/probe/lfs-probe.bin
+          GIT_LFS_SKIP_SMUDGE=0 git lfs fetch origin HEAD --include="clone_payload/probe/lfs-probe.bin" --exclude=""
+          GIT_LFS_SKIP_SMUDGE=0 git lfs checkout clone_payload/probe/lfs-probe.bin
+          test "$(wc -c < clone_payload/probe/lfs-probe.bin | tr -d ' ')" = "$SIZE"
+          ACTUAL="$(sha256sum clone_payload/probe/lfs-probe.bin | cut -d' ' -f1)"
+          test "$ACTUAL" = "$OID"
+          echo "ALINA_LFS_PROBE_OK oid=$OID bytes=$SIZE"
