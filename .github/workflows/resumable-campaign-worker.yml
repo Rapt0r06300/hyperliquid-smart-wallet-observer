@@ -499,6 +499,18 @@ jobs:
               ;;
           esac
 
+      - name: Queue clone-complete LFS mirror after durable publication
+        if: steps.durable.outcome == 'success' && vars.ALINA_LFS_MIRROR_ENABLED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run clone-payload-lfs-mirror.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f confirm_lfs_costs=true \
+            -f max_assets=500 \
+            -f max_bytes=734003200
+
       - name: Record immutable publication receipt
         if: ${{ false }}
         shell: bash
