@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -210,3 +211,32 @@ def test_resume_state_rejects_repository_mismatch(tmp_path):
         assert "another repository" in str(exc)
     else:
         raise AssertionError("resume state must never cross repositories")
+
+
+def test_discover_files_includes_useful_git_ignored_evidence_outside_default_roots(
+    tmp_path,
+):
+    module = _module()
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+    (root / ".gitignore").write_text(
+        "*.db\n*.log\nportable_runtime/\n.env\n",
+        encoding="utf-8",
+    )
+    useful_db = root / "local-results.db"
+    useful_log = root / "collector-extra.log"
+    useful_db.write_bytes(b"db-evidence")
+    useful_log.write_text("collector evidence", encoding="utf-8")
+    (root / ".env").write_text("SECRET=never-upload", encoding="utf-8")
+    portable = root / "portable_runtime"
+    portable.mkdir()
+    (portable / "python.exe").write_bytes(b"reproducible-runtime")
+
+    files = module.discover_files(root, ("data", "logs", "reports", "runtime"))
+    relative = {path.relative_to(root).as_posix() for path in files}
+
+    assert "local-results.db" in relative
+    assert "collector-extra.log" in relative
+    assert ".env" not in relative
+    assert "portable_runtime/python.exe" not in relative
