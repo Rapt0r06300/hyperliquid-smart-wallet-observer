@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -159,3 +160,22 @@ def test_known_asset_ids_is_idempotency_authority():
         ],
     }
     assert module.known_asset_ids(manifest) == {1, 2}
+
+
+def test_public_fallback_strips_authorization_but_keeps_api_headers():
+    module = _module()
+    request = urllib.request.Request(
+        "https://api.github.com/repos/o/r/releases",
+        headers={
+            "Authorization": "Bearer secret",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "test-agent",
+        },
+    )
+
+    anonymous = module._without_authorization(request)
+    headers = {key.lower(): value for key, value in anonymous.header_items()}
+
+    assert "authorization" not in headers
+    assert headers["accept"] == "application/vnd.github+json"
+    assert headers["user-agent"] == "test-agent"
