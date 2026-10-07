@@ -38,7 +38,18 @@ SKIP_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
+    ".cache",
+    ".vscode",
+    ".idea",
+    ".worktrees",
     "node_modules",
+    "dist",
+    "build",
+    "htmlcov",
+    "tmp_pytest",
+    "_to_delete",
+    "portable_runtime",
+    "portable-build",
     "recovery",
 }
 SQLITE_SUFFIXES = {".sqlite", ".sqlite3", ".db"}
@@ -96,6 +107,38 @@ def _is_allowed_file(path: Path, root: Path) -> bool:
     return True
 
 
+def _discover_git_ignored_files(root: Path) -> list[Path]:
+    """Return ignored/untracked project files so evidence outside default roots is not lost."""
+    executable = shutil.which("git")
+    if not executable or not (root / ".git").exists():
+        return []
+    result = subprocess.run(
+        [
+            executable,
+            "-C",
+            str(root),
+            "ls-files",
+            "-z",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    files: list[Path] = []
+    for raw in result.stdout.split(b"\0"):
+        if not raw:
+            continue
+        relative = os.fsdecode(raw)
+        candidate = root / relative
+        if _is_allowed_file(candidate, root):
+            files.append(candidate)
+    return files
+
+
 def discover_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
     result: list[Path] = []
     for name in roots:
@@ -109,6 +152,12 @@ def discover_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
         for path in base.rglob("*"):
             if _is_allowed_file(path, root):
                 result.append(path)
+
+    # The explicit evidence roots catch canonical Alina runtime data even when a
+    # checkout has unusual ignore rules. Git's ignored-file inventory catches
+    # every other local-only project artifact (root *.db/*.log, audit reports,
+    # console captures, etc.) without duplicating tracked source code.
+    result.extend(_discover_git_ignored_files(root))
     return sorted(set(result), key=lambda p: _safe_relative(p, root))
 
 
