@@ -170,10 +170,17 @@ def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
             if not isinstance(row, Mapping):
                 bad += 1
                 continue
-            tag = _safe_component(str(row.get("release_tag") or payload.get("data_release_base_tag") or payload.get("release_tag") or ""))
+            raw_tag = str(
+                row.get("release_tag")
+                or payload.get("data_release_base_tag")
+                or payload.get("release_tag")
+                or ""
+            )
             name = str(row.get("release_asset") or "")
             expected = str(row.get("sha256") or "").lower()
-            path = asset_lookup.get((tag, _safe_component(name))) if tag and name else None
+            tag = _safe_component(raw_tag) if raw_tag else ""
+            safe_name = _safe_component(name) if name else ""
+            path = asset_lookup.get((tag, safe_name)) if tag and safe_name else None
             if path is None:
                 missing += 1
                 continue
