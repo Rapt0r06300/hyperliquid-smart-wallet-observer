@@ -145,6 +145,60 @@ def _canonical_complete(repository: str, requested_tag: str) -> bool:
     return False
 
 
+def _candidate_canonical_tags(bundle_root: Path, requested_tag: str) -> list[str]:
+    index_path = bundle_root / "BUNDLE_INDEX.json"
+    try:
+        bundle_index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RecoveryError("recovered BUNDLE_INDEX.json is invalid") from exc
+    manifest_paths = [
+        bundle_root / str(value)
+        for value in bundle_index.get("manifests", [])
+        if str(value).strip()
+    ]
+    manifests: list[Mapping[str, Any]] = []
+    for path in manifest_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RecoveryError(f"invalid recovered manifest: {path}") from exc
+        if not isinstance(payload, Mapping):
+            raise RecoveryError(f"invalid recovered manifest mapping: {path}")
+        manifests.append(payload)
+    retry = publisher.retry_release_tag(
+        requested_tag,
+        bundle_index.get("collection_run_id"),
+        manifests,
+    )
+    return [
+        requested_tag,
+        publisher.manifest_release_tag(requested_tag),
+        retry,
+        publisher.manifest_release_tag(retry),
+    ]
+
+
+def _any_canonical_complete(repository: str, tags: list[str]) -> str | None:
+    for tag in dict.fromkeys(tags):
+        result = _gh(
+            ["api", f"repos/{repository}/releases/tags/{tag}"],
+            check=False,
+        )
+        if result.returncode != 0:
+            continue
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            continue
+        assets = payload.get("assets") if isinstance(payload, Mapping) else None
+        if isinstance(assets, list) and any(
+            isinstance(asset, Mapping) and asset.get("name") == "RUN_MANIFEST.json"
+            for asset in assets
+        ):
+            return tag
+    return None
+
+
 def recover_one(repository: str, release: Mapping[str, Any], work_root: Path) -> dict[str, Any]:
     tag = str(release.get("tag_name") or "")
     if not tag.startswith(RECOVERY_PREFIX):
@@ -192,6 +246,18 @@ def recover_one(repository: str, release: Mapping[str, Any], work_root: Path) ->
         raise RecoveryError(f"missing bundle index evidence in {tag}")
     if _sha256(bundle_index) != expected_index_sha:
         raise RecoveryError(f"BUNDLE_INDEX sha256 mismatch in {tag}")
+
+    completed_tag = _any_canonical_complete(
+        repository,
+        _candidate_canonical_tags(bundle_root, requested_tag),
+    )
+    if completed_tag is not None:
+        return {
+            "recovery_tag": tag,
+            "requested_tag": requested_tag,
+            "status": "ALREADY_COMPLETE",
+            "canonical_release_tag": completed_tag,
+        }
 
     previous = os.getenv("ALINA_RECOVERY_CAPSULE")
     os.environ["ALINA_RECOVERY_CAPSULE"] = "0"
