@@ -24,6 +24,7 @@ DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 DEFAULT_ROOTS = ("data", "logs", "reports", "runtime")
 CHUNK_BYTES = 1_000_000_000
 INDEX_NAME = "ALINA_LOCAL_SNAPSHOT_INDEX.json"
+STATE_RELATIVE_PATH = Path("runtime/recovery/local_snapshot_state.json")
 FORBIDDEN_PART = re.compile(
     r"(^|[._-])(env|secret|token|credential|private|mnemonic|seed|api[_-]?key)([._-]|$)",
     re.IGNORECASE,
@@ -45,6 +46,12 @@ SQLITE_SUFFIXES = {".sqlite", ".sqlite3", ".db"}
 
 class SnapshotError(RuntimeError):
     pass
+
+
+class SnapshotAlreadyFinalized(SnapshotError):
+    def __init__(self, tag: str) -> None:
+        super().__init__(f"snapshot tag {tag} is already finalized")
+        self.tag = tag
 
 
 def _gh(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -182,9 +189,7 @@ def _ensure_release(repository: str, tag: str) -> dict[str, dict]:
         raise SnapshotError("GitHub Release id is missing")
     assets = _release_assets(repository, release_id)
     if INDEX_NAME in assets:
-        raise SnapshotError(
-            f"snapshot tag {tag} is already finalized; use a new tag for a new snapshot"
-        )
+        raise SnapshotAlreadyFinalized(tag)
     return assets
 
 
@@ -427,6 +432,46 @@ def publish_snapshot(
     return index
 
 
+def _snapshot_state_path(root: Path) -> Path:
+    return root / STATE_RELATIVE_PATH
+
+
+def _load_or_create_resume_tag(root: Path, repository: str) -> str:
+    state_path = _snapshot_state_path(root)
+    if state_path.is_file():
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise SnapshotError("local snapshot resume state is invalid JSON") from exc
+        if not isinstance(state, dict):
+            raise SnapshotError("local snapshot resume state is invalid")
+        if state.get("schema") != "alina.local_snapshot_state.v1":
+            raise SnapshotError("unsupported local snapshot resume state")
+        if str(state.get("repository") or "") != repository:
+            raise SnapshotError("local snapshot resume state targets another repository")
+        tag = str(state.get("tag") or "")
+        if not tag.startswith("alina-local-snapshot-"):
+            raise SnapshotError("local snapshot resume state has an invalid tag")
+        return tag
+
+    tag = datetime.now(timezone.utc).strftime("alina-local-snapshot-%Y%m%dT%H%M%SZ")
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema": "alina.local_snapshot_state.v1",
+                "repository": repository,
+                "tag": tag,
+                "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    return tag
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
@@ -444,18 +489,32 @@ def main(argv: list[str] | None = None) -> int:
     if any(Path(name).is_absolute() or ".." in Path(name).parts for name in roots):
         print("ALINA_LOCAL_SNAPSHOT_FAIL: roots must be relative", flush=True)
         return 2
-    tag = args.tag or datetime.now(timezone.utc).strftime(
-        "alina-local-snapshot-%Y%m%dT%H%M%SZ"
-    )
+    state_managed = args.tag is None
+    try:
+        tag = (
+            _load_or_create_resume_tag(root, args.repository)
+            if state_managed
+            else str(args.tag)
+        )
+    except SnapshotError as exc:
+        print(f"ALINA_LOCAL_SNAPSHOT_FAIL: {exc}")
+        return 2
     if not tag.startswith("alina-local-snapshot-"):
         print("ALINA_LOCAL_SNAPSHOT_FAIL: tag must start with alina-local-snapshot-")
         return 2
 
     try:
         result = publish_snapshot(root, args.repository, roots=roots, tag=tag)
+    except SnapshotAlreadyFinalized:
+        if state_managed:
+            _snapshot_state_path(root).unlink(missing_ok=True)
+        print(json.dumps({"status": "ALREADY_COMPLETE", "release_tag": tag}, indent=2))
+        return 0
     except (SnapshotError, OSError, sqlite3.Error, ValueError) as exc:
         print(f"ALINA_LOCAL_SNAPSHOT_FAIL: {exc}")
         return 2
+    if state_managed:
+        _snapshot_state_path(root).unlink(missing_ok=True)
     print(
         json.dumps(
             {
