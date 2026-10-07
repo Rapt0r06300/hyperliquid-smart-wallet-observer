@@ -24,6 +24,7 @@ import publish_dataset_v2_release as publisher
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 RECOVERY_PREFIX = "alina-recovery-"
 INDEX_NAME = "ALINA_RECOVERY_INDEX.json"
+COMPLETE_NAME = "CANONICAL_PUBLICATION.json"
 
 
 class RecoveryError(RuntimeError):
@@ -301,6 +302,13 @@ def recover_pending(repository: str, *, limit: int) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="alina-recovery-") as tmp:
         root = Path(tmp)
         for release in releases:
+            assets = release.get("assets")
+            if isinstance(assets, list) and any(
+                isinstance(asset, Mapping) and asset.get("name") == COMPLETE_NAME
+                for asset in assets
+            ):
+                report["already_complete"] += 1
+                continue
             if report["attempted"] >= max(0, limit):
                 break
             try:
