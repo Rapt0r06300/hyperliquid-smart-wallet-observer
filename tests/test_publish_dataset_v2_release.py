@@ -555,3 +555,87 @@ def test_publish_refuses_to_mutate_finalized_release_with_foreign_assets(
             target="main",
             title="test",
         )
+
+
+def test_recovery_capsule_persists_exact_bundle_before_canonical_upload(tmp_path, monkeypatch) -> None:
+    module = _module()
+    root = tmp_path / "bundle"
+    assets = root / "assets"
+    manifests_dir = root / "manifests"
+    assets.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+    payload = b"immutable-trades"
+    asset = assets / "trades.jsonl.gz"
+    asset.write_bytes(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    manifest = {
+        "dataset_id": "dataset-recovery",
+        "release_asset": asset.name,
+        "sha256": digest,
+        "bytes": len(payload),
+    }
+    manifest_path = manifests_dir / "dataset-recovery.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    bundle_index = {
+        "collector_version": "a" * 40,
+        "collection_run_id": "run-recovery",
+        "manifests": ["manifests/dataset-recovery.json"],
+        "assets": ["assets/trades.jsonl.gz"],
+    }
+    (root / "BUNDLE_INDEX.json").write_text(
+        json.dumps(bundle_index), encoding="utf-8"
+    )
+
+    monkeypatch.setenv("ALINA_RECOVERY_CAPSULE", "1")
+    uploaded = []
+    monkeypatch.setattr(
+        module,
+        "ensure_release",
+        lambda **_kwargs: {"id": 55, "assets": []},
+    )
+    monkeypatch.setattr(
+        module,
+        "upload_file",
+        lambda **kwargs: uploaded.append(Path(kwargs["path"])),
+    )
+
+    def fake_json(_args):
+        rows = []
+        for path in uploaded:
+            rows.append(
+                {
+                    "id": len(rows) + 1,
+                    "name": path.name,
+                    "size": path.stat().st_size,
+                    "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+                }
+            )
+        return {"id": 55, "assets": rows}
+
+    monkeypatch.setattr(module, "_json", fake_json)
+
+    result = module.publish_recovery_capsule(
+        root,
+        index=bundle_index,
+        manifest_paths=[manifest_path],
+        manifests=[manifest],
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        requested_release_tag="data-v2-run-recovery",
+        target="main",
+        title="test",
+    )
+
+    assert result is not None
+    assert result["part_count"] == 1
+    assert [path.name for path in uploaded] == [
+        "ALINA_RECOVERY_INDEX.json",
+        "ALINA_RECOVERY_BUNDLE.part000.tar",
+    ]
+
+    import tarfile
+
+    with tarfile.open(uploaded[1], "r") as archive:
+        names = set(archive.getnames())
+    assert "BUNDLE_INDEX.json" in names
+    assert "manifests/dataset-recovery.json" in names
+    assert "assets/trades.jsonl.gz" in names
