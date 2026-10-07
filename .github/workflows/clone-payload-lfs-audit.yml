@@ -1,0 +1,61 @@
+name: clone-payload-lfs-audit
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "clone_payload/**"
+      - "tools/mirror_releases_to_clone_lfs.py"
+      - "tools/check_clone_payload_completeness.py"
+      - ".github/workflows/clone-payload-lfs-audit.yml"
+      - ".github/workflows/clone-payload-lfs-mirror.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "13 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: "${{ github.token }}"
+      GIT_LFS_SKIP_SMUDGE: "1"
+      REAL_MAINNET_TRADING: "false"
+      ENABLE_REAL_ORDERS: "0"
+    steps:
+      - name: Checkout main without LFS payload download
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Audit Release bytes against current-tree LFS pointers
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXTRA=()
+          if [ "${{ vars.ALINA_LFS_MIRROR_ENABLED }}" = "true" ]; then
+            EXTRA+=(--require-complete)
+          fi
+          python tools/check_clone_payload_completeness.py             --repository "$GITHUB_REPOSITORY"             --root .             --output "$RUNNER_TEMP/clone-payload-completeness.json"             "${EXTRA[@]}"
+          cat "$RUNNER_TEMP/clone-payload-completeness.json"
+
+      - name: Upload completeness report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: clone-payload-completeness
+          path: "${{ runner.temp }}/clone-payload-completeness.json"
+          if-no-files-found: warn
+          retention-days: 14
