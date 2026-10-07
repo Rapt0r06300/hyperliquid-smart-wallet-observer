@@ -94,3 +94,47 @@ def test_download_asset_rejects_digest_mismatch(tmp_path, monkeypatch):
         assert "size mismatch" in str(exc) or "sha256 mismatch" in str(exc)
     else:
         raise AssertionError("corrupted restore asset must fail closed")
+
+
+def test_materialize_latest_local_snapshot_rebuilds_large_runtime_file(tmp_path):
+    module = _module()
+    releases_root = tmp_path / "downloads" / "releases"
+    release = releases_root / "alina-local-snapshot-20261007T200000Z"
+    release.mkdir(parents=True)
+    payload = b"abc123" * 100
+    chunk = release / "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    chunk.write_bytes(payload)
+    target_bytes = payload[10:210] + payload[300:450]
+    index = {
+        "schema": "alina.local_snapshot.v1",
+        "tag": release.name,
+        "chunks": [
+            {
+                "name": chunk.name,
+                "bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        ],
+        "files": [
+            {
+                "path": "runtime/replay/example.bin",
+                "bytes": len(target_bytes),
+                "sha256": hashlib.sha256(target_bytes).hexdigest(),
+                "segments": [
+                    {"chunk": chunk.name, "offset": 10, "bytes": 200},
+                    {"chunk": chunk.name, "offset": 300, "bytes": 150},
+                ],
+            }
+        ],
+    }
+    (release / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps(index), encoding="utf-8"
+    )
+    workspace = tmp_path / "fresh-clone"
+    workspace.mkdir()
+
+    result = module.materialize_latest_local_snapshot(releases_root, workspace)
+
+    assert result is not None
+    assert result["restored_files"] == 1
+    assert (workspace / "runtime" / "replay" / "example.bin").read_bytes() == target_bytes
