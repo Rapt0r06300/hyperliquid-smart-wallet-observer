@@ -10,11 +10,13 @@ on:
       - "tools/recover_dataset_v2_capsules.py"
       - "tools/publish_local_recovery_snapshot.py"
       - "tools/mirror_releases_to_clone_lfs.py"
+      - "tools/check_clone_payload_completeness.py"
       - "tests/test_restore_alina.py"
       - "tests/test_publish_dataset_v2_release.py"
       - "tests/test_publish_local_recovery_snapshot.py"
       - "tests/test_recover_dataset_v2_capsules.py"
       - "tests/test_mirror_releases_to_clone_lfs.py"
+      - "tests/test_check_clone_payload_completeness.py"
       - ".github/workflows/recovery-contract.yml"
       - ".github/workflows/clone-payload-lfs-mirror.yml"
   workflow_dispatch:
@@ -48,9 +50,10 @@ jobs:
       - name: Compile recovery tools
         run: |
           python -m py_compile             tools/restore_alina.py             tools/publish_dataset_v2_release.py             tools/recover_dataset_v2_capsules.py             tools/publish_local_recovery_snapshot.py \
-            tools/mirror_releases_to_clone_lfs.py
+            tools/mirror_releases_to_clone_lfs.py \
+            tools/check_clone_payload_completeness.py
 
       - name: Run deterministic recovery tests
         run: |
           python -m pip install --disable-pip-version-check -e . pytest
-          python -m pytest -q tests/test_restore_alina.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py tests/test_mirror_releases_to_clone_lfs.py --tb=line
+          python -m pytest -q tests/test_restore_alina.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py tests/test_mirror_releases_to_clone_lfs.py tests/test_check_clone_payload_completeness.py --tb=line
