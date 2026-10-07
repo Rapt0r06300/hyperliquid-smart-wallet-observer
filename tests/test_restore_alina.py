@@ -182,3 +182,46 @@ def test_streaming_download_writes_in_chunks_without_request_buffer(tmp_path, mo
     assert size == len(payload)
     assert digest == hashlib.sha256(payload).hexdigest()
     assert target.read_bytes() == payload
+
+
+def test_safe_component_is_collision_resistant_for_sanitized_names():
+    module = _module()
+
+    first = module._safe_component("tag/with/slash")
+    second = module._safe_component("tag_with_slash")
+
+    assert first != second
+    assert "/" not in first
+
+
+def test_restore_fails_before_download_when_disk_is_insufficient(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"x" * 1024
+    releases = [
+        {
+            "tag_name": "data-v2-test",
+            "assets": [_asset("asset.bin", "https://example.invalid/asset", payload)],
+        }
+    ]
+    monkeypatch.setattr(module, "iter_releases", lambda *_args, **_kwargs: iter(releases))
+
+    class Usage:
+        total = 2048
+        used = 2047
+        free = 1
+
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda _path: Usage())
+    monkeypatch.setattr(
+        module,
+        "_download_to_path",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("download must not start without enough disk")
+        ),
+    )
+
+    try:
+        module.restore_everything("owner/repo", tmp_path)
+    except module.RestoreError as exc:
+        assert "insufficient disk space" in str(exc)
+    else:
+        raise AssertionError("restore must fail closed when disk capacity is insufficient")
