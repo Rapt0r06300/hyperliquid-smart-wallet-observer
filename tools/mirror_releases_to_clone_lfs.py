@@ -153,7 +153,7 @@ def iter_releases_oldest_first(
     repository: str,
     *,
     token: str | None = None,
-    per_page: int = 10,
+    per_page: int = 100,
 ) -> Iterable[Mapping[str, Any]]:
     first, headers = _api_page(
         repository,
