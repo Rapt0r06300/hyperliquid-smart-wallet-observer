@@ -77,11 +77,11 @@ On Windows, `BACKUP_LOCAL_ALINA.cmd` runs this snapshot command directly.
 Interrupted snapshots keep a small resume state under `runtime/recovery/` and
 reuse already uploaded 1 GB chunks only when byte size and SHA-256 match.
 
-The command snapshots ignored `data/`, `logs/`, `reports/` and `runtime/` roots
+The command snapshots the canonical ignored `data/`, `logs/`, `reports/` and `runtime/` roots, and also enumerates every other useful Git-ignored local-only project file
 into chunked Release assets. Files larger than one Release asset are split into
 1 GB chunks. SQLite files are copied through SQLite's backup API.
 
-Secret-like paths, private-key material and `.env` files are excluded and must
+Reproducible caches/toolchains/build outputs (virtualenvs, node_modules, build/dist, portable runtimes, editor caches) are excluded. Secret-like paths, private-key material and `.env` files are excluded and must
 never be published.
 
 ## What cannot be recovered retroactively
