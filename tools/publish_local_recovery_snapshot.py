@@ -189,20 +189,33 @@ class ChunkWriter:
         self.path = None
         self.size = 0
 
-    def write_stream(self, source: BinaryIO, file_digest: hashlib._Hash) -> list[dict]:
+    def write_stream(
+        self,
+        source: BinaryIO,
+        file_digest: hashlib._Hash,
+        *,
+        limit_bytes: int,
+    ) -> list[dict]:
+        if limit_bytes < 0:
+            raise SnapshotError("snapshot byte limit must be non-negative")
         segments: list[dict] = []
-        while True:
+        remaining = int(limit_bytes)
+        while remaining > 0:
             self._open()
             assert self.handle is not None
             capacity = CHUNK_BYTES - self.size
-            data = source.read(min(8 * 1024 * 1024, capacity))
+            requested = min(8 * 1024 * 1024, capacity, remaining)
+            data = source.read(requested)
             if not data:
-                break
+                raise SnapshotError(
+                    "source file was truncated while creating a point-in-time snapshot"
+                )
             offset = self.size
             self.handle.write(data)
             self.digest.update(data)
             file_digest.update(data)
             self.size += len(data)
+            remaining -= len(data)
             segments.append(
                 {
                     "chunk": f"ALINA_LOCAL_SNAPSHOT.chunk{self.index:04d}.bin",
@@ -263,14 +276,24 @@ def publish_snapshot(
                 prepared = _sqlite_backup(source_path, backup_path)
 
             digest = hashlib.sha256()
-            size = 0
+            stat_at_open = prepared.stat()
+            size = int(stat_at_open.st_size)
             with prepared.open("rb") as source:
-                segments = writer.write_stream(source, digest)
-                size = prepared.stat().st_size
+                segments = writer.write_stream(
+                    source,
+                    digest,
+                    limit_bytes=size,
+                )
             manifest_files.append(
                 {
                     "path": relative,
                     "bytes": size,
+                    "source_mtime_ns_at_open": int(stat_at_open.st_mtime_ns),
+                    "snapshot_mode": (
+                        "sqlite_backup"
+                        if backup_path is not None
+                        else "prefix_at_open"
+                    ),
                     "sha256": digest.hexdigest(),
                     "segments": segments,
                     "sqlite_consistent_backup": backup_path is not None,
