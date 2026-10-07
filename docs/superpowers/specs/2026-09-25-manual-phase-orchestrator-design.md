@@ -12800,45 +12800,92 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 3. **Future data can be made to look fresh.** `ExecutionTruth.age_ms()` currently applies `max(0, decision_ts - received_ts)`; a snapshot received after the decision therefore obtains age zero instead of a causality failure. `PaperEngine` similarly clamps negative leader signal age to zero. This is a direct look-ahead risk.
 4. **Proof-critical code still reads wall time.** `PaperEngine.mark_to_market()` timestamps ledger updates with `time.time()`, and `PaperEvent.create()` falls back to wall time when no timestamp is
 
-## Disaster recovery and complete fresh-machine restore
+## Disaster recovery and clone-complete fresh-machine contract
 
-The single-repository invariant also includes disaster recovery. A user-PC failure must not destroy canonical Alina evidence.
+The single-repository invariant includes disaster recovery. A user-PC failure must not destroy canonical Alina evidence.
 
-Git history stores code, workflows, specs, manifests, catalogs, checkpoints and compact results. Heavy immutable evidence remains in GitHub Releases of the same repository; raw L2/trade payloads are not moved into Git history merely to make `git clone` larger.
-
-Because Git does not download GitHub Release assets, the canonical fresh-machine restore contract is:
+The final acceptance contract is **clone-complete**, not merely "clone + custom restore". On a fresh machine where Git LFS is installed, the canonical operation is:
 
 ```bash
+git lfs install
 git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
-cd hyperliquid-smart-wallet-observer
-python tools/restore_alina.py --everything
 ```
 
-`git clone` plus the restore command is one logical recovery operation. The restore must enumerate same-repository Releases, download every canonical asset, verify available SHA-256/byte identities, re-check Dataset V2 `RUN_MANIFEST.json` asset identities, materialize the latest explicit local-runtime snapshot, and fail closed on missing or corrupt evidence.
+A normal clone must then make all canonical heavy payload bytes available through the current tree's Git LFS objects under `clone_payload/`. GitHub Releases remain immutable durability/migration sources because Git itself does not clone Release assets.
+
+### Byte-parity authority
+
+Physical server/client `.git` directory sizes are not an admissible equality test because Git may repack and compress an identical object graph differently.
+
+The authoritative equality is payload identity. `tools/check_clone_payload_completeness.py --require-complete` must prove all of the following before any `CLONE_COMPLETE` claim:
+
+- every explicit GitHub Release asset id appears exactly once in `clone_payload/MANIFEST.json`;
+- source and clone asset counts are identical;
+- source and clone byte totals are identical;
+- every source byte size equals its clone manifest byte size;
+- every available source SHA-256 equals the clone SHA-256;
+- every `clone_payload/releases/**` object committed at HEAD is a Git LFS pointer;
+- each LFS pointer OID equals the payload SHA-256;
+- each LFS pointer size equals the payload byte size;
+- missing, extra and mismatch counts are all zero.
+
+### Release-to-LFS clone mirror
+
+`tools/mirror_releases_to_clone_lfs.py` is the deterministic bounded migrator from same-repository GitHub Releases into `clone_payload/`.
+
+Requirements:
+
+- append-only identity by immutable GitHub Release asset id;
+- byte size and SHA-256 verified before manifest acceptance;
+- collision-resistant paths;
+- fail closed on secret-like identities;
+- no deletion/mutation of source Releases;
+- no real execution/trading capability;
+- GitHub-hosted only;
+- bounded batches to avoid runner/API overload;
+- migration commit must stage payload objects as Git LFS pointers, never ordinary huge Git blobs.
+
+`.github/workflows/clone-payload-lfs-mirror.yml` is cost-gated. Automatic scheduled mirroring and campaign-triggered mirroring may run only when `ALINA_LFS_MIRROR_ENABLED=true` has been explicitly configured. The workflow's manual path also requires explicit acknowledgment that Git LFS storage/bandwidth may be billable.
+
+A durable collection or analysis publication may queue this mirror only after its Release evidence already exists. LFS mirroring must never be allowed to make data less durable than the Release-first path.
 
 ### Pre-publication collection capsules
 
-Every GitHub-hosted Dataset V2 collection unit must make its exact local bundle durable **before** beginning the high-cardinality per-shard Release upload. The publisher creates a deterministic `alina-recovery-*` Release containing `ALINA_RECOVERY_INDEX.json` plus bounded `ALINA_RECOVERY_BUNDLE.partNNN.tar` parts. The capsule contains the exact `BUNDLE_INDEX.json`, shard manifests and collected assets with hashes.
+Every GitHub-hosted Dataset V2 collection unit must make its exact local bundle durable **before** beginning high-cardinality per-shard Release upload. The publisher creates a deterministic `alina-recovery-*` Release containing `ALINA_RECOVERY_INDEX.json` plus bounded `ALINA_RECOVERY_BUNDLE.partNNN.tar` parts. The capsule contains exact `BUNDLE_INDEX.json`, shard manifests and collected assets with hashes.
 
-If GitHub API/secondary rate limiting interrupts later canonical publication, the ephemeral runner may exit only after the exact unit is already recoverable from that capsule. A GitHub-hosted recovery workflow may later download and verify the capsule and resume the canonical publication idempotently. It must never recollect a different interval and present it as the lost one.
+If GitHub API/secondary rate limiting interrupts later canonical publication, the ephemeral runner may exit only after the exact unit is already recoverable from that capsule. A GitHub-hosted recovery workflow may later download/verify the capsule and resume canonical publication idempotently. It must never recollect a different interval and present it as the lost one.
 
-Recovery capsules are additional durability evidence and are retained after successful canonical publication unless an explicit future retention policy proves an equivalent independent durable copy.
+Recovery capsules are retained as durability evidence and are themselves eligible for the clone LFS mirror.
 
 ### Explicit local Codex snapshots
 
-Cloud Alina remains independent of the user's PC. When the user explicitly works in a local checkout with Codex and creates important ignored runtime evidence, that evidence is not canonical/durable merely because it exists under `data/`, `logs/`, `reports/` or `runtime/`.
+Cloud Alina remains independent of the user's PC. When the user explicitly works in a local checkout with Codex and creates important ignored runtime evidence, that evidence is not durable merely because it exists locally.
 
-`tools/publish_local_recovery_snapshot.py` provides an explicit same-repository Release snapshot for those ignored runtime roots and for every other useful Git-ignored local-only project file. Large files are chunked, active SQLite databases use SQLite backup semantics, reproducible caches/toolchains/build outputs are excluded, and secret-like material (`.env`, private keys, credentials, mnemonics/seeds) is excluded.
+`tools/publish_local_recovery_snapshot.py` snapshots canonical ignored roots and every other useful Git-ignored local-only project file into same-repository Release assets. Large files are chunked, active SQLite databases use SQLite backup semantics, reproducible caches/toolchains/build outputs are excluded, and secret-like material (`.env`, private keys, credentials, mnemonics/seeds) is excluded.
 
-A local-only file that was never committed or uploaded before physical disk loss is not recoverable retroactively. Therefore any local result that must survive machine loss must be snapshotted before it is treated as durable evidence.
+Historical files above per-file Git/LFS limits may be represented losslessly as bounded chunks plus manifests. The byte-parity contract concerns preservation of every original content byte; it does not require a physically impossible single >limit Git blob.
+
+After those local snapshot chunks reach Releases, they enter the same Release-to-LFS mirror and become part of the clone-complete payload.
+
+A local-only file never committed/uploaded before physical disk loss is not recoverable retroactively.
+
+### Transitional compatibility only
+
+`tools/restore_alina.py --everything`, `RESTORE_ALINA.cmd` and `RESTORE_ALINA.sh` remain transitional fallbacks while historical Release assets have not yet reached LFS byte parity. They are not the final disaster-recovery acceptance path.
+
+### Hard platform prerequisites
+
+A normal clone can materialize real LFS payload bytes only if Git LFS is installed/enabled on the new machine and the GitHub account/repository has sufficient LFS storage and download bandwidth. If GitHub serves only pointer files because those prerequisites are not satisfied, `CLONE_COMPLETE` is false.
 
 ### Disaster-recovery acceptance
 
 The recovery contract is accepted only if:
 
 - new cloud collection units create verified recovery capsules before per-shard publication;
-- failed canonical publication can be resumed from the exact capsule;
-- `tools/restore_alina.py --everything` restores all same-repository Release assets and fails closed on corruption/missing data;
-- the latest explicit local snapshot can be reconstructed into a fresh checkout with verified file hashes;
-- tests cover Release restore, capsule creation and local snapshot materialization;
+- failed canonical publication can resume from exact capsules;
+- all same-repository Release assets are mirrored into the current-tree Git LFS payload;
+- `check_clone_payload_completeness.py --require-complete` reports equal asset count and equal byte total with zero missing/extra/mismatch;
+- fresh-machine clone validation proves Git LFS objects materialize;
+- important local-only evidence has been published and mirrored before the old disk is discarded;
 - no recovery path introduces real trading, `/exchange`, signatures, private keys or self-hosted runners.
+
