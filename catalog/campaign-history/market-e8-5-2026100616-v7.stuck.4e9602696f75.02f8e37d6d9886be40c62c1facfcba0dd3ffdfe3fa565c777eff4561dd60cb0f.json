@@ -1,0 +1,148 @@
+{
+  "analysis_stage": null,
+  "attempts": 4,
+  "campaign_id": "market-e8-5-2026100616-v7",
+  "checkpoint_lineage": [],
+  "chunk_index": 3,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "4e9602696f75736cd15f35a0231842ca100f1af1",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "4afed82338c725331e3571de01f1eb3f654638078e679bbf00c1d11ca9ee78a9",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-market-e8-5-2026100616-v7-u0-retry-f0beaa4759e2ecc3 --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 market-e8-5-2026100616-v7 unit 0 retry --notes Alina SmartFlow dataset V2 collection run. Collector SHA: 4e9602696f75736cd15f35a0231842ca100f1af1 Shards: 692 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID 7C01:161F:262B5C0C:28344AFB:6AC57E6F and timestamp 2026-10-06 23:04:15 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "03c2a84e7bbe0e251c06a0ac312900e815d668629f119c53a0fc0250335fffdf"
+    },
+    "1": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "0fd9d878c20d2d75ed0a0fed7c6db9cba6d75aba80f265a559aa9aa83ba3af74",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: retry release identity conflict: data-v2-campaign-market-e8-5-2026100616-v7-u1-retry-53471f9a415a0964",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "694a50e49b0d6e263d2cdd18565ccbd37b517963899060c60ad1b46b3a3d51d4"
+    },
+    "2": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "9bcab247f1778c9283596e005ad457a6a169661aec8616375e503279da79ea8b",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create data-v2-campaign-market-e8-5-2026100616-v7-u2-retry-acbb950cfda2bbde --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 market-e8-5-2026100616-v7 unit 2 retry --notes Alina SmartFlow dataset V2 collection run. Collector SHA: 4e9602696f75736cd15f35a0231842ca100f1af1 Shards: 720 Final shard manifests are consolidated in RUN_MANIFEST.json. Only manifests with quality_status=SAFE and validation_allowed=true may be used by validation replays/backtests. failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID D422:B41B:FB2D7:335432:6AC5CE14 and timestamp 2026-10-07 04:44:04 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "a761d4f17fd827283e83259417ce38cf121754a141cd7e53054dbb327efe914c"
+    }
+  },
+  "config_sha256": "b000134f8f379a72914829b4a9eb7b277d5b66a809c0f66701524ada761e5921",
+  "consecutive_failures": 3,
+  "created_at": "2026-10-06T16:16:19.451880+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "checkpoint_id": "a761d4f17fd827283e83259417ce38cf121754a141cd7e53054dbb327efe914c",
+    "duration_s": 3500,
+    "generation": 3,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37556718310",
+    "market_shard_count": 16,
+    "market_shard_index": 5,
+    "max_coins": 0,
+    "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-05.json",
+    "plan_sha256": "883e32e574fa0dee98db09a6700957981a8a84e5b9c0a1fd3fe5030d1d98dfab",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
+    "require_all_native_venues": true,
+    "rotate_mb": 64,
+    "selected_coin_count": 42,
+    "universe_digest": "052934d77f9a58a227842894e30a763aea4389025637dd75c070d0aae1629be2",
+    "universe_mode": "native_discovery_full"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-13T16:16:19.451880+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
+    },
+    {
+      "archived_manifest": "catalog/campaign-history/market-e8-5-2026100616-v7.pending.a04827d45df8.e75fad44411381bd821758f0af65f6c9fa68ca8cb89d048f532267d77bc437b2.json",
+      "archived_manifest_sha256": "e75fad44411381bd821758f0af65f6c9fa68ca8cb89d048f532267d77bc437b2",
+      "at": "2026-10-06T16:43:39.697958Z",
+      "event": "refresh_collect_after_code_fix",
+      "prior_code_sha": "a04827d45df87d4f44fef1fe34e24366f20bdb28",
+      "prior_status": "PENDING",
+      "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-06T21:39:15.246101Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-06T23:04:15.395993Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-10-07T00:25:18.692844Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T01:48:18.485439Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
+    },
+    {
+      "at": "2026-10-07T03:15:37.316117Z",
+      "from": "CONTINUATION_REQUIRED",
+      "reason": "worker_started",
+      "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T04:44:05.106815Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 12,
+    "max_chunks": 24,
+    "max_consecutive_failures": 4,
+    "max_no_progress": 3,
+    "max_wall_clock_s": 86400
+  },
+  "next_due_at": "2026-10-07T04:49:05.106815Z",
+  "no_progress_count": 3,
+  "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 8,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-07T04:44:05.106815Z",
+  "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
+}
