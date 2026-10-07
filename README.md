@@ -702,24 +702,30 @@ Cette surface est une **fondation de contrôle**. Le statut cloud final doit ref
 
 ---
 
-## 20.1 Reprise complète sur un nouveau PC
+## 20.1 Clone complet sur un nouveau PC
 
-Un simple `git clone` récupère l'historique Git, mais Git ne télécharge pas les assets des GitHub Releases. Pour récupérer aussi les trades, L2, preuves de replay/backtest/OOS/forward, scoreboards et snapshots locaux publiés :
+Contrat cible : **un simple `git clone` doit récupérer tous les octets utiles d'Alina**, y compris les données lourdes, sans commande de restauration séparée.
 
-~~~text
-Windows : RESTORE_ALINA.cmd
-Linux/macOS : ./RESTORE_ALINA.sh
+Pré-requis machine : Git LFS doit être installé et activé une fois. Ensuite :
+
+~~~bash
+git lfs install
+git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
 ~~~
 
-Ces lanceurs exécutent `tools/restore_alina.py --everything`, téléchargent les Releases du repository canonique, vérifient les identités SHA-256 et reconstruisent le dernier snapshot local explicite.
+Les gros octets canoniques sont progressivement reflétés sous `clone_payload/` via Git LFS. Avec Git LFS disponible et la capacité LFS du compte suffisante, le checkout du clone télécharge automatiquement les objets LFS réels.
 
-Avant d'abandonner l'ancien PC, les données importantes encore uniquement locales et ignorées par Git peuvent être envoyées une fois vers les Releases avec :
+La preuve machine de complétude est :
 
-~~~text
-BACKUP_LOCAL_ALINA.cmd
+~~~bash
+python tools/check_clone_payload_completeness.py --require-complete
 ~~~
 
-Cette sauvegarde locale est chunkée, reprenable après interruption et couvre aussi les fichiers ignorés utiles hors `data/logs/reports/runtime` (par exemple DB/logs/audits locaux). Elle exclut les secrets/clés ainsi que les caches, environnements et builds reproductibles. Le cloud Alina ne dépend jamais de cette machine : cette commande sert uniquement à sauver des données historiques qui n'existent pas encore sur GitHub.
+Elle n'accepte `complete=true` que si chaque asset GitHub Release possède exactement une entrée clonable avec le même asset id, la même taille et le même SHA-256/LFS OID, et si `source_bytes == clone_bytes`.
+
+`RESTORE_ALINA.cmd` / `RESTORE_ALINA.sh` restent uniquement des filets de compatibilité pendant la migration historique des Releases vers `clone_payload/`. Ils ne constituent plus le contrat final.
+
+Avant d'abandonner l'ancien PC, les données utiles encore uniquement locales doivent toujours être publiées avec `BACKUP_LOCAL_ALINA.cmd`; ces chunks immuables sont ensuite eux aussi éligibles au miroir LFS clonable. Les secrets/clés, caches, environnements et builds reproductibles restent exclus.
 
 Voir `docs/DISASTER_RECOVERY.md`.
 
