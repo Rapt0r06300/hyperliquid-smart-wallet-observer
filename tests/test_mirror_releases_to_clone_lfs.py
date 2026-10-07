@@ -206,9 +206,9 @@ def test_release_pagination_reads_every_page_oldest_first(monkeypatch):
         assert per_page == 5
         observed.append(page)
         rows = {
-            1: [{"id": n, "assets": []} for n in range(11, 16)],
-            2: [{"id": n, "assets": []} for n in range(6, 11)],
-            3: [{"id": n, "assets": []} for n in range(1, 6)],
+            1: [{"id": n, "assets": []} for n in range(15, 10, -1)],
+            2: [{"id": n, "assets": []} for n in range(10, 5, -1)],
+            3: [{"id": n, "assets": []} for n in range(5, 0, -1)],
         }
         headers = {
             "Link": '<https://api.github.com/repos/o/r/releases?per_page=5&page=3>; rel="last"'
