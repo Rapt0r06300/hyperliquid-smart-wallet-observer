@@ -83,21 +83,24 @@ jobs:
           set -euo pipefail
           git add .gitattributes clone_payload
           python - <<'PY'
-          import subprocess
+          import os, subprocess
           paths=subprocess.check_output(
               ["git","diff","--cached","--name-only","--","clone_payload/releases"],
               text=True,
           ).splitlines()
-          for path in paths:
-              attr=subprocess.check_output(
-                  ["git","check-attr","filter","--",path],
-                  text=True,
-              ).strip()
-              if not attr.endswith(": lfs"):
-                  raise SystemExit(f"payload path is not LFS tracked: {path}: {attr}")
-              staged=subprocess.check_output(["git","show",f":{path}"])
-              if not staged.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
-                  raise SystemExit(f"staged payload is not an LFS pointer: {path}")
+          out=os.path.join(os.environ["RUNNER_TEMP"],"new-lfs-paths.txt")
+          with open(out,"w",encoding="utf-8") as handle:
+              for path in paths:
+                  handle.write(path+"\n")
+                  attr=subprocess.check_output(
+                      ["git","check-attr","filter","--",path],
+                      text=True,
+                  ).strip()
+                  if not attr.endswith(": lfs"):
+                      raise SystemExit(f"payload path is not LFS tracked: {path}: {attr}")
+                  staged=subprocess.check_output(["git","show",f":{path}"])
+                  if not staged.startswith(b"version https://git-lfs.github.com/spec/v1\n"):
+                      raise SystemExit(f"staged payload is not an LFS pointer: {path}")
           print(f"verified_lfs_pointer_paths={len(paths)}")
           PY
 
@@ -107,16 +110,84 @@ jobs:
           set -euo pipefail
           if git diff --cached --quiet; then
             echo "Clone payload already caught up."
+            echo "LFS_BATCH_PUSHED=0" >> "$GITHUB_ENV"
             exit 0
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m "data(lfs): mirror immutable Release assets into clone payload"
           gh auth setup-git
+          pushed=0
           for attempt in 1 2 3 4 5 6 7 8; do
             if git pull --rebase origin main && git push origin HEAD:main; then
-              exit 0
+              pushed=1
+              break
             fi
             [ "$attempt" -lt 8 ] || exit 1
             sleep $((attempt * 10))
           done
+          test "$pushed" -eq 1
+          echo "LFS_BATCH_PUSHED=1" >> "$GITHUB_ENV"
+
+      - name: Re-fetch pushed LFS objects from GitHub and verify bytes
+        if: env.LFS_BATCH_PUSHED == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATHS_FILE="$RUNNER_TEMP/new-lfs-paths.txt"
+          test -s "$PATHS_FILE"
+          python - <<'PY'
+          import os, pathlib, subprocess
+          repo=pathlib.Path(".").resolve()
+          git_dir=pathlib.Path(
+              subprocess.check_output(["git","rev-parse","--git-dir"],text=True).strip()
+          ).resolve()
+          paths=[p for p in pathlib.Path(os.environ["RUNNER_TEMP"]).joinpath("new-lfs-paths.txt").read_text(encoding="utf-8").splitlines() if p]
+          oids=[]
+          for path in paths:
+              raw=subprocess.check_output(["git","show",f"HEAD:{path}"],text=True)
+              oid=None
+              size=None
+              for line in raw.splitlines():
+                  if line.startswith("oid sha256:"):
+                      oid=line.split(":",1)[1].strip()
+                  elif line.startswith("size "):
+                      size=int(line.split()[1])
+              if not oid or size is None:
+                  raise SystemExit(f"invalid LFS pointer at HEAD: {path}")
+              oids.append((path,oid,size))
+              local=git_dir/"lfs"/"objects"/oid[:2]/oid[2:4]/oid
+              if local.exists():
+                  local.unlink()
+              work=repo/path
+              if work.exists():
+                  work.unlink()
+          pathlib.Path(os.environ["RUNNER_TEMP"]).joinpath("new-lfs-oids.json").write_text(
+              __import__("json").dumps(oids),encoding="utf-8"
+          )
+          print(f"purged_local_lfs_objects={len(oids)}")
+          PY
+
+          INCLUDE="$(paste -sd, "$PATHS_FILE")"
+          GIT_LFS_SKIP_SMUDGE=0 git lfs fetch origin HEAD --include="$INCLUDE" --exclude=""
+          GIT_LFS_SKIP_SMUDGE=0 git lfs checkout $(cat "$PATHS_FILE")
+
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          rows=json.loads(pathlib.Path(os.environ["RUNNER_TEMP"]).joinpath("new-lfs-oids.json").read_text(encoding="utf-8"))
+          verified=0
+          for path,oid,size in rows:
+              p=pathlib.Path(path)
+              if not p.is_file():
+                  raise SystemExit(f"LFS object did not materialize from GitHub: {path}")
+              if p.stat().st_size != int(size):
+                  raise SystemExit(f"LFS size mismatch after re-fetch: {path}")
+              h=hashlib.sha256()
+              with p.open("rb") as handle:
+                  for chunk in iter(lambda:handle.read(8*1024*1024),b""):
+                      h.update(chunk)
+              if h.hexdigest()!=oid:
+                  raise SystemExit(f"LFS sha256 mismatch after re-fetch: {path}")
+              verified+=1
+          print(f"verified_remote_lfs_objects={verified}")
+          PY
