@@ -64,11 +64,12 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     ]
 
     monkeypatch.setattr(module, "iter_releases", lambda *_args, **_kwargs: iter(releases))
-    monkeypatch.setattr(
-        module,
-        "_request",
-        lambda url, **_kwargs: payloads[url],
-    )
+    def fake_download(url, target, **_kwargs):
+        payload = payloads[url]
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
 
     report = module.restore_everything("owner/repo", tmp_path)
 
@@ -86,7 +87,11 @@ def test_download_asset_rejects_digest_mismatch(tmp_path, monkeypatch):
     good = b"expected"
     bad = b"corrupted"
     asset = _asset("asset.bin", "https://example.invalid/asset", good)
-    monkeypatch.setattr(module, "_request", lambda *_args, **_kwargs: bad)
+    def fake_bad_download(_url, target, **_kwargs):
+        target.write_bytes(bad)
+        return len(bad), hashlib.sha256(bad).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", fake_bad_download)
 
     try:
         module.download_asset(asset, tmp_path)
@@ -138,3 +143,42 @@ def test_materialize_latest_local_snapshot_rebuilds_large_runtime_file(tmp_path)
     assert result is not None
     assert result["restored_files"] == 1
     assert (workspace / "runtime" / "replay" / "example.bin").read_bytes() == target_bytes
+
+
+def test_streaming_download_writes_in_chunks_without_request_buffer(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"a" * (9 * 1024 * 1024) + b"tail"
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+            self.offset = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, size):
+            if self.offset >= len(self.data):
+                return b""
+            part = self.data[self.offset : self.offset + size]
+            self.offset += len(part)
+            return part
+
+    monkeypatch.setattr(
+        module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: Response(payload),
+    )
+    target = tmp_path / "asset.partial"
+
+    size, digest = module._download_to_path(
+        "https://example.invalid/large-asset",
+        target,
+    )
+
+    assert size == len(payload)
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert target.read_bytes() == payload
