@@ -1,9 +1,9 @@
 {
   "analysis_stage": null,
-  "attempts": 7,
+  "attempts": 8,
   "campaign_id": "market-e8-10-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 2,
+  "chunk_index": 3,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "c349b9ea2cd5f5d047d00a3fcd4b58839ee43b9c",
   "collection_cutoff_at_utc": null,
@@ -29,26 +29,37 @@
         "status": "FAILED"
       },
       "sha256": "ebcb5cb30c605293896f57ce49212fc6b909dc0fe8eb67691b57606c670c38a1"
+    },
+    "2": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "04dc5e7c47870c23422b6e65ab91fb43d9407c18cd43f10c007e445451b16acd",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-10-2026100616-v7-u2-retry-252f05348b6a6680 /home/runner/work/_temp/campaign-output/market-e8-10-2026100616-v7/2/assets/gate-public-rest-instrument-metadata-la-usdt-1791389420288-1791389420288-32881443bc69.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID CC11:116969:30331:3FC11:6AC6951D and timestamp 2026-10-07 18:53:17 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405989741/assets?label=&name=gate-public-rest-instrument-metadata-la-usdt-1791389420288-1791389420288-32881443bc69.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "c345989742046d3846854454b6927c1e4cf2ce3e00dcdee2d6aa9661645be505"
     }
   },
   "config_sha256": "cfccc8cb095fe262f0777901b4041de81e1d2baeb885dc72b03ce14158ecf3d6",
-  "consecutive_failures": 2,
+  "consecutive_failures": 3,
   "created_at": "2026-10-06T16:16:20.049886+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "ebcb5cb30c605293896f57ce49212fc6b909dc0fe8eb67691b57606c670c38a1",
+    "checkpoint_id": "c345989742046d3846854454b6927c1e4cf2ce3e00dcdee2d6aa9661645be505",
     "duration_s": 3500,
-    "generation": 2,
-    "handoff_generation": null,
+    "generation": 3,
+    "handoff_generation": "2",
     "handoff_phase_epoch": 8,
-    "last_run_id": "37618639042",
+    "last_run_id": "37649810120",
     "market_shard_count": 16,
     "market_shard_index": 10,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-10.json",
     "plan_sha256": "f671f22b498790000ce86b4a94c3487d7a79cbff8edb383bc420080391a6a6fa",
-    "predecessor_run_id": null,
-    "requested_handoff_at_utc": null,
+    "predecessor_run_id": "37618639042",
+    "requested_handoff_at_utc": "2026-10-07T16:09:11.259546Z",
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 52,
@@ -148,15 +159,16 @@
       "from": "CONTINUATION_REQUIRED",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T18:53:17.340488Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "STUCK"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T16:10:13.902596Z",
-    "expires_at": "2026-10-07T21:55:13.902596Z",
-    "lease_token_sha256": "fbe34e890132271a3ef58d7dcd75c857d793d41f07c947dd9e02ad6b5ea2912d",
-    "owner_run_id": "37649810120"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -164,8 +176,8 @@
     "max_no_progress": 3,
     "max_wall_clock_s": 86400
   },
-  "next_due_at": null,
-  "no_progress_count": 2,
+  "next_due_at": "2026-10-07T18:58:17.340488Z",
+  "no_progress_count": 3,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -174,9 +186,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "STUCK",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T16:10:13.902642Z",
+  "updated_at": "2026-10-07T18:53:17.340488Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
