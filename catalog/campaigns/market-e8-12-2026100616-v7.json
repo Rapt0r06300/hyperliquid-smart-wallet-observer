@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 2,
+  "attempts": 3,
   "campaign_id": "market-e8-12-2026100616-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "02a0ee4a018bf02c42f6c3bcc09d6ea62b9589a4",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "d022c56d3b4fe79f71c521344fdec907dc234f4586f55dc7fde8e17e792930b7",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-12-2026100616-v7-u0 /home/runner/work/_temp/campaign-output/market-e8-12-2026100616-v7/0/assets/gate-public-rest-instrument-metadata-kioxia-usdt-1791342991858-1791342991858-9a9af9d5910d.jsonl.gz --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 403: API rate limit exceeded for installation. If you reach out to GitHub Support for help, please include the request ID E880:2C108D:3377E:6CE54:6AC5DEE1 and timestamp 2026-10-07 05:55:45 UTC. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service (https://docs.github.com/en/site-policy/github-terms/github-terms-of-service) (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/405374506/assets?label=&name=gate-public-rest-instrument-metadata-kioxia-usdt-1791342991858-1791342991858-9a9af9d5910d.jsonl.gz)",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "50081f267a99bfaf825363d3bf44904608f37838596c9c6f1964788d43840445"
+    }
+  },
   "config_sha256": "c37ebbc7b2cbd2da51de97d9c09b740775e918dd614789d7fc0751bd69d1ed4b",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-06T16:16:20.294485+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "50081f267a99bfaf825363d3bf44904608f37838596c9c6f1964788d43840445",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37556718310",
     "market_shard_count": 16,
     "market_shard_index": 12,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100616/shard-12.json",
     "plan_sha256": "3773f7dd1ca46e5e228d6f7de9208b30564a28d019a2429362cf0f9825e00fdb",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 40,
@@ -57,15 +76,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T05:55:45.665387Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T03:15:33.470735Z",
-    "expires_at": "2026-10-07T09:00:33.470735Z",
-    "lease_token_sha256": "1a78a8543b53873a87154df4f0549ca103f5f23f33e5fc872a9e96253e319a3e",
-    "owner_run_id": "37556718310"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -74,7 +94,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -83,9 +103,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T03:15:33.470806Z",
+  "updated_at": "2026-10-07T05:55:45.665387Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
