@@ -107,7 +107,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "timeout-minutes: 10" in controller
     assert "timeout-minutes: 345" in worker
     assert "cancel-in-progress: false" in controller
-    assert "group: resumable-campaign-controller-v4" in controller
+    assert "group: resumable-campaign-controller-v5" in controller
     assert "cancel-in-progress: false" in worker
     assert "self-hosted" not in controller + worker
     assert "uses: ./.github/workflows/resumable-campaign-worker.yml" in controller
@@ -115,9 +115,15 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "other_work:" in controller
     assert "max-parallel: 1" in controller
     assert "max-parallel: 16" in controller
-    assert "head -n 128" in controller
+    assert "selected[:128]" in controller
     assert 'list-due catalog/campaigns             | head -n 128' not in controller
     assert 'all-due.txt' in controller
+    assert 'GITHUB_EVENT_PATH' in controller
+    assert 'canary-market-*.json' in controller
+    assert 'changed_canaries' in controller
+    assert 'selected = [campaign_id for campaign_id in due if campaign_id in changed_canaries]' in controller
+    assert 'canary_ids = [campaign_id for campaign_id in due if campaign_id.startswith("canary-market-")]' in controller
+    assert 'selected = canary_ids + [campaign_id for campaign_id in due if campaign_id not in canary_ids]' in controller
     assert "copy_matrix" in controller
     assert "other_matrix" in controller
     assert "active_copy=False" in controller

@@ -16,9 +16,9 @@ permissions:
   contents: write
 
 concurrency:
-  # v3 intentionally moves off the legacy v2 serialization group so a long
-  # pre-fix Copy-Vault fan-out cannot starve fresh market/L2 work.
-  group: resumable-campaign-controller-v4
+  # v5 releases bounded canaries from a pre-fix publication wave that can
+  # otherwise hold the serialized controller for the full runner lifetime.
+  group: resumable-campaign-controller-v5
   cancel-in-progress: false
 
 jobs:
@@ -68,7 +68,25 @@ jobs:
           echo "phase=$PHASE" >> "$GITHUB_OUTPUT"
           echo "phase_epoch=$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
           PYTHONPATH=alina/src python alina/tools/resumable_campaign.py             list-due catalog/campaigns             --current-phase "$PHASE"             --current-epoch "$PHASE_EPOCH"             --current-analysis-stage "$ANALYSIS_STAGE"             > "$RUNNER_TEMP/all-due.txt"
-          head -n 128 "$RUNNER_TEMP/all-due.txt" > "$RUNNER_TEMP/due.txt"
+          python - <<'PY' "$RUNNER_TEMP/all-due.txt" "$RUNNER_TEMP/due.txt" "$GITHUB_EVENT_PATH"
+          import fnmatch,json,sys
+          from pathlib import Path
+
+          due = [line.strip() for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+          event = json.load(open(sys.argv[3], encoding="utf-8"))
+          changed_canaries = set()
+          if event.get("ref") == "refs/heads/main":
+              for commit in event.get("commits") or []:
+                  for field in ("added", "modified"):
+                      for name in commit.get(field) or []:
+                          if fnmatch.fnmatch(name, "catalog/campaigns/canary-market-*.json"):
+                              changed_canaries.add(Path(name).stem)
+          selected = [campaign_id for campaign_id in due if campaign_id in changed_canaries]
+          if not selected:
+              canary_ids = [campaign_id for campaign_id in due if campaign_id.startswith("canary-market-")]
+              selected = canary_ids + [campaign_id for campaign_id in due if campaign_id not in canary_ids]
+          Path(sys.argv[2]).write_text("".join(f"{campaign_id}\n" for campaign_id in selected[:128]), encoding="utf-8")
+          PY
           python - <<'PY' "$RUNNER_TEMP/due.txt" "$PHASE_EPOCH" >> "$GITHUB_OUTPUT"
           import json,sys
           from pathlib import Path
