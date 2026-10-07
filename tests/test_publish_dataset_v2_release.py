@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,127 @@ def test_release_capacity_reserves_run_manifest_slot() -> None:
     module.validate_release_capacity(999)
     with pytest.raises(module.PublishError):
         module.validate_release_capacity(1000)
+
+
+def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
+    module = _module()
+    root = tmp_path / "bundle"
+    assets = root / "assets"
+    assets.mkdir(parents=True)
+    manifests = []
+    for index in range(5):
+        name = f"shard-{index}.jsonl.gz"
+        payload = f"payload-{index}".encode()
+        (assets / name).write_bytes(payload)
+        manifests.append({
+            "dataset_id": f"dataset-{index}",
+            "release_asset": name,
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+
+    first = module.build_compacted_assets(root, manifests, members_per_asset=2)
+    first_digests = [row["sha256"] for row in first]
+    second = module.build_compacted_assets(root, manifests, members_per_asset=2)
+
+    assert len(first) == 3
+    assert [row["sha256"] for row in second] == first_digests
+    assert [len(row["manifests"]) for row in first] == [2, 2, 1]
+    with zipfile.ZipFile(first[0]["path"]) as archive:
+        assert archive.namelist() == ["shard-0.jsonl.gz", "shard-1.jsonl.gz"]
+        assert archive.read("shard-0.jsonl.gz") == b"payload-0"
+
+
+def test_compaction_splits_before_github_file_size_limit(tmp_path) -> None:
+    module = _module()
+    root = tmp_path / "bundle"
+    assets = root / "assets"
+    assets.mkdir(parents=True)
+    manifests = []
+    for index in range(3):
+        payload = b"1234567890"
+        name = f"shard-{index}.jsonl.gz"
+        (assets / name).write_bytes(payload)
+        manifests.append({"dataset_id": str(index), "release_asset": name,
+                          "bytes": len(payload),
+                          "sha256": hashlib.sha256(payload).hexdigest()})
+
+    compacted = module.build_compacted_assets(
+        root, manifests, members_per_asset=100, max_payload_bytes=20,
+    )
+
+    assert [len(row["manifests"]) for row in compacted] == [2, 1]
+
+
+def test_publish_compacts_large_bundle_into_two_github_writes(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    manifests_dir = bundle / "manifests"
+    assets.mkdir(parents=True)
+    manifests_dir.mkdir(parents=True)
+    manifest_paths = []
+    for index in range(module.COMPACTION_MIN_SHARDS):
+        name = f"asset-{index:03d}.jsonl.gz"
+        payload = f"payload-{index}".encode()
+        (assets / name).write_bytes(payload)
+        manifest = {
+            "dataset_id": f"dataset-{index}", "family": "trades",
+            "venue": "gate", "symbol": "BTC_USDT",
+            "start_ts_ms": 1000 + index, "end_ts_ms": 1000 + index,
+            "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload),
+            "event_count": 1, "collector_version": "a" * 40,
+            "source": "gate_public_ws", "quality_status": "PARTIAL",
+            "release_asset": name, "asset_verified": False,
+            "replay_compatible": True,
+            "provenance": {"public_data_only": True, "authenticated": False,
+                           "real_execution": False, "transports": ["websocket"]},
+            "integrity": {"gap_count": 0, "duplicate_count": 0,
+                          "regression_count": 0, "missing_timestamp_count": 0,
+                          "missing_monotonic_count": 0, "desync_count": 0,
+                          "duplicates_deduped": True},
+            "synchronization": {"connection_count": 1},
+            "reconciliation": {"status": "PARTIAL"},
+            "required_channels": [], "observed_channels": ["trades"],
+            "cost_model": {"applicable": False, "ready": False},
+        }
+        path = manifests_dir / f"dataset-{index}.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        manifest_paths.append(f"manifests/{path.name}")
+    (bundle / "BUNDLE_INDEX.json").write_text(json.dumps({
+        "collector_version": "a" * 40,
+        "collection_run_id": "run-1",
+        "manifests": manifest_paths,
+    }), encoding="utf-8")
+
+    uploaded = []
+    monkeypatch.setattr(module, "ensure_release", lambda **_kwargs: {"id": 77, "assets": []})
+
+    def fake_upload_file(*, repository, tag, path):
+        uploaded.append(Path(path))
+
+    monkeypatch.setattr(module, "upload_file", fake_upload_file)
+
+    def fake_json(_args):
+        rows = []
+        for index, path in enumerate(uploaded, 1):
+            rows.append({"id": index, "name": path.name, "size": path.stat().st_size,
+                         "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()})
+        return {"id": 77, "assets": rows}
+
+    monkeypatch.setattr(module, "_json", fake_json)
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-run-compacted",
+        target="main",
+        title="compacted",
+    )
+
+    assert [path.name for path in uploaded] == ["packed-shards-0000.zip", "RUN_MANIFEST.json"]
+    assert result["shard_count"] == module.COMPACTION_MIN_SHARDS
+    assert result["release_parts"][0]["asset_count"] == 1
+    assert all(row["release"]["storage"] == "zip_entry" for row in result["manifests"])
 
 
 def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkeypatch) -> None:

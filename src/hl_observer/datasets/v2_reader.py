@@ -1,8 +1,10 @@
 """Read-only consumer for Alina SmartFlow dataset V2 GitHub Releases."""
 from __future__ import annotations
 
+import hashlib
 import json
-import urllib.parse
+import shutil
+import zipfile
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -247,28 +249,64 @@ def materialize_safe_shards(
             digest=str(release.get("remote_digest") or ""),
         )
         expected_sha = str(manifest.get("sha256") or "").lower()
-        if not asset.sha256 or asset.sha256.lower() != expected_sha:
+        member_name = str(release.get("member_name") or "")
+        if not member_name and (not asset.sha256 or asset.sha256.lower() != expected_sha):
             raise DatasetBridgeError("Manifest SHA and GitHub asset digest disagree.")
         destination = root / f"{manifest.get('dataset_id')}.jsonl.gz"
+        expected_size = _int(manifest.get("bytes"))
         if destination.is_file() and not force:
             try:
-                verify_asset(destination, asset)
-            except DatasetBridgeError:
+                if destination.stat().st_size != expected_size or _sha256(destination) != expected_sha:
+                    raise DatasetBridgeError("Cached shard identity mismatch.")
+            except (DatasetBridgeError, OSError):
                 destination.unlink(missing_ok=True)
         if not destination.is_file():
             temporary = destination.with_suffix(".gz.part")
             temporary.unlink(missing_ok=True)
-            try:
-                download_release_asset(
-                    repository=repository,
-                    asset_id=asset.asset_id,
-                    destination=temporary,
-                )
-            except GitHubTransportError as exc:
+            if member_name:
+                containers = root / "_containers"
+                containers.mkdir(parents=True, exist_ok=True)
+                container = containers / f"{asset.asset_id}-{Path(asset.name).name}"
+                if not container.is_file() or force:
+                    part = container.with_suffix(container.suffix + ".part")
+                    part.unlink(missing_ok=True)
+                    try:
+                        download_release_asset(
+                            repository=repository,
+                            asset_id=asset.asset_id,
+                            destination=part,
+                        )
+                    except GitHubTransportError as exc:
+                        part.unlink(missing_ok=True)
+                        raise DatasetBridgeError(str(exc)) from exc
+                    part.replace(container)
+                verify_asset(container, asset)
+                if Path(member_name).name != member_name:
+                    raise DatasetBridgeError("Unsafe compacted shard member name.")
+                try:
+                    with (
+                        zipfile.ZipFile(container) as archive,
+                        archive.open(member_name) as source,
+                        temporary.open("wb") as target,
+                    ):
+                        shutil.copyfileobj(source, target)
+                except (KeyError, OSError, zipfile.BadZipFile) as exc:
+                    temporary.unlink(missing_ok=True)
+                    raise DatasetBridgeError("Compacted shard is missing or corrupt.") from exc
+            else:
+                try:
+                    download_release_asset(
+                        repository=repository,
+                        asset_id=asset.asset_id,
+                        destination=temporary,
+                    )
+                except GitHubTransportError as exc:
+                    temporary.unlink(missing_ok=True)
+                    raise DatasetBridgeError(str(exc)) from exc
+            if temporary.stat().st_size != expected_size or _sha256(temporary) != expected_sha:
                 temporary.unlink(missing_ok=True)
-                raise DatasetBridgeError(str(exc)) from exc
+                raise DatasetBridgeError("Materialized shard identity mismatch.")
             temporary.replace(destination)
-            verify_asset(destination, asset)
         result[str(manifest.get("dataset_id"))] = destination
     return result
 
@@ -278,6 +316,14 @@ def _int(value: Any) -> int | None:
         return int(value) if value is not None and not isinstance(value, bool) else None
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 __all__ = [

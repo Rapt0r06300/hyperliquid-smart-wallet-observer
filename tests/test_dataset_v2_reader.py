@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import zipfile
+
 import pytest
 
 from hl_observer.datasets.github_release_bridge import DatasetBridgeError
@@ -69,3 +72,35 @@ def test_materializer_refuses_safe_without_replay_compatibility(tmp_path) -> Non
     row["replay_compatible"] = False
     with pytest.raises(DatasetBridgeError):
         materialize_safe_shards([row], tmp_path)
+
+
+def test_materializer_extracts_and_verifies_compacted_shard(tmp_path, monkeypatch) -> None:
+    payload = b"replay-grade-shard"
+    archive = tmp_path / "source.zip"
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as handle:
+        handle.writestr("shard.jsonl.gz", payload)
+    archive_digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    row = _manifest("SAFE")
+    row["sha256"] = hashlib.sha256(payload).hexdigest()
+    row["bytes"] = len(payload)
+    row["release"] = {
+        "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "asset_id": 7,
+        "asset_name": "packed-shards-0000.zip",
+        "remote_size": archive.stat().st_size,
+        "remote_digest": "sha256:" + archive_digest,
+        "member_name": "shard.jsonl.gz",
+    }
+
+    def fake_download(*, repository, asset_id, destination):
+        assert repository == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        assert asset_id == 7
+        destination.write_bytes(archive.read_bytes())
+
+    monkeypatch.setattr(
+        "hl_observer.datasets.v2_reader.download_release_asset",
+        fake_download,
+    )
+    result = materialize_safe_shards([row], tmp_path / "cache")
+
+    assert result[row["dataset_id"]].read_bytes() == payload

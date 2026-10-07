@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tarfile
 import time
+import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from typing import Any
 from hl_observer.datasets.replay_coverage import build_safe_coverage_matrix
 from hl_observer.datasets.v2_pipeline import (
     V2_REPOSITORY,
+    finalize_manifest,
     verify_remote_asset,
     write_manifest,
 )
@@ -32,6 +34,10 @@ OVERFLOW_DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS
 RECOVERY_CAPSULE_MAX_BYTES = 1_500_000_000
 RECOVERY_INDEX_NAME = "ALINA_RECOVERY_INDEX.json"
 RECOVERY_COMPLETE_NAME = "CANONICAL_PUBLICATION.json"
+COMPACTION_MIN_SHARDS = 100
+COMPACTION_SHARDS_PER_ASSET = 100
+COMPACTION_TARGET_PAYLOAD_BYTES = 512 * 1024 * 1024
+MAX_GITHUB_ASSET_BYTES = 1_900_000_000
 
 
 def recovery_release_tag(base_tag: str, collection_run_id: object) -> str:
@@ -46,6 +52,100 @@ def recovery_capsule_enabled() -> bool:
     explicit = str(os.getenv("ALINA_RECOVERY_CAPSULE") or "").strip().lower()
     return explicit in {"1", "true", "yes", "on"}
 
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def build_compacted_assets(
+    root: Path,
+    manifests: list[Mapping[str, Any]],
+    *,
+    members_per_asset: int = COMPACTION_SHARDS_PER_ASSET,
+    max_payload_bytes: int = COMPACTION_TARGET_PAYLOAD_BYTES,
+) -> list[dict[str, Any]]:
+    """Pack immutable shards into deterministic ZIP containers.
+
+    Shards are already gzip-compressed, so ZIP_STORED avoids wasted CPU. Fixed
+    metadata makes retries byte-identical while reducing hundreds of GitHub API
+    writes to a handful. Logical shard hashes remain authoritative.
+    """
+    width = max(1, int(members_per_asset))
+    payload_limit = max(1, int(max_payload_bytes))
+    compacted_dir = root / "compacted-assets"
+    compacted_dir.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, Any]] = []
+    ordered = sorted(
+        manifests,
+        key=lambda row: (
+            str(row.get("release_asset") or ""),
+            str(row.get("dataset_id") or ""),
+        ),
+    )
+    groups: list[list[Mapping[str, Any]]] = []
+    current: list[Mapping[str, Any]] = []
+    current_bytes = 0
+    for manifest in ordered:
+        member_bytes = int(manifest.get("bytes") or 0)
+        if member_bytes <= 0 or member_bytes >= MAX_GITHUB_ASSET_BYTES:
+            raise PublishError("logical shard is empty or exceeds GitHub asset limit")
+        if current and (
+            len(current) >= width or current_bytes + member_bytes > payload_limit
+        ):
+            groups.append(current)
+            current = []
+            current_bytes = 0
+        current.append(manifest)
+        current_bytes += member_bytes
+    if current:
+        groups.append(current)
+
+    for group_index, group in enumerate(groups):
+        name = f"packed-shards-{group_index:04d}.zip"
+        path = compacted_dir / name
+        seen: set[str] = set()
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED) as archive:
+            for manifest in group:
+                member = str(manifest.get("release_asset") or "")
+                if not member or member in seen or Path(member).name != member:
+                    raise PublishError(f"invalid or duplicate compacted member: {member!r}")
+                seen.add(member)
+                source = root / "assets" / member
+                if not source.is_file():
+                    raise PublishError(f"Missing upload file: {source}")
+                expected_size = int(manifest.get("bytes") or 0)
+                expected_sha = str(manifest.get("sha256") or "").lower()
+                if source.stat().st_size != expected_size or _sha256_file(source) != expected_sha:
+                    raise PublishError(f"local shard identity mismatch: {member}")
+                info = zipfile.ZipInfo(member, date_time=(1980, 1, 1, 0, 0, 0))
+                info.compress_type = zipfile.ZIP_STORED
+                info.external_attr = 0o100644 << 16
+                archive.writestr(info, source.read_bytes())
+        if path.stat().st_size >= MAX_GITHUB_ASSET_BYTES:
+            path.unlink(missing_ok=True)
+            raise PublishError("compacted asset exceeds GitHub file-size limit")
+        rows.append({
+            "name": name,
+            "path": path,
+            "bytes": path.stat().st_size,
+            "sha256": _sha256_file(path),
+            "manifests": list(group),
+        })
+    return rows
+
+
+def _direct_upload_assets(root: Path, manifests: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [{
+        "name": str(row.get("release_asset") or ""),
+        "path": root / "assets" / str(row.get("release_asset") or ""),
+        "bytes": int(row.get("bytes") or 0),
+        "sha256": str(row.get("sha256") or "").lower(),
+        "manifests": [row],
+    } for row in manifests]
 
 
 def overflow_release_tag(base_tag: str, part_index: int) -> str:
@@ -287,7 +387,7 @@ def _build_recovery_capsules(
     recovery_dir.mkdir(parents=True)
 
     rows: list[tuple[Path, Path]] = []
-    for manifest_path, manifest in zip(manifest_paths, manifests):
+    for manifest_path, manifest in zip(manifest_paths, manifests, strict=True):
         asset_name = str(manifest.get("release_asset") or "")
         asset_path = root / "assets" / asset_name
         if not asset_name or not asset_path.is_file() or not manifest_path.is_file():
@@ -509,6 +609,11 @@ def publish_bundle(
         target=target,
         title=title,
     )
+    upload_assets = (
+        build_compacted_assets(root, manifests)
+        if len(manifests) >= COMPACTION_MIN_SHARDS
+        else _direct_upload_assets(root, manifests)
+    )
 
     # Small bundles stay on one canonical Release exactly as before. Large
     # replay-grade windows may exceed GitHub's hard 1000-assets-per-Release
@@ -517,7 +622,7 @@ def publish_bundle(
     # the single canonical RUN_MANIFEST.json on a lightweight production
     # control tag. This also resumes old failed runs whose base Release already
     # contains 1000 compatible assets, without destructive deletion.
-    large_bundle = len(manifests) > DATA_ASSETS_PER_RELEASE
+    large_bundle = len(upload_assets) > DATA_ASSETS_PER_RELEASE
     data_capacity = (
         OVERFLOW_DATA_ASSETS_PER_RELEASE
         if large_bundle
@@ -527,8 +632,8 @@ def publish_bundle(
         raise PublishError("invalid GitHub release asset capacity")
 
     chunks = [
-        manifests[offset : offset + data_capacity]
-        for offset in range(0, len(manifests), data_capacity)
+        upload_assets[offset : offset + data_capacity]
+        for offset in range(0, len(upload_assets), data_capacity)
     ]
     if not chunks:
         chunks = [[]]
@@ -580,11 +685,7 @@ def publish_bundle(
         if release_id <= 0:
             raise PublishError("Release id is missing.")
 
-        expected_names = {
-            str(manifest.get("release_asset") or "")
-            for manifest in chunk
-            if str(manifest.get("release_asset") or "")
-        }
+        expected_names = {str(asset["name"]) for asset in chunk}
         existing_assets = release_asset_map(release)
         allowed_control = (
             {"RUN_MANIFEST.json"}
@@ -611,7 +712,7 @@ def publish_bundle(
             data_base_tag = retry_release_tag(
                 tag,
                 index.get("collection_run_id"),
-                manifests,
+                upload_assets,
             )
             part_tag = data_base_tag
             part_title = f"{title} retry"
@@ -632,49 +733,76 @@ def publish_bundle(
                     f"retry release identity conflict: {part_tag}"
                 )
 
-        for manifest in chunk:
-            asset_name = str(manifest.get("release_asset") or "")
+        for asset_row in chunk:
+            asset_name = str(asset_row["name"])
             existing = existing_assets.get(asset_name)
             if existing is not None:
-                assert_existing_asset_compatible(manifest, existing)
+                assert_existing_asset_compatible({
+                    "release_asset": asset_name,
+                    "sha256": asset_row["sha256"],
+                    "bytes": asset_row["bytes"],
+                }, existing)
 
-        for manifest in chunk:
-            asset_name = str(manifest.get("release_asset") or "")
+        for asset_row in chunk:
+            asset_name = str(asset_row["name"])
             if asset_name in existing_assets:
                 continue
-            local = root / "assets" / asset_name
-            upload_file(repository=repository, tag=part_tag, path=local)
+            upload_file(repository=repository, tag=part_tag, path=Path(asset_row["path"]))
 
         refreshed = _json(["api", f"repos/{repository}/releases/tags/{part_tag}"])
         if not isinstance(refreshed, Mapping):
             raise PublishError("Release payload after upload is invalid.")
         assets = release_asset_map(refreshed)
 
-        for manifest in chunk:
-            asset_name = str(manifest.get("release_asset") or "")
+        for asset_row in chunk:
+            asset_name = str(asset_row["name"])
             remote = assets.get(asset_name)
             if remote is None:
                 raise PublishError(f"Uploaded asset not visible in release: {asset_name}")
-            verified = verify_remote_asset(
-                manifest,
-                repository=repository,
-                release_tag=part_tag,
-                release_id=release_id,
-                asset_id=int(remote.get("id") or 0),
-                asset_name=asset_name,
-                remote_size=int(remote.get("size") or 0),
-                remote_digest=str(remote.get("digest") or ""),
-            )
-            verified.pop("local_source_path", None)
-            verified.pop("local_asset_path", None)
-            final_manifests.append(verified)
+            remote_size = int(remote.get("size") or 0)
+            remote_digest = str(remote.get("digest") or "")
+            remote_sha = remote_digest.split(":", 1)[1].lower() if remote_digest.startswith("sha256:") else ""
+            if remote_size != int(asset_row["bytes"]) or remote_sha != str(asset_row["sha256"]):
+                raise PublishError(f"remote compacted asset identity mismatch: {asset_name}")
+            compacted = len(asset_row["manifests"]) > 1 or asset_name.endswith(".zip")
+            for manifest in asset_row["manifests"]:
+                if compacted:
+                    verified = dict(manifest)
+                    verified["asset_verified"] = True
+                    verified["release"] = {
+                        "repository": repository,
+                        "release_tag": part_tag,
+                        "release_id": release_id,
+                        "asset_id": int(remote.get("id") or 0),
+                        "asset_name": asset_name,
+                        "remote_size": remote_size,
+                        "remote_digest": remote_digest,
+                        "member_name": str(manifest.get("release_asset") or ""),
+                        "storage": "zip_entry",
+                    }
+                    verified = finalize_manifest(verified)
+                else:
+                    verified = verify_remote_asset(
+                        manifest,
+                        repository=repository,
+                        release_tag=part_tag,
+                        release_id=release_id,
+                        asset_id=int(remote.get("id") or 0),
+                        asset_name=asset_name,
+                        remote_size=remote_size,
+                        remote_digest=remote_digest,
+                    )
+                verified.pop("local_source_path", None)
+                verified.pop("local_asset_path", None)
+                final_manifests.append(verified)
 
         data_releases.append(refreshed)
         release_parts.append(
             {
                 "release_tag": part_tag,
                 "release_id": release_id,
-                "shard_count": len(chunk),
+                "shard_count": sum(len(row["manifests"]) for row in chunk),
+                "asset_count": len(chunk),
                 "catalog_discoverable": not large_bundle and part_index == 0,
             }
         )

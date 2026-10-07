@@ -1079,6 +1079,7 @@ Requirements:
 - concurrency is bounded and dynamically planned rather than maximized blindly;
 - asset sizes are bounded and rotated before platform/file limits;
 - heavy raw assets are stored as immutable release assets, while Git tracks manifests, catalogs, hashes, phase state, and small reports;
+- bundles containing many small shards are packed into deterministic immutable ZIP containers before Release publication; every logical shard keeps its own SHA-256/size/member identity and the reader verifies both the container digest and extracted shard digest, reducing GitHub write-rate pressure without weakening replay provenance;
 - collection and heavy analysis do not compete because phase control remains authoritative.
 
 A GitHub delay/outage may create a real collection gap. Such a gap is detected from the coverage ledger and repaired where possible; otherwise it is quarantined. The system never relabels GitHub scheduling delay as continuous market data.

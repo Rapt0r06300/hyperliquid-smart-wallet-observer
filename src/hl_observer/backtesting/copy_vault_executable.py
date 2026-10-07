@@ -25,11 +25,11 @@ from hl_observer.backtesting.copy_vault_protocol import (
     CHECKPOINT_COLLECTOR_PROTOCOL,
     COPY_DELAY_MS,
     HORIZONS_MS,
+    MAX_GROSS_EXPOSURE_USD,
     MAX_OPEN_POSITIONS,
     MAX_REFERENCE_LAG_MS,
     MAX_TARGET_LAG_MS,
     METAORDER_GAP_MS,
-    MAX_GROSS_EXPOSURE_USD,
     MIN_TRAIN_TRADES,
     NOTIONAL_USD,
     POST_FREEZE_PROOF_POLICY,
@@ -197,15 +197,11 @@ def execute_metaorder(
         reference, entry, exit_book, reference_lag, entry_lag, exit_lag = checkpoint_triplet
         book_binding_method = "EXACT_METAORDER_CHECKPOINTS"
     else:
-        continuous_books = [
-            row
-            for row in books
-            if not row.get("checkpoint_id")
-            and (
-                not require_causal_books
-                or row.get("causal_observation") is True
-            )
-        ]
+        # Select the chronologically correct observation first.  Filtering out
+        # non-causal rows here could silently jump to a later book and make a
+        # forward episode look causal.  The explicit guard below must diagnose
+        # and reject the selected triplet instead.
+        continuous_books = [row for row in books if not row.get("checkpoint_id")]
         if not continuous_books:
             return None, "MISSING_EXACT_METAORDER_CHECKPOINT"
         reference, reference_lag = _first_at_or_after(

@@ -896,6 +896,9 @@ def test_new_proof_policy_uses_only_complete_utc_days_after_freeze(monkeypatch) 
 def test_protocol_signature_invalidates_pre_vwap_pre_complete_day_freezes() -> None:
     signature = protocol_signature()
 
+    assert signature["paper_equity_usd"] == 200.0
+    assert signature["max_gross_exposure_usd"] == 200.0
+    assert signature["notional_usd"] == 150.0
     assert signature["execution_pricing_policy"] == (
         "observed_side_specific_l2_vwap_full_size_v1"
     )
