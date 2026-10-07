@@ -201,11 +201,117 @@ def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
     return checks
 
 
+def _safe_workspace_target(workspace: Path, relative: str) -> Path:
+    rel = Path(relative)
+    if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+        raise RestoreError(f"unsafe snapshot path: {relative!r}")
+    target = (workspace / rel).resolve()
+    root = workspace.resolve()
+    if root != target and root not in target.parents:
+        raise RestoreError(f"snapshot path escapes workspace: {relative!r}")
+    if rel.parts[0] == ".git":
+        raise RestoreError("local snapshot may never write inside .git")
+    return target
+
+
+def materialize_latest_local_snapshot(
+    releases_root: Path,
+    workspace: Path,
+) -> dict[str, Any] | None:
+    candidates: list[tuple[str, Path, Mapping[str, Any]]] = []
+    for directory in releases_root.glob("alina-local-snapshot-*"):
+        index_path = directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json"
+        if not index_path.is_file():
+            continue
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, Mapping) and payload.get("schema") == "alina.local_snapshot.v1":
+            candidates.append((directory.name, directory, payload))
+    if not candidates:
+        return None
+
+    _name, directory, index = sorted(candidates, key=lambda row: row[0])[-1]
+    chunk_rows = index.get("chunks")
+    file_rows = index.get("files")
+    if not isinstance(chunk_rows, list) or not isinstance(file_rows, list):
+        raise RestoreError("latest local snapshot index is incomplete")
+
+    chunks: dict[str, Path] = {}
+    for row in chunk_rows:
+        if not isinstance(row, Mapping):
+            raise RestoreError("invalid local snapshot chunk row")
+        name = str(row.get("name") or "")
+        expected_sha = str(row.get("sha256") or "").lower()
+        expected_size = int(row.get("bytes") or 0)
+        path = directory / _safe_component(name)
+        if not path.is_file() or path.stat().st_size != expected_size:
+            raise RestoreError(f"missing local snapshot chunk: {name}")
+        if len(expected_sha) != 64 or _sha256(path) != expected_sha:
+            raise RestoreError(f"local snapshot chunk sha256 mismatch: {name}")
+        chunks[name] = path
+
+    restored = 0
+    skipped = 0
+    for row in file_rows:
+        if not isinstance(row, Mapping):
+            raise RestoreError("invalid local snapshot file row")
+        relative = str(row.get("path") or "")
+        expected_sha = str(row.get("sha256") or "").lower()
+        expected_size = int(row.get("bytes") or 0)
+        segments = row.get("segments")
+        if not relative or len(expected_sha) != 64 or expected_size < 0:
+            raise RestoreError("invalid local snapshot file identity")
+        if not isinstance(segments, list):
+            raise RestoreError(f"missing segments for {relative}")
+        target = _safe_workspace_target(workspace, relative)
+        if (
+            target.is_file()
+            and target.stat().st_size == expected_size
+            and _sha256(target) == expected_sha
+        ):
+            skipped += 1
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".alina-restore-partial")
+        tmp.unlink(missing_ok=True)
+        with tmp.open("wb") as output:
+            for segment in segments:
+                if not isinstance(segment, Mapping):
+                    raise RestoreError(f"invalid segment for {relative}")
+                chunk_name = str(segment.get("chunk") or "")
+                offset = int(segment.get("offset") or 0)
+                length = int(segment.get("bytes") or 0)
+                chunk = chunks.get(chunk_name)
+                if chunk is None or offset < 0 or length < 0:
+                    raise RestoreError(f"invalid chunk reference for {relative}")
+                with chunk.open("rb") as source:
+                    source.seek(offset)
+                    data = source.read(length)
+                if len(data) != length:
+                    raise RestoreError(f"short chunk read for {relative}")
+                output.write(data)
+        if tmp.stat().st_size != expected_size or _sha256(tmp) != expected_sha:
+            tmp.unlink(missing_ok=True)
+            raise RestoreError(f"restored local file sha256 mismatch: {relative}")
+        tmp.replace(target)
+        restored += 1
+
+    return {
+        "tag": str(index.get("tag") or directory.name),
+        "restored_files": restored,
+        "skipped_verified_files": skipped,
+        "file_count": len(file_rows),
+    }
+
+
 def restore_everything(
     repository: str,
     destination: Path,
     *,
     token: str | None = None,
+    workspace: Path | None = None,
 ) -> dict[str, Any]:
     releases_root = destination / "releases"
     releases_root.mkdir(parents=True, exist_ok=True)
@@ -254,6 +360,11 @@ def restore_everything(
     report["verification_failures"] = sum(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
+    report["local_snapshot"] = (
+        materialize_latest_local_snapshot(releases_root, workspace)
+        if workspace is not None
+        else None
+    )
     report_path = destination / "RESTORE_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return report
@@ -266,6 +377,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
+    parser.add_argument(
+        "--workspace",
+        default=".",
+        help="fresh clone root where the latest explicit local runtime snapshot is materialized",
+    )
     args = parser.parse_args(argv)
 
     if not args.everything:
@@ -274,7 +390,12 @@ def main(argv: list[str] | None = None) -> int:
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     destination = Path(args.destination).resolve()
     try:
-        report = restore_everything(args.repository, destination, token=token)
+        report = restore_everything(
+            args.repository,
+            destination,
+            token=token,
+            workspace=Path(args.workspace).resolve(),
+        )
     except RestoreError as exc:
         print(f"ALINA_RESTORE_FAIL: {exc}", file=sys.stderr)
         return 2
