@@ -12,8 +12,11 @@ on:
       - "tests/test_restore_alina.py"
       - "tests/test_publish_dataset_v2_release.py"
       - "tests/test_publish_local_recovery_snapshot.py"
+      - "tests/test_recover_dataset_v2_capsules.py"
       - ".github/workflows/recovery-contract.yml"
   workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * *"
 
 permissions:
   contents: read
@@ -46,4 +49,4 @@ jobs:
       - name: Run deterministic recovery tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_restore_alina.py             tests/test_publish_dataset_v2_release.py             tests/test_publish_local_recovery_snapshot.py --tb=line
+          python -m pytest -q tests/test_restore_alina.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py --tb=line
