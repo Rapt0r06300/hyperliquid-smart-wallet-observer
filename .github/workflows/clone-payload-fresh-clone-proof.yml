@@ -4,12 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       confirm_lfs_bandwidth:
-        description: "I accept that this fresh clone downloads the full Git LFS payload"
+        description: "I accept that this proof downloads the full Git LFS payload once"
         required: true
         type: boolean
         default: false
-  schedule:
-    - cron: "37 5 * * 0"
 
 permissions:
   contents: read
@@ -18,48 +16,113 @@ concurrency:
   group: clone-payload-fresh-clone-proof
   cancel-in-progress: false
 
+env:
+  GH_TOKEN: "${{ github.token }}"
+  GIT_LFS_SKIP_SMUDGE: "1"
+  REAL_MAINNET_TRADING: "false"
+  ENABLE_REAL_ORDERS: "0"
+
 jobs:
-  fresh-clone:
-    if: (github.event_name == 'workflow_dispatch' && inputs.confirm_lfs_bandwidth == true) || (github.event_name == 'schedule' && vars.ALINA_LFS_MIRROR_ENABLED == 'true')
+  source-parity:
+    if: inputs.confirm_lfs_bandwidth == true
     runs-on: ubuntu-latest
-    timeout-minutes: 330
-    env:
-      GH_TOKEN: "${{ github.token }}"
-      REAL_MAINNET_TRADING: "false"
-      ENABLE_REAL_ORDERS: "0"
+    timeout-minutes: 60
     steps:
-      - name: Checkout canonical main and materialize Git LFS payload
+      - name: Checkout canonical main without materializing LFS
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
-          lfs: true
+          lfs: false
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.12"
 
-      - name: Prove Release-to-LFS byte parity
+      - name: Prove every Release asset has an exact current-tree LFS pointer
         shell: bash
         run: |
           set -euo pipefail
-          python tools/check_clone_payload_completeness.py             --repository "$GITHUB_REPOSITORY"             --root .             --require-complete             --output "$RUNNER_TEMP/source-vs-lfs.json"
+          git lfs install --local
+          python tools/check_clone_payload_completeness.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --root . \
+            --require-complete \
+            --output "$RUNNER_TEMP/source-vs-lfs.json"
 
-      - name: Prove fresh checkout contains real payload bytes
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tools/verify_materialized_clone.py             --root .             --require-complete             --output "$RUNNER_TEMP/materialized-clone.json"
-
-      - name: Upload clone proof
+      - name: Upload source parity proof
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: clone-complete-proof
-          path: |
-            ${{ runner.temp }}/source-vs-lfs.json
-            ${{ runner.temp }}/materialized-clone.json
+          name: clone-source-vs-lfs
+          path: "${{ runner.temp }}/source-vs-lfs.json"
           if-no-files-found: warn
           retention-days: 30
+
+  materialize:
+    needs: source-parity
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Fresh checkout with LFS smudging disabled
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+          lfs: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Prepare Git LFS
+        shell: bash
+        run: |
+          set -euo pipefail
+          git lfs version
+          git lfs install --local
+
+      - name: Stream-fetch and hash this fresh-clone shard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/verify_fresh_clone_lfs_streaming.py \
+            --root . \
+            --shard-count 16 \
+            --shard-index "${{ matrix.shard }}" \
+            --batch-assets 250 \
+            --batch-bytes 734003200 \
+            --require-complete \
+            --output "$RUNNER_TEMP/materialized-shard-${{ matrix.shard }}.json"
+
+      - name: Upload shard proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b540449e92b4886f43607fa02
+        with:
+          name: "clone-materialized-shard-${{ matrix.shard }}"
+          path: "${{ runner.temp }}/materialized-shard-${{ matrix.shard }}.json"
+          if-no-files-found: warn
+          retention-days: 30
+
+  verdict:
+    if: always()
+    needs:
+      - source-parity
+      - materialize
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all byte-parity and fresh-clone shards green
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ needs.source-parity.result }}" = "success"
+          test "${{ needs.materialize.result }}" = "success"
+          echo "ALINA_CLONE_COMPLETE_FRESH_PROOF_OK"
