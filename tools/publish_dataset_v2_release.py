@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import tarfile
 import time
 from collections.abc import Mapping
 from pathlib import Path
@@ -28,6 +29,26 @@ MAX_RELEASE_ASSETS = 1000
 CONTROL_ASSET_SLOTS = 1
 DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS - CONTROL_ASSET_SLOTS
 OVERFLOW_DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS
+RECOVERY_CAPSULE_MAX_BYTES = 1_500_000_000
+RECOVERY_INDEX_NAME = "ALINA_RECOVERY_INDEX.json"
+
+
+def recovery_release_tag(base_tag: str, collection_run_id: object) -> str:
+    """Deterministic dedicated Release for an exact pre-publication recovery capsule."""
+    seed = f"{base_tag}|{collection_run_id or ''}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+    return f"alina-recovery-{digest}"
+
+
+def recovery_capsule_enabled() -> bool:
+    """Enable capsules on GitHub-hosted production runs, or explicitly in tests/tools."""
+    explicit = str(os.getenv("ALINA_RECOVERY_CAPSULE") or "").strip().lower()
+    if explicit in {"0", "false", "no", "off"}:
+        return False
+    return explicit in {"1", "true", "yes", "on"} or str(
+        os.getenv("GITHUB_ACTIONS") or ""
+    ).lower() == "true"
+
 
 
 def overflow_release_tag(base_tag: str, part_index: int) -> str:
@@ -237,6 +258,176 @@ def assert_existing_asset_compatible(
         )
 
 
+def _file_identity(path: Path) -> dict[str, Any]:
+    return {
+        "release_asset": path.name,
+        "bytes": path.stat().st_size,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def _build_recovery_capsules(
+    root: Path,
+    *,
+    index: Mapping[str, Any],
+    manifest_paths: list[Path],
+    manifests: list[Mapping[str, Any]],
+    repository: str,
+    requested_release_tag: str,
+    target: str,
+    title: str,
+) -> tuple[Path, list[Path]]:
+    """Pack the exact local bundle into a few immutable tar assets.
+
+    Individual Dataset V2 shards remain the canonical replay surface. These tar
+    assets are disaster-recovery insurance: they are uploaded first so a later
+    GitHub API rate-limit cannot destroy the just-collected unit when the hosted
+    runner disappears.
+    """
+    recovery_dir = root / ".alina_recovery"
+    if recovery_dir.exists():
+        shutil.rmtree(recovery_dir)
+    recovery_dir.mkdir(parents=True)
+
+    rows: list[tuple[Path, Path]] = []
+    for manifest_path, manifest in zip(manifest_paths, manifests):
+        asset_name = str(manifest.get("release_asset") or "")
+        asset_path = root / "assets" / asset_name
+        if not asset_name or not asset_path.is_file() or not manifest_path.is_file():
+            raise PublishError("recovery capsule input is incomplete")
+        rows.append((manifest_path, asset_path))
+
+    groups: list[list[tuple[Path, Path]]] = []
+    current: list[tuple[Path, Path]] = []
+    current_bytes = 0
+    for pair in rows:
+        pair_bytes = pair[0].stat().st_size + pair[1].stat().st_size
+        if current and current_bytes + pair_bytes > RECOVERY_CAPSULE_MAX_BYTES:
+            groups.append(current)
+            current = []
+            current_bytes = 0
+        current.append(pair)
+        current_bytes += pair_bytes
+    if current or not groups:
+        groups.append(current)
+
+    parts: list[Path] = []
+    for part_index, group in enumerate(groups):
+        path = recovery_dir / f"ALINA_RECOVERY_BUNDLE.part{part_index:03d}.tar"
+        with tarfile.open(path, mode="w") as archive:
+            archive.add(root / "BUNDLE_INDEX.json", arcname="BUNDLE_INDEX.json")
+            for manifest_path, asset_path in group:
+                archive.add(
+                    manifest_path,
+                    arcname=str(manifest_path.relative_to(root)).replace("\\", "/"),
+                )
+                archive.add(
+                    asset_path,
+                    arcname=str(asset_path.relative_to(root)).replace("\\", "/"),
+                )
+        parts.append(path)
+
+    recovery_index = {
+        "schema": "alina.recovery_capsule.v1",
+        "repository": repository,
+        "requested_release_tag": requested_release_tag,
+        "collection_run_id": index.get("collection_run_id"),
+        "collector_version": index.get("collector_version"),
+        "target": target,
+        "title": title,
+        "bundle_index_sha256": hashlib.sha256(
+            (root / "BUNDLE_INDEX.json").read_bytes()
+        ).hexdigest(),
+        "parts": [
+            {
+                "name": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+            for path in parts
+        ],
+        "read_only": True,
+        "real_execution": False,
+    }
+    index_path = recovery_dir / RECOVERY_INDEX_NAME
+    index_path.write_text(
+        json.dumps(recovery_index, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    return index_path, parts
+
+
+def publish_recovery_capsule(
+    root: Path,
+    *,
+    index: Mapping[str, Any],
+    manifest_paths: list[Path],
+    manifests: list[Mapping[str, Any]],
+    repository: str,
+    requested_release_tag: str,
+    target: str,
+    title: str,
+) -> dict[str, Any] | None:
+    if not recovery_capsule_enabled():
+        return None
+
+    index_path, parts = _build_recovery_capsules(
+        root,
+        index=index,
+        manifest_paths=manifest_paths,
+        manifests=manifests,
+        repository=repository,
+        requested_release_tag=requested_release_tag,
+        target=target,
+        title=title,
+    )
+    tag = recovery_release_tag(requested_release_tag, index.get("collection_run_id"))
+    release = ensure_release(
+        repository=repository,
+        tag=tag,
+        target=target,
+        title=f"{title} recovery capsule",
+        notes=(
+            "Exact pre-publication disaster-recovery capsule for one Alina collection "
+            "unit. It exists so GitHub Release API throttling cannot destroy fresh "
+            "trades/L2 evidence when an ephemeral hosted runner exits."
+        ),
+    )
+    existing = release_asset_map(release)
+    expected_paths = [index_path, *parts]
+    expected_names = {path.name for path in expected_paths}
+    foreign = set(existing) - expected_names
+    if foreign:
+        raise PublishError(
+            f"recovery release identity conflict for {tag}: {sorted(foreign)[:5]}"
+        )
+
+    for path in expected_paths:
+        identity = _file_identity(path)
+        remote = existing.get(path.name)
+        if remote is not None:
+            assert_existing_asset_compatible(identity, remote)
+            continue
+        upload_file(repository=repository, tag=tag, path=path)
+
+    refreshed = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
+    if not isinstance(refreshed, Mapping):
+        raise PublishError("Recovery Release payload is invalid.")
+    assets = release_asset_map(refreshed)
+    for path in expected_paths:
+        remote = assets.get(path.name)
+        if remote is None:
+            raise PublishError(f"recovery asset not visible after upload: {path.name}")
+        assert_existing_asset_compatible(_file_identity(path), remote)
+
+    return {
+        "release_tag": tag,
+        "asset_count": len(expected_paths),
+        "part_count": len(parts),
+        "index_asset": RECOVERY_INDEX_NAME,
+    }
+
+
 def publish_bundle(
     bundle_root: str | Path,
     *,
@@ -269,6 +460,17 @@ def publish_bundle(
         if not isinstance(payload, dict):
             raise PublishError(f"Invalid manifest: {path}")
         manifests.append(payload)
+
+    recovery_capsule = publish_recovery_capsule(
+        root,
+        index=index,
+        manifest_paths=manifest_paths,
+        manifests=manifests,
+        repository=repository,
+        requested_release_tag=tag,
+        target=target,
+        title=title,
+    )
 
     # Small bundles stay on one canonical Release exactly as before. Large
     # replay-grade windows may exceed GitHub's hard 1000-assets-per-Release
@@ -482,6 +684,7 @@ def publish_bundle(
         "requested_release_tag": tag,
         "data_release_base_tag": data_base_tag,
         "release_parts": release_parts,
+        "recovery_capsule": recovery_capsule,
         "collector_version": index.get("collector_version"),
         "code_sha": index.get("collector_version"),
         "collection_config": index.get("collection_config"),
