@@ -12827,7 +12827,7 @@ Recovery capsules are additional durability evidence and are retained after succ
 
 Cloud Alina remains independent of the user's PC. When the user explicitly works in a local checkout with Codex and creates important ignored runtime evidence, that evidence is not canonical/durable merely because it exists under `data/`, `logs/`, `reports/` or `runtime/`.
 
-`tools/publish_local_recovery_snapshot.py` provides an explicit same-repository Release snapshot for those ignored runtime roots. Large files are chunked, active SQLite databases use SQLite backup semantics, and secret-like material (`.env`, private keys, credentials, mnemonics/seeds) is excluded.
+`tools/publish_local_recovery_snapshot.py` provides an explicit same-repository Release snapshot for those ignored runtime roots and for every other useful Git-ignored local-only project file. Large files are chunked, active SQLite databases use SQLite backup semantics, reproducible caches/toolchains/build outputs are excluded, and secret-like material (`.env`, private keys, credentials, mnemonics/seeds) is excluded.
 
 A local-only file that was never committed or uploaded before physical disk loss is not recoverable retroactively. Therefore any local result that must survive machine loss must be snapshotted before it is treated as durable evidence.
 
