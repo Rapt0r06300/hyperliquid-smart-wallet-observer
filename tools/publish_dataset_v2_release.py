@@ -741,7 +741,8 @@ def publish_bundle(
     existing_run = release_asset_map(refreshed_canonical).get("RUN_MANIFEST.json")
     if existing_run is not None:
         assert_existing_asset_compatible(run_identity, existing_run)
-    upload_file(repository=repository, tag=canonical_tag, path=run_path)
+    else:
+        upload_file(repository=repository, tag=canonical_tag, path=run_path)
 
     final_release = _json(
         ["api", f"repos/{repository}/releases/tags/{canonical_tag}"]
