@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 import time
 import urllib.error
@@ -301,6 +302,32 @@ def materialize_latest_local_snapshot(
             raise RestoreError(f"local snapshot chunk sha256 mismatch: {name}")
         chunks[name] = path
 
+    pending_materialization = 0
+    for row in file_rows:
+        if not isinstance(row, Mapping):
+            raise RestoreError("invalid local snapshot file row")
+        relative = str(row.get("path") or "")
+        expected_sha = str(row.get("sha256") or "").lower()
+        expected_size = int(row.get("bytes") or 0)
+        if not relative or len(expected_sha) != 64 or expected_size < 0:
+            raise RestoreError("invalid local snapshot file identity")
+        target = _safe_workspace_target(workspace, relative)
+        if not (
+            target.is_file()
+            and target.stat().st_size == expected_size
+            and _sha256(target) == expected_sha
+        ):
+            pending_materialization += expected_size
+
+    free_workspace = shutil.disk_usage(workspace).free
+    safety_margin = 1024 * 1024 * 1024
+    if pending_materialization + safety_margin > free_workspace:
+        raise RestoreError(
+            "insufficient disk space to materialize latest local snapshot: "
+            f"need_at_least={pending_materialization + safety_margin} "
+            f"free={free_workspace}"
+        )
+
     restored = 0
     skipped = 0
     for row in file_rows:
@@ -364,6 +391,34 @@ def restore_everything(
 ) -> dict[str, Any]:
     releases_root = destination / "releases"
     releases_root.mkdir(parents=True, exist_ok=True)
+    releases = list(iter_releases(repository, token=token))
+
+    pending_download_bytes = 0
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        if not tag:
+            continue
+        release_dir = releases_root / _safe_component(tag)
+        assets = release.get("assets")
+        for asset in assets if isinstance(assets, list) else []:
+            if not isinstance(asset, Mapping):
+                continue
+            name = str(asset.get("name") or "")
+            if not name:
+                continue
+            target = release_dir / _safe_component(name)
+            if not _asset_ok(target, asset):
+                pending_download_bytes += max(0, int(asset.get("size") or 0))
+
+    free_destination = shutil.disk_usage(destination).free
+    safety_margin = 1024 * 1024 * 1024
+    if pending_download_bytes + safety_margin > free_destination:
+        raise RestoreError(
+            "insufficient disk space for complete GitHub Release restore: "
+            f"need_at_least={pending_download_bytes + safety_margin} "
+            f"free={free_destination}"
+        )
+
     report: dict[str, Any] = {
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
@@ -372,13 +427,15 @@ def restore_everything(
         "asset_count": 0,
         "downloaded": 0,
         "skipped_verified": 0,
+        "pending_download_bytes_at_start": pending_download_bytes,
+        "free_destination_bytes_at_start": free_destination,
         "failures": [],
         "releases": [],
         "read_only": True,
         "real_execution": False,
     }
 
-    for release in iter_releases(repository, token=token):
+    for release in releases:
         tag = str(release.get("tag_name") or "")
         if not tag:
             continue
