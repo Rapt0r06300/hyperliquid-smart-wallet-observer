@@ -719,7 +719,7 @@ Avant d'abandonner l'ancien PC, les données importantes encore uniquement local
 BACKUP_LOCAL_ALINA.cmd
 ~~~
 
-Cette sauvegarde locale est chunkée, reprenable après interruption et exclut les chemins de secrets/clés. Le cloud Alina ne dépend jamais de cette machine : cette commande sert uniquement à sauver des données historiques qui n'existent pas encore sur GitHub.
+Cette sauvegarde locale est chunkée, reprenable après interruption et couvre aussi les fichiers ignorés utiles hors `data/logs/reports/runtime` (par exemple DB/logs/audits locaux). Elle exclut les secrets/clés ainsi que les caches, environnements et builds reproductibles. Le cloud Alina ne dépend jamais de cette machine : cette commande sert uniquement à sauver des données historiques qui n'existent pas encore sur GitHub.
 
 Voir `docs/DISASTER_RECOVERY.md`.
 
