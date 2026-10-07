@@ -43,3 +43,13 @@ docs/archive/legacy_cmd/2026-07-25/TOUT-TESTER.cmd.txt text eol=crlf
 # Les scripts Windows restent CRLF au checkout mais sont normalises dans Git.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+
+# Canonical clone-complete payload. Heavy immutable Alina evidence mirrored here
+# is stored through Git LFS so a normal checkout with Git LFS installed fetches
+# the real bytes during clone instead of requiring a post-clone restore command.
+clone_payload/** filter=lfs diff=lfs merge=lfs -text
+# Small control files remain ordinary Git so migration can advance without
+# downloading old LFS objects on the GitHub-hosted mirror worker.
+clone_payload/README.md -filter -diff -merge text eol=lf
+clone_payload/MANIFEST.json -filter -diff -merge text eol=lf
