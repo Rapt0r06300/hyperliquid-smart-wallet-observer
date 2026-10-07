@@ -48,5 +48,5 @@ jobs:
 
       - name: Run deterministic recovery tests
         run: |
-          python -m pip install --disable-pip-version-check pytest
+          python -m pip install --disable-pip-version-check -e . pytest
           python -m pytest -q tests/test_restore_alina.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py --tb=line
