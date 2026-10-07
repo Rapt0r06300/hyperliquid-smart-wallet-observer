@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 
@@ -78,3 +80,26 @@ def test_discover_files_skips_recovery_recursion(tmp_path):
 
     assert wanted in files
     assert not any("recovery" in path.parts for path in files)
+
+
+def test_chunk_writer_snapshots_only_prefix_visible_at_open(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "CHUNK_BYTES", 64)
+    uploaded = {}
+
+    monkeypatch.setattr(
+        module,
+        "_upload_with_retry",
+        lambda _repository, _tag, path: uploaded.setdefault(path.name, path.read_bytes()),
+    )
+
+    writer = module.ChunkWriter(tmp_path, "owner/repo", "alina-local-snapshot-test")
+    digest = hashlib.sha256()
+    source = io.BytesIO(b"stable-prefix" + b"new-bytes-after-open")
+
+    segments = writer.write_stream(source, digest, limit_bytes=len(b"stable-prefix"))
+    writer.finish()
+
+    assert b"".join(uploaded[name] for name in sorted(uploaded)) == b"stable-prefix"
+    assert sum(segment["bytes"] for segment in segments) == len(b"stable-prefix")
+    assert digest.hexdigest() == hashlib.sha256(b"stable-prefix").hexdigest()
