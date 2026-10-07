@@ -31,6 +31,7 @@ DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS - CONTROL_ASSET_SLOTS
 OVERFLOW_DATA_ASSETS_PER_RELEASE = MAX_RELEASE_ASSETS
 RECOVERY_CAPSULE_MAX_BYTES = 1_500_000_000
 RECOVERY_INDEX_NAME = "ALINA_RECOVERY_INDEX.json"
+RECOVERY_COMPLETE_NAME = "CANONICAL_PUBLICATION.json"
 
 
 def recovery_release_tag(base_tag: str, collection_run_id: object) -> str:
@@ -396,7 +397,7 @@ def publish_recovery_capsule(
     existing = release_asset_map(release)
     expected_paths = [index_path, *parts]
     expected_names = {path.name for path in expected_paths}
-    foreign = set(existing) - expected_names
+    foreign = set(existing) - expected_names - {RECOVERY_COMPLETE_NAME}
     if foreign:
         raise PublishError(
             f"recovery release identity conflict for {tag}: {sorted(foreign)[:5]}"
@@ -427,6 +428,47 @@ def publish_recovery_capsule(
         "index_asset": RECOVERY_INDEX_NAME,
     }
 
+
+
+
+def mark_recovery_capsule_complete(
+    root: Path,
+    *,
+    recovery_capsule: Mapping[str, Any] | None,
+    repository: str,
+    canonical_tag: str,
+    run_identity: Mapping[str, Any],
+) -> None:
+    """Best-effort receipt so recovery scans can skip finalized capsules cheaply."""
+    if not recovery_capsule:
+        return
+    recovery_tag = str(recovery_capsule.get("release_tag") or "")
+    if not recovery_tag:
+        return
+    receipt = {
+        "schema": "alina.recovery_capsule_completion.v1",
+        "repository": repository,
+        "recovery_release_tag": recovery_tag,
+        "canonical_release_tag": canonical_tag,
+        "run_manifest_sha256": str(run_identity.get("sha256") or ""),
+        "run_manifest_bytes": int(run_identity.get("bytes") or 0),
+        "read_only": True,
+        "real_execution": False,
+    }
+    recovery_dir = root / ".alina_recovery"
+    recovery_dir.mkdir(parents=True, exist_ok=True)
+    path = recovery_dir / RECOVERY_COMPLETE_NAME
+    path.write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+
+    release = _json(["api", f"repos/{repository}/releases/tags/{recovery_tag}"])
+    if not isinstance(release, Mapping):
+        raise PublishError("Recovery Release payload is invalid while marking completion.")
+    existing = release_asset_map(release).get(RECOVERY_COMPLETE_NAME)
+    identity = _file_identity(path)
+    if existing is not None:
+        assert_existing_asset_compatible(identity, existing)
+        return
+    upload_file(repository=repository, tag=recovery_tag, path=path)
 
 def publish_bundle(
     bundle_root: str | Path,
@@ -752,6 +794,21 @@ def publish_bundle(
     )
     if "RUN_MANIFEST.json" not in final_assets:
         raise PublishError("RUN_MANIFEST.json not visible after upload.")
+
+    # Canonical evidence is already durable at this point. The completion
+    # receipt only optimizes later recovery scans, so failure to write it must
+    # never downgrade an otherwise complete Dataset V2 publication.
+    try:
+        mark_recovery_capsule_complete(
+            root,
+            recovery_capsule=recovery_capsule,
+            repository=repository,
+            canonical_tag=canonical_tag,
+            run_identity=run_identity,
+        )
+    except PublishError as exc:
+        print(f"DATASET_V2_RECOVERY_MARK_WARNING: {exc}")
+
     return run_manifest
 
 
