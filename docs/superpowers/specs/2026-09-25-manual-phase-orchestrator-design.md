@@ -12798,3 +12798,46 @@ A 2026-09-26 code audit found material weaknesses outside the already-documented
 2. **Legacy package surface remains installed.** The current tree still contains roughly 299 `hyper_smart_observer/*` files, and `pyproject.toml` still includes `hyper_smart_observer*` plus a legacy dYdX CLI in package discovery/entry points. The current legacy testnet executor/client are hard-disabled and contain no order submission implementation, so this is not an active live-trading hole; however, keeping historical execution/simulation code in the default runtime surface creates import, test, maintenance and accidental-authority risk.
 3. **Future data can be made to look fresh.** `ExecutionTruth.age_ms()` currently applies `max(0, decision_ts - received_ts)`; a snapshot received after the decision therefore obtains age zero instead of a causality failure. `PaperEngine` similarly clamps negative leader signal age to zero. This is a direct look-ahead risk.
 4. **Proof-critical code still reads wall time.** `PaperEngine.mark_to_market()` timestamps ledger updates with `time.time()`, and `PaperEvent.create()` falls back to wall time when no timestamp is
+
+## Disaster recovery and complete fresh-machine restore
+
+The single-repository invariant also includes disaster recovery. A user-PC failure must not destroy canonical Alina evidence.
+
+Git history stores code, workflows, specs, manifests, catalogs, checkpoints and compact results. Heavy immutable evidence remains in GitHub Releases of the same repository; raw L2/trade payloads are not moved into Git history merely to make `git clone` larger.
+
+Because Git does not download GitHub Release assets, the canonical fresh-machine restore contract is:
+
+```bash
+git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
+cd hyperliquid-smart-wallet-observer
+python tools/restore_alina.py --everything
+```
+
+`git clone` plus the restore command is one logical recovery operation. The restore must enumerate same-repository Releases, download every canonical asset, verify available SHA-256/byte identities, re-check Dataset V2 `RUN_MANIFEST.json` asset identities, materialize the latest explicit local-runtime snapshot, and fail closed on missing or corrupt evidence.
+
+### Pre-publication collection capsules
+
+Every GitHub-hosted Dataset V2 collection unit must make its exact local bundle durable **before** beginning the high-cardinality per-shard Release upload. The publisher creates a deterministic `alina-recovery-*` Release containing `ALINA_RECOVERY_INDEX.json` plus bounded `ALINA_RECOVERY_BUNDLE.partNNN.tar` parts. The capsule contains the exact `BUNDLE_INDEX.json`, shard manifests and collected assets with hashes.
+
+If GitHub API/secondary rate limiting interrupts later canonical publication, the ephemeral runner may exit only after the exact unit is already recoverable from that capsule. A GitHub-hosted recovery workflow may later download and verify the capsule and resume the canonical publication idempotently. It must never recollect a different interval and present it as the lost one.
+
+Recovery capsules are additional durability evidence and are retained after successful canonical publication unless an explicit future retention policy proves an equivalent independent durable copy.
+
+### Explicit local Codex snapshots
+
+Cloud Alina remains independent of the user's PC. When the user explicitly works in a local checkout with Codex and creates important ignored runtime evidence, that evidence is not canonical/durable merely because it exists under `data/`, `logs/`, `reports/` or `runtime/`.
+
+`tools/publish_local_recovery_snapshot.py` provides an explicit same-repository Release snapshot for those ignored runtime roots. Large files are chunked, active SQLite databases use SQLite backup semantics, and secret-like material (`.env`, private keys, credentials, mnemonics/seeds) is excluded.
+
+A local-only file that was never committed or uploaded before physical disk loss is not recoverable retroactively. Therefore any local result that must survive machine loss must be snapshotted before it is treated as durable evidence.
+
+### Disaster-recovery acceptance
+
+The recovery contract is accepted only if:
+
+- new cloud collection units create verified recovery capsules before per-shard publication;
+- failed canonical publication can be resumed from the exact capsule;
+- `tools/restore_alina.py --everything` restores all same-repository Release assets and fails closed on corruption/missing data;
+- the latest explicit local snapshot can be reconstructed into a fresh checkout with verified file hashes;
+- tests cover Release restore, capsule creation and local snapshot materialization;
+- no recovery path introduces real trading, `/exchange`, signatures, private keys or self-hosted runners.
