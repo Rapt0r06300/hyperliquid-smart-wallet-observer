@@ -508,8 +508,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f confirm_lfs_costs=true \
-            -f max_assets=500 \
-            -f max_bytes=734003200
+            -f max_assets=1000 \
+            -f max_bytes=1500000000
 
       - name: Record immutable publication receipt
         if: ${{ false }}

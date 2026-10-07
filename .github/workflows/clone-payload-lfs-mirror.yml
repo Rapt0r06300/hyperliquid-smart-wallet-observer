@@ -11,12 +11,12 @@ on:
       max_assets:
         description: "Maximum Release assets mirrored in this run"
         required: false
-        default: "500"
+        default: "1000"
         type: string
       max_bytes:
         description: "Maximum source bytes mirrored in this run"
         required: false
-        default: "734003200"
+        default: "1500000000"
         type: string
   schedule:
     - cron: "41 * * * *"
@@ -74,8 +74,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          MAX_ASSETS="${{ inputs.max_assets || '500' }}"
-          MAX_BYTES="${{ inputs.max_bytes || '734003200' }}"
+          MAX_ASSETS="${{ inputs.max_assets || '1000' }}"
+          MAX_BYTES="${{ inputs.max_bytes || '1500000000' }}"
           python tools/mirror_releases_to_clone_lfs.py             --repository "$GITHUB_REPOSITORY"             --root .             --max-assets "$MAX_ASSETS"             --max-bytes "$MAX_BYTES"             --confirm-lfs-costs             | tee "$RUNNER_TEMP/clone-lfs-report.json"
 
       - name: Stage and prove every payload blob is an LFS pointer
@@ -216,5 +216,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f confirm_lfs_costs=true \
-            -f max_assets=500 \
-            -f max_bytes=734003200
+            -f max_assets=1000 \
+            -f max_bytes=1500000000
