@@ -18,6 +18,61 @@
         "status": "FAILED"
       },
       "sha256": "cbc670c08c3df3fc6e2c50de598dc10256b8dc9f500e36db1c3f56e284b2c46c"
+    },
+    "1": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/market-14-2026100104-v7/1",
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_run_manifest",
+          "compressed_bytes": 90188618,
+          "frame_metrics_complete": false,
+          "l2_frames": 0,
+          "partial_count": 93,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 851175,
+          "reject_count": 0,
+          "safe_count": 415,
+          "shard_count": 508,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 43031,
+          "trade_shard_count": 94,
+          "trade_shards_exact": 94
+        },
+        "collection_plan_sha256": "252d72ba0c39b531566cd3e920df5839ff1656e0205c21588399f34e31f3044e",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/market-14-2026100104-v7/1",
+        "partial_count": 93,
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-14-2026100104-v7/1"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "07818228-e67c48ba6bd8.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ZEC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-zen-usdt-swap-1791406923848-1791407801224-ff619aed56e1\",\n      \"event_count\": 119,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-zen-usdt-swap-1791406923848-1791407801224-ff619aed56e1.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ZEN-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"last_error\": \"\",\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0\n  },\n  \"bundle_index\": {\n    \"partial_count\": 508,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 508\n  },\n  \"coins\": [\n    \"ACT\",\n    \"ADBE\",\n    \"APD\",\n    \"APE\",\n    \"API3\",\n    \"BE\",\n    \"BHP\",\n    \"BILL\",\n    \"BOT\",\n    \"BOTZ\",\n    \"BREV\",\n    \"CONL\",\n    \"CRCL\",\n    \"CXMT\",\n    \"DOGS\",\n    \"FRAX\",\n    \"GMT\",\n    \"GRASS\",\n    \"H\",\n    \"IBIT\",\n    \"ICP\",\n    \"MANTA\",\n    \"MAV\",\n    \"MIRA\",\n    \"MRNA\",\n    \"MU\",\n    \"MUFG\",\n    \"MYX\",\n    \"NEAR\",\n    \"PAXG\",\n    \"PLUME\",\n    \"POWR\",\n    \"PROVE\",\n    \"PURR\",\n    \"RUM\",\n    \"SAGA\",\n    \"SAHARA\",\n    \"SATS\",\n    \"SHLD\",\n    \"SKL\",\n    \"SPK\",\n    \"SSPC\",\n    \"STBL\",\n    \"TAG\",\n    \"TEM\",\n    \"TOSHI\",\n    \"UBER\",\n    \"URNM\",\n    \"USDBRL\",\n    \"W\",\n    \"XBI\",\n    \"XLM\",\n    \"ZEC\",\n    \"ZEN\"\n  ],\n  \"collection_run_id\": \"market-14-2026100104-v7-1\",\n  \"collector_version\": \"453ac83c731f921c3a56ff78952ba63ecf56a2ff\",\n  \"disk_free_bytes_at_stop\": 88487886848,\n  \"duration_s\": 3595.464,\n  \"ended_at_ms\": 1791410516540,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 15,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"accepted_samples\": 58,\n    \"attempts\": 329,\n    \"clock_offset_ms\": -530.0,\n    \"clock_probe_receive_wall_ts_ms\": 1791410396804,\n    \"clock_probe_rtt_ms\": 0.0,\n    \"clock_probe_server_ts_ms\": 1791410396274,\n    \"clock_source\": \"webData3.userState.serverTime\",\n    \"failures\": 271,\n    \"last_error\": \"\",\n    \"status\": \"OK\"\n  },\n  \"hyperliquid_trade_reference\": {\n    \"base_weight_budget_per_min\": 480.0,\n    \"effective_interval_s\": 38.0,\n    \"estimated_base_weight_per_min\": 473.684,\n    \"poll_errors\": {\n      \"APE\": 0,\n      \"GMT\": 0,\n      \"GRASS\": 0,\n      \"ICP\": 0,\n      \"MANTA\": 0,\n      \"NEAR\": 0,\n      \"PAXG\": 0,\n      \"PROVE\": 0,\n      \"PURR\": 0,\n      \"SAGA\": 0,\n      \"STBL\": 0,\n      \"W\": 0,\n      \"XLM\": 0,\n      \"ZEC\": 0,\n      \"ZEN\": 0\n    },\n    \"polls\": 93,\n    \"reference_trade_ids\": {\n      \"APE\": 111,\n      \"GMT\": 104,\n      \"GRASS\": 820,\n      \"ICP\": 191,\n      \"MANTA\": 132,\n      \"NEAR\": 909,\n      \"PAXG\": 110,\n      \"PROVE\": 88,\n      \"PURR\": 557,\n      \"SAGA\": 27,\n      \"STBL\": 135,\n      \"W\": 262,\n      \"XLM\": 151,\n      \"ZEC\": 910,\n      \"ZEN\": 183\n    },\n    \"requested_interval_s\": 5.0,\n    \"successful_polls\": {\n      \"APE\": 93,\n      \"GMT\": 93,\n      \"GRASS\": 93,\n      \"ICP\": 93,\n      \"MANTA\": 93,\n      \"NEAR\": 93,\n      \"PAXG\": 93,\n      \"PROVE\": 93,\n      \"PURR\": 93,\n      \"SAGA\": 93,\n      \"STBL\": 93,\n      \"W\": 93,\n      \"XLM\": 93,\n      \"ZEC\": 93,\n      \"ZEN\": 93\n    }\n  },\n  \"instrument_metadata\": {\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 15,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 31,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"bitget\": 29337,\n      \"gate\": 282177,\n      \"hyperliquid\": 9780,\n      \"okx\": 81773\n    },\n    \"expected_symbol_count\": 149,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 149,\n    \"required\": true,\n    \"required_venues\": [\n      \"bitget\",\n      \"gate\",\n      \"hyperliquid\",\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 851175,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791406921076,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ACTUSDT\",\n      \"ADBEUSDT\",\n      \"APDUSDT\",\n      \"APEUSDT\",\n      \"API3USDT\",\n      \"BEUSDT\",\n      \"BHPUSDT\",\n      \"BILLUSDT\",\n      \"BOTUSDT\",\n      \"BOTZUSDT\",\n      \"BREVUSDT\",\n      \"CONLUSDT\",\n      \"CRCLUSDT\",\n      \"CXMTUSDT\",\n      \"DOGSUSDT\",\n      \"FRAXUSDT\",\n      \"GMTUSDT\",\n      \"GRASSUSDT\",\n      \"HUSDT\",\n      \"IBITUSDT\",\n      \"ICPUSDT\",\n      \"MANTAUSDT\",\n      \"MAVUSDT\",\n      \"MIRAUSDT\",\n      \"MRNAUSDT\",\n      \"MUFGUSDT\",\n      \"MUUSDT\",\n      \"MYXUSDT\",\n      \"NEARUSDT\",\n      \"PAXGUSDT\",\n      \"PLUMEUSDT\",\n      \"POWRUSDT\",\n      \"PROVEUSDT\",\n      \"PURRUSDT\",\n      \"RUMUSDT\",\n      \"SAHARAUSDT\",\n      \"SKLUSDT\",\n      \"SPKUSDT\",\n      \"SSPCUSDT\",\n      \"TAGUSDT\",\n      \"TEMUSDT\",\n      \"TOSHIUSDT\",\n      \"UBERUSDT\",\n      \"URNMUSDT\",\n      \"USDBRLUSDT\",\n      \"WUSDT\",\n      \"XBIUSDT\",\n      \"XLMUSDT\",\n      \"ZECUSDT\",\n      \"ZENUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ACT_USDT\",\n      \"ADBE_USDT\",\n      \"APD_USDT\",\n      \"APE_USDT\",\n      \"API3_USDT\",\n      \"BE_USDT\",\n      \"BHP_USDT\",\n      \"BILL_USDT\",\n      \"BOTZ_USDT\",\n      \"BOT_USDT\",\n      \"BREV_USDT\",\n      \"CONL_USDT\",\n      \"CRCL_USDT\",\n      \"CXMT_USDT\",\n      \"DOGS_USDT\",\n      \"FRAX_USDT\",\n      \"GMT_USDT\",\n      \"GRASS_USDT\",\n      \"H_USDT\",\n      \"IBIT_USDT\",\n      \"ICP_USDT\",\n      \"MANTA_USDT\",\n      \"MAV_USDT\",\n      \"MIRA_USDT\",\n      \"MRNA_USDT\",\n      \"MUFG_USDT\",\n      \"MU_USDT\",\n      \"MYX_USDT\",\n      \"NEAR_USDT\",\n      \"PAXG_USDT\",\n      \"PLUME_USDT\",\n      \"POWR_USDT\",\n      \"PROVE_USDT\",\n      \"PURR_USDT\",\n      \"RUM_USDT\",\n      \"SAGA_USDT\",\n      \"SAHARA_USDT\",\n      \"SATS_USDT\",\n      \"SHLD_USDT\",\n      \"SKL_USDT\",\n      \"SPK_USDT\",\n      \"SSPC_USDT\",\n      \"STBL_USDT\",\n      \"TAG_USDT\",\n      \"TEM_USDT\",\n      \"TOSHI_USDT\",\n      \"UBER_USDT\",\n      \"URNM_USDT\",\n      \"USDBRL_USDT\",\n      \"W_USDT\",\n      \"XBI_USDT\",\n      \"XLM_USDT\",\n      \"ZEC_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"APE\",\n      \"GMT\",\n      \"GRASS\",\n      \"ICP\",\n      \"MANTA\",\n      \"NEAR\",\n      \"PAXG\",\n      \"PROVE\",\n      \"PURR\",\n      \"SAGA\",\n      \"STBL\",\n      \"W\",\n      \"XLM\",\n      \"ZEC\",\n      \"ZEN\"\n    ],\n    \"okx\": [\n      \"ACT-USDT-SWAP\",\n      \"ADBE-USDT-SWAP\",\n      \"APE-USDT-SWAP\",\n      \"API3-USDT-SWAP\",\n      \"BE-USDT-SWAP\",\n      \"BILL-USDT-SWAP\",\n      \"BOT-USDT-SWAP\",\n      \"BREV-USDT-SWAP\",\n      \"CRCL-USDT-SWAP\",\n      \"CXMT-USDT-SWAP\",\n      \"GMT-USDT-SWAP\",\n      \"GRASS-USDT-SWAP\",\n      \"H-USDT-SWAP\",\n      \"ICP-USDT-SWAP\",\n      \"MRNA-USDT-SWAP\",\n      \"MU-USDT-SWAP\",\n      \"NEAR-USDT-SWAP\",\n      \"PLUME-USDT-SWAP\",\n      \"PROVE-USDT-SWAP\",\n      \"PURR-USDT-SWAP\",\n      \"SAHARA-USDT-SWAP\",\n      \"SATS-USDT-SWAP\",\n      \"SHLD-USDT-SWAP\",\n      \"SPK-USDT-SWAP\",\n      \"TEM-USDT-SWAP\",\n      \"URNM-USDT-SWAP\",\n      \"W-USDT-SWAP\",\n      \"XBI-USDT-SWAP\",\n      \"XLM-USDT-SWAP\",\n      \"ZEC-USDT-SWAP\",\n      \"ZEN-USDT-SWAP\"\n    ]\n  }\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-campaign-market-14-2026100104-v7-u1",
+        "returncode": 0,
+        "safe_count": 415,
+        "safe_workspace": null,
+        "shard_count": 508,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "07818228-e67c48ba6bd8.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ZEC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-zen-usdt-swap-1791406923848-1791407801224-ff619aed56e1\",\n      \"event_count\": 119,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-zen-usdt-swap-1791406923848-1791407801224-ff619aed56e1.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ZEN-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"last_error\": \"\",\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0\n  },\n  \"bundle_index\": {\n    \"partial_count\": 508,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 508\n  },\n  \"coins\": [\n    \"ACT\",\n    \"ADBE\",\n    \"APD\",\n    \"APE\",\n    \"API3\",\n    \"BE\",\n    \"BHP\",\n    \"BILL\",\n    \"BOT\",\n    \"BOTZ\",\n    \"BREV\",\n    \"CONL\",\n    \"CRCL\",\n    \"CXMT\",\n    \"DOGS\",\n    \"FRAX\",\n    \"GMT\",\n    \"GRASS\",\n    \"H\",\n    \"IBIT\",\n    \"ICP\",\n    \"MANTA\",\n    \"MAV\",\n    \"MIRA\",\n    \"MRNA\",\n    \"MU\",\n    \"MUFG\",\n    \"MYX\",\n    \"NEAR\",\n    \"PAXG\",\n    \"PLUME\",\n    \"POWR\",\n    \"PROVE\",\n    \"PURR\",\n    \"RUM\",\n    \"SAGA\",\n    \"SAHARA\",\n    \"SATS\",\n    \"SHLD\",\n    \"SKL\",\n    \"SPK\",\n    \"SSPC\",\n    \"STBL\",\n    \"TAG\",\n    \"TEM\",\n    \"TOSHI\",\n    \"UBER\",\n    \"URNM\",\n    \"USDBRL\",\n    \"W\",\n    \"XBI\",\n    \"XLM\",\n    \"ZEC\",\n    \"ZEN\"\n  ],\n  \"collection_run_id\": \"market-14-2026100104-v7-1\",\n  \"collector_version\": \"453ac83c731f921c3a56ff78952ba63ecf56a2ff\",\n  \"disk_free_bytes_at_stop\": 88487886848,\n  \"duration_s\": 3595.464,\n  \"ended_at_ms\": 1791410516540,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 15,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"accepted_samples\": 58,\n    \"attempts\": 329,\n    \"clock_offset_ms\": -530.0,\n    \"clock_probe_receive_wall_ts_ms\": 1791410396804,\n    \"clock_probe_rtt_ms\": 0.0,\n    \"clock_probe_server_ts_ms\": 1791410396274,\n    \"clock_source\": \"webData3.userState.serverTime\",\n    \"failures\": 271,\n    \"last_error\": \"\",\n    \"status\": \"OK\"\n  },\n  \"hyperliquid_trade_reference\": {\n    \"base_weight_budget_per_min\": 480.0,\n    \"effective_interval_s\": 38.0,\n    \"estimated_base_weight_per_min\": 473.684,\n    \"poll_errors\": {\n      \"APE\": 0,\n      \"GMT\": 0,\n      \"GRASS\": 0,\n      \"ICP\": 0,\n      \"MANTA\": 0,\n      \"NEAR\": 0,\n      \"PAXG\": 0,\n      \"PROVE\": 0,\n      \"PURR\": 0,\n      \"SAGA\": 0,\n      \"STBL\": 0,\n      \"W\": 0,\n      \"XLM\": 0,\n      \"ZEC\": 0,\n      \"ZEN\": 0\n    },\n    \"polls\": 93,\n    \"reference_trade_ids\": {\n      \"APE\": 111,\n      \"GMT\": 104,\n      \"GRASS\": 820,\n      \"ICP\": 191,\n      \"MANTA\": 132,\n      \"NEAR\": 909,\n      \"PAXG\": 110,\n      \"PROVE\": 88,\n      \"PURR\": 557,\n      \"SAGA\": 27,\n      \"STBL\": 135,\n      \"W\": 262,\n      \"XLM\": 151,\n      \"ZEC\": 910,\n      \"ZEN\": 183\n    },\n    \"requested_interval_s\": 5.0,\n    \"successful_polls\": {\n      \"APE\": 93,\n      \"GMT\": 93,\n      \"GRASS\": 93,\n      \"ICP\": 93,\n      \"MANTA\": 93,\n      \"NEAR\": 93,\n      \"PAXG\": 93,\n      \"PROVE\": 93,\n      \"PURR\": 93,\n      \"SAGA\": 93,\n      \"STBL\": 93,\n      \"W\": 93,\n      \"XLM\": 93,\n      \"ZEC\": 93,\n      \"ZEN\": 93\n    }\n  },\n  \"instrument_metadata\": {\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 15,\n      \"status\": \"OK\"\n    },\n    \"okx\": {\n      \"records\": 31,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"bitget\": 29337,\n      \"gate\": 282177,\n      \"hyperliquid\": 9780,\n      \"okx\": 81773\n    },\n    \"expected_symbol_count\": 149,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 149,\n    \"required\": true,\n    \"required_venues\": [\n      \"bitget\",\n      \"gate\",\n      \"hyperliquid\",\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 851175,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791406921076,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ACTUSDT\",\n      \"ADBEUSDT\",\n      \"APDUSDT\",\n      \"APEUSDT\",\n      \"API3USDT\",\n      \"BEUSDT\",\n      \"BHPUSDT\",\n      \"BILLUSDT\",\n      \"BOTUSDT\",\n      \"BOTZUSDT\",\n      \"BREVUSDT\",\n      \"CONLUSDT\",\n      \"CRCLUSDT\",\n      \"CXMTUSDT\",\n      \"DOGSUSDT\",\n      \"FRAXUSDT\",\n      \"GMTUSDT\",\n      \"GRASSUSDT\",\n      \"HUSDT\",\n      \"IBITUSDT\",\n      \"ICPUSDT\",\n      \"MANTAUSDT\",\n      \"MAVUSDT\",\n      \"MIRAUSDT\",\n      \"MRNAUSDT\",\n      \"MUFGUSDT\",\n      \"MUUSDT\",\n      \"MYXUSDT\",\n      \"NEARUSDT\",\n      \"PAXGUSDT\",\n      \"PLUMEUSDT\",\n      \"POWRUSDT\",\n      \"PROVEUSDT\",\n      \"PURRUSDT\",\n      \"RUMUSDT\",\n      \"SAHARAUSDT\",\n      \"SKLUSDT\",\n      \"SPKUSDT\",\n      \"SSPCUSDT\",\n      \"TAGUSDT\",\n      \"TEMUSDT\",\n      \"TOSHIUSDT\",\n      \"UBERUSDT\",\n      \"URNMUSDT\",\n      \"USDBRLUSDT\",\n      \"WUSDT\",\n      \"XBIUSDT\",\n      \"XLMUSDT\",\n      \"ZECUSDT\",\n      \"ZENUSDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ACT_USDT\",\n      \"ADBE_USDT\",\n      \"APD_USDT\",\n      \"APE_USDT\",\n      \"API3_USDT\",\n      \"BE_USDT\",\n      \"BHP_USDT\",\n      \"BILL_USDT\",\n      \"BOTZ_USDT\",\n      \"BOT_USDT\",\n      \"BREV_USDT\",\n      \"CONL_USDT\",\n      \"CRCL_USDT\",\n      \"CXMT_USDT\",\n      \"DOGS_USDT\",\n      \"FRAX_USDT\",\n      \"GMT_USDT\",\n      \"GRASS_USDT\",\n      \"H_USDT\",\n      \"IBIT_USDT\",\n      \"ICP_USDT\",\n      \"MANTA_USDT\",\n      \"MAV_USDT\",\n      \"MIRA_USDT\",\n      \"MRNA_USDT\",\n      \"MUFG_USDT\",\n      \"MU_USDT\",\n      \"MYX_USDT\",\n      \"NEAR_USDT\",\n      \"PAXG_USDT\",\n      \"PLUME_USDT\",\n      \"POWR_USDT\",\n      \"PROVE_USDT\",\n      \"PURR_USDT\",\n      \"RUM_USDT\",\n      \"SAGA_USDT\",\n      \"SAHARA_USDT\",\n      \"SATS_USDT\",\n      \"SHLD_USDT\",\n      \"SKL_USDT\",\n      \"SPK_USDT\",\n      \"SSPC_USDT\",\n      \"STBL_USDT\",\n      \"TAG_USDT\",\n      \"TEM_USDT\",\n      \"TOSHI_USDT\",\n      \"UBER_USDT\",\n      \"URNM_USDT\",\n      \"USDBRL_USDT\",\n      \"W_USDT\",\n      \"XBI_USDT\",\n      \"XLM_USDT\",\n      \"ZEC_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"APE\",\n      \"GMT\",\n      \"GRASS\",\n      \"ICP\",\n      \"MANTA\",\n      \"NEAR\",\n      \"PAXG\",\n      \"PROVE\",\n      \"PURR\",\n      \"SAGA\",\n      \"STBL\",\n      \"W\",\n      \"XLM\",\n      \"ZEC\",\n      \"ZEN\"\n    ],\n    \"okx\": [\n      \"ACT-USDT-SWAP\",\n      \"ADBE-USDT-SWAP\",\n      \"APE-USDT-SWAP\",\n      \"API3-USDT-SWAP\",\n      \"BE-USDT-SWAP\",\n      \"BILL-USDT-SWAP\",\n      \"BOT-USDT-SWAP\",\n      \"BREV-USDT-SWAP\",\n      \"CRCL-USDT-SWAP\",\n      \"CXMT-USDT-SWAP\",\n      \"GMT-USDT-SWAP\",\n      \"GRASS-USDT-SWAP\",\n      \"H-USDT-SWAP\",\n      \"ICP-USDT-SWAP\",\n      \"MRNA-USDT-SWAP\",\n      \"MU-USDT-SWAP\",\n      \"NEAR-USDT-SWAP\",\n      \"PLUME-USDT-SWAP\",\n      \"PROVE-USDT-SWAP\",\n      \"PURR-USDT-SWAP\",\n      \"SAHARA-USDT-SWAP\",\n      \"SATS-USDT-SWAP\",\n      \"SHLD-USDT-SWAP\",\n      \"SPK-USDT-SWAP\",\n      \"TEM-USDT-SWAP\",\n      \"URNM-USDT-SWAP\",\n      \"W-USDT-SWAP\",\n      \"XBI-USDT-SWAP\",\n      \"XLM-USDT-SWAP\",\n      \"ZEC-USDT-SWAP\",\n      \"ZEN-USDT-SWAP\"\n    ]\n  }\n}\n",
+        "universe_discovery_required": true
+      },
+      "sha256": "0b2a4d1ba50d0de168d9b6bb06f78492244b46a3029bde0558b5a9c95265702f"
     }
   },
   "config_sha256": "ab990e49259a1158ab7d1507297307aff7d72fbe3de02bc80864746116c087aa",
@@ -25,12 +80,12 @@
   "created_at": "2026-10-01T04:38:04.535532+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
-    "checkpoint_id": "cbc670c08c3df3fc6e2c50de598dc10256b8dc9f500e36db1c3f56e284b2c46c",
+    "checkpoint_id": "0b2a4d1ba50d0de168d9b6bb06f78492244b46a3029bde0558b5a9c95265702f",
     "duration_s": 3500,
     "generation": 1,
     "handoff_generation": null,
     "handoff_phase_epoch": 4,
-    "last_run_id": "37495214637",
+    "last_run_id": "37686089915",
     "market_shard_count": 16,
     "market_shard_index": 14,
     "max_coins": 0,
@@ -91,15 +146,16 @@
       "from": "STUCK",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-07T22:02:50.821338Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-07T21:01:43.831853Z",
-    "expires_at": "2026-10-08T02:46:43.831853Z",
-    "lease_token_sha256": "3bde6db5c75010678bffe51971406de78124d5cf153b166bfee27a08021de98a",
-    "owner_run_id": "37686089915"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -117,9 +173,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-07T21:01:43.831924Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "0b2a4d1ba50d0de168d9b6bb06f78492244b46a3029bde0558b5a9c95265702f",
+  "updated_at": "2026-10-07T22:02:50.821338Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
