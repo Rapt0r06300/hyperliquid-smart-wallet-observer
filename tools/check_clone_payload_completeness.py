@@ -42,15 +42,67 @@ def parse_lfs_pointer(raw: bytes) -> tuple[str, int]:
     return match.group(1).decode("ascii"), int(match.group(2))
 
 
-def git_pointer_for_path(root: Path, path: str) -> tuple[str, int]:
+def git_pointers_for_paths(
+    root: Path,
+    paths: list[str],
+) -> dict[str, tuple[str, int]]:
+    """Read all current-tree LFS pointer blobs in one git process."""
+    if not paths:
+        return {}
+    if any("\n" in path or "\r" in path for path in paths):
+        raise CompletenessError("clone payload path contains a newline")
+
+    request = "".join(f"HEAD:{path}\n" for path in paths).encode("utf-8")
     result = subprocess.run(
-        ["git", "-C", str(root), "show", f"HEAD:{path}"],
+        ["git", "-C", str(root), "cat-file", "--batch"],
+        input=request,
         capture_output=True,
         check=False,
     )
     if result.returncode != 0:
-        raise CompletenessError(f"clone payload path is not tracked at HEAD: {path}")
-    return parse_lfs_pointer(result.stdout)
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise CompletenessError(f"git cat-file --batch failed: {detail}")
+
+    raw = memoryview(result.stdout)
+    offset = 0
+    pointers: dict[str, tuple[str, int]] = {}
+    for path in paths:
+        newline = result.stdout.find(b"\n", offset)
+        if newline < 0:
+            raise CompletenessError("truncated git cat-file batch header")
+        header = bytes(raw[offset:newline]).decode("utf-8", errors="replace")
+        offset = newline + 1
+        parts = header.split()
+        if len(parts) >= 2 and parts[-1] == "missing":
+            raise CompletenessError(f"clone payload path is not tracked at HEAD: {path}")
+        if len(parts) != 3 or parts[1] != "blob":
+            raise CompletenessError(
+                f"unexpected git cat-file header for {path}: {header}"
+            )
+        try:
+            size = int(parts[2])
+        except ValueError as exc:
+            raise CompletenessError(
+                f"invalid git blob size for {path}: {header}"
+            ) from exc
+        if size < 0 or offset + size > len(raw):
+            raise CompletenessError(f"truncated git blob for {path}")
+        blob = bytes(raw[offset : offset + size])
+        offset += size
+        if offset >= len(raw) or raw[offset] != 10:
+            raise CompletenessError(f"missing git batch blob terminator for {path}")
+        offset += 1
+        pointers[path] = parse_lfs_pointer(blob)
+
+    if offset != len(raw):
+        trailing = bytes(raw[offset:]).strip()
+        if trailing:
+            raise CompletenessError("unexpected trailing data from git cat-file batch")
+    return pointers
+
+
+def git_pointer_for_path(root: Path, path: str) -> tuple[str, int]:
+    return git_pointers_for_paths(root, [path])[path]
 
 
 def source_inventory(
@@ -114,8 +166,23 @@ def audit(
     missing_ids = sorted(source_ids - cloned_ids)
     extra_ids = sorted(cloned_ids - source_ids)
     mismatches: list[dict[str, Any]] = []
+    common_ids = sorted(source_ids & cloned_ids)
+    pointer_map: dict[str, tuple[str, int]] = {}
+    if verify_git_pointers:
+        pointer_paths = [str(cloned[asset_id].get("clone_path") or "") for asset_id in common_ids]
+        try:
+            pointer_map = git_pointers_for_paths(root, pointer_paths)
+        except CompletenessError as exc:
+            mismatches.append(
+                {
+                    "asset_id": None,
+                    "kind": "git_pointer_batch",
+                    "error": str(exc),
+                }
+            )
+            pointer_map = {}
 
-    for asset_id in sorted(source_ids & cloned_ids):
+    for asset_id in common_ids:
         expected = source[asset_id]
         row = cloned[asset_id]
         expected_bytes = int(expected["bytes"])
@@ -147,17 +214,17 @@ def audit(
                 )
                 continue
         if verify_git_pointers:
-            try:
-                pointer_sha, pointer_size = git_pointer_for_path(root, path)
-            except CompletenessError as exc:
+            pointer = pointer_map.get(path)
+            if pointer is None:
                 mismatches.append(
                     {
                         "asset_id": asset_id,
                         "kind": "git_pointer",
-                        "error": str(exc),
+                        "error": f"pointer not available for {path}",
                     }
                 )
                 continue
+            pointer_sha, pointer_size = pointer
             if pointer_sha != sha or pointer_size != actual_bytes:
                 mismatches.append(
                     {
