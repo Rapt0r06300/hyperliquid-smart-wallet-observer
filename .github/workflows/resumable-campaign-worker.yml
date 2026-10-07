@@ -69,6 +69,7 @@ jobs:
       REQUESTED_HANDOFF_AT_UTC: "${{ inputs.requested_handoff_at_utc || '' }}"
       REAL_MAINNET_TRADING: "false"
       ENABLE_REAL_ORDERS: "0"
+      ALINA_RECOVERY_CAPSULE: "1"
     steps:
       - name: Checkout Alina repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
