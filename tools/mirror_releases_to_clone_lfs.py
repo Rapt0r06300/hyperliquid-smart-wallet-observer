@@ -26,7 +26,7 @@ DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 MANIFEST_PATH = Path("clone_payload/MANIFEST.json")
 PAYLOAD_ROOT = Path("clone_payload/releases")
 USER_AGENT = "alina-clone-lfs-mirror/1"
-DEFAULT_MAX_ASSETS = 25
+DEFAULT_MAX_ASSETS = 500
 DEFAULT_MAX_BYTES = 700 * 1024 * 1024
 FORBIDDEN = re.compile(
     r"(^|[._-])(env|secret|token|credential|private|mnemonic|seed|api[_-]?key)([._-]|$)",
