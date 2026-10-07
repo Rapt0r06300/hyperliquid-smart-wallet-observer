@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: clone-payload-lfs-mirror
@@ -191,3 +192,29 @@ jobs:
               verified+=1
           print(f"verified_remote_lfs_objects={verified}")
           PY
+
+
+      - name: Audit backlog after verified LFS batch
+        if: env.LFS_BATCH_PUSHED == '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/check_clone_payload_completeness.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --root . \
+            --output "$RUNNER_TEMP/clone-after-batch.json"
+          COMPLETE="$(python -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["complete"]).lower())' "$RUNNER_TEMP/clone-after-batch.json")"
+          echo "CLONE_PAYLOAD_COMPLETE=$COMPLETE" >> "$GITHUB_ENV"
+          cat "$RUNNER_TEMP/clone-after-batch.json"
+
+      - name: Queue next bounded LFS batch until parity
+        if: env.LFS_BATCH_PUSHED == '1' && env.CLONE_PAYLOAD_COMPLETE != 'true' && vars.ALINA_LFS_MIRROR_ENABLED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run clone-payload-lfs-mirror.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f confirm_lfs_costs=true \
+            -f max_assets=500 \
+            -f max_bytes=734003200
