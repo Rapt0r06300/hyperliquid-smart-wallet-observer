@@ -61,20 +61,43 @@ def _headers(token: str | None, *, accept: str = "application/vnd.github+json") 
     return headers
 
 
+def _without_authorization(request: urllib.request.Request) -> urllib.request.Request:
+    headers = {
+        key: value
+        for key, value in request.header_items()
+        if key.lower() != "authorization"
+    }
+    return urllib.request.Request(request.full_url, headers=headers)
+
+
 def _open_with_retry(
     request: urllib.request.Request,
     *,
     retries: int = 8,
 ):
+    active_request = request
+    anonymous_fallback_used = False
     for attempt in range(1, retries + 1):
         try:
-            return urllib.request.urlopen(request, timeout=120)
+            return urllib.request.urlopen(active_request, timeout=120)
         except urllib.error.HTTPError as exc:
+            # This repository is public. GitHub Actions installation tokens can
+            # exhaust a shared API budget while anonymous public reads still
+            # have an independent allowance. Use that allowance before sleeping.
+            has_auth = any(
+                key.lower() == "authorization"
+                for key, _value in active_request.header_items()
+            )
+            if exc.code == 403 and has_auth and not anonymous_fallback_used:
+                active_request = _without_authorization(active_request)
+                anonymous_fallback_used = True
+                continue
+
             transient = exc.code in {403, 429, 500, 502, 503, 504}
             if not transient or attempt >= retries:
                 detail = exc.read().decode("utf-8", errors="replace")[:800]
                 raise MirrorError(
-                    f"HTTP {exc.code} for {request.full_url}: {detail}"
+                    f"HTTP {exc.code} for {active_request.full_url}: {detail}"
                 ) from exc
             reset = exc.headers.get("X-RateLimit-Reset")
             delay = min(120.0, float(2 ** min(attempt, 6)))
@@ -84,10 +107,10 @@ def _open_with_retry(
         except (urllib.error.URLError, TimeoutError) as exc:
             if attempt >= retries:
                 raise MirrorError(
-                    f"network failure for {request.full_url}: {exc}"
+                    f"network failure for {active_request.full_url}: {exc}"
                 ) from exc
             time.sleep(min(60.0, float(2 ** attempt)))
-    raise MirrorError(f"unreachable retry state for {request.full_url}")
+    raise MirrorError(f"unreachable retry state for {active_request.full_url}")
 
 
 def _api_page(
