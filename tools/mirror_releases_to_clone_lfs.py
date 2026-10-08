@@ -575,6 +575,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 4
+    # The workflow attestation is deliberately separate from the CLI flag.
+    # It must only be enabled after confirming a zero-dollar GitHub LFS budget.
+    # A positive LFS budget could charge money during upload or a fresh clone.
+    if os.getenv("ALINA_LFS_ZERO_COST_BUDGET_VERIFIED") != "true":
+        print(
+            "ALINA_CLONE_LFS_MIRROR_BLOCKED: zero-dollar LFS budget not verified",
+            file=sys.stderr,
+        )
+        return 4
     if args.max_assets < 1 or args.max_bytes < 1:
         print("ALINA_CLONE_LFS_MIRROR_FAIL: invalid batch bounds", file=sys.stderr)
         return 2

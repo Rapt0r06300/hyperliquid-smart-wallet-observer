@@ -319,3 +319,19 @@ def test_manifest_totals_conflict_is_fail_closed(monkeypatch, tmp_path):
     report = module.audit("owner/repo", root=tmp_path, token=None, verify_git_pointers=True)
     assert report["complete"] is False
     assert any(m["kind"] == "manifest_totals" for m in report["mismatches_sample"])
+
+
+
+def test_source_inventory_refuses_asset_without_provenance_sha(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module.mirror, "iter_releases_oldest_first", lambda *_a, **_k: [
+        {"id": 44, "tag_name": "sample", "assets": [
+            {"id": 88, "name": "data.bin", "size": 12, "digest": None},
+        ]},
+    ])
+    try:
+        module.source_inventory("owner/repo", token=None)
+    except module.CompletenessError as exc:
+        assert "SHA-256" in str(exc)
+    else:
+        raise AssertionError("clone parity cannot be proven without source SHA-256")

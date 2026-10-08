@@ -350,3 +350,13 @@ def test_full_release_rejects_missing_or_short_asset_page(monkeypatch):
         assert "incomplete" in str(exc) or "short" in str(exc)
     else:
         raise AssertionError("missing assets cannot result in success")
+
+
+
+def test_mirror_cli_refuses_billing_without_verified_zero_cost_budget(monkeypatch):
+    module = _module()
+    monkeypatch.delenv("ALINA_LFS_ZERO_COST_BUDGET_VERIFIED", raising=False)
+    assert module.main(["--confirm-lfs-costs"]) == 4
+    # No source Release downloads or Git writes can be reached.
+    monkeypatch.setenv("ALINA_LFS_ZERO_COST_BUDGET_VERIFIED", "false")
+    assert module.main(["--confirm-lfs-costs"]) == 4

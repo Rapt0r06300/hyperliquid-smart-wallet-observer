@@ -81,6 +81,8 @@ automatic mirroring becomes active only when the repository variable
 the mirror after durable collection/analysis publication only under that flag.
 
 The mirror never deletes Releases and never introduces execution/trading.
+Both the workflow and the CLI reject all LFS migration while
+`ALINA_LFS_ZERO_COST_BUDGET_VERIFIED` is absent or not exactly `true`.
 The mirror workflow is disabled unless the repository variable
 `ALINA_LFS_ZERO_COST_BUDGET_VERIFIED=true` is explicitly set *after*
 independently confirming an account-wide zero-dollar LFS budget and sufficient

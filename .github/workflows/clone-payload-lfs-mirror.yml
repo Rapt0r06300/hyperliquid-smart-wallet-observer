@@ -37,6 +37,7 @@ jobs:
     env:
       GH_TOKEN: "${{ github.token }}"
       GIT_LFS_SKIP_SMUDGE: "1"
+      ALINA_LFS_ZERO_COST_BUDGET_VERIFIED: "${{ vars.ALINA_LFS_ZERO_COST_BUDGET_VERIFIED }}"
       REAL_MAINNET_TRADING: "false"
       ENABLE_REAL_ORDERS: "0"
     steps:

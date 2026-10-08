@@ -142,12 +142,12 @@ def source_inventory(
                     f"GitHub Release asset has invalid size: {asset_id}"
                 )
             digest = str(asset.get("digest") or "")
-            if digest and (
+            if (
                 not digest.lower().startswith("sha256:")
                 or not re.fullmatch(r"[0-9a-fA-F]{64}", digest.split(":", 1)[1])
             ):
                 raise CompletenessError(
-                    f"GitHub Release asset has invalid digest: {asset_id}"
+                    f"GitHub Release asset has missing or invalid SHA-256 digest: {asset_id}"
                 )
             inventory[asset_id] = {
                 "release_id": int(release.get("id") or 0),
