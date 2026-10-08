@@ -1,15 +1,15 @@
 {
   "asset_verified": true,
-  "bytes": 630,
+  "bytes": 1042,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "hyperliquid-public-rest-instrument-metadata-apt-1790059726025-1790059726025-ae9370b69f0f",
+  "dataset_id": "okx-public-rest-instrument-metadata-aave-usdt-swap-1790059721815-1790059721815-7f2e5c7003e3",
   "duplicate_count": 0,
-  "end_ts_ms": 1790059726025,
+  "end_ts_ms": 1790059721815,
   "event_count": 1,
   "family": "instrument_metadata",
   "gap_count": 0,
@@ -22,7 +22,7 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
-  "invalid_record_count": 1,
+  "invalid_record_count": 0,
   "observed_channels": [
     "instrument_metadata"
   ],
@@ -33,45 +33,43 @@
     "public_data_only": true,
     "real_execution": false,
     "timestamp_semantics": [
-      "receive_observation_time_only"
+      "server_observation_time"
     ],
     "transports": [
       "https"
     ]
   },
-  "quality_reasons": [
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SNAPSHOT_VERIFIED"
   },
   "record_count": 1,
   "release": {
-    "asset_id": 607745322,
-    "asset_name": "hyperliquid-public-rest-instrument-metadata-apt-1790059726025-1790059726025-ae9370b69f0f.jsonl.gz",
-    "release_id": 402494337,
-    "remote_digest": "sha256:ae9370b69f0fcd568ff73947ce7098bdd33eb9bb75db7df56f23471700344368",
-    "remote_size": 630,
+    "asset_id": 607743739,
+    "asset_name": "okx-public-rest-instrument-metadata-aave-usdt-swap-1790059721815-1790059721815-7f2e5c7003e3.jsonl.gz",
+    "release_id": 402493541,
+    "remote_digest": "sha256:7f2e5c7003e389d32bb002e7af0f478c2439e83dcc597051f394f934deab4523",
+    "remote_size": 1042,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-    "tag": "data-v2-35696301919-s5"
+    "tag": "data-v2-35696301919-s6"
   },
-  "release_asset": "hyperliquid-public-rest-instrument-metadata-apt-1790059726025-1790059726025-ae9370b69f0f.jsonl.gz",
-  "release_asset_id": 607745322,
-  "release_id": 402494337,
-  "release_remote_digest": "sha256:ae9370b69f0fcd568ff73947ce7098bdd33eb9bb75db7df56f23471700344368",
-  "release_remote_size": 630,
+  "release_asset": "okx-public-rest-instrument-metadata-aave-usdt-swap-1790059721815-1790059721815-7f2e5c7003e3.jsonl.gz",
+  "release_asset_id": 607743739,
+  "release_id": 402493541,
+  "release_remote_digest": "sha256:7f2e5c7003e389d32bb002e7af0f478c2439e83dcc597051f394f934deab4523",
+  "release_remote_size": 1042,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "release_tag": "data-v2-35696301919-s5",
-  "replay_compatible": false,
-  "replay_reason": "INVALID_RECORD",
+  "release_tag": "data-v2-35696301919-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
   "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "ae9370b69f0fcd568ff73947ce7098bdd33eb9bb75db7df56f23471700344368",
-  "source": "hyperliquid_public_rest",
-  "start_ts_ms": 1790059726025,
-  "symbol": "APT",
+  "sha256": "7f2e5c7003e389d32bb002e7af0f478c2439e83dcc597051f394f934deab4523",
+  "source": "okx_public_rest",
+  "start_ts_ms": 1790059721815,
+  "symbol": "AAVE-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 0,
@@ -82,15 +80,15 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": null,
-    "last_exchange_ts_ms": null,
+    "first_exchange_ts_ms": 1790059721748,
+    "last_exchange_ts_ms": 1790059721748,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
-      "count": 0,
-      "max": null,
-      "min": null,
-      "p50": null,
-      "p95": null
+      "count": 1,
+      "max": 67.0,
+      "min": 67.0,
+      "p50": 67.0,
+      "p95": 67.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
@@ -103,7 +101,7 @@
   },
   "trade_count": 0,
   "trade_count_exact": true,
-  "validation_allowed": false,
-  "venue": "hyperliquid",
+  "validation_allowed": true,
+  "venue": "okx",
   "verifier_version": "alina.replay.compatibility.v6"
 }

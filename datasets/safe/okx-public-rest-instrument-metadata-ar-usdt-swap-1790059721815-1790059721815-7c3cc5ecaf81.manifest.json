@@ -7,10 +7,12 @@
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-rest-instrument-metadata-aero-usdt-swap-1790059681283-1790059681283-293029846191",
-  "end_ts_ms": 1790059681283,
+  "dataset_id": "okx-public-rest-instrument-metadata-ar-usdt-swap-1790059721815-1790059721815-7c3cc5ecaf81",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790059721815,
   "event_count": 1,
   "family": "instrument_metadata",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "instrument_metadata"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -35,36 +39,37 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SNAPSHOT_VERIFIED"
   },
+  "record_count": 1,
   "release": {
-    "asset_id": 607740701,
-    "asset_name": "okx-public-rest-instrument-metadata-aero-usdt-swap-1790059681283-1790059681283-293029846191.jsonl.gz",
-    "release_id": 402492729,
-    "remote_digest": "sha256:2930298461919f4b08d23b57b5731b3af31681d0b31cdc7bceb8237b91d9b795",
+    "asset_id": 607743765,
+    "asset_name": "okx-public-rest-instrument-metadata-ar-usdt-swap-1790059721815-1790059721815-7c3cc5ecaf81.jsonl.gz",
+    "release_id": 402493541,
+    "remote_digest": "sha256:7c3cc5ecaf81504348b4bc6bb4d2ec0ba41de0820bc1385ccb931fd7dcec7acc",
     "remote_size": 1037,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-    "tag": "data-v2-35696301919-s0"
+    "tag": "data-v2-35696301919-s6"
   },
-  "release_asset": "okx-public-rest-instrument-metadata-aero-usdt-swap-1790059681283-1790059681283-293029846191.jsonl.gz",
-  "release_asset_id": 607740701,
-  "release_id": 402492729,
-  "release_remote_digest": "sha256:2930298461919f4b08d23b57b5731b3af31681d0b31cdc7bceb8237b91d9b795",
+  "release_asset": "okx-public-rest-instrument-metadata-ar-usdt-swap-1790059721815-1790059721815-7c3cc5ecaf81.jsonl.gz",
+  "release_asset_id": 607743765,
+  "release_id": 402493541,
+  "release_remote_digest": "sha256:7c3cc5ecaf81504348b4bc6bb4d2ec0ba41de0820bc1385ccb931fd7dcec7acc",
   "release_remote_size": 1037,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "release_tag": "data-v2-35696301919-s0",
+  "release_tag": "data-v2-35696301919-s6",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "2930298461919f4b08d23b57b5731b3af31681d0b31cdc7bceb8237b91d9b795",
+  "sha256": "7c3cc5ecaf81504348b4bc6bb4d2ec0ba41de0820bc1385ccb931fd7dcec7acc",
   "source": "okx_public_rest",
-  "start_ts_ms": 1790059681283,
-  "symbol": "AERO-USDT-SWAP",
+  "start_ts_ms": 1790059721815,
+  "symbol": "AR-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 0,
@@ -75,15 +80,15 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1790059681206,
-    "last_exchange_ts_ms": 1790059681206,
+    "first_exchange_ts_ms": 1790059721748,
+    "last_exchange_ts_ms": 1790059721748,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 1,
-      "max": 77.0,
-      "min": 77.0,
-      "p50": 77.0,
-      "p95": 77.0
+      "max": 67.0,
+      "min": 67.0,
+      "p50": 67.0,
+      "p95": 67.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
@@ -94,6 +99,9 @@
       "p95": null
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v6"
 }

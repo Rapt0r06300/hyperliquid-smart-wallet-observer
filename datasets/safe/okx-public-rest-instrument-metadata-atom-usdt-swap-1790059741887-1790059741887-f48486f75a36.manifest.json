@@ -8,9 +8,11 @@
     "ready": false
   },
   "dataset_id": "okx-public-rest-instrument-metadata-atom-usdt-swap-1790059741887-1790059741887-f48486f75a36",
+  "duplicate_count": 0,
   "end_ts_ms": 1790059741887,
   "event_count": 1,
   "family": "instrument_metadata",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "instrument_metadata"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -35,14 +39,12 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SNAPSHOT_VERIFIED"
   },
+  "record_count": 1,
   "release": {
     "asset_id": 607752380,
     "asset_name": "okx-public-rest-instrument-metadata-atom-usdt-swap-1790059741887-1790059741887-f48486f75a36.jsonl.gz",
@@ -59,6 +61,9 @@
   "release_remote_size": 1050,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "f48486f75a36cb9bac67c20dc79d34c5d264eb907a22d34e6d475c93866b0752",
@@ -94,6 +99,9 @@
       "p95": null
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v6"
 }

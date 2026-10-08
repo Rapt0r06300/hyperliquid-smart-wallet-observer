@@ -7,10 +7,12 @@
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-rest-instrument-metadata-btc-usdt-swap-1790059681283-1790059681283-578f4417dce3",
-  "end_ts_ms": 1790059681283,
+  "dataset_id": "okx-public-rest-instrument-metadata-bigtime-usdt-swap-1790059741887-1790059741887-82443620a49d",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790059741887,
   "event_count": 1,
   "family": "instrument_metadata",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "instrument_metadata"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -35,36 +39,37 @@
       "https"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SNAPSHOT_VERIFIED"
   },
+  "record_count": 1,
   "release": {
-    "asset_id": 607740793,
-    "asset_name": "okx-public-rest-instrument-metadata-btc-usdt-swap-1790059681283-1790059681283-578f4417dce3.jsonl.gz",
-    "release_id": 402492729,
-    "remote_digest": "sha256:578f4417dce38be9ab75d98e39b9cced0108a6768da32a36374da718f6727799",
+    "asset_id": 607752410,
+    "asset_name": "okx-public-rest-instrument-metadata-bigtime-usdt-swap-1790059741887-1790059741887-82443620a49d.jsonl.gz",
+    "release_id": 402495715,
+    "remote_digest": "sha256:82443620a49dbb63478b2993aeb29a373398c5a95274ffd4b4cbe2383b78b53a",
     "remote_size": 1045,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-    "tag": "data-v2-35696301919-s0"
+    "tag": "data-v2-35696301919-s1"
   },
-  "release_asset": "okx-public-rest-instrument-metadata-btc-usdt-swap-1790059681283-1790059681283-578f4417dce3.jsonl.gz",
-  "release_asset_id": 607740793,
-  "release_id": 402492729,
-  "release_remote_digest": "sha256:578f4417dce38be9ab75d98e39b9cced0108a6768da32a36374da718f6727799",
+  "release_asset": "okx-public-rest-instrument-metadata-bigtime-usdt-swap-1790059741887-1790059741887-82443620a49d.jsonl.gz",
+  "release_asset_id": 607752410,
+  "release_id": 402495715,
+  "release_remote_digest": "sha256:82443620a49dbb63478b2993aeb29a373398c5a95274ffd4b4cbe2383b78b53a",
   "release_remote_size": 1045,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "release_tag": "data-v2-35696301919-s0",
+  "release_tag": "data-v2-35696301919-s1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "578f4417dce38be9ab75d98e39b9cced0108a6768da32a36374da718f6727799",
+  "sha256": "82443620a49dbb63478b2993aeb29a373398c5a95274ffd4b4cbe2383b78b53a",
   "source": "okx_public_rest",
-  "start_ts_ms": 1790059681283,
-  "symbol": "BTC-USDT-SWAP",
+  "start_ts_ms": 1790059741887,
+  "symbol": "BIGTIME-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 0,
@@ -75,15 +80,15 @@
     },
     "connection_count": 0,
     "connection_ids": [],
-    "first_exchange_ts_ms": 1790059681206,
-    "last_exchange_ts_ms": 1790059681206,
+    "first_exchange_ts_ms": 1790059741798,
+    "last_exchange_ts_ms": 1790059741798,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 1,
-      "max": 77.0,
-      "min": 77.0,
-      "p50": 77.0,
-      "p95": 77.0
+      "max": 89.0,
+      "min": 89.0,
+      "p50": 89.0,
+      "p95": 89.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
@@ -94,6 +99,9 @@
       "p95": null
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v6"
 }
