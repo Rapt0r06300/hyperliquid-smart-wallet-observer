@@ -1,0 +1,115 @@
+{
+  "asset_verified": true,
+  "bytes": 648469,
+  "collection_queue_drops": 208,
+  "collection_run_id": "market-e8-6-2026100814-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-ethfi-1791474423349-1791477918090-57e9bee434a5",
+  "end_ts_ms": 1791477918090,
+  "event_count": 2059,
+  "family": "cross_venue_capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 208,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "cross_venue_capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=208",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 2059,
+  "release": {
+    "asset_id": 622428048,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "cross-venue-derived-capacity-cross-venue-capacity-tape-ethfi-1791474423349-1791477918090-57e9bee434a5.jsonl.gz",
+    "release_id": 407065020,
+    "release_tag": "data-v2-campaign-market-e8-6-2026100814-v7-u0",
+    "remote_digest": "sha256:08c21ecf53936d0cfdff6da1e0e77c758c3291b992c936f6a5fac53059817b4c",
+    "remote_size": 13238523,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "cross-venue-derived-capacity-cross-venue-capacity-tape-ethfi-1791474423349-1791477918090-57e9bee434a5.jsonl.gz",
+  "release_asset_id": 622428048,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 407065020,
+  "release_member": "cross-venue-derived-capacity-cross-venue-capacity-tape-ethfi-1791474423349-1791477918090-57e9bee434a5.jsonl.gz",
+  "release_remote_digest": "sha256:08c21ecf53936d0cfdff6da1e0e77c758c3291b992c936f6a5fac53059817b4c",
+  "release_remote_size": 13238523,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-6-2026100814-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "57e9bee434a580f8fd2dbe4d0b2e045e237fdeb131b899d1739eb1bd434ca6cf",
+  "source": "cross_venue_derived_capacity",
+  "start_ts_ms": 1791474423349,
+  "symbol": "ETHFI",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1791474423206,
+    "last_exchange_ts_ms": 1791477917001,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2059,
+      "max": 5325.0,
+      "min": 66.0,
+      "p50": 136.0,
+      "p95": 1004.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 14359175,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}

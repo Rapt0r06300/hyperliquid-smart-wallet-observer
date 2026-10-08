@@ -1,0 +1,135 @@
+{
+  "asset_verified": true,
+  "bytes": 1526,
+  "collection_queue_drops": 80,
+  "collection_run_id": "market-e8-6-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-animeusdt-1791472991259-1791473038318-6d2514f2ca95",
+  "end_ts_ms": 1791473038318,
+  "event_count": 7,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 80,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=80",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 7,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 7,
+    "missing_from_live": 78,
+    "reference_count": 85,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 7,
+  "release": {
+    "asset_id": 622231618,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-trades-animeusdt-1791472991259-1791473038318-6d2514f2ca95.jsonl.gz",
+    "release_id": 406990501,
+    "release_tag": "data-v2-campaign-market-e8-6-2026100813-v7-u0",
+    "remote_digest": "sha256:1bfd7da7a06f683b91e90c4b785d550cfd02f904ebf97092d5bab45f44d0cd7a",
+    "remote_size": 9602516,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-animeusdt-1791472991259-1791473038318-6d2514f2ca95.jsonl.gz",
+  "release_asset_id": 622231618,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 406990501,
+  "release_member": "bitget-public-ws-trades-animeusdt-1791472991259-1791473038318-6d2514f2ca95.jsonl.gz",
+  "release_remote_digest": "sha256:1bfd7da7a06f683b91e90c4b785d550cfd02f904ebf97092d5bab45f44d0cd7a",
+  "release_remote_size": 9602516,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-6-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6d2514f2ca95cb219e9ca9d8c43145d21e34689642ac691c4ab0da508d834083",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791472991259,
+  "symbol": "ANIMEUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 7,
+      "max": 135.5,
+      "min": 112.0,
+      "p50": 112.0,
+      "p95": 135.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-7b3a2d7e68b24ed3bf4fe603bb2c6902"
+    ],
+    "first_exchange_ts_ms": 1791472991122,
+    "last_exchange_ts_ms": 1791473038211,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 7,
+      "max": 137.0,
+      "min": 81.0,
+      "p50": 106.0,
+      "p95": 137.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 7,
+      "max": 177.855637,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 177.855637
+    }
+  },
+  "trade_count": 7,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "1e6ae3c65d352ef0726a98d1b7a8ce372f06c6b079e3ce3bd88db021aeabaeea",
+    "7b426156d2d8553822f8f19de0e5e914fa5dac2ab9f6e42ed445b33f525ca1b9",
+    "849ecf86125fe69011e5a7de23f2d165ac3b229281b537bfbe8a580404b5ba55",
+    "88cf9ce979780fbc20dc16725f0b7c1625c08347f4606665efb3239768f506ae",
+    "c84e803859989e1bb3f46b3f43bf314c69b362dcd8624fb432e581654f88beb7",
+    "e45b7377561cf2bb5ffad10e27c2a8df98087229ca877a9829dce94ec3496ec2",
+    "f4cb02005ef7bde58c16246575a7efb88bcbf9aad98b11bb4b894c9f3b799284"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 10187,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 7,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bitget"
+}
