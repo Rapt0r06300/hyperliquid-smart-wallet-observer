@@ -446,3 +446,17 @@ def test_two_speed_ws_selection_never_exceeds_user_limit_and_rotates() -> None:
         row["address"] for row in selected_b if row["ws_selection_reason"] == "AUDIT_ROTATION"
     }
 
+
+
+
+def test_selection_snapshot_declares_receive_clock_without_exchange_clock():
+    selection = {
+        "selected_at_ms": 1600,
+        "source": "https://api.hyperliquid.xyz/info",
+        "filters": {},
+    }
+    envelope = C.selection_envelope({"address": "0x" + "4" * 40}, selection)
+    assert envelope.exchange_ts_ms is None
+    assert envelope.received_ts_ms == 1600
+    assert envelope.local_monotonic_ns is not None
+    assert envelope.provenance["timestamp_semantics"] == "receive_observation_time_only"
