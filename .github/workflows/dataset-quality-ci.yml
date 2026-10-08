@@ -12,7 +12,8 @@ on:
       - 'tests/**'
       - 'catalog/DATA_INDEX.json'
       - 'catalog/DATA_QUALITY_REGISTRY.json'
-      - 'catalog/campaigns/**'
+      # Campaign runtime checkpoints are validated by their controller workflows;
+      # they must not repeatedly cancel the full dataset-quality suite.
   pull_request:
   workflow_dispatch:
 
