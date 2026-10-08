@@ -30,7 +30,7 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        (json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")) if path.name == "DATA_INDEX.json" else json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True)) + "\n",
         encoding="utf-8",
     )
     os.replace(temporary, path)
@@ -216,7 +216,7 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "unique_trade_count": manifest.get("unique_trade_count"),
         "unique_trade_count_exact": manifest.get("unique_trade_count_exact"),
         "unique_identity_method": manifest.get("unique_identity_method"),
-        "trade_identity_digests": manifest.get("trade_identity_digests"),
+        # Large identity arrays remain in the per-shard manifest, never duplicated in the global index.
         "trade_identity_digests_exact": manifest.get("trade_identity_digests_exact"),
         "replay_compatible": manifest.get("replay_compatible"),
         "replay_schema_version": manifest.get("replay_schema_version"),
@@ -380,7 +380,10 @@ def index_run_manifests(
     )
     index["shards"] = shards
     index["active_data_status"] = active
+    # Fail before attempting a GitHub push past its 100 MiB blob limit.
     _atomic_json(index_path, index)
+    if index_path.stat().st_size >= 85 * 1024 * 1024:
+        raise ValueError("DATA_INDEX_TOO_LARGE: shard the catalogue before publication; no SAFE evidence dropped")
 
     safe_count = sum(1 for row in shards if row.get("quality_status") == "SAFE")
     partial_count = sum(1 for row in shards if row.get("quality_status") == "PARTIAL")
