@@ -75,3 +75,63 @@ def test_trade_count_patch_is_sha_bound_and_old_bybit_unique_is_fail_closed():
     )
     assert current["unique_trade_count"] == 190000
     assert current["unique_trade_count_exact"] is True
+
+
+
+def test_compacted_run_manifest_normalizes_remote_release_alias_and_zip_member():
+    from tools.index_run_manifest import _normalize_manifest, _valid_release_locator
+
+    manifest = _normalize_manifest({
+        "dataset_id": "bybit-trades-btc",
+        "sha256": "a" * 64,
+        "bytes": 100, "event_count": 10,
+        "release_asset": "inner.jsonl.gz",
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "release_tag": "data-v2-real-data-tag",
+            "asset_id": 100,
+            "asset_name": "packed-shards-0000.zip",
+            "member_name": "inner.jsonl.gz",
+            "storage": "zip_entry",
+            "remote_size": 1000,
+            "remote_digest": "sha256:" + "b" * 64,
+        },
+    })
+    assert manifest["release_tag"] == "data-v2-real-data-tag"
+    assert manifest["release_asset"] == "inner.jsonl.gz"
+    assert manifest["release_container_asset"] == "packed-shards-0000.zip"
+    assert manifest["release_member"] == "inner.jsonl.gz"
+    assert manifest["release_remote_size"] == 1000
+    assert _valid_release_locator(manifest) is True
+
+
+def test_compacted_safe_locator_requires_outer_remote_sha_not_just_inner_hash():
+    from tools.index_run_manifest import _normalize_manifest, _valid_release_locator
+    raw = {
+        "sha256": "a" * 64, "release_asset": "inner.jsonl.gz",
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "release_tag": "data-v2-real",
+            "asset_name": "packed-shards-0000.zip",
+            "member_name": "inner.jsonl.gz",
+            "storage": "zip_entry",
+            "remote_size": 1234,
+            "remote_digest": None,
+        },
+    }
+    assert _valid_release_locator(_normalize_manifest(raw)) is False
+
+
+def test_unpacked_release_tag_backcompat_kept():
+    from tools.index_run_manifest import _normalize_manifest, _valid_release_locator
+    raw = {
+        "release_asset": "trades.jsonl.gz",
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "tag": "old-direct",
+            "asset_name": "trades.jsonl.gz",
+        },
+    }
+    manifest = _normalize_manifest(raw)
+    assert manifest["release_tag"] == "old-direct"
+    assert _valid_release_locator(manifest) is True
