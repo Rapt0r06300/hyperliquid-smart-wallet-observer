@@ -268,3 +268,19 @@ def test_select_pending_respects_total_byte_limit():
     }
     rows = module.select_pending_assets([release], set(), max_assets=10, max_bytes=100)
     assert [asset["id"] for _rel, asset in rows] == [1]
+
+
+def test_default_mirror_batch_accommodates_tar_overhead():
+    module = _module()
+    assert 1_500_000_000 < module.DEFAULT_MAX_BYTES < 2 * 1024**3
+    asset_size = 1_500_000_000 + 16_384
+    items = module.select_pending_assets(
+        [{"id": 1, "tag_name": "recover-test", "assets": [
+            {"id": 100, "name": "ALINA_RECOVERY_BUNDLE.part000.tar", "size": asset_size}
+        ]}],
+        set(),
+        max_assets=10,
+        max_bytes=module.DEFAULT_MAX_BYTES,
+    )
+    assert len(items) == 1
+    assert items[0][1]["size"] == asset_size
