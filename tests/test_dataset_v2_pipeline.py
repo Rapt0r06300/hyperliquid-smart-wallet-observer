@@ -8,6 +8,7 @@ from hl_observer.datasets.v2_pipeline import (
     assess_manifest,
     attach_reconciliation,
     build_bundle,
+    finalize_manifest,
     verify_remote_asset,
 )
 
@@ -618,3 +619,26 @@ def test_safe_requires_explicit_replay_compatibility() -> None:
     status, reasons = assess_manifest(manifest)
     assert status == "SAFE"
     assert reasons == []
+
+
+
+def test_queue_loss_attached_after_export_invalidates_old_replay_receipt(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=100000)
+    writer.append(_event(1000))
+    writer.rotate_all()
+    bundle = build_bundle(
+        tmp_path / "ticks",
+        tmp_path / "bundle",
+        collector_version="a" * 40,
+    )
+    import json
+    row_path = next((tmp_path / "bundle" / "manifests").glob("*.json"))
+    manifest = json.loads(row_path.read_text())
+    assert manifest["replay_compatible"] is True
+    manifest["integrity"]["gap_count"] += 5
+    manifest["collection_queue_drops"] = 5
+    repaired = finalize_manifest(manifest)
+    assert repaired["quality_status"] == "REJECT"
+    assert repaired["replay_compatible"] is False
+    assert "QUEUE_DROPS" in repaired["replay_reason"]
+    assert repaired["validation_allowed"] is False

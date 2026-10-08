@@ -197,6 +197,21 @@ def assess_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
 
 def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     result = dict(manifest)
+    integrity = result.get("integrity")
+    integrity = integrity if isinstance(integrity, Mapping) else {}
+    invalid_replay = [
+        name
+        for name in ("gap_count", "regression_count", "desync_count")
+        if (_int(integrity.get(name)) or 0) > 0
+    ]
+    if (_int(result.get("collection_queue_drops")) or 0) > 0:
+        invalid_replay.append("QUEUE_DROPS")
+    if invalid_replay:
+        # Some sources add queue-loss evidence *after* the shard was exported.
+        # They must not retain a stale replay_compatible=True from before
+        # the integrity evidence was attached.
+        result["replay_compatible"] = False
+        result["replay_reason"] = ",".join(sorted(set(invalid_replay)))
     if str((result.get("reconciliation") or {}).get("status") or "").upper() in {
         "",
         "UNVERIFIED",
