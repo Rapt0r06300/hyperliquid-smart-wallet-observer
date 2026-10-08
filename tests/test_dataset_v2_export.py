@@ -413,3 +413,39 @@ def test_duplicate_shard_is_not_replay_compatible(tmp_path) -> None:
     manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
     assert manifest["replay_compatible"] is False
     assert "DUPLICATES_PRESENT" in manifest["replay_reason"]
+
+
+
+def test_copy_vault_http_snapshot_replays_using_receive_clock_only(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(TickEnvelope(
+        source_id="hyperliquid_public_info", channel="copy_vault_positions",
+        instrument="0x" + "1" * 40, event_kind="SNAPSHOT",
+        raw_payload={"assetPositions": []}, received_ts_ms=1000,
+        exchange_ts_ms=None, local_monotonic_ns=200,
+        provenance={
+            "access": "read_only", "transport": "https",
+            "authenticated": False,
+            "timestamp_semantics": "receive_observation_time_only",
+        },
+    ))
+    [shard] = writer.rotate_all()
+    m = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert m["integrity"]["missing_timestamp_count"] == 0
+    assert m["replay_compatible"] is True
+    assert m["synchronization"]["first_exchange_ts_ms"] is None
+
+
+def test_copy_vault_http_snapshot_without_receive_semantics_remains_unreplayable(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(TickEnvelope(
+        source_id="hyperliquid_public_info", channel="copy_vault_positions",
+        instrument="0x" + "2" * 40, event_kind="SNAPSHOT",
+        raw_payload={"assetPositions": []}, received_ts_ms=1000,
+        exchange_ts_ms=None, local_monotonic_ns=200,
+        provenance={"access": "read_only", "transport": "https", "authenticated": False},
+    ))
+    [shard] = writer.rotate_all()
+    m = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert m["integrity"]["missing_timestamp_count"] == 1
+    assert m["replay_compatible"] is False
