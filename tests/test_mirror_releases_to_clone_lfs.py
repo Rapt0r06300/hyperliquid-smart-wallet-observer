@@ -284,3 +284,69 @@ def test_default_mirror_batch_accommodates_tar_overhead():
     )
     assert len(items) == 1
     assert items[0][1]["size"] == asset_size
+
+
+
+def test_release_embedded_asset_limit_triggers_full_pagination(monkeypatch):
+    module = _module()
+    release = {
+        "id": 42, "tag_name": "dataset",
+        "assets": [{"id": n, "name": f"{n}.bin", "size": n} for n in range(1, 31)],
+    }
+    pages = []
+
+    def fetch(_repo, release_id, *, page, per_page, token):
+        pages.append(page)
+        assert release_id == 42
+        assert per_page == module.ASSET_PAGE_SIZE
+        data = {
+            1: [{"id": n} for n in range(1, 21)],
+            2: [{"id": n} for n in range(21, 41)],
+            3: [{"id": n} for n in range(41, 46)],
+        }
+        return data[page], {
+            "Link": '<https://api.github.com/repos/o/r/releases/42/assets?per_page=20&page=3>; rel="last"'
+        }
+
+    monkeypatch.setattr(module, "_asset_page", fetch)
+    result = module.complete_release_assets("o/r", release, token=None)
+    assert len(result) == 45
+    assert pages == [1, 2, 3]
+
+
+def test_full_embedded_release_rejects_missing_asset_pagination(monkeypatch):
+    module = _module()
+    release = {
+        "id": 42,
+        "assets": [{"id": n} for n in range(1, 31)],
+    }
+    monkeypatch.setattr(
+        module, "_asset_page",
+        lambda *_args, **_kwargs: ([{"id": n} for n in range(1, 21)], {}),
+    )
+    try:
+        module.complete_release_assets("o/r", release, token=None)
+    except module.MirrorError as exc:
+        assert "pagination" in str(exc)
+    else:
+        raise AssertionError("full embedded assets with unknown next page must fail")
+
+
+def test_full_release_rejects_missing_or_short_asset_page(monkeypatch):
+    module = _module()
+    release = {"id": 42, "assets": [{"id": n} for n in range(1, 31)]}
+
+    def fetch(_repo, _release_id, *, page, per_page, token):
+        if page == 1:
+            return [{"id": n} for n in range(1, 21)], {
+                "Link": '<https://api.github.com/repos/o/r/releases/42/assets?page=3>; rel="last"'
+            }
+        return [], {}
+
+    monkeypatch.setattr(module, "_asset_page", fetch)
+    try:
+        module.complete_release_assets("o/r", release, token=None)
+    except module.MirrorError as exc:
+        assert "incomplete" in str(exc) or "short" in str(exc)
+    else:
+        raise AssertionError("missing assets cannot result in success")

@@ -128,15 +128,27 @@ def source_inventory(
     for release in mirror.iter_releases_oldest_first(repository, token=token):
         assets = release.get("assets")
         if not isinstance(assets, list):
-            continue
+            raise CompletenessError("GitHub Release asset list unavailable")
         for asset in assets:
             if not isinstance(asset, Mapping):
-                continue
+                raise CompletenessError("invalid GitHub Release asset entry")
             asset_id = int(asset.get("id") or 0)
             if asset_id <= 0:
                 raise CompletenessError("GitHub Release asset without immutable id")
             if asset_id in inventory:
                 raise CompletenessError(f"duplicate GitHub asset id: {asset_id}")
+            if int(asset.get("size", -1)) < 0:
+                raise CompletenessError(
+                    f"GitHub Release asset has invalid size: {asset_id}"
+                )
+            digest = str(asset.get("digest") or "")
+            if digest and (
+                not digest.lower().startswith("sha256:")
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", digest.split(":", 1)[1])
+            ):
+                raise CompletenessError(
+                    f"GitHub Release asset has invalid digest: {asset_id}"
+                )
             inventory[asset_id] = {
                 "release_id": int(release.get("id") or 0),
                 "release_tag": str(release.get("tag_name") or ""),
@@ -171,6 +183,7 @@ def audit(
     token: str | None,
     verify_git_pointers: bool,
     verify_worktree: bool = False,
+    force_source_inventory: bool = False,
 ) -> dict[str, Any]:
     manifest = mirror.load_manifest(root / MANIFEST_PATH)
     cloned = manifest_inventory(manifest)
@@ -178,7 +191,10 @@ def audit(
     # transient GitHub API availability. Avoid many minutes of Release listing
     # retries and shared installation rate-limit consumption just to discover
     # that zero bytes have been mirrored. Source totals remain UNKNOWN, never 0.
-    if not cloned:
+    if not cloned and not force_source_inventory:
+        # Even before source inventory, report unexpected current-tree payloads.
+        # This must never be presented as a complete or verified inventory.
+        tracked = git_tracked_payload_paths(root) if verify_git_pointers else set()
         return {
             "schema": "alina.clone_payload_completeness.v1",
             "repository": repository,
@@ -191,10 +207,14 @@ def audit(
             "clone_bytes": 0,
             "missing_asset_count": None,
             "extra_asset_count": 0,
-            "mismatch_count": 0,
+            "mismatch_count": int(bool(tracked)),
+            "tracked_payload_without_manifest_count": len(tracked),
             "missing_asset_ids_sample": [],
             "extra_asset_ids_sample": [],
-            "mismatches_sample": [],
+            "mismatches_sample": (
+                [{"kind": "tracked_payload_set", "undeclared_sample": sorted(tracked)[:15]}]
+                if tracked else []
+            ),
             "git_lfs_pointers_verified": False,
             "physical_worktree_verification_requested": bool(verify_worktree),
             "physical_worktree_mismatch_count": None,
@@ -221,7 +241,13 @@ def audit(
         ]
         if (
             len(set(all_manifest_paths)) != len(all_manifest_paths)
-            or not all(path.startswith("clone_payload/releases/") for path in all_manifest_paths)
+            or not all(
+                path.startswith("clone_payload/releases/")
+                and ".." not in Path(path).parts
+                and not Path(path).is_absolute()
+                and "\\" not in path
+                for path in all_manifest_paths
+            )
         ):
             mismatches.append({
                 "asset_id": None,
@@ -310,6 +336,18 @@ def audit(
                     }
                 )
 
+    declared_assets = manifest.get("total_assets")
+    declared_bytes = manifest.get("total_bytes")
+    if (
+        declared_assets != len(cloned)
+        or declared_bytes != sum(int(row.get("bytes") or 0) for row in cloned.values())
+    ):
+        mismatches.append({
+            "asset_id": None,
+            "kind": "manifest_totals",
+            "declared_assets": declared_assets,
+            "declared_bytes": declared_bytes,
+        })
     physical_report = materializer.verify(root) if verify_worktree else None
     physical_failures = (
         physical_report.get("failures_sample", [])
@@ -359,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--require-complete", action="store_true")
     parser.add_argument("--skip-git-pointers", action="store_true")
     parser.add_argument(
+        "--inventory-source",
+        action="store_true",
+        help="enumerate ALL source Releases even if LFS mirror is still empty",
+    )
+    parser.add_argument(
         "--verify-worktree",
         action="store_true",
         help="stream every materialized LFS payload byte after a fresh clone",
@@ -378,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
             verify_git_pointers=not args.skip_git_pointers,
             verify_worktree=args.verify_worktree,
+            force_source_inventory=args.inventory_source,
         )
     except (CompletenessError, mirror.MirrorError, materializer.MaterializationError, OSError, ValueError) as exc:
         print(f"ALINA_CLONE_COMPLETENESS_FAIL: {exc}", file=sys.stderr)

@@ -45,6 +45,8 @@ def test_audit_reports_exact_byte_parity(monkeypatch, tmp_path):
     }
     manifest = {
         "schema": "alina.clone_payload_manifest.v1",
+        "total_assets": 1,
+        "total_bytes": 42,
         "entries": [
             {
                 "asset_id": 101,
@@ -96,6 +98,8 @@ def test_audit_fails_closed_on_one_missing_asset(monkeypatch, tmp_path):
         "load_manifest",
         lambda _path: {
             "schema": "alina.clone_payload_manifest.v1",
+            "total_assets": 1,
+            "total_bytes": 5,
             "entries": [
                 {
                     "asset_id": 1,
@@ -165,6 +169,8 @@ def test_audit_rejects_extra_tracked_lfs_asset(monkeypatch, tmp_path):
     })
     monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
         "schema": "alina.clone_payload_manifest.v1",
+        "total_assets": 1,
+        "total_bytes": 4,
         "entries": [{
             "asset_id": 1, "bytes": 4, "sha256": sha, "clone_path": path,
         }],
@@ -196,6 +202,8 @@ def test_audit_accepts_zero_length_release_asset(monkeypatch, tmp_path):
     })
     monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
         "schema": "alina.clone_payload_manifest.v1",
+        "total_assets": 1,
+        "total_bytes": 0,
         "entries": [{"asset_id": 2, "bytes": 0, "sha256": sha, "clone_path": path}],
     })
     monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _r: {path})
@@ -228,6 +236,8 @@ def test_empty_mirror_is_fast_fail_without_release_api_calls(monkeypatch, tmp_pa
     module = _module()
     monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
         "schema": "alina.clone_payload_manifest.v1",
+        "total_assets": 1,
+        "total_bytes": 42,
         "entries": [],
     })
     monkeypatch.setattr(
@@ -242,3 +252,69 @@ def test_empty_mirror_is_fast_fail_without_release_api_calls(monkeypatch, tmp_pa
     assert report["source_bytes"] is None
     assert report["clone_bytes"] == 0
     assert report["source_inventory_checked"] is False
+
+
+
+def test_empty_manifest_detects_orphan_payload_without_remote_api(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [], "total_assets": 0, "total_bytes": 0,
+    })
+    monkeypatch.setattr(
+        module, "source_inventory",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("no remote call expected")
+        ),
+    )
+    monkeypatch.setattr(
+        module, "git_tracked_payload_paths",
+        lambda _root: {"clone_payload/releases/unknown.bin"},
+    )
+    report = module.audit(
+        "owner/repo", root=tmp_path, token=None, verify_git_pointers=True,
+    )
+    assert report["complete"] is False
+    assert report["tracked_payload_without_manifest_count"] == 1
+    assert report["mismatch_count"] == 1
+
+
+def test_force_inventory_source_does_not_claim_complete_on_empty_mirror(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [], "total_assets": 0, "total_bytes": 0,
+    })
+    monkeypatch.setattr(
+        module, "source_inventory",
+        lambda *_args, **_kwargs: {42: {"bytes": 23, "source_digest": ""}},
+    )
+    monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _root: set())
+    report = module.audit(
+        "owner/repo", root=tmp_path, token=None, verify_git_pointers=True,
+        force_source_inventory=True,
+    )
+    assert report["complete"] is False
+    assert report["source_assets"] == 1
+    assert report["source_bytes"] == 23
+    assert report["missing_asset_count"] == 1
+
+
+def test_manifest_totals_conflict_is_fail_closed(monkeypatch, tmp_path):
+    module = _module()
+    path = "clone_payload/releases/r/1--a.bin"
+    sha = "a" * 64
+    monkeypatch.setattr(module, "source_inventory", lambda *_a, **_k: {
+        1: {"bytes": 12, "source_digest": "sha256:" + sha},
+    })
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [{"asset_id": 1, "bytes": 12, "sha256": sha, "clone_path": path}],
+        "total_assets": 0,
+        "total_bytes": 12,
+    })
+    monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _r: {path})
+    monkeypatch.setattr(module, "git_pointers_for_paths", lambda _r, _p: {path: (sha, 12)})
+    report = module.audit("owner/repo", root=tmp_path, token=None, verify_git_pointers=True)
+    assert report["complete"] is False
+    assert any(m["kind"] == "manifest_totals" for m in report["mismatches_sample"])

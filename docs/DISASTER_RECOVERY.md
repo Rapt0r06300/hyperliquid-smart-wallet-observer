@@ -37,6 +37,37 @@ Clone completeness is accepted only when
 - `source_bytes == clone_bytes`;
 - missing, extra and mismatched asset counts are all zero.
 
+## Git clone only: quota and current blocker
+
+A ZIP downloaded with GitHub's "Download ZIP" is NOT the accepted recovery
+mechanism. It does not contain historical Git objects and it does not
+automatically include arbitrary GitHub Release assets.
+
+GitHub Free and Pro include 10 GiB of Git LFS storage and 10 GiB of LFS
+download bandwidth per billing cycle. These allowances are account-wide and
+NOT proof of remaining free entitlement. The LFS billing budget must be
+verified as zero dollars at the account level before any bulk mirroring,
+and the complete source inventory must be smaller than the verified unused
+storage and bandwidth headroom. A zero-dollar budget blocks overages,
+but it does not magically make a larger clone possible.
+
+The full source byte count can be requested via:
+
+`python tools/check_clone_payload_completeness.py --inventory-source --require-complete`
+
+This command may take a long time with many large Release inventories; it must
+report INCOMPLETE until source assets and current LFS pointers match exactly.
+
+The GitHub Releases list can embed a truncated asset list; for any Release
+with 30 or more embedded assets the mirror enumerates the separate
+paginated Release-assets endpoint. Missing pages and malformed records
+are fatal. An absent API response cannot be interpreted as zero bytes.
+
+**Important:** evidence that still exists only on an unuploaded local machine
+cannot be proven to reside in GitHub. It must first be published using the
+existing safe local recovery snapshot process; cloud GitHub must never access
+or rely on that machine.
+
 ## Release-to-LFS migration
 
 `tools/mirror_releases_to_clone_lfs.py` mirrors immutable Release assets into

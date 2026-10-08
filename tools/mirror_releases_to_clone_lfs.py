@@ -136,7 +136,9 @@ def _api_page(
         raise MirrorError(f"invalid GitHub release JSON on page {page}") from exc
     if not isinstance(payload, list):
         raise MirrorError("GitHub releases payload is not an array")
-    return [row for row in payload if isinstance(row, Mapping)], headers
+    if not all(isinstance(row, Mapping) for row in payload):
+        raise MirrorError(f"invalid GitHub Release row on page {page}")
+    return payload, headers
 
 
 def _last_page_from_link(link: str | None, default: int = 1) -> int:
@@ -180,6 +182,7 @@ def iter_releases_oldest_first(
             "GitHub Release pagination is incomplete; refusing to report byte parity"
         )
 
+    seen_release_ids: set[int] = set()
     for page in range(last_page, 0, -1):
         rows = (
             first
@@ -191,8 +194,117 @@ def iter_releases_oldest_first(
                 token=token,
             )[0]
         )
+        if not rows or (page < last_page and len(rows) != per_page):
+            raise MirrorError(
+                f"Release pagination missing or short on page {page}/{last_page}"
+            )
         for release in reversed(rows):
-            yield release
+            release_id = int(release.get("id") or 0)
+            if release_id <= 0 or release_id in seen_release_ids:
+                raise MirrorError(
+                    f"invalid or duplicate Release id on page {page}: {release_id}"
+                )
+            seen_release_ids.add(release_id)
+            complete_assets = complete_release_assets(
+                repository, release, token=token,
+            )
+            yield {**release, "assets": complete_assets}
+
+
+# The releases list embeds only a limited number of assets per release.
+# A full embedded list can be truncated WITHOUT any pagination link for assets.
+# A release with 30 or more embedded assets must be independently enumerated.
+EMBEDDED_RELEASE_ASSET_LIMIT = 30
+ASSET_PAGE_SIZE = 20
+
+
+def _asset_page(
+    repository: str,
+    release_id: int,
+    *,
+    page: int,
+    per_page: int,
+    token: str | None,
+) -> tuple[list[Mapping[str, Any]], Mapping[str, str]]:
+    url = (
+        f"https://api.github.com/repos/{repository}/releases/"
+        f"{release_id}/assets?per_page={per_page}&page={page}"
+    )
+    request = urllib.request.Request(url, headers=_headers(token))
+    with _open_with_retry(request) as response:
+        raw = response.read()
+        headers = dict(response.headers.items())
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise MirrorError(
+            f"invalid asset inventory JSON for Release {release_id}, page {page}"
+        ) from exc
+    if not isinstance(payload, list) or not all(
+        isinstance(row, Mapping) for row in payload
+    ):
+        raise MirrorError(
+            f"invalid asset inventory for Release {release_id}, page {page}"
+        )
+    return payload, headers
+
+
+def complete_release_assets(
+    repository: str,
+    release: Mapping[str, Any],
+    *,
+    token: str | None,
+) -> list[Mapping[str, Any]]:
+    """Require a complete listing even when Releases embed only 30 assets."""
+    embedded = release.get("assets")
+    release_id = int(release.get("id") or 0)
+    if release_id <= 0 or not isinstance(embedded, list) or not all(
+        isinstance(asset, Mapping) for asset in embedded
+    ):
+        raise MirrorError("Release has invalid id or embedded asset inventory")
+    if len(embedded) < EMBEDDED_RELEASE_ASSET_LIMIT:
+        return embedded
+
+    first, headers = _asset_page(
+        repository, release_id, page=1, per_page=ASSET_PAGE_SIZE, token=token
+    )
+    link = headers.get("Link") or headers.get("link")
+    if len(first) == ASSET_PAGE_SIZE and not link:
+        raise MirrorError(
+            f"asset pagination missing for Release {release_id}; inventory unknown"
+        )
+    last_page = _last_page_from_link(link, default=1)
+    if len(first) == ASSET_PAGE_SIZE and last_page <= 1:
+        raise MirrorError(
+            f"asset pagination truncated for Release {release_id}"
+        )
+    assets = list(first)
+    for page in range(2, last_page + 1):
+        if len(assets[-ASSET_PAGE_SIZE:]) != ASSET_PAGE_SIZE:
+            raise MirrorError(
+                f"short asset page before last for Release {release_id}"
+            )
+        rows, _ = _asset_page(
+            repository, release_id, page=page,
+            per_page=ASSET_PAGE_SIZE, token=token,
+        )
+        if not rows or (page < last_page and len(rows) != ASSET_PAGE_SIZE):
+            raise MirrorError(
+                f"incomplete asset page {page} for Release {release_id}"
+            )
+        assets.extend(rows)
+    ids = [int(row.get("id") or 0) for row in assets]
+    embedded_ids = {int(row.get("id") or 0) for row in embedded}
+    if (
+        not ids or any(asset_id <= 0 for asset_id in ids)
+        or len(set(ids)) != len(ids)
+        or not embedded_ids.issubset(ids)
+        or len(assets) < len(embedded)
+    ):
+        raise MirrorError(
+            f"Release {release_id} asset enumeration inconsistent or incomplete"
+        )
+    return assets
 
 
 def _expected_remote_sha(asset: Mapping[str, Any]) -> str | None:
