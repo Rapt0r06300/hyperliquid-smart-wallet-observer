@@ -7,19 +7,82 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "9d33f0824deb94f2a747c03c490e042620a2a984",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/canary-market-e8-okx-btc-eth-replaygrade-20261008-v2/0",
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_run_manifest",
+          "compressed_bytes": 4112604,
+          "frame_metrics_complete": false,
+          "l2_frames": 0,
+          "partial_count": 3,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 27852,
+          "reject_count": 0,
+          "safe_count": 10,
+          "shard_count": 13,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 6233,
+          "trade_shard_count": 2,
+          "trade_shards_exact": 2
+        },
+        "collection_plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/canary-market-e8-okx-btc-eth-replaygrade-20261008-v2/0",
+        "partial_count": 3,
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.14/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/canary-market-e8-okx-btc-eth-replaygrade-20261008-v2/0"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "ublic-rest-instrument-metadata-eth-usdt-swap-1791434172028-1791434172028-d5d0edc51c92\",\n      \"event_count\": 1,\n      \"family\": \"instrument_metadata\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-rest-instrument-metadata-eth-usdt-swap-1791434172028-1791434172028-d5d0edc51c92.jsonl.gz\",\n      \"source\": \"okx_public_rest\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-bbo-btc-usdt-swap-1791434172962-1791434352066-8978efab53e5\",\n      \"event_count\": 7628,\n      \"family\": \"bbo\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-bbo-btc-usdt-swap-1791434172962-1791434352066-8978efab53e5.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-bbo-eth-usdt-swap-1791434172967-1791434352052-deb49c2b8a29\",\n      \"event_count\": 8070,\n      \"family\": \"bbo\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-bbo-eth-usdt-swap-1791434172967-1791434352052-deb49c2b8a29.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-l2book-btc-usdt-swap-1791434172962-1791434352066-9c6a63afdbb2\",\n      \"event_count\": 1790,\n      \"family\": \"l2Book\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-l2book-btc-usdt-swap-1791434172962-1791434352066-9c6a63afdbb2.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-l2book-eth-usdt-swap-1791434172967-1791434352063-841fc0c58461\",\n      \"event_count\": 1792,\n      \"family\": \"l2Book\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-l2book-eth-usdt-swap-1791434172967-1791434352063-841fc0c58461.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-ticker-btc-usdt-swap-1791434172802-1791434352046-70693e1ed353\",\n      \"event_count\": 1153,\n      \"family\": \"ticker\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-ticker-btc-usdt-swap-1791434172802-1791434352046-70693e1ed353.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-ticker-eth-usdt-swap-1791434172802-1791434351902-2ae7b67c71bb\",\n      \"event_count\": 1177,\n      \"family\": \"ticker\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-ticker-eth-usdt-swap-1791434172802-1791434351902-2ae7b67c71bb.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-btc-usdt-swap-1791434339755-1791434352018-33cc4413b4c4\",\n      \"event_count\": 370,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-btc-usdt-swap-1791434339755-1791434352018-33cc4413b4c4.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-eth-usdt-swap-1791434292192-1791434352017-0e04ffd2def4\",\n      \"event_count\": 5863,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-eth-usdt-swap-1791434292192-1791434352017-0e04ffd2def4.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"full_snapshot_unavailable_symbols\": [],\n    \"last_error\": \"\",\n    \"partial_fallback_frames\": 0,\n    \"partial_fallback_levels\": 20,\n    \"partial_fallback_publications\": 0,\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_retry_cooldown_s\": 60.0,\n    \"rest_retry_deferred_symbols\": [],\n    \"rest_unavailable_symbols\": [],\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0,\n    \"ws_api_failures\": 0,\n    \"ws_api_snapshots_received\": 0,\n    \"ws_base_url\": \"wss://fstream.binance.com/public/stream\",\n    \"ws_candidates\": [\n      \"wss://fstream.binance.com/public/stream\"\n    ],\n    \"ws_last_error\": \"\"\n  },\n  \"bundle_index\": {\n    \"partial_count\": 13,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 13\n  },\n  \"coins\": [\n    \"BTC\",\n    \"ETH\"\n  ],\n  \"collection_run_id\": \"canary-market-e8-okx-btc-eth-replaygrade-20261008-v2-0\",\n  \"collector_version\": \"9d33f0824deb94f2a747c03c490e042620a2a984\",\n  \"disk_free_bytes_at_stop\": 89422381056,\n  \"duration_s\": 201.355,\n  \"ended_at_ms\": 1791434373421,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"hyperliquid_trade_reference\": null,\n  \"instrument_metadata\": {\n    \"binance\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bitget\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"okx\": {\n      \"capacity_size_multiplier_by_symbol\": {\n        \"BTC-USDT-SWAP\": 0.01,\n        \"ETH-USDT-SWAP\": 0.1\n      },\n      \"records\": 2,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"okx\": 3582\n    },\n    \"expected_symbol_count\": 2,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 2,\n    \"required\": true,\n    \"required_venues\": [\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 53071,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"replay_grade_coverage\": {\n    \"complete\": false,\n    \"cross_venue_capacity_coins_observed\": [],\n    \"fail_closed\": true,\n    \"liquidation_families_observed\": [],\n    \"missing_cross_venue_capacity_coins\": [],\n    \"per_venue\": {\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BTC-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ETH-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791434172066,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [],\n    \"bybit\": [],\n    \"gate\": [],\n    \"hyperliquid\": [],\n    \"okx\": [\n      \"BTC-USDT-SWAP\",\n      \"ETH-USDT-SWAP\"\n    ]\n  }\n}\n"
+          }
+        ],
+        "reject_count": 0,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-campaign-canary-market-e8-okx-btc-eth-replaygrade-20261008-v2-u0",
+        "returncode": 0,
+        "safe_count": 10,
+        "safe_workspace": null,
+        "shard_count": 13,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "ublic-rest-instrument-metadata-eth-usdt-swap-1791434172028-1791434172028-d5d0edc51c92\",\n      \"event_count\": 1,\n      \"family\": \"instrument_metadata\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-rest-instrument-metadata-eth-usdt-swap-1791434172028-1791434172028-d5d0edc51c92.jsonl.gz\",\n      \"source\": \"okx_public_rest\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-bbo-btc-usdt-swap-1791434172962-1791434352066-8978efab53e5\",\n      \"event_count\": 7628,\n      \"family\": \"bbo\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-bbo-btc-usdt-swap-1791434172962-1791434352066-8978efab53e5.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-bbo-eth-usdt-swap-1791434172967-1791434352052-deb49c2b8a29\",\n      \"event_count\": 8070,\n      \"family\": \"bbo\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-bbo-eth-usdt-swap-1791434172967-1791434352052-deb49c2b8a29.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-l2book-btc-usdt-swap-1791434172962-1791434352066-9c6a63afdbb2\",\n      \"event_count\": 1790,\n      \"family\": \"l2Book\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-l2book-btc-usdt-swap-1791434172962-1791434352066-9c6a63afdbb2.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-l2book-eth-usdt-swap-1791434172967-1791434352063-841fc0c58461\",\n      \"event_count\": 1792,\n      \"family\": \"l2Book\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-l2book-eth-usdt-swap-1791434172967-1791434352063-841fc0c58461.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-ticker-btc-usdt-swap-1791434172802-1791434352046-70693e1ed353\",\n      \"event_count\": 1153,\n      \"family\": \"ticker\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-ticker-btc-usdt-swap-1791434172802-1791434352046-70693e1ed353.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-ticker-eth-usdt-swap-1791434172802-1791434351902-2ae7b67c71bb\",\n      \"event_count\": 1177,\n      \"family\": \"ticker\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-ticker-eth-usdt-swap-1791434172802-1791434351902-2ae7b67c71bb.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-btc-usdt-swap-1791434339755-1791434352018-33cc4413b4c4\",\n      \"event_count\": 370,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-btc-usdt-swap-1791434339755-1791434352018-33cc4413b4c4.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"BTC-USDT-SWAP\"\n    },\n    {\n      \"dataset_id\": \"okx-public-ws-trades-eth-usdt-swap-1791434292192-1791434352017-0e04ffd2def4\",\n      \"event_count\": 5863,\n      \"family\": \"trades\",\n      \"quality_status\": \"PARTIAL\",\n      \"release_asset\": \"okx-public-ws-trades-eth-usdt-swap-1791434292192-1791434352017-0e04ffd2def4.jsonl.gz\",\n      \"source\": \"okx_public_ws\",\n      \"symbol\": \"ETH-USDT-SWAP\"\n    }\n  ],\n  \"binance_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"binance_context\": {\n    \"clock_sync\": {},\n    \"frames\": 0,\n    \"last_error\": \"\",\n    \"latest_symbols\": 0,\n    \"metadata_samples\": 0,\n    \"open_interest_samples\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_market_context.v1\",\n    \"symbols\": 0\n  },\n  \"binance_depth\": {\n    \"books_exploitable\": 0,\n    \"clock_sync\": {},\n    \"frames_received\": 0,\n    \"full_snapshot_unavailable_symbols\": [],\n    \"last_error\": \"\",\n    \"partial_fallback_frames\": 0,\n    \"partial_fallback_levels\": 20,\n    \"partial_fallback_publications\": 0,\n    \"pending_resyncs\": 0,\n    \"publications\": 0,\n    \"read_only\": true,\n    \"real_execution\": false,\n    \"reconnects\": 0,\n    \"rest_retry_cooldown_s\": 60.0,\n    \"rest_retry_deferred_symbols\": [],\n    \"rest_unavailable_symbols\": [],\n    \"resync_failures\": 0,\n    \"schema_version\": \"alina.binance_usdm_l2_live.v1\",\n    \"snapshots_received\": 0,\n    \"symbols\": 0,\n    \"ws_api_failures\": 0,\n    \"ws_api_snapshots_received\": 0,\n    \"ws_base_url\": \"wss://fstream.binance.com/public/stream\",\n    \"ws_candidates\": [\n      \"wss://fstream.binance.com/public/stream\"\n    ],\n    \"ws_last_error\": \"\"\n  },\n  \"bundle_index\": {\n    \"partial_count\": 13,\n    \"reject_count\": 0,\n    \"safe_count\": 0,\n    \"schema\": \"alina.dataset_bundle.v2\",\n    \"shard_count\": 13\n  },\n  \"coins\": [\n    \"BTC\",\n    \"ETH\"\n  ],\n  \"collection_run_id\": \"canary-market-e8-okx-btc-eth-replaygrade-20261008-v2-0\",\n  \"collector_version\": \"9d33f0824deb94f2a747c03c490e042620a2a984\",\n  \"disk_free_bytes_at_stop\": 89422381056,\n  \"duration_s\": 201.355,\n  \"ended_at_ms\": 1791434373421,\n  \"funding_history\": {\n    \"binance\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bitget\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"okx\": {\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    }\n  },\n  \"hyperliquid_clock_sync\": {\n    \"status\": \"NO_DATA\"\n  },\n  \"hyperliquid_trade_reference\": null,\n  \"instrument_metadata\": {\n    \"binance\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bitget\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"bybit\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"gate\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"hyperliquid\": {\n      \"capacity_size_multiplier_by_symbol\": {},\n      \"records\": 0,\n      \"status\": \"NO_DATA\"\n    },\n    \"okx\": {\n      \"capacity_size_multiplier_by_symbol\": {\n        \"BTC-USDT-SWAP\": 0.01,\n        \"ETH-USDT-SWAP\": 0.1\n      },\n      \"records\": 2,\n      \"status\": \"OK\"\n    }\n  },\n  \"l2_coverage\": {\n    \"complete\": true,\n    \"event_count_by_venue\": {\n      \"okx\": 3582\n    },\n    \"expected_symbol_count\": 2,\n    \"missing_symbols\": {},\n    \"observed_symbol_count\": 2,\n    \"required\": true,\n    \"required_venues\": [\n      \"okx\"\n    ]\n  },\n  \"min_free_disk_bytes\": 2147483648,\n  \"persisted_frames\": 53071,\n  \"queue_drops\": {},\n  \"read_only\": true,\n  \"real_execution\": false,\n  \"replay_grade_coverage\": {\n    \"complete\": false,\n    \"cross_venue_capacity_coins_observed\": [],\n    \"fail_closed\": true,\n    \"liquidation_families_observed\": [],\n    \"missing_cross_venue_capacity_coins\": [],\n    \"per_venue\": {\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BTC-USDT-SWAP\": [\n            \"PARTIAL\"\n          ],\n          \"ETH-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791434172066,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [],\n    \"bybit\": [],\n    \"gate\": [],\n    \"hyperliquid\": [],\n    \"okx\": [\n      \"BTC-USDT-SWAP\",\n      \"ETH-USDT-SWAP\"\n    ]\n  }\n}\n",
+        "universe_discovery_required": true
+      },
+      "sha256": "d7726b1a7503de30defae92ad857e865adeadab885cd90da579698ea56877b01"
+    }
+  },
   "config_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
   "consecutive_failures": 0,
   "created_at": "2026-10-08T04:13:11.360693+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
     "canary": true,
+    "checkpoint_id": "d7726b1a7503de30defae92ad857e865adeadab885cd90da579698ea56877b01",
     "duration_s": 180,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37727272454",
     "market_shard_count": 1,
     "market_shard_index": 0,
     "max_coins": 2,
     "plan_file": "catalog/market_collection_plans/e8/canary-20261007/okx-btc-eth-compaction.json",
     "plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 16,
     "selected_coin_count": 2,
@@ -40,15 +103,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-08T04:41:23.533531Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-08T04:35:43.984125Z",
-    "expires_at": "2026-10-08T10:20:43.984125Z",
-    "lease_token_sha256": "50737b1a187370d90952e2156ed6543a3a6979d37733e42d47614cb91e64a343",
-    "owner_run_id": "37727272454"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 1,
     "max_chunks": 1,
@@ -66,9 +130,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-08T04:35:43.984187Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "d7726b1a7503de30defae92ad857e865adeadab885cd90da579698ea56877b01",
+  "updated_at": "2026-10-08T04:41:23.533531Z",
   "work_plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589"
 }
