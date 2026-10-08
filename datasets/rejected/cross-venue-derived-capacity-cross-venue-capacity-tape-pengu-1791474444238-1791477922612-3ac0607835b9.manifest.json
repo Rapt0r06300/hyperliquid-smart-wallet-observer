@@ -1,0 +1,115 @@
+{
+  "asset_verified": true,
+  "bytes": 307688,
+  "collection_queue_drops": 1452,
+  "collection_run_id": "market-e8-8-2026100814-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-pengu-1791474444238-1791477922612-3ac0607835b9",
+  "end_ts_ms": 1791477922612,
+  "event_count": 932,
+  "family": "cross_venue_capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 1452,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "cross_venue_capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=1452",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 932,
+  "release": {
+    "asset_id": 622433428,
+    "asset_name": "packed-shards-0003.zip",
+    "member_name": "cross-venue-derived-capacity-cross-venue-capacity-tape-pengu-1791474444238-1791477922612-3ac0607835b9.jsonl.gz",
+    "release_id": 407066812,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100814-v7-u0",
+    "remote_digest": "sha256:8daf960f041bd8f7cb98a9f00768b1fd6a2bfde2c5d6a1b5ad37a719d7d74dab",
+    "remote_size": 5670318,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "cross-venue-derived-capacity-cross-venue-capacity-tape-pengu-1791474444238-1791477922612-3ac0607835b9.jsonl.gz",
+  "release_asset_id": 622433428,
+  "release_container_asset": "packed-shards-0003.zip",
+  "release_id": 407066812,
+  "release_member": "cross-venue-derived-capacity-cross-venue-capacity-tape-pengu-1791474444238-1791477922612-3ac0607835b9.jsonl.gz",
+  "release_remote_digest": "sha256:8daf960f041bd8f7cb98a9f00768b1fd6a2bfde2c5d6a1b5ad37a719d7d74dab",
+  "release_remote_size": 5670318,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100814-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3ac0607835b911c670b6e5f262f09a447a989c258cd3bd265056f4593d0b961d",
+  "source": "cross_venue_derived_capacity",
+  "start_ts_ms": 1791474444238,
+  "symbol": "PENGU",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1791474444001,
+    "last_exchange_ts_ms": 1791477922505,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 932,
+      "max": 3226.0,
+      "min": 60.0,
+      "p50": 91.0,
+      "p95": 1219.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 6507499,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}

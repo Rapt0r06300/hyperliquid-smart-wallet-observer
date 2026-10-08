@@ -1,0 +1,127 @@
+{
+  "asset_verified": true,
+  "bytes": 1783,
+  "collection_queue_drops": 36,
+  "collection_run_id": "market-e8-9-2026100816-v7-0",
+  "collector_version": "33af0f503b795a9a276268ee30d8b449d6512303",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-aztecusdt-1791482390516-1791482435862-48887196844b",
+  "end_ts_ms": 1791482435862,
+  "event_count": 2,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 36,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=36",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 51,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 51,
+    "missing_from_live": 0,
+    "reference_count": 51,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 2,
+  "release": {
+    "asset_id": 622608805,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-trades-aztecusdt-1791482390516-1791482435862-48887196844b.jsonl.gz",
+    "release_id": 407126703,
+    "release_tag": "data-v2-campaign-market-e8-9-2026100816-v7-u0",
+    "remote_digest": "sha256:59740a045aac55ca212fac56c8413f0bd1ab227852bdc73ba80ef2b270ba42b1",
+    "remote_size": 5099926,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-aztecusdt-1791482390516-1791482435862-48887196844b.jsonl.gz",
+  "release_asset_id": 622608805,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 407126703,
+  "release_member": "bitget-public-ws-trades-aztecusdt-1791482390516-1791482435862-48887196844b.jsonl.gz",
+  "release_remote_digest": "sha256:59740a045aac55ca212fac56c8413f0bd1ab227852bdc73ba80ef2b270ba42b1",
+  "release_remote_size": 5099926,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026100816-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "48887196844b6cc640f6143c0650d87e86b47fd717ac6066bc98e60217d856ad",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791482390516,
+  "symbol": "AZTECUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2,
+      "max": 131.5,
+      "min": 95.5,
+      "p50": 95.5,
+      "p95": 131.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-cd61ce7ed8a8484eaa710206194da2b7"
+    ],
+    "first_exchange_ts_ms": 1791481870205,
+    "last_exchange_ts_ms": 1791482435755,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2,
+      "max": 520311.0,
+      "min": 107.0,
+      "p50": 107.0,
+      "p95": 520311.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2,
+      "max": 157.244803,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 157.244803
+    }
+  },
+  "trade_count": 51,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 8817,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

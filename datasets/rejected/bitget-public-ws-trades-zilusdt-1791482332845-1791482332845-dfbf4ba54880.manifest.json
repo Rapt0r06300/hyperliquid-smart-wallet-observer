@@ -1,0 +1,128 @@
+{
+  "asset_verified": true,
+  "bytes": 1595,
+  "collection_queue_drops": 73,
+  "collection_run_id": "market-e8-7-2026100816-v7-0",
+  "collector_version": "33af0f503b795a9a276268ee30d8b449d6512303",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-zilusdt-1791482332845-1791482332845-dfbf4ba54880",
+  "end_ts_ms": 1791482332845,
+  "event_count": 1,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 73,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=73",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 50,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 50,
+    "missing_from_live": 2,
+    "reference_count": 52,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 1,
+  "release": {
+    "asset_id": 622605190,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-trades-zilusdt-1791482332845-1791482332845-dfbf4ba54880.jsonl.gz",
+    "release_id": 407125484,
+    "release_tag": "data-v2-campaign-market-e8-7-2026100816-v7-u0",
+    "remote_digest": "sha256:70b0525114f4c755269550720c65b5f4cfbf3f50b9ff3e24de3862370f113e04",
+    "remote_size": 4230661,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-zilusdt-1791482332845-1791482332845-dfbf4ba54880.jsonl.gz",
+  "release_asset_id": 622605190,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 407125484,
+  "release_member": "bitget-public-ws-trades-zilusdt-1791482332845-1791482332845-dfbf4ba54880.jsonl.gz",
+  "release_remote_digest": "sha256:70b0525114f4c755269550720c65b5f4cfbf3f50b9ff3e24de3862370f113e04",
+  "release_remote_size": 4230661,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026100816-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "dfbf4ba548801c2b3d16f5f1e1d9b4bcaddaf996c86293d4a399579d0ac946d3",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791482332845,
+  "symbol": "ZILUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1,
+      "max": 91.5,
+      "min": 91.5,
+      "p50": 91.5,
+      "p95": 91.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-e84ac886c6a642f794c6759665573115"
+    ],
+    "first_exchange_ts_ms": 1791482116712,
+    "last_exchange_ts_ms": 1791482116712,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 216133.0,
+      "min": 216133.0,
+      "p50": 216133.0,
+      "p95": 216133.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1,
+      "max": 0.0,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 0.0
+    }
+  },
+  "trade_count": 50,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 7427,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

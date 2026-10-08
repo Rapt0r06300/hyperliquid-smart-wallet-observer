@@ -1,0 +1,128 @@
+{
+  "asset_verified": true,
+  "bytes": 56795,
+  "collection_queue_drops": 236,
+  "collection_run_id": "market-e8-9-2026100816-v7-0",
+  "collector_version": "33af0f503b795a9a276268ee30d8b449d6512303",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-morpho-1791478981684-1791482475330-5ab98b1e6b8f",
+  "end_ts_ms": 1791482475330,
+  "event_count": 276,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 236,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=236",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 565,
+    "live_only": null,
+    "local_continuity_fallback": false,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 555,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 276,
+  "release": {
+    "asset_id": 622609042,
+    "asset_name": "packed-shards-0006.zip",
+    "member_name": "hyperliquid-public-ws-trades-morpho-1791478981684-1791482475330-5ab98b1e6b8f.jsonl.gz",
+    "release_id": 407126703,
+    "release_tag": "data-v2-campaign-market-e8-9-2026100816-v7-u0",
+    "remote_digest": "sha256:62e4144bf28aacbc0e3d525569399364f33cd600d149964be91e73826f03cb96",
+    "remote_size": 71843228,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-morpho-1791478981684-1791482475330-5ab98b1e6b8f.jsonl.gz",
+  "release_asset_id": 622609042,
+  "release_container_asset": "packed-shards-0006.zip",
+  "release_id": 407126703,
+  "release_member": "hyperliquid-public-ws-trades-morpho-1791478981684-1791482475330-5ab98b1e6b8f.jsonl.gz",
+  "release_remote_digest": "sha256:62e4144bf28aacbc0e3d525569399364f33cd600d149964be91e73826f03cb96",
+  "release_remote_size": 71843228,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026100816-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5ab98b1e6b8ffb6ec05e792f3ac3b1611ada68560617840bf6bb48d1e746bc53",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791478981684,
+  "symbol": "MORPHO",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 275,
+      "max": -259.5,
+      "min": -1828.5,
+      "p50": -679.0,
+      "p95": -327.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-8e9ce6dd6a8b4254a79dd5fcd8a44df4"
+    ],
+    "first_exchange_ts_ms": 1791478979055,
+    "last_exchange_ts_ms": 1791482474976,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 276,
+      "max": 2629.0,
+      "min": 261.0,
+      "p50": 432.0,
+      "p95": 1365.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 565,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 489521,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

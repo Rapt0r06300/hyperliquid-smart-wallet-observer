@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 235274,
+  "collection_queue_drops": 4376,
+  "collection_run_id": "market-e8-7-2026100816-v7-0",
+  "collector_version": "33af0f503b795a9a276268ee30d8b449d6512303",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-sony-usdt-swap-1791478948436-1791482447191-b8d1418e743a",
+  "end_ts_ms": 1791482447191,
+  "event_count": 2722,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 4376,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=4376",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 2722,
+  "release": {
+    "asset_id": 622605912,
+    "asset_name": "packed-shards-0008.zip",
+    "member_name": "okx-public-ws-ticker-sony-usdt-swap-1791478948436-1791482447191-b8d1418e743a.jsonl.gz",
+    "release_id": 407125484,
+    "release_tag": "data-v2-campaign-market-e8-7-2026100816-v7-u0",
+    "remote_digest": "sha256:e7df84bbc11d26db6eea494b5b7fd4060c72e0fbc5a89bfa5f970b222d8b78da",
+    "remote_size": 16108905,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-ticker-sony-usdt-swap-1791478948436-1791482447191-b8d1418e743a.jsonl.gz",
+  "release_asset_id": 622605912,
+  "release_container_asset": "packed-shards-0008.zip",
+  "release_id": 407125484,
+  "release_member": "okx-public-ws-ticker-sony-usdt-swap-1791478948436-1791482447191-b8d1418e743a.jsonl.gz",
+  "release_remote_digest": "sha256:e7df84bbc11d26db6eea494b5b7fd4060c72e0fbc5a89bfa5f970b222d8b78da",
+  "release_remote_size": 16108905,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026100816-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b8d1418e743a58c4898a2b311f2ff479e3233d71f3144a44f1ac4ce7b7d50025",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791478948436,
+  "symbol": "SONY-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2722,
+      "max": 725.5,
+      "min": -556.0,
+      "p50": 38.0,
+      "p95": 93.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-7e75904b03934b7690d73141997d6cf4"
+    ],
+    "first_exchange_ts_ms": 1791478948033,
+    "last_exchange_ts_ms": 1791482447072,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2722,
+      "max": 2349.0,
+      "min": 79.0,
+      "p50": 153.0,
+      "p95": 1302.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2722,
+      "max": 2303.906506,
+      "min": 0.0,
+      "p50": 157.344548,
+      "p95": 1244.358407
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 4473963,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}
