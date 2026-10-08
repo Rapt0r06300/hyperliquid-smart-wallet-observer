@@ -241,3 +241,31 @@ def test_event_intelligence_binding_is_preserved_in_catalog_index(tmp_path) -> N
         "cross_venue_dislocation",
         "lead_lag",
     ]
+
+
+
+def test_index_migrates_preexisting_trade_digests_into_manifest_only(tmp_path):
+    root = _bootstrap_root(tmp_path)
+    manifest_dir = root / "datasets" / "safe"
+    digest = "a" * 64
+    proof = {
+        "dataset_id": "old-trades", "sha256": digest,
+        "trade_identity_digests": ["b" * 64, "c" * 64],
+        "trade_identity_digests_exact": True,
+    }
+    (manifest_dir / "old-trades.manifest.json").write_text(json.dumps(proof))
+    idx = root / "catalog" / "DATA_INDEX.json"
+    row = {
+        "dataset_id": "old-trades", "manifest_path": "datasets/safe/old-trades.manifest.json",
+        "family": "trades", "venue": "bybit", "quality_status": "SAFE",
+        "trade_identity_digests": ["b" * 64, "c" * 64],
+        "trade_identity_digests_exact": True, "sha256": digest,
+    }
+    idx.write_text(json.dumps({"shards": [row], "active_data_status": "SAFE"}))
+    index_run_manifests([], root=root)
+    on_disk = json.loads(idx.read_text())
+    assert len(on_disk["shards"]) == 1
+    assert "trade_identity_digests" not in on_disk["shards"][0]
+    assert on_disk["shards"][0]["trade_identity_digests_exact"] is True
+    assert json.loads((manifest_dir / "old-trades.manifest.json").read_text())["trade_identity_digests"] == proof["trade_identity_digests"]
+    assert "\n  " not in idx.read_text()
