@@ -228,8 +228,9 @@ def list_release_manifest_tags(
     if not 1 <= page_size <= 100:
         raise ValueError("page_size must be in 1..100")
     pages = 0
-    seen_ids: set[int] = set()
-    seen_tags: set[str] = set()
+    seen_ids: dict[int, str] = {}
+    seen_tags: dict[str, int] = {}
+    shifted_page_duplicates = 0
     rows: list[tuple[str, bool]] = []
     while True:
         pages += 1
@@ -237,15 +238,31 @@ def list_release_manifest_tags(
         page = _api_page(
             endpoint, runner=runner, sleeper=sleeper, attempts=attempts
         )
+        current_page_ids: set[int] = set()
+        current_page_tags: set[str] = set()
         for release in page:
             ident = release.get("id")
             tag = release.get("tag_name")
-            if type(ident) is not int or ident <= 0 or ident in seen_ids:
-                raise RuntimeError(f"invalid/duplicated Release id on page {pages}")
-            if not isinstance(tag, str) or not TAG_PATTERN.fullmatch(tag) or tag in seen_tags:
-                raise RuntimeError(f"invalid/duplicated Release tag on page {pages}")
-            seen_ids.add(ident)
-            seen_tags.add(tag)
+            if type(ident) is not int or ident <= 0:
+                raise RuntimeError(f"invalid Release id on page {pages}")
+            if not isinstance(tag, str) or not TAG_PATTERN.fullmatch(tag):
+                raise RuntimeError(f"invalid Release tag on page {pages}")
+            if ident in current_page_ids or tag in current_page_tags:
+                raise RuntimeError(f"duplicated Release id or tag within page {pages}")
+            current_page_ids.add(ident)
+            current_page_tags.add(tag)
+            # The list is ordered newest-first, while collectors keep adding
+            # Releases. An insertion before the current offset makes a
+            # previously seen release reappear on a later page. Such benign
+            # page overlaps are not evidence loss; silently accepting a
+            # conflicting identity, however, is forbidden.
+            if ident in seen_ids or tag in seen_tags:
+                if seen_ids.get(ident) != tag or seen_tags.get(tag) != ident:
+                    raise RuntimeError(f"conflicting Release id/tag on page {pages}")
+                shifted_page_duplicates += 1
+                continue
+            seen_ids[ident] = tag
+            seen_tags[tag] = ident
             assets = release.get("assets")
             if not isinstance(assets, list):
                 raise RuntimeError(f"missing assets for Release {tag}")
@@ -270,7 +287,10 @@ def list_release_manifest_tags(
             has_manifest = any(a["name"] == MANIFEST_NAME for a in assets)
             rows.append((tag, has_manifest))
         if len(page) < page_size:
-            print(f"GitHub Release inventory complete: {len(rows)} tags across {pages} pages")
+            print(
+                f"GitHub Release inventory enumerated: {len(rows)} unique tags "
+                f"across {pages} pages, {shifted_page_duplicates} stable page overlaps"
+            )
             return rows
 
 

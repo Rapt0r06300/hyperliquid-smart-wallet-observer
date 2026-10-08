@@ -264,6 +264,7 @@ def test_verified_observation_repair_keeps_original_missing_timestamp_evidence(t
         "start_ts_ms": 1000, "end_ts_ms": 1001,
         "sha256": "a" * 64, "bytes": 120, "event_count": 2,
         "collector_version": "test", "asset_verified": True,
+        "quality_status": "REJECT",
         "replay_compatible": False, "replay_schema_version": "alina.replay.v2",
         "replay_reason": "MISSING_CAUSAL_TIMESTAMP", "validation_allowed": False,
         "provenance": {

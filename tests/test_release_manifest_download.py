@@ -213,3 +213,57 @@ def test_listing_rejects_duplicate_release_ids():
     import pytest
     with pytest.raises(RuntimeError, match="duplicated Release id"):
         list_release_manifest_tags("owner/repo", runner=runner)
+
+
+
+def test_release_listing_tolerates_stable_overlapping_pages_from_new_live_releases():
+    import json
+    from download_release_manifests import list_release_manifest_tags
+
+    def runner(cmd, **_kwargs):
+        page = int(cmd[-1].split("page=")[-1])
+        items = {
+            1: [
+                {"id": 4, "tag_name": "data-v2-d", "assets": []},
+                {"id": 3, "tag_name": "data-v2-c", "assets": [{"name": "RUN_MANIFEST.json"}]},
+            ],
+            2: [
+                {"id": 3, "tag_name": "data-v2-c", "assets": [{"name": "RUN_MANIFEST.json"}]},
+                {"id": 2, "tag_name": "data-v2-b", "assets": []},
+            ],
+            3: [
+                {"id": 2, "tag_name": "data-v2-b", "assets": []},
+                {"id": 1, "tag_name": "data-v2-a", "assets": [{"name": "RUN_MANIFEST.json"}]},
+            ],
+            4: [],
+        }
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(items[page]), "")
+
+    result = list_release_manifest_tags(
+        "owner/repo", page_size=2, runner=runner, sleeper=lambda _: None,
+    )
+    assert result == [
+        ("data-v2-d", False), ("data-v2-c", True),
+        ("data-v2-b", False), ("data-v2-a", True),
+    ]
+
+
+def test_release_listing_rejects_conflicting_reused_tag_across_pages():
+    import json
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    def runner(cmd, **_kwargs):
+        page = int(cmd[-1].split("page=")[-1])
+        return subprocess.CompletedProcess(cmd, 0, json.dumps({
+            1: [
+                {"id": 12, "tag_name": "data-v2-a", "assets": []},
+                {"id": 11, "tag_name": "data-v2-b", "assets": []},
+            ],
+            2: [{"id": 10, "tag_name": "data-v2-a", "assets": []}],
+        }[page]), "")
+
+    with pytest.raises(RuntimeError, match="conflicting Release"):
+        list_release_manifest_tags(
+            "owner/repo", page_size=2, runner=runner, sleeper=lambda _: None,
+        )
