@@ -27,7 +27,9 @@ MANIFEST_PATH = Path("clone_payload/MANIFEST.json")
 PAYLOAD_ROOT = Path("clone_payload/releases")
 USER_AGENT = "alina-clone-lfs-mirror/1"
 DEFAULT_MAX_ASSETS = 1000
-DEFAULT_MAX_BYTES = 1_500_000_000
+# Must exceed RECOVERY_CAPSULE_MAX_BYTES (1.5 GB) plus TAR padding/header.
+# Keep bounded below GitHub's 2 GiB-per-Release-asset ceiling.
+DEFAULT_MAX_BYTES = 1_900_000_000
 FORBIDDEN = re.compile(
     r"(^|[._-])(env|secret|token|credential|private|mnemonic|seed|api[_-]?key)([._-]|$)",
     re.IGNORECASE,
