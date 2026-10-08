@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -42,6 +43,10 @@ class SafeShard:
     release_tag: str
     release_asset: str
     manifest_path: str
+    release_container_asset: str | None = None
+    release_member: str | None = None
+    release_remote_size: int | None = None
+    release_remote_digest: str | None = None
 
     @classmethod
     def from_index_row(cls, row: Mapping[str, Any]) -> "SafeShard":
@@ -78,6 +83,31 @@ class SafeShard:
         if start < 0 or end < start or size <= 0 or events <= 0:
             raise DatasetV2Error("invalid SAFE shard bounds")
         release_repo = str(row["release_repository"])
+        storage = str(row.get("release_storage") or "")
+        outer: str | None = None
+        member: str | None = None
+        remote_size: int | None = None
+        remote_digest: str | None = None
+        if storage and storage != "zip_entry":
+            raise DatasetV2Error(f"unsupported Release asset storage: {storage}")
+        if storage == "zip_entry":
+            outer = str(row.get("release_container_asset") or "")
+            member = str(row.get("release_member") or "")
+            digest = str(row.get("release_remote_digest") or "").lower()
+            remote_size_value = row.get("release_remote_size")
+            if not (
+                outer.endswith(".zip") and "/" not in outer and "\\" not in outer
+                and member == str(row.get("release_asset") or "")
+                and member.endswith(".jsonl.gz")
+                and "/" not in member and "\\" not in member and ".." not in member
+                and digest.startswith("sha256:")
+                and len(digest) == 71
+                and all(c in "0123456789abcdef" for c in digest[7:])
+                and type(remote_size_value) is int and remote_size_value > 0
+            ):
+                raise DatasetV2Error("packed SAFE shard lacks verified ZIP/member locator")
+            remote_size = remote_size_value
+            remote_digest = digest[7:]
         if release_repo != DEFAULT_REPOSITORY:
             raise DatasetV2Error(f"foreign dataset repository refused: {release_repo}")
         return cls(
@@ -94,6 +124,10 @@ class SafeShard:
             release_tag=str(row["release_tag"]),
             release_asset=str(row["release_asset"]),
             manifest_path=str(row["manifest_path"]),
+            release_container_asset=outer,
+            release_member=member,
+            release_remote_size=remote_size,
+            release_remote_digest=remote_digest,
         )
 
 
@@ -198,7 +232,7 @@ def _release_asset_url(shard: SafeShard) -> str:
     integrity contract: the downloaded bytes are still verified below.
     """
     tag = quote(shard.release_tag, safe="")
-    asset = quote(shard.release_asset, safe="")
+    asset = quote(shard.release_container_asset or shard.release_asset, safe="")
     return (
         f"https://github.com/{shard.release_repository}/releases/download/"
         f"{tag}/{asset}"
@@ -220,6 +254,9 @@ def download_safe_shard(
 
     temporary = path.with_suffix(path.suffix + ".part")
     temporary.unlink(missing_ok=True)
+    archive_temp = path.with_suffix(path.suffix + ".archive.part")
+    archive_temp.unlink(missing_ok=True)
+    download_to = archive_temp if shard.release_container_asset else temporary
     url = _release_asset_url(shard)
     try:
         with requests.get(
@@ -230,7 +267,7 @@ def download_safe_shard(
             allow_redirects=True,
         ) as response:
             response.raise_for_status()
-            with temporary.open("wb") as handle:
+            with download_to.open("wb") as handle:
                 for chunk in response.iter_content(chunk_size=4 * 1024 * 1024):
                     if chunk:
                         handle.write(chunk)
@@ -238,6 +275,7 @@ def download_safe_shard(
                 os.fsync(handle.fileno())
     except requests.HTTPError as exc:
         temporary.unlink(missing_ok=True)
+        archive_temp.unlink(missing_ok=True)
         status = getattr(getattr(exc, "response", None), "status_code", None)
         if status in {408, 425, 429, 500, 502, 503, 504}:
             raise DatasetV2Error(
@@ -248,14 +286,40 @@ def download_safe_shard(
         ) from exc
     except requests.RequestException as exc:
         temporary.unlink(missing_ok=True)
+        archive_temp.unlink(missing_ok=True)
         raise DatasetV2Error(
             f"temporary external SAFE shard download failure: {type(exc).__name__}"
         ) from exc
     except OSError as exc:
         temporary.unlink(missing_ok=True)
+        archive_temp.unlink(missing_ok=True)
         raise DatasetV2Error(
             f"SAFE shard local write failed: {type(exc).__name__}"
         ) from exc
+
+    if shard.release_container_asset:
+        try:
+            if (
+                archive_temp.stat().st_size != shard.release_remote_size
+                or _sha256(archive_temp) != shard.release_remote_digest
+            ):
+                raise DatasetV2Error("packed Release ZIP size/SHA-256 mismatch")
+            with zipfile.ZipFile(archive_temp, "r") as archive:
+                members = [
+                    info for info in archive.infolist()
+                    if info.filename == shard.release_member and not info.is_dir()
+                ]
+                if len(members) != 1 or members[0].file_size != shard.bytes:
+                    raise DatasetV2Error("packed Release member identity mismatch")
+                with archive.open(members[0]) as source, temporary.open("wb") as output:
+                    while block := source.read(4 * 1024 * 1024):
+                        output.write(block)
+                    output.flush()
+                    os.fsync(output.fileno())
+        except (zipfile.BadZipFile, OSError, EOFError, RuntimeError, ValueError) as exc:
+            raise DatasetV2Error("packed Release extraction failed") from exc
+        finally:
+            archive_temp.unlink(missing_ok=True)
 
     if temporary.stat().st_size != shard.bytes:
         temporary.unlink(missing_ok=True)
