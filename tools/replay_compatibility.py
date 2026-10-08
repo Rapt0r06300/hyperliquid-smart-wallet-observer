@@ -14,8 +14,8 @@ except ModuleNotFoundError:
     from backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
-REPLAYABLE_FAMILIES={"trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v4"
+REPLAYABLE_FAMILIES={"capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
+VERIFIER_VERSION="alina.replay.compatibility.v5"
 
 
 def _open(path: Path):
@@ -75,6 +75,68 @@ def _proof_of_receive_only_snapshot(
     if type(recv) is not int or recv <= 0 or type(monotonic) is not int or monotonic <= 0:
         return None
     return recv
+
+
+def _verified_capacity_lineage(row: Mapping[str, Any]) -> bool:
+    """Verify an individual derived capacity record's immutable L2 references.
+
+    This proves only replayability of the *derived tape*, not the existence,
+    completeness or SAFE classification of the parent L2 shard.
+    """
+    import hashlib
+    import re
+    if (
+        row.get("channel") != "capacity_tape"
+        or row.get("real_execution") is not False
+        or str(row.get("event_kind") or "").upper() != "SNAPSHOT"
+        or row.get("exchange_ts_ms") is None
+    ):
+        return False
+    provenance = row.get("provenance")
+    summary = row.get("parsed_summary")
+    if not isinstance(provenance, Mapping) or not isinstance(summary, Mapping):
+        return False
+    if not (
+        provenance.get("transport") == "derived"
+        and provenance.get("access") == "read_only"
+        and provenance.get("authenticated") is False
+        and provenance.get("derived") is True
+        and provenance.get("derived_from_family") == "l2Book"
+        and provenance.get("raw_l2_source_of_truth") is True
+    ):
+        return False
+    raw = row.get("raw_payload")
+    if not isinstance(raw, str) or not raw:
+        return False
+    if row.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest():
+        return False
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, Mapping) or payload.get("derived_from_family") != "l2Book":
+        return False
+    sha = str(summary.get("source_raw_l2_sha256") or "")
+    book = str(summary.get("source_reconstructed_book_sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha) or not re.fullmatch(r"[0-9a-f]{64}", book):
+        return False
+    if (
+        sha != str(payload.get("source_raw_l2_sha256") or "")
+        or sha != str(provenance.get("source_raw_l2_sha256") or "")
+        or book != str(payload.get("source_reconstructed_book_sha256") or "")
+        or book != str(provenance.get("source_reconstructed_book_sha256") or "")
+    ):
+        return False
+    identity = summary.get("source_l2_identity")
+    if not isinstance(identity, Mapping):
+        return False
+    return (
+        identity.get("raw_l2_sha256") == sha
+        and identity.get("reconstructed_book_sha256") == book
+        and identity.get("receive_monotonic_ns") == row.get("local_monotonic_ns")
+        and identity.get("exchange_ts_ms") == row.get("exchange_ts_ms")
+        and identity.get("sequence") == row.get("sequence")
+    )
 
 
 def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -137,6 +199,9 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
                     result["out_of_order_count"]+=1
                 last=ts
 
+                if family == "capacity_tape" and not _verified_capacity_lineage(row):
+                    result["invalid_record_count"] += 1
+                    continue
                 if family not in TRADE_FAMILIES:
                     continue
 
@@ -180,6 +245,10 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
         result["replay_reason"]="TRUNCATED_OR_UNREADABLE"
         return result
 
+    result["derived_capacity_lineage_verified"] = bool(
+        family == "capacity_tape" and result["record_count"] > 0
+        and result["invalid_record_count"] == 0
+    )
     result["receive_only_snapshot_verified"] = bool(
         receive_only and verified_observations == result["record_count"]
         and verified_observations > 0
