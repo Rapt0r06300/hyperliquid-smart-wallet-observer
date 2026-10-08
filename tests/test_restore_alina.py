@@ -225,3 +225,86 @@ def test_restore_fails_before_download_when_disk_is_insufficient(tmp_path, monke
         assert "insufficient disk space" in str(exc)
     else:
         raise AssertionError("restore must fail closed when disk capacity is insufficient")
+
+
+
+def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkeypatch):
+    module = _module()
+    def a(index):
+        return {
+            **_asset(f"part-{index:03}.bin", f"https://example.invalid/{index}", bytes([index % 256])),
+            "id": index + 1,
+            "state": "uploaded",
+        }
+    releases = [{"id": 123, "tag_name": "data-v2-many", "assets": [a(i) for i in range(30)]}]
+    calls = []
+    def fake_json(url, **_kwargs):
+        calls.append(url)
+        if "/releases?" in url:
+            return releases
+        if "123/assets?" in url and "page=1" in url:
+            return [a(i) for i in range(100)]
+        if "123/assets?" in url and "page=2" in url:
+            return [a(i) for i in range(100, 105)]
+        raise AssertionError(url)
+    monkeypatch.setattr(module, "_json", fake_json)
+    rows = list(module.iter_releases("owner/repo"))
+    assert len(rows) == 1
+    assert len(rows[0]["assets"]) == 105
+    assert rows[0]["assets"][-1]["name"] == "part-104.bin"
+    assert len([url for url in calls if "/assets?" in url]) == 2
+
+
+def test_iter_releases_rejects_malformed_or_duplicate_asset_pages(monkeypatch):
+    module = _module()
+    asset = {**_asset("one.bin", "https://example.invalid/one", b"a"), "id": 7, "state": "uploaded"}
+    def fake_json(url, **_kwargs):
+        if "/releases?" in url:
+            return [{"id": 1, "tag_name": "one", "assets": []}]
+        if "page=1" in url:
+            return [asset] * 100
+        return []
+    monkeypatch.setattr(module, "_json", fake_json)
+    import pytest
+    with pytest.raises(module.RestoreError, match="duplicated asset id"):
+        list(module.iter_releases("owner/repo"))
+
+
+def test_iter_releases_rejects_asset_without_provable_hash(monkeypatch):
+    module = _module()
+    def fake_json(url, **_kwargs):
+        if "/releases?" in url:
+            return [{"id": 1, "tag_name": "one", "assets": []}]
+        return [{**_asset("one.bin", "https://example.invalid/one", b"a"),
+                 "id": 7, "state": "uploaded", "digest": None}]
+    monkeypatch.setattr(module, "_json", fake_json)
+    import pytest
+    with pytest.raises(module.RestoreError, match="SHA-256"):
+        list(module.iter_releases("owner/repo"))
+
+
+def test_restore_rejects_incomplete_inventory_before_any_download(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "iter_releases", lambda *_args, **_kwargs: iter([
+        {"tag_name": "test", "assets": [
+            _asset("same.bin", "https://example.invalid/1", b"a"),
+            _asset("same.bin", "https://example.invalid/2", b"b"),
+        ]}
+    ]))
+    monkeypatch.setattr(module, "_download_to_path", lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("must not download")
+    ))
+    import pytest
+    with pytest.raises(module.RestoreError, match="duplicate"):
+        module.restore_everything("owner/repo", tmp_path)
+
+
+def test_download_asset_rejects_missing_hash_even_when_cached(tmp_path):
+    module = _module()
+    path = tmp_path / "asset.bin"
+    path.write_bytes(b"saved")
+    asset = _asset("asset.bin", "https://example.invalid/asset", b"saved")
+    asset["digest"] = "sha256:not-a-hex-digest"
+    import pytest
+    with pytest.raises(module.RestoreError, match="SHA-256"):
+        module.download_asset(asset, tmp_path)

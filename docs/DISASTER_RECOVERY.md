@@ -1,22 +1,39 @@
 # Alina Smart Flow — Disaster Recovery
 
-## Final contract: clone-complete
+## Current supported recovery: clone + GitHub Releases
 
-The user's PC is never an operational dependency of Alina Smart Flow.
+The user's PC is never an operational dependency of cloud Alina Smart Flow.
+For recovery on a fresh machine, use **two stages**:
 
-The final recovery contract is stricter than "clone + restore": on a machine
-where Git LFS is installed, a normal clone of the single canonical repository
-must make every canonical Alina payload byte available locally:
+1. Clone the canonical bot, modules, scripts, and tracked configuration:
 
-```bash
-git lfs install
+   ```bash
 git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
+cd hyperliquid-smart-wallet-observer
 ```
 
-GitHub Release assets cannot themselves be downloaded by Git clone. Therefore
-heavy immutable evidence is mirrored into `clone_payload/`, where every payload
-file is tracked by Git LFS. Releases remain immutable durability/migration
-sources, not the final clone surface.
+2. Run `RESTORE_ALINA.cmd` (Windows) or `bash RESTORE_ALINA.sh` (Linux/macOS)
+   with Python 3, enough disk space, and GitHub API access. This downloads
+   **all published Release assets in the inventory taken at startup** and
+   verifies the expected sizes and SHA-256 digests. Review
+   `runtime/recovery/full/RESTORE_REPORT.json` and require the
+   command's successful exit status; never treat a partial restore as complete.
+
+The independent paginated Release-assets API is consulted for **every** Release;
+the list embedded in the Releases API response is not trusted as complete.
+For large repositories, set `GH_TOKEN` or `GITHUB_TOKEN` to a token
+with read access if anonymous API rate limits are encountered. A successful
+restore is complete only for the **published assets included in its initial
+inventory**; cloud collection can publish additional Releases concurrently.
+It cannot recover unpublished data, missing GitHub assets or ephemeral
+GitHub Actions artifacts that have expired.
+
+**Future optional objective:** make a single Git clone include heavy payload
+bytes by mirroring GitHub Releases to LFS. This is **not yet implemented as
+a complete mirror**, and must not be advertised as ready. The clone payload
+manifest currently contains no Release assets and the LFS-free capacity gate
+remains closed (see below).
+
 
 ## Byte-parity definition
 

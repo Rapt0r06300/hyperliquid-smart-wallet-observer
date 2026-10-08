@@ -132,8 +132,56 @@ def _download_to_path(
 
 
 
-def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapping[str, Any]]:
+def _list_release_assets(
+    repository: str, release_id: int, *, token: str | None = None
+) -> list[Mapping[str, Any]]:
+    """Enumerate every asset; the Releases list can truncate embedded assets at 30."""
+    if type(release_id) is not int or release_id <= 0:
+        raise RestoreError("release has no valid id")
+    assets: list[Mapping[str, Any]] = []
+    ids: set[int] = set()
+    names: set[str] = set()
     page = 1
+    while True:
+        url = (
+            f"https://api.github.com/repos/{repository}/releases/"
+            f"{release_id}/assets?per_page=100&page={page}"
+        )
+        payload = _json(url, token=token)
+        if not isinstance(payload, list):
+            raise RestoreError(f"invalid asset listing for release {release_id} page {page}")
+        for asset in payload:
+            if not isinstance(asset, Mapping):
+                raise RestoreError(f"invalid asset record in release {release_id}")
+            asset_id = asset.get("id")
+            name = asset.get("name")
+            size = asset.get("size")
+            url = asset.get("browser_download_url")
+            if type(asset_id) is not int or asset_id <= 0 or asset_id in ids:
+                raise RestoreError(f"missing or duplicated asset id in release {release_id}")
+            if not isinstance(name, str) or not name or name in names:
+                raise RestoreError(f"missing or duplicated asset name in release {release_id}")
+            if type(size) is not int or size < 0:
+                raise RestoreError(f"invalid asset size for {name}")
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise RestoreError(f"invalid download URL for {name}")
+            if _expected_digest(asset) is None:
+                raise RestoreError(f"missing/invalid SHA-256 for {name}")
+            if asset.get("state") != "uploaded":
+                raise RestoreError(f"asset not fully uploaded: {name}")
+            ids.add(asset_id)
+            names.add(name)
+            assets.append(asset)
+        if len(payload) < 100:
+            return assets
+        page += 1
+
+
+def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapping[str, Any]]:
+    """Read complete historical Releases and their independently paged asset lists."""
+    page = 1
+    seen_ids: set[int] = set()
+    seen_tags: set[str] = set()
     while True:
         url = f"https://api.github.com/repos/{repository}/releases?per_page=100&page={page}"
         payload = _json(url, token=token)
@@ -141,9 +189,22 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
             raise RestoreError("release listing is not a JSON array")
         if not payload:
             return
-        for row in payload:
-            if isinstance(row, Mapping):
-                yield row
+        for release in payload:
+            if not isinstance(release, Mapping):
+                raise RestoreError("malformed Release in listing")
+            release_id = release.get("id")
+            tag = release.get("tag_name")
+            if type(release_id) is not int or release_id <= 0 or release_id in seen_ids:
+                raise RestoreError("missing or duplicated Release id")
+            if not isinstance(tag, str) or not tag or tag in seen_tags:
+                raise RestoreError("missing or duplicated Release tag")
+            seen_ids.add(release_id)
+            seen_tags.add(tag)
+            complete_release = dict(release)
+            complete_release["assets"] = _list_release_assets(
+                repository, release_id, token=token
+            )
+            yield complete_release
         if len(payload) < 100:
             return
         page += 1
@@ -151,7 +212,7 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
 
 def _expected_digest(asset: Mapping[str, Any]) -> str | None:
     raw = str(asset.get("digest") or "")
-    if raw.lower().startswith("sha256:") and len(raw.split(":", 1)[1]) == 64:
+    if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", raw):
         return raw.split(":", 1)[1].lower()
     return None
 
@@ -159,11 +220,15 @@ def _expected_digest(asset: Mapping[str, Any]) -> str | None:
 def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
     if not path.is_file():
         return False
-    expected_size = int(asset.get("size") or 0)
-    if expected_size > 0 and path.stat().st_size != expected_size:
-        return False
+    size = asset.get("size")
     digest = _expected_digest(asset)
-    return digest is None or _sha256(path) == digest
+    return (
+        type(size) is int
+        and size >= 0
+        and path.stat().st_size == size
+        and digest is not None
+        and _sha256(path) == digest
+    )
 
 
 def download_asset(
@@ -176,6 +241,10 @@ def download_asset(
     url = str(asset.get("browser_download_url") or "")
     if not name or not url:
         raise RestoreError("release asset is missing name/browser_download_url")
+    if _expected_digest(asset) is None:
+        raise RestoreError(f"missing/invalid SHA-256 for {name}")
+    if type(asset.get("size")) is not int or asset["size"] < 0:
+        raise RestoreError(f"invalid size for {name}")
     target = destination / _safe_component(name)
     target.parent.mkdir(parents=True, exist_ok=True)
     if _asset_ok(target, asset):
@@ -184,12 +253,12 @@ def download_asset(
     tmp = target.with_suffix(target.suffix + ".partial")
     tmp.unlink(missing_ok=True)
     actual_size, actual_sha = _download_to_path(url, tmp, token=token)
-    expected_size = int(asset.get("size") or 0)
-    if expected_size > 0 and actual_size != expected_size:
+    expected_size = asset["size"]
+    if actual_size != expected_size:
         tmp.unlink(missing_ok=True)
         raise RestoreError(f"size mismatch for {name}")
     expected_sha = _expected_digest(asset)
-    if expected_sha and actual_sha != expected_sha:
+    if actual_sha != expected_sha:
         tmp.unlink(missing_ok=True)
         raise RestoreError(f"sha256 mismatch for {name}")
     tmp.replace(target)
@@ -396,6 +465,30 @@ def restore_everything(
     releases_root = destination / "releases"
     releases_root.mkdir(parents=True, exist_ok=True)
     releases = list(iter_releases(repository, token=token))
+    # Never start transferring data with a partial/malformed source inventory.
+    seen_tags: set[str] = set()
+    for release in releases:
+        tag = release.get("tag_name")
+        assets = release.get("assets")
+        if not isinstance(tag, str) or not tag or tag in seen_tags:
+            raise RestoreError("duplicate or missing Release tag in source inventory")
+        if not isinstance(assets, list):
+            raise RestoreError(f"missing asset list for Release {tag}")
+        seen_tags.add(tag)
+        seen_names: set[str] = set()
+        for asset in assets:
+            if not isinstance(asset, Mapping):
+                raise RestoreError(f"invalid asset record in Release {tag}")
+            name = asset.get("name")
+            if not isinstance(name, str) or not name or name in seen_names:
+                raise RestoreError(f"duplicate or missing asset name in Release {tag}")
+            if _expected_digest(asset) is None:
+                raise RestoreError(f"missing/invalid SHA-256 for {tag}/{name}")
+            if type(asset.get("size")) is not int or asset["size"] < 0:
+                raise RestoreError(f"missing/invalid size for {tag}/{name}")
+            if not isinstance(asset.get("browser_download_url"), str) or not asset["browser_download_url"].startswith("https://"):
+                raise RestoreError(f"invalid download URL for {tag}/{name}")
+            seen_names.add(name)
 
     pending_download_bytes = 0
     for release in releases:
@@ -475,6 +568,11 @@ def restore_everything(
         if workspace is not None
         else None
     )
+    report["expected_assets"] = sum(len(release["assets"]) for release in releases)
+    report["all_source_assets_accounted_for"] = (
+        report["asset_count"] == report["expected_assets"]
+        and report["downloaded"] + report["skipped_verified"] + len(report["failures"]) == report["expected_assets"]
+    )
     report_path = destination / "RESTORE_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
     return report
@@ -511,6 +609,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     failures = len(report["failures"]) + int(report["verification_failures"])
+    if not report["all_source_assets_accounted_for"]:
+        failures += 1
     print(
         json.dumps(
             {
