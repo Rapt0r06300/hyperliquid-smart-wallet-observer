@@ -229,7 +229,29 @@ def _candidate(
     # because local receive-monotonic timestamps cannot exist in downloaded
     # history. Admit only verified official archives to the strict verifier.
     if status in {"REJECT","REJECTED","PARTIAL"}:
-        return bool(manifest and is_official_historical_archive(manifest))
+        if manifest and is_official_historical_archive(manifest):
+            return True
+        # Historical HTTP Copy-Vault state lacks exchange timestamps by API
+        # design. Only allow it into the immutable asset verifier; this is NOT
+        # a SAFE promotion. Every TickEnvelope must subsequently prove causality.
+        expected_sources = {
+            "copy_vault_positions": "hyperliquid_public_info",
+            "copy_vault_selection": "hyperliquid_public_vaults",
+        }
+        if (
+            isinstance(manifest,Mapping)
+            and family in expected_sources
+            and manifest.get("source") == expected_sources[family]
+            and manifest.get("asset_verified") is True
+            and str(manifest.get("sha256") or "").lower() == str(row.get("sha256") or "").lower()
+            and str(row.get("release_repository") or "") == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        ):
+            provenance = manifest.get("provenance")
+            if isinstance(provenance,Mapping):
+                transports = provenance.get("transports")
+                if transports == ["https"] and provenance.get("authenticated") is False and provenance.get("public_data_only") is True:
+                    return True
+        return False
     return False
 
 
@@ -395,6 +417,36 @@ def _apply_result(
             manifest["trade_count_exact"]=False
     manifest.pop("replay_validation_pending",None)
     manifest.pop("pre_replay_quality_status",None)
+
+    if result.get("receive_only_snapshot_verified") is True:
+        # No invented exchange time: store the old integrity result for audit
+        # and correct only the missing-exchange label after immutable SHA
+        # verification and a full envelope-by-envelope receive-clock proof.
+        if result.get("verified_from_release") is not True or result.get("asset_sha256") != manifest.get("sha256"):
+            raise BackfillError("receive-only snapshot lacks immutable Release verification")
+        family=str(manifest.get("family") or "").lower()
+        original=manifest.get("integrity")
+        original=original if isinstance(original,Mapping) else {}
+        if family not in {"copy_vault_positions","copy_vault_selection"}:
+            raise BackfillError("invalid receive-only snapshot family")
+        manifest["historical_receive_only_repair"] = {
+            "method": "immutable_tick_envelope_receive_clock_scan_v1",
+            "verifier_version": VERIFIER_VERSION,
+            "release_asset_sha256": result["asset_sha256"],
+            "verified_records": result.get("record_count"),
+            "previous_missing_timestamp_count": original.get("missing_timestamp_count"),
+            "exchange_timestamp_invented": False,
+        }
+        integrity=dict(original)
+        integrity["missing_timestamp_count"]=0
+        manifest["integrity"]=integrity
+        provenance=dict(manifest.get("provenance") or {})
+        provenance["timestamp_semantics"]=["receive_observation_time_only"]
+        manifest["provenance"]=provenance
+        manifest["reconciliation"]={
+            "status": "SNAPSHOT_VERIFIED",
+            "method": "immutable_read_only_http_observation_sha256_scan",
+        }
 
     if result.get("replay_compatible") is True and is_official_historical_archive(manifest):
         reconciliation=dict(manifest.get("reconciliation") or {})
