@@ -458,23 +458,10 @@ def build() -> dict[str, Any]:
         and global_unique_complete
     )
 
-    if UNCOMPRESSED_PATCH.is_file():
-        try:
-            size_doc=json.loads(UNCOMPRESSED_PATCH.read_text(encoding="utf-8"))
-            size_rows=size_doc.get("sizes") if isinstance(size_doc,dict) else {}
-            if isinstance(size_rows,dict):
-                total_uncompressed=sum(
-                    int(row.get("uncompressed_bytes") or 0)
-                    for row in size_rows.values()
-                    if isinstance(row,dict)
-                )
-                totals["TOTAL_UNCOMPRESSED_BYTES"]=total_uncompressed
-                totals["UNCOMPRESSED_SIZE_COVERAGE_COMPLETE"]=size_doc.get("coverage_complete") is True
-                totals["UNCOMPRESSED_SIZE_PATCH_DIGEST"]=hashlib.sha256(
-                    json.dumps(size_doc,sort_keys=True,separators=(",",":")).encode()
-                ).hexdigest()
-        except (OSError,ValueError,TypeError):
-            totals["UNCOMPRESSED_SIZE_COVERAGE_COMPLETE"]=False
+    # TOTAL_UNCOMPRESSED_BYTES was already accumulated for EACH indexed shard,
+    # using SHA-matched size patches when present and exact manifest evidence
+    # otherwise. Never overwrite a growing catalog's whole-corpus total with
+    # a stale historical patch covering only a subset of the indexed shards.
 
     totals["VALID_RECORD_COUNT_MISSING_SHARDS"] = valid_record_count_missing
     totals["UNIQUE_RECORD_COUNT_MISSING_SHARDS"] = unique_record_count_missing
