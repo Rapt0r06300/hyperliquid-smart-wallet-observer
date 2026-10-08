@@ -455,3 +455,36 @@ def test_compact_index_restores_exact_trade_identities_from_sha_bound_manifest(t
     totals = metrics.build()["totals"]
     assert totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
     assert totals["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
+
+
+
+def test_new_exact_shards_are_not_discarded_from_total_bytes_by_stale_patch(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    rows = []
+    for dataset_id, size in (("old", 100), ("new", 300)):
+        rows.append({
+            "dataset_id": dataset_id, "family": "bbo",
+            "venue": "okx", "symbol": "BTCUSDT",
+            "quality_status": "SAFE", "event_count": 1,
+            "record_count": 1, "bytes": 50,
+            "uncompressed_bytes": size, "uncompressed_size_exact": True,
+        })
+    (catalog / "DATA_INDEX.json").write_text(json.dumps({"shards": rows}))
+    (catalog / "UNCOMPRESSED_SIZE_PATCH.json").write_text(json.dumps({
+        "coverage_complete": True, "sizes": {"old": {"uncompressed_bytes": 100}}
+    }))
+    monkeypatch.setattr(metrics, "ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "INDEX", catalog / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", catalog / "absent-unique.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", catalog / "absent-trades.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", catalog / "absent-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", catalog / "UNCOMPRESSED_SIZE_PATCH.json")
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_SHARDS"] == 2
+    assert totals["TOTAL_UNCOMPRESSED_BYTES"] == 400
+    assert totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] == 2
+    assert totals["UNCOMPRESSED_SIZE_COVERAGE_COMPLETE"] is True
