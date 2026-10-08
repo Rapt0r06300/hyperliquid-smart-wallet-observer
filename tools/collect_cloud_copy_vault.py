@@ -185,6 +185,7 @@ def selection_envelope(row: Mapping[str, Any], selection: Mapping[str, Any]) -> 
             "transport": "https",
             "authenticated": False,
             "selection_causal": True,
+            "timestamp_semantics": "receive_observation_time_only",
         },
         parsed_summary={
             "tvl_usd": row.get("tvl_usd"),
@@ -756,6 +757,7 @@ async def collect_position_snapshots(
                         "transport": "https",
                         "authenticated": False,
                         "request_type": "clearinghouseState",
+                        "timestamp_semantics": "receive_observation_time_only",
                         "request_send_wall_ms": sent_ms,
                         "request_receive_wall_ms": received_ms,
                     },

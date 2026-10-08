@@ -18,6 +18,8 @@ V2_SCHEMA = "alina.dataset_bundle.v2"
 _WS_TRANSPORTS = {"websocket"}
 _SNAPSHOT_CHANNELS = {
     "instrument_metadata",
+    "copy_vault_positions",
+    "copy_vault_selection",
     "open_interest",
     "funding_settlement",
     "clock_sync",
@@ -58,6 +60,13 @@ def infer_reconciliation_status(manifest: Mapping[str, Any]) -> str:
 
     family = str(manifest.get("family") or "").lower()
     if transports and transports.issubset({"https", "http"}) and family in _SNAPSHOT_CHANNELS:
+        if family in {"copy_vault_positions", "copy_vault_selection"}:
+            semantics = {
+                str(value).lower()
+                for value in (provenance.get("timestamp_semantics") or [])
+            }
+            if "receive_observation_time_only" not in semantics:
+                return "UNVERIFIED"
         return "SNAPSHOT_VERIFIED"
     if transports.intersection(_WS_TRANSPORTS) and connection_count == 1 and clean:
         return "SOURCE_CONTINUITY_VERIFIED"

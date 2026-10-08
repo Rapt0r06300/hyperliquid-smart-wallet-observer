@@ -272,6 +272,17 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
                 reasons.append("RECONCILIATION_ARCHIVE_VERIFICATION_REQUIRED")
         elif reconciliation_status not in _CONTINUITY_RECONCILIATION:
             reasons.append("RECONCILIATION_MATCH_REQUIRED")
+    elif (
+        family in {"copy_vault_positions", "copy_vault_selection"}
+        and transports
+        and transports.issubset({"http", "https"})
+        and "receive_observation_time_only" in {
+            str(value).lower()
+            for value in (provenance.get("timestamp_semantics") or [])
+        }
+    ):
+        if reconciliation_status not in _SNAPSHOT_RECONCILIATION:
+            reasons.append(f"RECONCILIATION_{reconciliation_status}")
     elif family in {"instrument_metadata", "open_interest", "funding_settlement"} and transports and transports.issubset({"http", "https"}):
         if reconciliation_status not in _SNAPSHOT_RECONCILIATION:
             reasons.append(f"RECONCILIATION_{reconciliation_status}")
