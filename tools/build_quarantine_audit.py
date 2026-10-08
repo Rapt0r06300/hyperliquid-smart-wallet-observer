@@ -265,6 +265,51 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     return body
 
 
+def compact_root_causes(audit: Mapping[str, Any]) -> dict[str, Any]:
+    """Publish compact actionable causes, retaining exhaustive audit separately."""
+    by_venue_family: dict[str, dict[str, int]] = {}
+    reason_by_venue_family: dict[str, dict[str, int]] = {}
+    for shard in audit.get("non_safe_shards") or []:
+        if not isinstance(shard, Mapping):
+            continue
+        key = f"{shard.get('venue') or 'unknown'}|{shard.get('family') or 'unknown'}"
+        records = _count(shard.get("record_count"))
+        _add_bucket(by_venue_family, key, records=records)
+        for reason in shard.get("current_reasons") or ["NO_CURRENT_REASON"]:
+            _add_bucket(reason_by_venue_family, f"{key}|{reason}", records=records)
+
+    def ranked(table: Mapping[str, Mapping[str, Any]], limit: int) -> dict[str, Any]:
+        return dict(sorted(
+            table.items(),
+            key=lambda item: (-_count(item[1].get("shards")), item[0]),
+        )[:limit])
+
+    return {
+        "schema": "alina.quarantine_root_causes.v1",
+        "source_index_sha256": audit.get("source_index_sha256"),
+        "source_audit_digest": audit.get("receipt_digest"),
+        "source_shards": audit.get("source_shard_count"),
+        "non_safe_shards": audit.get("non_safe_shard_count"),
+        "unreadable_manifest_count": audit.get("unreadable_manifest_count"),
+        "potential_false_non_safe_count": audit.get("potential_false_non_safe_count"),
+        "quarantine_total_matches_metrics": audit.get("quarantine_total_matches_metrics"),
+        "by_status": audit.get("by_status"),
+        "by_category": audit.get("by_category"),
+        "by_family": audit.get("by_family"),
+        "by_venue": audit.get("by_venue"),
+        "current_reasons": ranked(audit.get("current_reason_counts") or {}, 60),
+        "stored_reasons": ranked(audit.get("stored_reason_counts") or {}, 60),
+        "by_venue_family": ranked(by_venue_family, 100),
+        "reason_by_venue_family": ranked(reason_by_venue_family, 120),
+        "record_counts_overlap_reasons": True,
+        "scope": "indexed_dataset_only",
+        "status": "DIAGNOSIS_ONLY",
+        "validation_allowed": False,
+        "paper_only": True,
+        "real_execution": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=str(ROOT))
@@ -277,6 +322,16 @@ def main() -> int:
         json.dumps(body, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    causes = compact_root_causes(body)
+    causes_path = output.with_name("QUARANTINE_CAUSES.json")
+    causes_path.write_text(
+        json.dumps(causes, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({
+        "root_causes_output": str(causes_path),
+        "top_current_reasons": list(causes["current_reasons"].items())[:12],
+    }, sort_keys=True))
     print(json.dumps({
         "output": str(output),
         "quarantined_record_count": body["quarantined_record_count"],

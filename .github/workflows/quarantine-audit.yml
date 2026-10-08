@@ -10,6 +10,7 @@ on:
       - "catalog/DATA_METRICS.json"
       - "datasets/**/*.manifest.json"
       - "tools/build_quarantine_audit.py"
+      - "catalog/QUARANTINE_CAUSES.json"
       - "tools/repair_stale_safe_classifications.py"
       - "tools/manifest_policy.py"
       - "tests/test_quarantine_audit.py"
@@ -79,6 +80,7 @@ jobs:
             catalog/DATA_CATALOG.json \
             catalog/DATA_QUALITY_REGISTRY.json \
             catalog/QUARANTINE_AUDIT.json \
+            catalog/QUARANTINE_CAUSES.json \
             datasets/safe \
             datasets/quarantine \
             datasets/rejected

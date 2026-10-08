@@ -164,3 +164,34 @@ def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
     assert registry["active_dataset"]["partial_count"] == 0
     assert data_catalog["safe_shard_count"] == 1
     assert data_catalog["partial_shard_count"] == 0
+
+
+
+def test_compact_root_causes_keeps_reasons_and_never_promotes():
+    from tools.build_quarantine_audit import compact_root_causes
+
+    audit = {
+        "receipt_digest": "sha",
+        "source_index_sha256": "sha-index",
+        "source_shard_count": 4,
+        "non_safe_shard_count": 2,
+        "by_status": {"REJECT": {"shards": 1, "records": 2}},
+        "by_venue": {},
+        "by_family": {},
+        "by_category": {},
+        "current_reason_counts": {"DESYNC": {"shards": 1, "records": 2}},
+        "stored_reason_counts": {},
+        "non_safe_shards": [
+            {"venue": "binance", "family": "l2book", "record_count": 2,
+             "current_reasons": ["DESYNC", "SEQUENCE_OR_QUEUE_GAP"]},
+            {"venue": "bybit", "family": "ticker", "record_count": 10,
+             "current_reasons": ["RECONCILIATION_UNVERIFIED"]},
+        ],
+    }
+    compact = compact_root_causes(audit)
+    assert compact["non_safe_shards"] == 2
+    assert compact["by_venue_family"]["binance|l2book"]["shards"] == 1
+    assert compact["reason_by_venue_family"]["binance|l2book|DESYNC"]["records"] == 2
+    assert compact["status"] == "DIAGNOSIS_ONLY"
+    assert compact["validation_allowed"] is False
+    assert "non_safe_shards" not in compact["by_status"]
