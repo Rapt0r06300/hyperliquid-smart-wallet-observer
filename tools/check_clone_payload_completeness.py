@@ -11,6 +11,7 @@ same object graph differently on server and client.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -150,12 +151,56 @@ def manifest_inventory(manifest: Mapping[str, Any]) -> dict[int, Mapping[str, An
     return inventory
 
 
+def verify_materialized_assets(
+    root: Path, inventory: Mapping[int, Mapping[str, Any]]
+) -> list[dict[str, Any]]:
+    """Verify actual working-tree bytes, not merely Git LFS pointer identities.
+
+    Run on a fresh machine after a normal Git LFS-enabled clone. This check
+    reads the real files by streaming and rejects symlinks/path traversal.
+    """
+    root = root.resolve()
+    allowed = (root / "clone_payload" / "releases").resolve()
+    failures: list[dict[str, Any]] = []
+    for asset_id, row in inventory.items():
+        relative = Path(str(row.get("clone_path") or ""))
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or relative.parts[:2] != ("clone_payload", "releases")
+        ):
+            failures.append({"asset_id": asset_id, "reason": "invalid_path"})
+            continue
+        path = root / relative
+        resolved = path.resolve()
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or allowed not in resolved.parents
+        ):
+            failures.append({"asset_id": asset_id, "reason": "not_materialized"})
+            continue
+        expected_bytes = int(row.get("bytes") or 0)
+        expected_sha = str(row.get("sha256") or "").lower()
+        if path.stat().st_size != expected_bytes or len(expected_sha) != 64:
+            failures.append({"asset_id": asset_id, "reason": "size_or_identity"})
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                digest.update(block)
+        if digest.hexdigest() != expected_sha:
+            failures.append({"asset_id": asset_id, "reason": "sha256_mismatch"})
+    return failures
+
+
 def audit(
     repository: str,
     *,
     root: Path,
     token: str | None,
     verify_git_pointers: bool,
+    verify_worktree: bool = False,
 ) -> dict[str, Any]:
     manifest = mirror.load_manifest(root / MANIFEST_PATH)
     source = source_inventory(repository, token=token)
@@ -237,12 +282,16 @@ def audit(
                     }
                 )
 
+    physical_failures = (
+        verify_materialized_assets(root, cloned) if verify_worktree else []
+    )
     source_bytes = sum(int(row["bytes"]) for row in source.values())
     cloned_bytes = sum(int(row.get("bytes") or 0) for row in cloned.values())
     complete = (
         not missing_ids
         and not extra_ids
         and not mismatches
+        and not physical_failures
         and source_bytes == cloned_bytes
     )
     return {
@@ -260,6 +309,9 @@ def audit(
         "extra_asset_ids_sample": extra_ids[:50],
         "mismatches_sample": mismatches[:50],
         "git_lfs_pointers_verified": bool(verify_git_pointers),
+        "physical_worktree_verification_requested": bool(verify_worktree),
+        "physical_worktree_mismatch_count": len(physical_failures),
+        "physical_worktree_mismatches_sample": physical_failures[:50],
         "read_only": True,
         "real_execution": False,
     }
@@ -271,6 +323,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".")
     parser.add_argument("--require-complete", action="store_true")
     parser.add_argument("--skip-git-pointers", action="store_true")
+    parser.add_argument(
+        "--verify-worktree",
+        action="store_true",
+        help="stream every materialized LFS payload byte after a fresh clone",
+    )
     parser.add_argument("--output")
     args = parser.parse_args(argv)
 
@@ -282,6 +339,7 @@ def main(argv: list[str] | None = None) -> int:
             root=root,
             token=token,
             verify_git_pointers=not args.skip_git_pointers,
+            verify_worktree=args.verify_worktree,
         )
     except (CompletenessError, mirror.MirrorError, OSError, ValueError) as exc:
         print(f"ALINA_CLONE_COMPLETENESS_FAIL: {exc}", file=sys.stderr)
