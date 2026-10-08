@@ -96,7 +96,10 @@ jobs:
                   continue
               if allowed.match(tag) and tag not in known and tag not in quarantined:
                   new_tags.append(tag)
-          batch = new_tags[:100]
+          # Publishing ~100*1000 per-shard manifests makes DATA_INDEX huge and
+          # GitHub rejects individual >100 MiB blobs. Bound each durable wave,
+          # preserve the backlog, and relay the next wave after a real push.
+          batch = new_tags[:8]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
