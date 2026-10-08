@@ -1,0 +1,125 @@
+{
+  "asset_verified": true,
+  "bytes": 1823,
+  "collection_run_id": "market-e8-6-2026100708-v7-0",
+  "collector_version": "674bb2f044ca730096193380b885539a7e66de81",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-snowusdt-1791418825333-1791418899793-caa94fdb2f60",
+  "end_ts_ms": 1791418899793,
+  "event_count": 2,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 51,
+    "live_only": 49,
+    "matched_count": 2,
+    "missing_from_live": 0,
+    "reference_count": 2,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 2,
+  "release": {
+    "asset_id": 620217212,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-trades-snowusdt-1791418825333-1791418899793-caa94fdb2f60.jsonl.gz",
+    "release_id": 406275093,
+    "release_tag": "data-v2-campaign-market-e8-6-2026100708-v7-u0",
+    "remote_digest": "sha256:fb0a59f877803baa755ba58b8a1d02bbc3a95ac500b05d6fed75636c39af332d",
+    "remote_size": 27114355,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-snowusdt-1791418825333-1791418899793-caa94fdb2f60.jsonl.gz",
+  "release_asset_id": 620217212,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 406275093,
+  "release_member": "bitget-public-ws-trades-snowusdt-1791418825333-1791418899793-caa94fdb2f60.jsonl.gz",
+  "release_remote_digest": "sha256:fb0a59f877803baa755ba58b8a1d02bbc3a95ac500b05d6fed75636c39af332d",
+  "release_remote_size": 27114355,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-6-2026100708-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "caa94fdb2f602a9e3a053cdffd65a950e2d146f380dfe495d05ee847c0a1f74e",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791418825333,
+  "symbol": "SNOWUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2,
+      "max": 67.5,
+      "min": 66.0,
+      "p50": 66.0,
+      "p95": 67.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-fbbdc1c326fb48fe954080d3e1f1acfb"
+    ],
+    "first_exchange_ts_ms": 1791417887435,
+    "last_exchange_ts_ms": 1791418899735,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2,
+      "max": 937898.0,
+      "min": 58.0,
+      "p50": 58.0,
+      "p95": 937898.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2,
+      "max": 108.926863,
+      "min": 0.0,
+      "p50": 0.0,
+      "p95": 108.926863
+    }
+  },
+  "trade_count": 51,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 8748,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

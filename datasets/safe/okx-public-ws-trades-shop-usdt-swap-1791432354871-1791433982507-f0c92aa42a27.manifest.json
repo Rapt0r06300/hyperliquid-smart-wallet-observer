@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 1037,
+  "collection_run_id": "market-e8-6-2026100721-v7-0",
+  "collector_version": "567d3fed0396fdbbc5e304a9c17a1d164b98f8e1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-shop-usdt-swap-1791432354871-1791433982507-f0c92aa42a27",
+  "end_ts_ms": 1791433982507,
+  "event_count": 3,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 3,
+    "live_only": 0,
+    "matched_count": 3,
+    "missing_from_live": 0,
+    "reference_count": 3,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 3,
+  "release": {
+    "asset_id": 620794386,
+    "asset_name": "packed-shards-0007.zip",
+    "member_name": "okx-public-ws-trades-shop-usdt-swap-1791432354871-1791433982507-f0c92aa42a27.jsonl.gz",
+    "release_id": 406434528,
+    "release_tag": "data-v2-campaign-market-e8-6-2026100721-v7-u0",
+    "remote_digest": "sha256:f520d5f5eae8f268e71c4db03da8d70c164e3b7d1033dad2f77e9e69f6ecb117",
+    "remote_size": 53834027,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-shop-usdt-swap-1791432354871-1791433982507-f0c92aa42a27.jsonl.gz",
+  "release_asset_id": 620794386,
+  "release_container_asset": "packed-shards-0007.zip",
+  "release_id": 406434528,
+  "release_member": "okx-public-ws-trades-shop-usdt-swap-1791432354871-1791433982507-f0c92aa42a27.jsonl.gz",
+  "release_remote_digest": "sha256:f520d5f5eae8f268e71c4db03da8d70c164e3b7d1033dad2f77e9e69f6ecb117",
+  "release_remote_size": 53834027,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-6-2026100721-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f0c92aa42a270fd2bc8d3632184ea6e49a6c0e474353dd2f990b864f51df1298",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791432354871,
+  "symbol": "SHOP-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3,
+      "max": 35.5,
+      "min": 27.0,
+      "p50": 27.0,
+      "p95": 35.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-e37f3684fa03449f85d494c1e16c667e"
+    ],
+    "first_exchange_ts_ms": 1791432354766,
+    "last_exchange_ts_ms": 1791433981452,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3,
+      "max": 1055.0,
+      "min": 105.0,
+      "p50": 106.0,
+      "p95": 1055.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3,
+      "max": 178.079032,
+      "min": 176.843832,
+      "p50": 176.843832,
+      "p95": 178.079032
+    }
+  },
+  "trade_count": 3,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "3ddff5dc63f6a271f7bd2816dc242ada36e5ae83e6c2c01f4509411dd4bc8dc1",
+    "be545fae76a0baf1e831b67da9b732a3bd59b3702122bb844faff999c8d4fd10",
+    "cdbaac79c73e58bb5cb28dca0e8eddda8769fb43d92b95bd9ce8413dfdbbd309"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 4345,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 3,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

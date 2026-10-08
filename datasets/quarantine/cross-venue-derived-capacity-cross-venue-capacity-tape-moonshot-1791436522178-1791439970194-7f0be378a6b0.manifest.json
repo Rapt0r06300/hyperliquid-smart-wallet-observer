@@ -1,0 +1,113 @@
+{
+  "asset_verified": true,
+  "bytes": 89184,
+  "collection_run_id": "market-e8-6-2026100801-v7-0",
+  "collector_version": "5ef94aada80d6830758d164b6ed431b75341bc43",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-moonshot-1791436522178-1791439970194-7f0be378a6b0",
+  "end_ts_ms": 1791439970194,
+  "event_count": 271,
+  "family": "cross_venue_capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "cross_venue_capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 271,
+  "release": {
+    "asset_id": 620927987,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "cross-venue-derived-capacity-cross-venue-capacity-tape-moonshot-1791436522178-1791439970194-7f0be378a6b0.jsonl.gz",
+    "release_id": 406481039,
+    "release_tag": "data-v2-campaign-market-e8-6-2026100801-v7-u0",
+    "remote_digest": "sha256:f753ec5fbc8637bc400e735bcbdcb305393f4b9cea00dfe1d007c7465822dae9",
+    "remote_size": 17610876,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "cross-venue-derived-capacity-cross-venue-capacity-tape-moonshot-1791436522178-1791439970194-7f0be378a6b0.jsonl.gz",
+  "release_asset_id": 620927987,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 406481039,
+  "release_member": "cross-venue-derived-capacity-cross-venue-capacity-tape-moonshot-1791436522178-1791439970194-7f0be378a6b0.jsonl.gz",
+  "release_remote_digest": "sha256:f753ec5fbc8637bc400e735bcbdcb305393f4b9cea00dfe1d007c7465822dae9",
+  "release_remote_size": 17610876,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-6-2026100801-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "7f0be378a6b02635b04c9787459c7e3292a19f9009e95e126a2b4e24645c4f17",
+  "source": "cross_venue_derived_capacity",
+  "start_ts_ms": 1791436522178,
+  "symbol": "MOONSHOT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1791436522105,
+    "last_exchange_ts_ms": 1791439970106,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 271,
+      "max": 349.0,
+      "min": 57.0,
+      "p50": 83.0,
+      "p95": 145.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 1886472,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}
