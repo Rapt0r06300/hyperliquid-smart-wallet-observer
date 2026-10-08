@@ -55,14 +55,17 @@ def verify(root: Path) -> dict:
             failures.append({"kind": "invalid_manifest_row"})
             continue
         relative = str(row.get("clone_path") or "")
-        expected_size = int(row.get("bytes") or -1)
+        expected_size = int(row.get("bytes", -1))
         expected_sha = str(row.get("sha256") or "").lower()
+        relative_path = Path(relative)
         if (
             not relative
-            or Path(relative).is_absolute()
-            or ".." in Path(relative).parts
+            or relative_path.is_absolute()
+            or relative_path.parts[:2] != ("clone_payload", "releases")
+            or ".." in relative_path.parts
             or expected_size < 0
             or len(expected_sha) != 64
+            or any(ch not in "0123456789abcdef" for ch in expected_sha)
         ):
             failures.append(
                 {"kind": "invalid_identity", "asset_id": row.get("asset_id")}
@@ -73,9 +76,15 @@ def verify(root: Path) -> dict:
             continue
         seen_paths.add(relative)
 
-        path = (root / relative).resolve()
+        untrusted = root / relative_path
+        path = untrusted.resolve()
         root_resolved = root.resolve()
-        if root_resolved != path and root_resolved not in path.parents:
+        allowed_root = root_resolved / "clone_payload" / "releases"
+        if (
+            untrusted.is_symlink()
+            or path == allowed_root
+            or allowed_root not in path.parents
+        ):
             failures.append({"kind": "path_escape", "path": relative})
             continue
         if not path.is_file():
@@ -113,8 +122,11 @@ def verify(root: Path) -> dict:
 
     manifest_assets = int(manifest.get("total_assets") or 0)
     manifest_bytes = int(manifest.get("total_bytes") or 0)
+    # An empty mirror can be internally consistent but is never an acceptable
+    # proof that historical Alina Releases have been cloned.
     complete = (
-        not failures
+        manifest_assets > 0
+        and not failures
         and verified_assets == len(rows) == manifest_assets
         and verified_bytes == manifest_bytes
     )
