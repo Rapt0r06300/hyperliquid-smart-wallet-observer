@@ -1,46 +1,46 @@
 {
-  "dataset_v2_head": "bc7f6927c5c18a758a5c8703009566a994a48860",
-  "generated_at_utc": "2026-10-08T16:15:36.677940Z",
+  "dataset_v2_head": "7d1042566a68d22d201f5d9d347a67cedddc7f9c",
+  "generated_at_utc": "2026-10-08T16:24:06.708919Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "7b4bdf148b135ff0ba5d2d2d47ecb95c3224c8c37cc30edc4e2327c83c0c9a78",
-      "output_tail": "...........................................                              [100%]\n43 passed in 2.61s\n",
+      "output_sha256": "fa1c81bdd67313cddeacdb51fb8e713517515f36e463529b006362cdd1dabdf5",
+      "output_tail": "...........................................                              [100%]\n43 passed in 2.70s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "00b4e77c0084937154c21c117e3829a16a1e66cc806eae79fd181322df04d09c",
-      "output_tail": "..................................................                       [100%]\n50 passed in 3.76s\n",
+      "output_sha256": "c81d818a7ba40a3364cf4159ce88803739293b4c26ee11e7fa92c6ce46c59d3c",
+      "output_tail": "..................................................                       [100%]\n50 passed in 3.84s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "c2cc7d61ded2fc1a032600936cf40ee632b59cb65f95236f01334b5987e523b1",
-      "output_tail": "...................................................................F.... [ 94%]\n....                                                                     [100%]\n=================================== FAILURES ===================================\n__ test_verified_observation_repair_keeps_original_missing_timestamp_evidence __\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0')\n\n    def test_verified_observation_repair_keeps_original_missing_timestamp_evidence(tmp_path):\n        from tools.replay_compatibility import VERIFIER_VERSION\n        manifest = {\n            \"dataset_id\": \"vault-example\",\n            \"family\": \"copy_vault_positions\", \"source\": \"hyperliquid_public_info\",\n            \"venue\": \"hyperliquid\", \"symbol\": \"0x\" + \"1\" * 40,\n            \"start_ts_ms\": 1000, \"end_ts_ms\": 1001,\n            \"sha256\": \"a\" * 64, \"bytes\": 120, \"event_count\": 2,\n            \"collector_version\": \"test\", \"asset_verified\": True,\n            \"replay_compatible\": False, \"replay_schema_version\": \"alina.replay.v2\",\n            \"replay_reason\": \"MISSING_CAUSAL_TIMESTAMP\", \"validation_allowed\": False,\n            \"provenance\": {\n                \"public_data_only\": True, \"authenticated\": False,\n                \"real_execution\": False, \"transports\": [\"https\"], \"timestamp_semantics\": [],\n            },\n            \"integrity\": {\n                \"gap_count\": 0, \"regression_count\": 0, \"missing_timestamp_count\": 2,\n                \"missing_monotonic_count\": 0, \"desync_count\": 0,\n                \"duplicate_count\": 0, \"duplicates_deduped\": True,\n            },\n            \"reconciliation\": {\"status\": \"UNVERIFIED\"},\n            \"required_channels\": [], \"observed_channels\": [\"copy_vault_positions\"],\n            \"cost_model\": {\"applicable\": False, \"ready\": False},\n        }\n        path = tmp_path / \"datasets\" / \"rejected\" / \"vault-example.manifest.json\"\n        path.parent.mkdir(parents=True)\n        path.write_text(json.dumps(manifest), encoding=\"utf-8\")\n        row = {\n            \"dataset_id\": \"vault-example\", \"family\": \"copy_vault_positions\",\n            \"quality_status\": \"REJECT\", \"manifest_path\": str(path.relative_to(tmp_path)),\n            \"sha256\": \"a\" * 64, \"bytes\": 120,\n        }\n        result = {\n            \"record_count\": 2, \"replay_compatible\": True,\n            \"replay_schema_version\": \"alina.replay.v2\",\n            \"replay_reason\": \"STRICT_PARSE_CHRONOLOGY_OK\",\n            \"receive_only_snapshot_verified\": True, \"verified_from_release\": True,\n            \"asset_sha256\": \"a\" * 64, \"verifier_version\": VERIFIER_VERSION,\n        }\n        backfill._apply_result(row, result, root=tmp_path)\n        safe = tmp_path / \"datasets\" / \"safe\" / \"vault-example.manifest.json\"\n>       assert safe.is_file()\nE       AssertionError: assert False\nE        +  where False = is_file()\nE        +    where is_file = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0/datasets/safe/vault-example.manifest.json').is_file\n\ntests/test_backfill_replay_compatibility_candidates.py:299: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_backfill_replay_compatibility_candidates.py::test_verified_observation_repair_keeps_original_missing_timestamp_evidence - AssertionError: assert False\n +  where False = is_file()\n +    where is_file = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0/datasets/safe/vault-example.manifest.json').is_file\n1 failed, 75 passed in 5.32s\n",
+      "output_sha256": "6dee9f64da66f3d5764353e73224afb8a81d938840d0600c8eab498c9ddac85c",
+      "output_tail": "...................................................................F.... [ 94%]\n....                                                                     [100%]\n=================================== FAILURES ===================================\n__ test_verified_observation_repair_keeps_original_missing_timestamp_evidence __\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0')\n\n    def test_verified_observation_repair_keeps_original_missing_timestamp_evidence(tmp_path):\n        from tools.replay_compatibility import VERIFIER_VERSION\n        manifest = {\n            \"dataset_id\": \"vault-example\",\n            \"family\": \"copy_vault_positions\", \"source\": \"hyperliquid_public_info\",\n            \"venue\": \"hyperliquid\", \"symbol\": \"0x\" + \"1\" * 40,\n            \"start_ts_ms\": 1000, \"end_ts_ms\": 1001,\n            \"sha256\": \"a\" * 64, \"bytes\": 120, \"event_count\": 2,\n            \"collector_version\": \"test\", \"asset_verified\": True,\n            \"replay_compatible\": False, \"replay_schema_version\": \"alina.replay.v2\",\n            \"replay_reason\": \"MISSING_CAUSAL_TIMESTAMP\", \"validation_allowed\": False,\n            \"provenance\": {\n                \"public_data_only\": True, \"authenticated\": False,\n                \"real_execution\": False, \"transports\": [\"https\"], \"timestamp_semantics\": [],\n            },\n            \"integrity\": {\n                \"gap_count\": 0, \"regression_count\": 0, \"missing_timestamp_count\": 2,\n                \"missing_monotonic_count\": 0, \"desync_count\": 0,\n                \"duplicate_count\": 0, \"duplicates_deduped\": True,\n            },\n            \"reconciliation\": {\"status\": \"UNVERIFIED\"},\n            \"required_channels\": [], \"observed_channels\": [\"copy_vault_positions\"],\n            \"cost_model\": {\"applicable\": False, \"ready\": False},\n        }\n        path = tmp_path / \"datasets\" / \"rejected\" / \"vault-example.manifest.json\"\n        path.parent.mkdir(parents=True)\n        path.write_text(json.dumps(manifest), encoding=\"utf-8\")\n        row = {\n            \"dataset_id\": \"vault-example\", \"family\": \"copy_vault_positions\",\n            \"quality_status\": \"REJECT\", \"manifest_path\": str(path.relative_to(tmp_path)),\n            \"sha256\": \"a\" * 64, \"bytes\": 120,\n        }\n        result = {\n            \"record_count\": 2, \"replay_compatible\": True,\n            \"replay_schema_version\": \"alina.replay.v2\",\n            \"replay_reason\": \"STRICT_PARSE_CHRONOLOGY_OK\",\n            \"receive_only_snapshot_verified\": True, \"verified_from_release\": True,\n            \"asset_sha256\": \"a\" * 64, \"verifier_version\": VERIFIER_VERSION,\n        }\n        backfill._apply_result(row, result, root=tmp_path)\n        safe = tmp_path / \"datasets\" / \"safe\" / \"vault-example.manifest.json\"\n>       assert safe.is_file()\nE       AssertionError: assert False\nE        +  where False = is_file()\nE        +    where is_file = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0/datasets/safe/vault-example.manifest.json').is_file\n\ntests/test_backfill_replay_compatibility_candidates.py:299: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_backfill_replay_compatibility_candidates.py::test_verified_observation_repair_keeps_original_missing_timestamp_evidence - AssertionError: assert False\n +  where False = is_file()\n +    where is_file = PosixPath('/tmp/pytest-of-runner/pytest-1/test_verified_observation_repa0/datasets/safe/vault-example.manifest.json').is_file\n1 failed, 75 passed in 5.23s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "1bfadd9be674873dd5d2101a80a3d7aad6a8c91c3e2309b757c31fce779eeb47",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.42s\n",
+      "output_sha256": "9d288e300fa122731d283393f66c8f52962fd43d46c130464e4a4c3aa45e4b28",
+      "output_tail": ".........                                                                [100%]\n9 passed in 1.48s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "2de25ca28d0fda6bb4080c94f597434783ee9d66f04c9d1db7d22d306aae7923",
-      "output_tail": ".................................................                        [100%]\n49 passed in 3.32s\n",
+      "output_sha256": "0c8ca7699ad55b387d9c0ad139218448a7eba01291e9899edbf0bf0539e36140",
+      "output_tail": ".................................................                        [100%]\n49 passed in 3.36s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "5b4cb686847af6973ae35c7f16fa4660d8504f73fec3871e3ff96b12e06fc95f",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.55s\n",
+      "output_sha256": "27f753c4f15e15623f78ef624c3c894261a6815f0393c2758e83544a3d5060f4",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.68s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -52,17 +52,17 @@
       "status": "PASS"
     }
   ],
-  "main_alina_head": "bc7f6927c5c18a758a5c8703009566a994a48860",
+  "main_alina_head": "7d1042566a68d22d201f5d9d347a67cedddc7f9c",
   "paper_only": true,
   "python_version": "3.12.15",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "9bfd6238873e3726614bc9b082a84e960f986c75fb378104b0de0bf48dbee376",
+  "receipt_digest": "f9618e729c30aa7123dbf1017de3e8aa57162633a06ed23bd225dc5c77e67067",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "37806033719"
+  "workflow_run_id": "37806598374"
 }
