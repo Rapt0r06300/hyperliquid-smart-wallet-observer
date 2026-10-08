@@ -254,23 +254,30 @@ def select_pending_assets(
     selected: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
     selected_bytes = 0
 
+    if max_assets < 1 or max_bytes < 1:
+        raise MirrorError("mirror limits must be positive")
     for release in releases:
         assets = release.get("assets")
         if not isinstance(assets, list):
-            continue
+            raise MirrorError("Release asset inventory is missing")
         for asset in assets:
             if not isinstance(asset, Mapping):
-                continue
+                raise MirrorError("Release asset inventory has an invalid row")
             asset_id = int(asset.get("id") or 0)
-            if asset_id <= 0 or asset_id in known_ids:
+            if asset_id <= 0:
+                raise MirrorError("Release asset missing immutable ID")
+            if asset_id in known_ids:
                 continue
             size = int(asset.get("size") or 0)
             if size < 0:
                 raise MirrorError(f"negative Release asset size for id={asset_id}")
-            if selected and (
-                len(selected) >= max_assets
-                or selected_bytes + size > max_bytes
-            ):
+            if size > max_bytes:
+                raise MirrorError(
+                    f"Release asset id={asset_id} is {size} bytes, larger than "
+                    f"this worker batch limit {max_bytes}; increase the per-run "
+                    "limit rather than silently exceeding runner capacity"
+                )
+            if len(selected) >= max_assets or selected_bytes + size > max_bytes:
                 return selected
             selected.append((release, asset))
             selected_bytes += size
