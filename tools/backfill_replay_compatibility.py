@@ -448,6 +448,49 @@ def _apply_result(
             "method": "immutable_read_only_http_observation_sha256_scan",
         }
 
+    if result.get("receive_only_context_verified") is True:
+        if (
+            result.get("verified_from_release") is not True
+            or result.get("asset_sha256") != manifest.get("sha256")
+            or str(manifest.get("source") or "") != "hyperliquid_public_ws"
+            or str(manifest.get("family") or "").lower() != "activeassetctx"
+        ):
+            raise BackfillError("receive-only context lacks immutable release proof")
+        original=dict(manifest.get("integrity") or {})
+        manifest["historical_receive_only_repair"] = {
+            "method": "unique_receive_clock_hyperliquid_context_v1",
+            "verifier_version": VERIFIER_VERSION,
+            "release_asset_sha256": result["asset_sha256"],
+            "verified_records": result.get("record_count"),
+            "previous_duplicate_count": original.get("duplicate_count"),
+            "previous_missing_timestamp_count": original.get("missing_timestamp_count"),
+            "exchange_timestamp_invented": False,
+        }
+        # Repeated values at DISTINCT monotonic receive times are independent
+        # observations, not duplicate market trades. Preserve the old count.
+        original["duplicate_count"]=0
+        original["duplicates_deduped"]=True
+        original["missing_timestamp_count"]=0
+        manifest["integrity"]=original
+        provenance=dict(manifest.get("provenance") or {})
+        provenance["timestamp_semantics"]=["receive_observation_time_only"]
+        manifest["provenance"]=provenance
+
+    if result.get("derived_capacity_lineage_verified") is True:
+        if (
+            result.get("verified_from_release") is not True
+            or result.get("asset_sha256") != manifest.get("sha256")
+            or str(manifest.get("family") or "").lower() != "capacity_tape"
+        ):
+            raise BackfillError("derived capacity lineage lacks immutable release proof")
+        manifest["derived_capacity_lineage_receipt"]={
+            "method": "immutable_derived_envelope_l2_hash_consistency_v1",
+            "release_asset_sha256": result["asset_sha256"],
+            "verified_records": result.get("record_count"),
+            "parent_l2_shard_verified": False,
+            "proof_of_pnl_allowed": False,
+        }
+
     if result.get("replay_compatible") is True and is_official_historical_archive(manifest):
         reconciliation=dict(manifest.get("reconciliation") or {})
         reconciliation.update({
