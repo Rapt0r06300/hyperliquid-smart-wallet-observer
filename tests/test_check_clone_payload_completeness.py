@@ -236,8 +236,8 @@ def test_empty_mirror_is_fast_fail_without_release_api_calls(monkeypatch, tmp_pa
     module = _module()
     monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
         "schema": "alina.clone_payload_manifest.v1",
-        "total_assets": 1,
-        "total_bytes": 42,
+        "total_assets": 0,
+        "total_bytes": 0,
         "entries": [],
     })
     monkeypatch.setattr(
@@ -246,6 +246,7 @@ def test_empty_mirror_is_fast_fail_without_release_api_calls(monkeypatch, tmp_pa
             AssertionError("empty mirror must not exhaust remote API quota")
         ),
     )
+    monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _r: set())
     report = module.audit("owner/repo", root=tmp_path, token=None, verify_git_pointers=True)
     assert report["complete"] is False
     assert report["reason"] == "MIRROR_NOT_STARTED"

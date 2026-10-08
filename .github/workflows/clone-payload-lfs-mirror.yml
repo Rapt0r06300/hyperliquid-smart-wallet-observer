@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_lfs_costs:
-        description: "I accept that Git LFS storage/bandwidth may be billable"
+        description: "I verified account LFS budget is $0 and free capacity covers this batch"
         required: true
         type: boolean
         default: false
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   mirror:
-    if: github.event_name == 'workflow_dispatch' || vars.ALINA_LFS_MIRROR_ENABLED == 'true'
+    if: vars.ALINA_LFS_ZERO_COST_BUDGET_VERIFIED == 'true' && (github.event_name == 'workflow_dispatch' || vars.ALINA_LFS_MIRROR_ENABLED == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "${{ inputs.confirm_lfs_costs }}" != "true" ]; then
-            echo "Refusing LFS migration without explicit cost authorization." >&2
+            echo "Refusing LFS migration without explicit verified zero-cost capacity." >&2
             exit 64
           fi
 
