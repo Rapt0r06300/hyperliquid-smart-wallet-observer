@@ -83,6 +83,7 @@ class AsyncTickSink:
         self.batch_size = max(1, int(batch_size))
         self.accepted = 0
         self.persisted = 0
+        self.backpressure_events = 0
         self.drops: dict[tuple[str, str, str], int] = defaultdict(int)
         self._stop = False
 
@@ -95,11 +96,20 @@ class AsyncTickSink:
         )
 
     def emit(self, envelope: TickEnvelope) -> None:
+        # Legacy callback: congestion remains explicit, never silently ignored.
         try:
             self.queue.put_nowait(envelope)
             self.accepted += 1
         except asyncio.QueueFull:
             self.drops[self.key(envelope)] += 1
+
+    async def emit_async(self, envelope: TickEnvelope) -> None:
+        # Async capture should wait for a durable writer slot instead of
+        # silently losing a causally significant fill/position observation.
+        if self.queue.full():
+            self.backpressure_events += 1
+        await self.queue.put(envelope)
+        self.accepted += 1
 
     async def run(self) -> None:
         while not self._stop or not self.queue.empty():
@@ -121,6 +131,14 @@ class AsyncTickSink:
     async def close(self) -> None:
         self._stop = True
         await self.queue.join()
+
+
+async def _emit_with_backpressure(sink: Any, envelope: TickEnvelope) -> None:
+    async_emit = getattr(sink, "emit_async", None)
+    if callable(async_emit):
+        await async_emit(envelope)
+    else:
+        sink.emit(envelope)
 
 
 def discover_vaults(
@@ -406,7 +424,7 @@ async def _dynamic_l2_collector(
                             reconnect_count=state.get("reconnects", 0),
                         )
                         if envelope is not None:
-                            sink.emit(envelope)
+                            await _emit_with_backpressure(sink, envelope)
                             state["frames"] = state.get("frames", 0) + 1
                 finally:
                     sender_task.cancel()
@@ -606,7 +624,7 @@ async def collect_broad_state(
                     return
                 state["tvl_usd"] = float(row.get("tvl_usd") or 0.0)
                 states[vault] = state
-                sink.emit(envelope)
+                await _emit_with_backpressure(sink, envelope)
                 return
             failures[last_error] += 1
 
@@ -772,7 +790,7 @@ async def collect_position_snapshots(
         rows = await asyncio.gather(*(one(vault) for vault in vaults))
         for envelope in rows:
             if envelope is not None:
-                sink.emit(envelope)
+                await _emit_with_backpressure(sink, envelope)
                 count += 1
     return count
 
@@ -862,7 +880,7 @@ async def _socket_group(
                         if envelope is None:
                             continue
                         envelope.reconnect_count = reconnect_counts.get(vault, 0)
-                        sink.emit(envelope)
+                        await _emit_with_backpressure(sink, envelope)
 
                         # Pre-warm public execution L2 from every observed coin,
                         # including the initial snapshot. Snapshot fills never count
@@ -1288,7 +1306,7 @@ async def collect(
     validate_user_subscription_budget(vaults)
 
     for row in selected_rows:
-        sink.emit(selection_envelope(row, selection))
+        await _emit_with_backpressure(sink, selection_envelope(row, selection))
 
     live_ids: dict[str, set[str]] = defaultdict(set)
     live_fill_counts: dict[str, int] = defaultdict(int)
@@ -1431,6 +1449,7 @@ async def collect(
         "broad_position_fingerprints_changed": changed_fingerprints,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
+        "backpressure_events": sink.backpressure_events,
         "queue_drops": sum(int(v) for v in sink.drops.values()),
         "live_fill_counts": dict(sorted(live_fill_counts.items())),
         "reconnect_counts": dict(sorted(reconnect_counts.items())),
