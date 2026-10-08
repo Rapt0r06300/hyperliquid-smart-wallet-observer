@@ -61,6 +61,11 @@ def test_audit_reports_exact_byte_parity(monkeypatch, tmp_path):
         "git_pointers_for_paths",
         lambda _root, paths: {path: (sha, 42) for path in paths},
     )
+    monkeypatch.setattr(
+        module,
+        "git_tracked_payload_paths",
+        lambda _root: {"clone_payload/releases/data-v2-test/101--trades.bin"},
+    )
 
     report = module.audit(
         "owner/repo",
@@ -149,3 +154,71 @@ def test_git_pointers_for_paths_reads_many_blobs_in_one_batch(tmp_path):
 
     assert module.git_pointers_for_paths(tmp_path, paths) == expected
 
+
+
+def test_audit_rejects_extra_tracked_lfs_asset(monkeypatch, tmp_path):
+    module = _module()
+    sha = "a" * 64
+    path = "clone_payload/releases/t/1--asset.bin"
+    monkeypatch.setattr(module, "source_inventory", lambda *_a, **_k: {
+        1: {"bytes": 4, "source_digest": "sha256:" + sha},
+    })
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [{
+            "asset_id": 1, "bytes": 4, "sha256": sha, "clone_path": path,
+        }],
+    })
+    monkeypatch.setattr(module, "git_pointers_for_paths", lambda _r, _p: {
+        path: (sha, 4),
+    })
+    monkeypatch.setattr(
+        module,
+        "git_tracked_payload_paths",
+        lambda _r: {path, "clone_payload/releases/t/unlisted.bin"},
+    )
+
+    report = module.audit(
+        "owner/repo", root=tmp_path, token=None, verify_git_pointers=True,
+    )
+
+    assert report["complete"] is False
+    assert any(row["kind"] == "tracked_payload_set" for row in report["mismatches_sample"])
+
+
+def test_audit_accepts_zero_length_release_asset(monkeypatch, tmp_path):
+    module = _module()
+    import hashlib
+    sha = hashlib.sha256(b"").hexdigest()
+    path = "clone_payload/releases/t/2--empty.bin"
+    monkeypatch.setattr(module, "source_inventory", lambda *_a, **_k: {
+        2: {"bytes": 0, "source_digest": "sha256:" + sha},
+    })
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [{"asset_id": 2, "bytes": 0, "sha256": sha, "clone_path": path}],
+    })
+    monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _r: {path})
+    monkeypatch.setattr(module, "git_pointers_for_paths", lambda _r, _p: {
+        path: (sha, 0),
+    })
+    report = module.audit("owner/repo", root=tmp_path, token=None, verify_git_pointers=True)
+    assert report["complete"] is True
+
+
+def test_git_tracked_payload_inventory_excludes_untracked_files(tmp_path):
+    module = _module()
+    import subprocess
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.invalid"], check=True)
+    target = tmp_path / "clone_payload" / "releases" / "t" / "1--test.bin"
+    target.parent.mkdir(parents=True)
+    target.write_text("version https://git-lfs.github.com/spec/v1\n" + "oid sha256:" + ("a" * 64) + "\nsize 123\n")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-m", "data"], check=True, capture_output=True)
+    (target.parent / "untracked.bin").write_bytes(b"extra")
+
+    assert module.git_tracked_payload_paths(tmp_path) == {
+        "clone_payload/releases/t/1--test.bin"
+    }
