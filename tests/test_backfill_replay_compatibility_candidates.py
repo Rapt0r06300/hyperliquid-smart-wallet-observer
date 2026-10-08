@@ -215,3 +215,108 @@ def test_restore_exact_counts_prefers_current_global_v3_unique_proof(tmp_path):
     assert manifest["unique_trade_count"]==10
     assert manifest["unique_trade_count_exact"] is True
     assert manifest["unique_identity_method"]==backfill.GLOBAL_IDENTITY_VERSION
+
+
+
+def test_rejected_receive_only_copy_vault_enters_verified_backfill(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    dataset_id = "vault-observation-old"
+    path = tmp_path / "datasets" / "rejected" / (dataset_id + ".manifest.json")
+    path.parent.mkdir(parents=True)
+    manifest = {
+        "dataset_id": dataset_id,
+        "family": "copy_vault_positions",
+        "source": "hyperliquid_public_info",
+        "asset_verified": True,
+        "sha256": "b" * 64,
+        "bytes": 150,
+        "provenance": {
+            "authenticated": False, "public_data_only": True, "real_execution": False,
+            "transports": ["https"], "timestamp_semantics": [],
+        },
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "tag": "data-v2-old",
+            "asset_name": "vault.jsonl.gz",
+        },
+    }
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    row = {
+        "dataset_id": dataset_id,
+        "family": "copy_vault_positions",
+        "quality_status": "REJECT",
+        "replay_compatible": False,
+        "manifest_path": str(path.relative_to(tmp_path)),
+    }
+    assert backfill._candidate(row, {}, {"copy_vault_positions"}) is True
+    assert row["release_asset"] == "vault.jsonl.gz"
+    manifest["source"] = "legacy_unknown_dump"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    assert backfill._candidate(dict(row), {}, {"copy_vault_positions"}) is False
+
+
+def test_verified_observation_repair_keeps_original_missing_timestamp_evidence(tmp_path):
+    from tools.replay_compatibility import VERIFIER_VERSION
+    manifest = {
+        "dataset_id": "vault-example",
+        "family": "copy_vault_positions", "source": "hyperliquid_public_info",
+        "venue": "hyperliquid", "symbol": "0x" + "1" * 40,
+        "start_ts_ms": 1000, "end_ts_ms": 1001,
+        "sha256": "a" * 64, "bytes": 120, "event_count": 2,
+        "collector_version": "test", "asset_verified": True,
+        "replay_compatible": False, "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "MISSING_CAUSAL_TIMESTAMP", "validation_allowed": False,
+        "provenance": {
+            "public_data_only": True, "authenticated": False,
+            "real_execution": False, "transports": ["https"], "timestamp_semantics": [],
+        },
+        "integrity": {
+            "gap_count": 0, "regression_count": 0, "missing_timestamp_count": 2,
+            "missing_monotonic_count": 0, "desync_count": 0,
+            "duplicate_count": 0, "duplicates_deduped": True,
+        },
+        "reconciliation": {"status": "UNVERIFIED"},
+        "required_channels": [], "observed_channels": ["copy_vault_positions"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    path = tmp_path / "datasets" / "rejected" / "vault-example.manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    row = {
+        "dataset_id": "vault-example", "family": "copy_vault_positions",
+        "quality_status": "REJECT", "manifest_path": str(path.relative_to(tmp_path)),
+        "sha256": "a" * 64, "bytes": 120,
+    }
+    result = {
+        "record_count": 2, "replay_compatible": True,
+        "replay_schema_version": "alina.replay.v2",
+        "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "receive_only_snapshot_verified": True, "verified_from_release": True,
+        "asset_sha256": "a" * 64, "verifier_version": VERIFIER_VERSION,
+    }
+    backfill._apply_result(row, result, root=tmp_path)
+    safe = tmp_path / "datasets" / "safe" / "vault-example.manifest.json"
+    assert safe.is_file()
+    saved = json.loads(safe.read_text(encoding="utf-8"))
+    assert saved["historical_receive_only_repair"]["previous_missing_timestamp_count"] == 2
+    assert saved["historical_receive_only_repair"]["exchange_timestamp_invented"] is False
+    assert saved["integrity"]["missing_timestamp_count"] == 0
+    assert saved["reconciliation"]["status"] == "SNAPSHOT_VERIFIED"
+    assert saved["validation_allowed"] is True
+
+
+def test_observation_repair_requires_verified_release_hash(tmp_path):
+    import pytest
+    path = tmp_path / "datasets" / "rejected" / "vault-bad.manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"dataset_id": "vault-bad", "sha256": "a" * 64}), encoding="utf-8")
+    row = {
+        "dataset_id": "vault-bad", "family": "copy_vault_positions",
+        "quality_status": "REJECT", "manifest_path": str(path.relative_to(tmp_path)),
+        "sha256": "a" * 64,
+    }
+    with pytest.raises(backfill.BackfillError, match="immutable Release"):
+        backfill._apply_result(row, {
+            "receive_only_snapshot_verified": True, "replay_compatible": True,
+            "asset_sha256": "c" * 64,
+        }, root=tmp_path)
