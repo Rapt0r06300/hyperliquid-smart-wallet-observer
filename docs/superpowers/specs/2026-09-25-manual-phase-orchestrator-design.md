@@ -12889,3 +12889,39 @@ The recovery contract is accepted only if:
 - important local-only evidence has been published and mirrored before the old disk is discarded;
 - no recovery path introduces real trading, `/exchange`, signatures, private keys or self-hosted runners.
 
+
+
+## 2026-10-08 — Collect/replay-grade reliability hardening (ongoing)
+
+The canonical phase orchestrator stays in **COLLECT**. Current GitHub-hosted
+collectors must not be disabled, restarted manually, or moved to ANALYZE by
+these code-quality changes. All trades and derived data remain paper/read-only.
+
+- Real root causes must be diagnosed using the SHA-bound, per-shard immutable
+  evidence. Do not equate cumulative campaign shard counts with indexed
+  unique shards; inspect `catalog/QUARANTINE_CAUSES.json` with its source-index
+  digest and correct scope. In particular, a rejected manifest caused by
+  `collection_queue_drops > 0` documents genuine ingress loss and MUST NOT
+  become SAFE merely because the remaining records parse.
+- Async streaming producers use a bounded writer queue with cooperative
+  backpressure. Queue saturation must be observable, not silently discarded;
+  a raw L2/trade/fill drop invalidates complete replay for the affected shard.
+- HTTP Copy-Vault state has a receive-only observation clock, not a fabricated
+  exchange timestamp. Historical repairs require verifiable immutable Release
+  asset SHA-256, per-envelope raw-payload integrity and chronological receive
+  clocks. A derived capacity tape additionally requires independent proof of
+  its source L2 shard before economic validation.
+- GitHub Release reconciliation must paginate reliably while new Releases are
+  published, detect identity conflicts, retry transient HTTP failures, and
+  commit in bounded waves. Compact `DATA_INDEX.json` must not duplicate large
+  per-shard identity vectors; they remain in SHA-bound manifest evidence.
+  Refuse to publish any catalogue blob exceeding GitHub's native 100 MiB cap.
+- Archive and replay materialization must verify both the outer Release ZIP
+  digest/size and the selected shard-member digest/size. Historical count
+  patches can prove only the indexed identities that they actually cover.
+- **Closure remains pending**, regardless of passing unit tests, until the
+  GitHub-hosted collector and replay workflows succeed at their final HEAD,
+  remaining quality causes are diagnosed/recovered or explicitly proven
+  irrecoverable, and OOS/forward net results meet the economic contract.
+  Neither `REPLAYABLE` nor `SAFE` alone establishes trading profitability.
+
