@@ -11,7 +11,6 @@ same object graph differently on server and client.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -22,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import mirror_releases_to_clone_lfs as mirror
+import verify_materialized_clone as materializer
 
 DEFAULT_REPOSITORY = mirror.DEFAULT_REPOSITORY
 MANIFEST_PATH = mirror.MANIFEST_PATH
@@ -151,49 +151,6 @@ def manifest_inventory(manifest: Mapping[str, Any]) -> dict[int, Mapping[str, An
     return inventory
 
 
-def verify_materialized_assets(
-    root: Path, inventory: Mapping[int, Mapping[str, Any]]
-) -> list[dict[str, Any]]:
-    """Verify actual working-tree bytes, not merely Git LFS pointer identities.
-
-    Run on a fresh machine after a normal Git LFS-enabled clone. This check
-    reads the real files by streaming and rejects symlinks/path traversal.
-    """
-    root = root.resolve()
-    allowed = (root / "clone_payload" / "releases").resolve()
-    failures: list[dict[str, Any]] = []
-    for asset_id, row in inventory.items():
-        relative = Path(str(row.get("clone_path") or ""))
-        if (
-            relative.is_absolute()
-            or ".." in relative.parts
-            or relative.parts[:2] != ("clone_payload", "releases")
-        ):
-            failures.append({"asset_id": asset_id, "reason": "invalid_path"})
-            continue
-        path = root / relative
-        resolved = path.resolve()
-        if (
-            not path.is_file()
-            or path.is_symlink()
-            or allowed not in resolved.parents
-        ):
-            failures.append({"asset_id": asset_id, "reason": "not_materialized"})
-            continue
-        expected_bytes = int(row.get("bytes") or 0)
-        expected_sha = str(row.get("sha256") or "").lower()
-        if path.stat().st_size != expected_bytes or len(expected_sha) != 64:
-            failures.append({"asset_id": asset_id, "reason": "size_or_identity"})
-            continue
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-                digest.update(block)
-        if digest.hexdigest() != expected_sha:
-            failures.append({"asset_id": asset_id, "reason": "sha256_mismatch"})
-    return failures
-
-
 def audit(
     repository: str,
     *,
@@ -282,9 +239,16 @@ def audit(
                     }
                 )
 
+    physical_report = materializer.verify(root) if verify_worktree else None
     physical_failures = (
-        verify_materialized_assets(root, cloned) if verify_worktree else []
+        physical_report.get("failures_sample", [])
+        if physical_report is not None
+        else []
     )
+    # A negative materialization verdict is fatal even when a report truncates
+    # its failure examples to avoid generating enormous diagnostics.
+    if physical_report is not None and not physical_report["complete"] and not physical_failures:
+        physical_failures = [{"kind": "incomplete_physical_clone"}]
     source_bytes = sum(int(row["bytes"]) for row in source.values())
     cloned_bytes = sum(int(row.get("bytes") or 0) for row in cloned.values())
     complete = (
@@ -341,7 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             verify_git_pointers=not args.skip_git_pointers,
             verify_worktree=args.verify_worktree,
         )
-    except (CompletenessError, mirror.MirrorError, OSError, ValueError) as exc:
+    except (CompletenessError, mirror.MirrorError, materializer.MaterializationError, OSError, ValueError) as exc:
         print(f"ALINA_CLONE_COMPLETENESS_FAIL: {exc}", file=sys.stderr)
         return 2
 
