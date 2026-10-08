@@ -312,3 +312,19 @@ def test_batched_trade_identity_count_still_rejects_unproven_uniqueness():
     assert status == "PARTIAL"
     assert "UNIQUE_TRADE_COUNT_NOT_EXACT" in reasons
     assert "TRADE_COUNT_NOT_EXACT" not in reasons
+
+
+
+def test_capacity_replay_requires_independent_parent_l2_shard_proof():
+    value = manifest()
+    value["family"] = "capacity_tape"
+    value["venue"] = "bybit"
+    value["reconciliation"] = {"status": "SOURCE_CONTINUITY_VERIFIED"}
+    value["provenance"]["transports"] = ["websocket"]
+    value["derived_capacity_lineage_receipt"] = {
+        "method": "immutable_derived_envelope_l2_hash_consistency_v1",
+        "parent_l2_shard_verified": False,
+    }
+    status, reasons = classify_manifest(value)
+    assert status == "PARTIAL"
+    assert "PARENT_L2_SHARD_NOT_VERIFIED" in reasons

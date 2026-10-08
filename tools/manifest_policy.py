@@ -268,6 +268,14 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
         if isinstance(raw_transports, list):
             transports = {str(value).lower() for value in raw_transports if str(value).strip()}
 
+    if family == "capacity_tape":
+        # Consistent hashes within a derived record do not verify its parent
+        # immutable L2 shard. Never certify economic replay on derived-only
+        # data unless independent parent evidence is present.
+        parent_proof = manifest.get("derived_capacity_lineage_receipt")
+        if not isinstance(parent_proof, Mapping) or parent_proof.get("parent_l2_shard_verified") is not True:
+            reasons.append("PARENT_L2_SHARD_NOT_VERIFIED")
+
     if family in _MATCHED_RECONCILIATION_FAMILIES:
         if historical_archive:
             if reconciliation_status not in {"MATCHED", "SOURCE_ARCHIVE_VERIFIED"}:
