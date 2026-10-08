@@ -105,6 +105,19 @@ def git_pointers_for_paths(
 def git_pointer_for_path(root: Path, path: str) -> tuple[str, int]:
     return git_pointers_for_paths(root, [path])[path]
 
+def git_tracked_payload_paths(root: Path) -> set[str]:
+    """Prove that no extra LFS payload file is silently outside the manifest."""
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", "clone_payload/releases"],
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise CompletenessError(f"git ls-tree failed: {detail}")
+    return {os.fsdecode(path) for path in result.stdout.split(b"\0") if path}
+
+
 
 def source_inventory(
     repository: str,
@@ -171,27 +184,57 @@ def audit(
     common_ids = sorted(source_ids & cloned_ids)
     pointer_map: dict[str, tuple[str, int]] = {}
     if verify_git_pointers:
-        pointer_paths = [str(cloned[asset_id].get("clone_path") or "") for asset_id in common_ids]
+        pointer_paths = [
+            str(cloned[asset_id].get("clone_path") or "")
+            for asset_id in common_ids
+        ]
+        all_manifest_paths = [
+            str(row.get("clone_path") or "") for row in cloned.values()
+        ]
+        if (
+            len(set(all_manifest_paths)) != len(all_manifest_paths)
+            or not all(path.startswith("clone_payload/releases/") for path in all_manifest_paths)
+        ):
+            mismatches.append({
+                "asset_id": None,
+                "kind": "invalid_or_duplicate_clone_path",
+            })
         try:
+            tracked = git_tracked_payload_paths(root)
+            undeclared = sorted(tracked - set(all_manifest_paths))
+            missing_tracked = sorted(set(all_manifest_paths) - tracked)
+            if undeclared or missing_tracked:
+                mismatches.append({
+                    "asset_id": None,
+                    "kind": "tracked_payload_set",
+                    "undeclared_count": len(undeclared),
+                    "missing_count": len(missing_tracked),
+                    "undeclared_sample": undeclared[:15],
+                    "missing_sample": missing_tracked[:15],
+                })
             pointer_map = git_pointers_for_paths(root, pointer_paths)
         except CompletenessError as exc:
-            mismatches.append(
-                {
-                    "asset_id": None,
-                    "kind": "git_pointer_batch",
-                    "error": str(exc),
-                }
-            )
+            mismatches.append({
+                "asset_id": None,
+                "kind": "git_tree_or_pointer",
+                "error": str(exc),
+            })
             pointer_map = {}
 
     for asset_id in common_ids:
         expected = source[asset_id]
         row = cloned[asset_id]
         expected_bytes = int(expected["bytes"])
-        actual_bytes = int(row.get("bytes") or -1)
+        actual_bytes = int(row.get("bytes", -1))
         path = str(row.get("clone_path") or "")
         sha = str(row.get("sha256") or "").lower()
 
+        if len(sha) != 64 or any(ch not in "0123456789abcdef" for ch in sha):
+            mismatches.append({
+                "asset_id": asset_id,
+                "kind": "invalid_manifest_sha256",
+            })
+            continue
         if expected_bytes != actual_bytes:
             mismatches.append(
                 {
@@ -294,6 +337,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output")
     args = parser.parse_args(argv)
+
+    if args.require_complete and args.skip_git_pointers:
+        parser.error("--require-complete cannot skip Git LFS pointer verification")
 
     root = Path(args.root).resolve()
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
