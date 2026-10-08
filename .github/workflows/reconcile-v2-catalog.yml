@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/reconcile-v2-catalog.yml'
       - 'tools/index_run_manifest.py'
+      - 'tools/download_release_manifests.py'
+      - 'tests/test_release_manifest_download.py'
       - 'tools/manifest_policy.py'
       - 'tools/check_dataset_quality.py'
       - 'control/legacy-release-migration.json'
@@ -48,7 +50,10 @@ jobs:
           ROOT="$RUNNER_TEMP/v2-release-manifests"
           ALL_TAGS="$RUNNER_TEMP/v2-all-release-tags.txt"
           TAGS="$RUNNER_TEMP/v2-new-release-tags.txt"
-          gh api --paginate             "repos/${GITHUB_REPOSITORY}/releases?per_page=100"             --jq '.[] | [.tag_name, ([.assets[].name] | index("RUN_MANIFEST.json") != null)] | @tsv' > "$ALL_TAGS"
+          python tools/download_release_manifests.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --list-tags-output "$ALL_TAGS" \
+            --list-page-size 50
           python - <<'PY' "$ALL_TAGS" "$TAGS"
           import json, os, re, sys
           from pathlib import Path
@@ -104,7 +109,7 @@ jobs:
             echo "No new canonical production releases to reconcile."
             exit 0
           fi
-          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 1             --poll-seconds 0
+          python tools/download_release_manifests.py             --repository "$GITHUB_REPOSITORY"             --destination "$ROOT"             --tags-file "$TAGS"             --attempts 3             --poll-seconds 2
           COUNT="$(find "$ROOT" -name RUN_MANIFEST.json -type f | wc -l)"
           echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
           echo "canonical run manifests found: $COUNT"

@@ -132,3 +132,84 @@ def test_tags_are_deduplicated_without_changing_order(tmp_path) -> None:
     assert downloads == ["data-v2-a", "data-v2-b"]
     assert result.downloaded == ("data-v2-a", "data-v2-b")
 
+
+
+
+def test_listing_retries_504_per_page_without_discarding_previous_pages():
+    from download_release_manifests import list_release_manifest_tags
+    calls = []
+    sleeps = []
+    def runner(command, **_):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if endpoint.endswith("page=1"):
+            body = [
+                {"id": 10, "tag_name": "data-v2-1", "assets": [{"name": "RUN_MANIFEST.json"}]},
+                {"id": 11, "tag_name": "data-v2-2", "assets": []},
+            ]
+            return subprocess.CompletedProcess(command, 0, __import__("json").dumps(body), "")
+        if len([x for x in calls if x.endswith("page=2")]) == 1:
+            return subprocess.CompletedProcess(command, 1, "", "HTTP 504 gateway timeout")
+        return subprocess.CompletedProcess(
+            command, 0, __import__("json").dumps([
+                {"id": 12, "tag_name": "data-v2-3", "assets": [{"name": "RUN_MANIFEST.json"}]}
+            ]), ""
+        )
+    got = list_release_manifest_tags(
+        "owner/repo", page_size=2, runner=runner, sleeper=sleeps.append,
+    )
+    assert got == [("data-v2-1", True), ("data-v2-2", False), ("data-v2-3", True)]
+    assert len([x for x in calls if x.endswith("page=1")]) == 1
+    assert len([x for x in calls if x.endswith("page=2")]) == 2
+    assert sleeps == [2.0]
+
+
+def test_listing_reads_truncated_asset_pages():
+    from download_release_manifests import list_release_manifest_tags
+    import json
+    calls = []
+    def runner(command, **_):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if "/assets?" in endpoint:
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps([{"id": 99, "name": "RUN_MANIFEST.json"}]), ""
+            )
+        if endpoint.endswith("page=1"):
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps([{"id": 10, "tag_name": "data-v2-late",
+                                        "assets": [{"name": str(i)} for i in range(30)]}]), ""
+            )
+        raise AssertionError(endpoint)
+    out = list_release_manifest_tags("owner/repo", page_size=50, runner=runner)
+    assert out == [("data-v2-late", True)]
+    assert any("/assets?" in url for url in calls)
+
+
+def test_listing_refuses_partial_inventory_on_permanent_http_504():
+    from download_release_manifests import list_release_manifest_tags
+    import pytest
+    calls = []
+    def runner(command, **_):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1, "", "HTTP 504 timed out")
+    with pytest.raises(RuntimeError, match="after 2 attempt"):
+        list_release_manifest_tags(
+            "owner/repo", runner=runner, sleeper=lambda _: None, attempts=2,
+        )
+    assert len(calls) == 2
+
+
+def test_listing_rejects_duplicate_release_ids():
+    from download_release_manifests import list_release_manifest_tags
+    import json
+    def runner(command, **_):
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps([
+                {"id": 10, "tag_name": "data-v2-1", "assets": []},
+                {"id": 10, "tag_name": "data-v2-2", "assets": []},
+            ]), ""
+        )
+    import pytest
+    with pytest.raises(RuntimeError, match="duplicated Release id"):
+        list_release_manifest_tags("owner/repo", runner=runner)
