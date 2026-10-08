@@ -94,3 +94,26 @@ def test_verify_materialized_clone_rejects_wrong_sha(tmp_path):
     assert report["complete"] is False
     assert report["failure_count"] == 1
     assert report["failures_sample"][0]["kind"] in {"size", "sha256"}
+
+
+
+def test_verify_materialized_clone_rejects_empty_mirror(tmp_path):
+    module = _module()
+    path = tmp_path / "clone_payload" / "MANIFEST.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({
+            "schema": "alina.clone_payload_manifest.v1",
+            "entries": [], "total_assets": 0, "total_bytes": 0,
+        }), encoding="utf-8",
+    )
+    report = module.verify(tmp_path)
+    assert report["complete"] is False
+
+
+def test_verify_materialized_clone_blocks_escape_from_payload_tree(tmp_path):
+    module = _module()
+    _write_manifest(tmp_path, payload=b"data", path="../outside.bin")
+    report = module.verify(tmp_path)
+    assert report["complete"] is False
+    assert report["failures_sample"][0]["kind"] == "invalid_identity"
