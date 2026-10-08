@@ -1320,7 +1320,7 @@
     "market-e8-9-2026100816-v7"
   ],
   "campaign_resilience_status": "READY",
-  "canonical_spec_blob": "f8aa00d74263aea6d154dddbefcc789442b0d347",
+  "canonical_spec_blob": "22be5ccba8b1c3c778c36ddaf9c101fb9ad5a62f",
   "copy_vault_coverage_receipt": {
     "digest": "a1575d0102422bef7a71e331d797d19528c71284afe45a095c4949e1010ca25e",
     "reconciliation": {
@@ -1342,7 +1342,8 @@
     "analysis_stage": null,
     "blockers": [
       "GLOBAL_UNIQUE_TRADE_COVERAGE_INCOMPLETE",
-      "GLOBAL_UNIQUE_TRADE_COUNT_UNAVAILABLE"
+      "GLOBAL_UNIQUE_TRADE_COUNT_UNAVAILABLE",
+      "REPLAY_COMPATIBILITY_CLASSIFICATION_INCOMPLETE"
     ],
     "cross_shard_overlap_trade_count": 0,
     "economic_proof": {
@@ -1353,17 +1354,17 @@
     },
     "global_unique_failure_reason_count": 0,
     "global_unique_trade_ratio": 0.0,
-    "partial_shard_count": 6521,
+    "partial_shard_count": 6461,
     "phase": "COLLECT",
     "phase_epoch": 8,
     "profitability_claimed": false,
-    "quarantined_record_count": 5384447,
+    "quarantined_record_count": 5384267,
     "raw_record_count": 56556712,
     "raw_trade_count": 7636646,
     "rejected_shard_count": 6093,
-    "replay_compatible_shard_count": 23753,
-    "replay_unclassified_candidate_count": 0,
-    "safe_shard_count": 13605,
+    "replay_compatible_shard_count": 23815,
+    "replay_unclassified_candidate_count": 509,
+    "safe_shard_count": 13665,
     "status": "NOT_ANALYSIS_ELIGIBLE",
     "trade_count_exact": true,
     "trade_count_failure_reason_count": 0,
@@ -1376,7 +1377,7 @@
   },
   "dataset_health_digest": "1748fa30086473a28013a263e7dcc2a6ba9fe86821e67856999e9578e4a92797",
   "dataset_selection_id": null,
-  "dataset_v2_head": "1eccda9a29ca9feb616357ead6788c771d02cf8d",
+  "dataset_v2_head": "a958f45ddc246c081bb04800c9372c67099049d9",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "8dbfc1c58e66e290ccd082c1d64bf030ddfcc27fcd25cfb1014710a7baee7355",
@@ -1404,12 +1405,12 @@
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "4 canonical closure blocker(s) remain",
+      "reason": "5 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-08T16:39:59.230900Z",
+  "generated_at_utc": "2026-10-08T18:00:38.189707Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -1436,12 +1437,17 @@
     },
     {
       "id": "BLOCKER-04",
+      "reason": "SAFE to replay-compatible migration has 509 unclassified candidates",
+      "status": "UNRESOLVED"
+    },
+    {
+      "id": "BLOCKER-05",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "1eccda9a29ca9feb616357ead6788c771d02cf8d",
+  "main_alina_head": "a958f45ddc246c081bb04800c9372c67099049d9",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -1469,24 +1475,25 @@
     "rows": []
   },
   "paper_read_only": true,
-  "partial_count": 6521,
+  "partial_count": 6461,
   "phase": "COLLECT",
   "phase_epoch": 8,
-  "quarantined_record_count": 5384447,
+  "quarantined_record_count": 5384267,
   "raw_record_count": 56556712,
   "raw_trade_count": 7636646,
   "real_execution_reachable": false,
-  "receipt_digest": "6531c1faccd6f0ee211bcb51bc58147fe4affcc4800b07b2e6a511e5ff4c93ee",
+  "receipt_digest": "3e69cbd7b21c618b3c3f77b56f14e1c19f53a537ae73e2cc002168fe7345c969",
   "rejected_count": 6093,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
     "global unique trade count coverage is incomplete",
+    "SAFE to replay-compatible migration has 509 unclassified candidates",
     "analysis campaigns are not all terminal COMPLETE"
   ],
-  "replay_compatible_count": 23753,
-  "replay_remaining_candidates": 0,
-  "safe_count": 13605,
+  "replay_compatible_count": 23815,
+  "replay_remaining_candidates": 509,
+  "safe_count": 13665,
   "schema_version": "alina.final_closure_receipt.v1",
   "scoreboard_artifact": null,
   "scoreboard_provenance": {
@@ -1629,6 +1636,7 @@
     "37760113907",
     "37782907105",
     "37790755777",
-    "37792841836"
+    "37792841836",
+    "37803166213"
   ]
 }
