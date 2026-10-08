@@ -308,6 +308,11 @@ def index_run_manifests(
         for row in (index.get("shards") or [])
         if isinstance(row, Mapping) and row.get("dataset_id")
     }
+    # Also compact PREEXISTING rows: old DATA_INDEX repeated the full trade
+    # digest vectors, already ~77 MiB for only 11k rows. Immutable manifests
+    # retain the original vectors for SHA-bound aggregate proof.
+    for old_row in rows_by_id.values():
+        old_row.pop("trade_identity_digests", None)
 
     imported = 0
     statuses: dict[str, int] = {}
