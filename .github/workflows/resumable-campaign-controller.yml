@@ -155,7 +155,14 @@ jobs:
               copy_ids=[]
           # Keep four hosted-runner slots free for Copy-Vault, watchdog, quality, and control jobs.
           other_capacity=max(0,16-active_other)
-          other_ids=other_ids[:other_capacity]
+          # One explicitly bounded canary may use a control-plane slot even while
+          # all normal market lanes are occupied. It is short, isolated, and the
+          # worker's campaign lock prevents duplicate execution.
+          bounded_canaries=[campaign_id for campaign_id in other_ids if campaign_id.startswith("canary-market-")]
+          reserved_canary=bounded_canaries[:1]
+          ordinary_ids=[campaign_id for campaign_id in other_ids if campaign_id not in bounded_canaries]
+          ordinary_ids=ordinary_ids[:max(0,other_capacity-len(reserved_canary))]
+          other_ids=reserved_canary+ordinary_ids
           print("copy_count="+str(len(copy_ids)))
           print("copy_matrix="+json.dumps({"campaign_id":copy_ids},separators=(",",":")))
           print("other_count="+str(len(other_ids)))

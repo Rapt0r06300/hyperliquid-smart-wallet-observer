@@ -50,7 +50,8 @@ def test_controller_does_not_serialize_fresh_market_behind_copy_fanout() -> None
     assert "copy_ids=copy_ids[:1]" in controller
     assert "active_other=0" in controller
     assert "other_capacity=max(0,16-active_other)" in controller
-    assert "other_ids=other_ids[:other_capacity]" in controller
+    assert "reserved_canary=bounded_canaries[:1]" in controller
+    assert "other_ids=reserved_canary+ordinary_ids" in controller
     assert "relay_collect:" in controller
     assert "uses: ./.github/workflows/resumable-campaign-worker.yml" in controller
     assert "needs.select.outputs.phase == 'COLLECT'" in controller

@@ -129,6 +129,9 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "active_copy=False" in controller
     assert "active_other=0" in controller
     assert "other_capacity=max(0,16-active_other)" in controller
+    assert "bounded_canaries=[campaign_id for campaign_id in other_ids if campaign_id.startswith(\"canary-market-\")]" in controller
+    assert "reserved_canary=bounded_canaries[:1]" in controller
+    assert "max(0,other_capacity-len(reserved_canary))" in controller
     assert "fromJSON(needs.select.outputs.copy_matrix)" in controller
     assert "fromJSON(needs.select.outputs.other_matrix)" in controller
     assert "relay_collect:" in controller
