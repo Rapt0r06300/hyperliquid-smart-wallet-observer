@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 114370,
+  "collection_queue_drops": 51,
+  "collection_run_id": "market-e8-8-2026100808-v7-0",
+  "collector_version": "ee12861af9e31f34562513686b6cae2061212853",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-wld-1791449319978-1791452815333-f682f8ff00da",
+  "end_ts_ms": 1791452815333,
+  "event_count": 463,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 51,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=51",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 1334,
+    "live_only": 797,
+    "local_continuity_fallback": false,
+    "matched_count": 537,
+    "missing_from_live": 56,
+    "reference_count": 593,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 463,
+  "release": {
+    "asset_id": 621419376,
+    "asset_name": "packed-shards-0007.zip",
+    "member_name": "hyperliquid-public-ws-trades-wld-1791449319978-1791452815333-f682f8ff00da.jsonl.gz",
+    "release_id": 406677311,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100808-v7-u0",
+    "remote_digest": "sha256:adfe87f5a780ec5c8da8b3d6e1f0c527ac56f7c1b91e1341ca5d4f30f6c16534",
+    "remote_size": 49076988,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-wld-1791449319978-1791452815333-f682f8ff00da.jsonl.gz",
+  "release_asset_id": 621419376,
+  "release_container_asset": "packed-shards-0007.zip",
+  "release_id": 406677311,
+  "release_member": "hyperliquid-public-ws-trades-wld-1791449319978-1791452815333-f682f8ff00da.jsonl.gz",
+  "release_remote_digest": "sha256:adfe87f5a780ec5c8da8b3d6e1f0c527ac56f7c1b91e1341ca5d4f30f6c16534",
+  "release_remote_size": 49076988,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100808-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f682f8ff00da0a6db663f766e95f0a2a215c7bcd1384d741c7312bb9c50f252c",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791449319978,
+  "symbol": "WLD",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 460,
+      "max": -248.0,
+      "min": -1404.0,
+      "p50": -532.0,
+      "p95": -280.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-d26ada5d88e64a878e1b712d73276eb6"
+    ],
+    "first_exchange_ts_ms": 1791449317728,
+    "last_exchange_ts_ms": 1791452815021,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 463,
+      "max": 2250.0,
+      "min": 234.0,
+      "p50": 332.0,
+      "p95": 1073.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 1334,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 935274,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

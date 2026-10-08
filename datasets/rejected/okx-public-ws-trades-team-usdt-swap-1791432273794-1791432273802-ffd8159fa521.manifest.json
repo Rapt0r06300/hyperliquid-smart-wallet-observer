@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 964,
+  "collection_queue_drops": 5,
+  "collection_run_id": "market-e8-8-2026100721-v7-0",
+  "collector_version": "567d3fed0396fdbbc5e304a9c17a1d164b98f8e1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-team-usdt-swap-1791432273794-1791432273802-ffd8159fa521",
+  "end_ts_ms": 1791432273802,
+  "event_count": 3,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 5,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=5"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 3,
+    "live_only": 0,
+    "matched_count": 3,
+    "missing_from_live": 0,
+    "reference_count": 3,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 3,
+  "release": {
+    "asset_id": 620796726,
+    "asset_name": "packed-shards-0010.zip",
+    "member_name": "okx-public-ws-trades-team-usdt-swap-1791432273794-1791432273802-ffd8159fa521.jsonl.gz",
+    "release_id": 406435285,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100721-v7-u0",
+    "remote_digest": "sha256:7e3952e3c35912041f75d5a7fc666cd752392dd20310a4c4f9e07027202ec282",
+    "remote_size": 5069910,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-team-usdt-swap-1791432273794-1791432273802-ffd8159fa521.jsonl.gz",
+  "release_asset_id": 620796726,
+  "release_container_asset": "packed-shards-0010.zip",
+  "release_id": 406435285,
+  "release_member": "okx-public-ws-trades-team-usdt-swap-1791432273794-1791432273802-ffd8159fa521.jsonl.gz",
+  "release_remote_digest": "sha256:7e3952e3c35912041f75d5a7fc666cd752392dd20310a4c4f9e07027202ec282",
+  "release_remote_size": 5069910,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100721-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ffd8159fa521dd90bafe378e4912a5bdbbf4472ddf2fcf31a9cafce37147bafc",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791432273794,
+  "symbol": "TEAM-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3,
+      "max": 26.5,
+      "min": 26.5,
+      "p50": 26.5,
+      "p95": 26.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-68550d40631841afb1d64878c44349bd"
+    ],
+    "first_exchange_ts_ms": 1791432273741,
+    "last_exchange_ts_ms": 1791432273747,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3,
+      "max": 55.0,
+      "min": 53.0,
+      "p50": 53.0,
+      "p95": 55.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3,
+      "max": 107.529292,
+      "min": 107.529292,
+      "p50": 107.529292,
+      "p95": 107.529292
+    }
+  },
+  "trade_count": 3,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "1415975b3aa7887c29f922a5a53506263f95583f07780fd553358dff1256c074",
+    "9f3d5eeffc8640b0fc2e14f044a5f466abf7360ed7be7333350cbf5a22203517",
+    "a9b427c0ede978d570b87c3e910477aaeee821b8cb012a6f6188020848433e5b"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 4346,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 3,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "okx"
+}

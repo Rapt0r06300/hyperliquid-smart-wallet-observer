@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 27030,
+  "collection_queue_drops": 23,
+  "collection_run_id": "market-e8-9-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-kaito-1791469280216-1791472737325-b0e5b8f00aa7",
+  "end_ts_ms": 1791472737325,
+  "event_count": 119,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 23,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=23",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 250,
+    "live_only": null,
+    "local_continuity_fallback": false,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 167,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 119,
+  "release": {
+    "asset_id": 622213038,
+    "asset_name": "packed-shards-0006.zip",
+    "member_name": "hyperliquid-public-ws-trades-kaito-1791469280216-1791472737325-b0e5b8f00aa7.jsonl.gz",
+    "release_id": 406982280,
+    "release_tag": "data-v2-campaign-market-e8-9-2026100813-v7-u0",
+    "remote_digest": "sha256:9cb7224091c4012d499cd6ac7759000cdc428625d2df8f95cbfc974a2c26455f",
+    "remote_size": 64691294,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-kaito-1791469280216-1791472737325-b0e5b8f00aa7.jsonl.gz",
+  "release_asset_id": 622213038,
+  "release_container_asset": "packed-shards-0006.zip",
+  "release_id": 406982280,
+  "release_member": "hyperliquid-public-ws-trades-kaito-1791469280216-1791472737325-b0e5b8f00aa7.jsonl.gz",
+  "release_remote_digest": "sha256:9cb7224091c4012d499cd6ac7759000cdc428625d2df8f95cbfc974a2c26455f",
+  "release_remote_size": 64691294,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b0e5b8f00aa70ff9afebf4aca0bf610633d2b8a051c1f6cb1316f947f89fa3bf",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791469280216,
+  "symbol": "KAITO",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 118,
+      "max": -237.0,
+      "min": -1285.0,
+      "p50": -723.5,
+      "p95": -243.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-32240b361c3e43e6b2033d9b8898694e"
+    ],
+    "first_exchange_ts_ms": 1791469264042,
+    "last_exchange_ts_ms": 1791472736717,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 119,
+      "max": 16174.0,
+      "min": 247.0,
+      "p50": 397.0,
+      "p95": 827.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 250,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 212855,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

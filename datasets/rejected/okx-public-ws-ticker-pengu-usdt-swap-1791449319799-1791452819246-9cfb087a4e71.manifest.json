@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 1476394,
+  "collection_queue_drops": 1544,
+  "collection_run_id": "market-e8-8-2026100808-v7-0",
+  "collector_version": "ee12861af9e31f34562513686b6cae2061212853",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-ticker-pengu-usdt-swap-1791449319799-1791452819246-9cfb087a4e71",
+  "end_ts_ms": 1791452819246,
+  "event_count": 17804,
+  "family": "ticker",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 1544,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "ticker"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=1544",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 17804,
+  "release": {
+    "asset_id": 621419709,
+    "asset_name": "packed-shards-0009.zip",
+    "member_name": "okx-public-ws-ticker-pengu-usdt-swap-1791449319799-1791452819246-9cfb087a4e71.jsonl.gz",
+    "release_id": 406677311,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100808-v7-u0",
+    "remote_digest": "sha256:20625194af78298b054ccfdca4ba860ea4372f471916b84d77eb1932bf36dfeb",
+    "remote_size": 80483045,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-ticker-pengu-usdt-swap-1791449319799-1791452819246-9cfb087a4e71.jsonl.gz",
+  "release_asset_id": 621419709,
+  "release_container_asset": "packed-shards-0009.zip",
+  "release_id": 406677311,
+  "release_member": "okx-public-ws-ticker-pengu-usdt-swap-1791449319799-1791452819246-9cfb087a4e71.jsonl.gz",
+  "release_remote_digest": "sha256:20625194af78298b054ccfdca4ba860ea4372f471916b84d77eb1932bf36dfeb",
+  "release_remote_size": 80483045,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100808-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9cfb087a4e71536e14b058f2b2afcef519a414a3c2ff6d190e38d5435fe789e6",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791449319799,
+  "symbol": "PENGU-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 17804,
+      "max": 610.5,
+      "min": -509.5,
+      "p50": 23.5,
+      "p95": 80.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-9c4460c0cc13473f91c838dd9dc781fd"
+    ],
+    "first_exchange_ts_ms": 1791449319569,
+    "last_exchange_ts_ms": 1791452818074,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 17804,
+      "max": 1985.0,
+      "min": 76.0,
+      "p50": 164.0,
+      "p95": 941.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 17804,
+      "max": 785.600802,
+      "min": 0.0,
+      "p50": 143.220571,
+      "p95": 596.86568
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 29823352,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}

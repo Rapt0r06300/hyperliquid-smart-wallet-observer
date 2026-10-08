@@ -1,0 +1,117 @@
+{
+  "asset_verified": true,
+  "bytes": 885239,
+  "collection_queue_drops": 327,
+  "collection_run_id": "market-e8-8-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-derived-capacity-capacity-tape-softbank-usdt-1791469480412-1791472951920-e9640a3cd3bd",
+  "end_ts_ms": 1791472951920,
+  "event_count": 2235,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 327,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=327",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 2235,
+  "release": {
+    "asset_id": 622235871,
+    "asset_name": "packed-shards-0003.zip",
+    "member_name": "gate-derived-capacity-capacity-tape-softbank-usdt-1791469480412-1791472951920-e9640a3cd3bd.jsonl.gz",
+    "release_id": 406992437,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100813-v7-u0",
+    "remote_digest": "sha256:fc7b86e95c6cb09875144527a48c44bd66db45d62b457932243e029e10e37fba",
+    "remote_size": 7354625,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-derived-capacity-capacity-tape-softbank-usdt-1791469480412-1791472951920-e9640a3cd3bd.jsonl.gz",
+  "release_asset_id": 622235871,
+  "release_container_asset": "packed-shards-0003.zip",
+  "release_id": 406992437,
+  "release_member": "gate-derived-capacity-capacity-tape-softbank-usdt-1791469480412-1791472951920-e9640a3cd3bd.jsonl.gz",
+  "release_remote_digest": "sha256:fc7b86e95c6cb09875144527a48c44bd66db45d62b457932243e029e10e37fba",
+  "release_remote_size": 7354625,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "e9640a3cd3bd640f38f0cee21ca078d257508d69f0c6af2fdaa95cd25d8d42a4",
+  "source": "gate_derived_capacity",
+  "start_ts_ms": 1791469480412,
+  "symbol": "SOFTBANK_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 2235,
+      "max": 885.5,
+      "min": -384.5,
+      "p50": 286.0,
+      "p95": 334.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-7a854772bad1401c96b88e0cb96ed3ed"
+    ],
+    "first_exchange_ts_ms": 1791469480322,
+    "last_exchange_ts_ms": 1791472951220,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 2235,
+      "max": 1736.0,
+      "min": 69.0,
+      "p50": 120.0,
+      "p95": 193.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 2235,
+      "max": 1571.518281,
+      "min": 0.0,
+      "p50": 135.783358,
+      "p95": 194.931253
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 21160628,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "gate"
+}

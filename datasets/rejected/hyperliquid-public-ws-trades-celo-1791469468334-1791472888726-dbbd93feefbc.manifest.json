@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 16679,
+  "collection_queue_drops": 31,
+  "collection_run_id": "market-e8-8-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-celo-1791469468334-1791472888726-dbbd93feefbc",
+  "end_ts_ms": 1791472888726,
+  "event_count": 70,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 31,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=31",
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 161,
+    "live_only": null,
+    "local_continuity_fallback": false,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 173,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 70,
+  "release": {
+    "asset_id": 622236718,
+    "asset_name": "packed-shards-0007.zip",
+    "member_name": "hyperliquid-public-ws-trades-celo-1791469468334-1791472888726-dbbd93feefbc.jsonl.gz",
+    "release_id": 406992437,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100813-v7-u0",
+    "remote_digest": "sha256:ecfec52600c297fc85da25d1b49f2bfd7a24e27bc520493fac140275b1cfb79c",
+    "remote_size": 35533146,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-celo-1791469468334-1791472888726-dbbd93feefbc.jsonl.gz",
+  "release_asset_id": 622236718,
+  "release_container_asset": "packed-shards-0007.zip",
+  "release_id": 406992437,
+  "release_member": "hyperliquid-public-ws-trades-celo-1791469468334-1791472888726-dbbd93feefbc.jsonl.gz",
+  "release_remote_digest": "sha256:ecfec52600c297fc85da25d1b49f2bfd7a24e27bc520493fac140275b1cfb79c",
+  "release_remote_size": 35533146,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "dbbd93feefbc176b7a6dcd0e3e62107c9d8399128f285583008af6608d99e547",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791469468334,
+  "symbol": "CELO",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 68,
+      "max": -265.5,
+      "min": -1250.5,
+      "p50": -714.0,
+      "p95": -281.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-9eb5f596687d4d738195ce88b7dc1209"
+    ],
+    "first_exchange_ts_ms": 1791469388153,
+    "last_exchange_ts_ms": 1791472887761,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 70,
+      "max": 80181.0,
+      "min": 249.0,
+      "p50": 357.0,
+      "p95": 1014.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 161,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 129237,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
