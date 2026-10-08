@@ -311,7 +311,7 @@ def main() -> int:
         args.list_tags_output.parent.mkdir(parents=True, exist_ok=True)
         tmp = args.list_tags_output.with_name(args.list_tags_output.name + ".tmp")
         tmp.write_text(
-            "".join(f"{tag}\\t{str(has_manifest).lower()}\\n" for tag, has_manifest in inventory),
+            "".join(f"{tag}\t{str(has_manifest).lower()}\n" for tag, has_manifest in inventory),
             encoding="utf-8",
         )
         os.replace(tmp, args.list_tags_output)
