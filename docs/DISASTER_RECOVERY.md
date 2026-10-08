@@ -70,6 +70,24 @@ cannot be proven to reside in GitHub. It must first be published using the
 existing safe local recovery snapshot process; cloud GitHub must never access
 or rely on that machine.
 
+### Measured, non-exhaustive capacity preflight — 2026-10-08
+
+A read-only GitHub API sample of the first 50 listed Releases found **467
+asset IDs, 467 distinct nonempty SHA-256 digests, and exactly
+12,080,885,180 bytes** (11.2512 GiB) of distinct payload content.
+
+This lower bound alone exceeds the **10 GiB LFS storage allowance** available
+on GitHub Free and Pro. It does not include older Releases, newly published
+assets, other LFS objects or unpublished local-only evidence. Because all
+467 digests in this sample are distinct, LFS object deduplication cannot
+reduce this sample beneath the Free/Pro allowance.
+
+This is NOT a complete source inventory or a restored-clone proof.
+The owner's exact GitHub plan, account-level LFS balance and zero-dollar
+billing budget have not been read through the connector. Consequently, no
+mass LFS migration is authorized or attempted. The mirror manifest remains the
+authority for mirrored bytes, not these sample totals.
+
 ## Release-to-LFS migration
 
 `tools/mirror_releases_to_clone_lfs.py` mirrors immutable Release assets into
