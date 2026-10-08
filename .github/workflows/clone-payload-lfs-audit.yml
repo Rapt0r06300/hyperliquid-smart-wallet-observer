@@ -44,11 +44,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXTRA=()
-          if [ "${{ vars.ALINA_LFS_MIRROR_ENABLED }}" = "true" ]; then
-            EXTRA+=(--require-complete)
-          fi
-          python tools/check_clone_payload_completeness.py             --repository "$GITHUB_REPOSITORY"             --root .             --output "$RUNNER_TEMP/clone-payload-completeness.json"             "${EXTRA[@]}"
+          # A structurally valid report with complete=false is NOT a successful
+          # disaster-recovery proof. Always fail closed, even if LFS mirroring
+          # is held for explicit billing approval.
+          python tools/check_clone_payload_completeness.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --root . \
+            --output "$RUNNER_TEMP/clone-payload-completeness.json" \
+            --require-complete
           cat "$RUNNER_TEMP/clone-payload-completeness.json"
 
       - name: Upload completeness report
