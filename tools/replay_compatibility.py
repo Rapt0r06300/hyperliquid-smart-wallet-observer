@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
 REPLAYABLE_FAMILIES={"trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v3"
+VERIFIER_VERSION="alina.replay.compatibility.v4"
 
 
 def _open(path: Path):
@@ -29,6 +29,52 @@ def _timestamp(row: Mapping[str, Any]) -> float | None:
     except (TypeError,ValueError,OverflowError):
         return None
     return value if math.isfinite(value) and value >= 0.0 else None
+
+
+_RECEIVE_ONLY_COPY_SOURCES = {
+    "copy_vault_positions": "hyperliquid_public_info",
+    "copy_vault_selection": "hyperliquid_public_vaults",
+}
+
+
+def _proof_of_receive_only_snapshot(
+    row: Mapping[str, Any], family: str, manifest: Mapping[str, Any]
+) -> int | None:
+    """Strictly verify *observed* HTTP state; never synthesize exchange events."""
+    if (
+        family not in _RECEIVE_ONLY_COPY_SOURCES
+        or manifest.get("source") != _RECEIVE_ONLY_COPY_SOURCES[family]
+        or row.get("source_id") != _RECEIVE_ONLY_COPY_SOURCES[family]
+        or str(row.get("channel") or "").lower() != family
+        or str(row.get("event_kind") or "").upper() != "SNAPSHOT"
+        or row.get("exchange_ts_ms") is not None
+        or row.get("real_execution") is not False
+    ):
+        return None
+    provenance = row.get("provenance")
+    if not isinstance(provenance, Mapping) or (
+        provenance.get("transport") != "https"
+        or provenance.get("access") not in {"read_only", "public_read_only"}
+        or provenance.get("authenticated") is not False
+    ):
+        return None
+    if family == "copy_vault_positions":
+        if provenance.get("request_type") != "clearinghouseState":
+            return None
+    elif provenance.get("selection_causal") is not True:
+        return None
+    raw = row.get("raw_payload")
+    if not isinstance(raw, str) or not raw:
+        return None
+    # Hash the actual envelope raw payload: a mislabeled/corrupt snapshot fails.
+    import hashlib
+    if row.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest():
+        return None
+    recv = row.get("received_ts_ms")
+    monotonic = row.get("local_monotonic_ns")
+    if type(recv) is not int or recv <= 0 or type(monotonic) is not int or monotonic <= 0:
+        return None
+    return recv
 
 
 def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -58,6 +104,8 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
     }
     last: float | None=None
     seen:set[str]=set()
+    receive_only = family in _RECEIVE_ONLY_COPY_SOURCES
+    verified_observations = 0
     try:
         with _open(p) as handle:
             for line in handle:
@@ -73,6 +121,13 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
                     continue
                 result["record_count"]+=1
                 ts=_timestamp(row)
+                if receive_only:
+                    observed = _proof_of_receive_only_snapshot(row, family, manifest)
+                    if observed is not None:
+                        verified_observations += 1
+                        ts = float(observed)
+                    else:
+                        ts = None
                 if ts is None:
                     result["invalid_record_count"]+=1
                     if family in TRADE_FAMILIES:
@@ -125,6 +180,11 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
         result["replay_reason"]="TRUNCATED_OR_UNREADABLE"
         return result
 
+    result["receive_only_snapshot_verified"] = bool(
+        receive_only and verified_observations == result["record_count"]
+        and verified_observations > 0
+        and result["invalid_record_count"] == 0
+    )
     if result["record_count"]<=0:
         result["replay_reason"]="NO_RECORDS"
     elif result["invalid_record_count"]>0:
