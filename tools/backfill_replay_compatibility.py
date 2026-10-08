@@ -22,9 +22,9 @@ from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
 
 try:
-    from tools.backfill_exact_trade_counts import IDENTITY_VERSION
+    from tools.backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
 except ModuleNotFoundError:
-    from backfill_exact_trade_counts import IDENTITY_VERSION
+    from backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
 
 ROOT=Path(__file__).resolve().parents[1]
 INDEX_PATH=ROOT/"catalog"/"DATA_INDEX.json"
@@ -123,8 +123,18 @@ def _hydrate_release_fields(row: dict[str,Any], manifest: Mapping[str,Any] | Non
     release_map=release if isinstance(release,Mapping) else {}
     fallback={
         "release_repository": manifest.get("release_repository") or release_map.get("repository"),
-        "release_tag": manifest.get("release_tag") or release_map.get("tag"),
-        "release_asset": manifest.get("release_asset") or release_map.get("asset_name"),
+        "release_tag": manifest.get("release_tag") or release_map.get("release_tag") or release_map.get("tag"),
+        "release_asset": manifest.get("release_asset") or (
+            release_map.get("member_name") if release_map.get("storage") == "zip_entry"
+            else release_map.get("asset_name")
+        ),
+        "release_storage": manifest.get("release_storage") or release_map.get("storage"),
+        "release_container_asset": manifest.get("release_container_asset") or (
+            release_map.get("asset_name") if release_map.get("storage") == "zip_entry" else None
+        ),
+        "release_member": manifest.get("release_member") or release_map.get("member_name"),
+        "release_remote_size": manifest.get("release_remote_size") or release_map.get("remote_size"),
+        "release_remote_digest": manifest.get("release_remote_digest") or release_map.get("remote_digest"),
         "sha256": manifest.get("sha256"),
         "bytes": manifest.get("bytes"),
     }
@@ -259,7 +269,7 @@ def _download(row: Mapping[str,Any], destination: Path) -> Path:
     """Download immutable release assets with a quota-resilient public fallback."""
     repo=str(row["release_repository"])
     tag=str(row["release_tag"])
-    asset=str(row["release_asset"])
+    asset=str(row.get("release_container_asset") or row["release_asset"])
     destination.mkdir(parents=True,exist_ok=True)
     path=destination/asset
 
@@ -276,6 +286,10 @@ def _download(row: Mapping[str,Any], destination: Path) -> Path:
         check=False,
     )
     if first.returncode==0 and path.is_file():
+        if row.get("release_container_asset"):
+            extracted = _extract_packed_verified_shard(row, path, destination)
+            path.unlink(missing_ok=True)
+            return extracted
         return path
 
     parts=repo.split("/",1)
@@ -308,6 +322,10 @@ def _download(row: Mapping[str,Any], destination: Path) -> Path:
             if value and value.strip()
         )
         raise BackfillError(("release download failed: "+detail)[-700:])
+    if row.get("release_container_asset"):
+        extracted = _extract_packed_verified_shard(row, path, destination)
+        path.unlink(missing_ok=True)
+        return extracted
     return path
 
 
