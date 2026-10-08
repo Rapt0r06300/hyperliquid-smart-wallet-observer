@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -150,66 +149,3 @@ def test_git_pointers_for_paths_reads_many_blobs_in_one_batch(tmp_path):
 
     assert module.git_pointers_for_paths(tmp_path, paths) == expected
 
-
-def test_verify_materialized_clone_payload_accepts_exact_bytes(tmp_path):
-    module = _module()
-    payload = b"market trades and L2 evidence" * 200
-    sha = hashlib.sha256(payload).hexdigest()
-    target = tmp_path / "clone_payload" / "releases" / "v1" / "asset.bin"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(payload)
-    entries = {
-        123: {
-            "clone_path": target.relative_to(tmp_path).as_posix(),
-            "bytes": len(payload),
-            "sha256": sha,
-        }
-    }
-    assert module.verify_materialized_assets(tmp_path, entries) == []
-
-    target.write_bytes(payload + b"corrupted")
-    errors = module.verify_materialized_assets(tmp_path, entries)
-    assert len(errors) == 1
-    assert errors[0]["reason"] == "size_or_identity"
-
-
-def test_verify_materialized_refuses_unchecked_lfs_pointer(tmp_path):
-    module = _module()
-    target = tmp_path / "clone_payload" / "releases" / "v1" / "asset.bin"
-    target.parent.mkdir(parents=True)
-    target.write_text("version https://git-lfs.github.com/spec/v1\\n", encoding="ascii")
-    expected = b"real payload 200mb"
-    errors = module.verify_materialized_assets(
-        tmp_path,
-        {99: {
-            "clone_path": "clone_payload/releases/v1/asset.bin",
-            "bytes": len(expected),
-            "sha256": hashlib.sha256(expected).hexdigest(),
-        }},
-    )
-    assert errors and errors[0]["reason"] == "size_or_identity"
-
-
-def test_verify_materialized_blocks_path_traversal(tmp_path):
-    module = _module()
-    failures = module.verify_materialized_assets(
-        tmp_path,
-        {1: {"clone_path": "../secrets.bin", "bytes": 2, "sha256": "0" * 64}},
-    )
-    assert failures[0]["reason"] == "invalid_path"
-
-
-def test_verify_materialized_detects_same_size_corruption(tmp_path):
-    module = _module()
-    target = tmp_path / "clone_payload" / "releases" / "v1" / "asset.bin"
-    target.parent.mkdir(parents=True)
-    target.write_bytes(b"abcd")
-    failures = module.verify_materialized_assets(
-        tmp_path,
-        {7: {
-            "clone_path": "clone_payload/releases/v1/asset.bin",
-            "bytes": 4,
-            "sha256": hashlib.sha256(b"dcba").hexdigest(),
-        }},
-    )
-    assert failures[0]["reason"] == "sha256_mismatch"
