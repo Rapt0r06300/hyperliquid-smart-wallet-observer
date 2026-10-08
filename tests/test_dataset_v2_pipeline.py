@@ -336,6 +336,54 @@ def test_partial_trade_reconciliation_never_promotes_safe(tmp_path) -> None:
     assert "RECONCILIATION_MATCH_REQUIRED" in partial["quality_reasons"]
 
 
+def test_reference_tail_lag_preserves_locally_proven_source_continuity() -> None:
+    manifest = {
+        "event_count": 10,
+        "bytes": 100,
+        "start_ts_ms": 1000,
+        "end_ts_ms": 2000,
+        "sha256": "f" * 64,
+        "collector_version": "f" * 40,
+        "family": "trades",
+        "asset_verified": True,
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+        },
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "synchronization": {"connection_count": 1},
+        "required_channels": [],
+        "observed_channels": ["trades"],
+        "cost_model": {"applicable": False, "ready": False},
+        "reconciliation": {"status": "UNVERIFIED"},
+        "replay_compatible": True,
+    }
+    reconciled = attach_reconciliation(
+        manifest,
+        {
+            "status": "PARTIAL",
+            "live_count": 10,
+            "reference_count": 8,
+            "matched_count": 8,
+            "missing_from_live": 0,
+            "live_only": 2,
+            "duplicate_live_keys": 0,
+        },
+    )
+    assert reconciled["reconciliation"]["status"] == "SOURCE_CONTINUITY_VERIFIED"
+    assert reconciled["reconciliation"]["reference_status"] == "PARTIAL"
+    assert reconciled["quality_status"] == "SAFE"
+
+
 def test_receive_observation_snapshot_can_be_safe_without_exchange_timestamp(tmp_path) -> None:
     writer = PartitionedTickDatasetWriter(tmp_path / "ticks", rotate_bytes=10_000_000)
     event = TickEnvelope(

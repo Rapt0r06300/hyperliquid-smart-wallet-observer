@@ -148,6 +148,11 @@ def test_okx_all_trades_frame_is_canonical_individual_trade() -> None:
     assert envelope.parsed_summary["source_channel"] == "trades-all"
     assert envelope.parsed_summary["individual_trade_feed"] is True
     assert envelope.parsed_summary["event_count"] == 1
+    assert envelope.parsed_summary["trade_id"] == "43"
+    assert envelope.parsed_summary["price"] == "100"
+    assert envelope.parsed_summary["quantity"] == "0.5"
+    assert envelope.parsed_summary["side"] == "sell"
+    assert envelope.parsed_summary["trade_ts_ms"] == 1996
 
 
 def test_native_tape_refuses_frame_without_receive_clock() -> None:

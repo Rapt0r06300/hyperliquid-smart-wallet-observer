@@ -218,8 +218,17 @@ def attach_reconciliation(
     result = dict(manifest)
     reference_status = str(report.get("status") or "UNVERIFIED").upper()
     status = reference_status
-    if reference_status == "UNAVAILABLE":
-        locally_proven = infer_reconciliation_status(result)
+    locally_proven = infer_reconciliation_status(result)
+    reference_is_live_subset = (
+        reference_status == "PARTIAL"
+        and _int(report.get("missing_from_live")) == 0
+        and _int(report.get("duplicate_live_keys")) == 0
+        and (_int(report.get("matched_count")) or 0) > 0
+        and (_int(report.get("live_count")) or 0)
+        == (_int(report.get("matched_count")) or 0)
+        + (_int(report.get("live_only")) or 0)
+    )
+    if reference_status == "UNAVAILABLE" or reference_is_live_subset:
         if locally_proven == "SOURCE_CONTINUITY_VERIFIED":
             status = locally_proven
     result["reconciliation"] = {
@@ -233,6 +242,7 @@ def attach_reconciliation(
         "duplicate_live_keys": _int(report.get("duplicate_live_keys")),
         "backfill_status": report.get("backfill_status"),
         "backfill_error": report.get("backfill_error"),
+        "local_continuity_fallback": status != reference_status,
     }
     return finalize_manifest(result)
 

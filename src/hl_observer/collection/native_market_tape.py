@@ -321,6 +321,16 @@ def _okx_identity(
         "action": str(payload.get("action") or ""),
         "prev_sequence": _int(first.get("prevSeqId")),
     }
+    if channel == "trades" and len(rows) == 1:
+        summary.update(
+            {
+                "trade_id": str(first.get("tradeId") or ""),
+                "price": str(first.get("px") or ""),
+                "quantity": str(first.get("sz") or ""),
+                "side": str(first.get("side") or "").lower(),
+                "trade_ts_ms": _int(first.get("ts")),
+            }
+        )
     return channel, instrument, exchange_ts, sequence, summary
 
 
