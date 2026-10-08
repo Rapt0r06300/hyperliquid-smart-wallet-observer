@@ -44,8 +44,19 @@ def safe_hyperliquid_reference_interval_s(
 
 
 def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
+    ids, event_count, _first_ts_ms, _last_ts_ms = _live_trade_evidence(path, venue=venue)
+    return ids, event_count
+
+
+def _live_trade_evidence(
+    path: str | Path,
+    *,
+    venue: str,
+) -> tuple[set[str], int, int | None, int | None]:
     ids: set[str] = set()
     event_count = 0
+    first_ts_ms: int | None = None
+    last_ts_ms: int | None = None
     with gzip.open(Path(path), "rt", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
@@ -84,7 +95,11 @@ def live_trade_ids(path: str | Path, *, venue: str) -> tuple[set[str], int]:
                     continue
                 event_count += 1
                 ids.add(trade_id)
-    return ids, event_count
+                trade_ts_ms = _trade_timestamp_ms(row, venue)
+                if trade_ts_ms is not None:
+                    first_ts_ms = trade_ts_ms if first_ts_ms is None else min(first_ts_ms, trade_ts_ms)
+                    last_ts_ms = trade_ts_ms if last_ts_ms is None else max(last_ts_ms, trade_ts_ms)
+    return ids, event_count, first_ts_ms, last_ts_ms
 
 
 class HyperliquidTradeReferenceSampler:
@@ -202,17 +217,21 @@ class HyperliquidTradeReferenceSampler:
         end_ms: int,
     ) -> dict[str, Any]:
         coin = str(symbol).strip().upper()
-        live_ids, live_events = live_trade_ids(path, venue="hyperliquid")
+        live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+            path, venue="hyperliquid"
+        )
+        comparison_start_ms = live_start_ms if live_start_ms is not None else int(start_ms)
+        comparison_end_ms = live_end_ms if live_end_ms is not None else int(end_ms)
         refs = self._rows.get(coin, {})
         ref_ids = {
             trade_id
             for trade_id, ts in refs.items()
-            if int(start_ms) <= int(ts) <= int(end_ms)
+            if comparison_start_ms <= int(ts) <= comparison_end_ms
         }
         reference_times = [
             int(ts)
             for ts in refs.values()
-            if int(start_ms) <= int(ts) <= int(end_ms)
+            if comparison_start_ms <= int(ts) <= comparison_end_ms
         ]
         all_reference_times = list(refs.values())
         if not self._success_wall_ms.get(coin):
@@ -237,8 +256,8 @@ class HyperliquidTradeReferenceSampler:
         if live_ids and (
             coverage_start is None
             or coverage_end is None
-            or coverage_start > int(start_ms)
-            or coverage_end < int(end_ms)
+            or coverage_start > comparison_start_ms
+            or coverage_end < comparison_end_ms
         ):
             return {
                 "status": "PARTIAL",
@@ -265,7 +284,7 @@ class HyperliquidTradeReferenceSampler:
         report["reference_last_ts_ms"] = (
             max(reference_times) if reference_times else None
         )
-        return report
+        return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 
 async def reconcile_bybit_trade_shard(
@@ -279,6 +298,11 @@ async def reconcile_bybit_trade_shard(
 ) -> dict[str, Any]:
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://api.bybit.com", timeout=10.0)
+    live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+        path, venue="bybit"
+    )
+    comparison_start_ms = live_start_ms if live_start_ms is not None else int(start_ms)
+    comparison_end_ms = live_end_ms if live_end_ms is not None else int(end_ms)
     try:
         response = await http.get(
             "/v5/market/recent-trade",
@@ -307,7 +331,7 @@ async def reconcile_bybit_trade_shard(
     reference = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
     timestamps = [_int(row.get("time")) for row in reference]
     present_ts = [value for value in timestamps if value is not None]
-    if not present_ts or min(present_ts) > int(start_ms):
+    if not present_ts or min(present_ts) > comparison_start_ms:
         return {
             "status": "PARTIAL",
             "reason": "REFERENCE_DOES_NOT_COVER_WINDOW_START",
@@ -319,16 +343,16 @@ async def reconcile_bybit_trade_shard(
         str(row.get("execId"))
         for row in reference
         if row.get("execId") not in {None, ""}
-        and start_ms <= (_int(row.get("time")) or -1) <= end_ms
+        and comparison_start_ms <= (_int(row.get("time")) or -1) <= comparison_end_ms
     }
-    live_ids, live_events = live_trade_ids(path, venue="bybit")
-    return _compare(
+    report = _compare(
         live_ids,
         ref_ids,
         live_event_count=live_events,
         reference_event_count=len(ref_ids),
         reference_coverage="WINDOW_START_COVERED",
     )
+    return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 
 async def reconcile_okx_trade_shard(
@@ -343,8 +367,13 @@ async def reconcile_okx_trade_shard(
 ) -> dict[str, Any]:
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://www.okx.com", timeout=10.0)
+    live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+        path, venue="okx"
+    )
+    comparison_start_ms = live_start_ms if live_start_ms is not None else int(start_ms)
+    comparison_end_ms = live_end_ms if live_end_ms is not None else int(end_ms)
     rows: list[Mapping[str, Any]] = []
-    cursor = int(end_ms) + 1
+    cursor = comparison_end_ms + 1
     covered_start = False
     try:
         for _page in range(max(1, int(max_pages))):
@@ -375,7 +404,7 @@ async def reconcile_okx_trade_shard(
             if not present:
                 break
             oldest = min(present)
-            if oldest <= int(start_ms):
+            if oldest <= comparison_start_ms:
                 covered_start = True
                 break
             if oldest >= cursor:
@@ -402,16 +431,16 @@ async def reconcile_okx_trade_shard(
         str(row.get("tradeId"))
         for row in rows
         if row.get("tradeId") not in {None, ""}
-        and start_ms <= (_int(row.get("ts")) or -1) <= end_ms
+        and comparison_start_ms <= (_int(row.get("ts")) or -1) <= comparison_end_ms
     }
-    live_ids, live_events = live_trade_ids(path, venue="okx")
-    return _compare(
+    report = _compare(
         live_ids,
         ref_ids,
         live_event_count=live_events,
         reference_event_count=len(ref_ids),
         reference_coverage="WINDOW_START_COVERED",
     )
+    return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 
 
@@ -428,8 +457,13 @@ async def reconcile_gate_trade_shard(
 ) -> dict[str, Any]:
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://api.gateio.ws/api/v4", timeout=10.0)
-    start_s = int(start_ms) // 1000
-    end_s = (int(end_ms) + 999) // 1000
+    live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+        path, venue="gate"
+    )
+    comparison_start_ms = live_start_ms if live_start_ms is not None else int(start_ms)
+    comparison_end_ms = live_end_ms if live_end_ms is not None else int(end_ms)
+    start_s = comparison_start_ms // 1000
+    end_s = (comparison_end_ms + 999) // 1000
     pending = [(start_s, end_s)]
     reference: dict[str, Mapping[str, Any]] = {}
     requests = 0
@@ -462,7 +496,7 @@ async def reconcile_gate_trade_shard(
                 if ts is None:
                     sec = _int(row.get("create_time") or row.get("time"))
                     ts = sec * 1000 if sec is not None else None
-                if trade_id not in {None, ""} and ts is not None and int(start_ms) <= ts <= int(end_ms):
+                if trade_id not in {None, ""} and ts is not None and comparison_start_ms <= ts <= comparison_end_ms:
                     reference[str(trade_id)] = row
             full = len(rows) >= min(1000, max(1, int(limit)))
             if full and left < right:
@@ -481,14 +515,14 @@ async def reconcile_gate_trade_shard(
     finally:
         if own_client:
             await http.aclose()
-    live_ids, live_events = live_trade_ids(path, venue="gate")
-    return _compare(
+    report = _compare(
         live_ids,
         set(reference),
         live_event_count=live_events,
         reference_event_count=len(reference),
         reference_coverage="EXPLICIT_BOUNDED_REST_WINDOW",
     )
+    return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 
 async def reconcile_bitget_trade_shard(
@@ -503,6 +537,11 @@ async def reconcile_bitget_trade_shard(
 ) -> dict[str, Any]:
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://api.bitget.com", timeout=10.0)
+    live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+        path, venue="bitget"
+    )
+    comparison_start_ms = live_start_ms if live_start_ms is not None else int(start_ms)
+    comparison_end_ms = live_end_ms if live_end_ms is not None else int(end_ms)
     reference: dict[str, Mapping[str, Any]] = {}
     cursor: str | None = None
     covered_start = False
@@ -511,8 +550,8 @@ async def reconcile_bitget_trade_shard(
             params = {
                 "symbol": str(symbol).upper(),
                 "productType": "USDT-FUTURES",
-                "startTime": str(int(start_ms)),
-                "endTime": str(int(end_ms)),
+                "startTime": str(comparison_start_ms),
+                "endTime": str(comparison_end_ms),
                 "limit": str(min(1000, max(1, int(limit)))),
             }
             if cursor:
@@ -541,9 +580,9 @@ async def reconcile_bitget_trade_shard(
                     page_ts.append(ts)
                 if trade_id not in {None, ""}:
                     page_ids.append(str(trade_id))
-                    if ts is not None and int(start_ms) <= ts <= int(end_ms):
+                    if ts is not None and comparison_start_ms <= ts <= comparison_end_ms:
                         reference[str(trade_id)] = row
-            if page_ts and min(page_ts) <= int(start_ms):
+            if page_ts and min(page_ts) <= comparison_start_ms:
                 covered_start = True
                 break
             if len(page_rows) < min(1000, max(1, int(limit))):
@@ -567,14 +606,14 @@ async def reconcile_bitget_trade_shard(
             "reason": "REFERENCE_DOES_NOT_COVER_WINDOW_START",
             "reference_count": len(reference),
         }
-    live_ids, live_events = live_trade_ids(path, venue="bitget")
-    return _compare(
+    report = _compare(
         live_ids,
         set(reference),
         live_event_count=live_events,
         reference_event_count=len(reference),
         reference_coverage="BOUNDED_HISTORY_PAGINATION",
     )
+    return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 async def reconcile_binance_aggtrade_shard(
     path: str | Path,
@@ -595,8 +634,11 @@ async def reconcile_binance_aggtrade_shard(
     """
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://fapi.binance.com", timeout=10.0)
-    start = int(start_ms)
-    end = int(end_ms)
+    live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
+        path, venue="binance"
+    )
+    start = live_start_ms if live_start_ms is not None else int(start_ms)
+    end = live_end_ms if live_end_ms is not None else int(end_ms)
     if end < start:
         if own_client:
             await http.aclose()
@@ -667,14 +709,14 @@ async def reconcile_binance_aggtrade_shard(
         if own_client:
             await http.aclose()
 
-    live_ids, live_events = live_trade_ids(path, venue="binance")
-    return _compare(
+    report = _compare(
         live_ids,
         set(reference),
         live_event_count=live_events,
         reference_event_count=len(reference),
         reference_coverage="EXPLICIT_BOUNDED_REST_WINDOW",
     )
+    return _with_comparison_window(report, start, end)
 
 
 def _compare(
@@ -705,6 +747,17 @@ def _compare(
     }
 
 
+def _with_comparison_window(
+    report: dict[str, Any],
+    start_ms: int,
+    end_ms: int,
+) -> dict[str, Any]:
+    report["comparison_start_ts_ms"] = int(start_ms)
+    report["comparison_end_ts_ms"] = int(end_ms)
+    report["comparison_time_domain"] = "EXCHANGE_EVENT_TIME"
+    return report
+
+
 def _trade_id(row: Mapping[str, Any], venue: str) -> str | None:
     key = str(venue).lower()
     if key == "bybit":
@@ -722,6 +775,27 @@ def _trade_id(row: Mapping[str, Any], venue: str) -> str | None:
     else:
         return None
     return None if value in {None, ""} else str(value)
+
+
+def _trade_timestamp_ms(row: Mapping[str, Any], venue: str) -> int | None:
+    key = str(venue).lower()
+    if key == "bybit":
+        return _int(row.get("T", row.get("time")))
+    if key == "okx":
+        return _int(row.get("ts"))
+    if key == "binance":
+        return _int(row.get("T"))
+    if key == "hyperliquid":
+        return _int(row.get("time"))
+    if key == "gate":
+        value = _int(row.get("create_time_ms"))
+        if value is not None:
+            return value
+        seconds = _int(row.get("create_time", row.get("time")))
+        return seconds * 1_000 if seconds is not None else None
+    if key == "bitget":
+        return _int(row.get("ts", row.get("timestamp")))
+    return None
 
 
 def _error_report(reason: str, exc: Exception) -> dict[str, Any]:

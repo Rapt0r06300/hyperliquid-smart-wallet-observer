@@ -186,6 +186,42 @@ def test_gate_and_bitget_exact_trade_reconciliation(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_gate_and_bitget_reconciliation_use_live_exchange_time_bounds(tmp_path) -> None:
+    gate_path = tmp_path / "gate-bounds.jsonl.gz"
+    with gzip.open(gate_path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"raw_payload": {"result": [
+            {"id": 7, "create_time_ms": 1050}, {"id": 8, "create_time_ms": 1080}
+        ]}}) + "\n")
+    bitget_path = tmp_path / "bitget-bounds.jsonl.gz"
+    with gzip.open(bitget_path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps({"raw_payload": {"data": [
+            {"tradeId": "7", "ts": "1050"}, {"tradeId": "8", "ts": "1080"}
+        ]}}) + "\n")
+
+    async def scenario() -> None:
+        async def gate_handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[
+                {"id": 6, "create_time_ms": 1005}, {"id": 7, "create_time_ms": 1050},
+                {"id": 8, "create_time_ms": 1080}, {"id": 9, "create_time_ms": 1095},
+            ])
+        gate_client = httpx.AsyncClient(base_url="https://api.gateio.ws/api/v4", transport=httpx.MockTransport(gate_handler))
+        gate_report = await reconcile_gate_trade_shard(gate_path, symbol="BTC_USDT", start_ms=1000, end_ms=1100, client=gate_client)
+        await gate_client.aclose()
+        assert gate_report["status"] == "MATCHED"
+
+        async def bitget_handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"code": "00000", "data": [
+                {"tradeId": "9", "ts": "1095"}, {"tradeId": "8", "ts": "1080"},
+                {"tradeId": "7", "ts": "1050"}, {"tradeId": "6", "ts": "1005"},
+            ]})
+        bitget_client = httpx.AsyncClient(base_url="https://api.bitget.com", transport=httpx.MockTransport(bitget_handler))
+        bitget_report = await reconcile_bitget_trade_shard(bitget_path, symbol="BTCUSDT", start_ms=1000, end_ms=1100, client=bitget_client)
+        await bitget_client.aclose()
+        assert bitget_report["status"] == "MATCHED"
+
+    asyncio.run(scenario())
+
+
 def test_replay_grade_coverage_uses_actual_published_families() -> None:
     manifests = []
     for family in ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"):

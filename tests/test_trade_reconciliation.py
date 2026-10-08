@@ -9,10 +9,10 @@ import httpx
 from hl_observer.collection.trade_reconciliation import (
     HyperliquidTradeReferenceSampler,
     live_trade_ids,
-    safe_hyperliquid_reference_interval_s,
     reconcile_binance_aggtrade_shard,
     reconcile_bybit_trade_shard,
     reconcile_okx_trade_shard,
+    safe_hyperliquid_reference_interval_s,
 )
 
 
@@ -156,6 +156,25 @@ def test_bybit_truncated_reference_stays_partial(tmp_path) -> None:
     asyncio.run(scenario())
 
 
+def test_bybit_reconciliation_uses_live_exchange_time_bounds(tmp_path) -> None:
+    path = tmp_path / "bybit.jsonl.gz"
+    _write_shard(path, venue="bybit", rows=[{"id": "a", "ts": 1050}, {"id": "b", "ts": 1080}])
+
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"retCode": 0, "result": {"list": [
+                {"execId": "after", "time": "1095"}, {"execId": "b", "time": "1080"},
+                {"execId": "a", "time": "1050"}, {"execId": "before", "time": "1005"},
+            ]}})
+        client = httpx.AsyncClient(base_url="https://api.bybit.com", transport=httpx.MockTransport(handler))
+        report = await reconcile_bybit_trade_shard(path, symbol="BTCUSDT", start_ms=1000, end_ms=1100, client=client)
+        await client.aclose()
+        assert report["status"] == "MATCHED"
+        assert report["comparison_time_domain"] == "EXCHANGE_EVENT_TIME"
+
+    asyncio.run(scenario())
+
+
 def test_okx_paginates_until_window_start_then_matches(tmp_path) -> None:
     path = tmp_path / "okx.jsonl.gz"
     _write_shard(
@@ -191,9 +210,29 @@ def test_okx_paginates_until_window_start_then_matches(tmp_path) -> None:
             client=client,
         )
         await client.aclose()
-        assert len(calls) == 2
+        assert calls == [1081]
         assert report["status"] == "MATCHED"
         assert report["matched_count"] == 2
+
+    asyncio.run(scenario())
+
+
+def test_okx_reconciliation_uses_exchange_time_bounds_not_receive_bounds(tmp_path) -> None:
+    path = tmp_path / "okx-bounds.jsonl.gz"
+    _write_shard(path, venue="okx", rows=[{"id": "a", "ts": 1050}, {"id": "b", "ts": 1080}])
+
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"code": "0", "data": [
+                {"tradeId": "after", "ts": "1095"}, {"tradeId": "b", "ts": "1080"},
+                {"tradeId": "a", "ts": "1050"}, {"tradeId": "before", "ts": "1005"},
+            ]})
+        client = httpx.AsyncClient(base_url="https://www.okx.com", transport=httpx.MockTransport(handler))
+        report = await reconcile_okx_trade_shard(path, symbol="BTC-USDT-SWAP", start_ms=1000, end_ms=1100, client=client)
+        await client.aclose()
+        assert report["status"] == "MATCHED"
+        assert report["comparison_start_ts_ms"] == 1050
+        assert report["comparison_end_ts_ms"] == 1080
 
     asyncio.run(scenario())
 
@@ -311,6 +350,27 @@ def test_binance_aggtrade_exact_rest_match(tmp_path) -> None:
         assert report["status"] == "MATCHED"
         assert report["matched_count"] == 2
         assert report["reference_coverage"] == "EXPLICIT_BOUNDED_REST_WINDOW"
+
+    asyncio.run(scenario())
+
+
+def test_binance_reconciliation_uses_live_exchange_time_bounds(tmp_path) -> None:
+    path = tmp_path / "binance-bounds.jsonl.gz"
+    _write_shard(path, venue="binance", rows=[{"id": 10, "ts": 1050}])
+
+    async def scenario() -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=[
+                {"a": 9, "T": 1005}, {"a": 10, "T": 1050}, {"a": 11, "T": 1095}
+            ])
+        client = httpx.AsyncClient(base_url="https://fapi.binance.com", transport=httpx.MockTransport(handler))
+        report = await reconcile_binance_aggtrade_shard(
+            path, symbol="BTCUSDT", start_ms=1000, end_ms=1100,
+            client=client, throttle_s=0,
+        )
+        await client.aclose()
+        assert report["status"] == "MATCHED"
+        assert report["comparison_time_domain"] == "EXCHANGE_EVENT_TIME"
 
     asyncio.run(scenario())
 
@@ -456,7 +516,10 @@ def test_hyperliquid_reference_sampler_fails_closed_without_window_coverage(tmp_
     path = tmp_path / "hl-partial.jsonl.gz"
     raw = {
         "channel": "trades",
-        "data": [{"coin": "BTC", "tid": 101, "time": 1000}],
+        "data": [
+            {"coin": "BTC", "tid": 101, "time": 1000},
+            {"coin": "BTC", "tid": 103, "time": 1010},
+        ],
     }
     with gzip.open(path, "wt", encoding="utf-8") as handle:
         handle.write(json.dumps({"raw_payload": json.dumps(raw)}) + "\n")
