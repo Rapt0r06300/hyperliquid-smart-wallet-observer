@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
 REPLAYABLE_FAMILIES={"capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v5"
+VERIFIER_VERSION="alina.replay.compatibility.v6"
 
 
 def _open(path: Path):
@@ -73,6 +73,47 @@ def _proof_of_receive_only_snapshot(
     recv = row.get("received_ts_ms")
     monotonic = row.get("local_monotonic_ns")
     if type(recv) is not int or recv <= 0 or type(monotonic) is not int or monotonic <= 0:
+        return None
+    return recv
+
+
+def _proof_of_active_asset_context(row: Mapping[str, Any], manifest: Mapping[str, Any]) -> int | None:
+    """Use genuine receive-time observation for timestamp-free Hyperliquid context."""
+    import hashlib
+    if (
+        str(manifest.get("source") or "") != "hyperliquid_public_ws"
+        or row.get("source_id") != "hyperliquid_public_ws"
+        or row.get("channel") != "activeAssetCtx"
+        or str(row.get("event_kind") or "").upper() != "SNAPSHOT"
+        or row.get("exchange_ts_ms") is not None
+        or row.get("real_execution") is not False
+    ):
+        return None
+    provenance = row.get("provenance")
+    if not isinstance(provenance, Mapping) or any((
+        provenance.get("transport") != "websocket",
+        provenance.get("access") != "read_only",
+        provenance.get("authenticated") is not False,
+        provenance.get("timestamp_semantics") != "receive_observation_time_only",
+    )):
+        return None
+    raw = row.get("raw_payload")
+    if not isinstance(raw, str) or not raw:
+        return None
+    if row.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest():
+        return None
+    try:
+        source = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(source, Mapping) or source.get("channel") != "activeAssetCtx":
+        return None
+    data = source.get("data")
+    if not isinstance(data, Mapping) or not isinstance(data.get("ctx"), Mapping):
+        return None
+    recv = row.get("received_ts_ms")
+    mono = row.get("local_monotonic_ns")
+    if type(recv) is not int or recv <= 0 or type(mono) is not int or mono <= 0:
         return None
     return recv
 
@@ -168,6 +209,9 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
     seen:set[str]=set()
     receive_only = family in _RECEIVE_ONLY_COPY_SOURCES
     verified_observations = 0
+    receive_context = family == "activeassetctx"
+    context_proven = 0
+    context_observation_clocks: set[int] = set()
     try:
         with _open(p) as handle:
             for line in handle:
@@ -188,6 +232,14 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
                     if observed is not None:
                         verified_observations += 1
                         ts = float(observed)
+                    else:
+                        ts = None
+                if receive_context:
+                    observed_ctx = _proof_of_active_asset_context(row, manifest)
+                    if observed_ctx is not None:
+                        context_proven += 1
+                        context_observation_clocks.add(row["local_monotonic_ns"])
+                        ts = float(observed_ctx)
                     else:
                         ts = None
                 if ts is None:
@@ -245,6 +297,12 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
         result["replay_reason"]="TRUNCATED_OR_UNREADABLE"
         return result
 
+    result["receive_only_context_verified"] = bool(
+        receive_context and result["record_count"] > 0
+        and context_proven == result["record_count"]
+        and len(context_observation_clocks) == result["record_count"]
+        and result["invalid_record_count"] == 0
+    )
     result["derived_capacity_lineage_verified"] = bool(
         family == "capacity_tape" and result["record_count"] > 0
         and result["invalid_record_count"] == 0
