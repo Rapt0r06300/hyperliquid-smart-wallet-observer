@@ -335,3 +335,31 @@ def test_source_inventory_refuses_asset_without_provenance_sha(monkeypatch):
         assert "SHA-256" in str(exc)
     else:
         raise AssertionError("clone parity cannot be proven without source SHA-256")
+
+
+
+def test_source_inventory_never_trusts_partial_embedded_assets(monkeypatch):
+    module = _module()
+    release = {
+        "id": 42, "tag_name": "dataset",
+        "assets": [
+            {"id": 1, "name": "first.bin", "size": 1, "digest": "sha256:" + "a" * 64}
+        ],
+    }
+
+    def releases(_repository, *, page, per_page, token):
+        assert page == 1
+        return [release], {}
+
+    def assets(_repository, release_id, *, page, per_page, token):
+        assert release_id == 42
+        return [
+            {"id": 1, "name": "first.bin", "size": 1, "digest": "sha256:" + "a" * 64},
+            {"id": 2, "name": "second.bin", "size": 2, "digest": "sha256:" + "b" * 64},
+        ], {}
+
+    monkeypatch.setattr(module.mirror, "_api_page", releases)
+    monkeypatch.setattr(module.mirror, "_asset_page", assets)
+    inventory = module.source_inventory("owner/repo", token=None)
+    assert len(inventory) == 2
+    assert inventory[2]["bytes"] == 2

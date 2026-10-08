@@ -158,6 +158,7 @@ def iter_releases_oldest_first(
     *,
     token: str | None = None,
     per_page: int = 5,
+    strict_assets: bool = False,
 ) -> Iterable[Mapping[str, Any]]:
     # Some collection Releases carry hundreds of assets. Requesting 100 such
     # Releases per response repeatedly triggers GitHub API 504 timeouts.
@@ -206,7 +207,7 @@ def iter_releases_oldest_first(
                 )
             seen_release_ids.add(release_id)
             complete_assets = complete_release_assets(
-                repository, release, token=token,
+                repository, release, token=token, force_full=strict_assets,
             )
             yield {**release, "assets": complete_assets}
 
@@ -254,6 +255,7 @@ def complete_release_assets(
     release: Mapping[str, Any],
     *,
     token: str | None,
+    force_full: bool = False,
 ) -> list[Mapping[str, Any]]:
     """Require a complete listing even when Releases embed only 30 assets."""
     embedded = release.get("assets")
@@ -262,7 +264,7 @@ def complete_release_assets(
         isinstance(asset, Mapping) for asset in embedded
     ):
         raise MirrorError("Release has invalid id or embedded asset inventory")
-    if len(embedded) < EMBEDDED_RELEASE_ASSET_LIMIT:
+    if not force_full and len(embedded) < EMBEDDED_RELEASE_ASSET_LIMIT:
         return embedded
 
     first, headers = _asset_page(
@@ -296,7 +298,8 @@ def complete_release_assets(
     ids = [int(row.get("id") or 0) for row in assets]
     embedded_ids = {int(row.get("id") or 0) for row in embedded}
     if (
-        not ids or any(asset_id <= 0 for asset_id in ids)
+        (not ids and bool(embedded))
+        or any(asset_id <= 0 for asset_id in ids)
         or len(set(ids)) != len(ids)
         or not embedded_ids.issubset(ids)
         or len(assets) < len(embedded)

@@ -125,7 +125,11 @@ def source_inventory(
     token: str | None,
 ) -> dict[int, dict[str, Any]]:
     inventory: dict[int, dict[str, Any]] = {}
-    for release in mirror.iter_releases_oldest_first(repository, token=token):
+    # Source-side byte parity must always use the dedicated paginated assets API,
+    # even for Releases with fewer than 30 embedded assets.
+    for release in mirror.iter_releases_oldest_first(
+        repository, token=token, strict_assets=True,
+    ):
         assets = release.get("assets")
         if not isinstance(assets, list):
             raise CompletenessError("GitHub Release asset list unavailable")

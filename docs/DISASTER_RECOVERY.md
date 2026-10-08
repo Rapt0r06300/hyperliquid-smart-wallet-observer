@@ -60,7 +60,9 @@ report INCOMPLETE until source assets and current LFS pointers match exactly.
 
 The GitHub Releases list can embed a truncated asset list; for any Release
 with 30 or more embedded assets the mirror enumerates the separate
-paginated Release-assets endpoint. Missing pages and malformed records
+paginated Release-assets endpoint. The independent strict completeness audit
+re-enumerates the paginated assets endpoint for EVERY Release, even if the
+embedded list contains fewer than 30 assets. Missing pages and malformed records
 are fatal. An absent API response cannot be interpreted as zero bytes.
 
 **Important:** evidence that still exists only on an unuploaded local machine

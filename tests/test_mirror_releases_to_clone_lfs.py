@@ -360,3 +360,26 @@ def test_mirror_cli_refuses_billing_without_verified_zero_cost_budget(monkeypatc
     # No source Release downloads or Git writes can be reached.
     monkeypatch.setenv("ALINA_LFS_ZERO_COST_BUDGET_VERIFIED", "false")
     assert module.main(["--confirm-lfs-costs"]) == 4
+
+
+
+def test_strict_release_assets_queries_api_below_embedded_limit(monkeypatch):
+    module = _module()
+    embedded = {
+        "id": 8, "assets": [{"id": 1, "name": "one.bin", "size": 1}],
+    }
+    called = []
+
+    def fetch(_repo, release_id, *, page, per_page, token):
+        called.append(page)
+        return [
+            {"id": 1, "name": "one.bin", "size": 1},
+            {"id": 2, "name": "two.bin", "size": 2},
+        ], {}
+
+    monkeypatch.setattr(module, "_asset_page", fetch)
+    assets = module.complete_release_assets(
+        "owner/repo", embedded, token=None, force_full=True,
+    )
+    assert [x["id"] for x in assets] == [1, 2]
+    assert called == [1]
