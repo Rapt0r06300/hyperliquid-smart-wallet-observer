@@ -258,3 +258,26 @@ def test_live_trade_missing_monotonic_time_is_still_rejected():
     status, reasons = classify_manifest(value)
     assert status == "REJECT"
     assert any(reason.startswith("FATAL_INTEGRITY:missing_monotonic_count") for reason in reasons)
+
+
+
+def test_copy_vault_receive_only_http_snapshot_can_be_safe_with_explicit_evidence():
+    value = manifest()
+    value["family"] = "copy_vault_positions"
+    value["venue"] = "hyperliquid"
+    value["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    value["provenance"]["transports"] = ["https"]
+    value["provenance"]["timestamp_semantics"] = ["receive_observation_time_only"]
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE", reasons
+
+
+def test_copy_vault_snapshot_without_receive_semantics_is_not_safe():
+    value = manifest()
+    value["family"] = "copy_vault_positions"
+    value["venue"] = "hyperliquid"
+    value["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    value["provenance"]["transports"] = ["https"]
+    value["provenance"]["timestamp_semantics"] = []
+    status, _reasons = classify_manifest(value)
+    assert status != "SAFE"
