@@ -1,30 +1,30 @@
 {
   "by_category": {
     "LEGITIMATE_EXCLUSION": {
-      "records": 1680,
-      "shards": 1120
+      "records": 17459523,
+      "shards": 6093
     },
     "PARTIAL_EVIDENCE": {
-      "records": 804252,
-      "shards": 834
+      "records": 5384237,
+      "shards": 6459
     }
   },
   "by_family": {
     "activeassetctx": {
-      "records": 144225,
-      "shards": 53
+      "records": 433750,
+      "shards": 148
+    },
+    "bbo": {
+      "records": 5119436,
+      "shards": 1185
     },
     "capacity_tape": {
-      "records": 145636,
-      "shards": 110
+      "records": 4297917,
+      "shards": 2529
     },
     "clock_sync": {
-      "records": 176,
-      "shards": 3
-    },
-    "copy_vault_fills": {
-      "records": 30,
-      "shards": 2
+      "records": 4256,
+      "shards": 75
     },
     "copy_vault_l2": {
       "records": 183,
@@ -38,6 +38,10 @@
       "records": 560,
       "shards": 560
     },
+    "cross_venue_capacity_tape": {
+      "records": 1080014,
+      "shards": 458
+    },
     "external_events": {
       "records": 549,
       "shards": 6
@@ -47,16 +51,20 @@
       "shards": 53
     },
     "funding_settlement": {
-      "records": 256,
-      "shards": 88
+      "records": 76,
+      "shards": 28
     },
     "instrument_metadata": {
       "records": 106,
       "shards": 106
     },
     "l2book": {
-      "records": 38,
-      "shards": 38
+      "records": 6248935,
+      "shards": 2538
+    },
+    "liquidations": {
+      "records": 51,
+      "shards": 35
     },
     "mark_price": {
       "records": 194262,
@@ -67,86 +75,106 @@
       "shards": 53
     },
     "ticker": {
-      "records": 164997,
-      "shards": 53
+      "records": 3101429,
+      "shards": 769
     },
     "trades": {
-      "records": 148757,
-      "shards": 207
+      "records": 2356079,
+      "shards": 3387
     }
   },
   "by_status": {
     "PARTIAL": {
-      "records": 804252,
-      "shards": 834
+      "records": 5384237,
+      "shards": 6459
     },
     "REJECT": {
-      "records": 1680,
-      "shards": 1120
+      "records": 17459523,
+      "shards": 6093
     }
   },
   "by_venue": {
     "bitget": {
-      "records": 16235,
-      "shards": 71
+      "records": 188268,
+      "shards": 2630
     },
     "gate": {
-      "records": 39891,
-      "shards": 109
+      "records": 7539590,
+      "shards": 4703
     },
     "hyperliquid": {
-      "records": 190075,
-      "shards": 1362
+      "records": 1741982,
+      "shards": 2233
     },
     "okx": {
-      "records": 559182,
-      "shards": 406
+      "records": 12293357,
+      "shards": 2522
     },
     "unknown": {
-      "records": 549,
-      "shards": 6
+      "records": 1080563,
+      "shards": 464
     }
   },
   "by_venue_family": {
+    "bitget|bbo": {
+      "records": 25597,
+      "shards": 403
+    },
     "bitget|capacity_tape": {
       "records": 16073,
       "shards": 35
     },
     "bitget|clock_sync": {
-      "records": 59,
-      "shards": 1
+      "records": 1428,
+      "shards": 25
     },
-    "bitget|trades": {
-      "records": 103,
+    "bitget|l2Book": {
+      "records": 32333,
+      "shards": 415
+    },
+    "bitget|liquidations": {
+      "records": 51,
       "shards": 35
     },
+    "bitget|ticker": {
+      "records": 104722,
+      "shards": 432
+    },
+    "bitget|trades": {
+      "records": 8064,
+      "shards": 1285
+    },
+    "gate|bbo": {
+      "records": 2414356,
+      "shards": 408
+    },
     "gate|capacity_tape": {
-      "records": 21783,
-      "shards": 38
+      "records": 1102572,
+      "shards": 1319
     },
     "gate|clock_sync": {
-      "records": 58,
-      "shards": 1
+      "records": 1407,
+      "shards": 25
     },
     "gate|l2Book": {
-      "records": 38,
-      "shards": 38
+      "records": 3330647,
+      "shards": 1747
     },
     "gate|trades": {
-      "records": 18012,
-      "shards": 32
+      "records": 690608,
+      "shards": 1204
     },
     "hyperliquid|activeAssetCtx": {
-      "records": 144225,
-      "shards": 53
+      "records": 433750,
+      "shards": 148
+    },
+    "hyperliquid|bbo": {
+      "records": 945264,
+      "shards": 105
     },
     "hyperliquid|capacity_tape": {
-      "records": 9152,
-      "shards": 14
-    },
-    "hyperliquid|copy_vault_fills": {
-      "records": 30,
-      "shards": 2
+      "records": 199963,
+      "shards": 317
     },
     "hyperliquid|copy_vault_l2": {
       "records": 183,
@@ -161,36 +189,48 @@
       "shards": 560
     },
     "hyperliquid|funding_settlement": {
-      "records": 212,
-      "shards": 44
+      "records": 62,
+      "shards": 14
     },
     "hyperliquid|instrument_metadata": {
       "records": 53,
       "shards": 53
     },
+    "hyperliquid|l2Book": {
+      "records": 56483,
+      "shards": 97
+    },
     "hyperliquid|trades": {
-      "records": 34540,
-      "shards": 67
+      "records": 104544,
+      "shards": 370
+    },
+    "okx|bbo": {
+      "records": 1734219,
+      "shards": 269
     },
     "okx|capacity_tape": {
-      "records": 98628,
-      "shards": 23
+      "records": 2979309,
+      "shards": 858
     },
     "okx|clock_sync": {
-      "records": 59,
-      "shards": 1
+      "records": 1421,
+      "shards": 25
     },
     "okx|funding": {
       "records": 708,
       "shards": 53
     },
     "okx|funding_settlement": {
-      "records": 44,
-      "shards": 44
+      "records": 14,
+      "shards": 14
     },
     "okx|instrument_metadata": {
       "records": 53,
       "shards": 53
+    },
+    "okx|l2Book": {
+      "records": 2829472,
+      "shards": 279
     },
     "okx|mark_price": {
       "records": 194262,
@@ -201,12 +241,16 @@
       "shards": 53
     },
     "okx|ticker": {
-      "records": 164997,
-      "shards": 53
+      "records": 2996707,
+      "shards": 337
     },
     "okx|trades": {
-      "records": 96102,
-      "shards": 73
+      "records": 1552863,
+      "shards": 528
+    },
+    "unknown|cross_venue_capacity_tape": {
+      "records": 1080014,
+      "shards": 458
     },
     "unknown|external_events": {
       "records": 549,
@@ -215,156 +259,208 @@
   },
   "current_reasons": {
     "DUPLICATES_NOT_DEDUPED:1": {
-      "records": 382,
+      "records": 2205,
+      "shards": 14
+    },
+    "FATAL_INTEGRITY:gap_count=1": {
+      "records": 139888,
+      "shards": 108
+    },
+    "FATAL_INTEGRITY:gap_count=10": {
+      "records": 30071,
+      "shards": 22
+    },
+    "FATAL_INTEGRITY:gap_count=103": {
+      "records": 44150,
+      "shards": 17
+    },
+    "FATAL_INTEGRITY:gap_count=11": {
+      "records": 29785,
+      "shards": 22
+    },
+    "FATAL_INTEGRITY:gap_count=112": {
+      "records": 2439,
+      "shards": 8
+    },
+    "FATAL_INTEGRITY:gap_count=12": {
+      "records": 1479,
+      "shards": 12
+    },
+    "FATAL_INTEGRITY:gap_count=120": {
+      "records": 2231,
+      "shards": 8
+    },
+    "FATAL_INTEGRITY:gap_count=13": {
+      "records": 3509,
       "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:11": {
-      "records": 100,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=133": {
+      "records": 10903,
+      "shards": 20
     },
-    "DUPLICATES_NOT_DEDUPED:116": {
-      "records": 335,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=14": {
+      "records": 2174,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:118": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=140": {
+      "records": 49307,
+      "shards": 16
     },
-    "DUPLICATES_NOT_DEDUPED:123": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=15": {
+      "records": 1521,
+      "shards": 12
     },
-    "DUPLICATES_NOT_DEDUPED:158": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=158": {
+      "records": 27106,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:1613": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=16": {
+      "records": 2063,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:1683": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=17": {
+      "records": 2120,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:205": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=170": {
+      "records": 21764,
+      "shards": 17
     },
-    "DUPLICATES_NOT_DEDUPED:21": {
-      "records": 100,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=171": {
+      "records": 19499,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:2286": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=172": {
+      "records": 28049,
+      "shards": 13
     },
-    "DUPLICATES_NOT_DEDUPED:245": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=18": {
+      "records": 2178,
+      "shards": 18
     },
-    "DUPLICATES_NOT_DEDUPED:2459": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=1804": {
+      "records": 1033,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:258": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=19": {
+      "records": 1518,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:2665": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=2": {
+      "records": 348219,
+      "shards": 131
     },
-    "DUPLICATES_NOT_DEDUPED:27": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=21": {
+      "records": 1203,
+      "shards": 16
     },
-    "DUPLICATES_NOT_DEDUPED:271": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=22": {
+      "records": 15865,
+      "shards": 35
     },
-    "DUPLICATES_NOT_DEDUPED:278": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=23": {
+      "records": 1327,
+      "shards": 17
     },
-    "DUPLICATES_NOT_DEDUPED:284": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=25": {
+      "records": 7407,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:288": {
-      "records": 4645,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=26": {
+      "records": 12271,
+      "shards": 22
     },
-    "DUPLICATES_NOT_DEDUPED:3513": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=27": {
+      "records": 3351,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:383": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=28": {
+      "records": 2257,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:398": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=29": {
+      "records": 3416,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:410": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=3": {
+      "records": 260439,
+      "shards": 110
     },
-    "DUPLICATES_NOT_DEDUPED:460": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=30": {
+      "records": 25617,
+      "shards": 43
     },
-    "DUPLICATES_NOT_DEDUPED:5": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=31": {
+      "records": 734,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:51": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=36": {
+      "records": 15068,
+      "shards": 28
     },
-    "DUPLICATES_NOT_DEDUPED:519": {
-      "records": 4645,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=39": {
+      "records": 3381,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:574": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=4": {
+      "records": 373153,
+      "shards": 119
     },
-    "DUPLICATES_NOT_DEDUPED:634": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=41": {
+      "records": 4120,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:666": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=435": {
+      "records": 22907,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:738": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=47": {
+      "records": 6263,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:870": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=5": {
+      "records": 224287,
+      "shards": 49
     },
-    "DUPLICATES_NOT_DEDUPED:873": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=53": {
+      "records": 8191,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:874": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=6": {
+      "records": 217244,
+      "shards": 52
     },
-    "DUPLICATES_NOT_DEDUPED:91": {
-      "records": 10100,
-      "shards": 2
+    "FATAL_INTEGRITY:gap_count=7": {
+      "records": 136605,
+      "shards": 29
     },
-    "DUPLICATES_NOT_DEDUPED:920": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=70": {
+      "records": 10064,
+      "shards": 15
     },
-    "DUPLICATES_NOT_DEDUPED:96": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=71": {
+      "records": 19229,
+      "shards": 30
+    },
+    "FATAL_INTEGRITY:gap_count=75": {
+      "records": 2737,
+      "shards": 11
+    },
+    "FATAL_INTEGRITY:gap_count=8": {
+      "records": 11354,
+      "shards": 18
+    },
+    "FATAL_INTEGRITY:gap_count=82": {
+      "records": 4672,
+      "shards": 10
+    },
+    "FATAL_INTEGRITY:gap_count=9": {
+      "records": 47459,
+      "shards": 14
+    },
+    "FATAL_INTEGRITY:gap_count=90": {
+      "records": 9555,
+      "shards": 9
     },
     "FATAL_INTEGRITY:missing_timestamp_count=1": {
       "records": 560,
@@ -374,37 +470,65 @@
       "records": 1120,
       "shards": 560
     },
+    "FATAL_INTEGRITY:regression_count=3": {
+      "records": 18767,
+      "shards": 14
+    },
+    "PARENT_L2_SHARD_NOT_VERIFIED": {
+      "records": 4297917,
+      "shards": 2529
+    },
     "RECONCILIATION_MATCH_REQUIRED": {
-      "records": 148757,
-      "shards": 207
+      "records": 2328254,
+      "shards": 2504
     },
     "RECONCILIATION_SNAPSHOT_VERIFIED": {
-      "records": 176,
-      "shards": 3
-    },
-    "RECONCILIATION_UNAVAILABLE": {
-      "records": 549,
-      "shards": 6
+      "records": 4256,
+      "shards": 75
     },
     "RECONCILIATION_UNVERIFIED": {
-      "records": 147354,
-      "shards": 1268
+      "records": 19972686,
+      "shards": 8674
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 656199,
-      "shards": 1689
+      "records": 7125913,
+      "shards": 2404
     },
-    "TRADE_COUNT_NOT_EXACT": {
-      "records": 34673,
-      "shards": 104
+    "UNIQUE_TRADE_COUNT_NOT_EXACT": {
+      "records": 77951,
+      "shards": 1545
     }
   },
-  "non_safe_shards": 1954,
+  "non_safe_shards": 12552,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
   "real_execution": false,
   "reason_by_venue_family": {
+    "bitget|bbo|FATAL_INTEGRITY:gap_count=2": {
+      "records": 478,
+      "shards": 6
+    },
+    "bitget|bbo|FATAL_INTEGRITY:gap_count=23": {
+      "records": 20,
+      "shards": 5
+    },
+    "bitget|bbo|FATAL_INTEGRITY:gap_count=3": {
+      "records": 449,
+      "shards": 6
+    },
+    "bitget|bbo|FATAL_INTEGRITY:gap_count=4": {
+      "records": 567,
+      "shards": 5
+    },
+    "bitget|bbo|RECONCILIATION_UNVERIFIED": {
+      "records": 25597,
+      "shards": 403
+    },
+    "bitget|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
+      "records": 16073,
+      "shards": 35
+    },
     "bitget|capacity_tape|RECONCILIATION_UNVERIFIED": {
       "records": 16073,
       "shards": 35
@@ -414,204 +538,264 @@
       "shards": 35
     },
     "bitget|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
-      "records": 59,
-      "shards": 1
+      "records": 1428,
+      "shards": 25
+    },
+    "bitget|l2Book|FATAL_INTEGRITY:gap_count=2": {
+      "records": 1451,
+      "shards": 9
+    },
+    "bitget|l2Book|FATAL_INTEGRITY:gap_count=3": {
+      "records": 2357,
+      "shards": 10
+    },
+    "bitget|l2Book|FATAL_INTEGRITY:gap_count=4": {
+      "records": 2577,
+      "shards": 7
+    },
+    "bitget|l2Book|RECONCILIATION_UNVERIFIED": {
+      "records": 32333,
+      "shards": 415
+    },
+    "bitget|liquidations|FATAL_INTEGRITY:gap_count=1": {
+      "records": 9,
+      "shards": 8
+    },
+    "bitget|liquidations|FATAL_INTEGRITY:gap_count=2": {
+      "records": 12,
+      "shards": 9
+    },
+    "bitget|liquidations|RECONCILIATION_UNVERIFIED": {
+      "records": 51,
+      "shards": 35
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=1096": {
+      "records": 1046,
+      "shards": 5
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=1576": {
+      "records": 120,
+      "shards": 5
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=1583": {
+      "records": 144,
+      "shards": 6
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=1804": {
+      "records": 1033,
+      "shards": 9
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=3": {
+      "records": 5531,
+      "shards": 7
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=4": {
+      "records": 33133,
+      "shards": 42
+    },
+    "bitget|ticker|RECONCILIATION_UNVERIFIED": {
+      "records": 104722,
+      "shards": 432
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=1": {
+      "records": 204,
+      "shards": 43
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=10": {
+      "records": 28,
+      "shards": 8
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=11": {
+      "records": 11,
+      "shards": 7
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=18": {
+      "records": 17,
+      "shards": 6
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=2": {
+      "records": 28,
+      "shards": 27
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=21": {
+      "records": 14,
+      "shards": 9
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=3": {
+      "records": 27,
+      "shards": 26
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=4": {
+      "records": 21,
+      "shards": 21
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=5": {
+      "records": 8,
+      "shards": 8
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=6": {
+      "records": 15,
+      "shards": 11
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=7": {
+      "records": 32,
+      "shards": 13
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=8": {
+      "records": 7,
+      "shards": 6
+    },
+    "bitget|trades|FATAL_INTEGRITY:gap_count=9": {
+      "records": 11,
+      "shards": 6
     },
     "bitget|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 103,
-      "shards": 35
+      "records": 4854,
+      "shards": 520
     },
-    "bitget|trades|TRADE_COUNT_NOT_EXACT": {
-      "records": 103,
-      "shards": 35
+    "bitget|trades|UNIQUE_TRADE_COUNT_NOT_EXACT": {
+      "records": 7947,
+      "shards": 1242
+    },
+    "gate|bbo|FATAL_INTEGRITY:gap_count=3": {
+      "records": 28391,
+      "shards": 8
+    },
+    "gate|bbo|RECONCILIATION_UNVERIFIED": {
+      "records": 2414356,
+      "shards": 408
+    },
+    "gate|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
+      "records": 1102572,
+      "shards": 1319
     },
     "gate|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 21783,
-      "shards": 38
+      "records": 1102572,
+      "shards": 1319
     },
     "gate|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 21783,
-      "shards": 38
+      "records": 26129,
+      "shards": 39
     },
     "gate|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
-      "records": 58,
-      "shards": 1
+      "records": 1407,
+      "shards": 25
+    },
+    "gate|l2Book|FATAL_INTEGRITY:gap_count=2": {
+      "records": 54927,
+      "shards": 11
+    },
+    "gate|l2Book|FATAL_INTEGRITY:gap_count=3": {
+      "records": 65380,
+      "shards": 8
+    },
+    "gate|l2Book|FATAL_INTEGRITY:gap_count=4": {
+      "records": 69587,
+      "shards": 10
+    },
+    "gate|l2Book|FATAL_INTEGRITY:gap_count=5": {
+      "records": 116059,
+      "shards": 8
     },
     "gate|l2Book|RECONCILIATION_UNVERIFIED": {
-      "records": 38,
-      "shards": 38
+      "records": 3330647,
+      "shards": 1747
+    },
+    "gate|l2Book|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 3329077,
+      "shards": 428
+    },
+    "gate|trades|FATAL_INTEGRITY:gap_count=1": {
+      "records": 6450,
+      "shards": 21
+    },
+    "gate|trades|FATAL_INTEGRITY:gap_count=2": {
+      "records": 1142,
+      "shards": 15
+    },
+    "gate|trades|FATAL_INTEGRITY:gap_count=3": {
+      "records": 3095,
+      "shards": 13
     },
     "gate|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 18012,
-      "shards": 32
+      "records": 690608,
+      "shards": 1204
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1": {
-      "records": 199,
-      "shards": 2
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=103": {
+      "records": 36348,
+      "shards": 11
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:11": {
-      "records": 100,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=140": {
+      "records": 49289,
+      "shards": 15
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:116": {
-      "records": 335,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=158": {
+      "records": 22734,
+      "shards": 7
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:118": {
-      "records": 5047,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=172": {
+      "records": 19493,
+      "shards": 6
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:123": {
-      "records": 4384,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=435": {
+      "records": 20807,
+      "shards": 7
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:158": {
-      "records": 4384,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=846": {
+      "records": 15429,
+      "shards": 6
     },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1613": {
-      "records": 4646,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1683": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:205": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:21": {
-      "records": 100,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2286": {
-      "records": 5053,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:245": {
-      "records": 336,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2459": {
-      "records": 4384,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:258": {
-      "records": 4384,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2665": {
-      "records": 4646,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:27": {
-      "records": 336,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:271": {
-      "records": 5053,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:278": {
-      "records": 4646,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:284": {
-      "records": 4384,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:288": {
-      "records": 4645,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:3513": {
-      "records": 5053,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:383": {
-      "records": 5053,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:398": {
-      "records": 5047,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:410": {
-      "records": 5053,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:460": {
-      "records": 5047,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:5": {
-      "records": 336,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:51": {
-      "records": 336,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:519": {
-      "records": 4645,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:574": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:634": {
-      "records": 4646,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:666": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:738": {
-      "records": 4384,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:870": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:873": {
-      "records": 4257,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:874": {
-      "records": 5047,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:91": {
-      "records": 10100,
-      "shards": 2
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:920": {
-      "records": 5047,
-      "shards": 1
-    },
-    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:96": {
-      "records": 336,
-      "shards": 1
+    "hyperliquid|activeAssetCtx|RECONCILIATION_UNVERIFIED": {
+      "records": 289525,
+      "shards": 95
     },
     "hyperliquid|activeAssetCtx|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 144225,
       "shards": 53
     },
+    "hyperliquid|bbo|FATAL_INTEGRITY:gap_count=2": {
+      "records": 72155,
+      "shards": 7
+    },
+    "hyperliquid|bbo|RECONCILIATION_UNVERIFIED": {
+      "records": 945264,
+      "shards": 105
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=133": {
+      "records": 3628,
+      "shards": 7
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=22": {
+      "records": 6919,
+      "shards": 11
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=26": {
+      "records": 5008,
+      "shards": 8
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=30": {
+      "records": 9330,
+      "shards": 15
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=36": {
+      "records": 6160,
+      "shards": 10
+    },
+    "hyperliquid|capacity_tape|FATAL_INTEGRITY:gap_count=71": {
+      "records": 6972,
+      "shards": 12
+    },
+    "hyperliquid|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
+      "records": 199963,
+      "shards": 317
+    },
     "hyperliquid|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 9152,
-      "shards": 14
+      "records": 199963,
+      "shards": 317
     },
     "hyperliquid|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 9152,
       "shards": 14
-    },
-    "hyperliquid|copy_vault_fills|TRADE_COUNT_NOT_EXACT": {
-      "records": 30,
-      "shards": 2
     },
     "hyperliquid|copy_vault_l2|DUPLICATES_NOT_DEDUPED:1": {
       "records": 183,
@@ -642,36 +826,88 @@
       "shards": 560
     },
     "hyperliquid|funding_settlement|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 212,
-      "shards": 44
+      "records": 62,
+      "shards": 14
     },
     "hyperliquid|instrument_metadata|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 53,
       "shards": 53
     },
-    "hyperliquid|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 34540,
-      "shards": 67
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=133": {
+      "records": 3627,
+      "shards": 7
     },
-    "hyperliquid|trades|TRADE_COUNT_NOT_EXACT": {
-      "records": 34540,
-      "shards": 67
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=170": {
+      "records": 2886,
+      "shards": 6
+    },
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=22": {
+      "records": 6919,
+      "shards": 11
+    },
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=26": {
+      "records": 4382,
+      "shards": 7
+    },
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=30": {
+      "records": 9330,
+      "shards": 15
+    },
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=36": {
+      "records": 6776,
+      "shards": 11
+    },
+    "hyperliquid|l2Book|FATAL_INTEGRITY:gap_count=71": {
+      "records": 6391,
+      "shards": 11
+    },
+    "hyperliquid|l2Book|RECONCILIATION_UNVERIFIED": {
+      "records": 55179,
+      "shards": 95
+    },
+    "hyperliquid|trades|FATAL_INTEGRITY:gap_count=6": {
+      "records": 662,
+      "shards": 6
+    },
+    "hyperliquid|trades|RECONCILIATION_MATCH_REQUIRED": {
+      "records": 80161,
+      "shards": 259
+    },
+    "hyperliquid|trades|UNIQUE_TRADE_COUNT_NOT_EXACT": {
+      "records": 70004,
+      "shards": 303
+    },
+    "okx|bbo|FATAL_INTEGRITY:gap_count=2": {
+      "records": 44516,
+      "shards": 6
+    },
+    "okx|bbo|RECONCILIATION_UNVERIFIED": {
+      "records": 1734219,
+      "shards": 269
+    },
+    "okx|capacity_tape|FATAL_INTEGRITY:gap_count=5": {
+      "records": 21505,
+      "shards": 7
+    },
+    "okx|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
+      "records": 2979309,
+      "shards": 858
     },
     "okx|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 98628,
-      "shards": 23
+      "records": 2979309,
+      "shards": 858
     },
     "okx|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 98628,
       "shards": 23
     },
     "okx|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
-      "records": 59,
-      "shards": 1
+      "records": 1421,
+      "shards": 25
     },
     "okx|funding_settlement|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 44,
-      "shards": 44
+      "records": 14,
+      "shards": 14
     },
     "okx|funding|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 708,
@@ -681,6 +917,18 @@
       "records": 53,
       "shards": 53
     },
+    "okx|l2Book|FATAL_INTEGRITY:gap_count=6": {
+      "records": 122567,
+      "shards": 8
+    },
+    "okx|l2Book|RECONCILIATION_UNVERIFIED": {
+      "records": 2829472,
+      "shards": 279
+    },
+    "okx|l2Book|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 2826785,
+      "shards": 278
+    },
     "okx|mark_price|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 194262,
       "shards": 53
@@ -689,13 +937,49 @@
       "records": 4329,
       "shards": 53
     },
+    "okx|ticker|FATAL_INTEGRITY:gap_count=2": {
+      "records": 97757,
+      "shards": 9
+    },
+    "okx|ticker|FATAL_INTEGRITY:gap_count=3": {
+      "records": 82057,
+      "shards": 6
+    },
+    "okx|ticker|FATAL_INTEGRITY:gap_count=4": {
+      "records": 165002,
+      "shards": 11
+    },
+    "okx|ticker|RECONCILIATION_UNVERIFIED": {
+      "records": 2831710,
+      "shards": 284
+    },
     "okx|ticker|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 164997,
       "shards": 53
     },
+    "okx|trades|FATAL_INTEGRITY:gap_count=11": {
+      "records": 1278,
+      "shards": 6
+    },
+    "okx|trades|FATAL_INTEGRITY:gap_count=2": {
+      "records": 25898,
+      "shards": 8
+    },
     "okx|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 96102,
-      "shards": 73
+      "records": 1552631,
+      "shards": 521
+    },
+    "unknown|cross_venue_capacity_tape|FATAL_INTEGRITY:regression_count=3": {
+      "records": 18767,
+      "shards": 14
+    },
+    "unknown|cross_venue_capacity_tape|RECONCILIATION_UNVERIFIED": {
+      "records": 1080014,
+      "shards": 458
+    },
+    "unknown|cross_venue_capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 309167,
+      "shards": 67
     },
     "unknown|external_events|RECONCILIATION_UNAVAILABLE": {
       "records": 549,
@@ -705,162 +989,210 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "691b1954838cc2fb12db5f5fa06ee77d1c2a756f885b3843541026dc00704040",
-  "source_index_sha256": "56eb331c98d067a141307a984cac0166cac991d31e1d77e28ca15be2022a8acd",
-  "source_shards": 4421,
+  "source_audit_digest": "0a6138239aa5ac27d597245c3aaaed9a716d8dd42702928da3a509831a9bbb99",
+  "source_index_sha256": "226ded31e8ac37823b2027daff2b247b84d30d47b4131d89fd5147b805bece3c",
+  "source_shards": 26219,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
     "DUPLICATES_NOT_DEDUPED:1": {
-      "records": 382,
+      "records": 2205,
+      "shards": 14
+    },
+    "FATAL_INTEGRITY:gap_count=1": {
+      "records": 139888,
+      "shards": 108
+    },
+    "FATAL_INTEGRITY:gap_count=10": {
+      "records": 30071,
+      "shards": 22
+    },
+    "FATAL_INTEGRITY:gap_count=103": {
+      "records": 44150,
+      "shards": 17
+    },
+    "FATAL_INTEGRITY:gap_count=11": {
+      "records": 29785,
+      "shards": 22
+    },
+    "FATAL_INTEGRITY:gap_count=112": {
+      "records": 2439,
+      "shards": 8
+    },
+    "FATAL_INTEGRITY:gap_count=12": {
+      "records": 1479,
+      "shards": 12
+    },
+    "FATAL_INTEGRITY:gap_count=13": {
+      "records": 3509,
       "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:11": {
-      "records": 100,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=133": {
+      "records": 10903,
+      "shards": 20
     },
-    "DUPLICATES_NOT_DEDUPED:116": {
-      "records": 335,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=14": {
+      "records": 2174,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:118": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=140": {
+      "records": 49307,
+      "shards": 16
     },
-    "DUPLICATES_NOT_DEDUPED:123": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=15": {
+      "records": 1521,
+      "shards": 12
     },
-    "DUPLICATES_NOT_DEDUPED:158": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=158": {
+      "records": 27106,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:1613": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=16": {
+      "records": 2063,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:1683": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=17": {
+      "records": 2120,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:205": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=170": {
+      "records": 21764,
+      "shards": 17
     },
-    "DUPLICATES_NOT_DEDUPED:21": {
-      "records": 100,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=171": {
+      "records": 19499,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:2286": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=172": {
+      "records": 28049,
+      "shards": 13
     },
-    "DUPLICATES_NOT_DEDUPED:245": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=18": {
+      "records": 2178,
+      "shards": 18
     },
-    "DUPLICATES_NOT_DEDUPED:2459": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=1804": {
+      "records": 1033,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:258": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=19": {
+      "records": 1518,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:2665": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=2": {
+      "records": 348219,
+      "shards": 131
     },
-    "DUPLICATES_NOT_DEDUPED:27": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=21": {
+      "records": 1203,
+      "shards": 16
     },
-    "DUPLICATES_NOT_DEDUPED:271": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=22": {
+      "records": 15865,
+      "shards": 35
     },
-    "DUPLICATES_NOT_DEDUPED:278": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=23": {
+      "records": 1327,
+      "shards": 17
     },
-    "DUPLICATES_NOT_DEDUPED:284": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=25": {
+      "records": 7407,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:288": {
-      "records": 4645,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=26": {
+      "records": 12271,
+      "shards": 22
     },
-    "DUPLICATES_NOT_DEDUPED:3513": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=27": {
+      "records": 3351,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:383": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=28": {
+      "records": 2257,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:398": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=29": {
+      "records": 3416,
+      "shards": 14
     },
-    "DUPLICATES_NOT_DEDUPED:410": {
-      "records": 5053,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=3": {
+      "records": 260439,
+      "shards": 110
     },
-    "DUPLICATES_NOT_DEDUPED:460": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=30": {
+      "records": 25617,
+      "shards": 43
     },
-    "DUPLICATES_NOT_DEDUPED:5": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=31": {
+      "records": 734,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:51": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=36": {
+      "records": 15068,
+      "shards": 28
     },
-    "DUPLICATES_NOT_DEDUPED:519": {
-      "records": 4645,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=39": {
+      "records": 3381,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:574": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=4": {
+      "records": 373153,
+      "shards": 119
     },
-    "DUPLICATES_NOT_DEDUPED:634": {
-      "records": 4646,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=41": {
+      "records": 4120,
+      "shards": 9
     },
-    "DUPLICATES_NOT_DEDUPED:666": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=435": {
+      "records": 22907,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:738": {
-      "records": 4384,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=47": {
+      "records": 6263,
+      "shards": 11
     },
-    "DUPLICATES_NOT_DEDUPED:870": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=5": {
+      "records": 224287,
+      "shards": 49
     },
-    "DUPLICATES_NOT_DEDUPED:873": {
-      "records": 4257,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=53": {
+      "records": 8191,
+      "shards": 10
     },
-    "DUPLICATES_NOT_DEDUPED:874": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=6": {
+      "records": 217244,
+      "shards": 52
     },
-    "DUPLICATES_NOT_DEDUPED:91": {
-      "records": 10100,
-      "shards": 2
+    "FATAL_INTEGRITY:gap_count=7": {
+      "records": 136605,
+      "shards": 29
     },
-    "DUPLICATES_NOT_DEDUPED:920": {
-      "records": 5047,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=70": {
+      "records": 10064,
+      "shards": 15
     },
-    "DUPLICATES_NOT_DEDUPED:96": {
-      "records": 336,
-      "shards": 1
+    "FATAL_INTEGRITY:gap_count=71": {
+      "records": 19229,
+      "shards": 30
+    },
+    "FATAL_INTEGRITY:gap_count=75": {
+      "records": 2737,
+      "shards": 11
+    },
+    "FATAL_INTEGRITY:gap_count=8": {
+      "records": 11354,
+      "shards": 18
+    },
+    "FATAL_INTEGRITY:gap_count=82": {
+      "records": 4672,
+      "shards": 10
+    },
+    "FATAL_INTEGRITY:gap_count=9": {
+      "records": 47459,
+      "shards": 14
+    },
+    "FATAL_INTEGRITY:gap_count=90": {
+      "records": 9555,
+      "shards": 9
     },
     "FATAL_INTEGRITY:missing_timestamp_count=1": {
       "records": 560,
@@ -870,37 +1202,37 @@
       "records": 1120,
       "shards": 560
     },
+    "FATAL_INTEGRITY:regression_count=3": {
+      "records": 18767,
+      "shards": 14
+    },
     "RECONCILIATION_MATCH_REQUIRED": {
-      "records": 148757,
-      "shards": 207
+      "records": 2328254,
+      "shards": 2504
     },
     "RECONCILIATION_SNAPSHOT_VERIFIED": {
-      "records": 176,
-      "shards": 3
-    },
-    "RECONCILIATION_UNAVAILABLE": {
-      "records": 549,
-      "shards": 6
+      "records": 4256,
+      "shards": 75
     },
     "RECONCILIATION_UNVERIFIED": {
-      "records": 147354,
-      "shards": 1268
+      "records": 19972686,
+      "shards": 8674
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 656199,
-      "shards": 1689
+      "records": 7127217,
+      "shards": 2406
     },
     "TRADE_COUNT_NOT_EXACT": {
-      "records": 34673,
-      "shards": 104
+      "records": 112594,
+      "shards": 1647
     },
     "UNIQUE_TRADE_COUNT_NOT_EXACT": {
-      "records": 5604,
-      "shards": 51
+      "records": 83525,
+      "shards": 1594
     },
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
-      "records": 366149,
-      "shards": 419
+      "records": 365969,
+      "shards": 359
     }
   },
   "unreadable_manifest_count": 0,
