@@ -407,3 +407,51 @@ def test_metrics_rejects_v3_unique_row_when_scanned_trade_count_mismatches(tmp_p
     assert totals["TOTAL_UNIQUE_TRADES_WITHIN_SHARDS"] == 0
     assert totals["TRADE_SHARDS_MISSING_EXACT_UNIQUE_COUNT"] == 1
     assert totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
+
+
+
+def test_compact_index_restores_exact_trade_identities_from_sha_bound_manifest(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+    root = tmp_path
+    catalog = root / "catalog"
+    catalog.mkdir()
+    folder = root / "datasets" / "safe"
+    folder.mkdir(parents=True)
+    sha = "a" * 64
+    digest_a, digest_b = "b" * 64, "c" * 64
+    manifest = {
+        "dataset_id": "compact-trades", "sha256": sha,
+        "trade_identity_digests_exact": True,
+        "trade_identity_digests": [digest_a, digest_b],
+    }
+    path = folder / "compact-trades.manifest.json"
+    path.write_text(json.dumps(manifest))
+    idx = {
+        "shards": [{
+            "dataset_id": "compact-trades", "family": "trades",
+            "venue": "binance", "symbol": "BTC", "quality_status": "SAFE",
+            "event_count": 2, "record_count": 2, "trade_count": 2,
+            "trade_count_exact": True, "unique_trade_count": 2,
+            "unique_trade_count_exact": True,
+            "trade_identity_digests_exact": True,
+            "manifest_path": "datasets/safe/compact-trades.manifest.json",
+            "sha256": sha, "bytes": 100, "replay_compatible": True,
+        }]
+    }
+    (catalog / "DATA_INDEX.json").write_text(json.dumps(idx))
+    monkeypatch.setattr(metrics, "ROOT", root)
+    monkeypatch.setattr(metrics, "INDEX", catalog / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", catalog / "missing-unique.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", catalog / "missing-trades.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", catalog / "missing-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", catalog / "missing-sizes.json")
+    assert metrics.build()["totals"]["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
+
+    # A manifest no longer matching the indexed hash cannot falsely certify
+    # global uniqueness after index compaction.
+    manifest["sha256"] = "d" * 64
+    path.write_text(json.dumps(manifest))
+    totals = metrics.build()["totals"]
+    assert totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
+    assert totals["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
