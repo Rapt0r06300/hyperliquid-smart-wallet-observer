@@ -1,0 +1,908 @@
+{
+  "by_category": {
+    "LEGITIMATE_EXCLUSION": {
+      "records": 1680,
+      "shards": 1120
+    },
+    "PARTIAL_EVIDENCE": {
+      "records": 804252,
+      "shards": 834
+    }
+  },
+  "by_family": {
+    "activeassetctx": {
+      "records": 144225,
+      "shards": 53
+    },
+    "capacity_tape": {
+      "records": 145636,
+      "shards": 110
+    },
+    "clock_sync": {
+      "records": 176,
+      "shards": 3
+    },
+    "copy_vault_fills": {
+      "records": 30,
+      "shards": 2
+    },
+    "copy_vault_l2": {
+      "records": 183,
+      "shards": 9
+    },
+    "copy_vault_positions": {
+      "records": 1120,
+      "shards": 560
+    },
+    "copy_vault_selection": {
+      "records": 560,
+      "shards": 560
+    },
+    "external_events": {
+      "records": 549,
+      "shards": 6
+    },
+    "funding": {
+      "records": 708,
+      "shards": 53
+    },
+    "funding_settlement": {
+      "records": 256,
+      "shards": 88
+    },
+    "instrument_metadata": {
+      "records": 106,
+      "shards": 106
+    },
+    "l2book": {
+      "records": 38,
+      "shards": 38
+    },
+    "mark_price": {
+      "records": 194262,
+      "shards": 53
+    },
+    "open_interest": {
+      "records": 4329,
+      "shards": 53
+    },
+    "ticker": {
+      "records": 164997,
+      "shards": 53
+    },
+    "trades": {
+      "records": 148757,
+      "shards": 207
+    }
+  },
+  "by_status": {
+    "PARTIAL": {
+      "records": 804252,
+      "shards": 834
+    },
+    "REJECT": {
+      "records": 1680,
+      "shards": 1120
+    }
+  },
+  "by_venue": {
+    "bitget": {
+      "records": 16235,
+      "shards": 71
+    },
+    "gate": {
+      "records": 39891,
+      "shards": 109
+    },
+    "hyperliquid": {
+      "records": 190075,
+      "shards": 1362
+    },
+    "okx": {
+      "records": 559182,
+      "shards": 406
+    },
+    "unknown": {
+      "records": 549,
+      "shards": 6
+    }
+  },
+  "by_venue_family": {
+    "bitget|capacity_tape": {
+      "records": 16073,
+      "shards": 35
+    },
+    "bitget|clock_sync": {
+      "records": 59,
+      "shards": 1
+    },
+    "bitget|trades": {
+      "records": 103,
+      "shards": 35
+    },
+    "gate|capacity_tape": {
+      "records": 21783,
+      "shards": 38
+    },
+    "gate|clock_sync": {
+      "records": 58,
+      "shards": 1
+    },
+    "gate|l2Book": {
+      "records": 38,
+      "shards": 38
+    },
+    "gate|trades": {
+      "records": 18012,
+      "shards": 32
+    },
+    "hyperliquid|activeAssetCtx": {
+      "records": 144225,
+      "shards": 53
+    },
+    "hyperliquid|capacity_tape": {
+      "records": 9152,
+      "shards": 14
+    },
+    "hyperliquid|copy_vault_fills": {
+      "records": 30,
+      "shards": 2
+    },
+    "hyperliquid|copy_vault_l2": {
+      "records": 183,
+      "shards": 9
+    },
+    "hyperliquid|copy_vault_positions": {
+      "records": 1120,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_selection": {
+      "records": 560,
+      "shards": 560
+    },
+    "hyperliquid|funding_settlement": {
+      "records": 212,
+      "shards": 44
+    },
+    "hyperliquid|instrument_metadata": {
+      "records": 53,
+      "shards": 53
+    },
+    "hyperliquid|trades": {
+      "records": 34540,
+      "shards": 67
+    },
+    "okx|capacity_tape": {
+      "records": 98628,
+      "shards": 23
+    },
+    "okx|clock_sync": {
+      "records": 59,
+      "shards": 1
+    },
+    "okx|funding": {
+      "records": 708,
+      "shards": 53
+    },
+    "okx|funding_settlement": {
+      "records": 44,
+      "shards": 44
+    },
+    "okx|instrument_metadata": {
+      "records": 53,
+      "shards": 53
+    },
+    "okx|mark_price": {
+      "records": 194262,
+      "shards": 53
+    },
+    "okx|open_interest": {
+      "records": 4329,
+      "shards": 53
+    },
+    "okx|ticker": {
+      "records": 164997,
+      "shards": 53
+    },
+    "okx|trades": {
+      "records": 96102,
+      "shards": 73
+    },
+    "unknown|external_events": {
+      "records": 549,
+      "shards": 6
+    }
+  },
+  "current_reasons": {
+    "DUPLICATES_NOT_DEDUPED:1": {
+      "records": 382,
+      "shards": 11
+    },
+    "DUPLICATES_NOT_DEDUPED:11": {
+      "records": 100,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:116": {
+      "records": 335,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:118": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:123": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:158": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:1613": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:1683": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:205": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:21": {
+      "records": 100,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2286": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:245": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2459": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:258": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2665": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:27": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:271": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:278": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:284": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:288": {
+      "records": 4645,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:3513": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:383": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:398": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:410": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:460": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:5": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:51": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:519": {
+      "records": 4645,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:574": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:634": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:666": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:738": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:870": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:873": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:874": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:91": {
+      "records": 10100,
+      "shards": 2
+    },
+    "DUPLICATES_NOT_DEDUPED:920": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:96": {
+      "records": 336,
+      "shards": 1
+    },
+    "FATAL_INTEGRITY:missing_timestamp_count=1": {
+      "records": 560,
+      "shards": 560
+    },
+    "FATAL_INTEGRITY:missing_timestamp_count=2": {
+      "records": 1120,
+      "shards": 560
+    },
+    "RECONCILIATION_MATCH_REQUIRED": {
+      "records": 148757,
+      "shards": 207
+    },
+    "RECONCILIATION_SNAPSHOT_VERIFIED": {
+      "records": 176,
+      "shards": 3
+    },
+    "RECONCILIATION_UNAVAILABLE": {
+      "records": 549,
+      "shards": 6
+    },
+    "RECONCILIATION_UNVERIFIED": {
+      "records": 147354,
+      "shards": 1268
+    },
+    "REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 656199,
+      "shards": 1689
+    },
+    "TRADE_COUNT_NOT_EXACT": {
+      "records": 34673,
+      "shards": 104
+    }
+  },
+  "non_safe_shards": 1954,
+  "paper_only": true,
+  "potential_false_non_safe_count": 0,
+  "quarantine_total_matches_metrics": true,
+  "real_execution": false,
+  "reason_by_venue_family": {
+    "bitget|capacity_tape|RECONCILIATION_UNVERIFIED": {
+      "records": 16073,
+      "shards": 35
+    },
+    "bitget|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 16073,
+      "shards": 35
+    },
+    "bitget|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
+      "records": 59,
+      "shards": 1
+    },
+    "bitget|trades|RECONCILIATION_MATCH_REQUIRED": {
+      "records": 103,
+      "shards": 35
+    },
+    "bitget|trades|TRADE_COUNT_NOT_EXACT": {
+      "records": 103,
+      "shards": 35
+    },
+    "gate|capacity_tape|RECONCILIATION_UNVERIFIED": {
+      "records": 21783,
+      "shards": 38
+    },
+    "gate|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 21783,
+      "shards": 38
+    },
+    "gate|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
+      "records": 58,
+      "shards": 1
+    },
+    "gate|l2Book|RECONCILIATION_UNVERIFIED": {
+      "records": 38,
+      "shards": 38
+    },
+    "gate|trades|RECONCILIATION_MATCH_REQUIRED": {
+      "records": 18012,
+      "shards": 32
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1": {
+      "records": 199,
+      "shards": 2
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:11": {
+      "records": 100,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:116": {
+      "records": 335,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:118": {
+      "records": 5047,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:123": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:158": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1613": {
+      "records": 4646,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:1683": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:205": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:21": {
+      "records": 100,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2286": {
+      "records": 5053,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:245": {
+      "records": 336,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2459": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:258": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:2665": {
+      "records": 4646,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:27": {
+      "records": 336,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:271": {
+      "records": 5053,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:278": {
+      "records": 4646,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:284": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:288": {
+      "records": 4645,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:3513": {
+      "records": 5053,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:383": {
+      "records": 5053,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:398": {
+      "records": 5047,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:410": {
+      "records": 5053,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:460": {
+      "records": 5047,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:5": {
+      "records": 336,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:51": {
+      "records": 336,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:519": {
+      "records": 4645,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:574": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:634": {
+      "records": 4646,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:666": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:738": {
+      "records": 4384,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:870": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:873": {
+      "records": 4257,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:874": {
+      "records": 5047,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:91": {
+      "records": 10100,
+      "shards": 2
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:920": {
+      "records": 5047,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|DUPLICATES_NOT_DEDUPED:96": {
+      "records": 336,
+      "shards": 1
+    },
+    "hyperliquid|activeAssetCtx|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 144225,
+      "shards": 53
+    },
+    "hyperliquid|capacity_tape|RECONCILIATION_UNVERIFIED": {
+      "records": 9152,
+      "shards": 14
+    },
+    "hyperliquid|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 9152,
+      "shards": 14
+    },
+    "hyperliquid|copy_vault_fills|TRADE_COUNT_NOT_EXACT": {
+      "records": 30,
+      "shards": 2
+    },
+    "hyperliquid|copy_vault_l2|DUPLICATES_NOT_DEDUPED:1": {
+      "records": 183,
+      "shards": 9
+    },
+    "hyperliquid|copy_vault_positions|FATAL_INTEGRITY:missing_timestamp_count=2": {
+      "records": 1120,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_positions|RECONCILIATION_UNVERIFIED": {
+      "records": 1120,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_positions|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 1120,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_selection|FATAL_INTEGRITY:missing_timestamp_count=1": {
+      "records": 560,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_selection|RECONCILIATION_UNVERIFIED": {
+      "records": 560,
+      "shards": 560
+    },
+    "hyperliquid|copy_vault_selection|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 560,
+      "shards": 560
+    },
+    "hyperliquid|funding_settlement|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 212,
+      "shards": 44
+    },
+    "hyperliquid|instrument_metadata|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 53,
+      "shards": 53
+    },
+    "hyperliquid|trades|RECONCILIATION_MATCH_REQUIRED": {
+      "records": 34540,
+      "shards": 67
+    },
+    "hyperliquid|trades|TRADE_COUNT_NOT_EXACT": {
+      "records": 34540,
+      "shards": 67
+    },
+    "okx|capacity_tape|RECONCILIATION_UNVERIFIED": {
+      "records": 98628,
+      "shards": 23
+    },
+    "okx|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 98628,
+      "shards": 23
+    },
+    "okx|clock_sync|RECONCILIATION_SNAPSHOT_VERIFIED": {
+      "records": 59,
+      "shards": 1
+    },
+    "okx|funding_settlement|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 44,
+      "shards": 44
+    },
+    "okx|funding|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 708,
+      "shards": 53
+    },
+    "okx|instrument_metadata|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 53,
+      "shards": 53
+    },
+    "okx|mark_price|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 194262,
+      "shards": 53
+    },
+    "okx|open_interest|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 4329,
+      "shards": 53
+    },
+    "okx|ticker|REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 164997,
+      "shards": 53
+    },
+    "okx|trades|RECONCILIATION_MATCH_REQUIRED": {
+      "records": 96102,
+      "shards": 73
+    },
+    "unknown|external_events|RECONCILIATION_UNAVAILABLE": {
+      "records": 549,
+      "shards": 6
+    }
+  },
+  "record_counts_overlap_reasons": true,
+  "schema": "alina.quarantine_root_causes.v1",
+  "scope": "indexed_dataset_only",
+  "source_audit_digest": "691b1954838cc2fb12db5f5fa06ee77d1c2a756f885b3843541026dc00704040",
+  "source_index_sha256": "56eb331c98d067a141307a984cac0166cac991d31e1d77e28ca15be2022a8acd",
+  "source_shards": 4421,
+  "status": "DIAGNOSIS_ONLY",
+  "stored_reasons": {
+    "DUPLICATES_NOT_DEDUPED:1": {
+      "records": 382,
+      "shards": 11
+    },
+    "DUPLICATES_NOT_DEDUPED:11": {
+      "records": 100,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:116": {
+      "records": 335,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:118": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:123": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:158": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:1613": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:1683": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:205": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:21": {
+      "records": 100,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2286": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:245": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2459": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:258": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:2665": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:27": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:271": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:278": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:284": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:288": {
+      "records": 4645,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:3513": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:383": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:398": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:410": {
+      "records": 5053,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:460": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:5": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:51": {
+      "records": 336,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:519": {
+      "records": 4645,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:574": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:634": {
+      "records": 4646,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:666": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:738": {
+      "records": 4384,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:870": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:873": {
+      "records": 4257,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:874": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:91": {
+      "records": 10100,
+      "shards": 2
+    },
+    "DUPLICATES_NOT_DEDUPED:920": {
+      "records": 5047,
+      "shards": 1
+    },
+    "DUPLICATES_NOT_DEDUPED:96": {
+      "records": 336,
+      "shards": 1
+    },
+    "FATAL_INTEGRITY:missing_timestamp_count=1": {
+      "records": 560,
+      "shards": 560
+    },
+    "FATAL_INTEGRITY:missing_timestamp_count=2": {
+      "records": 1120,
+      "shards": 560
+    },
+    "RECONCILIATION_MATCH_REQUIRED": {
+      "records": 148757,
+      "shards": 207
+    },
+    "RECONCILIATION_SNAPSHOT_VERIFIED": {
+      "records": 176,
+      "shards": 3
+    },
+    "RECONCILIATION_UNAVAILABLE": {
+      "records": 549,
+      "shards": 6
+    },
+    "RECONCILIATION_UNVERIFIED": {
+      "records": 147354,
+      "shards": 1268
+    },
+    "REPLAY_COMPATIBILITY_NOT_PROVEN": {
+      "records": 656199,
+      "shards": 1689
+    },
+    "TRADE_COUNT_NOT_EXACT": {
+      "records": 34673,
+      "shards": 104
+    },
+    "UNIQUE_TRADE_COUNT_NOT_EXACT": {
+      "records": 5604,
+      "shards": 51
+    },
+    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
+      "records": 366149,
+      "shards": 419
+    }
+  },
+  "unreadable_manifest_count": 0,
+  "validation_allowed": false
+}
