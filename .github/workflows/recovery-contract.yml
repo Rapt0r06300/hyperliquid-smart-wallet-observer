@@ -31,6 +31,11 @@ on:
   schedule:
     - cron: "23 3 * * *"
 
+# Only redundant recovery test runs are superseded. This never cancels collectors.
+concurrency:
+  group: recovery-contract-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
