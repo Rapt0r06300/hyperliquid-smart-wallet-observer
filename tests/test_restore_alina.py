@@ -242,9 +242,9 @@ def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkey
         calls.append(url)
         if "/releases?" in url:
             return releases
-        if "123/assets?" in url and "page=1" in url:
+        if "123/assets?" in url and url.endswith("&page=1"):
             return [a(i) for i in range(100)]
-        if "123/assets?" in url and "page=2" in url:
+        if "123/assets?" in url and url.endswith("&page=2"):
             return [a(i) for i in range(100, 105)]
         raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
@@ -261,7 +261,7 @@ def test_iter_releases_rejects_malformed_or_duplicate_asset_pages(monkeypatch):
     def fake_json(url, **_kwargs):
         if "/releases?" in url:
             return [{"id": 1, "tag_name": "one", "assets": []}]
-        if "page=1" in url:
+        if url.endswith("&page=1"):
             return [asset] * 100
         return []
     monkeypatch.setattr(module, "_json", fake_json)
