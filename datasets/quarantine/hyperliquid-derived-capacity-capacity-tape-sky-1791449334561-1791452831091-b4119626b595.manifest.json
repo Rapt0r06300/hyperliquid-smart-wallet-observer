@@ -1,0 +1,115 @@
+{
+  "asset_verified": true,
+  "bytes": 441973,
+  "collection_run_id": "market-e8-7-2026100808-v7-0",
+  "collector_version": "ee12861af9e31f34562513686b6cae2061212853",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-derived-capacity-capacity-tape-sky-1791449334561-1791452831091-b4119626b595",
+  "end_ts_ms": 1791452831091,
+  "event_count": 652,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 652,
+  "release": {
+    "asset_id": 621411627,
+    "asset_name": "packed-shards-0005.zip",
+    "member_name": "hyperliquid-derived-capacity-capacity-tape-sky-1791449334561-1791452831091-b4119626b595.jsonl.gz",
+    "release_id": 406674686,
+    "release_tag": "data-v2-campaign-market-e8-7-2026100808-v7-u0",
+    "remote_digest": "sha256:219c437c2031f596fe06e03f00e8a761058e429b400d151a8596af51fd4cb26b",
+    "remote_size": 14719898,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-derived-capacity-capacity-tape-sky-1791449334561-1791452831091-b4119626b595.jsonl.gz",
+  "release_asset_id": 621411627,
+  "release_container_asset": "packed-shards-0005.zip",
+  "release_id": 406674686,
+  "release_member": "hyperliquid-derived-capacity-capacity-tape-sky-1791449334561-1791452831091-b4119626b595.jsonl.gz",
+  "release_remote_digest": "sha256:219c437c2031f596fe06e03f00e8a761058e429b400d151a8596af51fd4cb26b",
+  "release_remote_size": 14719898,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026100808-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "b4119626b595bffbd04c632a25036a7f18f9e3f85fd9a8526e82877041303302",
+  "source": "hyperliquid_derived_capacity",
+  "start_ts_ms": 1791449334561,
+  "symbol": "SKY",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 651,
+      "max": -203.5,
+      "min": -597.0,
+      "p50": -483.0,
+      "p95": -249.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-d147d8facacf40b684e2cd6c4b032a0d"
+    ],
+    "first_exchange_ts_ms": 1791449333780,
+    "last_exchange_ts_ms": 1791452830742,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 652,
+      "max": 824.0,
+      "min": 294.0,
+      "p50": 352.0,
+      "p95": 500.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 6200646,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}

@@ -1,0 +1,151 @@
+{
+  "asset_verified": true,
+  "bytes": 3547,
+  "collection_queue_drops": 2,
+  "collection_run_id": "market-e8-7-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-sony-usdt-swap-1791469836468-1791472994802-6093a67dbc00",
+  "end_ts_ms": 1791472994802,
+  "event_count": 23,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 2,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=2",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 23,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 23,
+    "missing_from_live": 2,
+    "reference_count": 25,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 23,
+  "release": {
+    "asset_id": 622230130,
+    "asset_name": "packed-shards-0008.zip",
+    "member_name": "okx-public-ws-trades-sony-usdt-swap-1791469836468-1791472994802-6093a67dbc00.jsonl.gz",
+    "release_id": 406988902,
+    "release_tag": "data-v2-campaign-market-e8-7-2026100813-v7-u0",
+    "remote_digest": "sha256:ef43cd09ba4b9ed4102be14a9f1a48943d425c9ebedacda6ca3bd38d1c365142",
+    "remote_size": 47254851,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-sony-usdt-swap-1791469836468-1791472994802-6093a67dbc00.jsonl.gz",
+  "release_asset_id": 622230130,
+  "release_container_asset": "packed-shards-0008.zip",
+  "release_id": 406988902,
+  "release_member": "okx-public-ws-trades-sony-usdt-swap-1791469836468-1791472994802-6093a67dbc00.jsonl.gz",
+  "release_remote_digest": "sha256:ef43cd09ba4b9ed4102be14a9f1a48943d425c9ebedacda6ca3bd38d1c365142",
+  "release_remote_size": 47254851,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "6093a67dbc002837e3fb2f7f97e78695a72aea35c855f58466c8728c65ff2a21",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791469836468,
+  "symbol": "SONY-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 23,
+      "max": 53.5,
+      "min": 22.5,
+      "p50": 32.5,
+      "p95": 50.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-710a4011883a401aa89bf72cbccb7d68"
+    ],
+    "first_exchange_ts_ms": 1791469836362,
+    "last_exchange_ts_ms": 1791472993012,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 23,
+      "max": 1790.0,
+      "min": 84.0,
+      "p50": 93.0,
+      "p95": 1790.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 23,
+      "max": 165.706194,
+      "min": 157.547368,
+      "p50": 160.27098,
+      "p95": 165.706194
+    }
+  },
+  "trade_count": 23,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "5459f56151b00ad956e75d01b999aee348a8d9778f241c29f173c99898eb0b67",
+    "56f1193e67fc06639336fc2c089cc41e56f6a4992c2f8e0169f9104a0212cd68",
+    "5c5af1040f7c8b280c31bece4ab20017358af9eecfe281935f357f50afdf0744",
+    "5ecaa8e276f9dd1e5bf7649678bdbc59a6484bc73534c88950318935ccf6ea9b",
+    "5f83cebe9de6e214b055898757e2e3ab36d421eb7d48dd2459b5761668a179ac",
+    "60d925e1e37911fe366cadedb88114b3f7aea1aa55cb53c71bbe6ae374e13d15",
+    "673df29287e2a364805ea4c27de9dd44749428313e0eca9d8c4434767af59743",
+    "6d8cc8a30f33b469141018d5e50ad529ec942560ae03e8af34adb4184a142526",
+    "700d68928ed711e593c25866599f3ef9cb1dba77bad8cdf71fb177fa39d46485",
+    "70c8615318f70dcbac49ed119cc520a596d651e1692d4d5dc9ec37f019d4f1a1",
+    "7bd72de7fad5f90be7b74e1c46cddd7ca65ddc436162684884b5437542b45521",
+    "809bbac195d93717a4ad1ba737287d53908ae275080c38fd7f0081fcb6420b15",
+    "8adaa01110f45a1ad32479b09c53064fb582fb7ceeb702f42c2aed26be0790ef",
+    "9a5bef9fbdd2967a5af86703d53fdae098e0f7b50f9efeb99b9c8a0bee74cb6d",
+    "9c0cbb9b528bab088a2f16a7577e3ddc4407d31006198e57f6b2a2de55d5986b",
+    "af45a2c7b0cefa4f1be1dd5a03b8b9f615fbb5eb0d3ab4e42e303308a13f3592",
+    "b6f30acec64e67048eea73fd647320f24f72b562072c5300bfe7f0471c8a4a43",
+    "b8df17270f1c030b8aa0ab8689d7444f27230e184f9a4cc5bcdf91c16cb1e881",
+    "e9d3a45785795db18fa49f3eaaa5732dda9d95a05436d66a95f37c5936634421",
+    "ea99685ebbddd626dc7cd480f74c455c42e057e20eb55a9f60d1caf73afeb5a9",
+    "f61af7e1069a126f373d73c75e7b4c87dc2d75b9b6d3309f201015a5a144526f",
+    "fe315d6baf19dd4dcb9b4e5bf3dbd92e111208e1a6d8f8bef677789ad40ab8b0",
+    "fe509c364d0f3f750524a64dbdb268823ed56c3a01dbcc63e3e3c622c524c3a1"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 35440,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 23,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "okx"
+}

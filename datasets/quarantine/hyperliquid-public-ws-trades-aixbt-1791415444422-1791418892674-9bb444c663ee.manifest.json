@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 17044,
+  "collection_run_id": "market-e8-8-2026100708-v7-0",
+  "collector_version": "674bb2f044ca730096193380b885539a7e66de81",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-aixbt-1791415444422-1791418892674-9bb444c663ee",
+  "end_ts_ms": 1791418892674,
+  "event_count": 77,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "TRADE_COUNT_NOT_EXACT",
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 135,
+    "live_only": 29,
+    "matched_count": 106,
+    "missing_from_live": 0,
+    "reference_count": 106,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 77,
+  "release": {
+    "asset_id": 620221569,
+    "asset_name": "packed-shards-0008.zip",
+    "member_name": "hyperliquid-public-ws-trades-aixbt-1791415444422-1791418892674-9bb444c663ee.jsonl.gz",
+    "release_id": 406276730,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100708-v7-u0",
+    "remote_digest": "sha256:f1730cbf7a554929f475ca2f0da4f5566672db6d8145dae5e1ab4b27d3aa0c33",
+    "remote_size": 56932070,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-aixbt-1791415444422-1791418892674-9bb444c663ee.jsonl.gz",
+  "release_asset_id": 620221569,
+  "release_container_asset": "packed-shards-0008.zip",
+  "release_id": 406276730,
+  "release_member": "hyperliquid-public-ws-trades-aixbt-1791415444422-1791418892674-9bb444c663ee.jsonl.gz",
+  "release_remote_digest": "sha256:f1730cbf7a554929f475ca2f0da4f5566672db6d8145dae5e1ab4b27d3aa0c33",
+  "release_remote_size": 56932070,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100708-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9bb444c663eeeaddf9376c0a34159bb6701966553604b46057ea2f1826b37f8d",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791415444422,
+  "symbol": "AIXBT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 76,
+      "max": -238.0,
+      "min": -642.5,
+      "p50": -346.5,
+      "p95": -260.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-4487da5413f64a8bbf520c69fdebe31c"
+    ],
+    "first_exchange_ts_ms": 1791415337540,
+    "last_exchange_ts_ms": 1791418892261,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 77,
+      "max": 106882.0,
+      "min": 255.0,
+      "p50": 312.0,
+      "p95": 433.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 135,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 129761,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
