@@ -94,6 +94,7 @@ class AsyncPartitionSink:
         self.drops: dict[tuple[str, str, str], int] = defaultdict(int)
         self.accepted = 0
         self.persisted = 0
+        self.backpressure_events = 0
         self._stop = False
         self._latest_capacity: dict[tuple[str, str], TickEnvelope] = {}
 
@@ -105,31 +106,51 @@ class AsyncPartitionSink:
             str(envelope.instrument),
         )
 
-    def emit(self, envelope: TickEnvelope) -> None:
-        self._put(envelope)
+    def _capacity_pairs(self, envelope: TickEnvelope) -> list[TickEnvelope]:
         if envelope.channel != "capacity_tape":
-            return
+            return []
         coin = str(envelope.parsed_summary.get("coin") or "").upper()
         venue = str(envelope.parsed_summary.get("venue") or "").lower()
         if not coin or not venue:
-            return
+            return []
         peers = [
-            row
-            for (peer_coin, peer_venue), row in self._latest_capacity.items()
+            row for (peer_coin, peer_venue), row in self._latest_capacity.items()
             if peer_coin == coin and peer_venue != venue
         ]
         self._latest_capacity[(coin, venue)] = envelope
-        for peer in peers:
-            paired = cross_venue_capacity_envelope(peer, envelope)
-            if paired is not None:
-                self._put(paired)
+        return [
+            paired
+            for peer in peers
+            if (paired := cross_venue_capacity_envelope(peer, envelope)) is not None
+        ]
 
-    def _put(self, envelope: TickEnvelope) -> None:
+    def emit(self, envelope: TickEnvelope) -> None:
+        """Legacy synchronous callback; any queue overflow remains explicit."""
+        if not self._put(envelope):
+            return
+        for paired in self._capacity_pairs(envelope):
+            self._put(paired)
+
+    async def emit_async(self, envelope: TickEnvelope) -> None:
+        """Backpressure async market producers instead of dropping raw frames."""
+        if self.queue.full():
+            self.backpressure_events += 1
+        await self.queue.put(envelope)
+        self.accepted += 1
+        for paired in self._capacity_pairs(envelope):
+            if self.queue.full():
+                self.backpressure_events += 1
+            await self.queue.put(paired)
+            self.accepted += 1
+
+    def _put(self, envelope: TickEnvelope) -> bool:
         try:
             self.queue.put_nowait(envelope)
             self.accepted += 1
+            return True
         except asyncio.QueueFull:
             self.drops[self.key(envelope)] += 1
+            return False
 
     async def run(self) -> None:
         while not self._stop or not self.queue.empty():
@@ -155,6 +176,14 @@ class AsyncPartitionSink:
     async def close(self) -> None:
         self._stop = True
         await self.queue.join()
+
+
+async def _emit_with_backpressure(sink: Any, envelope: TickEnvelope) -> None:
+    async_emit = getattr(sink, "emit_async", None)
+    if callable(async_emit):
+        await async_emit(envelope)
+    else:
+        sink.emit(envelope)
 
 
 def _hyperliquid_envelope(
@@ -560,7 +589,7 @@ async def _native_with_clock_sync(
             # Lightweight test/dummy probes still enrich market frames without
             # fabricating a standalone receipt they cannot fully describe.
             if hasattr(sample, "uncertainty_ms"):
-                sink.emit(
+                await _emit_with_backpressure(sink, 
                     TickEnvelope(
                         source_id=f"{venue}_public_rest",
                         channel="clock_sync",
@@ -621,7 +650,7 @@ async def _native_with_clock_sync(
                 capacity_states.clear()
             return
         for envelope in bootstrap_rows:
-            sink.emit(envelope)
+            await _emit_with_backpressure(sink, envelope)
             if venue == "gate" and envelope.channel == "l2Book":
                 raw = (
                     dict(envelope.raw_payload)
@@ -646,7 +675,7 @@ async def _native_with_clock_sync(
                     ),
                 )
                 if capacity is not None:
-                    sink.emit(capacity)
+                    await _emit_with_backpressure(sink, capacity)
 
     # Acquire explicit timing and official base-book evidence before admitting
     # incremental native frames.
@@ -690,7 +719,7 @@ async def _native_with_clock_sync(
             message["_alina_transport"] = transport
             envelope = native_tick_envelope(venue, message)
             if envelope is not None:
-                sink.emit(envelope)
+                await _emit_with_backpressure(sink, envelope)
             capacity = _native_capacity_envelope(
                 venue,
                 message,
@@ -698,7 +727,7 @@ async def _native_with_clock_sync(
                 capacity_multipliers,
             )
             if capacity is not None:
-                sink.emit(capacity)
+                await _emit_with_backpressure(sink, capacity)
     finally:
         probe_task.cancel()
         await asyncio.gather(probe_task, return_exceptions=True)
@@ -762,7 +791,7 @@ async def _collect_instrument_metadata(
                 if coin not in hl_coins:
                     continue
                 capacity_multipliers["hyperliquid"][coin] = 1.0
-                sink.emit(
+                await _emit_with_backpressure(sink, 
                     TickEnvelope(
                         source_id="hyperliquid_public_rest",
                         channel="instrument_metadata",
@@ -815,7 +844,7 @@ async def _collect_instrument_metadata(
                 if symbol not in binance_symbols:
                     continue
                 capacity_multipliers["binance"][symbol] = 1.0
-                sink.emit(
+                await _emit_with_backpressure(sink, 
                     TickEnvelope(
                         source_id="binance_usdm_public_rest",
                         channel="instrument_metadata",
@@ -900,7 +929,7 @@ async def _collect_instrument_metadata(
                     observed_server_ts_ms=server_ts,
                 )
                 if envelope is not None:
-                    sink.emit(envelope)
+                    await _emit_with_backpressure(sink, envelope)
                     count += 1
             result[venue] = {"records": count, "status": "OK" if count else "NO_DATA"}
         except Exception as exc:
@@ -973,7 +1002,7 @@ async def _collect_funding_settlements(
                 "error": type(exc).__name__,
             }
         for envelope in rows:
-            sink.emit(envelope)
+            await _emit_with_backpressure(sink, envelope)
         return venue, {
             "status": "OK" if rows else "NO_DATA",
             "records": len(rows),
@@ -1097,7 +1126,7 @@ async def _hyperliquid(
                         )
                         if envelope is not None:
                             envelope.reconnect_count = reconnects
-                            sink.emit(envelope)
+                            await _emit_with_backpressure(sink, envelope)
                             if envelope.channel == "l2Book" and isinstance(message.get("data"), Mapping):
                                 levels = message["data"].get("levels")
                                 if isinstance(levels, list) and len(levels) >= 2:
@@ -1118,7 +1147,7 @@ async def _hyperliquid(
                                     )
                                     if capacity is not None:
                                         capacity.reconnect_count = reconnects
-                                        sink.emit(capacity)
+                                        await _emit_with_backpressure(sink, capacity)
                 finally:
                     heartbeat_task.cancel()
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
@@ -1185,7 +1214,7 @@ async def _binance_stream(
                     )
                     if envelope is not None:
                         envelope.reconnect_count = reconnects
-                        sink.emit(envelope)
+                        await _emit_with_backpressure(sink, envelope)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1828,6 +1857,7 @@ async def collect(
         "disk_free_bytes_at_stop": disk_free_bytes_at_stop,
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
+        "backpressure_events": sink.backpressure_events,
         "queue_drops": {
             "|".join(key): value for key, value in sorted(sink.drops.items())
         },
