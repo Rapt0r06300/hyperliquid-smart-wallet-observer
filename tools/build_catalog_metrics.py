@@ -295,6 +295,24 @@ def build() -> dict[str, Any]:
             manifest_trade_shards += 1
             identity_rows = row.get("trade_identity_digests")
             identity_exact = row.get("trade_identity_digests_exact") is True
+            if identity_exact and not isinstance(identity_rows, list):
+                # Retain the exhaustive identity digest proof in its own
+                # SHA-bound manifest, keeping the global index bounded.
+                rel = str(row.get("manifest_path") or "")
+                manifest_path = (ROOT / rel).resolve() if rel else ROOT
+                try:
+                    if not manifest_path.is_relative_to(ROOT.resolve()) or not manifest_path.is_file():
+                        raise ValueError("invalid manifest locator")
+                    proof = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    if (
+                        proof.get("dataset_id") == dataset_id
+                        and str(proof.get("sha256") or "").lower()
+                            == str(row.get("sha256") or "").lower()
+                        and proof.get("trade_identity_digests_exact") is True
+                    ):
+                        identity_rows = proof.get("trade_identity_digests")
+                except (OSError, ValueError, TypeError):
+                    identity_rows = None
             valid_identity_rows = (
                 isinstance(identity_rows, list)
                 and all(
