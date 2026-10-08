@@ -107,7 +107,7 @@ def test_controller_worker_are_bounded_hosted_and_collect_relayed():
     assert "timeout-minutes: 10" in controller
     assert "timeout-minutes: 345" in worker
     assert "cancel-in-progress: false" in controller
-    assert "group: resumable-campaign-controller-v5" in controller
+    assert "group: resumable-campaign-controller-${{ github.event_name == 'push' && github.sha || 'v5' }}" in controller
     assert "cancel-in-progress: false" in worker
     assert "self-hosted" not in controller + worker
     assert "uses: ./.github/workflows/resumable-campaign-worker.yml" in controller

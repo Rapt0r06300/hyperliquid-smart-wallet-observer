@@ -16,9 +16,9 @@ permissions:
   contents: write
 
 concurrency:
-  # v5 releases bounded canaries from a pre-fix publication wave that can
-  # otherwise hold the serialized controller for the full runner lifetime.
-  group: resumable-campaign-controller-v5
+  # Scheduled waves stay serialized. A control-plane push gets its own bounded
+  # selector run; per-campaign worker locks still prevent duplicate execution.
+  group: resumable-campaign-controller-${{ github.event_name == 'push' && github.sha || 'v5' }}
   cancel-in-progress: false
 
 jobs:
