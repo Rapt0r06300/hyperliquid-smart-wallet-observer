@@ -84,6 +84,9 @@ jobs:
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "bbo"
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "l2book,l2,book"
+          # Secondary market context is strict replay-checked in a small, bounded batch.
+          # Derived capacity stays PARTIAL until independent parent-L2 proof exists.
+          python tools/backfill_replay_compatibility.py             --limit 60             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/check_dataset_quality.py
