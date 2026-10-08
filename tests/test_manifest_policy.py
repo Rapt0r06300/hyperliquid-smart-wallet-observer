@@ -281,3 +281,34 @@ def test_copy_vault_snapshot_without_receive_semantics_is_not_safe():
     value["provenance"]["timestamp_semantics"] = []
     status, _reasons = classify_manifest(value)
     assert status != "SAFE"
+
+
+
+def test_batched_native_trade_count_can_exceed_envelope_count_without_fake_rejection():
+    value = manifest()
+    value["family"] = "trades"
+    value["venue"] = "bitget"
+    value["event_count"] = 2
+    value["trade_count"] = 90
+    value["trade_count_exact"] = True
+    value["unique_trade_count"] = 90
+    value["unique_trade_count_exact"] = True
+    value["reconciliation"] = {"status": "MATCHED"}
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE", reasons
+
+
+def test_batched_trade_identity_count_still_rejects_unproven_uniqueness():
+    value = manifest()
+    value["family"] = "trades"
+    value["venue"] = "bitget"
+    value["event_count"] = 1
+    value["trade_count"] = 50
+    value["trade_count_exact"] = True
+    value["unique_trade_count"] = None
+    value["unique_trade_count_exact"] = False
+    value["reconciliation"] = {"status": "MATCHED"}
+    status, reasons = classify_manifest(value)
+    assert status == "PARTIAL"
+    assert "UNIQUE_TRADE_COUNT_NOT_EXACT" in reasons
+    assert "TRADE_COUNT_NOT_EXACT" not in reasons

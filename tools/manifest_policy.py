@@ -245,7 +245,9 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
             manifest.get("trade_count_exact") is not True
             or trade_count is None
             or trade_count < 0
-            or trade_count > event_count
+            # One authenticated WS TickEnvelope may contain a native batch
+            # with many distinct trades. Compare exact native trade counts
+            # against their proven identities, never against envelope count.
         ):
             reasons.append("TRADE_COUNT_NOT_EXACT")
         if (
