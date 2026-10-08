@@ -51,6 +51,7 @@ from hl_observer.datasets.v2_export import (  # noqa: E402
 from hl_observer.datasets.v2_pipeline import (  # noqa: E402
     V2_REPOSITORY,
     V2_SCHEMA,
+    infer_reconciliation_status,
     finalize_manifest,
 )
 from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
@@ -1119,6 +1120,13 @@ def build_copy_vault_bundle(
                 "matched_count": report.get("matched_count"),
                 "missing_from_live": report.get("missing_from_live"),
                 "live_only": report.get("live_only"),
+            }
+        elif family in {"copy_vault_positions", "copy_vault_selection"}:
+            # Immutable public HTTP observation, not an exchange-timestamped
+            # trade. Verify local causality and explicit receive-only semantics.
+            preliminary["reconciliation"] = {
+                "status": infer_reconciliation_status(preliminary),
+                "method": "observed_public_http_state_v1",
             }
         else:
             preliminary["reconciliation"] = {"status": "UNVERIFIED"}
