@@ -7,18 +7,81 @@
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "ee12861af9e31f34562513686b6cae2061212853",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "analysis_stage": null,
+        "bundle_root": "/home/runner/work/_temp/campaign-output/market-e8-4-2026100808-v7/0",
+        "collection_metrics": {
+          "accepted_frames": 0,
+          "basis": "published_run_manifest",
+          "compressed_bytes": 196128161,
+          "frame_metrics_complete": false,
+          "l2_frames": 0,
+          "partial_count": 137,
+          "persisted_frames": 0,
+          "queue_drops": 0,
+          "record_count_observed": 1556449,
+          "reject_count": 40,
+          "safe_count": 523,
+          "shard_count": 700,
+          "trade_count_coverage_complete": true,
+          "trade_count_observed": 77422,
+          "trade_shard_count": 115,
+          "trade_shards_exact": 115
+        },
+        "collection_plan_sha256": "2ecba8730fe5981529c3dde0506f6181742e9ce8d3a804185ab717db2da1d21b",
+        "durable_persisted": true,
+        "output_root": "/home/runner/work/_temp/campaign-output/market-e8-4-2026100808-v7/0",
+        "partial_count": 137,
+        "phases": [
+          {
+            "analysis_stage": null,
+            "command": [
+              "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+              "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_window.py",
+              "--output",
+              "/home/runner/work/_temp/campaign-output/market-e8-4-2026100808-v7/0"
+            ],
+            "name": "unit",
+            "returncode": 0,
+            "stderr": "",
+            "stdout": "     ],\n          \"ADI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"AGPU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ANKR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BASED_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BITO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BLSH_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BLUR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BOME_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"B_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CHR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COTI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CRDO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CSOPSKHYNIX2L_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DOS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"FIL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"GWEI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"H100_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"HOLO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ILV_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IMX_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KUAISHOU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MEW_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MTL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PIXEL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"POPCAT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"RSR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SKHY_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SKR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SOXS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SQD_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TENCENT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TRB_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TRUMP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"UAI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XDP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZORA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"\\u725b\\u6765_USDT\": [\n            \"MISMATCH\"\n          ]\n        }\n      },\n      \"hyperliquid\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": false,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BLUR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BOME\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"FIL\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"IMX\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"POPCAT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"RSR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SKR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRB\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRUMP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"ZORA\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      },\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BASED-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BLUR-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BOME-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"CRDO-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"DOS-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"FIL-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"H100-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"IMX-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"MEW-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"POPCAT-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SKHY-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SOXS-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRB-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRUMP-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"XDP-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"ZORA-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791449346187,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ACUUSDT\",\n      \"ADIUSDT\",\n      \"AGPUUSDT\",\n      \"ANKRUSDT\",\n      \"BASEDUSDT\",\n      \"BITOUSDT\",\n      \"BLSHUSDT\",\n      \"BLURUSDT\",\n      \"BOMEUSDT\",\n      \"BUSDT\",\n      \"CHRUSDT\",\n      \"COPUSDT\",\n      \"COTIUSDT\",\n      \"CRDOUSDT\",\n      \"DKNGUSDT\",\n      \"DOSUSDT\",\n      \"FILUSDT\",\n      \"GWEIUSDT\",\n      \"H100USDT\",\n      \"HOLOUSDT\",\n      \"ILVUSDT\",\n      \"IMXUSDT\",\n      \"INUSDT\",\n      \"ISRGUSDT\",\n      \"KUAISHOUUSDT\",\n      \"MEWUSDT\",\n      \"MTLUSDT\",\n      \"NETUSDT\",\n      \"PIXELUSDT\",\n      \"POPCATUSDT\",\n      \"RSRUSDT\",\n      \"SKHYUSDT\",\n      \"SKRUSDT\",\n      \"SOXSUSDT\",\n      \"SQDUSDT\",\n      \"TENCENTUSDT\",\n      \"TRBUSDT\",\n      \"TRUMPUSDT\",\n      \"UAIUSDT\",\n      \"VOOUSDT\",\n      \"ZORAUSDT\",\n      \"ZSUSDT\",\n      \"\\u725b\\u6765USDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ACU_USDT\",\n      \"ADI_USDT\",\n      \"AGPU_USDT\",\n      \"ANKR_USDT\",\n      \"BASED_USDT\",\n      \"BITO_USDT\",\n      \"BLSH_USDT\",\n      \"BLUR_USDT\",\n      \"BOME_USDT\",\n      \"B_USDT\",\n      \"CHR_USDT\",\n      \"COP_USDT\",\n      \"COTI_USDT\",\n      \"CRDO_USDT\",\n      \"CSOPSKHYNIX2L_USDT\",\n      \"DKNG_USDT\",\n      \"DOS_USDT\",\n      \"FIL_USDT\",\n      \"GWEI_USDT\",\n      \"H100_USDT\",\n      \"HOLO_USDT\",\n      \"ILV_USDT\",\n      \"IMX_USDT\",\n      \"IN_USDT\",\n      \"ISRG_USDT\",\n      \"KUAISHOU_USDT\",\n      \"MEW_USDT\",\n      \"MTL_USDT\",\n      \"NET_USDT\",\n      \"PIXEL_USDT\",\n      \"POPCAT_USDT\",\n      \"RSR_USDT\",\n      \"SKHY_USDT\",\n      \"SKR_USDT\",\n      \"SOXS_USDT\",\n      \"SQD_USDT\",\n      \"TENCENT_USDT\",\n      \"TRB_USDT\",\n      \"TRUMP_USDT\",\n      \"UAI_USDT\",\n      \"VOO_USDT\",\n      \"XDP_USDT\",\n      \"ZORA_USDT\",\n      \"ZS_USDT\",\n      \"\\u725b\\u6765_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"BLUR\",\n      \"BOME\",\n      \"FIL\",\n      \"IMX\",\n      \"POPCAT\",\n      \"RSR\",\n      \"SKR\",\n      \"TRB\",\n      \"TRUMP\",\n      \"ZORA\"\n    ],\n    \"okx\": [\n      \"ACU-USDT-SWAP\",\n      \"BASED-USDT-SWAP\",\n      \"BLUR-USDT-SWAP\",\n      \"BOME-USDT-SWAP\",\n      \"CRDO-USDT-SWAP\",\n      \"CSOPSKHYNIX2L-USDT-SWAP\",\n      \"DKNG-USDT-SWAP\",\n      \"DOS-USDT-SWAP\",\n      \"FIL-USDT-SWAP\",\n      \"H100-USDT-SWAP\",\n      \"IMX-USDT-SWAP\",\n      \"ISRG-USDT-SWAP\",\n      \"MEW-USDT-SWAP\",\n      \"NET-USDT-SWAP\",\n      \"POPCAT-USDT-SWAP\",\n      \"RSR-USDT-SWAP\",\n      \"SKHY-USDT-SWAP\",\n      \"SOXS-USDT-SWAP\",\n      \"TRB-USDT-SWAP\",\n      \"TRUMP-USDT-SWAP\",\n      \"XDP-USDT-SWAP\",\n      \"ZORA-USDT-SWAP\"\n    ]\n  }\n}\n"
+          }
+        ],
+        "reject_count": 40,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-campaign-market-e8-4-2026100808-v7-u0",
+        "returncode": 0,
+        "safe_count": 523,
+        "safe_workspace": null,
+        "shard_count": 700,
+        "status": "COMPLETE",
+        "stderr": "",
+        "stdout": "     ],\n          \"ADI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"AGPU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ANKR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BASED_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BITO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BLSH_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BLUR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"BOME_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"B_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CHR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"COTI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CRDO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"CSOPSKHYNIX2L_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"DOS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"FIL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"GWEI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"H100_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"HOLO_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ILV_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IMX_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"IN_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"KUAISHOU_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MEW_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"MTL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"PIXEL_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"POPCAT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"RSR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SKHY_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SKR_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SOXS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"SQD_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TENCENT_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TRB_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"TRUMP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"UAI_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"XDP_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZORA_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"ZS_USDT\": [\n            \"MISMATCH\"\n          ],\n          \"\\u725b\\u6765_USDT\": [\n            \"MISMATCH\"\n          ]\n        }\n      },\n      \"hyperliquid\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": false,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BLUR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BOME\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"FIL\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"IMX\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"POPCAT\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"RSR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SKR\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRB\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRUMP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"ZORA\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      },\n      \"okx\": {\n        \"clock_sync_observed\": true,\n        \"clock_sync_required\": true,\n        \"complete\": false,\n        \"missing_families_by_symbol\": {},\n        \"required_families\": [\n          \"bbo\",\n          \"capacity_tape\",\n          \"instrument_metadata\",\n          \"l2Book\",\n          \"ticker\",\n          \"trades\"\n        ],\n        \"timing_defects_by_symbol\": {},\n        \"trade_reconciliation_defects_by_symbol\": {\n          \"BASED-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BLUR-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"BOME-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"CRDO-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"DOS-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"FIL-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"H100-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"IMX-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"MEW-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"POPCAT-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SKHY-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"SOXS-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRB-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"TRUMP-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"XDP-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ],\n          \"ZORA-USDT-SWAP\": [\n            \"SOURCE_CONTINUITY_VERIFIED\"\n          ]\n        }\n      }\n    },\n    \"schema\": \"alina.replay_grade_coverage.v1\"\n  },\n  \"schema\": \"alina.cloud_collection_window.v1\",\n  \"started_at_ms\": 1791449346187,\n  \"stop_reason\": \"DURATION_REACHED\",\n  \"venue_symbols\": {\n    \"binance\": [],\n    \"bitget\": [\n      \"ACUUSDT\",\n      \"ADIUSDT\",\n      \"AGPUUSDT\",\n      \"ANKRUSDT\",\n      \"BASEDUSDT\",\n      \"BITOUSDT\",\n      \"BLSHUSDT\",\n      \"BLURUSDT\",\n      \"BOMEUSDT\",\n      \"BUSDT\",\n      \"CHRUSDT\",\n      \"COPUSDT\",\n      \"COTIUSDT\",\n      \"CRDOUSDT\",\n      \"DKNGUSDT\",\n      \"DOSUSDT\",\n      \"FILUSDT\",\n      \"GWEIUSDT\",\n      \"H100USDT\",\n      \"HOLOUSDT\",\n      \"ILVUSDT\",\n      \"IMXUSDT\",\n      \"INUSDT\",\n      \"ISRGUSDT\",\n      \"KUAISHOUUSDT\",\n      \"MEWUSDT\",\n      \"MTLUSDT\",\n      \"NETUSDT\",\n      \"PIXELUSDT\",\n      \"POPCATUSDT\",\n      \"RSRUSDT\",\n      \"SKHYUSDT\",\n      \"SKRUSDT\",\n      \"SOXSUSDT\",\n      \"SQDUSDT\",\n      \"TENCENTUSDT\",\n      \"TRBUSDT\",\n      \"TRUMPUSDT\",\n      \"UAIUSDT\",\n      \"VOOUSDT\",\n      \"ZORAUSDT\",\n      \"ZSUSDT\",\n      \"\\u725b\\u6765USDT\"\n    ],\n    \"bybit\": [],\n    \"gate\": [\n      \"ACU_USDT\",\n      \"ADI_USDT\",\n      \"AGPU_USDT\",\n      \"ANKR_USDT\",\n      \"BASED_USDT\",\n      \"BITO_USDT\",\n      \"BLSH_USDT\",\n      \"BLUR_USDT\",\n      \"BOME_USDT\",\n      \"B_USDT\",\n      \"CHR_USDT\",\n      \"COP_USDT\",\n      \"COTI_USDT\",\n      \"CRDO_USDT\",\n      \"CSOPSKHYNIX2L_USDT\",\n      \"DKNG_USDT\",\n      \"DOS_USDT\",\n      \"FIL_USDT\",\n      \"GWEI_USDT\",\n      \"H100_USDT\",\n      \"HOLO_USDT\",\n      \"ILV_USDT\",\n      \"IMX_USDT\",\n      \"IN_USDT\",\n      \"ISRG_USDT\",\n      \"KUAISHOU_USDT\",\n      \"MEW_USDT\",\n      \"MTL_USDT\",\n      \"NET_USDT\",\n      \"PIXEL_USDT\",\n      \"POPCAT_USDT\",\n      \"RSR_USDT\",\n      \"SKHY_USDT\",\n      \"SKR_USDT\",\n      \"SOXS_USDT\",\n      \"SQD_USDT\",\n      \"TENCENT_USDT\",\n      \"TRB_USDT\",\n      \"TRUMP_USDT\",\n      \"UAI_USDT\",\n      \"VOO_USDT\",\n      \"XDP_USDT\",\n      \"ZORA_USDT\",\n      \"ZS_USDT\",\n      \"\\u725b\\u6765_USDT\"\n    ],\n    \"hyperliquid\": [\n      \"BLUR\",\n      \"BOME\",\n      \"FIL\",\n      \"IMX\",\n      \"POPCAT\",\n      \"RSR\",\n      \"SKR\",\n      \"TRB\",\n      \"TRUMP\",\n      \"ZORA\"\n    ],\n    \"okx\": [\n      \"ACU-USDT-SWAP\",\n      \"BASED-USDT-SWAP\",\n      \"BLUR-USDT-SWAP\",\n      \"BOME-USDT-SWAP\",\n      \"CRDO-USDT-SWAP\",\n      \"CSOPSKHYNIX2L-USDT-SWAP\",\n      \"DKNG-USDT-SWAP\",\n      \"DOS-USDT-SWAP\",\n      \"FIL-USDT-SWAP\",\n      \"H100-USDT-SWAP\",\n      \"IMX-USDT-SWAP\",\n      \"ISRG-USDT-SWAP\",\n      \"MEW-USDT-SWAP\",\n      \"NET-USDT-SWAP\",\n      \"POPCAT-USDT-SWAP\",\n      \"RSR-USDT-SWAP\",\n      \"SKHY-USDT-SWAP\",\n      \"SOXS-USDT-SWAP\",\n      \"TRB-USDT-SWAP\",\n      \"TRUMP-USDT-SWAP\",\n      \"XDP-USDT-SWAP\",\n      \"ZORA-USDT-SWAP\"\n    ]\n  }\n}\n",
+        "universe_discovery_required": true
+      },
+      "sha256": "aef95a5cff63b5c67b31f69e7e35a007af3920524aeb81c0819bebfc8807319a"
+    }
+  },
   "config_sha256": "c53f7ab36bbd6a21b19d6c98175d0d7bfb306c5208646af1082314ee873d526d",
   "consecutive_failures": 0,
   "created_at": "2026-10-08T08:46:24.002661+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "aef95a5cff63b5c67b31f69e7e35a007af3920524aeb81c0819bebfc8807319a",
     "duration_s": 3500,
+    "generation": 0,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37752122478",
     "market_shard_count": 16,
     "market_shard_index": 4,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026100808/shard-04.json",
     "plan_sha256": "2ecba8730fe5981529c3dde0506f6181742e9ce8d3a804185ab717db2da1d21b",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 45,
@@ -39,15 +102,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-08T09:52:51.174709Z",
+      "from": "RUNNING",
+      "reason": "unit_complete",
+      "to": "COMPLETE"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-08T08:48:31.950158Z",
-    "expires_at": "2026-10-08T14:33:31.950158Z",
-    "lease_token_sha256": "615a575f486f3826835e9e74081ab95e4ea939fa383390d0bfe406c82b0a2bc1",
-    "owner_run_id": "37752122478"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -65,9 +129,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
-  "terminal_evidence_digest": null,
-  "updated_at": "2026-10-08T08:48:31.950214Z",
+  "status": "COMPLETE",
+  "status_reason": "unit_complete",
+  "terminal_evidence_digest": "aef95a5cff63b5c67b31f69e7e35a007af3920524aeb81c0819bebfc8807319a",
+  "updated_at": "2026-10-08T09:52:51.174709Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
