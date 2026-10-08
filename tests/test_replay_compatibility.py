@@ -187,3 +187,44 @@ def test_receive_only_vault_snapshot_out_of_order_fails_closed(tmp_path):
     })
     assert result["out_of_order_count"] == 1
     assert result["replay_compatible"] is False
+
+
+
+def test_derived_capacity_replay_requires_real_l2_lineage(tmp_path):
+    from hl_observer.collection.depth_capacity import capacity_tape_envelope
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    tick = capacity_tape_envelope(
+        venue="bybit", instrument="BTCUSDT",
+        bids=[[99, 1]], asks=[[101, 2]],
+        exchange_ts_ms=1000, received_ts_ms=1001, receive_mono_ns=100000,
+        connection_id="bybit-1", sequence=10, quality="EXPLOITABLE",
+        source_raw_l2_payload={"seq": 10, "b": [[99, 1]], "a": [[101, 2]]},
+    )
+    assert tick is not None
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(tick)
+    [asset] = writer.rotate_all()
+    result = inspect_asset(asset, {"family": "capacity_tape", "venue": "bybit", "symbol": "BTCUSDT"})
+    assert result["record_count"] == 1
+    assert result["invalid_record_count"] == 0
+    assert result["derived_capacity_lineage_verified"] is True
+    assert result["replay_compatible"] is True
+
+
+def test_derived_capacity_missing_l2_hash_fails_replay(tmp_path):
+    from hl_observer.collection.depth_capacity import capacity_tape_envelope
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    tick = capacity_tape_envelope(
+        venue="bitget", instrument="BTCUSDT",
+        bids=[[99, 1]], asks=[[101, 2]],
+        exchange_ts_ms=1000, received_ts_ms=1001, receive_mono_ns=100000,
+        connection_id="bitget-1", sequence=10, quality="EXPLOITABLE",
+        source_raw_l2_payload=None,
+    )
+    assert tick is not None
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(tick)
+    [asset] = writer.rotate_all()
+    result = inspect_asset(asset, {"family": "capacity_tape", "venue": "bitget", "symbol": "BTCUSDT"})
+    assert result["derived_capacity_lineage_verified"] is False
+    assert result["replay_compatible"] is False
