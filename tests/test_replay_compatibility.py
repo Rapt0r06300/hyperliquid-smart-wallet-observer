@@ -228,3 +228,53 @@ def test_derived_capacity_missing_l2_hash_fails_replay(tmp_path):
     result = inspect_asset(asset, {"family": "capacity_tape", "venue": "bitget", "symbol": "BTCUSDT"})
     assert result["derived_capacity_lineage_verified"] is False
     assert result["replay_compatible"] is False
+
+
+
+def _active_ctx_tick(ts, mono):
+    import hashlib
+    raw = json.dumps({
+        "channel": "activeAssetCtx",
+        "data": {"coin": "BTC", "ctx": {"markPx": "100"}},
+    }, sort_keys=True)
+    return {
+        "schema_version": "hypersmart.tick.v1",
+        "source_id": "hyperliquid_public_ws",
+        "channel": "activeAssetCtx",
+        "event_kind": "SNAPSHOT",
+        "exchange_ts_ms": None,
+        "received_ts_ms": ts,
+        "local_monotonic_ns": mono,
+        "raw_payload": raw,
+        "raw_sha256": hashlib.sha256(raw.encode()).hexdigest(),
+        "real_execution": False,
+        "provenance": {
+            "transport": "websocket", "access": "read_only",
+            "authenticated": False,
+            "timestamp_semantics": "receive_observation_time_only",
+        },
+    }
+
+
+def test_context_same_raw_state_at_distinct_observation_times_is_replayable(tmp_path):
+    path = tmp_path / "active.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        for ts, mono in [(1000, 100_000), (1001, 101_000)]:
+            handle.write(json.dumps(_active_ctx_tick(ts, mono)) + "\n")
+    out = inspect_asset(path, {"family": "activeAssetCtx", "source": "hyperliquid_public_ws",
+                               "venue": "hyperliquid", "symbol": "BTC"})
+    assert out["receive_only_context_verified"] is True
+    assert out["replay_compatible"] is True
+
+
+def test_context_same_monotonic_clock_is_not_deduplicated_by_assumption(tmp_path):
+    path = tmp_path / "repeat.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps(_active_ctx_tick(1000, 10_000)) + "\n")
+        handle.write(json.dumps(_active_ctx_tick(1001, 10_000)) + "\n")
+    out = inspect_asset(path, {"family": "activeAssetCtx", "source": "hyperliquid_public_ws",
+                               "venue": "hyperliquid", "symbol": "BTC"})
+    assert out["receive_only_context_verified"] is False
+    # A snapshot can be replayable but must not qualify for repair without
+    # proof of DISTINCT causal observations.
+    assert out["replay_compatible"] is True
