@@ -1,0 +1,128 @@
+{
+  "asset_verified": true,
+  "bytes": 1075,
+  "collection_run_id": "market-e8-9-2026100721-v7-0",
+  "collector_version": "567d3fed0396fdbbc5e304a9c17a1d164b98f8e1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-trades-bx-usdt-1791433225911-1791433515711-9bd6d0ed4ebe",
+  "end_ts_ms": 1791433515711,
+  "event_count": 3,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 3,
+    "live_only": 3,
+    "matched_count": 0,
+    "missing_from_live": 0,
+    "reference_count": 0,
+    "reference_status": "MISMATCH",
+    "status": "MISMATCH"
+  },
+  "record_count": 3,
+  "release": {
+    "asset_id": 620794259,
+    "asset_name": "packed-shards-0005.zip",
+    "member_name": "gate-public-ws-trades-bx-usdt-1791433225911-1791433515711-9bd6d0ed4ebe.jsonl.gz",
+    "release_id": 406434508,
+    "release_tag": "data-v2-campaign-market-e8-9-2026100721-v7-u0",
+    "remote_digest": "sha256:c55298f28fa24df4f250c136c67ab2baa3d1e032820b0a48bca2ad1b798c3542",
+    "remote_size": 35560161,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-public-ws-trades-bx-usdt-1791433225911-1791433515711-9bd6d0ed4ebe.jsonl.gz",
+  "release_asset_id": 620794259,
+  "release_container_asset": "packed-shards-0005.zip",
+  "release_id": 406434508,
+  "release_member": "gate-public-ws-trades-bx-usdt-1791433225911-1791433515711-9bd6d0ed4ebe.jsonl.gz",
+  "release_remote_digest": "sha256:c55298f28fa24df4f250c136c67ab2baa3d1e032820b0a48bca2ad1b798c3542",
+  "release_remote_size": 35560161,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026100721-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "9bd6d0ed4ebe50707ba48ebb3b17f2808fc8c81e5bd855e6492a21fde04485c3",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1791433225911,
+  "symbol": "BX_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3,
+      "max": 313.5,
+      "min": 266.5,
+      "p50": 313.5,
+      "p95": 313.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-3af9e94a067d4d3cb0b0a9d362033c57"
+    ],
+    "first_exchange_ts_ms": 1791433221654,
+    "last_exchange_ts_ms": 1791433515642,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3,
+      "max": 4257.0,
+      "min": 68.0,
+      "p50": 69.0,
+      "p95": 4257.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3,
+      "max": 219.762118,
+      "min": 133.755217,
+      "p50": 134.426244,
+      "p95": 219.762118
+    }
+  },
+  "trade_count": 3,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "8742ffb4c8dba60d02a52062688e0cc73b7c9dbe2d1a0a9873dce863c58c8b55",
+    "9d04126db352e0de7bd61df7149444c62aa43755cdff88616f4dad8857a3e168",
+    "d87cfaa6fb2b479c5d3e8d1e497b2fa7e9bb28c9166ff6622e698184d8661859"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 4224,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 3,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "gate"
+}
