@@ -460,3 +460,37 @@ def test_selection_snapshot_declares_receive_clock_without_exchange_clock():
     assert envelope.received_ts_ms == 1600
     assert envelope.local_monotonic_ns is not None
     assert envelope.provenance["timestamp_semantics"] == "receive_observation_time_only"
+
+
+
+def test_copy_vault_async_sink_waits_for_writer_instead_of_dropping():
+    import asyncio
+    from types import SimpleNamespace
+
+    class Writer:
+        def __init__(self):
+            self.rows = []
+
+        def append_batch_records(self, batch):
+            self.rows.extend(batch)
+            return batch
+
+    async def verify():
+        writer = Writer()
+        sink = C.AsyncTickSink(writer, max_queue=1, batch_size=1)
+        a = SimpleNamespace(source_id="vault", channel="copy_vault_fills", instrument="A")
+        b = SimpleNamespace(source_id="vault", channel="copy_vault_fills", instrument="B")
+        await sink.emit_async(a)
+        pending = asyncio.create_task(sink.emit_async(b))
+        await asyncio.sleep(0)
+        assert sink.backpressure_events == 1
+        assert not pending.done()
+        worker = asyncio.create_task(sink.run())
+        await pending
+        await sink.close()
+        await worker
+        assert sink.drops == {}
+        assert sink.accepted == sink.persisted == 2
+        assert writer.rows == [a, b]
+
+    asyncio.run(verify())
