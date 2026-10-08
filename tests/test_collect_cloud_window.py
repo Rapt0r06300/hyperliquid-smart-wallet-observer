@@ -756,3 +756,65 @@ def test_gate_reconnect_rebootstraps_capacity_book() -> None:
         row.parsed_summary["size_multiplier_to_base"] == 0.001
         for row in capacity
     )
+
+
+
+def test_async_sink_backpressures_instead_of_dropping_raw_frames():
+    import asyncio
+    import types
+
+    class Writer:
+        def __init__(self):
+            self.rows = []
+
+        def append_batch_records(self, batch):
+            self.rows.extend(batch)
+            return list(batch)
+
+    async def exercise():
+        writer = Writer()
+        sink = m.AsyncPartitionSink(writer, max_queue=1, batch_size=1)
+        one = types.SimpleNamespace(
+            source_id="okx_public_ws", channel="trades", instrument="BTCUSDT",
+            parsed_summary={},
+        )
+        two = types.SimpleNamespace(
+            source_id="okx_public_ws", channel="trades", instrument="ETHUSDT",
+            parsed_summary={},
+        )
+        await sink.emit_async(one)
+        pending = asyncio.create_task(sink.emit_async(two))
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert sink.backpressure_events == 1
+        worker = asyncio.create_task(sink.run())
+        await pending
+        await sink.close()
+        await worker
+        assert sink.accepted == sink.persisted == 2
+        assert sink.drops == {}
+        assert writer.rows == [one, two]
+
+    asyncio.run(exercise())
+
+
+def test_legacy_sink_never_pairs_a_derived_capacity_frame_that_was_dropped():
+    import types
+
+    class Writer:
+        pass
+
+    sink = m.AsyncPartitionSink(Writer(), max_queue=1)
+    first = types.SimpleNamespace(
+        source_id="bybit_public_ws", channel="capacity_tape",
+        instrument="BTCUSDT", parsed_summary={"coin": "BTC", "venue": "bybit"},
+    )
+    second = types.SimpleNamespace(
+        source_id="okx_public_ws", channel="capacity_tape",
+        instrument="BTCUSDT", parsed_summary={"coin": "BTC", "venue": "okx"},
+    )
+    sink.emit(first)
+    sink.emit(second)
+    assert sink.accepted == 1
+    assert sink.drops[sink.key(second)] == 1
+    assert ("BTC", "okx") not in sink._latest_capacity
