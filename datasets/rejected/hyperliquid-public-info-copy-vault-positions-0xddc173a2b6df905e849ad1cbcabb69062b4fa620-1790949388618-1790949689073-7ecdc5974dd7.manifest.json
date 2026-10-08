@@ -13,9 +13,11 @@
     "ready": false
   },
   "dataset_id": "hyperliquid-public-info-copy-vault-positions-0xddc173a2b6df905e849ad1cbcabb69062b4fa620-1790949388618-1790949689073-7ecdc5974dd7",
+  "duplicate_count": 0,
   "end_ts_ms": 1790949689073,
   "event_count": 2,
   "family": "copy_vault_positions",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -25,9 +27,11 @@
     "missing_timestamp_count": 2,
     "regression_count": 0
   },
+  "invalid_record_count": 2,
   "observed_channels": [
     "copy_vault_positions"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -65,8 +69,8 @@
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-campaign-copy-vault-e6-45-2026100104-v7-u0",
   "replay_compatible": false,
-  "replay_reason": "MISSING_CAUSAL_TIMESTAMP",
-  "replay_schema_version": "alina.replay.v1",
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "7ecdc5974dd76e76fe2a8ad6d6e21df16b1a2b97dc9ee2054ffafc8e046a9926",
@@ -103,7 +107,8 @@
     }
   },
   "trade_count": 0,
-  "trade_count_exact": false,
+  "trade_count_exact": true,
   "validation_allowed": false,
-  "venue": "hyperliquid"
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v6"
 }

@@ -1,0 +1,105 @@
+{
+  "asset_verified": true,
+  "bytes": 985,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-rest-funding-settlement-eigen-1790075226821-1790075226821-604b710a1016",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790075226821,
+  "event_count": 5,
+  "family": "funding_settlement",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "record_count": 5,
+  "release": {
+    "asset_id": 607756539,
+    "asset_name": "hyperliquid-public-rest-funding-settlement-eigen-1790075226821-1790075226821-604b710a1016.jsonl.gz",
+    "release_id": 402497053,
+    "remote_digest": "sha256:604b710a1016ff4838fc367c4ac9c79b754cb8d70be34b51a8c7e3ca8e75cffa",
+    "remote_size": 985,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s2"
+  },
+  "release_asset": "hyperliquid-public-rest-funding-settlement-eigen-1790075226821-1790075226821-604b710a1016.jsonl.gz",
+  "release_asset_id": 607756539,
+  "release_id": 402497053,
+  "release_remote_digest": "sha256:604b710a1016ff4838fc367c4ac9c79b754cb8d70be34b51a8c7e3ca8e75cffa",
+  "release_remote_size": 985,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s2",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "604b710a1016ff4838fc367c4ac9c79b754cb8d70be34b51a8c7e3ca8e75cffa",
+  "source": "hyperliquid_public_rest",
+  "start_ts_ms": 1790075226821,
+  "symbol": "EIGEN",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790060400019,
+    "last_exchange_ts_ms": 1790074800014,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5,
+      "max": 14826802.0,
+      "min": 426807.0,
+      "p50": 7626808.0,
+      "p95": 14826802.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v6"
+}

@@ -1,0 +1,105 @@
+{
+  "asset_verified": true,
+  "bytes": 996,
+  "collection_run_id": "market-35696301919",
+  "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-rest-funding-settlement-aixbt-1790075042396-1790075042396-c794ccdf4573",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790075042396,
+  "event_count": 5,
+  "family": "funding_settlement",
+  "gap_count": 0,
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "invalid_record_count": 0,
+  "observed_channels": [
+    "funding_settlement"
+  ],
+  "out_of_order_count": 0,
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "https"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SNAPSHOT_VERIFIED"
+  },
+  "record_count": 5,
+  "release": {
+    "asset_id": 607751063,
+    "asset_name": "hyperliquid-public-rest-funding-settlement-aixbt-1790075042396-1790075042396-c794ccdf4573.jsonl.gz",
+    "release_id": 402495715,
+    "remote_digest": "sha256:c794ccdf457374e2c7044eaef1c53c02145d9b25d77cbdf26e5f37cf06668d4a",
+    "remote_size": 996,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "tag": "data-v2-35696301919-s1"
+  },
+  "release_asset": "hyperliquid-public-rest-funding-settlement-aixbt-1790075042396-1790075042396-c794ccdf4573.jsonl.gz",
+  "release_asset_id": 607751063,
+  "release_id": 402495715,
+  "release_remote_digest": "sha256:c794ccdf457374e2c7044eaef1c53c02145d9b25d77cbdf26e5f37cf06668d4a",
+  "release_remote_size": 996,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_tag": "data-v2-35696301919-s1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "c794ccdf457374e2c7044eaef1c53c02145d9b25d77cbdf26e5f37cf06668d4a",
+  "source": "hyperliquid_public_rest",
+  "start_ts_ms": 1790075042396,
+  "symbol": "AIXBT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1790060400019,
+    "last_exchange_ts_ms": 1790074800014,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5,
+      "max": 14642377.0,
+      "min": 242382.0,
+      "p50": 7442383.0,
+      "p95": 14642377.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v6"
+}

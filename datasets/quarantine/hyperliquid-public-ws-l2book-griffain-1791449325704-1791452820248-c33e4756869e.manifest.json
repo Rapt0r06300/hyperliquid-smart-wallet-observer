@@ -8,9 +8,11 @@
     "ready": false
   },
   "dataset_id": "hyperliquid-public-ws-l2book-griffain-1791449325704-1791452820248-c33e4756869e",
+  "duplicate_count": 0,
   "end_ts_ms": 1791452820248,
   "event_count": 652,
   "family": "l2Book",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 1,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "l2Book"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -34,8 +38,7 @@
     ]
   },
   "quality_reasons": [
-    "DUPLICATES_NOT_DEDUPED:1",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+    "DUPLICATES_NOT_DEDUPED:1"
   ],
   "quality_status": "PARTIAL",
   "reconciliation": {
@@ -63,9 +66,9 @@
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_storage": "zip_entry",
   "release_tag": "data-v2-campaign-market-e8-9-2026100808-v7-u0",
-  "replay_compatible": false,
-  "replay_reason": "DUPLICATES_PRESENT",
-  "replay_schema_version": "alina.replay.v1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "c33e4756869ed0076145d9fbf285ba0774a5d5de73555bb161207a3bf5861926",
@@ -104,7 +107,7 @@
     }
   },
   "trade_count": 0,
-  "trade_count_exact": false,
+  "trade_count_exact": true,
   "trade_identity_digests": [],
   "trade_identity_digests_exact": false,
   "uncompressed_bytes": 2068385,
@@ -112,5 +115,6 @@
   "unique_trade_count": null,
   "unique_trade_count_exact": false,
   "validation_allowed": false,
-  "venue": "hyperliquid"
+  "venue": "hyperliquid",
+  "verifier_version": "alina.replay.compatibility.v6"
 }
