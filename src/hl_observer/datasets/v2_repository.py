@@ -93,21 +93,21 @@ class SafeShard:
         if storage == "zip_entry":
             outer = str(row.get("release_container_asset") or "")
             member = str(row.get("release_member") or "")
-            digest = str(row.get("release_remote_digest") or "").lower()
+            outer_digest = str(row.get("release_remote_digest") or "").lower()
             remote_size_value = row.get("release_remote_size")
             if not (
                 outer.endswith(".zip") and "/" not in outer and "\\" not in outer
                 and member == str(row.get("release_asset") or "")
                 and member.endswith(".jsonl.gz")
                 and "/" not in member and "\\" not in member and ".." not in member
-                and digest.startswith("sha256:")
-                and len(digest) == 71
-                and all(c in "0123456789abcdef" for c in digest[7:])
+                and outer_digest.startswith("sha256:")
+                and len(outer_digest) == 71
+                and all(c in "0123456789abcdef" for c in outer_digest[7:])
                 and type(remote_size_value) is int and remote_size_value > 0
             ):
                 raise DatasetV2Error("packed SAFE shard lacks verified ZIP/member locator")
             remote_size = remote_size_value
-            remote_digest = digest[7:]
+            remote_digest = outer_digest[7:]
         if release_repo != DEFAULT_REPOSITORY:
             raise DatasetV2Error(f"foreign dataset repository refused: {release_repo}")
         return cls(
@@ -316,6 +316,8 @@ def download_safe_shard(
                         output.write(block)
                     output.flush()
                     os.fsync(output.fileno())
+        except DatasetV2Error:
+            raise
         except (zipfile.BadZipFile, OSError, EOFError, RuntimeError, ValueError) as exc:
             raise DatasetV2Error("packed Release extraction failed") from exc
         finally:
