@@ -173,8 +173,36 @@ def audit(
     verify_worktree: bool = False,
 ) -> dict[str, Any]:
     manifest = mirror.load_manifest(root / MANIFEST_PATH)
-    source = source_inventory(repository, token=token)
     cloned = manifest_inventory(manifest)
+    # An empty migration is conclusively INCOMPLETE for Alina, regardless of
+    # transient GitHub API availability. Avoid many minutes of Release listing
+    # retries and shared installation rate-limit consumption just to discover
+    # that zero bytes have been mirrored. Source totals remain UNKNOWN, never 0.
+    if not cloned:
+        return {
+            "schema": "alina.clone_payload_completeness.v1",
+            "repository": repository,
+            "complete": False,
+            "reason": "MIRROR_NOT_STARTED",
+            "source_inventory_checked": False,
+            "source_assets": None,
+            "clone_assets": 0,
+            "source_bytes": None,
+            "clone_bytes": 0,
+            "missing_asset_count": None,
+            "extra_asset_count": 0,
+            "mismatch_count": 0,
+            "missing_asset_ids_sample": [],
+            "extra_asset_ids_sample": [],
+            "mismatches_sample": [],
+            "git_lfs_pointers_verified": False,
+            "physical_worktree_verification_requested": bool(verify_worktree),
+            "physical_worktree_mismatch_count": None,
+            "physical_worktree_mismatches_sample": [],
+            "read_only": True,
+            "real_execution": False,
+        }
+    source = source_inventory(repository, token=token)
 
     source_ids = set(source)
     cloned_ids = set(cloned)
