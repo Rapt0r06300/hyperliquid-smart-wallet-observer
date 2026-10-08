@@ -1,0 +1,63 @@
+{
+  "analysis_stage": null,
+  "attempts": 0,
+  "campaign_id": "canary-market-e8-okx-btc-eth-replaygrade-20261008-v2",
+  "checkpoint_lineage": [],
+  "chunk_index": 0,
+  "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "code_sha": "9d33f0824deb94f2a747c03c490e042620a2a984",
+  "collection_cutoff_at_utc": null,
+  "completed_units": {},
+  "config_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+  "consecutive_failures": 0,
+  "created_at": "2026-10-08T04:13:11.360693+00:00",
+  "creation_phase": "COLLECT",
+  "cursor": {
+    "canary": true,
+    "duration_s": 180,
+    "market_shard_count": 1,
+    "market_shard_index": 0,
+    "max_coins": 2,
+    "plan_file": "catalog/market_collection_plans/e8/canary-20261007/okx-btc-eth-compaction.json",
+    "plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "require_all_native_venues": true,
+    "rotate_mb": 16,
+    "selected_coin_count": 2,
+    "universe_digest": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589",
+    "universe_mode": "bounded_canary"
+  },
+  "dataset_generation": "V2_FRESH",
+  "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "dataset_selection_id": null,
+  "expires_at": "2026-10-15T04:13:11.360693+00:00",
+  "history": [
+    {
+      "event": "operator_request",
+      "request_id": "43d2ab08150fdcb9ea17c63f116736df76498e157cd68d78ea398c5830b939ea"
+    }
+  ],
+  "kind": "market_collection",
+  "lease": null,
+  "limits": {
+    "max_attempts": 1,
+    "max_chunks": 1,
+    "max_consecutive_failures": 1,
+    "max_no_progress": 1,
+    "max_wall_clock_s": 1200
+  },
+  "next_due_at": null,
+  "no_progress_count": 0,
+  "operator_request_id": "43d2ab08150fdcb9ea17c63f116736df76498e157cd68d78ea398c5830b939ea",
+  "outputs": [],
+  "paper_only": true,
+  "phase_epoch": 8,
+  "read_only": true,
+  "real_execution": false,
+  "schema_version": "alina.resumable_campaign.v2",
+  "source_collection_epoch": null,
+  "status": "PENDING",
+  "status_reason": "created",
+  "terminal_evidence_digest": null,
+  "updated_at": "2026-10-08T04:13:11.360741Z",
+  "work_plan_sha256": "e20a966eb00e9330212128e4ef8900f4068580381f1198d0cae53d861760c589"
+}
