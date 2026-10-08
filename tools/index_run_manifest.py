@@ -128,17 +128,62 @@ def _apply_replay_patch(
 
 
 def _normalize_manifest(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize immutable Release locators, including packed ZIP shards."""
     manifest = dict(raw)
     release = manifest.get("release")
     if isinstance(release, Mapping):
-        manifest.setdefault("release_repository", release.get("repository"))
-        manifest.setdefault("release_tag", release.get("tag"))
-        manifest.setdefault("release_asset", release.get("asset_name"))
-        manifest.setdefault("release_id", release.get("release_id"))
-        manifest.setdefault("release_asset_id", release.get("asset_id"))
-        manifest.setdefault("release_remote_size", release.get("remote_size"))
-        manifest.setdefault("release_remote_digest", release.get("remote_digest"))
+        # Current compacted publisher uses release.release_tag; old direct
+        # publisher uses release.tag. Missing this alias previously put tens
+        # of thousands of apparently SAFE shards into an unrecoverable index.
+        for key, value in (
+            ("release_repository", release.get("repository")),
+            ("release_tag", release.get("release_tag") or release.get("tag")),
+            ("release_id", release.get("release_id")),
+            ("release_asset_id", release.get("asset_id")),
+            ("release_remote_size", release.get("remote_size")),
+            ("release_remote_digest", release.get("remote_digest")),
+        ):
+            if manifest.get(key) in (None, "") and value not in (None, ""):
+                manifest[key] = value
+
+        storage = str(release.get("storage") or "")
+        if storage == "zip_entry":
+            outer = str(release.get("asset_name") or "")
+            member = str(release.get("member_name") or "")
+            manifest["release_storage"] = "zip_entry"
+            manifest["release_container_asset"] = outer
+            manifest["release_member"] = member
+            # Keep release_asset as the logical gzip shard name. The physical
+            # GitHub downloadable asset is the outer ZIP, pinned separately.
+            if manifest.get("release_asset") in (None, ""):
+                manifest["release_asset"] = member
+        elif manifest.get("release_asset") in (None, ""):
+            manifest["release_asset"] = release.get("asset_name")
     return manifest
+
+
+def _valid_release_locator(manifest: Mapping[str, Any]) -> bool:
+    import re
+    if (
+        manifest.get("release_repository") != "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        or not str(manifest.get("release_tag") or "")
+        or not str(manifest.get("release_asset") or "")
+    ):
+        return False
+    release = manifest.get("release")
+    if isinstance(release, Mapping) and release.get("storage") == "zip_entry":
+        digest = str(manifest.get("release_remote_digest") or "")
+        member = str(manifest.get("release_member") or "")
+        return bool(
+            str(manifest.get("release_container_asset") or "").endswith(".zip")
+            and member == str(manifest.get("release_asset") or "")
+            and member.endswith(".jsonl.gz")
+            and "/" not in member and "\\" not in member and ".." not in member
+            and re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest)
+            and type(manifest.get("release_remote_size")) is int
+            and manifest["release_remote_size"] > 0
+        )
+    return True
 
 
 def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> dict[str, Any]:
@@ -155,6 +200,11 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "release_repository": manifest.get("release_repository"),
         "release_tag": manifest.get("release_tag"),
         "release_asset": manifest.get("release_asset"),
+        "release_container_asset": manifest.get("release_container_asset"),
+        "release_member": manifest.get("release_member"),
+        "release_storage": manifest.get("release_storage"),
+        "release_remote_size": manifest.get("release_remote_size"),
+        "release_remote_digest": manifest.get("release_remote_digest"),
         "sha256": manifest.get("sha256"),
         "bytes": manifest.get("bytes"),
         "uncompressed_bytes": manifest.get("uncompressed_bytes"),
@@ -285,6 +335,9 @@ def index_run_manifests(
             _apply_replay_patch(manifest, replay_patch_results)
             _apply_trade_count_patch(manifest, trade_count_patch_results)
             status, reasons = classify_manifest(manifest)
+            if status == "SAFE" and not _valid_release_locator(manifest):
+                status = "PARTIAL"
+                reasons = list(dict.fromkeys([*reasons, "RELEASE_LOCATOR_UNPROVEN"]))
             if status == "SAFE" and manifest.get("replay_compatible") is not True:
                 status = "PARTIAL"
                 reasons = list(dict.fromkeys([*reasons, "REPLAY_COMPATIBILITY_NOT_PROVEN"]))
