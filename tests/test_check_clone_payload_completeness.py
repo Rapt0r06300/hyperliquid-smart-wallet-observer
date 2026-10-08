@@ -222,3 +222,23 @@ def test_git_tracked_payload_inventory_excludes_untracked_files(tmp_path):
     assert module.git_tracked_payload_paths(tmp_path) == {
         "clone_payload/releases/t/1--test.bin"
     }
+
+
+def test_empty_mirror_is_fast_fail_without_release_api_calls(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1",
+        "entries": [],
+    })
+    monkeypatch.setattr(
+        module, "source_inventory",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("empty mirror must not exhaust remote API quota")
+        ),
+    )
+    report = module.audit("owner/repo", root=tmp_path, token=None, verify_git_pointers=True)
+    assert report["complete"] is False
+    assert report["reason"] == "MIRROR_NOT_STARTED"
+    assert report["source_bytes"] is None
+    assert report["clone_bytes"] == 0
+    assert report["source_inventory_checked"] is False
