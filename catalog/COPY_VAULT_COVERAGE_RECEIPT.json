@@ -5,15 +5,15 @@
       {
         "campaign_id": "copy-vault-e8-broad-2026100813-v8",
         "collected": false,
-        "completed_units": 2,
+        "completed_units": 3,
         "published": false,
         "shard_index": 0,
-        "status": "RUNNING",
-        "status_reason": "worker_started"
+        "status": "STUCK",
+        "status_reason": "worker_unit_crash"
       }
     ],
     "collected_lane_count": 0,
-    "completed_unit_count": 2,
+    "completed_unit_count": 3,
     "created_at_max": "2026-10-08T13:35:24.694120+00:00",
     "declared_universe_count": 3083,
     "duplicate_lane_indices": [],
@@ -37,7 +37,13 @@
     "selection_verified": true,
     "status": "BLOCKED",
     "terminal_lane_count": 0,
-    "unexpected_failures": [],
+    "unexpected_failures": [
+      {
+        "campaign_id": "copy-vault-e8-broad-2026100813-v8",
+        "reason": "worker_unit_crash",
+        "status": "STUCK"
+      }
+    ],
     "users_per_largest_lane": 3083
   },
   "candidate_campaign_count": 3,
@@ -135,15 +141,15 @@
         {
           "campaign_id": "copy-vault-e8-broad-2026100813-v8",
           "collected": false,
-          "completed_units": 2,
+          "completed_units": 3,
           "published": false,
           "shard_index": 0,
-          "status": "RUNNING",
-          "status_reason": "worker_started"
+          "status": "STUCK",
+          "status_reason": "worker_unit_crash"
         }
       ],
       "collected_lane_count": 0,
-      "completed_unit_count": 2,
+      "completed_unit_count": 3,
       "created_at_max": "2026-10-08T13:35:24.694120+00:00",
       "declared_universe_count": 3083,
       "duplicate_lane_indices": [],
@@ -167,13 +173,19 @@
       "selection_verified": true,
       "status": "BLOCKED",
       "terminal_lane_count": 0,
-      "unexpected_failures": [],
+      "unexpected_failures": [
+        {
+          "campaign_id": "copy-vault-e8-broad-2026100813-v8",
+          "reason": "worker_unit_crash",
+          "status": "STUCK"
+        }
+      ],
       "users_per_largest_lane": 3083
     }
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "cf9d77436f5f2b079832e39aafabee1115b5b65de42dde6e0dd4cc0280c52921",
+  "receipt_digest": "a1575d0102422bef7a71e331d797d19528c71284afe45a095c4949e1010ca25e",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
