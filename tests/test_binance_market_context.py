@@ -167,3 +167,21 @@ def test_open_interest_and_metadata_rest_samples_are_taped() -> None:
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+
+def test_context_tick_sink_awaits_bounded_async_writer():
+    async def exercise():
+        emitted = []
+        async def receiver(tick):
+            await asyncio.sleep(0)
+            emitted.append(tick)
+        collector = BinanceMarketContextCollector(["BTCUSDT"], tick_sink=receiver)
+        try:
+            row = object()
+            await collector._emit_tick_async(row)
+            assert emitted == [row]
+        finally:
+            await collector.close()
+
+    asyncio.run(exercise())

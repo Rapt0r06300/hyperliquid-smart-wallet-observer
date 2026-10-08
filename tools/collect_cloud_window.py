@@ -1569,7 +1569,7 @@ async def collect(
     )
     binance_context = BinanceMarketContextCollector(
         binance_symbols,
-        tick_sink=sink.emit,
+        tick_sink=sink.emit_async,
         clock_sync_provider=(binance_clock.evidence if binance_clock is not None else None),
     )
     hyperliquid_trade_reference = (

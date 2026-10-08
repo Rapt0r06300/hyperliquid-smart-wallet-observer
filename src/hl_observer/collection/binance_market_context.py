@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import inspect
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping
@@ -249,7 +250,7 @@ class BinanceMarketContextCollector:
                         current["receive_ts_ms"] = receive_wall_ms
                         current["exchange_ts_ms"] = parsed["exchange_ts_ms"]
                         self._emit_context(symbol, current)
-                        self._emit_tick(
+                        await self._emit_tick_async(
                             TickEnvelope(
                                 source_id="binance_usdm_public",
                                 channel=parsed["channel"],
@@ -315,7 +316,7 @@ class BinanceMarketContextCollector:
                 current["open_interest"] = oi
                 current["open_interest_receive_ts_ms"] = receive_wall_ms
                 self._emit_context(symbol, current)
-                self._emit_tick(
+                await self._emit_tick_async(
                     TickEnvelope(
                         source_id="binance_usdm_public",
                         channel="open_interest",
@@ -374,7 +375,7 @@ class BinanceMarketContextCollector:
                 key: value for key, value in row.items() if key != "raw"
             }
             self._emit_context(symbol, current)
-            self._emit_tick(
+            await self._emit_tick_async(
                 TickEnvelope(
                     source_id="binance_usdm_public",
                     channel="instrument_metadata",
@@ -433,6 +434,12 @@ class BinanceMarketContextCollector:
     def _emit_tick(self, envelope: TickEnvelope) -> None:
         if self.tick_sink is not None:
             self.tick_sink(envelope)
+
+    async def _emit_tick_async(self, envelope: TickEnvelope) -> None:
+        if self.tick_sink is not None:
+            result = self.tick_sink(envelope)
+            if inspect.isawaitable(result):
+                await result
 
     def _emit_context(self, symbol: str, row: Mapping[str, Any]) -> None:
         if self.context_sink is not None:
