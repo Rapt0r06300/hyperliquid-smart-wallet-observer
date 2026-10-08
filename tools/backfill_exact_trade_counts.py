@@ -17,6 +17,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -393,10 +394,59 @@ def inspect_asset(path: Path, row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _extract_packed_verified_shard(
+    row: Mapping[str, Any], archive_path: Path, destination: Path,
+) -> Path:
+    """Verify outer immutable ZIP and exact inner gzip bytes, without extractall."""
+    expected_sha = str(row.get("sha256") or "").lower()
+    outer_digest = str(row.get("release_remote_digest") or "").lower()
+    outer_size = row.get("release_remote_size")
+    member = str(row.get("release_member") or "")
+    logical = str(row.get("release_asset") or "")
+    compressed_size = row.get("bytes")
+    container = str(row.get("release_container_asset") or "")
+    if not (
+        container.endswith(".zip")
+        and "/" not in container and "\\" not in container
+        and member == logical and member.endswith(".jsonl.gz")
+        and "/" not in member and "\\" not in member and ".." not in member
+        and len(expected_sha) == 64 and all(x in "0123456789abcdef" for x in expected_sha)
+        and outer_digest.startswith("sha256:") and len(outer_digest) == 71
+        and all(x in "0123456789abcdef" for x in outer_digest[7:])
+        and type(outer_size) is int and outer_size > 0
+        and type(compressed_size) is int and compressed_size > 0
+    ):
+        raise BackfillError("unsafe or incomplete immutable packed Release coordinates")
+    if archive_path.stat().st_size != outer_size or _sha256(archive_path) != outer_digest[7:]:
+        raise BackfillError("packed Release ZIP size/SHA-256 mismatch")
+    destination.mkdir(parents=True, exist_ok=True)
+    target = destination / member
+    temporary = destination / (member + ".partial")
+    temporary.unlink(missing_ok=True)
+    try:
+        with zipfile.ZipFile(archive_path) as container_zip:
+            members = [
+                item for item in container_zip.infolist()
+                if item.filename == member and not item.is_dir()
+            ]
+            if len(members) != 1 or members[0].file_size != compressed_size:
+                raise BackfillError("packed Release member missing or wrong size")
+            with container_zip.open(members[0]) as src, temporary.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=4 * 1024 * 1024)
+        if temporary.stat().st_size != compressed_size or _sha256(temporary) != expected_sha:
+            raise BackfillError("packed Release inner shard SHA-256 mismatch")
+        temporary.replace(target)
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError) as exc:
+        raise BackfillError("packed Release member extraction failed") from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def _download(row: Mapping[str, Any], destination: Path) -> Path:
     repository = str(row.get("release_repository") or "")
     tag = str(row.get("release_tag") or "")
-    asset = str(row.get("release_asset") or "")
+    asset = str(row.get("release_container_asset") or row.get("release_asset") or "")
     if not repository or not tag or not asset:
         raise BackfillError("release coordinates missing")
     destination.mkdir(parents=True, exist_ok=True)
@@ -423,6 +473,10 @@ def _download(row: Mapping[str, Any], destination: Path) -> Path:
         raise BackfillError((result.stderr or result.stdout or "direct release download failed").strip())
     if not path.is_file():
         raise BackfillError("downloaded asset missing")
+    if row.get("release_container_asset"):
+        result = _extract_packed_verified_shard(row, path, destination)
+        path.unlink(missing_ok=True)
+        return result
     return path
 
 
