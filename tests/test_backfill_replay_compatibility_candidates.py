@@ -320,3 +320,26 @@ def test_observation_repair_requires_verified_release_hash(tmp_path):
             "receive_only_snapshot_verified": True, "replay_compatible": True,
             "asset_sha256": "c" * 64,
         }, root=tmp_path)
+
+
+
+def test_compacted_replay_release_hydrates_outer_and_member_locator():
+    row = {"release_asset": "", "release_tag": "", "release_repository": ""}
+    manifest = {
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "release_tag": "data-v2-packed",
+            "asset_name": "packed-shards-0000.zip",
+            "member_name": "x.jsonl.gz",
+            "storage": "zip_entry",
+            "remote_size": 200,
+            "remote_digest": "sha256:" + "a" * 64,
+        },
+        "sha256": "b" * 64, "bytes": 50,
+    }
+    backfill._hydrate_release_fields(row, manifest)
+    assert row["release_tag"] == "data-v2-packed"
+    assert row["release_asset"] == "x.jsonl.gz"
+    assert row["release_container_asset"] == "packed-shards-0000.zip"
+    assert row["release_member"] == "x.jsonl.gz"
+    assert row["release_remote_digest"] == "sha256:" + "a" * 64
