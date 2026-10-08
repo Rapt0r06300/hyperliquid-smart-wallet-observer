@@ -79,7 +79,9 @@ jobs:
         run: |
           set -euo pipefail
           LIMIT="${{ inputs.per_family_limit || '120' }}"
-          # Small resumable waves leave hosted compute free for live catalogue\n          # reconciliation while proving each shard from its immutable Release.\n          # Trades first: close the multi-million-row replay gap incrementally.
+          # Small resumable waves leave hosted compute free for live catalogue
+          # reconciliation while proving each shard from its immutable Release.
+          # Trades first: close the multi-million-row replay gap incrementally.
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "trades,agg_trades,fills,userfills,user_fills"
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "bbo"
