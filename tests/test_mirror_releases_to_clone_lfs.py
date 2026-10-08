@@ -230,3 +230,41 @@ def test_release_pagination_rejects_expensive_page_size():
         assert "between 1 and 10" in str(exc)
     else:
         raise AssertionError("Unbounded Release pagination must be rejected")
+
+
+
+def test_select_pending_rejects_single_asset_over_batch_bytes():
+    module = _module()
+    release = {
+        "id": 1, "tag_name": "v1",
+        "assets": [{"id": 100, "name": "huge.bin", "size": 1_500_000_001}],
+    }
+    try:
+        module.select_pending_assets([release], set(), max_assets=10, max_bytes=1_500_000_000)
+    except module.MirrorError as exc:
+        assert "larger than" in str(exc)
+    else:
+        raise AssertionError("must not silently exceed runner byte cap")
+
+
+def test_select_pending_refuses_incomplete_release_inventory():
+    module = _module()
+    try:
+        module.select_pending_assets([{"id": 1}], set(), max_assets=10, max_bytes=100)
+    except module.MirrorError as exc:
+        assert "inventory" in str(exc)
+    else:
+        raise AssertionError("missing inventory must fail closed")
+
+
+def test_select_pending_respects_total_byte_limit():
+    module = _module()
+    release = {
+        "id": 1, "tag_name": "v1",
+        "assets": [
+            {"id": 1, "name": "one.bin", "size": 60},
+            {"id": 2, "name": "two.bin", "size": 50},
+        ],
+    }
+    rows = module.select_pending_assets([release], set(), max_assets=10, max_bytes=100)
+    assert [asset["id"] for _rel, asset in rows] == [1]
