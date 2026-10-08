@@ -79,3 +79,40 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -e . pytest
           python -m pytest -q tests/test_restore_alina.py tests/test_publish_dataset_v2_release.py tests/test_publish_local_recovery_snapshot.py tests/test_recover_dataset_v2_capsules.py tests/test_mirror_releases_to_clone_lfs.py tests/test_check_clone_payload_completeness.py tests/test_verify_materialized_clone.py tests/test_verify_fresh_clone_lfs_streaming.py --tb=line
+
+
+      - name: Smoke test a real published Release asset
+        env:
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          python - <<'PY'
+          import os
+          import tempfile
+          from pathlib import Path
+          from tools.restore_alina import _json, _list_release_assets, download_asset
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          releases = _json(
+              f"https://api.github.com/repos/{repo}/releases?per_page=10&page=1",
+              token=token,
+          )
+          if not isinstance(releases, list):
+              raise RuntimeError("GitHub returned invalid Release listing")
+          for release in releases:
+              assets = _list_release_assets(repo, release["id"], token=token)
+              small = [a for a in assets if 0 < a["size"] <= 2 * 1024 * 1024]
+              if not small:
+                  continue
+              with tempfile.TemporaryDirectory() as directory:
+                  result = download_asset(small[0], Path(directory))
+                  assert result["status"] == "DOWNLOADED_VERIFIED", result
+                  print(
+                      f"LIVE_RELEASE_SMOKE_OK release={release['tag_name']} "
+                      f"asset_id={small[0]['id']} "
+                      f"bytes={small[0]['size']} sha256_verified=true"
+                  )
+              break
+          else:
+              raise RuntimeError("No small published asset to verify")
+          PY
