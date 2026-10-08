@@ -184,8 +184,10 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     text = _workflow("reconcile-v2-catalog.yml")
     assert "event-intelligence-v2-" in text
     assert "data-v2-" in text
-    assert "--attempts 1" in text
-    assert "--poll-seconds 0" in text
+    assert "--attempts 3" in text
+    assert "--poll-seconds 2" in text
+    assert "--list-tags-output" in text
+    assert "--list-page-size 50" in text
     assert "dataset-health-receipt.yml" in text
     assert "actions/checkout@v4" not in text
     assert "actions/setup-python@v5" not in text
