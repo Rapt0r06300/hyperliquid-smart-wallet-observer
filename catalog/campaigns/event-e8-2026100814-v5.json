@@ -30,10 +30,21 @@
       "prior_code_sha": "7e1a6a63185cbe34c9b87847f30f21287aeb16cc",
       "prior_status": "PENDING",
       "prior_status_reason": "created"
+    },
+    {
+      "at": "2026-10-08T19:37:26.310091Z",
+      "from": "PENDING",
+      "reason": "worker_started",
+      "to": "RUNNING"
     }
   ],
   "kind": "event_intelligence_collection",
-  "lease": null,
+  "lease": {
+    "acquired_at": "2026-10-08T19:37:26.310048Z",
+    "expires_at": "2026-10-09T01:22:26.310048Z",
+    "lease_token_sha256": "9d5f48460a99be0f1b3050838270c8e0093a5c19028176a56885d76b4f5c9826",
+    "owner_run_id": "37832998038"
+  },
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -51,9 +62,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "refresh_collect_after_code_fix",
+  "status": "RUNNING",
+  "status_reason": "worker_started",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-08T14:18:07.176297Z",
+  "updated_at": "2026-10-08T19:37:26.310091Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
