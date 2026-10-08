@@ -1,59 +1,66 @@
 {
   "analysis_stage": null,
-  "attempts": 2,
-  "campaign_id": "market-e8-2-2026100813-v7",
+  "attempts": 1,
+  "campaign_id": "market-e8-1-2026100813-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
-  "code_sha": "7e1a6a63185cbe34c9b87847f30f21287aeb16cc",
+  "code_sha": "9da8f71699102b3ceefc83c412f82018303678f8",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
-  "config_sha256": "3c5225634e3c52843d981927064e417c806a3ecdedb7b6c5557ff4b1bd37c88b",
-  "consecutive_failures": 0,
-  "created_at": "2026-10-08T13:35:22.140076+00:00",
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "reason": "worker_unit_crash",
+        "status": "FAILED"
+      },
+      "sha256": "b79b8404116d5c897ca55e0594342ac2655d0737edd5aff95eed9ba2bb1c8a7f"
+    }
+  },
+  "config_sha256": "5079ae5e70458b43d0390066dc65dae61399c1d303fcd64b5148d704aa778245",
+  "consecutive_failures": 1,
+  "created_at": "2026-10-08T13:35:22.043352+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "b79b8404116d5c897ca55e0594342ac2655d0737edd5aff95eed9ba2bb1c8a7f",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "37785266776",
     "market_shard_count": 16,
-    "market_shard_index": 2,
+    "market_shard_index": 1,
     "max_coins": 0,
-    "plan_file": "catalog/market_collection_plans/e8/2026100813/shard-02.json",
-    "plan_sha256": "4abb1f41b83bfee344ae15fb0b2f73bb1e921f73cd30b617e03620773b8091d2",
+    "plan_file": "catalog/market_collection_plans/e8/2026100813/shard-01.json",
+    "plan_sha256": "f995d1c5eca9c594e37f52a9bcbf84aaf5afeaaa03d2606a31f90f3c6b61622f",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
-    "selected_coin_count": 49,
+    "selected_coin_count": 47,
     "universe_digest": "992c50c20d6cb8dc65df49715a0bddad036a44dc4974bf90037906101430762f",
     "universe_mode": "native_discovery_full"
   },
   "dataset_generation": "V2_FRESH",
   "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "dataset_selection_id": null,
-  "expires_at": "2026-10-15T13:35:22.140076+00:00",
+  "expires_at": "2026-10-15T13:35:22.043352+00:00",
   "history": [
     {
       "event": "operator_request",
       "request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39"
     },
     {
-      "at": "2026-10-08T13:37:21.867153Z",
+      "at": "2026-10-08T13:37:19.125881Z",
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
     },
     {
-      "at": "2026-10-08T13:57:52.308594Z",
+      "at": "2026-10-08T13:57:52.124970Z",
       "from": "RUNNING",
       "reason": "worker_unit_crash",
       "to": "CONTINUATION_REQUIRED"
-    },
-    {
-      "archived_manifest": "catalog/campaign-history/market-e8-2-2026100813-v7.continuation_required.9da8f7169910.0ec4f7dd52f9f79b28f65ea47765fec4ce269f49b19a7167c4b86a1c210f3377.json",
-      "archived_manifest_sha256": "0ec4f7dd52f9f79b28f65ea47765fec4ce269f49b19a7167c4b86a1c210f3377",
-      "at": "2026-10-08T14:02:12.713167Z",
-      "event": "refresh_collect_after_code_fix",
-      "prior_code_sha": "9da8f71699102b3ceefc83c412f82018303678f8",
-      "prior_status": "CONTINUATION_REQUIRED",
-      "prior_status_reason": "worker_unit_crash"
     }
   ],
   "kind": "market_collection",
@@ -66,7 +73,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -75,9 +82,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "PENDING",
-  "status_reason": "refresh_collect_after_code_fix",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "worker_unit_crash",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-08T14:02:12.713182Z",
+  "updated_at": "2026-10-08T13:57:52.124970Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
