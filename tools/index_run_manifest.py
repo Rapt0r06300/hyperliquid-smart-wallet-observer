@@ -19,6 +19,27 @@ CATALOG_PATH = ROOT / "catalog" / "DATA_CATALOG.json"
 TRADE_COUNT_PATCH_PATH = ROOT / "catalog" / "TRADE_COUNT_PATCH.json"
 REPLAY_COMPAT_PATCH_PATH = ROOT / "catalog" / "REPLAY_COMPAT_PATCH.json"
 BYBIT_IDENTITY_VERSION = "full_native_or_deterministic_composite_string_v3"
+CANONICAL_DATA_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+
+
+def hydrate_default_release_repository(index: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """In-memory release locator expansion; never mutate the compact index on disk."""
+    raw = index.get("shards")
+    if not isinstance(raw, list):
+        raise ValueError("DATA_INDEX shards must be a list")
+    default = index.get("release_repository_default")
+    if default not in (None, CANONICAL_DATA_REPOSITORY):
+        raise ValueError("foreign release_repository_default forbidden")
+    expanded = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise ValueError("invalid shard entry")
+        row = dict(item)
+        if "release_repository" not in row and default == CANONICAL_DATA_REPOSITORY:
+            row["release_repository"] = CANONICAL_DATA_REPOSITORY
+        expanded.append(row)
+    return expanded
+
 
 _STAGE_BY_STATUS = {
     "SAFE": "safe",
@@ -189,7 +210,9 @@ def _valid_release_locator(manifest: Mapping[str, Any]) -> bool:
     return True
 
 
-def _compact_index_row(row: Mapping[str, Any]) -> dict[str, Any]:
+def _compact_index_row(
+    row: Mapping[str, Any], *, inherit_canonical_repo: bool = False
+) -> dict[str, Any]:
     """Omit redundant fields, retaining all independent causal proofs.
 
     Immutable shard manifests retain the full original evidence. Only
@@ -199,6 +222,9 @@ def _compact_index_row(row: Mapping[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key, value in row.items():
         if value is None or key in {"trade_identity_digests", "quality_reasons"}:
+            continue
+        if (inherit_canonical_repo and key == "release_repository"
+                and value == CANONICAL_DATA_REPOSITORY):
             continue
         if key == "record_count" and value == row.get("event_count"):
             continue
@@ -336,16 +362,18 @@ def index_run_manifests(
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     replay_patch_results = _load_replay_patch_results(base)
     trade_count_patch_results = _load_trade_count_patch_results(base)
+    expanded_rows = hydrate_default_release_repository(index)
+    index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
     rows_by_id = {
         str(row.get("dataset_id")): dict(row)
-        for row in (index.get("shards") or [])
+        for row in expanded_rows
         if isinstance(row, Mapping) and row.get("dataset_id")
     }
     # Also compact PREEXISTING rows: old DATA_INDEX repeated the full trade
     # digest vectors, already ~77 MiB for only 11k rows. Immutable manifests
     # retain the original vectors for SHA-bound aggregate proof.
     rows_by_id = {
-        key: _compact_index_row(old_row)
+        key: _compact_index_row(old_row, inherit_canonical_repo=True)
         for key, old_row in rows_by_id.items()
     }
 
@@ -405,7 +433,9 @@ def index_run_manifests(
                 / f"{dataset_id}.manifest.json"
             )
             _atomic_json(destination, manifest)
-            rows_by_id[dataset_id] = _index_row(manifest, destination, base)
+            rows_by_id[dataset_id] = _compact_index_row(
+                _index_row(manifest, destination, base), inherit_canonical_repo=True
+            )
             statuses[status] = statuses.get(status, 0) + 1
             imported += 1
 
@@ -464,13 +494,51 @@ def index_run_manifests(
     }
 
 
+def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
+    """Losslessly remove repeated canonical repo locators only.
+
+    The same immutable per-shard manifest retains full repository provenance.
+    A foreign repository remains explicit so all consumers can refuse it.
+    """
+    base = Path(root)
+    path = base / INDEX_PATH.relative_to(ROOT) if INDEX_PATH.is_absolute() else base / INDEX_PATH
+    index = json.loads(path.read_text(encoding="utf-8"))
+    expanded = hydrate_default_release_repository(index)
+    for row in expanded:
+        if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
+            raise ValueError("COMPACTION_REQUIRES_VERIFIED_CANONICAL_RELEASE_LOCATOR")
+    index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
+    index["shards"] = [
+        _compact_index_row(row, inherit_canonical_repo=True)
+        for row in expanded
+    ]
+    # Exact and reversible for all existing fields except explicitly redundant
+    # canonical release_repository, which is represented at the index root.
+    if hydrate_default_release_repository(index) != expanded:
+        raise ValueError("COMPACTION_PARITY_MISMATCH")
+    before_size = path.stat().st_size
+    _atomic_json(path, index)
+    return {"shards": len(expanded), "before_bytes": before_size,
+            "after_bytes": path.stat().st_size,
+            "saved_bytes": before_size - path.stat().st_size}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Index verified dataset V2 RUN_MANIFEST release evidence."
     )
-    parser.add_argument("run_manifests", nargs="+")
+    parser.add_argument("run_manifests", nargs="*")
+    parser.add_argument("--compact-existing", action="store_true",
+                        help="losslessly compact canonical release locator metadata")
     args = parser.parse_args()
-    result = index_run_manifests(args.run_manifests)
+    if args.compact_existing:
+        if args.run_manifests:
+            parser.error("--compact-existing does not accept run manifests")
+        result = compact_existing_index()
+    elif args.run_manifests:
+        result = index_run_manifests(args.run_manifests)
+    else:
+        parser.error("provide run manifests or --compact-existing")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
