@@ -190,16 +190,30 @@ def _valid_release_locator(manifest: Mapping[str, Any]) -> bool:
 
 
 def _compact_index_row(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep the selector and metric scalar fields, not repeated evidence.
+    """Omit redundant fields, retaining all independent causal proofs.
 
-    Full quality reasons and full trade identities are in the individually
-    indexed immutable shard manifests. This does not change eligibility.
+    Immutable shard manifests retain the full original evidence. Only
+    explicit booleans True can certify exact-count/replay eligibility.
     """
-    return {
-        key: value for key, value in row.items()
-        if value is not None
-        and key not in {"trade_identity_digests", "quality_reasons"}
-    }
+    direct = row.get("release_storage") != "zip_entry"
+    out: dict[str, Any] = {}
+    for key, value in row.items():
+        if value is None or key in {"trade_identity_digests", "quality_reasons"}:
+            continue
+        if key == "record_count" and value == row.get("event_count"):
+            continue
+        if key == "release_member" and value == row.get("release_asset"):
+            continue
+        if direct and key in {"release_remote_size", "release_remote_digest"}:
+            continue
+        if key in {"trade_count_exact", "unique_trade_count_exact", "trade_identity_digests_exact"} and value is False:
+            continue
+        if key == "trade_count" and value == 0 and row.get("trade_count_exact") is not True:
+            continue
+        if key == "duplicate_count" and value == 0:
+            continue
+        out[key] = value
+    return out
 
 
 def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> dict[str, Any]:

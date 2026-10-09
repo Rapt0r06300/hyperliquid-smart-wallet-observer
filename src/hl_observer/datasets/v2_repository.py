@@ -92,7 +92,7 @@ class SafeShard:
             raise DatasetV2Error(f"unsupported Release asset storage: {storage}")
         if storage == "zip_entry":
             outer = str(row.get("release_container_asset") or "")
-            member = str(row.get("release_member") or "")
+            member = str(row.get("release_member") or row.get("release_asset") or "")
             outer_digest = str(row.get("release_remote_digest") or "").lower()
             remote_size_value = row.get("release_remote_size")
             if not (

@@ -401,7 +401,7 @@ def _extract_packed_verified_shard(
     expected_sha = str(row.get("sha256") or "").lower()
     outer_digest = str(row.get("release_remote_digest") or "").lower()
     outer_size = row.get("release_remote_size")
-    member = str(row.get("release_member") or "")
+    member = str(row.get("release_member") or row.get("release_asset") or "")
     logical = str(row.get("release_asset") or "")
     compressed_size = row.get("bytes")
     container = str(row.get("release_container_asset") or "")
