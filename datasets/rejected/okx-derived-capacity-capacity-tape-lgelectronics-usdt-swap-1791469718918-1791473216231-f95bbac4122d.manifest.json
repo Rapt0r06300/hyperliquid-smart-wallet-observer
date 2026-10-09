@@ -1,0 +1,118 @@
+{
+  "asset_verified": true,
+  "bytes": 1162775,
+  "collection_queue_drops": 321,
+  "collection_run_id": "market-e8-5-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-derived-capacity-capacity-tape-lgelectronics-usdt-swap-1791469718918-1791473216231-f95bbac4122d",
+  "end_ts_ms": 1791473216231,
+  "event_count": 3322,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 321,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=321",
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 3322,
+  "release": {
+    "asset_id": 622230698,
+    "asset_name": "packed-shards-0005.zip",
+    "member_name": "okx-derived-capacity-capacity-tape-lgelectronics-usdt-swap-1791469718918-1791473216231-f95bbac4122d.jsonl.gz",
+    "release_id": 406989753,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100813-v7-u0",
+    "remote_digest": "sha256:2695d38a674166a079913c60be50f510ee3cf82b5e896a94d85ad483c145986a",
+    "remote_size": 52851409,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-derived-capacity-capacity-tape-lgelectronics-usdt-swap-1791469718918-1791473216231-f95bbac4122d.jsonl.gz",
+  "release_asset_id": 622230698,
+  "release_container_asset": "packed-shards-0005.zip",
+  "release_id": 406989753,
+  "release_member": "okx-derived-capacity-capacity-tape-lgelectronics-usdt-swap-1791469718918-1791473216231-f95bbac4122d.jsonl.gz",
+  "release_remote_digest": "sha256:2695d38a674166a079913c60be50f510ee3cf82b5e896a94d85ad483c145986a",
+  "release_remote_size": 52851409,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "f95bbac4122dbadf464032375beee683fac0ad9e941f3b1cf6f2a42ea0105408",
+  "source": "okx_derived_capacity",
+  "start_ts_ms": 1791469718918,
+  "symbol": "LGELECTRONICS-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 3322,
+      "max": 124.0,
+      "min": 25.5,
+      "p50": 38.5,
+      "p95": 114.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-0acc8e11af134ceca3e4fb4c435d4ef6"
+    ],
+    "first_exchange_ts_ms": 1791469718701,
+    "last_exchange_ts_ms": 1791473216106,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 3322,
+      "max": 1899.0,
+      "min": 95.0,
+      "p50": 107.0,
+      "p95": 178.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 3322,
+      "max": 1089.226736,
+      "min": 0.0,
+      "p50": 168.962495,
+      "p95": 301.786033
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 31841679,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}

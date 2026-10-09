@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 767,
+  "collection_queue_drops": 6,
+  "collection_run_id": "market-e8-5-2026100813-v7-0",
+  "collector_version": "77c8a573b09177f0a6f9dfc18eca78761dec7f11",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-trades-samsungem-usdt-1791472961094-1791472961094-fce6a3f0f83e",
+  "end_ts_ms": 1791472961094,
+  "event_count": 1,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 6,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:gap_count=6",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 1,
+    "live_only": 1,
+    "local_continuity_fallback": false,
+    "matched_count": 0,
+    "missing_from_live": 0,
+    "reference_count": 0,
+    "reference_status": "MISMATCH",
+    "status": "MISMATCH"
+  },
+  "record_count": 1,
+  "release": {
+    "asset_id": 622230614,
+    "asset_name": "packed-shards-0004.zip",
+    "member_name": "gate-public-ws-trades-samsungem-usdt-1791472961094-1791472961094-fce6a3f0f83e.jsonl.gz",
+    "release_id": 406989753,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100813-v7-u0",
+    "remote_digest": "sha256:857f2a247f0abd82ecc1e3b9ab0138186eb31b508b7d15a088b1ea6960cac442",
+    "remote_size": 8311939,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-public-ws-trades-samsungem-usdt-1791472961094-1791472961094-fce6a3f0f83e.jsonl.gz",
+  "release_asset_id": 622230614,
+  "release_container_asset": "packed-shards-0004.zip",
+  "release_id": 406989753,
+  "release_member": "gate-public-ws-trades-samsungem-usdt-1791472961094-1791472961094-fce6a3f0f83e.jsonl.gz",
+  "release_remote_digest": "sha256:857f2a247f0abd82ecc1e3b9ab0138186eb31b508b7d15a088b1ea6960cac442",
+  "release_remote_size": 8311939,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100813-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "fce6a3f0f83ea316089eec23270e3f01dfd287c877a83ca8e186cafc29e7d2db",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1791472961094,
+  "symbol": "SAMSUNGEM_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1,
+      "max": 747.5,
+      "min": 747.5,
+      "p50": 747.5,
+      "p95": 747.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-7de62b572e4d4cd6a31c1f261d984891"
+    ],
+    "first_exchange_ts_ms": 1791472959942,
+    "last_exchange_ts_ms": 1791472959942,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1,
+      "max": 1152.0,
+      "min": 1152.0,
+      "p50": 1152.0,
+      "p95": 1152.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1,
+      "max": 135.198229,
+      "min": 135.198229,
+      "p50": 135.198229,
+      "p95": 135.198229
+    }
+  },
+  "trade_count": 1,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "da6038a7322d6b107156da366ebde8dc4ff75261893236dafd70d62814ebf665"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 1425,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 1,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "gate"
+}

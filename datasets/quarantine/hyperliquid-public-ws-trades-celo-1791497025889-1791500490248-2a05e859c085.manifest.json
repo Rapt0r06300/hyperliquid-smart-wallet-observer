@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 19208,
+  "collection_run_id": "market-e8-8-2026100821-v7-0",
+  "collector_version": "57dd03583e6ada4638b5f5ec66a9a2211d790776",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-celo-1791497025889-1791500490248-2a05e859c085",
+  "end_ts_ms": 1791500490248,
+  "event_count": 91,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "UNIQUE_TRADE_COUNT_NOT_EXACT",
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 137,
+    "live_only": null,
+    "local_continuity_fallback": false,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 115,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 91,
+  "release": {
+    "asset_id": 623258148,
+    "asset_name": "packed-shards-0007.zip",
+    "member_name": "hyperliquid-public-ws-trades-celo-1791497025889-1791500490248-2a05e859c085.jsonl.gz",
+    "release_id": 407332505,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100821-v7-u0",
+    "remote_digest": "sha256:9e7bad8b737ea56e94db963ac6e964116e7a569f5cf2f25a96dd43c1711aa827",
+    "remote_size": 37495992,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-celo-1791497025889-1791500490248-2a05e859c085.jsonl.gz",
+  "release_asset_id": 623258148,
+  "release_container_asset": "packed-shards-0007.zip",
+  "release_id": 407332505,
+  "release_member": "hyperliquid-public-ws-trades-celo-1791497025889-1791500490248-2a05e859c085.jsonl.gz",
+  "release_remote_digest": "sha256:9e7bad8b737ea56e94db963ac6e964116e7a569f5cf2f25a96dd43c1711aa827",
+  "release_remote_size": 37495992,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100821-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "2a05e859c0857b0f5b060726d35aff08e3e221a130237601b75f6b25852d82bd",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791497025889,
+  "symbol": "CELO",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 90,
+      "max": -214.0,
+      "min": -607.0,
+      "p50": -468.5,
+      "p95": -247.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-adcd6142b8944f7eb0e417042dec15c3"
+    ],
+    "first_exchange_ts_ms": 1791497003447,
+    "last_exchange_ts_ms": 1791500489988,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 91,
+      "max": 22442.0,
+      "min": 215.0,
+      "p50": 253.0,
+      "p95": 421.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 137,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 146294,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
