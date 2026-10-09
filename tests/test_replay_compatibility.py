@@ -278,3 +278,45 @@ def test_context_same_monotonic_clock_is_not_deduplicated_by_assumption(tmp_path
     # A snapshot can be replayable but must not qualify for repair without
     # proof of DISTINCT causal observations.
     assert out["replay_compatible"] is True
+
+
+
+def test_historical_vault_http_without_modern_request_type_is_proved_by_raw_payload(tmp_path):
+    row = _vault_tick()
+    row["provenance"].pop("request_type")
+    row["provenance"]["url"] = "https://api.hyperliquid.xyz/info"
+    row["parsed_summary"] = {"position_count": 0}
+    path = tmp_path / "legacy-vault.jsonl.gz"
+    with gzip.open(path, "wt", encoding="utf-8") as output:
+        output.write(json.dumps(row) + "\n")
+    result = inspect_asset(path, {
+        "family": "copy_vault_positions", "source": "hyperliquid_public_info",
+        "venue": "hyperliquid",
+    })
+    assert result["receive_only_snapshot_verified"] is True
+    assert result["replay_compatible"] is True
+
+
+def test_historical_vault_wrong_http_origin_or_position_count_remains_unverified(tmp_path):
+    for wrong in ("origin", "position_count", "raw"):
+        row = _vault_tick()
+        row["provenance"].pop("request_type")
+        row["provenance"]["url"] = "https://api.hyperliquid.xyz/info"
+        row["parsed_summary"] = {"position_count": 0}
+        if wrong == "origin":
+            row["provenance"]["url"] = "https://untrusted.example/info"
+        elif wrong == "position_count":
+            row["parsed_summary"]["position_count"] = 999
+        else:
+            row["raw_payload"] = json.dumps({"assetPositions": "not a snapshot"})
+            import hashlib
+            row["raw_sha256"] = hashlib.sha256(row["raw_payload"].encode()).hexdigest()
+        path = tmp_path / f"invalid-{wrong}.jsonl.gz"
+        with gzip.open(path, "wt", encoding="utf-8") as output:
+            output.write(json.dumps(row) + "\n")
+        result = inspect_asset(path, {
+            "family": "copy_vault_positions", "source": "hyperliquid_public_info",
+            "venue": "hyperliquid",
+        })
+        assert result["receive_only_snapshot_verified"] is False
+        assert result["replay_compatible"] is False
