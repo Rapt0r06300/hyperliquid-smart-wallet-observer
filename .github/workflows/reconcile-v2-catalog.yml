@@ -99,7 +99,17 @@ jobs:
           # Publishing ~100*1000 per-shard manifests makes DATA_INDEX huge and
           # GitHub rejects individual >100 MiB blobs. Bound each durable wave,
           # preserve the backlog, and relay the next wave after a real push.
-          batch = new_tags[:8]
+          # Never repeatedly build a lot that cannot fit GitHub's 100 MiB
+          # single-blob hard limit. Keep all pending tags discoverable so the
+          # next run resumes, and fail closed at the indexer's 85 MiB guard.
+          indexed_bytes = Path("catalog/DATA_INDEX.json").stat().st_size
+          if indexed_bytes >= 80 * 1024 * 1024:
+              batch_size = 1
+          elif indexed_bytes >= 65 * 1024 * 1024:
+              batch_size = 2
+          else:
+              batch_size = 8
+          batch = new_tags[:batch_size]
           remaining = max(0, len(new_tags) - len(batch))
           out_path.write_text("\n".join(batch) + ("\n" if batch else ""), encoding="utf-8")
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
