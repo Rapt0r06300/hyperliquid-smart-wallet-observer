@@ -284,9 +284,10 @@ def test_quarantine_audit_rejects_stale_sha_and_duplicate_ids(tmp_path: Path):
         build(tmp_path)
 
     metrics["source_index_sha256"] = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    metrics["totals"]["TOTAL_QUARANTINED_RECORDS"] = 2
     metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
     with pytest.raises(ValueError, match="QUARANTINE_COUNT_MISMATCH"):
-        build(tmp_path)  # Missing manifest still reports its recorded record count.
+        build(tmp_path)  # A metric total is no substitute for indexed record evidence.
 
 
 def test_quarantine_audit_rejects_duplicate_shard_id_even_with_matched_metrics(tmp_path: Path):
