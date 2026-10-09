@@ -589,7 +589,7 @@ def test_restore_fails_closed_on_duplicate_dataset_identity(tmp_path):
     root = tmp_path / "releases"
     release = root / "data-v2-duplicate"
     release.mkdir(parents=True)
-    shard = b'{"trade_id":"distinct"}\\n'
+    shard = b'{"trade_id":"distinct"}\n'
     (release / "shard.jsonl.gz").write_bytes(shard)
     row = {
         "dataset_id": "same-id",
@@ -623,7 +623,7 @@ def test_restore_revoked_safe_shard_is_quarantined_on_next_run(tmp_path):
     root = tmp_path / "releases"
     release = root / "data-v2-revocation"
     release.mkdir(parents=True)
-    shard = b'{"trade_id":"previously-safe"}\\n'
+    shard = b'{"trade_id":"previously-safe"}\n'
     (release / "shard.jsonl.gz").write_bytes(shard)
     row = {
         "dataset_id": "once-safe",
@@ -674,3 +674,24 @@ def test_restore_rejects_zip_with_duplicate_member_names(tmp_path):
     import pytest
     with pytest.raises(module.RestoreError, match="duplicate ZIP members"):
         module._verify_zip_archive(archive_path, archive_path.name)
+
+
+def test_restore_rejects_data_release_without_run_manifest_before_download(
+    tmp_path, monkeypatch
+):
+    module = _module()
+    shard = b"unclassified-data"
+    release = {
+        "tag_name": "data-v2-missing-manifest",
+        "assets": [_asset("trades.jsonl.gz", "https://example.invalid/shard", shard)],
+    }
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    monkeypatch.setattr(
+        module, "_download_to_path",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("incomplete evidence must not be downloaded")
+        ),
+    )
+    import pytest
+    with pytest.raises(module.RestoreError, match="RUN_MANIFEST.json"):
+        module.restore_everything("owner/repo", tmp_path)
