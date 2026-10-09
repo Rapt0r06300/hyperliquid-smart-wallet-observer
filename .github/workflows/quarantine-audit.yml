@@ -18,6 +18,7 @@ on:
 permissions:
   contents: write
   actions: write
+  statuses: write
 
 concurrency:
   group: dataset-v2-control-plane-index
@@ -129,3 +130,37 @@ jobs:
           set -euo pipefail
           gh workflow run dataset-health-receipt.yml --repo "$GITHUB_REPOSITORY" --ref main
           gh workflow run alina-canonical-closure-report.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Publish auditable quarantine result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_SHA: ${{ github.sha }}
+          GH_RUN_ID: ${{ github.run_id }}
+          GH_REPOSITORY: ${{ github.repository }}
+          AUDIT_JOB_RESULT: ${{ job.status }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+          outcome = os.environ["AUDIT_JOB_RESULT"]
+          state = "success" if outcome == "success" else "error" if outcome == "cancelled" else "failure"
+          body = json.dumps({
+              "state": state,
+              "context": "alina/quarantine-catalog-audit",
+              "description": "Current catalog quarantine verified" if state == "success" else "Current catalog quarantine NOT verified",
+              "target_url": "https://github.com/" + os.environ["GH_REPOSITORY"] + "/actions/runs/" + os.environ["GH_RUN_ID"],
+          }).encode()
+          request = urllib.request.Request(
+              "https://api.github.com/repos/" + os.environ["GH_REPOSITORY"] + "/statuses/" + os.environ["GH_SHA"],
+              data=body, method="POST",
+              headers={
+                  "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                  "Accept": "application/vnd.github+json",
+                  "Content-Type": "application/json",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30):
+              pass
+          PY
