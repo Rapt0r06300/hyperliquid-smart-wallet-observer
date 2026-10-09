@@ -488,3 +488,35 @@ def test_new_exact_shards_are_not_discarded_from_total_bytes_by_stale_patch(tmp_
     assert totals["TOTAL_UNCOMPRESSED_BYTES"] == 400
     assert totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] == 2
     assert totals["UNCOMPRESSED_SIZE_COVERAGE_COMPLETE"] is True
+
+
+def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+    import json
+    root = tmp_path
+    cat = root / "catalog"
+    cat.mkdir()
+    folder = root / "datasets" / "rejected"
+    folder.mkdir(parents=True)
+    sha = "a" * 64
+    manifest = folder / "gap.manifest.json"
+    manifest.write_text(json.dumps({"dataset_id": "gap", "sha256": sha, "integrity": {"gap_count": 7}}))
+    (cat / "DATA_INDEX.json").write_text(json.dumps({"shards": [{
+        "dataset_id": "gap", "sha256": sha, "manifest_path": "datasets/rejected/gap.manifest.json",
+        "quality_status": "REJECT", "family": "l2Book", "venue": "okx", "symbol": "BTC",
+        "bytes": 20, "event_count": 100
+    }]}))
+    monkeypatch.setattr(metrics, "ROOT", root)
+    monkeypatch.setattr(metrics, "INDEX", cat / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", cat / "no-unique.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", cat / "no-trades.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", cat / "no-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", cat / "no-sizes.json")
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_GAP_RECORDS"] == 7
+    assert totals["GAP_COUNT_COVERAGE_COMPLETE"] is True
+    manifest.write_text(json.dumps({"dataset_id": "gap", "sha256": "b" * 64, "integrity": {"gap_count": 7}}))
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_GAP_RECORDS"] == 0
+    assert totals["GAP_COUNT_COVERAGE_COMPLETE"] is False
+    assert totals["GAP_COUNT_MISSING_SHARDS"] == 1

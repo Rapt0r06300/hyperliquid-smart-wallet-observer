@@ -336,3 +336,12 @@ def test_single_repo_phase_control_propagates_generated_request_id():
     assert 'gh workflow run control-phase.yml' in text
     assert '--repo "$GITHUB_REPOSITORY"' in text
     assert '-f request_id="$REQUEST_ID"' in text
+
+
+def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():
+    text = _workflow("reconcile-v2-catalog.yml")
+    assert "git pull --rebase" not in text
+    assert "git reset --hard origin/main" in text
+    assert 'python tools/index_run_manifest.py "${MANIFESTS[@]}"' in text
+    assert "git push origin HEAD:main" in text
+    assert 'if [ "$published" != true ]; then' in text

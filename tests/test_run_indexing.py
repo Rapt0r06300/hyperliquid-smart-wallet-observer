@@ -269,3 +269,21 @@ def test_index_migrates_preexisting_trade_digests_into_manifest_only(tmp_path):
     assert on_disk["shards"][0]["trade_identity_digests_exact"] is True
     assert json.loads((manifest_dir / "old-trades.manifest.json").read_text())["trade_identity_digests"] == proof["trade_identity_digests"]
     assert "\n  " not in idx.read_text()
+
+
+def test_compacted_index_preserves_selectors_and_scalar_integrity():
+    from index_run_manifest import _compact_index_row
+    row = {
+        "dataset_id": "x", "quality_status": "SAFE", "release_tag": "data-v2-x",
+        "sha256": "a" * 64, "bytes": 99, "event_count": 10,
+        "quality_reasons": ["UNVERIFIED"], "trade_identity_digests": ["b" * 64],
+        "release_container_asset": None, "gap_count": 4,
+    }
+    compact = _compact_index_row(row)
+    assert compact["quality_status"] == "SAFE"
+    assert compact["release_tag"] == "data-v2-x"
+    assert compact["sha256"] == "a" * 64
+    assert compact["gap_count"] == 4
+    assert "trade_identity_digests" not in compact
+    assert "quality_reasons" not in compact
+    assert "release_container_asset" not in compact
