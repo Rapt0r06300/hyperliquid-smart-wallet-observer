@@ -762,6 +762,7 @@ def test_gate_reconnect_rebootstraps_capacity_book() -> None:
 def test_async_sink_backpressures_instead_of_dropping_raw_frames():
     import asyncio
     import types
+    m = _module()
 
     class Writer:
         def __init__(self):
@@ -800,6 +801,7 @@ def test_async_sink_backpressures_instead_of_dropping_raw_frames():
 
 def test_legacy_sink_never_pairs_a_derived_capacity_frame_that_was_dropped():
     import types
+    m = _module()
 
     class Writer:
         pass
