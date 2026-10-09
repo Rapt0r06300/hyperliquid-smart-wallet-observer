@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+
+import pytest
 
 from tools.build_quarantine_audit import build
 from tools.repair_stale_safe_classifications import repair
@@ -88,9 +91,17 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
             "manifest_path": f"datasets/quarantine/{manifest['dataset_id']}.manifest.json",
         })
     (catalog / "DATA_INDEX.json").write_text(json.dumps({"shards": rows}), encoding="utf-8")
+    source_sha = hashlib.sha256((catalog / "DATA_INDEX.json").read_bytes()).hexdigest()
     (catalog / "DATA_METRICS.json").write_text(
-        json.dumps({"totals": {"TOTAL_QUARANTINED_RECORDS": 20}}),
-        encoding="utf-8",
+        json.dumps({
+            "schema_version": "alina.data_metrics.v4",
+            "source_index_sha256": source_sha,
+            "totals": {
+                "TOTAL_SHARDS": 2, "SAFE_SHARDS": 0,
+                "PARTIAL_SHARDS": 2, "REJECTED_SHARDS": 0,
+                "TOTAL_QUARANTINED_RECORDS": 20, "TOTAL_REJECTED_RECORDS": 0,
+            },
+        }), encoding="utf-8",
     )
 
     report = build(tmp_path)
@@ -253,3 +264,45 @@ def test_quarantine_cause_census_separates_real_drop_from_legacy_repeated_loss()
     assert doc["queue_drops_sum_across_non_safe_manifests"] == 8
     assert doc["queue_drop_sum_is_not_distinct_frames"] is True
     assert doc["validation_allowed"] is False
+
+
+def test_quarantine_audit_rejects_stale_sha_and_duplicate_ids(tmp_path: Path):
+    (tmp_path / "catalog").mkdir()
+    index_path = tmp_path / "catalog" / "DATA_INDEX.json"
+    metrics_path = tmp_path / "catalog" / "DATA_METRICS.json"
+    row = {"dataset_id": "one", "quality_status": "PARTIAL", "record_count": 1}
+    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    metrics = {
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": "0" * 64,
+        "totals": {"TOTAL_SHARDS": 1, "SAFE_SHARDS": 0,
+                   "PARTIAL_SHARDS": 1, "REJECTED_SHARDS": 0,
+                   "TOTAL_QUARANTINED_RECORDS": 1, "TOTAL_REJECTED_RECORDS": 0},
+    }
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    with pytest.raises(ValueError, match="QUARANTINE_STALE_METRICS"):
+        build(tmp_path)
+
+    metrics["source_index_sha256"] = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    with pytest.raises(ValueError, match="QUARANTINE_COUNT_MISMATCH"):
+        build(tmp_path)  # Missing manifest still reports its recorded record count.
+
+
+def test_quarantine_audit_rejects_duplicate_shard_id_even_with_matched_metrics(tmp_path: Path):
+    (tmp_path / "catalog").mkdir()
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    rows = [
+        {"dataset_id": "same", "quality_status": "PARTIAL", "record_count": 1},
+        {"dataset_id": "same", "quality_status": "REJECT", "record_count": 2},
+    ]
+    path.write_text(json.dumps({"shards": rows}), encoding="utf-8")
+    (tmp_path / "catalog" / "DATA_METRICS.json").write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 2, "SAFE_SHARDS": 0,
+                   "PARTIAL_SHARDS": 1, "REJECTED_SHARDS": 1,
+                   "TOTAL_QUARANTINED_RECORDS": 1, "TOTAL_REJECTED_RECORDS": 2},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="QUARANTINE_DUPLICATE_IDENTITY"):
+        build(tmp_path)
