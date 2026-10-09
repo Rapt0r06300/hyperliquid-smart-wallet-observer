@@ -96,6 +96,7 @@ jobs:
           python tools/backfill_replay_compatibility.py             --limit 18             --families "cross_venue_capacity_tape"
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
+          python tools/build_quarantine_audit.py
           python tools/check_dataset_quality.py
 
       - name: Publish replay-proof progress
@@ -124,7 +125,8 @@ jobs:
           mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
           if [ "${#conflicts[@]}" -eq 1 ] && [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ]; then
             python tools/build_catalog_metrics.py
-            git add catalog/DATA_METRICS.json
+            python tools/build_quarantine_audit.py
+            git add catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
             GIT_EDITOR=true git rebase --continue
             git push origin HEAD:main
             exit 0
