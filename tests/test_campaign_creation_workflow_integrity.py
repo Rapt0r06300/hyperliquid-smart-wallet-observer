@@ -80,3 +80,20 @@ def test_collect_campaign_identity_and_frozen_inputs_are_epoch_scoped() -> None:
     assert '"archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"' in text
     assert 'row.get("creation_phase")=="COLLECT"' in text
     assert 'int(row.get("phase_epoch") or 0)==epoch' in text
+
+
+
+def test_archive_backfill_is_not_starved_by_unbounded_live_market_backlog():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    controller = (root / ".github/workflows/resumable-campaign-controller.yml").read_text()
+    creator = (root / ".github/workflows/create-resumable-campaigns.yml").read_text()
+    assert "archive_due=[" in controller
+    assert "if priority == 2" in controller
+    assert "other_ids=[archive_first]+" in controller
+    assert "other_capacity=max(0,16-active_other)" in controller
+    assert "ordinary_ids=ordinary_ids[:max(0,other_capacity-len(reserved_canary))]" in controller
+    assert "if [ \"$((10#$HOUR))\" -ge 6 ]; then" in creator
+    assert '"archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"' in creator
+    assert '"archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"' in creator
+    assert "--preserve-running" in creator
