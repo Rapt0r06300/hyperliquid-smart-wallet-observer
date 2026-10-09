@@ -604,6 +604,10 @@ def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
         else ("PARTIAL" if rows else "NO_DATA")
     )
     index["active_data_status"]=active
+    index["release_repository_default"]="Rapt0r06300/hyperliquid-smart-wallet-observer"
+    for row in rows:
+        if row.get("release_repository") == index["release_repository_default"]:
+            row.pop("release_repository")
     _write_json(root/"catalog"/"DATA_INDEX.json",index)
 
     catalog=_load_json(root/"catalog"/"DATA_CATALOG.json")
