@@ -329,3 +329,33 @@ def test_stale_safe_repair_refuses_mismatched_immutable_asset(tmp_path: Path):
     assert result["repaired_count"] == 0
     assert not list((tmp_path / "datasets" / "safe").glob("*.manifest.json")) if (tmp_path / "datasets" / "safe").exists() else True
     assert (quarantine / "wrong-sha.manifest.json").is_file()
+
+
+def test_no_op_stale_repair_never_rewrites_large_catalog_index(tmp_path: Path, monkeypatch):
+    from tools import repair_stale_safe_classifications as stale
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    original_index = json.dumps({"shards": [
+        {"dataset_id": "already-safe", "quality_status": "SAFE",
+         "sha256": "a" * 64, "record_count": 1}
+    ]}, indent=2)
+    (catalog / "DATA_INDEX.json").write_text(original_index, encoding="utf-8")
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (catalog / "DATA_CATALOG.json").write_text("{}", encoding="utf-8")
+
+    original_write = stale._atomic_json
+    writes = []
+
+    def tracked_write(path, doc):
+        writes.append(path.name)
+        if path.name == "DATA_INDEX.json":
+            raise AssertionError("NO-OP audit cannot rewrite the large index")
+        return original_write(path, doc)
+
+    monkeypatch.setattr(stale, "_atomic_json", tracked_write)
+    result = stale.repair(tmp_path)
+
+    assert result["repaired_count"] == 0
+    assert "DATA_INDEX.json" not in writes
+    assert (catalog / "DATA_INDEX.json").read_text(encoding="utf-8") == original_index
