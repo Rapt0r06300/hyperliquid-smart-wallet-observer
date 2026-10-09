@@ -382,6 +382,7 @@ def index_run_manifests(
 
     imported = 0
     statuses: dict[str, int] = {}
+    pending_manifests: dict[str, tuple[Path, dict[str, Any]]] = {}
     for run_path in run_manifest_paths:
         payload = json.loads(Path(run_path).read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
@@ -425,17 +426,16 @@ def index_run_manifests(
             # never proves that any strategy has positive PnL.
             manifest["proof_of_pnl_allowed"] = False
 
-            for stage in set(_STAGE_BY_STATUS.values()):
-                stale = base / "datasets" / stage / f"{dataset_id}.manifest.json"
-                if stale.exists():
-                    stale.unlink()
+            # Stage changes in memory first: the canonical index size guard
+            # must fire before we move or overwrite any immutable shard
+            # classification receipts in this checkout.
             destination = (
                 base
                 / "datasets"
                 / _STAGE_BY_STATUS[status]
                 / f"{dataset_id}.manifest.json"
             )
-            _atomic_json(destination, manifest)
+            pending_manifests[dataset_id] = (destination, manifest)
             rows_by_id[dataset_id] = _compact_index_row(
                 _index_row(manifest, destination, base), inherit_canonical_repo=True
             )
@@ -463,6 +463,15 @@ def index_run_manifests(
     _atomic_json(index_path, index)
     if index_path.stat().st_size >= 85 * 1024 * 1024:
         raise ValueError("DATA_INDEX_TOO_LARGE: shard the catalogue before publication; no SAFE evidence dropped")
+
+    # Only after the index has passed the atomic size guard may shard
+    # manifests be published. A failed guard cannot erase prior evidence.
+    for dataset_id, (destination, manifest) in pending_manifests.items():
+        _atomic_json(destination, manifest)
+        for stage in set(_STAGE_BY_STATUS.values()):
+            stale = base / "datasets" / stage / f"{dataset_id}.manifest.json"
+            if stale != destination and stale.exists():
+                stale.unlink()
 
     safe_count = sum(1 for row in shards if row.get("quality_status") == "SAFE")
     partial_count = sum(1 for row in shards if row.get("quality_status") == "PARTIAL")
