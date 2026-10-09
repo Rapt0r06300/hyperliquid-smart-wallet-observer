@@ -155,11 +155,11 @@ class AsyncPartitionSink:
         except asyncio.QueueFull:
             self.drops[self.key(envelope)] += 1
             try:
-                received_second = int(envelope.received_ts_ms) // 1000
+                received_second = int(getattr(envelope, "received_ts_ms", None)) // 1000
             except (TypeError, ValueError, OverflowError):
                 received_second = -1
             self.drop_windows[
-                (*self.key(envelope), str(envelope.connection_id or ""), received_second)
+                (*self.key(envelope), str(getattr(envelope, "connection_id", None) or ""), received_second)
             ] += 1
             return False
 
