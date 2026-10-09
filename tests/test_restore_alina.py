@@ -583,3 +583,94 @@ def test_safe_candidate_without_explicit_release_tag_stays_quarantined(tmp_path,
     assert report["classification"]["usable_shards"] == 0
     assert report["classification"]["quarantined_shards"] == 1
 
+
+def test_restore_fails_closed_on_duplicate_dataset_identity(tmp_path):
+    module = _module()
+    root = tmp_path / "releases"
+    release = root / "data-v2-duplicate"
+    release.mkdir(parents=True)
+    shard = b'{"trade_id":"distinct"}\\n'
+    (release / "shard.jsonl.gz").write_bytes(shard)
+    row = {
+        "dataset_id": "same-id",
+        "quality_status": "SAFE",
+        "validation_allowed": True,
+        "replay_compatible": True,
+        "asset_verified": True,
+        "bytes": len(shard),
+        "sha256": hashlib.sha256(shard).hexdigest(),
+        "release": {
+            "repository": "owner/repo",
+            "release_tag": release.name,
+            "asset_name": "shard.jsonl.gz",
+        },
+    }
+    (release / "RUN_MANIFEST.json").write_text(
+        json.dumps({"manifests": [row, dict(row)]}), encoding="utf-8"
+    )
+
+    result = module._materialize_classified_shards("owner/repo", root, tmp_path)
+    assert result["usable_shards"] == 0
+    assert result["excluded_rows"] == 2
+    assert len(result["failures"]) == 2
+    assert all(r["error"] == "DUPLICATE_DATASET_ID_IN_MANIFEST"
+               for r in result["failures"])
+    assert not (tmp_path / "usable" / "shards" / release.name / "same-id.jsonl.gz").exists()
+
+
+def test_restore_revoked_safe_shard_is_quarantined_on_next_run(tmp_path):
+    module = _module()
+    root = tmp_path / "releases"
+    release = root / "data-v2-revocation"
+    release.mkdir(parents=True)
+    shard = b'{"trade_id":"previously-safe"}\\n'
+    (release / "shard.jsonl.gz").write_bytes(shard)
+    row = {
+        "dataset_id": "once-safe",
+        "quality_status": "SAFE",
+        "validation_allowed": True,
+        "replay_compatible": True,
+        "asset_verified": True,
+        "bytes": len(shard),
+        "sha256": hashlib.sha256(shard).hexdigest(),
+        "release": {
+            "repository": "owner/repo",
+            "release_tag": release.name,
+            "asset_name": "shard.jsonl.gz",
+        },
+    }
+    manifest_path = release / "RUN_MANIFEST.json"
+    manifest_path.write_text(json.dumps({"manifests": [row]}), encoding="utf-8")
+    first = module._materialize_classified_shards("owner/repo", root, tmp_path)
+    usable = tmp_path / "usable" / "shards" / release.name / "once-safe.jsonl.gz"
+    assert first["usable_shards"] == 1
+    assert usable.read_bytes() == shard
+
+    row["quality_status"] = "REJECT"
+    row["validation_allowed"] = False
+    manifest_path.write_text(json.dumps({"manifests": [row]}), encoding="utf-8")
+    second = module._materialize_classified_shards("owner/repo", root, tmp_path)
+
+    assert second["usable_shards"] == 0
+    assert second["quarantined_shards"] == 1
+    assert second["stale_usable_quarantined"] == 1
+    assert not usable.exists()
+    assert (release / "shard.jsonl.gz").read_bytes() == shard
+    assert (tmp_path / "quarantine" / "shards" /
+            release.name / "once-safe.jsonl.gz").read_bytes() == shard
+    assert list((tmp_path / "quarantine" / "stale_usable" /
+                 release.name).glob("once-safe.jsonl.gz.*.stale"))
+
+
+def test_restore_rejects_zip_with_duplicate_member_names(tmp_path):
+    module = _module()
+    archive_path = tmp_path / "ambiguous.zip"
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("same.jsonl.gz", b"first")
+            archive.writestr("same.jsonl.gz", b"second")
+    import pytest
+    with pytest.raises(module.RestoreError, match="duplicate ZIP members"):
+        module._verify_zip_archive(archive_path, archive_path.name)
