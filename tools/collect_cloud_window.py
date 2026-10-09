@@ -1533,7 +1533,12 @@ async def collect(
     writer = PartitionedTickDatasetWriter(
         raw_root,
         rotate_bytes=rotate_bytes,
-        flush_every=1,
+        # Raw JSONL is fsynced on every append_batch_records() call. Rewriting
+        # the *whole* shard-index sidecar for every partition batch scales
+        # quadratically as shards accumulate, stalls the consumer and drives
+        # queue backpressure / dropped frames. Refresh the sidecar less often;
+        # the final rotate_all() still seals every immutable gzip shard.
+        flush_every=128,
     )
     sink = AsyncPartitionSink(writer)
     writer_task = asyncio.create_task(sink.run())
