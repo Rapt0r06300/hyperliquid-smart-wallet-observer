@@ -449,3 +449,48 @@ def test_copy_vault_http_snapshot_without_receive_semantics_remains_unreplayable
     m = build_manifest_from_tick_shard(shard, collector_version="test")
     assert m["integrity"]["missing_timestamp_count"] == 1
     assert m["replay_compatible"] is False
+
+
+
+def test_verified_full_depth_snapshot_reanchors_sequence_without_false_gap(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for exchange_ts, sequence, kind, predecessor in [
+        (1000, 1000, "UPDATE", None),
+        (1010, 3000, "SNAPSHOT", -1),
+        (1020, 3001, "UPDATE", 3000),
+    ]:
+        writer.append(TickEnvelope(
+            source_id="okx_public_ws", channel="l2Book", instrument="BTC-USDT-SWAP",
+            event_kind=kind, raw_payload={"action": kind.lower(), "seqId": sequence},
+            exchange_ts_ms=exchange_ts, received_ts_ms=exchange_ts + 3,
+            local_monotonic_ns=exchange_ts * 1000, sequence=sequence,
+            connection_id="okx-1",
+            provenance={"access": "read_only", "transport": "websocket", "authenticated": False},
+            parsed_summary={"prev_sequence": predecessor},
+        ))
+    [shard] = writer.rotate_all()
+    report = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert report["integrity"]["gap_count"] == 0
+    assert report["integrity"]["regression_count"] == 0
+    assert report["replay_compatible"] is True
+
+
+def test_incremental_gap_after_real_snapshot_is_still_reported(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for exchange_ts, sequence, kind, previous in [
+        (1000, 100, "SNAPSHOT", -1),
+        (1010, 110, "UPDATE", 99),
+    ]:
+        writer.append(TickEnvelope(
+            source_id="okx_public_ws", channel="l2Book", instrument="BTC-USDT-SWAP",
+            event_kind=kind, raw_payload={"action": kind.lower(), "seqId": sequence},
+            exchange_ts_ms=exchange_ts, received_ts_ms=exchange_ts + 3,
+            local_monotonic_ns=exchange_ts * 1000, sequence=sequence,
+            connection_id="okx-1",
+            provenance={"access": "read_only", "transport": "websocket", "authenticated": False},
+            parsed_summary={"prev_sequence": previous},
+        ))
+    [shard] = writer.rotate_all()
+    report = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert report["integrity"]["gap_count"] >= 1
+    assert report["replay_compatible"] is False
