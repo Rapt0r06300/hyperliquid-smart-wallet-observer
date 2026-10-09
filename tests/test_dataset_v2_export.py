@@ -494,3 +494,54 @@ def test_incremental_gap_after_real_snapshot_is_still_reported(tmp_path):
     report = build_manifest_from_tick_shard(shard, collector_version="test")
     assert report["integrity"]["gap_count"] >= 1
     assert report["replay_compatible"] is False
+
+
+
+def test_large_trade_shard_preserves_exact_count_without_unbounded_digest_vector(tmp_path):
+    import json
+    from hl_observer.datasets.v2_export import MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS
+
+    count = MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS + 3
+    writer = PartitionedTickDatasetWriter(tmp_path, flush_every=128)
+    writer.append_batch(TickEnvelope(
+        source_id="hyperliquid_public_ws", channel="trades",
+        instrument="BTC", event_kind="EVENT",
+        raw_payload={"channel": "trades", "data": [{"tid": index}]},
+        exchange_ts_ms=1000 + index,
+        received_ts_ms=1005 + index,
+        local_monotonic_ns=100000 + index,
+        connection_id="hl-test",
+        sequence=index,
+        provenance={
+            "access": "read_only", "authenticated": False,
+            "transport": "websocket",
+        },
+        parsed_summary={"event_count": 1},
+    ) for index in range(count))
+    [shard] = writer.rotate_all()
+    manifest = build_manifest_from_tick_shard(shard, collector_version="abc123")
+
+    assert manifest["trade_count"] == count
+    assert manifest["trade_count_exact"] is True
+    assert manifest["unique_trade_count"] == count
+    assert manifest["unique_trade_count_exact"] is True
+    assert manifest["trade_identity_digests"] == []
+    assert manifest["trade_identity_digests_exact"] is False
+    assert manifest["trade_identity_vector_omitted"] is True
+    assert manifest["trade_identity_set_count"] == count
+
+    identities = []
+    with gzip.open(shard, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            row = json.loads(line)
+            identity = (
+                row["source_id"], row["channel"], row["instrument"],
+                row["exchange_ts_ms"], row["sequence"], row["raw_sha256"],
+            )
+            encoding = json.dumps(identity, ensure_ascii=False, separators=(",", ":"))
+            identities.append(hashlib.sha256(encoding.encode()).hexdigest())
+    receipt = hashlib.sha256(
+        ("\n".join(sorted(identities)) + "\n").encode("ascii")
+    ).hexdigest()
+    assert manifest["trade_identity_set_sha256"] == receipt
+    assert len(json.dumps(manifest)) < 5000
