@@ -61,7 +61,7 @@ jobs:
           all_path, out_path = map(Path, sys.argv[1:])
           index = json.loads(Path("catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
           known={
-              str(row.get("release_tag"))
+              str(row.get("run_manifest_release_tag") or row.get("release_tag"))
               for row in (index.get("shards") or [])
               if isinstance(row, dict)
               and row.get("release_tag")

@@ -135,3 +135,31 @@ def test_unpacked_release_tag_backcompat_kept():
     manifest = _normalize_manifest(raw)
     assert manifest["release_tag"] == "old-direct"
     assert _valid_release_locator(manifest) is True
+
+
+
+def test_compacted_publisher_keeps_canonical_manifest_release_independent_of_data_tag():
+    from tools.index_run_manifest import _index_row, _normalize_manifest
+    from pathlib import Path
+    base = Path("/tmp/alina-test-case")
+    raw = {
+        "dataset_id": "immutable-trade",
+        "release_asset": "immutable-trade.jsonl.gz",
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "release_tag": "data-v2-collection-part0",
+            "asset_name": "packed-shards-0000.zip",
+            "member_name": "immutable-trade.jsonl.gz",
+            "storage": "zip_entry",
+            "remote_size": 1000,
+            "remote_digest": "sha256:" + "a" * 64,
+        },
+    }
+    manifest = _normalize_manifest(raw)
+    manifest["run_manifest_release_tag"] = "data-v2-collection-part0-manifest"
+    row = _index_row(
+        manifest, base / "datasets/safe/immutable-trade.manifest.json", base,
+    )
+    assert row["release_tag"] == "data-v2-collection-part0"
+    assert row["run_manifest_release_tag"] == "data-v2-collection-part0-manifest"
+    assert row["release_container_asset"] == "packed-shards-0000.zip"

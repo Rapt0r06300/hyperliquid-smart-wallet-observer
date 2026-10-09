@@ -215,6 +215,7 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "manifest_path": str(manifest_path.relative_to(root)).replace("\\", "/"),
         "release_repository": manifest.get("release_repository"),
         "release_tag": manifest.get("release_tag"),
+        "run_manifest_release_tag": manifest.get("run_manifest_release_tag"),
         "release_asset": manifest.get("release_asset"),
         "release_container_asset": manifest.get("release_container_asset"),
         "release_member": manifest.get("release_member"),
@@ -354,6 +355,12 @@ def index_run_manifests(
             if not isinstance(raw, Mapping):
                 continue
             manifest = _normalize_manifest(raw)
+            # A large run's canonical RUN_MANIFEST Release differs from the
+            # physical data-part tag. Keep both coordinates for idempotent
+            # reconciliation; the original physical asset tag remains intact.
+            canonical_tag = str(payload.get("release_tag") or "").strip()
+            if canonical_tag:
+                manifest["run_manifest_release_tag"] = canonical_tag
             dataset_id = str(manifest.get("dataset_id") or "").strip()
             if not dataset_id:
                 raise ValueError("dataset_id required")
