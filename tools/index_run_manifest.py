@@ -186,6 +186,19 @@ def _valid_release_locator(manifest: Mapping[str, Any]) -> bool:
     return True
 
 
+def _compact_index_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the selector and metric scalar fields, not repeated evidence.
+
+    Full quality reasons and full trade identities are in the individually
+    indexed immutable shard manifests. This does not change eligibility.
+    """
+    return {
+        key: value for key, value in row.items()
+        if value is not None
+        and key not in {"trade_identity_digests", "quality_reasons"}
+    }
+
+
 def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> dict[str, Any]:
     row = {
         "dataset_id": manifest.get("dataset_id"),
@@ -222,6 +235,8 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "replay_schema_version": manifest.get("replay_schema_version"),
         "replay_reason": manifest.get("replay_reason"),
         "quality_reasons": manifest.get("quality_reasons"),
+        "gap_count": (manifest.get("integrity") or {}).get("gap_count"),
+        "duplicate_count": (manifest.get("integrity") or {}).get("duplicate_count"),
         "source": manifest.get("source"),
     }
     patch_path = root / "catalog" / "TRADE_COUNT_PATCH.json"
@@ -285,7 +300,7 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
                 ),
             }
         )
-    return row
+    return _compact_index_row(row)
 
 
 def index_run_manifests(
@@ -311,8 +326,10 @@ def index_run_manifests(
     # Also compact PREEXISTING rows: old DATA_INDEX repeated the full trade
     # digest vectors, already ~77 MiB for only 11k rows. Immutable manifests
     # retain the original vectors for SHA-bound aggregate proof.
-    for old_row in rows_by_id.values():
-        old_row.pop("trade_identity_digests", None)
+    rows_by_id = {
+        key: _compact_index_row(old_row)
+        for key, old_row in rows_by_id.items()
+    }
 
     imported = 0
     statuses: dict[str, int] = {}
