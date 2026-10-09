@@ -179,6 +179,10 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
     # *write* guard. Only actual SHA-verified SAFE repairs mutate index bytes.
     # The guard remains enforced for every real index mutation.
     if repaired:
+        index["release_repository_default"] = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        for new_row in new_rows:
+            if new_row.get("release_repository") == index["release_repository_default"]:
+                new_row.pop("release_repository")
         index["shards"] = new_rows
         index["active_data_status"] = active
         _atomic_json(index_path, index)
