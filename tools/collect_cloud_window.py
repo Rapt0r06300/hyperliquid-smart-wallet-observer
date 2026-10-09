@@ -155,7 +155,7 @@ class AsyncPartitionSink:
         except asyncio.QueueFull:
             self.drops[self.key(envelope)] += 1
             try:
-                received_second = int(getattr(envelope, "received_ts_ms", None)) // 1000
+                received_second = int(getattr(envelope, "received_ts_ms", None))
             except (TypeError, ValueError, OverflowError):
                 received_second = -1
             self.drop_windows[
@@ -210,6 +210,8 @@ def attribute_queue_drops(
     manifests: list[Mapping[str, Any]],
     dropped: Mapping[tuple[str, str, str], int],
     drop_windows: Mapping[tuple[str, str, str, str, int], int],
+    *,
+    timestamps_are_ms: bool = False,
 ) -> list[int]:
     """Attribute *real* ingress losses to the impacted immutable shards.
 
@@ -249,7 +251,13 @@ def attribute_queue_drops(
             for index in candidates:
                 attribution[index] += int(count)
             continue
-        lower, upper = int(second) * 1000, (int(second) + 1) * 1000 - 1
+        # New collection records exact receive milliseconds. Legacy callers
+        # continue using second-resolution evidence until migrated.
+        lower, upper = (
+            (int(second), int(second))
+            if timestamps_are_ms
+            else (int(second) * 1000, (int(second) + 1) * 1000 - 1)
+        )
         distance_by_index: dict[int, int] = {}
         for index in candidates:
             first = int(manifests[index].get("start_ts_ms") or 0)
@@ -1945,6 +1953,7 @@ async def collect(
         [manifest for _shard, manifest in shard_preliminaries],
         sink.drops,
         sink.drop_windows,
+        timestamps_are_ms=True,
     )
     orphan_drops = orphaned_queue_drops(
         [manifest for _shard, manifest in shard_preliminaries], sink.drops,
@@ -1955,7 +1964,7 @@ async def collect(
                 int(manifest["integrity"].get("gap_count") or 0) + drops
             )
             manifest["collection_queue_drops"] = drops
-            manifest["queue_drop_attribution_method"] = "connection_receive_second_v1"
+            manifest["queue_drop_attribution_method"] = "connection_receive_millisecond_v2"
         manifest["collection_run_id"] = run_id
         manifest = finalize_manifest(manifest)
 
