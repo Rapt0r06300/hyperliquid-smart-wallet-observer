@@ -105,7 +105,13 @@ class GateMarketState:
         # authoritative book snapshot. Replace the book and re-anchor its
         # sequence rather than comparing against a prior incremental epoch.
         # Historical gap counters are retained as evidence.
-        if payload.get("full") is True:
+        is_full_snapshot = payload.get("full") is True
+        if not is_full_snapshot and self.sequence is None:
+            # Never reconstruct an executable L2 book from orphan deltas.
+            # Retain raw websocket frames separately for later diagnosis.
+            self.quality, self.reason = UNMEASURABLE, "DELTA_BEFORE_SNAPSHOT"
+            return self.quality
+        if is_full_snapshot:
             bids = payload.get("b") or payload.get("bids")
             asks = payload.get("a") or payload.get("asks")
             if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
@@ -118,10 +124,18 @@ class GateMarketState:
             if first is not None and first > self.sequence + 1:
                 self.gap_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_GAP"
+                # Invalidate stale depth immediately; old sequence/levels can
+                # never justify future derived execution capacity.
+                self.sequence = None
+                self.bids.clear()
+                self.asks.clear()
                 return self.quality
             if last < self.sequence:
                 self.regression_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_REGRESSION"
+                self.sequence = None
+                self.bids.clear()
+                self.asks.clear()
                 return self.quality
         for side, target in (
             (payload.get("b") or payload.get("bids"), self.bids),
