@@ -6,7 +6,7 @@ on:
       - ".github/workflows/uncompressed-size-v2.yml"
       - "tools/measure_uncompressed_sizes.py"
       - "tools/backfill_exact_trade_counts.py"
-      - "tools/build_catalog_metrics.py"
+      - "tools/build_catalog_metrics.py"\n      - "tools/merge_measured_catalog_patches.py"
   workflow_dispatch:
     inputs:
       limit:
@@ -44,22 +44,39 @@ jobs:
           GH_TOKEN: "${{ github.token }}"
           MEASURE_LIMIT: ${{ inputs.limit || '36055' }}
         run: python tools/measure_uncompressed_sizes.py --limit "${MEASURE_LIMIT}" --workers 24
-      - name: Rebuild catalog metrics
-        run: python tools/build_catalog_metrics.py
-      - name: Publish size patch and metrics
+      - name: Preserve verified measurements outside the checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/alina-size-measurements"
+          cp catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json "$RUNNER_TEMP/alina-size-measurements/"
+
+      - name: Publish size and record measurements against latest main
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json catalog/DATA_METRICS.json
-          git diff --cached --quiet && exit 0
-          git commit -m "data: advance uncompressed size coverage"
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8; do
+            # The runner is ephemeral. Reconstruct this commit from CURRENT
+            # remote main instead of rebasing stale computed metrics and
+            # conflicting with the continuously published collection catalog.
+            git fetch origin main
+            git reset --hard origin/main
+            python tools/merge_measured_catalog_patches.py \
+              --measured-root "$RUNNER_TEMP/alina-size-measurements"
+            python tools/build_catalog_metrics.py
+            git add catalog/UNCOMPRESSED_SIZE_PATCH.json catalog/RECORD_COUNT_PATCH.json catalog/DATA_METRICS.json
+            if git diff --cached --quiet; then
+              echo "Verified size/record evidence already published."
+              exit 0
+            fi
+            git commit -m "data: merge verified size and record measurement evidence"
             if git push origin HEAD:main; then
               exit 0
             fi
-            git fetch origin main
-            git rebase origin/main
+            echo "Remote main advanced; merging verified evidence into new HEAD (attempt $attempt)"
+            sleep "$((attempt * 2))"
           done
-          echo "Unable to publish after five rebase attempts" >&2
+          echo "Unable to publish verified measurements after eight attempts" >&2
           exit 1
