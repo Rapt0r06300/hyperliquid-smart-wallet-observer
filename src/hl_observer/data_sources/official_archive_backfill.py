@@ -318,7 +318,9 @@ def _parse_binance_reader(
         return row[fallback] if fallback < len(row) else ""
 
     def generate() -> Iterable[TickEnvelope]:
-        for row in rows:
+        for row_index, row in enumerate(rows, 1):
+            if not row:
+                continue
             try:
                 event_id = field(row, ("agg_trade_id", "aggtradeid", "id"), 0)
                 price = field(row, ("price",), 1)
@@ -330,8 +332,10 @@ def _parse_binance_reader(
                 sequence = int(event_id)
                 float(price)
                 float(quantity)
-            except (TypeError, ValueError, OverflowError):
-                continue
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"OFFICIAL_ARCHIVE_UNPARSEABLE_TRADE_ROW:binance_aggtrades:{row_index}"
+                ) from exc
             yield _historical_trade_envelope(
                 source_id="binance_usdm_official_archive",
                 coin=coin,
@@ -381,7 +385,9 @@ def _parse_binance_trades_reader(
         return row[fallback] if fallback < len(row) else ""
 
     def generate() -> Iterable[TickEnvelope]:
-        for row in rows:
+        for row_index, row in enumerate(rows, 1):
+            if not row:
+                continue
             try:
                 trade_id = field(row, ("id", "trade_id", "tradeid"), 0)
                 price = field(row, ("price",), 1)
@@ -392,8 +398,10 @@ def _parse_binance_trades_reader(
                 sequence = int(trade_id)
                 float(price)
                 float(quantity)
-            except (TypeError, ValueError, OverflowError):
-                continue
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"OFFICIAL_ARCHIVE_UNPARSEABLE_TRADE_ROW:binance_trades:{row_index}"
+                ) from exc
             yield _historical_trade_envelope(
                 source_id="binance_usdm_official_archive",
                 coin=coin,
@@ -442,15 +450,17 @@ def _parse_bybit_reader(
     archive_sha256: str,
 ) -> Iterable[TickEnvelope]:
     def generate() -> Iterable[TickEnvelope]:
-        for row in reader:
+        for row_index, row in enumerate(reader, 1):
             try:
                 timestamp = _epoch_ms(row.get("timestamp") or row.get("time") or row.get("trade_time_ms"))
                 price = str(row.get("price") or "")
                 size = str(row.get("size") or row.get("qty") or "")
                 float(price)
                 float(size)
-            except (TypeError, ValueError, OverflowError):
-                continue
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"OFFICIAL_ARCHIVE_UNPARSEABLE_TRADE_ROW:bybit:{row_index}"
+                ) from exc
             yield _historical_trade_envelope(
                 source_id="bybit_official_archive",
                 coin=coin,
@@ -544,7 +554,7 @@ def _parse_okx_trades_reader(
     archive_sha256: str,
 ) -> Iterable[TickEnvelope]:
     def generate() -> Iterable[TickEnvelope]:
-        for row in reader:
+        for row_index, row in enumerate(reader, 1):
             try:
                 trade_id = str(row.get("trade_id") or row.get("tradeId") or row.get("id") or "")
                 instrument = str(row.get("instrument_name") or row.get("instId") or symbol)
@@ -555,8 +565,10 @@ def _parse_okx_trades_reader(
                     raise ValueError("missing trade id")
                 float(price)
                 float(size)
-            except (TypeError, ValueError, OverflowError):
-                continue
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError(
+                    f"OFFICIAL_ARCHIVE_UNPARSEABLE_TRADE_ROW:okx:{row_index}"
+                ) from exc
             raw = {str(key): value for key, value in row.items() if key is not None}
             raw.update({"trade_id": trade_id, "instrument_name": instrument})
             yield _historical_trade_envelope(
