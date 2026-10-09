@@ -125,6 +125,7 @@ def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     row = {
         "dataset_id": "stale-safe",
+        "sha256": manifest["sha256"],
         "venue": "bybit",
         "family": "trades",
         "symbol": "BTCUSDT",
@@ -307,3 +308,24 @@ def test_quarantine_audit_rejects_duplicate_shard_id_even_with_matched_metrics(t
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="QUARANTINE_DUPLICATE_IDENTITY"):
         build(tmp_path)
+
+
+def test_stale_safe_repair_refuses_mismatched_immutable_asset(tmp_path: Path):
+    catalog = tmp_path / "catalog"
+    quarantine = tmp_path / "datasets" / "quarantine"
+    catalog.mkdir(parents=True)
+    quarantine.mkdir(parents=True)
+    manifest = _manifest("wrong-sha", safe_now=True)
+    (quarantine / "wrong-sha.manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (catalog / "DATA_INDEX.json").write_text(json.dumps({"shards": [{
+        "dataset_id": "wrong-sha",
+        "sha256": "b" * 64,
+        "quality_status": "PARTIAL",
+        "manifest_path": "datasets/quarantine/wrong-sha.manifest.json",
+    }]}), encoding="utf-8")
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (catalog / "DATA_CATALOG.json").write_text("{}", encoding="utf-8")
+    result = repair(tmp_path)
+    assert result["repaired_count"] == 0
+    assert not list((tmp_path / "datasets" / "safe").glob("*.manifest.json")) if (tmp_path / "datasets" / "safe").exists() else True
+    assert (quarantine / "wrong-sha.manifest.json").is_file()
