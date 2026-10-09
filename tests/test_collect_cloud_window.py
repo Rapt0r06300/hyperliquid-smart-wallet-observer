@@ -818,3 +818,40 @@ def test_legacy_sink_never_pairs_a_derived_capacity_frame_that_was_dropped():
     assert sink.accepted == 1
     assert sink.drops[sink.key(second)] == 1
     assert ("BTC", "okx") not in sink._latest_capacity
+
+
+
+def test_batched_cloud_partition_writer_keeps_all_raw_evidence_durable(tmp_path):
+    import gzip
+    import json
+
+    m = _module()
+    writer = m.PartitionedTickDatasetWriter(
+        tmp_path, rotate_bytes=5_000_000, flush_every=128,
+    )
+    ticks = [
+        m._hyperliquid_envelope(
+            {"channel": "l2Book", "data": {
+                "coin": "BTC", "time": 1000 + i,
+                "levels": [[{"px": "100", "sz": "1"}], [{"px": "101", "sz": "2"}]],
+            }},
+            received_ts_ms=1010 + i, receive_mono_ns=123456 + i,
+            connection_id="hl-test",
+        )
+        for i in range(4)
+    ]
+    assert all(t is not None for t in ticks)
+    assert len(writer.append_batch_records(ticks[:2])) == 2
+    assert len(writer.append_batch_records(ticks[2:])) == 2
+    live = list(tmp_path.glob("**/*.current.jsonl"))
+    assert len(live) == 1
+    assert len([json.loads(line) for line in live[0].read_text().splitlines()]) == 4
+    [shard] = writer.rotate_all()
+    with gzip.open(shard, "rt", encoding="utf-8") as stream:
+        restored = [json.loads(line) for line in stream]
+    assert len(restored) == 4
+    assert [r["received_ts_ms"] for r in restored] == [1010, 1011, 1012, 1013]
+    receipt = json.loads(shard.with_name(shard.name + ".manifest.json").read_text())
+    assert receipt["event_count"] == 4
+    assert receipt["sha256"]
+    assert writer.stats()["records_written"] == 4
