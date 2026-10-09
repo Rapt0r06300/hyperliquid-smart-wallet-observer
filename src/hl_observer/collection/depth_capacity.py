@@ -412,18 +412,17 @@ def cross_venue_capacity_envelope(
         }
         for row in (first, second)
     ]
-    exchange_times = [
-        int(value)
-        for value in (first.exchange_ts_ms, second.exchange_ts_ms)
-        if value is not None
-    ]
+    # Two venues have independent exchange clocks; max(exchange timestamps)
+    # is NOT the event time of a synthesized cross-venue observation. Preserve
+    # both authentic leg timestamps in source_legs and use the actual receiver
+    # clock of the second available leg for causal replay.
     return TickEnvelope(
         source_id="cross_venue_derived_capacity",
         channel="cross_venue_capacity_tape",
         instrument=str(tape["coin"]),
         event_kind=FeedEventKind.SNAPSHOT,
         raw_payload={"schema": tape["schema"], "source_legs": source_legs},
-        exchange_ts_ms=max(exchange_times) if len(exchange_times) == 2 else None,
+        exchange_ts_ms=None,
         received_ts_ms=max(first.received_ts_ms, second.received_ts_ms),
         local_monotonic_ns=max(
             int(first.local_monotonic_ns or 0),
@@ -440,6 +439,7 @@ def cross_venue_capacity_envelope(
             "real_execution": False,
             "derived": True,
             "derived_from_family": "capacity_tape",
+            "timestamp_semantics": "receive_observation_time_only",
             "raw_l2_source_of_truth": True,
             "derivation": "same_runner_minimum_two_leg_capacity_v1",
         },

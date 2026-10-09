@@ -10,6 +10,7 @@ from typing import Any
 
 _RECEIVE_ONLY_CHANNELS = {
     "activeAssetCtx",
+    "cross_venue_capacity_tape",
     "copy_vault_positions",
     "copy_vault_selection",
     "external_events",

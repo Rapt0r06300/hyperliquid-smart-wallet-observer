@@ -855,3 +855,51 @@ def test_batched_cloud_partition_writer_keeps_all_raw_evidence_durable(tmp_path)
     assert receipt["event_count"] == 4
     assert receipt["sha256"]
     assert writer.stats()["records_written"] == 4
+
+
+
+def test_cross_venue_derived_receive_clock_does_not_invent_exchange_timestamp(tmp_path):
+    import gzip
+    import json
+    m = _module()
+
+    def one(venue, exchange, received, mono):
+        return m.capacity_tape_envelope(
+            venue=venue,
+            instrument="BTCUSDT" if venue == "bybit" else "BTC-USDT-SWAP",
+            bids=[[100, 3]], asks=[[101, 3]],
+            exchange_ts_ms=exchange, received_ts_ms=received,
+            receive_mono_ns=mono,
+            connection_id=venue + "-1", sequence=10,
+            quality="EXPLOITABLE",
+            source_raw_l2_payload={"sequence": 10, "exchange": exchange},
+        )
+
+    first = m.cross_venue_capacity_envelope(
+        one("bybit", 1020, 1040, 1_000_000_000),
+        one("okx", 1015, 1041, 1_000_000_010),
+    )
+    second = m.cross_venue_capacity_envelope(
+        one("bybit", 1017, 1050, 1_000_000_100),
+        one("okx", 1009, 1051, 1_000_000_110),
+    )
+    assert first is not None and second is not None
+    assert first.exchange_ts_ms is None
+    assert second.exchange_ts_ms is None
+    assert second.received_ts_ms > first.received_ts_ms
+    assert second.provenance["timestamp_semantics"] == "receive_observation_time_only"
+    assert first.parsed_summary["source_legs"]
+    assert all(leg["exchange_ts_ms"] is not None for leg in first.parsed_summary["source_legs"])
+
+    writer = m.PartitionedTickDatasetWriter(tmp_path)
+    writer.append_batch_records([first, second])
+    [shard] = writer.rotate_all()
+    manifest = m.build_manifest_from_tick_shard(shard, collector_version="test")
+    assert manifest["integrity"]["regression_count"] == 0
+    assert manifest["integrity"]["missing_timestamp_count"] == 0
+    assert manifest["synchronization"]["first_exchange_ts_ms"] is None
+    assert manifest["replay_compatible"] is True
+    with gzip.open(shard, "rt", encoding="utf-8") as source:
+        raw = [json.loads(line) for line in source]
+    assert len(raw) == 2
+    assert all(row["exchange_ts_ms"] is None for row in raw)
