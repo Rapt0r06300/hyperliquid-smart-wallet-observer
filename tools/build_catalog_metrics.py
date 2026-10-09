@@ -190,7 +190,10 @@ def build() -> dict[str, Any]:
         if not isinstance(row, dict):
             continue
         status = str(row.get("quality_status") or "")
-        replay = row.get("replay_compatible") is True
+        # "Replayable" metrics mean admissible replay evidence, not merely a
+        # payload format for which an adapter exists. Non-SAFE rows remain
+        # quarantined even when their serialization is technically decodable.
+        replay = status == "SAFE" and row.get("replay_compatible") is True
         dataset_id = str(row.get("dataset_id") or "")
         trade_entry = trade_rows.get(dataset_id)
         trade_entry_valid = (

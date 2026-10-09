@@ -57,6 +57,56 @@ def test_verify_metrics_source_accepts_exact_sha_and_shard_count(tmp_path):
     assert proof["source_index_sha256"] == hashlib.sha256(index_path.read_bytes()).hexdigest()
 
 
+def test_replayable_totals_exclude_non_safe_compatible_shards(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    (catalog / "DATA_INDEX.json").write_text(
+        json.dumps({
+            "shards": [
+                {
+                    "dataset_id": "safe",
+                    "family": "trades",
+                    "quality_status": "SAFE",
+                    "replay_compatible": True,
+                    "trade_count": 2,
+                    "trade_count_exact": True,
+                    "unique_trade_count": 2,
+                    "unique_trade_count_exact": True,
+                    "record_count": 2,
+                    "bytes": 10,
+                },
+                {
+                    "dataset_id": "partial",
+                    "family": "trades",
+                    "quality_status": "PARTIAL",
+                    "replay_compatible": True,
+                    "trade_count": 3,
+                    "trade_count_exact": True,
+                    "unique_trade_count": 3,
+                    "unique_trade_count_exact": True,
+                    "record_count": 3,
+                    "bytes": 10,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(metrics, "INDEX", catalog / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", catalog / "missing-trades.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", catalog / "missing-unique.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", catalog / "missing-records.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", catalog / "missing-sizes.json")
+
+    totals = metrics.build()["totals"]
+
+    assert totals["REPLAYABLE_SHARDS"] == 1
+    assert totals["TOTAL_TRADES_REPLAYABLE"] == 2
+    assert totals["TOTAL_REPLAYABLE_RECORDS"] == 2
+
+
 def test_metrics_file_is_machine_readable_and_counts_shards():
     out = build()
     idx = json.loads((ROOT / "catalog" / "DATA_INDEX.json").read_text())
