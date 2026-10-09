@@ -32,6 +32,17 @@ try:
 except ModuleNotFoundError:
     from backfill_exact_trade_counts import TRADE_FAMILIES, _download, _native_trade_keys
 
+try:
+    from tools.index_run_manifest import (
+        hydrate_default_release_repository, _compact_index_row,
+        CANONICAL_DATA_REPOSITORY,
+    )
+except ModuleNotFoundError:
+    from index_run_manifest import (
+        hydrate_default_release_repository, _compact_index_row,
+        CANONICAL_DATA_REPOSITORY,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
 PATCH_PATH = ROOT / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
@@ -218,9 +229,8 @@ def main() -> None:
         raise SystemExit("workers must be between 1 and 32")
 
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    rows = index.get("shards")
-    if not isinstance(rows, list):
-        raise SystemExit("invalid DATA_INDEX shards")
+    rows = hydrate_default_release_repository(index)
+    index["shards"] = rows
 
     restored_exact_trade_rows=_restore_exact_trade_count_rows(rows)
 
@@ -353,10 +363,18 @@ def main() -> None:
             patch_row = counts.get(str(row.get("dataset_id") or ""))
             if isinstance(patch_row, Mapping):
                 row.update(patch_row)
-    INDEX_PATH.write_text(
-        json.dumps(index, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    # Publish only compact scalar index evidence; identities remain in the
+    # independent patch. Never republish the expanded in-memory view.
+    index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
+    index["shards"] = [
+        _compact_index_row(row, inherit_canonical_repo=True) for row in rows
+    ]
+    serialized = json.dumps(
+        index, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ) + "\n"
+    if len(serialized.encode("utf-8")) >= 85 * 1024 * 1024:
+        raise ValueError("DATA_INDEX_TOO_LARGE: preserve global identity proofs in patch")
+    INDEX_PATH.write_text(serialized, encoding="utf-8")
 
     all_candidate_ids = {
         str(row.get("dataset_id") or "") for row in all_candidates
