@@ -160,7 +160,6 @@ class BybitMarketState:
         update_id = _int(data.get("u"))
         sequence = _int(data.get("seq"))
         exchange_ts = _int(payload.get("cts")) or _int(data.get("cts")) or _int(payload.get("ts"))
-        had_snapshot = self.has_snapshot
 
         if kind == "snapshot":
             self.bids.clear()
@@ -173,7 +172,7 @@ class BybitMarketState:
                 exchange_ts_ms=exchange_ts,
                 receive_ts_ms=received,
                 receive_mono_ns=receive_mono,
-                reset=had_snapshot or connection_changed,
+                reset=True,  # exchange full depth snapshot re-anchors every epoch
             )
         elif kind == "delta":
             if not self.has_snapshot:
