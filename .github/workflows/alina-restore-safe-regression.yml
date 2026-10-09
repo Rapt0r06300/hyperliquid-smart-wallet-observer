@@ -6,6 +6,9 @@ on:
     paths:
       - tools/restore_alina.py
       - tests/test_restore_alina.py
+      - tests/test_native_trade_batch_split.py
+      - src/hl_observer/collection/native_market_tape.py
+      - src/hl_observer/collection/native_venue_coordinator.py
       - .github/workflows/alina-restore-safe-regression.yml
   workflow_dispatch:
 
@@ -32,7 +35,7 @@ jobs:
       - name: Run deterministic restore tests
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2
-          python -m pytest -q tests/test_restore_alina.py
+          PYTHONPATH=src python -m pytest -q tests/test_restore_alina.py tests/test_native_trade_batch_split.py
       - name: Publish test result for verifiable GitHub status
         if: always()
         env:
@@ -46,11 +49,14 @@ jobs:
           import json
           import os
           import urllib.request
-          state = "success" if os.environ["TEST_JOB_STATUS"] == "success" else "failure"
+          job_state = os.environ["TEST_JOB_STATUS"]
+          state = "success" if job_state == "success" else "error" if job_state == "cancelled" else "failure"
           payload = json.dumps({
               "state": state,
               "context": "alina/restore-safe-regression",
-              "description": "SAFE-only restore pytest passed" if state == "success" else "SAFE-only restore pytest failed",
+              "description": ("SAFE restore and trade-batch tests passed" if state == "success" else
+                              "Test run cancelled" if state == "error" else
+                              "SAFE restore or trade-batch tests failed"),
               "target_url": "https://github.com/" + os.environ["GH_REPOSITORY"] + "/actions/runs/" + os.environ["GH_RUN_ID"],
           }).encode("utf-8")
           request = urllib.request.Request(
