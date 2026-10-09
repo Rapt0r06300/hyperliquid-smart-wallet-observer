@@ -375,3 +375,30 @@ def test_historical_cross_venue_reject_is_inspected_only_with_immutable_release(
     manifest["asset_verified"] = False
     target.write_text(json.dumps(manifest), encoding="utf-8")
     assert backfill._candidate(dict(row), {}, {"cross_venue_capacity_tape"}) is False
+
+
+
+def test_verified_historical_archive_recovery_precedes_newer_live_trade_within_family():
+    from tools.backfill_replay_compatibility import _candidate_sort_key
+
+    archive = {
+        "dataset_id": "archive-binance-btc",
+        "family": "trades",
+        "source": "binance_usdm_official_archive",
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "end_ts_ms": 100,
+    }
+    newer_live = {
+        "dataset_id": "live-binance-btc",
+        "family": "trades",
+        "source": "binance_public_ws",
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "end_ts_ms": 1000000,
+    }
+    different_family = {
+        **newer_live, "family": "bbo", "dataset_id": "live-bbo",
+    }
+    assert _candidate_sort_key(archive) < _candidate_sort_key(newer_live)
+    assert _candidate_sort_key(different_family) < _candidate_sort_key(archive)
+    spoof = {**archive, "release_repository": "forged/exchange"}
+    assert _candidate_sort_key(spoof) > _candidate_sort_key(archive)
