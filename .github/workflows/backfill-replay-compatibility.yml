@@ -16,19 +16,22 @@ on:
       - 'tests/test_backfill_replay_compatibility_candidates.py'
       - '.github/workflows/backfill-replay-compatibility.yml'
   schedule:
-    - cron: '6,16,26,36,46,56 * * * *'
+    - cron: '12,32,52 * * * *'
   workflow_dispatch:
     inputs:
       per_family_limit:
         description: "Maximum verified assets per priority family group"
         required: false
-        default: "120"
+        default: "36"
 
 permissions:
   contents: write
 
 concurrency:
-  group: dataset-v2-control-plane-index
+  # Keep replay proof running even when historical catalog reconciliation is
+  # continually relaunching. Writes remain SHA-verified and the push fails on
+  # semantic conflict rather than merging potentially inconsistent SAFE rows.
+  group: dataset-v2-replay-verification-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -78,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LIMIT="${{ inputs.per_family_limit || '120' }}"
+          LIMIT="${{ inputs.per_family_limit || '36' }}"
           # Small resumable waves leave hosted compute free for live catalogue
           # reconciliation while proving each shard from its immutable Release.
           # Trades first: close the multi-million-row replay gap incrementally.
@@ -88,9 +91,9 @@ jobs:
           python tools/backfill_replay_compatibility.py             --limit "$LIMIT"             --families "l2book,l2,book"
           # Secondary market context is strict replay-checked in a small, bounded batch.
           # Derived capacity stays PARTIAL until independent parent-L2 proof exists.
-          python tools/backfill_replay_compatibility.py             --limit 60             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
+          python tools/backfill_replay_compatibility.py             --limit 18             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
           # Historical Cross-Venue observations: strict two-leg receipt, never parent L2/PnL proof.
-          python tools/backfill_replay_compatibility.py             --limit 60             --families "cross_venue_capacity_tape"
+          python tools/backfill_replay_compatibility.py             --limit 18             --families "cross_venue_capacity_tape"
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/check_dataset_quality.py
