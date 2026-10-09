@@ -177,3 +177,20 @@ def test_packed_shard_uses_logical_member_when_redundant_locator_omitted():
     shard = SafeShard.from_index_row(row)
     assert shard.release_member == "x.jsonl.gz"
     assert shard.release_container_asset == "packed-shards-0000.zip"
+
+
+
+def test_selector_resolves_canonical_inherited_repository_only_when_declared():
+    compact = _safe_row()
+    compact.pop("release_repository")
+    selected = select_safe_shards({
+        "release_repository_default": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "shards": [compact],
+    })
+    assert len(selected) == 1
+    assert selected[0].release_repository == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+
+    with pytest.raises(DatasetV2Error, match="missing"):
+        select_safe_shards({"shards": [compact]})
+    with pytest.raises(DatasetV2Error, match="foreign"):
+        select_safe_shards({"release_repository_default": "another/repo", "shards": [compact]})
