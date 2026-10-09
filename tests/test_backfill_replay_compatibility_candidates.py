@@ -434,3 +434,28 @@ def test_new_global_identity_evidence_retries_prior_failed_replay_receipt():
         "unique_trade_count_exact": True,
     }}
     assert backfill._candidate(row, prior, {"trades"}, new_proof) is True
+
+
+def test_replay_backfill_compacts_index_instead_of_indenting_it(tmp_path):
+    index_path = tmp_path / "DATA_INDEX.json"
+    body = {"shards": [
+        {"dataset_id": "one", "quality_status": "PARTIAL", "notes": ["a", "b"]}
+    ]}
+    backfill._write_json(index_path, body)
+    raw = index_path.read_text(encoding="utf-8")
+    assert raw == json.dumps(body, sort_keys=True, separators=(",", ":"),
+                             ensure_ascii=False) + "\n"
+
+
+def test_no_candidate_replay_wave_preserves_exact_index_bytes(monkeypatch, tmp_path):
+    index = tmp_path / "DATA_INDEX.json"
+    patch = tmp_path / "REPLAY_COMPAT_PATCH.json"
+    original = '{"shards":[],"active_data_status":"SAFE"}\n'
+    index.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(backfill, "INDEX_PATH", index)
+    monkeypatch.setattr(backfill, "PATCH_PATH", patch)
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    result = backfill.backfill(1, {"trades"})
+    assert result["updated"] == 0
+    assert index.read_text(encoding="utf-8") == original
+    assert patch.is_file()
