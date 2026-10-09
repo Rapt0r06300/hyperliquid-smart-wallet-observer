@@ -515,6 +515,17 @@ async def reconcile_gate_trade_shard(
     finally:
         if own_client:
             await http.aclose()
+    if live_ids and not reference:
+        # Empty historical REST does not prove a mismatch: venue history may
+        # have expired or omitted the instrument. Keep the evidence for retry.
+        return _with_comparison_window({
+            "status": "UNAVAILABLE",
+            "reason": "REFERENCE_EMPTY_FOR_NONEMPTY_LIVE",
+            "live_count": len(live_ids),
+            "live_event_count": live_events,
+            "reference_count": 0,
+            "reference_coverage": "NOT_PROVEN_EMPTY_REST",
+        }, comparison_start_ms, comparison_end_ms)
     report = _compare(
         live_ids,
         set(reference),
@@ -606,6 +617,17 @@ async def reconcile_bitget_trade_shard(
             "reason": "REFERENCE_DOES_NOT_COVER_WINDOW_START",
             "reference_count": len(reference),
         }
+    if live_ids and not reference:
+        # Empty historical REST does not prove a mismatch: venue history may
+        # have expired or omitted the instrument. Keep the evidence for retry.
+        return _with_comparison_window({
+            "status": "UNAVAILABLE",
+            "reason": "REFERENCE_EMPTY_FOR_NONEMPTY_LIVE",
+            "live_count": len(live_ids),
+            "live_event_count": live_events,
+            "reference_count": 0,
+            "reference_coverage": "NOT_PROVEN_EMPTY_REST",
+        }, comparison_start_ms, comparison_end_ms)
     report = _compare(
         live_ids,
         set(reference),
