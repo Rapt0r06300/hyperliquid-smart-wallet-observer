@@ -144,6 +144,21 @@ def native_tick_envelope(
         return None
 
     channel, instrument, exchange_ts_ms, sequence, summary = parsed
+    # Full exchange order-book snapshots are causal re-anchors, not incremental
+    # sequence updates. Mark them explicitly so replay/checkpoints can restart
+    # at a genuine source snapshot without inventing missing deltas.
+    book_snapshot = (
+        channel == "l2Book"
+        and (
+            (venue_key in {"okx", "bitget"} and str(message.get("action") or "").lower() == "snapshot")
+            or (venue_key == "bybit" and str(message.get("type") or "").lower() == "snapshot")
+            or (
+                venue_key == "gate"
+                and isinstance(message.get("result"), Mapping)
+                and message["result"].get("full") is True
+            )
+        )
+    )
     summary = {
         **summary,
         "transport_rtt_ms": _float(transport.get("transport_rtt_ms")),
@@ -158,7 +173,7 @@ def native_tick_envelope(
         source_id=f"{venue_key}_public_ws",
         channel=channel,
         instrument=instrument,
-        event_kind="UPDATE",
+        event_kind="SNAPSHOT" if book_snapshot else "UPDATE",
         raw_payload=message,
         received_ts_ms=receive_ts_ms,
         exchange_ts_ms=exchange_ts_ms,
