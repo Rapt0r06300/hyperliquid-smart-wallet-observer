@@ -1607,8 +1607,10 @@ def _replay_grade_coverage_report(
                     "missing_timestamp_count",
                     "gap_count",
                     "regression_count",
+                    "duplicate_count",
+                    "desync_count",
                 )
-            ):
+            ) and manifest.get("replay_compatible") is not False:
                 coin = canonical_coin(symbol)
                 if coin:
                     observed_cross_capacity_coins.add(coin)
@@ -1629,6 +1631,12 @@ def _replay_grade_coverage_report(
                     defects.append("GAP")
                 if int(integrity.get("regression_count") or 0) > 0:
                     defects.append("REGRESSION")
+                if int(integrity.get("duplicate_count") or 0) > 0:
+                    defects.append("DUPLICATES")
+                if int(integrity.get("desync_count") or 0) > 0:
+                    defects.append("DESYNC")
+                if manifest.get("replay_compatible") is False:
+                    defects.append("REPLAY_NOT_VERIFIED")
                 if defects:
                     timing_defects[venue][symbol].extend(defects)
         if family in {"trades", "agg_trades"}:

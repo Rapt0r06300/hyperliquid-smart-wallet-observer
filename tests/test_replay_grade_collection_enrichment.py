@@ -675,3 +675,59 @@ def test_replay_grade_requires_published_cross_venue_capacity_for_shared_coin() 
     )
     assert report["complete"] is True
     assert report["missing_cross_venue_capacity_coins"] == []
+
+
+def test_replay_grade_reports_l2_duplicates_desync_and_unproven_replay() -> None:
+    families = ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata")
+    base = [{
+        "venue": "bitget", "symbol": "BTCUSDT", "family": family,
+        "event_count": 1, "replay_compatible": True,
+        "integrity": {
+            "missing_monotonic_count": 0, "missing_timestamp_count": 0,
+            "gap_count": 0, "regression_count": 0,
+            "duplicate_count": 0, "desync_count": 0,
+        },
+        "reconciliation": {"status": "MATCHED" if family == "trades" else "UNVERIFIED"},
+    } for family in families]
+    base.append({"venue": "bitget", "symbol": "__VENUE__", "family": "clock_sync", "event_count": 1})
+    assert _replay_grade_coverage_report(base, {"bitget": ["BTCUSDT"]})["complete"] is True
+    for defect, value, reason in (
+        ("duplicate_count", 1, "DUPLICATES"),
+        ("desync_count", 1, "DESYNC"),
+        ("replay_compatible", False, "REPLAY_NOT_VERIFIED"),
+    ):
+        altered = [{**row, "integrity": dict(row.get("integrity") or {})} for row in base]
+        l2 = next(row for row in altered if row["family"] == "l2Book")
+        if defect == "replay_compatible":
+            l2[defect] = value
+        else:
+            l2["integrity"][defect] = value
+        report = _replay_grade_coverage_report(altered, {"bitget": ["BTCUSDT"]})
+        assert report["complete"] is False
+        assert reason in report["per_venue"]["bitget"]["timing_defects_by_symbol"]["BTCUSDT"]
+
+
+def test_cross_venue_capacity_with_desync_cannot_prove_replay_coverage() -> None:
+    required = {
+        "bybit": ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"),
+        "okx": ("l2Book", "bbo", "trades", "ticker", "capacity_tape", "instrument_metadata"),
+    }
+    rows = []
+    for venue, families in required.items():
+        symbol = "BTCUSDT" if venue == "bybit" else "BTC-USDT-SWAP"
+        for family in families:
+            rows.append({
+                "venue": venue, "symbol": symbol, "family": family, "event_count": 1,
+                "integrity": {"gap_count": 0, "regression_count": 0, "missing_timestamp_count": 0, "missing_monotonic_count": 0},
+                "reconciliation": {"status": "MATCHED" if family == "trades" else "UNVERIFIED"},
+            })
+        rows.append({"venue": venue, "symbol": "__VENUE__", "family": "clock_sync", "event_count": 1})
+    rows.append({
+        "venue": "unknown", "symbol": "BTC", "family": "cross_venue_capacity_tape",
+        "event_count": 1, "replay_compatible": False,
+        "integrity": {"gap_count": 0, "regression_count": 0, "missing_timestamp_count": 0,
+                      "missing_monotonic_count": 0, "desync_count": 1},
+    })
+    report = _replay_grade_coverage_report(rows, {"bybit": ["BTCUSDT"], "okx": ["BTC-USDT-SWAP"]})
+    assert report["complete"] is False
+    assert report["missing_cross_venue_capacity_coins"] == ["BTC"]

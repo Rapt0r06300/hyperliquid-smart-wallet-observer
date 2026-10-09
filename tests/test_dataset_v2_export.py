@@ -545,3 +545,37 @@ def test_large_trade_shard_preserves_exact_count_without_unbounded_digest_vector
     ).hexdigest()
     assert manifest["trade_identity_set_sha256"] == receipt
     assert len(json.dumps(manifest)) < 5000
+
+
+def test_repeated_l2_snapshots_are_independent_receive_observations(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for received, mono in ((1005, 100), (1015, 200)):
+        writer.append(TickEnvelope(
+            source_id="okx_public_ws", channel="l2Book", instrument="BTC-USDT-SWAP",
+            event_kind="SNAPSHOT", raw_payload={"action": "snapshot", "seqId": 10},
+            exchange_ts_ms=1000, received_ts_ms=received, local_monotonic_ns=mono,
+            connection_id="okx-1", sequence=10,
+            provenance={"access": "read_only", "transport": "websocket", "authenticated": False},
+            parsed_summary={"prev_sequence": -1, "book_state": "EXPLOITABLE"},
+        ))
+    [shard] = writer.rotate_all()
+    report = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert report["integrity"]["duplicate_count"] == 0
+    assert report["replay_compatible"] is True
+
+
+def test_exact_duplicate_snapshot_frame_still_fails_closed(tmp_path) -> None:
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    for _ in range(2):
+        writer.append(TickEnvelope(
+            source_id="okx_public_ws", channel="l2Book", instrument="BTC-USDT-SWAP",
+            event_kind="SNAPSHOT", raw_payload={"action": "snapshot", "seqId": 10},
+            exchange_ts_ms=1000, received_ts_ms=1005, local_monotonic_ns=100,
+            connection_id="okx-1", sequence=10,
+            provenance={"access": "read_only", "transport": "websocket", "authenticated": False},
+            parsed_summary={"prev_sequence": -1, "book_state": "EXPLOITABLE"},
+        ))
+    [shard] = writer.rotate_all()
+    report = build_manifest_from_tick_shard(shard, collector_version="test")
+    assert report["integrity"]["duplicate_count"] == 1
+    assert report["replay_compatible"] is False

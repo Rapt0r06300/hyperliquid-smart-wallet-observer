@@ -204,6 +204,16 @@ def build_manifest_from_tick_shard(
                 record.get("sequence"),
                 record.get("raw_sha256"),
             )
+            # Repeated order-book/BBO snapshots are fresh observations when
+            # captured at different receive instants, even if the exchange
+            # publishes identical payload and sequence IDs. Unlike trades,
+            # they are not extra executions. Still detect exact frame repeats.
+            if (
+                identity is not None
+                and channel not in _TRADE_CHANNELS
+                and str(record.get("event_kind") or "").upper() == "SNAPSHOT"
+            ):
+                identity = (*identity, receive, mono, connection_id)
             if identity is not None:
                 if identity in identities:
                     duplicate_count += 1
