@@ -359,7 +359,7 @@ def index_run_manifests(
             # physical data-part tag. Keep both coordinates for idempotent
             # reconciliation; the original physical asset tag remains intact.
             canonical_tag = str(payload.get("release_tag") or "").strip()
-            if canonical_tag:
+            if canonical_tag and canonical_tag != str(manifest.get("release_tag") or ""):
                 manifest["run_manifest_release_tag"] = canonical_tag
             dataset_id = str(manifest.get("dataset_id") or "").strip()
             if not dataset_id:
