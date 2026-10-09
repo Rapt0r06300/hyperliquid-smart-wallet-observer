@@ -75,7 +75,9 @@ class PartitionedTickDatasetWriter:
         return writer
 
     def append(self, envelope: TickEnvelope) -> int:
-        return self._writer(envelope).append(envelope)
+        # Route single events through the same reconnect-epoch barriers as
+        # batch ingestion. Direct writer.append silently merged connections.
+        return len(self.append_batch_records((envelope,)))
 
     def append_batch(self, envelopes: Iterable[TickEnvelope]) -> int:
         return len(self.append_batch_records(envelopes))
@@ -130,11 +132,19 @@ class PartitionedTickDatasetWriter:
         return [record for record in output if record is not None]
 
     def rotate_all(self) -> list[Path]:
-        shards: list[Path] = []
+        """Return EVERY sealed shard, including automatic size/reconnect rotations.
+
+        TickDatasetWriter can seal files internally while append_batch_records
+        is writing. The old implementation returned only the final rotate()
+        result, omitting earlier durable gzip assets from the publish bundle.
+        Do not use in-memory counters as a surrogate for on-disk evidence.
+        """
+        shards: set[Path] = set()
         for writer in self._writers.values():
-            shard = writer.rotate()
-            if shard is not None:
-                shards.append(shard)
+            writer.rotate()
+            shards.update(
+                writer.shards_directory.glob(f"{writer.stream_name}.*.jsonl.gz")
+            )
         return sorted(shards)
 
     def stats(self) -> dict[str, Any]:
