@@ -105,6 +105,37 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     shards = index.get("shards") if isinstance(index, Mapping) else []
     if not isinstance(shards, list):
         raise ValueError("DATA_INDEX shards must be a list")
+    # A previous successful audit is not a statement about a newer index.
+    # Fail closed if metrics and indexed shard identities are not the same
+    # snapshot. The metrics pipeline rebuilds both before this audit is run.
+    index_digest = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    totals = metrics.get("totals") if isinstance(metrics, Mapping) else None
+    if (
+        not isinstance(totals, Mapping)
+        or metrics.get("schema_version") != "alina.data_metrics.v4"
+        or metrics.get("source_index_sha256") != index_digest
+        or type(totals.get("TOTAL_SHARDS")) is not int
+        or totals["TOTAL_SHARDS"] != len(shards)
+    ):
+        raise ValueError("QUARANTINE_STALE_METRICS: DATA_METRICS is not SHA-bound to DATA_INDEX")
+    seen_dataset_ids: set[str] = set()
+    for row in shards:
+        if not isinstance(row, Mapping):
+            raise ValueError("QUARANTINE_BAD_CATALOG_ROW: shard must be an object")
+        identity = str(row.get("dataset_id") or "")
+        if not identity or identity in seen_dataset_ids:
+            raise ValueError("QUARANTINE_DUPLICATE_IDENTITY: every dataset id must be unique")
+        seen_dataset_ids.add(identity)
+    actual_safe = sum(str(row.get("quality_status") or "").upper() == "SAFE" for row in shards)
+    actual_partial = sum(str(row.get("quality_status") or "").upper() == "PARTIAL" for row in shards)
+    actual_reject = sum(str(row.get("quality_status") or "").upper() == "REJECT" for row in shards)
+    if (
+        actual_safe != totals.get("SAFE_SHARDS")
+        or actual_partial != totals.get("PARTIAL_SHARDS")
+        or actual_reject != totals.get("REJECTED_SHARDS")
+        or actual_safe + actual_partial + actual_reject != len(shards)
+    ):
+        raise ValueError("QUARANTINE_STATUS_MISMATCH: current shard statuses disagree with metrics")
 
     by_venue: dict[str, dict[str, int]] = {}
     by_family: dict[str, dict[str, int]] = {}
@@ -217,10 +248,17 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     if not isinstance(metric_totals, Mapping):
         metric_totals = {}
     metric_quarantine_records = _count(metric_totals.get("TOTAL_QUARANTINED_RECORDS"))
+    metric_rejected_records = _count(metric_totals.get("TOTAL_REJECTED_RECORDS"))
+    if (
+        quarantine_records != metric_quarantine_records
+        or rejected_records != metric_rejected_records
+        or len(rows_out) != actual_partial + actual_reject
+    ):
+        raise ValueError("QUARANTINE_COUNT_MISMATCH: counts disagree with current metrics")
 
     body = {
         "schema": "alina.quarantine_audit.v1",
-        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "source_index_sha256": index_digest,
         "source_metrics_sha256": (
             hashlib.sha256(metrics_path.read_bytes()).hexdigest()
             if metrics_path.is_file()
