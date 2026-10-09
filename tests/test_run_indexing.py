@@ -372,3 +372,40 @@ def test_compaction_refuses_noncanonical_release_repository(tmp_path):
     import pytest
     with pytest.raises(ValueError, match="CANONICAL"):
         compact_existing_index(root)
+
+
+def test_index_size_failure_never_mutates_existing_manifests(tmp_path, monkeypatch):
+    import pytest
+    import index_run_manifest as module
+
+    root = _bootstrap_root(tmp_path)
+    old = root / "datasets/quarantine/same-id.manifest.json"
+    old_payload = {"dataset_id": "same-id", "quality_status": "PARTIAL",
+                   "sha256": "a" * 64}
+    old.write_text(json.dumps(old_payload), encoding="utf-8")
+    index_path = root / "catalog/DATA_INDEX.json"
+    original_index = index_path.read_bytes()
+    original_catalog = (root / "catalog/DATA_CATALOG.json").read_bytes()
+    original_registry = (root / "catalog/DATA_QUALITY_REGISTRY.json").read_bytes()
+
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, [_manifest(family="l2Book",
+                               reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                               dataset_id="same-id")])
+    real_writer = module._atomic_json
+
+    def reject_oversize_index(path, payload):
+        if Path(path).name == "DATA_INDEX.json":
+            raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
+        return real_writer(path, payload)
+
+    monkeypatch.setattr(module, "_atomic_json", reject_oversize_index)
+    with pytest.raises(ValueError, match="DATA_INDEX_TOO_LARGE"):
+        module.index_run_manifests([run], root=root)
+
+    assert old.read_text(encoding="utf-8") == json.dumps(old_payload)
+    assert not (root / "datasets/safe/same-id.manifest.json").exists()
+    assert index_path.read_bytes() == original_index
+    assert (root / "catalog/DATA_CATALOG.json").read_bytes() == original_catalog
+    assert (root / "catalog/DATA_QUALITY_REGISTRY.json").read_bytes() == original_registry
+
