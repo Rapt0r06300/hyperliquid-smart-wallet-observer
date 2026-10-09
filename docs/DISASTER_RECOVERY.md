@@ -157,12 +157,27 @@ than one giant source file.
 Once the snapshot chunks exist as Release assets, the same Release-to-LFS mirror
 makes those bytes part of the clone-complete payload.
 
-## Transitional compatibility
+## Accepted restoration contract: clone + verified GitHub Releases
 
-`RESTORE_ALINA.cmd`, `RESTORE_ALINA.sh` and
-`tools/restore_alina.py --everything` remain available while the historical
-Release backlog is not yet fully mirrored into Git LFS. They are compatibility
-fallbacks only and are not the final acceptance contract.
+`git clone` followed by `RESTORE_ALINA.cmd` (or `RESTORE_ALINA.sh`)
+is the **currently accepted** recovery method. Git LFS mirroring remains an
+optional, quota-dependent future enhancement, not a prerequisite.
+
+The restore command reads the current clone's canonical
+`catalog/DATA_INDEX.json` and `catalog/DATA_METRICS.json` before downloading.
+It fails closed if the metrics do not match the index SHA-256. It materializes
+a verified shard to `usable/` only when the immutable Release manifest AND
+the current catalog agree on its identity, SHA-256, release tag, SAFE quality
+and replay compatibility. Historical SAFE rows revoked by the catalog,
+duplicate shard identities and ambiguous ZIP entries do not become usable.
+Previously materialized SAFE files no longer expected by the catalog are
+preserved under quarantine, never silently treated as still eligible.
+
+The restore report and exit code must show that all assets in the initial
+Release inventory were accounted for, verified and classified without failures.
+A successful restoration certifies the **published inventory snapshot**,
+not future Releases concurrently added by live COLLECT, the quality of
+unpublished local files, or economic profitability.
 
 ## Hard platform prerequisite
 
@@ -177,7 +192,15 @@ byte-parity audit is unmet.
 
 ## Acceptance rule
 
-Alina disaster recovery is `CLONE_COMPLETE` only when:
+The accepted two-step recovery is `RESTORE_COMPLETE` only when
+`RESTORE_ALINA.cmd` or `RESTORE_ALINA.sh` exits successfully, its
+`RESTORE_REPORT.json` lists all inventoried Release assets with no missing,
+corrupt, unverified or misclassified rows, and usable shards are bound to
+the current SHA-verified canonical catalog. `PARTIAL` and `REJECT` evidence
+can remain in quarantine for diagnosis but must never enter the usable set.
+
+The separate, optional single-clone-plus-LFS objective is
+`CLONE_COMPLETE` only when:
 
 - `check_clone_payload_completeness.py --require-complete` is green;
 - source and clone asset counts are identical;
