@@ -89,6 +89,8 @@ jobs:
           # Secondary market context is strict replay-checked in a small, bounded batch.
           # Derived capacity stays PARTIAL until independent parent-L2 proof exists.
           python tools/backfill_replay_compatibility.py             --limit 60             --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
+          # Historical Cross-Venue observations: strict two-leg receipt, never parent L2/PnL proof.
+          python tools/backfill_replay_compatibility.py             --limit 60             --families "cross_venue_capacity_tape"
           python tools/build_replay_compatibility_reasons.py
           python tools/build_catalog_metrics.py
           python tools/check_dataset_quality.py
