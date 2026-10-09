@@ -514,7 +514,8 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
     ]
     # Exact and reversible for all existing fields except explicitly redundant
     # canonical release_repository, which is represented at the index root.
-    if hydrate_default_release_repository(index) != expanded:
+    expected = [_compact_index_row(row) for row in expanded]
+    if hydrate_default_release_repository(index) != expected:
         raise ValueError("COMPACTION_PARITY_MISMATCH")
     before_size = path.stat().st_size
     _atomic_json(path, index)
