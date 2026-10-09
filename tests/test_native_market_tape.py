@@ -350,3 +350,56 @@ def test_bitget_books15_frame_is_taped_as_l2() -> None:
     assert envelope.parsed_summary["bid_levels"] == 2
     assert envelope.parsed_summary["ask_levels"] == 2
     assert envelope.parsed_summary["depth_curve_replay_ready"] is True
+
+
+
+def test_okx_full_depth_snapshot_preserves_replay_reanchor_event_kind():
+    envelope = native_tick_envelope("okx", {
+        "arg": {"channel": "books", "instId": "BTC-USDT-SWAP"},
+        "action": "snapshot",
+        "data": [{
+            "instId": "BTC-USDT-SWAP", "ts": "2000",
+            "seqId": 300, "prevSeqId": -1,
+            "bids": [["100", "1", "0", "1"]],
+            "asks": [["101", "1", "0", "1"]],
+        }],
+        "_alina_transport": _transport(),
+    })
+    assert envelope is not None
+    assert envelope.channel == "l2Book"
+    assert envelope.event_kind == "SNAPSHOT"
+    assert envelope.sequence == 300
+
+
+def test_okx_incremental_depth_keeps_predecessor_checks():
+    envelope = native_tick_envelope("okx", {
+        "arg": {"channel": "books", "instId": "BTC-USDT-SWAP"},
+        "action": "update",
+        "data": [{
+            "instId": "BTC-USDT-SWAP", "ts": "2000",
+            "seqId": 301, "prevSeqId": 300,
+            "bids": [["100", "2", "0", "1"]],
+            "asks": [["101", "2", "0", "1"]],
+        }],
+        "_alina_transport": _transport(),
+    })
+    assert envelope is not None
+    assert envelope.event_kind == "UPDATE"
+    assert envelope.parsed_summary["prev_sequence"] == 300
+
+
+def test_gate_full_book_update_reanchors_only_with_native_full_marker():
+    sample = {
+        "channel": "futures.order_book_update",
+        "event": "update", "_alina_transport": _transport(),
+        "result": {"s": "BTC_USDT", "t": 1999, "U": 10, "u": 15,
+                   "b": [{"p": "99", "s": 1}], "a": [{"p": "101", "s": 1}],
+                   "full": True},
+    }
+    snapshot = native_tick_envelope("gate", sample)
+    assert snapshot is not None
+    assert snapshot.event_kind == "SNAPSHOT"
+    sample["result"]["full"] = False
+    incremental = native_tick_envelope("gate", sample)
+    assert incremental is not None
+    assert incremental.event_kind == "UPDATE"
