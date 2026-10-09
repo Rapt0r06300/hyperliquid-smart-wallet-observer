@@ -17,6 +17,11 @@ try:
 except ModuleNotFoundError:
     from backfill_exact_trade_counts import _download
 
+try:
+    from tools.index_run_manifest import hydrate_default_release_repository
+except ModuleNotFoundError:
+    from index_run_manifest import hydrate_default_release_repository
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 SIZE_PATCH = ROOT / "catalog" / "UNCOMPRESSED_SIZE_PATCH.json"
@@ -99,7 +104,7 @@ def main() -> None:
     worker_count = min(32, max(1, args.workers))
 
     index = json.loads(INDEX.read_text(encoding="utf-8"))
-    rows = index.get("shards")
+    rows = hydrate_default_release_repository(index)
     size_doc = (
         json.loads(SIZE_PATCH.read_text(encoding="utf-8"))
         if SIZE_PATCH.exists()
