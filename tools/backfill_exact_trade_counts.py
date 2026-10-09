@@ -21,6 +21,17 @@ import zipfile
 from typing import Any, Mapping
 from urllib.parse import quote
 
+try:
+    from tools.index_run_manifest import (
+        hydrate_default_release_repository, _compact_index_row,
+        CANONICAL_DATA_REPOSITORY,
+    )
+except ModuleNotFoundError:
+    from index_run_manifest import (
+        hydrate_default_release_repository, _compact_index_row,
+        CANONICAL_DATA_REPOSITORY,
+    )
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
 PATCH_PATH = ROOT / "catalog" / "TRADE_COUNT_PATCH.json"
@@ -616,9 +627,8 @@ def _candidate_priority(row: Mapping[str, Any]) -> tuple[int, int, str]:
 
 def backfill(limit: int) -> dict[str, Any]:
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
-    rows = index.get("shards")
-    if not isinstance(rows, list):
-        raise BackfillError("invalid data index")
+    rows = hydrate_default_release_repository(index)
+    index["shards"] = rows
     patch_doc = _load_patch()
     counts = patch_doc.get("counts")
     if not isinstance(counts, dict):
@@ -675,10 +685,17 @@ def backfill(limit: int) -> dict[str, Any]:
         json.dumps(patch_doc, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    INDEX_PATH.write_text(
-        json.dumps(index, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    if updated or restored_from_patch:
+        index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
+        index["shards"] = [
+            _compact_index_row(row, inherit_canonical_repo=True) for row in rows
+        ]
+        serialized = json.dumps(
+            index, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ) + "\n"
+        if len(serialized.encode("utf-8")) >= 85 * 1024 * 1024:
+            raise BackfillError("DATA_INDEX_TOO_LARGE: exact trade scan proof retained in patch")
+        INDEX_PATH.write_text(serialized, encoding="utf-8")
     return {
         "updated": updated,
         "restored_from_patch": restored_from_patch,
