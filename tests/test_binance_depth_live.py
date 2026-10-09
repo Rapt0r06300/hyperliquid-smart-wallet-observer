@@ -338,7 +338,7 @@ def test_partial_depth_fallback_preserves_real_ws_depth_but_stays_fail_closed() 
             }
         )
         assert frame is not None
-        collector._emit_partial_fallback(
+        await collector._emit_partial_fallback(
             "BTCUSDT",
             frame,
             connection_id="bin-partial",
@@ -497,3 +497,36 @@ def test_ws_api_valid_depth_response_accepts_non_echoed_id(monkeypatch) -> None:
 
     asyncio.run(scenario())
 
+
+
+
+def test_binance_depth_emission_waits_for_bounded_async_sink():
+    import asyncio
+    from hl_observer.collection.binance_depth_live import BinanceDepthLiveCollector
+    from hl_observer.collection.tick_dataset import TickEnvelope
+
+    async def check():
+        persisted = []
+        gate = asyncio.Event()
+
+        async def record(envelope):
+            await gate.wait()
+            persisted.append(envelope)
+
+        collector = BinanceDepthLiveCollector(["BTCUSDT"], tick_sink=record)
+        tick = TickEnvelope(
+            source_id="binance_usdm_public", channel="l2Book",
+            instrument="BTCUSDT", event_kind="INCREMENTAL",
+            raw_payload={"u": 123}, received_ts_ms=1000,
+            exchange_ts_ms=999, local_monotonic_ns=100,
+        )
+        pending = asyncio.create_task(collector._emit_tick(tick))
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert persisted == []
+        gate.set()
+        await pending
+        assert persisted == [tick]
+        await collector.close()
+
+    asyncio.run(check())
