@@ -84,10 +84,15 @@ def _load_json(path: Path) -> dict[str,Any]:
 def _write_json(path: Path, value: Mapping[str,Any]) -> None:
     path.parent.mkdir(parents=True,exist_ok=True)
     tmp=path.with_suffix(path.suffix+".tmp")
-    tmp.write_text(
-        json.dumps(dict(value),indent=2,sort_keys=True)+"\n",
-        encoding="utf-8",
-    )
+    content = (
+        json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        if path.name == "DATA_INDEX.json"
+        else json.dumps(dict(value), indent=2, sort_keys=True)
+    ) + "\n"
+    tmp.write_text(content, encoding="utf-8")
+    if path.name == "DATA_INDEX.json" and tmp.stat().st_size >= 85 * 1024 * 1024:
+        tmp.unlink(missing_ok=True)
+        raise BackfillError("DATA_INDEX_TOO_LARGE: preserve immutable evidence; compact or shard before publish")
     os.replace(tmp,path)
 
 
@@ -708,7 +713,10 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     )
     patch["remaining_candidates_for_filter"]=remaining
     _write_json(PATCH_PATH,patch)
-    _refresh_catalog(index,ROOT)
+    # No verified repair means no change to the canonical data index. Avoid
+    # rewriting tens of MiB in every bounded replay wave.
+    if updated:
+        _refresh_catalog(index,ROOT)
 
     return {
         "attempted":len(candidates),
