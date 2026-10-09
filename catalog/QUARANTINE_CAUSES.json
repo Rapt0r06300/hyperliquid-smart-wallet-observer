@@ -1,12 +1,12 @@
 {
   "by_category": {
     "LEGITIMATE_EXCLUSION": {
-      "records": 38919480,
-      "shards": 12429
+      "records": 38943203,
+      "shards": 12442
     },
     "PARTIAL_EVIDENCE": {
-      "records": 11032139,
-      "shards": 12805
+      "records": 12017373,
+      "shards": 14078
     }
   },
   "by_family": {
@@ -19,8 +19,8 @@
       "shards": 2720
     },
     "capacity_tape": {
-      "records": 9493631,
-      "shards": 6100
+      "records": 10065943,
+      "shards": 6608
     },
     "clock_sync": {
       "records": 2306,
@@ -39,8 +39,8 @@
       "shards": 560
     },
     "cross_venue_capacity_tape": {
-      "records": 2118428,
-      "shards": 1062
+      "records": 2233195,
+      "shards": 1164
     },
     "external_events": {
       "records": 549,
@@ -55,8 +55,8 @@
       "shards": 53
     },
     "l2book": {
-      "records": 13734858,
-      "shards": 5989
+      "records": 13735281,
+      "shards": 6260
     },
     "liquidations": {
       "records": 108,
@@ -71,40 +71,40 @@
       "shards": 1659
     },
     "trades": {
-      "records": 4918311,
-      "shards": 6014
+      "records": 5239766,
+      "shards": 6419
     }
   },
   "by_status": {
     "PARTIAL": {
-      "records": 11032139,
-      "shards": 12805
+      "records": 12017373,
+      "shards": 14078
     },
     "REJECT": {
-      "records": 38919480,
-      "shards": 12429
+      "records": 38943203,
+      "shards": 12442
     }
   },
   "by_venue": {
     "bitget": {
-      "records": 579575,
-      "shards": 4420
+      "records": 579830,
+      "shards": 4528
     },
     "gate": {
-      "records": 16873365,
-      "shards": 11311
+      "records": 17068959,
+      "shards": 12092
     },
     "hyperliquid": {
-      "records": 3407511,
-      "shards": 3189
+      "records": 3452503,
+      "shards": 3303
     },
     "okx": {
-      "records": 26972191,
-      "shards": 5246
+      "records": 27625540,
+      "shards": 5427
     },
     "unknown": {
-      "records": 2118977,
-      "shards": 1068
+      "records": 2233744,
+      "shards": 1170
     }
   },
   "by_venue_family": {
@@ -133,28 +133,28 @@
       "shards": 962
     },
     "bitget|trades": {
-      "records": 12462,
-      "shards": 1455
+      "records": 12717,
+      "shards": 1563
     },
     "gate|bbo": {
       "records": 5876772,
       "shards": 946
     },
     "gate|capacity_tape": {
-      "records": 2109369,
-      "shards": 3220
+      "records": 2186950,
+      "shards": 3490
     },
     "gate|clock_sync": {
       "records": 809,
       "shards": 18
     },
     "gate|l2Book": {
-      "records": 7214565,
-      "shards": 4194
+      "records": 7214953,
+      "shards": 4464
     },
     "gate|trades": {
-      "records": 1671850,
-      "shards": 2933
+      "records": 1789475,
+      "shards": 3174
     },
     "hyperliquid|activeAssetCtx": {
       "records": 721443,
@@ -165,8 +165,8 @@
       "shards": 223
     },
     "hyperliquid|capacity_tape": {
-      "records": 430427,
-      "shards": 713
+      "records": 462924,
+      "shards": 777
     },
     "hyperliquid|copy_vault_l2": {
       "records": 183,
@@ -185,20 +185,20 @@
       "shards": 53
     },
     "hyperliquid|l2Book": {
-      "records": 108044,
-      "shards": 210
+      "records": 108079,
+      "shards": 211
     },
     "hyperliquid|trades": {
-      "records": 147245,
-      "shards": 594
+      "records": 159705,
+      "shards": 643
     },
     "okx|bbo": {
       "records": 4300197,
       "shards": 629
     },
     "okx|capacity_tape": {
-      "records": 6937762,
-      "shards": 2132
+      "records": 7399996,
+      "shards": 2306
     },
     "okx|clock_sync": {
       "records": 746,
@@ -221,12 +221,12 @@
       "shards": 697
     },
     "okx|trades": {
-      "records": 3086754,
-      "shards": 1032
+      "records": 3277869,
+      "shards": 1039
     },
     "unknown|cross_venue_capacity_tape": {
-      "records": 2118428,
-      "shards": 1062
+      "records": 2233195,
+      "shards": 1164
     },
     "unknown|external_events": {
       "records": 549,
@@ -234,6 +234,10 @@
     }
   },
   "current_reasons": {
+    "DUPLICATES_NOT_DEDUPED:1": {
+      "records": 3546,
+      "shards": 17
+    },
     "FATAL_INTEGRITY:gap_count=1": {
       "records": 173340,
       "shards": 187
@@ -426,10 +430,6 @@
       "records": 6440,
       "shards": 17
     },
-    "FATAL_INTEGRITY:gap_count=75": {
-      "records": 11003,
-      "shards": 17
-    },
     "FATAL_INTEGRITY:gap_count=8": {
       "records": 56308,
       "shards": 45
@@ -455,28 +455,28 @@
       "shards": 560
     },
     "FATAL_INTEGRITY:regression_count=3": {
-      "records": 37608,
-      "shards": 30
+      "records": 39057,
+      "shards": 32
     },
     "PARENT_L2_SHARD_NOT_VERIFIED": {
-      "records": 9493631,
-      "shards": 6100
+      "records": 10065943,
+      "shards": 6608
     },
     "RECONCILIATION_MATCH_REQUIRED": {
-      "records": 4917222,
-      "shards": 5762
+      "records": 5238677,
+      "shards": 6167
     },
     "RECONCILIATION_UNVERIFIED": {
-      "records": 44530420,
-      "shards": 18900
+      "records": 45217887,
+      "shards": 19780
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 14685532,
-      "shards": 3233
+      "records": 14709255,
+      "shards": 3246
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 25234,
+  "non_safe_shards": 26520,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -653,8 +653,8 @@
       "shards": 8
     },
     "bitget|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 11862,
-      "shards": 1215
+      "records": 12117,
+      "shards": 1323
     },
     "gate|bbo|FATAL_INTEGRITY:gap_count=1": {
       "records": 30541,
@@ -673,12 +673,12 @@
       "shards": 946
     },
     "gate|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
-      "records": 2109369,
-      "shards": 3220
+      "records": 2186950,
+      "shards": 3490
     },
     "gate|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 2109369,
-      "shards": 3220
+      "records": 2186950,
+      "shards": 3490
     },
     "gate|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 26129,
@@ -701,8 +701,8 @@
       "shards": 10
     },
     "gate|l2Book|RECONCILIATION_UNVERIFIED": {
-      "records": 7214565,
-      "shards": 4194
+      "records": 7214953,
+      "shards": 4464
     },
     "gate|l2Book|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 7206272,
@@ -741,8 +741,8 @@
       "shards": 8
     },
     "gate|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 1671850,
-      "shards": 2933
+      "records": 1789475,
+      "shards": 3174
     },
     "hyperliquid|activeAssetCtx|FATAL_INTEGRITY:gap_count=103": {
       "records": 36348,
@@ -797,12 +797,12 @@
       "shards": 12
     },
     "hyperliquid|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
-      "records": 430427,
-      "shards": 713
+      "records": 462924,
+      "shards": 777
     },
     "hyperliquid|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 430427,
-      "shards": 713
+      "records": 462924,
+      "shards": 777
     },
     "hyperliquid|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 9152,
@@ -869,8 +869,8 @@
       "shards": 206
     },
     "hyperliquid|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 147245,
-      "shards": 594
+      "records": 159705,
+      "shards": 643
     },
     "okx|bbo|FATAL_INTEGRITY:gap_count=2": {
       "records": 50356,
@@ -885,12 +885,12 @@
       "shards": 9
     },
     "okx|capacity_tape|PARENT_L2_SHARD_NOT_VERIFIED": {
-      "records": 6937762,
-      "shards": 2132
+      "records": 7399996,
+      "shards": 2306
     },
     "okx|capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 6937762,
-      "shards": 2132
+      "records": 7399996,
+      "shards": 2306
     },
     "okx|capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 98628,
@@ -945,30 +945,30 @@
       "shards": 10
     },
     "okx|trades|RECONCILIATION_MATCH_REQUIRED": {
-      "records": 3086265,
-      "shards": 1020
+      "records": 3277380,
+      "shards": 1027
     },
     "unknown|cross_venue_capacity_tape|FATAL_INTEGRITY:regression_count=1": {
       "records": 12278,
       "shards": 9
     },
     "unknown|cross_venue_capacity_tape|FATAL_INTEGRITY:regression_count=3": {
-      "records": 37608,
-      "shards": 30
+      "records": 39057,
+      "shards": 32
     },
     "unknown|cross_venue_capacity_tape|RECONCILIATION_UNVERIFIED": {
-      "records": 2118428,
-      "shards": 1062
+      "records": 2233195,
+      "shards": 1164
     },
     "unknown|cross_venue_capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 538558,
-      "shards": 138
+      "records": 562281,
+      "shards": 151
     }
   },
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "8f07b6430d13ff54d65d1cc65d28730701774a0ecdef383186b770959425faab",
+  "source_audit_digest": "e7d66b663681f2f33f5d170deebf490ed3afb1c09ea09f7f2ecaa74b4389ad1e",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
@@ -995,8 +995,8 @@
       "shards": 962
     },
     "bitget|trades|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 6470,
-      "shards": 584
+      "records": 6725,
+      "shards": 692
     },
     "bitget|trades|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 5992,
@@ -1007,8 +1007,8 @@
       "shards": 946
     },
     "gate|capacity_tape|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 1680732,
-      "shards": 3037
+      "records": 1758313,
+      "shards": 3307
     },
     "gate|capacity_tape|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 428637,
@@ -1019,16 +1019,16 @@
       "shards": 18
     },
     "gate|l2Book|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 7948,
-      "shards": 3221
+      "records": 8336,
+      "shards": 3491
     },
     "gate|l2Book|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 7206617,
       "shards": 973
     },
     "gate|trades|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 1159670,
-      "shards": 2155
+      "records": 1277295,
+      "shards": 2396
     },
     "gate|trades|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 512180,
@@ -1047,8 +1047,8 @@
       "shards": 223
     },
     "hyperliquid|capacity_tape|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 325006,
-      "shards": 507
+      "records": 357503,
+      "shards": 571
     },
     "hyperliquid|capacity_tape|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 105421,
@@ -1071,16 +1071,16 @@
       "shards": 53
     },
     "hyperliquid|l2Book|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 2610,
-      "shards": 4
+      "records": 2645,
+      "shards": 5
     },
     "hyperliquid|l2Book|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 105434,
       "shards": 206
     },
     "hyperliquid|trades|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 92865,
-      "shards": 388
+      "records": 105325,
+      "shards": 437
     },
     "hyperliquid|trades|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 54380,
@@ -1091,8 +1091,8 @@
       "shards": 629
     },
     "okx|capacity_tape|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 4732585,
-      "shards": 1489
+      "records": 5194819,
+      "shards": 1663
     },
     "okx|capacity_tape|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 2205177,
@@ -1123,16 +1123,16 @@
       "shards": 650
     },
     "okx|trades|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 1322323,
-      "shards": 443
+      "records": 1513438,
+      "shards": 450
     },
     "okx|trades|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 1764431,
       "shards": 589
     },
     "unknown|cross_venue_capacity_tape|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 1617929,
-      "shards": 789
+      "records": 1732696,
+      "shards": 891
     },
     "unknown|cross_venue_capacity_tape|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 500499,
@@ -1143,10 +1143,14 @@
       "shards": 6
     }
   },
-  "source_index_sha256": "62eb42689bc52ad74cb3627c63febeb474ecb7cc1ded8bbb5489c12b42d150d8",
-  "source_shards": 58650,
+  "source_index_sha256": "7ed84d66b625f3d12b63baccf0d58fd16608cfcfb43bdb8eb84ecde96bae58ba",
+  "source_shards": 63186,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
+    "DUPLICATES_NOT_DEDUPED:1": {
+      "records": 3546,
+      "shards": 17
+    },
     "FATAL_INTEGRITY:gap_count=1": {
       "records": 173340,
       "shards": 187
@@ -1166,10 +1170,6 @@
     "FATAL_INTEGRITY:gap_count=12": {
       "records": 37292,
       "shards": 30
-    },
-    "FATAL_INTEGRITY:gap_count=120": {
-      "records": 10169,
-      "shards": 17
     },
     "FATAL_INTEGRITY:gap_count=13": {
       "records": 80627,
@@ -1352,36 +1352,36 @@
       "shards": 560
     },
     "FATAL_INTEGRITY:regression_count=3": {
-      "records": 37608,
-      "shards": 30
+      "records": 39057,
+      "shards": 32
     },
     "PARENT_L2_SHARD_NOT_VERIFIED": {
-      "records": 5341350,
-      "shards": 3681
+      "records": 5913662,
+      "shards": 4189
     },
     "RECONCILIATION_MATCH_REQUIRED": {
-      "records": 4917222,
-      "shards": 5762
+      "records": 5238677,
+      "shards": 6167
     },
     "RECONCILIATION_SNAPSHOT_VERIFIED": {
       "records": 2306,
       "shards": 52
     },
     "RECONCILIATION_UNVERIFIED": {
-      "records": 44530420,
-      "shards": 18900
+      "records": 45217887,
+      "shards": 19780
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 14685532,
-      "shards": 3233
+      "records": 14709255,
+      "shards": 3246
     },
     "TRADE_COUNT_NOT_EXACT": {
       "records": 85088,
       "shards": 831
     },
     "UNIQUE_TRADE_COUNT_NOT_EXACT": {
-      "records": 130545,
-      "shards": 1960
+      "records": 143260,
+      "shards": 2117
     },
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
       "records": 353666,
