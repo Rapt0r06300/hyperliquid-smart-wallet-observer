@@ -1084,3 +1084,51 @@ def test_gate_gap_schedules_bounded_single_contract_rebootstrap_without_cutting_
     assert len([r for r in sink.rows if r.source_id == "gate_public_ws"
                 and r.channel == "l2Book"]) == 3
     assert len([r for r in sink.rows if r.channel == "capacity_tape"]) >= 3
+
+
+def test_native_ws_batches_are_persisted_as_individual_trade_events():
+    """A native two-trade WS message must create two immutable replay records."""
+    import asyncio
+    from types import SimpleNamespace
+
+    m = _module()
+
+    class Client:
+        def measure_clock_sync(self):
+            return SimpleNamespace(
+                offset_ms=0, rtt_ms=1, server_ts_ms=1000,
+                receive_wall_ts_ms=1001,
+            )
+
+        async def messages(self, _symbols):
+            yield {
+                "topic": "publicTrade.BTCUSDT",
+                "ts": 1005,
+                "data": [
+                    {"s": "BTCUSDT", "i": "trade-1", "T": 1000,
+                     "p": "100", "v": "1", "S": "Buy"},
+                    {"s": "BTCUSDT", "i": "trade-2", "T": 1001,
+                     "p": "101", "v": "2", "S": "Sell"},
+                ],
+            }
+
+    class Sink:
+        def __init__(self):
+            self.rows = []
+
+        def emit(self, envelope):
+            self.rows.append(envelope)
+
+    sink = Sink()
+    asyncio.run(m._native_with_clock_sync(
+        "bybit", Client(), ["BTCUSDT"], sink, probe_interval_s=60,
+    ))
+    trades = [row for row in sink.rows if row.channel == "trades"]
+    assert len(trades) == 2
+    assert [row.parsed_summary["event_count"] for row in trades] == [1, 1]
+    assert [row.parsed_summary["source_batch_index"] for row in trades] == [0, 1]
+    assert [row.parsed_summary["source_batch_size"] for row in trades] == [2, 2]
+    assert len({row.parsed_summary["source_batch_sha256"] for row in trades}) == 1
+    assert trades[0].raw_payload["data"][0]["i"] == "trade-1"
+    assert trades[1].raw_payload["data"][0]["i"] == "trade-2"
+    assert all(row.provenance["access"] == "read_only" for row in trades)
