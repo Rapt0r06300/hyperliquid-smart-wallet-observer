@@ -1,0 +1,113 @@
+{
+  "asset_verified": true,
+  "bytes": 32413,
+  "collection_run_id": "market-e8-8-2026100901-v7-0",
+  "collector_version": "43383b9af8e21d690af5f73e322b5973b5ac3f0e",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-huma-1791514700384-1791514867848-abb7072bdaaa",
+  "end_ts_ms": 1791514867848,
+  "event_count": 100,
+  "family": "cross_venue_capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "cross_venue_capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 100,
+  "release": {
+    "asset_id": 623727215,
+    "asset_name": "packed-shards-0003.zip",
+    "member_name": "cross-venue-derived-capacity-cross-venue-capacity-tape-huma-1791514700384-1791514867848-abb7072bdaaa.jsonl.gz",
+    "release_id": 407453734,
+    "release_tag": "data-v2-campaign-market-e8-8-2026100901-v7-u0",
+    "remote_digest": "sha256:23b08efb758cafff40e700df072c218ffe7ac24339f5be578b0dbca03937e95c",
+    "remote_size": 14504874,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "cross-venue-derived-capacity-cross-venue-capacity-tape-huma-1791514700384-1791514867848-abb7072bdaaa.jsonl.gz",
+  "release_asset_id": 623727215,
+  "release_container_asset": "packed-shards-0003.zip",
+  "release_id": 407453734,
+  "release_member": "cross-venue-derived-capacity-cross-venue-capacity-tape-huma-1791514700384-1791514867848-abb7072bdaaa.jsonl.gz",
+  "release_remote_digest": "sha256:23b08efb758cafff40e700df072c218ffe7ac24339f5be578b0dbca03937e95c",
+  "release_remote_size": 14504874,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026100901-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "abb7072bdaaaa9f3c6b3741c471f471845824a936ee7486160e1e9a04e32ea14",
+  "source": "cross_venue_derived_capacity",
+  "start_ts_ms": 1791514700384,
+  "symbol": "HUMA",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": 1791514700217,
+    "last_exchange_ts_ms": 1791514867749,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 100,
+      "max": 544.0,
+      "min": 52.0,
+      "p50": 181.0,
+      "p95": 419.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 694720,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}
