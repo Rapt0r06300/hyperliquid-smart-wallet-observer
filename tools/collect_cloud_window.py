@@ -374,6 +374,58 @@ def _hyperliquid_envelope(
     )
 
 
+
+
+def _hyperliquid_envelopes(
+    message: Mapping[str, Any],
+    *,
+    received_ts_ms: int,
+    receive_mono_ns: int,
+    connection_id: str,
+    clock_evidence: Mapping[str, Any] | None = None,
+) -> list[TickEnvelope]:
+    """Split Hyperliquid public trades without losing original batch provenance.
+
+    Keep a malformed or unsplittable batch intact for fail-closed certification:
+    silently dropping individual rows would fabricate a complete trade history.
+    """
+    kwargs = {
+        "received_ts_ms": received_ts_ms,
+        "receive_mono_ns": receive_mono_ns,
+        "connection_id": connection_id,
+        "clock_evidence": clock_evidence,
+    }
+    def original() -> list[TickEnvelope]:
+        envelope = _hyperliquid_envelope(message, **kwargs)
+        return [envelope] if envelope is not None else []
+
+    if message.get("channel") != "trades":
+        return original()
+    rows = message.get("data")
+    if not isinstance(rows, list) or len(rows) <= 1:
+        return original()
+    batch_digest = hashlib.sha256(json.dumps(
+        dict(message), ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), default=str,
+    ).encode("utf-8")).hexdigest()
+    split: list[TickEnvelope] = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping) or not row.get("coin"):
+            return original()
+        single = dict(message)
+        single["data"] = [dict(row)]
+        envelope = _hyperliquid_envelope(single, **kwargs)
+        if envelope is None:
+            return original()
+        envelope.parsed_summary.update({
+            "source_batch_sha256": batch_digest,
+            "source_batch_size": len(rows),
+            "source_batch_index": index,
+        })
+        split.append(envelope)
+    return split
+
+
 def _binance_bbo_envelope(
     payload: Mapping[str, Any],
     *,
@@ -1272,14 +1324,13 @@ async def _hyperliquid(
                             if clock_probe is not None
                             else None
                         )
-                        envelope = _hyperliquid_envelope(
+                        for envelope in _hyperliquid_envelopes(
                             message,
                             received_ts_ms=receive_wall_ms,
                             receive_mono_ns=receive_mono_ns,
                             connection_id=connection_id,
                             clock_evidence=clock_evidence,
-                        )
-                        if envelope is not None:
+                        ):
                             envelope.reconnect_count = reconnects
                             await _emit_with_backpressure(sink, envelope)
                             if envelope.channel == "l2Book" and isinstance(message.get("data"), Mapping):
