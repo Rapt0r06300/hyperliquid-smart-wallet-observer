@@ -141,9 +141,11 @@ jobs:
           fi
           python tools/index_run_manifest.py "${MANIFESTS[@]}"
 
-      - name: Build exact catalog metrics after reconciliation
+      - name: Build SHA-bound metrics and quarantine audit after reconciliation
         if: env.RUN_MANIFEST_COUNT != '0'
-        run: python tools/build_catalog_metrics.py
+        run: |
+          python tools/build_catalog_metrics.py
+          python tools/build_quarantine_audit.py
 
       - name: Validate rebuilt control plane
         if: env.RUN_MANIFEST_COUNT != '0'
@@ -174,6 +176,7 @@ jobs:
             git reset --hard origin/main
             python tools/index_run_manifest.py "${MANIFESTS[@]}"
             python tools/build_catalog_metrics.py
+            python tools/build_quarantine_audit.py
             python tools/check_dataset_quality.py
             git add catalog datasets
             if git diff --cached --quiet; then
