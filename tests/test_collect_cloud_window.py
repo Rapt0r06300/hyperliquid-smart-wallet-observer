@@ -977,7 +977,7 @@ def test_sync_sink_records_queue_loss_clock_and_connection():
     sink.emit(one)
     sink.emit(two)
     assert sink.drops[("hyperliquid_public_ws", "bbo", "BTC")] == 1
-    assert sink.drop_windows[("hyperliquid_public_ws", "bbo", "BTC", "conn-1", 2)] == 1
+    assert sink.drop_windows[("hyperliquid_public_ws", "bbo", "BTC", "conn-1", 2300)] == 1
 
 
 
@@ -1193,3 +1193,47 @@ def test_native_malformed_trade_batch_stays_whole_and_unverified():
     assert rows[0].parsed_summary["event_count"] == 2
     assert rows[0].raw_payload["data"][1] == "malformed"
     assert rows[0].parsed_summary.get("source_batch_index") is None
+
+
+
+def test_queue_drop_millisecond_attribution_keeps_neighbouring_shards_safe():
+    m = _module()
+    key = ("gate_public_ws", "trades", "BTC_USDT")
+    base = {
+        "source": key[0], "family": key[1], "symbol": key[2],
+        "synchronization": {"connection_ids": ["gate-1"]},
+    }
+    rows = [
+        {**base, "start_ts_ms": 2000, "end_ts_ms": 2499},
+        {**base, "start_ts_ms": 2500, "end_ts_ms": 2999},
+    ]
+    # A lost frame exactly inside shard 2 should not poison shard 1
+    # merely because both share receive-second 2.
+    assert m.attribute_queue_drops(
+        rows, {key: 1}, {(*key, "gate-1", 2512): 1},
+        timestamps_are_ms=True,
+    ) == [0, 1]
+    # A loss at an indistinguishable shard boundary stays fail-closed.
+    same = [{**base, "start_ts_ms": 2000, "end_ts_ms": 2500},
+            {**base, "start_ts_ms": 2500, "end_ts_ms": 2999}]
+    assert m.attribute_queue_drops(
+        same, {key: 1}, {(*key, "gate-1", 2500): 1},
+        timestamps_are_ms=True,
+    ) == [1, 1]
+
+
+def test_queue_drop_millisecond_attribution_never_discards_unknown_epoch():
+    m = _module()
+    key = ("bybit_public_ws", "l2Book", "BTCUSDT")
+    rows = [
+        {"source": key[0], "family": key[1], "symbol": key[2],
+         "start_ts_ms": 1000, "end_ts_ms": 1500,
+         "synchronization": {"connection_ids": ["conn"]}},
+        {"source": key[0], "family": key[1], "symbol": key[2],
+         "start_ts_ms": 1800, "end_ts_ms": 2000,
+         "synchronization": {"connection_ids": ["conn"]}},
+    ]
+    assert m.attribute_queue_drops(
+        rows, {key: 1}, {(*key, "conn", -1): 1},
+        timestamps_are_ms=True,
+    ) == [1, 1]
