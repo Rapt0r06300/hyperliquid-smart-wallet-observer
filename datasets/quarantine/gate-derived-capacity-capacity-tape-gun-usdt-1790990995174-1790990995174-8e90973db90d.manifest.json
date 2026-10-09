@@ -8,9 +8,11 @@
     "ready": false
   },
   "dataset_id": "gate-derived-capacity-capacity-tape-gun-usdt-1790990995174-1790990995174-8e90973db90d",
+  "duplicate_count": 0,
   "end_ts_ms": 1790990995174,
   "event_count": 1,
   "family": "capacity_tape",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 1,
   "observed_channels": [
     "capacity_tape"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -35,6 +39,7 @@
   },
   "quality_reasons": [
     "REPLAY_COMPATIBILITY_NOT_PROVEN",
+    "PARENT_L2_SHARD_NOT_VERIFIED",
     "RECONCILIATION_UNVERIFIED"
   ],
   "quality_status": "PARTIAL",
@@ -59,8 +64,8 @@
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-campaign-market-e6-3-2026100202-v7-u0",
   "replay_compatible": false,
-  "replay_reason": "NO_REPLAY_ADAPTER",
-  "replay_schema_version": "alina.replay.v1",
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "8e90973db90d3542931feee4bfa3e28f9e22d249e70551f3e7c34c301ab53204",
@@ -97,7 +102,7 @@
     }
   },
   "trade_count": 0,
-  "trade_count_exact": false,
+  "trade_count_exact": true,
   "trade_identity_digests": [],
   "trade_identity_digests_exact": false,
   "uncompressed_bytes": 6014,
@@ -105,5 +110,6 @@
   "unique_trade_count": null,
   "unique_trade_count_exact": false,
   "validation_allowed": false,
-  "venue": "gate"
+  "venue": "gate",
+  "verifier_version": "alina.replay.compatibility.v6"
 }
