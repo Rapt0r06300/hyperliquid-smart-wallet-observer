@@ -86,12 +86,31 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
             continue
 
         manifest_rel = str(row.get("manifest_path") or "").strip()
-        manifest_path = base / manifest_rel
-        if not manifest_rel or not manifest_path.is_file():
+        manifest_path = (base / manifest_rel).resolve() if manifest_rel else base
+        if (
+            not manifest_rel
+            or not manifest_path.is_relative_to(base.resolve())
+            or not manifest_path.is_file()
+        ):
             new_rows.append(_compact_index_row(row))
             continue
 
         manifest = _normalize_manifest(_load(manifest_path))
+        # An index row may only be requalified using evidence for the SAME
+        # immutable shard. A valid manifest for another SHA/identity cannot
+        # serve as a SAFE shortcut after a stale catalog merge.
+        stored_id = str(row.get("dataset_id") or "")
+        manifest_id = str(manifest.get("dataset_id") or "")
+        stored_hash = str(row.get("sha256") or "").lower()
+        manifest_hash = str(manifest.get("sha256") or "").lower()
+        if (
+            not stored_id or manifest_id != stored_id
+            or len(stored_hash) != 64
+            or any(ch not in "0123456789abcdef" for ch in stored_hash)
+            or stored_hash != manifest_hash
+        ):
+            new_rows.append(_compact_index_row(row))
+            continue
         current_status, current_reasons = classify_manifest(manifest)
         if current_status == "SAFE" and not _valid_release_locator(manifest):
             current_status = "PARTIAL"
