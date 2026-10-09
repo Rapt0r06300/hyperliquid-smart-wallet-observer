@@ -1667,7 +1667,8 @@ async def collect(
     binance_clock = BinanceClockSyncProbe() if binance_symbols else None
     binance_depth = BinanceDepthLiveCollector(
         binance_symbols,
-        tick_sink=sink.emit,
+        # Await bounded queue for Binance L2; no silent sync frame drops.
+        tick_sink=sink.emit_async,
         publication_depth=200,
         snapshot_limit=1000,
         clock_sync_provider=(binance_clock.evidence if binance_clock is not None else None),
