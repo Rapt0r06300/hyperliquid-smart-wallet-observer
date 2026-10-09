@@ -216,9 +216,17 @@ def native_tick_envelopes(
     elif venue_key == "gate" and message.get("channel") == "futures.trades":
         rows_key = "result"
     rows = message.get(rows_key) if rows_key else None
-    if not isinstance(rows, list) or len(rows) <= 1:
+
+    def unsplit() -> list[TickEnvelope]:
         envelope = native_tick_envelope(venue_key, message)
         return [envelope] if envelope is not None else []
+
+    if not isinstance(rows, list) or len(rows) <= 1:
+        return unsplit()
+    # Never mark a truncated subset of a native trade batch as complete.
+    # Keep the entire source frame when any row cannot be represented.
+    if any(not isinstance(row, Mapping) for row in rows):
+        return unsplit()
     raw_batch = dict(message)
     raw_batch.pop("_alina_transport", None)
     batch_digest = hashlib.sha256(json.dumps(
@@ -227,18 +235,17 @@ def native_tick_envelopes(
     ).encode("utf-8")).hexdigest()
     envelopes = []
     for index, row in enumerate(rows):
-        if not isinstance(row, Mapping):
-            continue
         individual = dict(message)
         individual[rows_key] = [dict(row)]
         envelope = native_tick_envelope(venue_key, individual)
-        if envelope is not None:
-            envelope.parsed_summary.update({
-                "source_batch_size": len(rows),
-                "source_batch_index": index,
-                "source_batch_sha256": batch_digest,
-            })
-            envelopes.append(envelope)
+        if envelope is None:
+            return unsplit()
+        envelope.parsed_summary.update({
+            "source_batch_size": len(rows),
+            "source_batch_index": index,
+            "source_batch_sha256": batch_digest,
+        })
+        envelopes.append(envelope)
     return envelopes
 
 
