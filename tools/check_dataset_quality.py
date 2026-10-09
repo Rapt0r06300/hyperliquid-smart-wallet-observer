@@ -21,13 +21,14 @@ assert cat["storage"]["replay_selection"] == "SAFE_MANIFEST_ONLY"
 
 shards = index.get("shards") or []
 assert isinstance(shards, list)
+default_repo = index.get("release_repository_default")
+assert default_repo in (None, "Rapt0r06300/hyperliquid-smart-wallet-observer")
 for row in shards:
     assert row["quality_status"] in statuses
     if row["quality_status"] == "SAFE":
         for key in (
             "bytes",
             "sha256",
-            "release_repository",
             "release_tag",
             "release_asset",
             "event_count",
@@ -37,7 +38,7 @@ for row in shards:
         assert int(row["event_count"]) > 0
         assert row.get("replay_compatible") is True, "SAFE must be explicitly replay-compatible"
         assert str(row.get("replay_schema_version") or ""), "SAFE replay schema missing"
-        assert row["release_repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        assert (row.get("release_repository") or default_repo) == "Rapt0r06300/hyperliquid-smart-wallet-observer"
     manifest_path = root / row["manifest_path"]
     assert manifest_path.is_file()
     manifest = json.loads(manifest_path.read_text())
