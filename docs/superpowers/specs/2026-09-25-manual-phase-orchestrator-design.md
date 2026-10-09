@@ -12925,3 +12925,41 @@ these code-quality changes. All trades and derived data remain paper/read-only.
   irrecoverable, and OOS/forward net results meet the economic contract.
   Neither `REPLAYABLE` nor `SAFE` alone establishes trading profitability.
 
+
+- **Sealed-shard durability is mandatory:** partitioned ingestion must enumerate
+  every immutable gzip shard present in its own writer partitions, including
+  shards sealed automatically by the size threshold or a websocket reconnect,
+  not merely the result of the final flush. Single-event append and batch
+  append must share connection-epoch rotation rules. Unit tests verify every
+  source event is present exactly once across the returned assets and each
+  connection epoch remains separate. Never silently discard an earlier
+  already-written shard when building the Release bundle.
+- **Post-gap snapshot recovery:** for native incremental L2 feeds with
+  exchange-authenticated predecessor sequence evidence, an observed sequence
+  break contaminates its preceding segment. A later genuine full exchange
+  snapshot is the only causal point at which the partition can seal the
+  damaged prefix and open a new replay candidate. The missing messages are
+  not reconstructed, silently zero-filled or marked SAFE; the old prefix
+  remains preserved for diagnosis. A snapshot without a verified source
+  cannot erase historical gap evidence.
+- Gate capacity must immediately cease using a book on a sequence
+  gap/regression or if no authoritative initial base exists. A read-only
+  Gate REST rebootstrap is bounded to one concurrent request and 30 seconds
+  per contract, scoped to the present websocket connection; raw deltas
+  continue recording, and capacity remains fail-closed until reanchored.
+  Bybit order-book data after a fatal sequence anomaly similarly remains
+  inadmissible until an authentic exchange full snapshot resets chronology.
+- **Index size:** GitHub's 100 MiB single-blob hard cap is not a data-loss
+  recovery mechanism. The existing DATA_INDEX catalog retains minimum
+  selectors and scalar quality/record evidence; trade identity vectors and
+  original remote metadata remain in per-shard manifests. Values directly
+  reconstructible from a more precise indexed scalar may be omitted only
+  when readers and integrity tests prove parity. The current 85 MiB
+  pre-push guard still applies; a future scalable sharded index needs
+  end-to-end reader/metric/selection migration before the cap can be
+  considered permanently resolved.
+- Replay repair has its own bounded GitHub-hosted workflow concurrency,
+  separate from rapidly relaunching catalog reconciliation; it still
+  verifies immutable Release bytes and fails on semantic Git conflicts.
+  Successful tests and replay receipts are not a valid claim of zero
+  remaining PARTIAL/REJECT shards or profitable OOS/forward results.
