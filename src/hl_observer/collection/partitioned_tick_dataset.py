@@ -45,6 +45,11 @@ class PartitionedTickDatasetWriter:
         self.flush_every = max(1, int(flush_every))
         self._writers: dict[tuple[str, str, str], TickDatasetWriter] = {}
         self._last_connection: dict[tuple[str, str, str], str | None] = {}
+        # Track exchange-authenticated L2 predecessor evidence per partition.
+        # A genuine subsequent full snapshot can seal the damaged interval,
+        # allowing later clean frames to be recovered as a separate shard.
+        self._last_l2_sequence: dict[tuple[str, str, str], int] = {}
+        self._l2_gap_pending: set[tuple[str, str, str]] = set()
 
     def _key(self, envelope: TickEnvelope) -> tuple[str, str, str]:
         return (
@@ -121,12 +126,62 @@ class PartitionedTickDatasetWriter:
                 previous = self._last_connection.get(key)
                 if key in self._last_connection and connection != previous:
                     writer.rotate()
+                    self._last_l2_sequence.pop(key, None)
+                    self._l2_gap_pending.discard(key)
                 self._last_connection[key] = connection
-                records = writer.append_batch_records(
-                    envelope for _index, envelope in chunk
-                )
-                for (index, _envelope), record in zip(chunk, records):
-                    output[index] = record
+
+                # Segment at the FIRST authentic exchange re-anchor after a
+                # provable gap. This does not repair missing deltas: they stay
+                # in the preceding damaged shard, never in the new SAFE epoch.
+                buffered: list[tuple[int, TickEnvelope]] = []
+                def flush_segment() -> None:
+                    if not buffered:
+                        return
+                    persisted = writer.append_batch_records(
+                        envelope for _index, envelope in buffered
+                    )
+                    for (index, _envelope), record in zip(buffered, persisted):
+                        output[index] = record
+                    buffered.clear()
+
+                for indexed in chunk:
+                    envelope = indexed[1]
+                    source = str(envelope.source_id)
+                    native_l2 = (
+                        envelope.channel == "l2Book"
+                        and source in {
+                            "bybit_public_ws", "okx_public_ws",
+                            "gate_public_ws", "bitget_public_ws",
+                        }
+                    )
+                    if native_l2:
+                        summary = envelope.parsed_summary
+                        summary = summary if isinstance(summary, dict) else {}
+                        is_snapshot = str(envelope.event_kind).upper().endswith("SNAPSHOT")
+                        if is_snapshot:
+                            if key in self._l2_gap_pending:
+                                flush_segment()
+                                writer.rotate()
+                            self._l2_gap_pending.discard(key)
+                            self._last_l2_sequence.pop(key, None)
+                        else:
+                            before = self._last_l2_sequence.get(key)
+                            seq = envelope.sequence
+                            prev = summary.get("prev_sequence")
+                            first = summary.get("first_update_id")
+                            if before is not None and (
+                                (type(prev) is int and prev not in {-1, before})
+                                or (type(first) is int and first > before + 1)
+                                or (type(seq) is int and seq < before)
+                            ):
+                                self._l2_gap_pending.add(key)
+                        seq = envelope.sequence
+                        if type(seq) is int:
+                            before = self._last_l2_sequence.get(key)
+                            if before is None or seq > before:
+                                self._last_l2_sequence[key] = seq
+                    buffered.append(indexed)
+                flush_segment()
         if any(record is None for record in output):
             raise RuntimeError("partitioned writer failed to persist the full batch")
         return [record for record in output if record is not None]
