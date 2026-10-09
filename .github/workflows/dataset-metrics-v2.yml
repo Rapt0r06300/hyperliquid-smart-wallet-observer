@@ -9,6 +9,7 @@ on:
       - 'catalog/TRADE_UNIQUE_COUNT_PATCH.json'
       - 'catalog/UNCOMPRESSED_SIZE_PATCH.json'
       - 'tools/build_catalog_metrics.py'
+      - 'tools/build_quarantine_audit.py'
       - 'tools/build_collection_metrics.py'
       - 'tests/test_collection_metrics.py'
       - '.github/workflows/dataset-metrics-v2.yml'
@@ -38,6 +39,8 @@ jobs:
         run: python tools/build_catalog_metrics.py
       - name: Build instant collection metrics
         run: python tools/build_collection_metrics.py
+      - name: Rebuild SHA-bound quarantine audit
+        run: python tools/build_quarantine_audit.py
       - name: Validate dataset policy
         run: |
           python tools/check_dataset_quality.py
@@ -59,12 +62,13 @@ jobs:
             python tools/build_replay_compatibility_reasons.py
             python tools/build_catalog_metrics.py
             python tools/build_collection_metrics.py
+            python tools/build_quarantine_audit.py
             python - <<'PY'
           from tools.build_catalog_metrics import verify_metrics_source
           print(verify_metrics_source())
           PY
             python tools/check_dataset_quality.py
-            git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json
+            git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
             if git diff --cached --quiet; then
               echo "Metrics already match the current catalog."
               published=true
