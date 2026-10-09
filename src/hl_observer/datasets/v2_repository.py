@@ -49,12 +49,20 @@ class SafeShard:
     release_remote_digest: str | None = None
 
     @classmethod
-    def from_index_row(cls, row: Mapping[str, Any]) -> "SafeShard":
+    def from_index_row(
+        cls, row: Mapping[str, Any], *, repository_default: str | None = None
+    ) -> "SafeShard":
         status = str(row.get("quality_status") or "").upper()
         if status != "SAFE":
             raise DatasetV2Error(f"non-SAFE shard refused: {status or 'MISSING'}")
         if row.get("replay_compatible") is not True:
             raise DatasetV2Error("SAFE shard is not explicitly replay compatible")
+        if repository_default not in (None, DEFAULT_REPOSITORY):
+            raise DatasetV2Error("foreign default Release repository refused")
+        resolved = dict(row)
+        if "release_repository" not in resolved and repository_default == DEFAULT_REPOSITORY:
+            resolved["release_repository"] = DEFAULT_REPOSITORY
+        row = resolved
         required = (
             "dataset_id",
             "family",
@@ -187,6 +195,9 @@ def select_safe_shards(
     rows = index.get("shards")
     if not isinstance(rows, list):
         raise DatasetV2Error("V2 index shards must be a list")
+    default_repo = index.get("release_repository_default")
+    if default_repo not in (None, DEFAULT_REPOSITORY):
+        raise DatasetV2Error("foreign inherited Release repository")
     selected: list[SafeShard] = []
     for raw in rows:
         if not isinstance(raw, Mapping):
@@ -195,7 +206,7 @@ def select_safe_shards(
             continue
         if raw.get("replay_compatible") is not True:
             continue
-        shard = SafeShard.from_index_row(raw)
+        shard = SafeShard.from_index_row(raw, repository_default=default_repo)
         if family_set and shard.family.lower() not in family_set:
             continue
         if venue_set and shard.venue.lower() not in venue_set:
