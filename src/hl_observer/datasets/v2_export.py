@@ -20,6 +20,13 @@ _RECEIVE_ONLY_SEMANTICS = {
     "causal_event_availability",
     "receive_observation_time_only",
 }
+# Keep immutable trade history in raw shard assets. A per-trade digest
+# vector in every control-plane JSON inflates an ordinary BTC day into a
+# >100 MiB manifest and eventually blocks git clone and reconciliation.
+# Above this threshold publish an exact count + independently reproducible
+# sorted-set SHA-256, rather than storing the entire identity universe.
+MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS = 256
+
 _TRADE_CHANNELS = {
     "trades",
     "agg_trades",
@@ -320,6 +327,14 @@ def build_manifest_from_tick_shard(
     end = max(receive_times) if receive_times else 0
     sha256 = digest.hexdigest()
     dataset_id = _dataset_id(source, channel, instrument, start, end, sha256)
+    identity_proven = channel in _TRADE_CHANNELS and trade_identity_complete
+    identity_count = len(trade_identity_digests)
+    identity_sorted = sorted(trade_identity_digests) if identity_proven else []
+    identities_embedded = identity_proven and identity_count <= MAX_EMBEDDED_TRADE_IDENTITY_DIGESTS
+    identity_set_sha256 = (
+        hashlib.sha256(("\n".join(identity_sorted) + "\n").encode("ascii")).hexdigest()
+        if identity_proven else None
+    )
 
     replay_reasons = []
     if channel not in _REPLAYABLE_CHANNELS:
@@ -366,14 +381,11 @@ def build_manifest_from_tick_shard(
         "unique_trade_count_exact": (
             channel in _TRADE_CHANNELS and trade_identity_complete
         ),
-        "trade_identity_digests": (
-            sorted(trade_identity_digests)
-            if channel in _TRADE_CHANNELS and trade_identity_complete
-            else []
-        ),
-        "trade_identity_digests_exact": (
-            channel in _TRADE_CHANNELS and trade_identity_complete
-        ),
+        "trade_identity_digests": identity_sorted if identities_embedded else [],
+        "trade_identity_digests_exact": identities_embedded,
+        "trade_identity_set_sha256": identity_set_sha256,
+        "trade_identity_set_count": identity_count if identity_proven else None,
+        "trade_identity_vector_omitted": bool(identity_proven and not identities_embedded),
         "replay_compatible": replay_compatible,
         "replay_schema_version": "alina.replay.v1",
         "replay_reason": "SMOKE_OK" if replay_compatible else ",".join(replay_reasons),
