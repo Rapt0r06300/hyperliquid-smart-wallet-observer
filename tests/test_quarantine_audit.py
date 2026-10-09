@@ -359,3 +359,36 @@ def test_no_op_stale_repair_never_rewrites_large_catalog_index(tmp_path: Path, m
     assert result["repaired_count"] == 0
     assert "DATA_INDEX.json" not in writes
     assert (catalog / "DATA_INDEX.json").read_text(encoding="utf-8") == original_index
+
+
+def test_stale_repair_index_limit_never_partially_moves_manifest(tmp_path: Path, monkeypatch):
+    from tools import repair_stale_safe_classifications as stale
+
+    catalog = tmp_path / "catalog"
+    quarantine = tmp_path / "datasets" / "quarantine"
+    catalog.mkdir()
+    quarantine.mkdir(parents=True)
+    manifest = _manifest("capacity-blocked", safe_now=True)
+    source = quarantine / "capacity-blocked.manifest.json"
+    source.write_text(json.dumps(manifest), encoding="utf-8")
+    original_index = json.dumps({"shards": [{
+        "dataset_id": manifest["dataset_id"],
+        "sha256": manifest["sha256"],
+        "quality_status": "PARTIAL",
+        "manifest_path": "datasets/quarantine/capacity-blocked.manifest.json",
+    }]})
+    index_path = catalog / "DATA_INDEX.json"
+    index_path.write_text(original_index, encoding="utf-8")
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text("{}", encoding="utf-8")
+    (catalog / "DATA_CATALOG.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr(stale, "INDEX_WRITE_LIMIT_BYTES", 1)
+    with pytest.raises(ValueError, match="DATA_INDEX_TOO_LARGE"):
+        stale.repair(tmp_path)
+
+    assert source.is_file()
+    assert not (tmp_path / "datasets" / "safe" / "capacity-blocked.manifest.json").exists()
+    assert index_path.read_text(encoding="utf-8") == original_index
+    assert json.loads((catalog / "DATA_QUALITY_REGISTRY.json").read_text()) == {}
+    assert json.loads((catalog / "DATA_CATALOG.json").read_text()) == {}
+
