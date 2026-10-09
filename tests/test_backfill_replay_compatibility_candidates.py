@@ -402,3 +402,35 @@ def test_verified_historical_archive_recovery_precedes_newer_live_trade_within_f
     assert _candidate_sort_key(different_family) < _candidate_sort_key(archive)
     spoof = {**archive, "release_repository": "forged/exchange"}
     assert _candidate_sort_key(spoof) > _candidate_sort_key(archive)
+
+
+def test_new_global_identity_evidence_retries_prior_failed_replay_receipt():
+    dataset_id = "bybit-v3-new-proof"
+    row = {
+        "dataset_id": dataset_id,
+        "family": "trades",
+        "venue": "bybit",
+        "quality_status": "PARTIAL",
+        "replay_compatible": True,
+        "trade_count": 3,
+        "trade_count_exact": True,
+        "unique_trade_count_exact": False,
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2",
+        "release_asset": "verified.jsonl.gz",
+        "sha256": "a" * 64,
+        "bytes": 123,
+        "manifest_path": "datasets/quarantine/verified.manifest.json",
+    }
+    prior = {dataset_id: {
+        "replay_compatible": False,
+        "verifier_version": backfill.VERIFIER_VERSION,
+        "replay_reason": "PREVIOUS_IDENTITY_UNMEASURABLE",
+    }}
+    assert backfill._candidate(row, prior, {"trades"}) is False
+    new_proof = {dataset_id: {
+        "trade_count_scanned": 3,
+        "unique_trade_count": 3,
+        "unique_trade_count_exact": True,
+    }}
+    assert backfill._candidate(row, prior, {"trades"}, new_proof) is True
