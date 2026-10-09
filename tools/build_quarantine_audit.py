@@ -187,7 +187,17 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             current_reason_shards[reason] += 1
             current_reason_records[reason] += records
 
+        drop_count = _count(manifest.get("collection_queue_drops")) if isinstance(manifest, Mapping) else 0
+        integrity = manifest.get("integrity") if isinstance(manifest, Mapping) else {}
+        integrity = integrity if isinstance(integrity, Mapping) else {}
+        gap_count = _count(integrity.get("gap_count"))
         rows_out.append({
+            "collection_queue_drops": drop_count,
+            "integrity_gap_count": gap_count,
+            "queue_drop_attribution_method": (
+                manifest.get("queue_drop_attribution_method")
+                if isinstance(manifest, Mapping) else None
+            ),
             "dataset_id": row.get("dataset_id"),
             "venue": row.get("venue"),
             "family": row.get("family"),
@@ -269,11 +279,30 @@ def compact_root_causes(audit: Mapping[str, Any]) -> dict[str, Any]:
     """Publish compact actionable causes, retaining exhaustive audit separately."""
     by_venue_family: dict[str, dict[str, int]] = {}
     reason_by_venue_family: dict[str, dict[str, int]] = {}
+    source_gap_causes: dict[str, dict[str, int]] = {}
+    queue_loss_manifest_sum = 0
     for shard in audit.get("non_safe_shards") or []:
         if not isinstance(shard, Mapping):
             continue
         key = f"{shard.get('venue') or 'unknown'}|{shard.get('family') or 'unknown'}"
         records = _count(shard.get("record_count"))
+        drops = _count(shard.get("collection_queue_drops"))
+        gap_count = _count(shard.get("integrity_gap_count"))
+        method = shard.get("queue_drop_attribution_method")
+        # A legacy cumulative drop counter was repeated for *each* rotated
+        # shard: do not describe this sum as distinct frames lost.
+        if drops > 0:
+            queue_loss_manifest_sum += drops
+            cause = (
+                "ATTRIBUTED_INGRESS_LOSS_V1"
+                if method == "connection_receive_second_v1"
+                else "LEGACY_CUMULATIVE_INGRESS_LOSS"
+            )
+        elif gap_count > 0:
+            cause = "SOURCE_SEQUENCE_OR_OTHER_GAP_NO_QUEUE_LOSS"
+        else:
+            cause = "EVIDENCE_OR_RECONCILIATION_NOT_GAP"
+        _add_bucket(source_gap_causes, f"{key}|{cause}", records=records)
         _add_bucket(by_venue_family, key, records=records)
         for reason in shard.get("current_reasons") or ["NO_CURRENT_REASON"]:
             _add_bucket(reason_by_venue_family, f"{key}|{reason}", records=records)
@@ -301,6 +330,10 @@ def compact_root_causes(audit: Mapping[str, Any]) -> dict[str, Any]:
         "stored_reasons": ranked(audit.get("stored_reason_counts") or {}, 60),
         "by_venue_family": ranked(by_venue_family, 100),
         "reason_by_venue_family": ranked(reason_by_venue_family, 120),
+        "source_gap_causes": ranked(source_gap_causes, 120),
+        "queue_drops_sum_across_non_safe_manifests": queue_loss_manifest_sum,
+        "queue_drop_sum_is_not_distinct_frames": True,
+        "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": True,
         "record_counts_overlap_reasons": True,
         "scope": "indexed_dataset_only",
         "status": "DIAGNOSIS_ONLY",

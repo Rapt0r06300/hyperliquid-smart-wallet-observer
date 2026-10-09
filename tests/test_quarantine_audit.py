@@ -223,3 +223,33 @@ def test_stale_repair_wont_mark_missing_release_coordinates_safe(tmp_path: Path)
     result = repair(tmp_path)
     assert result["repaired_count"] == 0
     assert not (tmp_path / "datasets" / "safe" / "missing-release.manifest.json").exists()
+
+
+
+def test_quarantine_cause_census_separates_real_drop_from_legacy_repeated_loss():
+    from tools.build_quarantine_audit import compact_root_causes
+    rows = [
+        {
+            "venue": "gate", "family": "l2Book", "record_count": 10,
+            "collection_queue_drops": 6, "integrity_gap_count": 7,
+            "queue_drop_attribution_method": None,
+            "current_reasons": ["FATAL_INTEGRITY:gap_count=7"],
+        },
+        {
+            "venue": "bitget", "family": "bbo", "record_count": 20,
+            "collection_queue_drops": 2, "integrity_gap_count": 2,
+            "queue_drop_attribution_method": "connection_receive_second_v1",
+        },
+        {
+            "venue": "okx", "family": "l2Book", "record_count": 30,
+            "collection_queue_drops": 0, "integrity_gap_count": 3,
+        },
+    ]
+    doc = compact_root_causes({"non_safe_shards": rows})
+    causes = doc["source_gap_causes"]
+    assert causes["gate|l2Book|LEGACY_CUMULATIVE_INGRESS_LOSS"]["shards"] == 1
+    assert causes["bitget|bbo|ATTRIBUTED_INGRESS_LOSS_V1"]["shards"] == 1
+    assert causes["okx|l2Book|SOURCE_SEQUENCE_OR_OTHER_GAP_NO_QUEUE_LOSS"]["shards"] == 1
+    assert doc["queue_drops_sum_across_non_safe_manifests"] == 8
+    assert doc["queue_drop_sum_is_not_distinct_frames"] is True
+    assert doc["validation_allowed"] is False
