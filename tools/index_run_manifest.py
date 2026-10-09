@@ -57,6 +57,9 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
         (json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")) if path.name == "DATA_INDEX.json" else json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True)) + "\n",
         encoding="utf-8",
     )
+    if path.name == "DATA_INDEX.json" and temporary.stat().st_size >= 85 * 1024 * 1024:
+        temporary.unlink(missing_ok=True)
+        raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
     os.replace(temporary, path)
 
 
