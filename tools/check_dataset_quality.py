@@ -38,7 +38,8 @@ for row in shards:
         assert int(row["event_count"]) > 0
         assert row.get("replay_compatible") is True, "SAFE must be explicitly replay-compatible"
         assert str(row.get("replay_schema_version") or ""), "SAFE replay schema missing"
-        assert (row.get("release_repository") or default_repo) == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        repository = row["release_repository"] if "release_repository" in row else default_repo
+        assert repository == "Rapt0r06300/hyperliquid-smart-wallet-observer"
     manifest_path = root / row["manifest_path"]
     assert manifest_path.is_file()
     manifest = json.loads(manifest_path.read_text())
