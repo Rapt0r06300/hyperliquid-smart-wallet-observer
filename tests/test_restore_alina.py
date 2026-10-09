@@ -204,7 +204,10 @@ def test_restore_fails_before_download_when_disk_is_insufficient(tmp_path, monke
     releases = [
         {
             "tag_name": "data-v2-test",
-            "assets": [_asset("asset.bin", "https://example.invalid/asset", payload)],
+            "assets": [
+                _asset("asset.bin", "https://example.invalid/asset", payload),
+                _asset("RUN_MANIFEST.json", "https://example.invalid/manifest", b'{"manifests":[]}'),
+            ],
         }
     ]
     monkeypatch.setattr(module, "iter_releases", lambda *_args, **_kwargs: iter(releases))
