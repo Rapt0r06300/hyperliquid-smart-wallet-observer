@@ -1,0 +1,123 @@
+{
+  "asset_verified": true,
+  "bytes": 2314,
+  "collection_run_id": "market-e8-5-2026100801-v7-0",
+  "collector_version": "5ef94aada80d6830758d164b6ed431b75341bc43",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-zetausdt-1791439903907-1791439938564-39075e4a0c5e",
+  "end_ts_ms": 1791439938564,
+  "event_count": 8,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 66,
+    "live_only": 49,
+    "local_continuity_fallback": true,
+    "matched_count": 17,
+    "missing_from_live": 0,
+    "reference_count": 17,
+    "reference_status": "PARTIAL",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 8,
+  "release": {
+    "asset_id": 620930110,
+    "asset_name": "packed-shards-0002.zip",
+    "member_name": "bitget-public-ws-trades-zetausdt-1791439903907-1791439938564-39075e4a0c5e.jsonl.gz",
+    "release_id": 406481613,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100801-v7-u0",
+    "remote_digest": "sha256:1684edec31c7399a82c254698d399bfcea01737c0c7d692f006c855a9e6341f1",
+    "remote_size": 9100020,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-zetausdt-1791439903907-1791439938564-39075e4a0c5e.jsonl.gz",
+  "release_asset_id": 620930110,
+  "release_container_asset": "packed-shards-0002.zip",
+  "release_id": 406481613,
+  "release_member": "bitget-public-ws-trades-zetausdt-1791439903907-1791439938564-39075e4a0c5e.jsonl.gz",
+  "release_remote_digest": "sha256:1684edec31c7399a82c254698d399bfcea01737c0c7d692f006c855a9e6341f1",
+  "release_remote_size": 9100020,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100801-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "39075e4a0c5e4459037453e71b088df627d43df8ec3650e1900df65e3a885121",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791439903907,
+  "symbol": "ZETAUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 8,
+      "max": 67.5,
+      "min": 48.5,
+      "p50": 48.5,
+      "p95": 67.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-08c2ce77d5dd4e4c88feec66a7f32b40"
+    ],
+    "first_exchange_ts_ms": 1791439871517,
+    "last_exchange_ts_ms": 1791439938455,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 8,
+      "max": 32390.0,
+      "min": 109.0,
+      "p50": 141.0,
+      "p95": 32390.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 8,
+      "max": 155.624835,
+      "min": 0.0,
+      "p50": 155.624835,
+      "p95": 155.624835
+    }
+  },
+  "trade_count": 66,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 18617,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 66,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
