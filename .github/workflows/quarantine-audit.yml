@@ -21,8 +21,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: quarantine-audit
-  cancel-in-progress: true
+  group: dataset-v2-control-plane-index
+  cancel-in-progress: false
 
 jobs:
   audit:
@@ -70,29 +70,57 @@ jobs:
           PY
 
       - name: Publish repaired catalog and audit
+        shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A \
-            catalog/DATA_INDEX.json \
-            catalog/DATA_METRICS.json \
-            catalog/DATA_CATALOG.json \
-            catalog/DATA_QUALITY_REGISTRY.json \
-            catalog/QUARANTINE_AUDIT.json \
-            catalog/QUARANTINE_CAUSES.json \
-            datasets/safe \
-            datasets/quarantine \
-            datasets/rejected
-          if git diff --cached --quiet; then
-            echo "Catalog and quarantine audit already current."
-          else
-            git commit -m "fix(dataset): promote stale SAFE shards"
-            for attempt in 1 2 3 4 5 6; do
-              if git pull --rebase origin main && git push origin HEAD:main; then break; fi
-              [ "$attempt" -lt 6 ] || exit 1
-              sleep "$((attempt * 2))"
-            done
+          published=false
+          # Never rebase generated catalog files: another GitHub-hosted writer
+          # may have added new shards or metric receipts during the audit.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+            python tools/repair_stale_safe_classifications.py
+            python tools/build_catalog_metrics.py
+            python tools/build_quarantine_audit.py
+            python tools/check_dataset_quality.py
+            python - <<'PY'
+          import json
+          report=json.load(open("catalog/QUARANTINE_AUDIT.json",encoding="utf-8"))
+          if report.get("quarantine_total_matches_metrics") is not True:
+              raise SystemExit("quarantine audit and metrics disagree")
+          if int(report.get("historical_live_only_false_reject_count") or 0):
+              raise SystemExit("historical live-only exclusions remain")
+          if int(report.get("potential_false_non_safe_count") or 0):
+              raise SystemExit("stale non-SAFE labels remain")
+          PY
+            git add -A \
+              catalog/DATA_INDEX.json \
+              catalog/DATA_METRICS.json \
+              catalog/DATA_CATALOG.json \
+              catalog/DATA_QUALITY_REGISTRY.json \
+              catalog/QUARANTINE_AUDIT.json \
+              catalog/QUARANTINE_CAUSES.json \
+              datasets/safe \
+              datasets/quarantine \
+              datasets/rejected
+            if git diff --cached --quiet; then
+              echo "Quarantine audit and repaired catalog already current."
+              published=true
+              break
+            fi
+            git commit -m "fix(dataset): repair stale classifications with provenance"
+            if git push origin HEAD:main; then
+              published=true
+              echo "Durable quarantine repair pushed $(git rev-parse HEAD)"
+              break
+            fi
+            sleep $((attempt * 3))
+          done
+          if [ "$published" != true ]; then
+            echo "::error::Quarantine audit failed to publish after bounded retries"
+            exit 1
           fi
 
       - name: Refresh health and closure receipts
