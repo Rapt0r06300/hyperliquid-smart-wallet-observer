@@ -124,7 +124,7 @@ def _vault_tick(*, good=True, family="copy_vault_positions", ts=1000):
         "copy_vault_positions": "hyperliquid_public_info",
         "copy_vault_selection": "hyperliquid_public_vaults",
     }[family]
-    raw = json.dumps({"assetPositions": []}) if family == "copy_vault_positions" else json.dumps({"selection": {}})
+    raw = json.dumps({"assetPositions": []}) if family == "copy_vault_positions" else json.dumps({"selection": {}, "filters": {}})
     provenance = {
         "transport": "https", "access": "read_only", "authenticated": False,
     }
