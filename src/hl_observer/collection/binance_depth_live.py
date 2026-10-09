@@ -10,6 +10,7 @@ WebSocket API depth request is the full-depth fallback when REST egress is restr
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import time
 import uuid
@@ -333,7 +334,7 @@ class BinanceDepthLiveCollector:
         )
         self.snapshots_received += 1
         self._full_snapshot_unavailable_symbols.discard(key)
-        self._emit_tick(
+        await self._emit_tick(
             TickEnvelope(
                 source_id="binance_usdm_public",
                 channel="l2Book_snapshot",
@@ -376,7 +377,7 @@ class BinanceDepthLiveCollector:
             )
         )
         publication = state.publier(self.publication_depth)
-        self._emit_publication(key, publication, source_raw_l2_payload=payload)
+        await self._emit_publication(key, publication, source_raw_l2_payload=payload)
         self.last_error = ""
         return publication
 
@@ -425,7 +426,7 @@ class BinanceDepthLiveCollector:
                             if is_partial_fallback_frame:
                                 self.partial_fallback_frames += 1
                                 if symbol in self._full_snapshot_unavailable_symbols:
-                                    self._emit_partial_fallback(
+                                    await self._emit_partial_fallback(
                                         symbol,
                                         frame,
                                         connection_id=connection_id,
@@ -455,7 +456,7 @@ class BinanceDepthLiveCollector:
                                 book_state = "DESYNC"
                             else:
                                 book_state = "EXPLOITABLE"
-                            self._emit_tick(
+                            await self._emit_tick(
                                 TickEnvelope(
                                     source_id="binance_usdm_public",
                                     channel="l2Book",
@@ -493,7 +494,7 @@ class BinanceDepthLiveCollector:
                             if state.besoin_resnapshot():
                                 self._schedule_resync(symbol, connection_id)
                             elif status != BUFFERISE:
-                                self._emit_publication(
+                                await self._emit_publication(
                                     symbol,
                                     state.publier(self.publication_depth),
                                     source_raw_l2_payload=frame["raw"],
@@ -547,7 +548,7 @@ class BinanceDepthLiveCollector:
             "real_execution": False,
         }
 
-    def _emit_partial_fallback(
+    async def _emit_partial_fallback(
         self,
         symbol: str,
         frame: Mapping[str, Any],
@@ -585,7 +586,7 @@ class BinanceDepthLiveCollector:
             "read_only": True,
             "real_execution": False,
         }
-        self._emit_tick(
+        await self._emit_tick(
             TickEnvelope(
                 source_id="binance_usdm_public",
                 channel="l2Book_partial_snapshot",
@@ -619,7 +620,7 @@ class BinanceDepthLiveCollector:
             )
         )
         self.partial_fallback_publications += 1
-        self._emit_publication(
+        await self._emit_publication(
             symbol,
             publication,
             source_raw_l2_payload=frame.get("raw"),
@@ -662,11 +663,13 @@ class BinanceDepthLiveCollector:
     def _clock_evidence(self) -> dict[str, Any]:
         return self.clock_evidence()
 
-    def _emit_tick(self, envelope: TickEnvelope) -> None:
+    async def _emit_tick(self, envelope: TickEnvelope) -> None:
         if self.tick_sink is not None:
-            self.tick_sink(envelope)
+            result = self.tick_sink(envelope)
+            if inspect.isawaitable(result):
+                await result
 
-    def _emit_publication(
+    async def _emit_publication(
         self,
         symbol: str,
         publication: Mapping[str, Any],
@@ -691,7 +694,7 @@ class BinanceDepthLiveCollector:
             source_raw_l2_payload=source_raw_l2_payload,
         )
         if capacity is not None:
-            self._emit_tick(capacity)
+            await self._emit_tick(capacity)
         if self.publication_sink is not None:
             self.publication_sink(symbol, publication)
 
