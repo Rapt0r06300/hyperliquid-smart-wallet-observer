@@ -49,6 +49,7 @@ jobs:
           git fetch origin main
           git checkout main
           git reset --hard origin/main
+          python tools/index_run_manifest.py --compact-existing
           python tools/repair_stale_safe_classifications.py
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py
@@ -81,6 +82,7 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard origin/main
+            python tools/index_run_manifest.py --compact-existing
             python tools/repair_stale_safe_classifications.py
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
