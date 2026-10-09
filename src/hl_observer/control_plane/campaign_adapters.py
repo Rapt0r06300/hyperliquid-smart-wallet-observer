@@ -340,9 +340,9 @@ def build_command(ctx: AdapterContext) -> tuple[list[str], Path | None]:
             str(
                 _bounded_int(
                     ctx.partition.get("max_events_per_day"),
-                    2_000_000,
-                    1,
-                    2_000_000,
+                    0,
+                    0,
+                    25_000_000,
                 )
             ),
         ]

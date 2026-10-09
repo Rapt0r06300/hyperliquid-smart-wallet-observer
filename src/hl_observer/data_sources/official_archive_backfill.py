@@ -28,7 +28,7 @@ BYBIT_TRADING_ARCHIVE = "https://public.bybit.com/trading"
 OKX_ARCHIVE_HOST = "static.okx.com"
 DEFAULT_MAX_COMPRESSED_BYTES = 256 * 1024 * 1024
 DEFAULT_MAX_DECOMPRESSED_BYTES = 1024 * 1024 * 1024
-DEFAULT_MAX_EVENTS = 2_000_000
+DEFAULT_MAX_EVENTS = 0  # No silent truncation: bounded by verified archive bytes.
 
 
 @dataclass(slots=True)
@@ -708,10 +708,21 @@ def _prepend(first: list[str], rows: Iterable[list[str]]) -> Iterable[list[str]]
 
 
 def _limit(rows: Iterable[TickEnvelope], maximum: int) -> Iterable[TickEnvelope]:
-    limit = max(1, int(maximum))
+    """Never claim completeness for an archived day truncated by a row budget.
+
+    Zero means ingest the entire checksum-/byte-bounded official file.
+    Positive limits are *fail-closed*: observing an extra row aborts the
+    collection instead of silently publishing an incomplete day as replayable.
+    """
+    limit = int(maximum)
+    if limit < 0:
+        raise ValueError("max_events must not be negative")
     for index, row in enumerate(rows):
-        if index >= limit:
-            break
+        if limit > 0 and index >= limit:
+            raise ValueError(
+                f"OFFICIAL_ARCHIVE_INCOMPLETE_EVENT_LIMIT: at least {index + 1} "
+                f"events, allowed {limit}"
+            )
         yield row
 
 

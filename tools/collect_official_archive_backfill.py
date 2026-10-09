@@ -27,7 +27,8 @@ def main() -> int:
     parser.add_argument("--collector-version", required=True)
     parser.add_argument("--collection-run-id")
     parser.add_argument("--max-days", type=int, default=3)
-    parser.add_argument("--max-events-per-day", type=int, default=2_000_000)
+    parser.add_argument("--max-events-per-day", type=int, default=0,
+                        help="0=full byte-bounded archive; any positive cap fails closed when exceeded")
     parser.add_argument("--rotate-mb", type=int, default=256)
     parser.add_argument("--stream-type")
     parser.add_argument(
@@ -58,7 +59,7 @@ def main() -> int:
             coin=args.coin,
             symbol=args.symbol,
             day=day,
-            max_events=max(1, int(args.max_events_per_day)),
+            max_events=int(args.max_events_per_day),
             stream_type=args.stream_type,
             source_url=args.source_url,
         )
