@@ -65,7 +65,7 @@ jobs:
               for row in (index.get("shards") or [])
               if isinstance(row, dict)
               and row.get("release_tag")
-              and row.get("release_repository") == os.environ["GITHUB_REPOSITORY"]
+              and (row.get("release_repository") or index.get("release_repository_default")) == os.environ["GITHUB_REPOSITORY"]
           }
           quarantined = set()
           migration = Path("control/legacy-release-migration.json")
