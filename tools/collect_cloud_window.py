@@ -670,6 +670,10 @@ async def _native_with_clock_sync(
 ) -> None:
     sync: dict[str, float | int] = {}
     capacity_states: dict[str, Any] = {}
+    gate_connection_id: str | None = None
+    gate_refresh_tasks: dict[str, asyncio.Task[None]] = {}
+    gate_last_refresh_at: dict[str, float] = {}
+    gate_refresh_slots = asyncio.Semaphore(1)
     capacity_multipliers = {
         str(symbol).upper(): float(value)
         for symbol, value in dict(capacity_size_multipliers or {}).items()
@@ -737,17 +741,30 @@ async def _native_with_clock_sync(
             await asyncio.sleep(max(10.0, float(probe_interval_s)))
             await refresh_probe()
 
-    async def refresh_bootstrap_capacity() -> None:
+    async def refresh_bootstrap_capacity(
+        requested_symbols: list[str] | None = None,
+        *,
+        expected_connection: str | None = None,
+    ) -> None:
         bootstrap = getattr(client, "bootstrap_envelopes", None)
         if not callable(bootstrap):
             return
+        subset = symbols if requested_symbols is None else requested_symbols
         try:
-            bootstrap_rows = await asyncio.to_thread(bootstrap, symbols)
+            bootstrap_rows = await asyncio.to_thread(bootstrap, subset)
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            # Incremental Gate capacity must remain unavailable if its
-            # authoritative REST base cannot be refreshed.
+            # A failed REST rebootstrap must never revive uncertain Gate depth.
             if venue == "gate":
-                capacity_states.clear()
+                if requested_symbols is None:
+                    capacity_states.clear()
+                else:
+                    for symbol in requested_symbols:
+                        capacity_states.pop(symbol, None)
+            return
+        # Never resurrect a snapshot requested during a previous WS connection.
+        if expected_connection is not None and expected_connection != gate_connection_id:
             return
         for envelope in bootstrap_rows:
             await _emit_with_backpressure(sink, envelope)
@@ -757,13 +774,19 @@ async def _native_with_clock_sync(
                     if isinstance(envelope.raw_payload, Mapping)
                     else {}
                 )
+                # A successfully fetched official REST order_book with its
+                # independent update id is a true full depth base, not a delta.
+                raw["full"] = True
                 raw["_alina_transport"] = {
                     "receive_wall_ts_ms": envelope.received_ts_ms,
                     "receive_mono_ns": envelope.local_monotonic_ns,
-                    "connection_id": envelope.connection_id,
+                    "connection_id": expected_connection or envelope.connection_id,
                 }
                 state = GateMarketState(contract=envelope.instrument)
                 state.apply_book(raw, receive_ts_ms=envelope.received_ts_ms)
+                if state.quality != "EXPLOITABLE" or state.sequence is None:
+                    capacity_states.pop(envelope.instrument, None)
+                    continue
                 capacity_states[envelope.instrument] = state
                 capacity = _capacity_from_native_state(
                     "gate",
@@ -777,13 +800,17 @@ async def _native_with_clock_sync(
                 if capacity is not None:
                     await _emit_with_backpressure(sink, capacity)
 
+    async def guarded_gate_rebootstrap(symbol: str, connection: str) -> None:
+        # Serialize on-demand REST reads to avoid hammering Gate's public API.
+        async with gate_refresh_slots:
+            await refresh_bootstrap_capacity([symbol], expected_connection=connection)
+
     # Acquire explicit timing and official base-book evidence before admitting
     # incremental native frames.
     await refresh_probe()
     await refresh_bootstrap_capacity()
     probe_task = asyncio.create_task(probe_loop())
     connection_id = f"{venue}-{uuid.uuid4().hex}"
-    gate_connection_id: str | None = None
     try:
         async for payload in client.messages(symbols):
             receive_wall_ts_ms = int(time.time() * 1_000)
@@ -828,9 +855,35 @@ async def _native_with_clock_sync(
             )
             if capacity is not None:
                 await _emit_with_backpressure(sink, capacity)
+            if venue == "gate":
+                result = message.get("result")
+                contract = (
+                    str(result.get("contract") or result.get("s") or "").upper()
+                    if isinstance(result, Mapping) else ""
+                )
+                state = capacity_states.get(contract)
+                if (
+                    contract and isinstance(state, GateMarketState)
+                    and state.reason in {"SEQUENCE_GAP", "SEQUENCE_REGRESSION"}
+                    and gate_connection_id
+                ):
+                    # Raw WS frame was already written. Derived L2 stays dark
+                    # until a new official REST book re-anchors this contract.
+                    capacity_states.pop(contract, None)
+                    now = time.monotonic()
+                    pending = gate_refresh_tasks.get(contract)
+                    if now >= gate_last_refresh_at.get(contract, 0.0) and (
+                        pending is None or pending.done()
+                    ):
+                        gate_last_refresh_at[contract] = now + 30.0
+                        gate_refresh_tasks[contract] = asyncio.create_task(
+                            guarded_gate_rebootstrap(contract, gate_connection_id)
+                        )
     finally:
         probe_task.cancel()
-        await asyncio.gather(probe_task, return_exceptions=True)
+        for task in gate_refresh_tasks.values():
+            task.cancel()
+        await asyncio.gather(probe_task, *gate_refresh_tasks.values(), return_exceptions=True)
 
 
 def _capacity_size_multiplier_from_metadata(
