@@ -416,7 +416,7 @@ def test_gate_reconstructed_book_reanchors_on_authoritative_full_snapshot():
             "a": [{"p": str(bid + 2), "s": "2"}],
             "full": full,
         }
-    state.apply_book(depth(1, 2, 100))
+    state.apply_book(depth(1, 2, 100, full=True))
     assert state.sequence == 2
     state.apply_book(depth(100, 101, 200, full=True))
     assert state.sequence == 101
@@ -432,7 +432,7 @@ def test_gate_malformed_full_snapshot_does_not_destroy_previous_causal_book():
     state = GateMarketState(contract="BTC_USDT")
     state.apply_book({
         "U": 1, "u": 2, "b": [{"p": "100", "s": "2"}],
-        "a": [{"p": "102", "s": "2"}], "t": 1002,
+        "a": [{"p": "102", "s": "2"}], "t": 1002, "full": True,
     })
     before = dict(state.bids), dict(state.asks), state.sequence
     result = state.apply_book({"full": True, "U": 100, "u": 101, "b": [], "a": []})

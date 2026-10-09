@@ -100,7 +100,7 @@ def test_bitget_bbo_liquidation_and_vwap_depth_evidence() -> None:
 
 def test_gate_and_bitget_gap_detection_is_fail_closed() -> None:
     gate = GateMarketState("BTC_USDT")
-    gate.apply_book({"U": 10, "u": 10, "b": [["100", "1"]], "a": [["101", "1"]]}, receive_ts_ms=1000)
+    gate.apply_book({"U": 10, "u": 10, "b": [["100", "1"]], "a": [["101", "1"]], "full": True}, receive_ts_ms=1000)
     assert gate.apply_book({"U": 12, "u": 12, "b": [["100", "2"]], "a": []}, receive_ts_ms=1010) == DESYNC
     assert gate.gap_count == 1
 

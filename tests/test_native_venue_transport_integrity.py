@@ -196,6 +196,7 @@ def test_gate_preserves_transport_clock_in_snapshot() -> None:
         {
             "t": 1_000,
             "u": 10,
+            "full": True,
             "b": [{"p": "100", "s": 2}],
             "a": [{"p": "101", "s": 2}],
             "_alina_transport": {
