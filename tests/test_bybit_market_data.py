@@ -105,6 +105,24 @@ def test_bybit_fail_closed_on_delta_before_snapshot_and_regression() -> None:
         == DESYNC
     )
 
+    assert state.has_snapshot is False
+    assert not state.bids and not state.asks
+    # The apparent next delta must NOT restore an untrusted partial book.
+    assert state.apply_orderbook(
+        {"type": "delta", "data": {"s": "ETHUSDT", "b": [["10", "50"]], "a": [], "u": 10, "seq": 11}},
+        receive_ts_ms=103,
+    ) == DESYNC
+    assert state.has_snapshot is False
+    # Only a real exchange snapshot can restore an executable book.
+    assert state.apply_orderbook(
+        {"type": "snapshot", "ts": 104, "data": {
+            "s": "ETHUSDT", "b": [["9", "2"]], "a": [["11", "3"]],
+            "u": 12, "seq": 12,
+        }},
+        receive_ts_ms=105,
+    ) == "EXPLOITABLE"
+    assert state.has_snapshot is True
+
 
 def test_bybit_discovery_keeps_usdt_perpetuals_only() -> None:
     payload = {
