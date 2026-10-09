@@ -249,6 +249,22 @@ def _candidate(
             "copy_vault_selection": "hyperliquid_public_vaults",
         }
         if (
+            family == "cross_venue_capacity_tape"
+            and isinstance(manifest, Mapping)
+            and manifest.get("source") == "cross_venue_derived_capacity"
+            and manifest.get("asset_verified") is True
+            and str(manifest.get("sha256") or "").lower() == str(row.get("sha256") or "").lower()
+            and str(row.get("release_repository") or "") == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        ):
+            provenance = manifest.get("provenance")
+            if isinstance(provenance, Mapping) and (
+                provenance.get("public_data_only") is True
+                and provenance.get("authenticated") is False
+                and provenance.get("real_execution") is False
+                and provenance.get("transports") == ["derived"]
+            ):
+                return True
+        if (
             isinstance(manifest,Mapping)
             and family in expected_sources
             and manifest.get("source") == expected_sources[family]
@@ -435,6 +451,33 @@ def _apply_result(
             manifest["trade_count_exact"]=False
     manifest.pop("replay_validation_pending",None)
     manifest.pop("pre_replay_quality_status",None)
+
+    if result.get("cross_venue_receive_clock_verified") is True:
+        if (
+            result.get("verified_from_release") is not True
+            or result.get("asset_sha256") != manifest.get("sha256")
+            or manifest.get("source") != "cross_venue_derived_capacity"
+            or str(manifest.get("family") or "").lower() != "cross_venue_capacity_tape"
+        ):
+            raise BackfillError("cross-venue tape lacks immutable Release verification")
+        old = dict(manifest.get("integrity") or {})
+        manifest["historical_cross_venue_clock_repair"] = {
+            "method": "verified_dual_leg_receive_clock_scan_v1",
+            "verifier_version": VERIFIER_VERSION,
+            "release_asset_sha256": result["asset_sha256"],
+            "verified_records": result.get("record_count"),
+            "previous_regression_count": old.get("regression_count"),
+            "exchange_timestamp_invented": False,
+            "parent_l2_shard_verified": False,
+            "proof_of_pnl_allowed": False,
+        }
+        old["regression_count"] = 0
+        manifest["integrity"] = old
+        provenance = dict(manifest.get("provenance") or {})
+        provenance["timestamp_semantics"] = ["receive_observation_time_only"]
+        manifest["provenance"] = provenance
+        # The verified observation tape is replayable, but its parent L2
+        # shards remain unverified and its status cannot be forcibly SAFE.
 
     if result.get("receive_only_snapshot_verified") is True:
         # No invented exchange time: store the old integrity result for audit
