@@ -10,8 +10,10 @@ from typing import Any, Mapping
 
 try:
     from tools.manifest_policy import classify_manifest
+    from tools.index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator
 except ModuleNotFoundError:
     from manifest_policy import classify_manifest
+    from index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = Path("catalog/DATA_INDEX.json")
@@ -32,7 +34,7 @@ MIRROR_KEYS = (
     "sha256", "bytes", "uncompressed_bytes", "uncompressed_size_exact",
     "event_count", "record_count", "trade_count", "trade_count_exact",
     "unique_trade_count", "unique_trade_count_exact", "unique_identity_method",
-    "trade_identity_digests", "trade_identity_digests_exact",
+    "trade_identity_digests_exact",
     "replay_compatible", "replay_schema_version", "replay_reason",
     "quality_reasons", "source",
 )
@@ -42,9 +44,12 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(
-        json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        (json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":")) if path.name == "DATA_INDEX.json" else json.dumps(dict(payload), ensure_ascii=False, indent=2, sort_keys=True)) + "\n",
         encoding="utf-8",
     )
+    if path.name == "DATA_INDEX.json" and temporary.stat().st_size >= 85 * 1024 * 1024:
+        temporary.unlink(missing_ok=True)
+        raise ValueError("DATA_INDEX_TOO_LARGE: cannot publish unbounded index")
     os.replace(temporary, path)
 
 
@@ -77,21 +82,23 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
         row = dict(raw_row)
         stored_status = str(row.get("quality_status") or "").upper()
         if stored_status not in NON_SAFE:
-            new_rows.append(row)
+            new_rows.append(_compact_index_row(row))
             continue
 
         manifest_rel = str(row.get("manifest_path") or "").strip()
         manifest_path = base / manifest_rel
         if not manifest_rel or not manifest_path.is_file():
-            new_rows.append(row)
+            new_rows.append(_compact_index_row(row))
             continue
 
-        manifest = _load(manifest_path)
+        manifest = _normalize_manifest(_load(manifest_path))
         current_status, current_reasons = classify_manifest(manifest)
+        if current_status == "SAFE" and not _valid_release_locator(manifest):
+            current_status = "PARTIAL"
         # Repair only a proven stale negative label. Never auto-demote or weaken
         # a current exclusion here.
         if current_status != "SAFE":
-            new_rows.append(row)
+            new_rows.append(_compact_index_row(row))
             continue
 
         dataset_id = str(manifest.get("dataset_id") or row.get("dataset_id") or "").strip()
@@ -114,7 +121,7 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
         merged["quality_status"] = "SAFE"
         merged["quality_reasons"] = []
         merged["manifest_path"] = str(destination.relative_to(base)).replace("\\", "/")
-        new_rows.append(merged)
+        new_rows.append(_compact_index_row(merged))
 
         # Only delete the stale manifest pointer after the SAFE copy is durable.
         if manifest_path.resolve() != destination.resolve() and manifest_path.is_file():
