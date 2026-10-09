@@ -15,7 +15,7 @@ except ModuleNotFoundError:
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
 REPLAYABLE_FAMILIES={"capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v6"
+VERIFIER_VERSION="alina.replay.compatibility.v7"
 
 
 def _open(path: Path):
@@ -58,18 +58,44 @@ def _proof_of_receive_only_snapshot(
         or provenance.get("authenticated") is not False
     ):
         return None
-    if family == "copy_vault_positions":
-        if provenance.get("request_type") != "clearinghouseState":
-            return None
-    elif provenance.get("selection_causal") is not True:
-        return None
     raw = row.get("raw_payload")
     if not isinstance(raw, str) or not raw:
         return None
-    # Hash the actual envelope raw payload: a mislabeled/corrupt snapshot fails.
+    # The old collector did not persist request_type for HTTP observations.
+    # Inspect the immutable HTTP response *and* its provenance instead of
+    # demanding modern metadata that cannot be reconstructed retroactively.
     import hashlib
     if row.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest():
         return None
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    if family == "copy_vault_positions":
+        if (
+            provenance.get("request_type") not in {None, "clearinghouseState"}
+            or not isinstance(payload.get("assetPositions"), list)
+        ):
+            return None
+        if provenance.get("request_type") is None:
+            if provenance.get("url") != "https://api.hyperliquid.xyz/info":
+                return None
+            summary = row.get("parsed_summary")
+            if not isinstance(summary, Mapping) or summary.get("position_count") != len(payload["assetPositions"]):
+                return None
+    else:
+        if not isinstance(payload.get("selection"), Mapping) or not isinstance(payload.get("filters"), Mapping):
+            return None
+        if provenance.get("selection_causal") is not True:
+            if provenance.get("url") != "https://stats-data.hyperliquid.xyz/Mainnet/vaults":
+                return None
+            summary = row.get("parsed_summary")
+            if not isinstance(summary, Mapping) or summary.get("observation_only") is not True:
+                return None
+            if summary.get("selected_at_ms") != row.get("received_ts_ms"):
+                return None
     recv = row.get("received_ts_ms")
     monotonic = row.get("local_monotonic_ns")
     if type(recv) is not int or recv <= 0 or type(monotonic) is not int or monotonic <= 0:
