@@ -940,12 +940,19 @@ def test_queue_loss_unknown_time_is_conservatively_fail_closed():
     ) == [1, 1]
 
 
-def test_queue_loss_refuses_orphaned_drops_without_persisted_evidence():
-    import pytest
+def test_orphaned_queue_loss_preserves_other_markets_but_reports_missing_partition():
     m = _module()
     key = ("bitget_public_ws", "l2Book", "BTCUSDT")
-    with pytest.raises(ValueError, match="no corresponding durable shard"):
-        m.attribute_queue_drops([], {key: 1}, {(*key, "conn-1", 2): 1})
+    other = {
+        "source": "gate_public_ws", "family": "trades",
+        "symbol": "ETH_USDT", "start_ts_ms": 2000, "end_ts_ms": 2999,
+        "synchronization": {"connection_ids": ["gate-ok"]},
+    }
+    assert m.attribute_queue_drops([other], {key: 1}, {(*key, "conn-1", 2): 1}) == [0]
+    assert m.orphaned_queue_drops([other], {key: 1}) == {
+        "bitget_public_ws|l2Book|BTCUSDT": 1
+    }
+    assert m.attribute_queue_drops([], {key: 1}, {(*key, "conn-1", 2): 1}) == []
 
 
 def test_sync_sink_records_queue_loss_clock_and_connection():
