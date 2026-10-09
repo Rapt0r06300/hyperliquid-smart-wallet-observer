@@ -768,6 +768,13 @@ def restore_everything(
         if not isinstance(assets, list):
             raise RestoreError(f"missing asset list for Release {tag}")
         seen_tags.add(tag)
+        # Dataset Releases without the authoritative run manifest cannot be
+        # classified for replay. Refuse an incomplete inventory before download.
+        if tag.lower().startswith(("data-v2", "alina-data-v2")) and not any(
+            isinstance(asset, Mapping) and asset.get("name") == "RUN_MANIFEST.json"
+            for asset in assets
+        ):
+            raise RestoreError(f"dataset Release has no RUN_MANIFEST.json: {tag}")
         seen_names: set[str] = set()
         for asset in assets:
             if not isinstance(asset, Mapping):
