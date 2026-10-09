@@ -139,3 +139,59 @@ def test_mix_auto_rotate_and_batch_reconnect_preserves_every_record(tmp_path):
     assert all(len({row["connection_id"] for row in
                     [json.loads(x) for x in gzip.open(file, "rt", encoding="utf-8")]}) == 1
                for file in files)
+
+
+
+def test_post_gap_native_l2_snapshot_seals_damaged_prefix_and_recovers_clean_suffix(tmp_path):
+    import gzip
+
+    writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
+    def book(ts, seq, previous, kind="UPDATE"):
+        tick = envelope("okx_public_ws", "l2Book", "BTC-USDT-SWAP", ts)
+        tick.event_kind = kind
+        tick.sequence = seq
+        tick.parsed_summary = {"prev_sequence": previous}
+        return tick
+    ticks = [
+        book(1000, 10, -1),
+        book(1001, 11, 10),
+        book(1002, 15, 13),  # authenticated predecessor gap: 11 != 13.
+        book(1003, 20, -1, "SNAPSHOT"),  # genuine source re-anchor.
+        book(1004, 21, 20),
+    ]
+    assert len(writer.append_batch_records(ticks)) == 5
+    shards = writer.rotate_all()
+    assert len(shards) == 2
+    manifests = [build_manifest_from_tick_shard(
+        p, collector_version="recovery-test",
+    ) for p in shards]
+    assert [v["event_count"] for v in manifests] == [3, 2]
+    assert manifests[0]["integrity"]["gap_count"] > 0
+    assert manifests[0]["replay_compatible"] is False
+    assert manifests[1]["integrity"]["gap_count"] == 0
+    assert manifests[1]["replay_compatible"] is True
+    all_rows = []
+    for p in shards:
+        with gzip.open(p, "rt", encoding="utf-8") as fh:
+            all_rows.extend(json.loads(line) for line in fh)
+    assert [row["received_ts_ms"] for row in all_rows] == [
+        1005, 1006, 1007, 1008, 1009,
+    ]
+
+
+def test_post_gap_no_snapshot_remains_one_bad_shard(tmp_path):
+    writer = PartitionedTickDatasetWriter(tmp_path, rotate_bytes=10_000_000)
+    a = envelope("gate_public_ws", "l2Book", "BTC_USDT", 1000)
+    b = envelope("gate_public_ws", "l2Book", "BTC_USDT", 1001)
+    c = envelope("gate_public_ws", "l2Book", "BTC_USDT", 1002)
+    a.sequence = 10
+    b.sequence = 15
+    b.parsed_summary = {"first_update_id": 14}
+    c.sequence = 16
+    c.parsed_summary = {"first_update_id": 16}
+    writer.append_batch_records([a, b, c])
+    shards = writer.rotate_all()
+    assert len(shards) == 1
+    manifest = build_manifest_from_tick_shard(shards[0], collector_version="recovery-test")
+    assert manifest["integrity"]["gap_count"] > 0
+    assert manifest["replay_compatible"] is False
