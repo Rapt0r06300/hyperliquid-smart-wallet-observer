@@ -46,7 +46,7 @@ from hl_observer.collection.depth_capacity import (
 from hl_observer.collection.gate_market_data import GateMarketState, GatePublicClient
 from hl_observer.collection.native_market_tape import (
     native_instrument_metadata_envelope,
-    native_tick_envelope,
+    native_tick_envelopes,
 )
 from hl_observer.collection.native_venue_market import canonical_coin
 from hl_observer.collection.okx_market_data import OkxMarketState, OkxPublicClient
@@ -844,8 +844,10 @@ async def _native_with_clock_sync(
                     "probe_receive_wall_ts_ms"
                 )
             message["_alina_transport"] = transport
-            envelope = native_tick_envelope(venue, message)
-            if envelope is not None:
+            # Preserve each exchange trade identity even when a WS frame
+            # contains a native batch. The existing splitter keeps provenance
+            # and the original batch digest on every individual trade.
+            for envelope in native_tick_envelopes(venue, message):
                 await _emit_with_backpressure(sink, envelope)
             capacity = _native_capacity_envelope(
                 venue,
