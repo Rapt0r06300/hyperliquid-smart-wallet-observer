@@ -320,3 +320,76 @@ def test_historical_vault_wrong_http_origin_or_position_count_remains_unverified
         })
         assert result["receive_only_snapshot_verified"] is False
         assert result["replay_compatible"] is False
+
+
+
+def test_historical_cross_venue_max_exchange_regression_replays_on_verified_receive(tmp_path):
+    from hl_observer.collection.depth_capacity import (
+        capacity_tape_envelope, cross_venue_capacity_envelope,
+    )
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+
+    def tick(venue, exchange_ts, receive_ts, mono):
+        return capacity_tape_envelope(
+            venue=venue, instrument="BTCUSDT" if venue == "bybit" else "BTC-USDT-SWAP",
+            bids=[[100, 3]], asks=[[101, 3]],
+            exchange_ts_ms=exchange_ts, received_ts_ms=receive_ts,
+            receive_mono_ns=mono, connection_id=venue + "-1", sequence=10,
+            quality="EXPLOITABLE", source_raw_l2_payload={"seq": 10},
+        )
+
+    old_first = cross_venue_capacity_envelope(
+        tick("bybit", 1015, 1020, 1000000),
+        tick("okx", 1010, 1021, 1000010),
+    )
+    old_second = cross_venue_capacity_envelope(
+        tick("bybit", 1005, 1030, 1000100),
+        tick("okx", 1002, 1031, 1000110),
+    )
+    assert old_first is not None and old_second is not None
+    # Reproduce the historical synthetic exchange time without rewriting
+    # either of the immutable L2 leg identities.
+    old_first.exchange_ts_ms = 1015
+    old_second.exchange_ts_ms = 1005
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append_batch_records([old_first, old_second])
+    [path] = writer.rotate_all()
+    result = inspect_asset(path, {
+        "family": "cross_venue_capacity_tape",
+        "source": "cross_venue_derived_capacity", "venue": "unknown",
+        "symbol": "BTC", "integrity": {"gap_count": 0, "regression_count": 1},
+    })
+    assert result["record_count"] == 2
+    assert result["cross_venue_receive_clock_verified"] is True
+    assert result["replay_compatible"] is True
+    assert result["out_of_order_count"] == 0
+
+
+def test_cross_venue_missing_parent_l2_hash_is_not_replayable(tmp_path):
+    from hl_observer.collection.depth_capacity import (
+        capacity_tape_envelope, cross_venue_capacity_envelope,
+    )
+    from hl_observer.collection.partitioned_tick_dataset import PartitionedTickDatasetWriter
+    left = capacity_tape_envelope(
+        venue="bybit", instrument="BTCUSDT", bids=[[100, 3]], asks=[[101, 3]],
+        exchange_ts_ms=1015, received_ts_ms=1020, receive_mono_ns=1000000,
+        connection_id="bybit", sequence=10, quality="EXPLOITABLE",
+        source_raw_l2_payload=None,
+    )
+    right = capacity_tape_envelope(
+        venue="okx", instrument="BTC-USDT-SWAP", bids=[[100, 3]], asks=[[101, 3]],
+        exchange_ts_ms=1010, received_ts_ms=1021, receive_mono_ns=1000010,
+        connection_id="okx", sequence=10, quality="EXPLOITABLE",
+        source_raw_l2_payload={"seq": 10},
+    )
+    envelope = cross_venue_capacity_envelope(left, right)
+    assert envelope is not None
+    writer = PartitionedTickDatasetWriter(tmp_path)
+    writer.append(envelope)
+    [path] = writer.rotate_all()
+    result = inspect_asset(path, {
+        "family": "cross_venue_capacity_tape",
+        "source": "cross_venue_derived_capacity", "integrity": {"gap_count": 0},
+    })
+    assert result["cross_venue_receive_clock_verified"] is False
+    assert result["replay_compatible"] is False
