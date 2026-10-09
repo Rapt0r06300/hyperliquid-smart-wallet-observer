@@ -163,3 +163,17 @@ def test_packed_release_rejects_untrusted_member_locator():
             release_container_asset="packed.zip",
             release_remote_size=100, release_remote_digest="sha256:" + "a" * 64,
         ))
+
+
+
+def test_packed_shard_uses_logical_member_when_redundant_locator_omitted():
+    row = _safe_row(
+        release_asset="x.jsonl.gz",
+        release_storage="zip_entry",
+        release_container_asset="packed-shards-0000.zip",
+        release_remote_digest="sha256:" + "b" * 64,
+        release_remote_size=1000,
+    )
+    shard = SafeShard.from_index_row(row)
+    assert shard.release_member == "x.jsonl.gz"
+    assert shard.release_container_asset == "packed-shards-0000.zip"

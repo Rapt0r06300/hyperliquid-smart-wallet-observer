@@ -287,3 +287,44 @@ def test_compacted_index_preserves_selectors_and_scalar_integrity():
     assert "trade_identity_digests" not in compact
     assert "quality_reasons" not in compact
     assert "release_container_asset" not in compact
+
+
+
+def test_index_drops_only_redudant_scalars_and_keeps_cryptographic_locator():
+    from index_run_manifest import _compact_index_row
+    direct = {
+        "dataset_id": "one", "quality_status": "SAFE",
+        "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "release_tag": "data-v2-direct", "release_asset": "one.jsonl.gz",
+        "sha256": "a" * 64, "bytes": 100, "event_count": 7,
+        "record_count": 7, "trade_count": 0, "trade_count_exact": False,
+        "unique_trade_count_exact": False,
+        "trade_identity_digests_exact": False,
+        "duplicate_count": 0, "gap_count": 0,
+        "release_remote_size": 100,
+        "release_remote_digest": "sha256:" + "a" * 64,
+        "replay_compatible": True,
+    }
+    shrunk = _compact_index_row(direct)
+    assert shrunk["quality_status"] == "SAFE"
+    assert shrunk["sha256"] == "a" * 64
+    assert shrunk["gap_count"] == 0
+    assert shrunk["replay_compatible"] is True
+    for key in ("record_count", "trade_count", "trade_count_exact",
+                "unique_trade_count_exact", "trade_identity_digests_exact",
+                "duplicate_count", "release_remote_size", "release_remote_digest"):
+        assert key not in shrunk
+    packed = {
+        **direct, "release_storage": "zip_entry",
+        "release_asset": "one.jsonl.gz",
+        "release_member": "one.jsonl.gz",
+        "release_container_asset": "packed-shards-0000.zip",
+        "release_remote_size": 1000,
+        "release_remote_digest": "sha256:" + "b" * 64,
+    }
+    packed_row = _compact_index_row(packed)
+    assert packed_row["release_storage"] == "zip_entry"
+    assert packed_row["release_container_asset"] == "packed-shards-0000.zip"
+    assert packed_row["release_remote_size"] == 1000
+    assert packed_row["release_remote_digest"] == "sha256:" + "b" * 64
+    assert "release_member" not in packed_row
