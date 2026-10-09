@@ -401,6 +401,7 @@ def _materialize_classified_shards(
     destination: Path,
     *,
     catalog_safe: Mapping[str, tuple[str, str]] | None = None,
+    allowed_release_dirs: set[str] | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "usable_shards": 0,
@@ -409,12 +410,16 @@ def _materialize_classified_shards(
         "missing_or_corrupt_rows": 0,
         "verified_zip_members": 0,
         "stale_usable_quarantined": 0,
+        "ignored_stale_release_manifests": 0,
         "failures": [],
     }
     expected_usable: set[Path] = set()
     diagnostics = destination / "diagnostics" / "run_manifests"
     for manifest_path in sorted(releases_root.glob("*/RUN_MANIFEST.json")):
         release_tag = manifest_path.parent.name
+        if allowed_release_dirs is not None and release_tag not in allowed_release_dirs:
+            report["ignored_stale_release_manifests"] += 1
+            continue
         diagnostic_dir = diagnostics / release_tag
         diagnostic_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(manifest_path, diagnostic_dir / "RUN_MANIFEST.json")
@@ -575,10 +580,14 @@ def _materialize_classified_shards(
     return report
 
 
-def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
+def _verify_run_manifests(
+    root: Path, *, allowed_release_dirs: set[str] | None = None
+) -> list[dict[str, Any]]:
     asset_lookup: dict[tuple[str, str], Path] = {}
     for release_dir in root.iterdir() if root.exists() else []:
         if not release_dir.is_dir():
+            continue
+        if allowed_release_dirs is not None and release_dir.name not in allowed_release_dirs:
             continue
         for path in release_dir.iterdir():
             if path.is_file():
@@ -586,6 +595,8 @@ def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
 
     checks: list[dict[str, Any]] = []
     for manifest_path in root.glob("*/RUN_MANIFEST.json"):
+        if allowed_release_dirs is not None and manifest_path.parent.name not in allowed_release_dirs:
+            continue
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -859,6 +870,12 @@ def restore_everything(
                 raise RestoreError(f"invalid download URL for {tag}/{name}")
             seen_names.add(name)
 
+    # Old cached Releases must never be treated as part of the current GitHub
+    # inventory or silently reintroduce formerly SAFE local materializations.
+    allowed_release_dirs = {_safe_component(tag) for tag in seen_tags}
+    if len(allowed_release_dirs) != len(seen_tags):
+        raise RestoreError("Release tags collide after path normalization")
+
     pending_download_bytes = 0
     for release in releases:
         tag = str(release.get("tag_name") or "")
@@ -935,12 +952,15 @@ def restore_everything(
                 row["assets"].append({"name": asset.get("name"), "status": "FAIL", "error": str(exc)})
         report["releases"].append(row)
 
-    report["run_manifest_checks"] = _verify_run_manifests(releases_root)
+    report["run_manifest_checks"] = _verify_run_manifests(
+        releases_root, allowed_release_dirs=allowed_release_dirs
+    )
     report["verification_failures"] = sum(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
     report["classification"] = _materialize_classified_shards(
-        repository, releases_root, destination, catalog_safe=catalog_safe
+        repository, releases_root, destination, catalog_safe=catalog_safe,
+        allowed_release_dirs=allowed_release_dirs,
     )
     report["local_snapshot"] = (
         materialize_latest_local_snapshot(releases_root, workspace)
