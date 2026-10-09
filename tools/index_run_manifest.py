@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from manifest_policy import classify_manifest
+try:
+    from tools.manifest_policy import classify_manifest
+except ModuleNotFoundError:
+    from manifest_policy import classify_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"

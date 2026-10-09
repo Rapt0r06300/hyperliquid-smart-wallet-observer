@@ -813,7 +813,8 @@ def test_legacy_sink_never_pairs_a_derived_capacity_frame_that_was_dropped():
     )
     second = types.SimpleNamespace(
         source_id="okx_public_ws", channel="capacity_tape",
-        instrument="BTCUSDT", parsed_summary={"coin": "BTC", "venue": "okx"},
+        instrument="BTCUSDT", received_ts_ms=1002,
+        parsed_summary={"coin": "BTC", "venue": "okx"},
     )
     sink.emit(first)
     sink.emit(second)
