@@ -315,7 +315,11 @@ jobs:
 
             make_campaign             event_intelligence_collection             "event-e$PHASE_EPOCH-$BUCKET-v5"             "event-hourly-v5"             '{}'
 
-            if [ "$HOUR" = "06" ]; then
+            # GitHub may defer or cancel the 06:00 creator while market
+            # workflows are busy. Materialize the same deterministic daily
+            # archive campaign at any subsequent hour, without duplicates or
+            # interrupting active workers (make_campaign is lease-aware).
+            if [ "$((10#$HOUR))" -ge 6 ]; then
               make_campaign               official_archive_collection               "archives-binance-btc-e$PHASE_EPOCH-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"binance\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
               make_campaign               official_archive_collection               "archives-bybit-btc-e$PHASE_EPOCH-$DAY-v4"               "archives-daily-v4"               "{\"venue\":\"bybit\",\"coin\":\"BTC\",\"symbol\":\"BTCUSDT\",\"start_date\":\"$PREV_DAY\",\"end_date\":\"$PREV_DAY\",\"max_days\":1}"
             fi
