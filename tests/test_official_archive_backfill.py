@@ -264,3 +264,45 @@ def test_archive_campaign_defaults_to_full_day_without_silent_row_limit() -> Non
     )
     limited_command, _ = build_command(limited_ctx)
     assert limited_command[limited_command.index("--max-events-per-day") + 1] == "2000000"
+
+
+
+@pytest.mark.parametrize(
+    ("venue", "csv_body"),
+    [
+        ("binance_aggtrades", "1,100.1,0.2,1,2,1790000000000,true\n"
+                             "NOT_AN_ID,100.2,0.3,3,4,1790000000100,false\n"),
+        ("binance_trades", "id,price,qty,quote_qty,time,is_buyer_maker\n"
+                           "1,100.1,0.2,20,1790000000000,false\n"
+                           "not_an_id,100.2,0.3,20,1790000000100,false\n"),
+        ("bybit", "timestamp,symbol,side,size,price,tickDirection,trdMatchID\n"
+                  "1790000000.125,BTCUSDT,Buy,0.1,100.5,PlusTick,abc\n"
+                  "1790000000.125,BTCUSDT,Sell,wrong,100.5,MinusTick,def\n"),
+        ("okx", "trade_id,instrument_name,price,size,side,timestamp\n"
+                "abc,BTC-USDT-SWAP,60000,0.1,buy,1790000000000\n"
+                "def,BTC-USDT-SWAP,BROKEN,0.1,buy,1790000000100\n"),
+    ],
+)
+def test_official_archive_never_silently_drops_a_malformed_trade(venue, csv_body):
+    from hl_observer.data_sources.official_archive_backfill import (
+        parse_binance_aggtrades_csv,
+        parse_binance_trades_csv,
+        parse_bybit_trades_csv,
+        parse_okx_trades_csv,
+    )
+    common = {
+        "coin": "BTC", "source_url": "https://official.example.invalid/source",
+        "archive_sha256": "a" * 64,
+    }
+    if venue == "binance_aggtrades":
+        rows = parse_binance_aggtrades_csv(csv_body, symbol="BTCUSDT",
+                                           checksum_verified=True, **common)
+    elif venue == "binance_trades":
+        rows = parse_binance_trades_csv(csv_body, symbol="BTCUSDT",
+                                        checksum_verified=True, **common)
+    elif venue == "bybit":
+        rows = parse_bybit_trades_csv(csv_body, symbol="BTCUSDT", **common)
+    else:
+        rows = parse_okx_trades_csv(csv_body, symbol="BTC-USDT-SWAP", **common)
+    with pytest.raises(ValueError, match="OFFICIAL_ARCHIVE_UNPARSEABLE_TRADE_ROW"):
+        list(rows)
