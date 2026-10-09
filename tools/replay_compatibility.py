@@ -14,8 +14,8 @@ except ModuleNotFoundError:
     from backfill_exact_trade_counts import _native_trade_keys, _summary_trade_count
 
 TRADE_FAMILIES={"trades","agg_trades","fills","userfills","user_fills","copy_vault_fills"}
-REPLAYABLE_FAMILIES={"capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
-VERIFIER_VERSION="alina.replay.compatibility.v7"
+REPLAYABLE_FAMILIES={"cross_venue_capacity_tape","capacity_tape","trades","agg_trades","bbo","l2book","l2","book","funding","funding_settlement","open_interest","fills","userfills","user_fills","copy_vault_fills","copy_vault_l2","copy_vault_positions","copy_vault_selection","copy_vault_snapshot","external_events","activeassetctx","instrument_metadata","mark_price","ticker"}
+VERIFIER_VERSION="alina.replay.compatibility.v8"
 
 
 def _open(path: Path):
@@ -206,6 +206,75 @@ def _verified_capacity_lineage(row: Mapping[str, Any]) -> bool:
     )
 
 
+def _proof_cross_venue_receive_snapshot(
+    row: Mapping[str, Any], manifest: Mapping[str, Any]
+) -> int | None:
+    """Hash-verified dual-leg receive clock; no invented exchange timestamp."""
+    import hashlib
+    import re
+    if (
+        manifest.get("source") != "cross_venue_derived_capacity"
+        or row.get("source_id") != "cross_venue_derived_capacity"
+        or row.get("channel") != "cross_venue_capacity_tape"
+        or str(row.get("event_kind") or "").upper() != "SNAPSHOT"
+        or row.get("real_execution") is not False
+    ):
+        return None
+    prov = row.get("provenance")
+    if not isinstance(prov, Mapping) or not (
+        prov.get("transport") == "derived"
+        and prov.get("access") == "read_only"
+        and prov.get("authenticated") is False
+        and prov.get("derived") is True
+        and prov.get("derived_from_family") == "capacity_tape"
+        and prov.get("raw_l2_source_of_truth") is True
+    ):
+        return None
+    raw = row.get("raw_payload")
+    if not isinstance(raw, str) or (
+        row.get("raw_sha256") != hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    ):
+        return None
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    summary = row.get("parsed_summary")
+    if not isinstance(payload, Mapping) or not isinstance(summary, Mapping):
+        return None
+    legs = payload.get("source_legs")
+    if not isinstance(legs, list) or len(legs) != 2 or summary.get("source_legs") != legs:
+        return None
+    exchanges, walls, monos = [], [], []
+    venues: set[str] = set()
+    for leg in legs:
+        if not isinstance(leg, Mapping):
+            return None
+        venue = leg.get("venue")
+        if not isinstance(venue, str) or not venue or venue in venues:
+            return None
+        venues.add(venue)
+        for field in ("source_raw_l2_sha256", "source_reconstructed_book_sha256"):
+            if re.fullmatch(r"[0-9a-f]{64}", str(leg.get(field) or "")) is None:
+                return None
+        fields = (leg.get("exchange_ts_ms"), leg.get("receive_wall_ts_ms"),
+                  leg.get("receive_monotonic_ns"))
+        if any(type(value) is not int or value <= 0 for value in fields):
+            return None
+        exchanges.append(fields[0])
+        walls.append(fields[1])
+        monos.append(fields[2])
+    if abs(monos[0] - monos[1]) > 250_000_000:
+        return None
+    if row.get("exchange_ts_ms") not in (None, max(exchanges)):
+        return None
+    if row.get("received_ts_ms") != max(walls):
+        return None
+    if row.get("local_monotonic_ns") != max(monos):
+        return None
+    return max(walls)
+
+
 def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     """Verify parseability and causal chronology without inventing evidence.
 
@@ -236,6 +305,9 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
     receive_only = family in _RECEIVE_ONLY_COPY_SOURCES
     verified_observations = 0
     receive_context = family == "activeassetctx"
+    cross_venue = family == "cross_venue_capacity_tape"
+    cross_verified = 0
+    cross_monos: set[int] = set()
     context_proven = 0
     context_observation_clocks: set[int] = set()
     try:
@@ -268,6 +340,17 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
                         ts = float(observed_ctx)
                     else:
                         ts = None
+                if cross_venue:
+                    causal = _proof_cross_venue_receive_snapshot(row, manifest)
+                    if causal is None:
+                        ts = None
+                    else:
+                        cross_verified += 1
+                        mono = row["local_monotonic_ns"]
+                        if mono in cross_monos:
+                            result["invalid_record_count"] += 1
+                        cross_monos.add(mono)
+                        ts = float(causal)
                 if ts is None:
                     result["invalid_record_count"]+=1
                     if family in TRADE_FAMILIES:
@@ -323,6 +406,12 @@ def inspect_asset(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, An
         result["replay_reason"]="TRUNCATED_OR_UNREADABLE"
         return result
 
+    result["cross_venue_receive_clock_verified"] = bool(
+        cross_venue and result["record_count"] > 0
+        and cross_verified == result["record_count"]
+        and len(cross_monos) == result["record_count"]
+        and result["invalid_record_count"] == 0
+    )
     result["receive_only_context_verified"] = bool(
         receive_context and result["record_count"] > 0
         and context_proven == result["record_count"]
