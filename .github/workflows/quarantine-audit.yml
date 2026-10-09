@@ -6,12 +6,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "catalog/DATA_INDEX.json"
-      - "catalog/DATA_METRICS.json"
-      - "datasets/**/*.manifest.json"
+      # Dataset updates are audited on schedule; triggering on every new
+      # manifest caused redundant job cascades and starved the publisher.
       - "tools/build_quarantine_audit.py"
-      - "catalog/QUARANTINE_CAUSES.json"
       - "tools/repair_stale_safe_classifications.py"
+      - "tools/index_run_manifest.py"
       - "tools/manifest_policy.py"
       - "tests/test_quarantine_audit.py"
       - ".github/workflows/quarantine-audit.yml"
