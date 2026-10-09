@@ -403,3 +403,38 @@ def test_gate_full_book_update_reanchors_only_with_native_full_marker():
     incremental = native_tick_envelope("gate", sample)
     assert incremental is not None
     assert incremental.event_kind == "UPDATE"
+
+
+
+def test_gate_reconstructed_book_reanchors_on_authoritative_full_snapshot():
+    from hl_observer.collection.gate_market_data import GateMarketState
+    state = GateMarketState(contract="BTC_USDT")
+    def depth(start, end, bid, *, full=False):
+        return {
+            "U": start, "u": end, "t": 1000 + end,
+            "b": [{"p": str(bid), "s": "2"}],
+            "a": [{"p": str(bid + 2), "s": "2"}],
+            "full": full,
+        }
+    state.apply_book(depth(1, 2, 100))
+    assert state.sequence == 2
+    state.apply_book(depth(100, 101, 200, full=True))
+    assert state.sequence == 101
+    assert 100 not in state.bids
+    assert 200 in state.bids
+    assert state.gap_count == 0
+    state.apply_book(depth(105, 106, 201))
+    assert state.gap_count == 1  # A real post-snapshot delta gap remains fatal.
+
+
+def test_gate_malformed_full_snapshot_does_not_destroy_previous_causal_book():
+    from hl_observer.collection.gate_market_data import GateMarketState
+    state = GateMarketState(contract="BTC_USDT")
+    state.apply_book({
+        "U": 1, "u": 2, "b": [{"p": "100", "s": "2"}],
+        "a": [{"p": "102", "s": "2"}], "t": 1002,
+    })
+    before = dict(state.bids), dict(state.asks), state.sequence
+    result = state.apply_book({"full": True, "U": 100, "u": 101, "b": [], "a": []})
+    assert result != "EXPLOITABLE"
+    assert (state.bids, state.asks, state.sequence) == before
