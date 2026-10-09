@@ -1170,3 +1170,26 @@ def test_hyperliquid_malformed_batch_not_silently_truncated():
     assert len(rows) == 1
     assert rows[0].parsed_summary["event_count"] == 2
     assert len(rows[0].raw_payload["data"]) == 2
+
+
+def test_native_malformed_trade_batch_stays_whole_and_unverified():
+    from hl_observer.collection.native_market_tape import native_tick_envelopes
+
+    frame = {
+        "topic": "publicTrade.BTCUSDT",
+        "ts": 1005,
+        "data": [
+            {"s": "BTCUSDT", "i": "trade-1", "T": 1000},
+            "malformed",
+        ],
+        "_alina_transport": {
+            "receive_wall_ts_ms": 1010,
+            "receive_mono_ns": 100000,
+            "connection_id": "bybit-1",
+        },
+    }
+    rows = native_tick_envelopes("bybit", frame)
+    assert len(rows) == 1
+    assert rows[0].parsed_summary["event_count"] == 2
+    assert rows[0].raw_payload["data"][1] == "malformed"
+    assert rows[0].parsed_summary.get("source_batch_index") is None
