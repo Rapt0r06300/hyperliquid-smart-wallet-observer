@@ -800,3 +800,62 @@ def test_restore_rejects_stale_catalog_before_release_transfer(tmp_path, monkeyp
             "owner/repo", tmp_path / "restore",
             catalog_path=index_path, metrics_path=metrics_path,
         )
+
+
+def test_restore_ignores_cached_release_absent_from_current_inventory(tmp_path, monkeypatch):
+    module = _module()
+    old_release = tmp_path / "releases" / "data-v2-removed"
+    old_release.mkdir(parents=True)
+    stale_shard = b'{"trade_id":"previously-safe"}\n'
+    (old_release / "old.jsonl.gz").write_bytes(stale_shard)
+    (old_release / "RUN_MANIFEST.json").write_text(
+        json.dumps({
+            "manifests": [{
+                "dataset_id": "removed-trades",
+                "quality_status": "SAFE",
+                "validation_allowed": True,
+                "replay_compatible": True,
+                "asset_verified": True,
+                "bytes": len(stale_shard),
+                "sha256": hashlib.sha256(stale_shard).hexdigest(),
+                "release": {
+                    "repository": "owner/repo",
+                    "release_tag": old_release.name,
+                    "asset_name": "old.jsonl.gz",
+                },
+            }],
+        }),
+        encoding="utf-8",
+    )
+    previously_usable = (
+        tmp_path / "usable" / "shards" / old_release.name / "removed-trades.jsonl.gz"
+    )
+    previously_usable.parent.mkdir(parents=True)
+    previously_usable.write_bytes(stale_shard)
+
+    current_manifest = b'{"manifests":[]}'
+    monkeypatch.setattr(module, "iter_releases", lambda *_args, **_kwargs: iter([{
+        "tag_name": "data-v2-current",
+        "assets": [_asset(
+            "RUN_MANIFEST.json", "https://example.invalid/current",
+            current_manifest,
+        )],
+    }]))
+
+    def fake_download(_url, target, **_kwargs):
+        target.write_bytes(current_manifest)
+        return len(current_manifest), hashlib.sha256(current_manifest).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    report = module.restore_everything("owner/repo", tmp_path)
+
+    assert report["release_count"] == 1
+    assert report["verification_failures"] == 0
+    assert len(report["run_manifest_checks"]) == 1
+    assert report["classification"]["usable_shards"] == 0
+    assert report["classification"]["ignored_stale_release_manifests"] == 1
+    assert report["classification"]["stale_usable_quarantined"] == 1
+    assert not previously_usable.exists()
+    assert list((tmp_path / "quarantine" / "stale_usable").rglob("*.stale"))
+    assert (old_release / "old.jsonl.gz").read_bytes() == stale_shard
+
