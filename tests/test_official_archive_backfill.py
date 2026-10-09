@@ -198,15 +198,23 @@ def test_archive_event_limit_is_enforced() -> None:
         "3,100.7,0.75,16,18,1790000000200,false\n"
     )
     checksum = hashlib.sha256(payload).hexdigest().encode() + b"  archive.zip\n"
+    with pytest.raises(ValueError, match="OFFICIAL_ARCHIVE_INCOMPLETE_EVENT_LIMIT"):
+        fetch_official_archive_day(
+            venue="binance",
+            coin="BTC",
+            symbol="BTCUSDT",
+            day=date(2026, 9, 20),
+            fetch_bytes=lambda url: checksum if url.endswith(".CHECKSUM") else payload,
+            max_events=2,
+        )
     result = fetch_official_archive_day(
         venue="binance",
         coin="BTC",
         symbol="BTCUSDT",
         day=date(2026, 9, 20),
         fetch_bytes=lambda url: checksum if url.endswith(".CHECKSUM") else payload,
-        max_events=2,
     )
-    assert len(result.events) == 2
+    assert len(result.events) == 3
 
 
 def test_streaming_archive_does_not_materialize_events() -> None:
@@ -224,3 +232,35 @@ def test_streaming_archive_does_not_materialize_events() -> None:
     )
     assert not isinstance(result.events, tuple)
     assert [event.sequence for event in result.events] == [1, 2]
+
+
+
+def test_archive_event_limit_exact_boundary_is_allowed() -> None:
+    from hl_observer.data_sources.official_archive_backfill import _limit
+    assert list(_limit(iter(range(3)), 3)) == [0, 1, 2]
+    assert list(_limit(iter(range(3)), 0)) == [0, 1, 2]
+    with pytest.raises(ValueError, match="max_events"):
+        list(_limit(iter(range(3)), -1))
+
+
+def test_archive_campaign_defaults_to_full_day_without_silent_row_limit() -> None:
+    import time
+    from hl_observer.control_plane.campaign_adapters import AdapterContext, build_command
+
+    ctx = AdapterContext(
+        campaign_id="archive-fixture", kind="official_archive_collection",
+        unit_id="0", soft_deadline_epoch=time.time() + 1800,
+        partition={"venue": "binance", "coin": "BTC",
+                   "symbol": "BTCUSDT", "start_date": "2026-10-07"},
+    )
+    command, _ = build_command(ctx)
+    index = command.index("--max-events-per-day")
+    assert command[index + 1] == "0"
+
+    limited_ctx = AdapterContext(
+        campaign_id="archive-fixture", kind="official_archive_collection",
+        unit_id="0", soft_deadline_epoch=time.time() + 1800,
+        partition={**ctx.partition, "max_events_per_day": 2_000_000},
+    )
+    limited_command, _ = build_command(limited_ctx)
+    assert limited_command[limited_command.index("--max-events-per-day") + 1] == "2000000"
