@@ -698,3 +698,105 @@ def test_restore_rejects_data_release_without_run_manifest_before_download(
     import pytest
     with pytest.raises(module.RestoreError, match="RUN_MANIFEST.json"):
         module.restore_everything("owner/repo", tmp_path)
+
+
+def test_current_catalog_downgrade_overrides_historical_safe_manifest(tmp_path):
+    module = _module()
+    source = tmp_path / "releases" / "data-v2-historical-safe"
+    source.mkdir(parents=True)
+    shard = b'{"trade_id":"historical"}\n'
+    (source / "trade.jsonl.gz").write_bytes(shard)
+    manifest_row = {
+        "dataset_id": "historical-safe",
+        "quality_status": "SAFE",
+        "validation_allowed": True,
+        "replay_compatible": True,
+        "asset_verified": True,
+        "sha256": hashlib.sha256(shard).hexdigest(),
+        "bytes": len(shard),
+        "release": {
+            "repository": "owner/repo",
+            "release_tag": source.name,
+            "asset_name": "trade.jsonl.gz",
+        },
+    }
+    (source / "RUN_MANIFEST.json").write_text(
+        json.dumps({"manifests": [manifest_row]}), encoding="utf-8"
+    )
+    result = module._materialize_classified_shards(
+        "owner/repo", tmp_path / "releases", tmp_path,
+        catalog_safe={},
+    )
+    assert result["usable_shards"] == 0
+    assert result["quarantined_shards"] == 1
+    assert not list((tmp_path / "usable").rglob("*.jsonl.gz"))
+    assert list((tmp_path / "quarantine" / "shards").rglob("*.jsonl.gz"))
+
+
+def test_canonical_catalog_requires_sha_bound_metrics_and_unique_id(tmp_path):
+    module = _module()
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    shard = {
+        "dataset_id": "asset-1",
+        "quality_status": "SAFE",
+        "replay_compatible": True,
+        "sha256": "a" * 64,
+        "release_tag": "data-v2-e8",
+    }
+    index = {"shards": [shard]}
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    digest = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    metrics = {
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": digest,
+        "totals": {"TOTAL_SHARDS": 1},
+    }
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    eligible, proof = module._load_current_safe_catalog(index_path, metrics_path)
+    assert eligible == {"asset-1": ("a" * 64, "data-v2-e8")}
+    assert proof["indexed_shards"] == 1
+    assert proof["safe_catalog_shards"] == 1
+
+    shard["quality_status"] = "REJECT"
+    index_path.write_text(json.dumps({"shards": [shard]}), encoding="utf-8")
+    import pytest
+    with pytest.raises(module.RestoreError, match="does not match"):
+        module._load_current_safe_catalog(index_path, metrics_path)
+
+    new_digest = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    metrics["source_index_sha256"] = new_digest
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    safe, _ = module._load_current_safe_catalog(index_path, metrics_path)
+    assert safe == {}
+
+    index_path.write_text(json.dumps({"shards": [shard, shard]}), encoding="utf-8")
+    metrics["source_index_sha256"] = hashlib.sha256(index_path.read_bytes()).hexdigest()
+    metrics["totals"]["TOTAL_SHARDS"] = 2
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    with pytest.raises(module.RestoreError, match="duplicated dataset_id"):
+        module._load_current_safe_catalog(index_path, metrics_path)
+
+
+def test_restore_rejects_stale_catalog_before_release_transfer(tmp_path, monkeypatch):
+    module = _module()
+    index_path = tmp_path / "index.json"
+    metrics_path = tmp_path / "metrics.json"
+    index_path.write_text(json.dumps({"shards": []}), encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": "0" * 64,
+        "totals": {"TOTAL_SHARDS": 0},
+    }), encoding="utf-8")
+    monkeypatch.setattr(
+        module, "iter_releases",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("stale catalog must abort before listing Releases")
+        ),
+    )
+    import pytest
+    with pytest.raises(module.RestoreError, match="does not match"):
+        module.restore_everything(
+            "owner/repo", tmp_path / "restore",
+            catalog_path=index_path, metrics_path=metrics_path,
+        )
