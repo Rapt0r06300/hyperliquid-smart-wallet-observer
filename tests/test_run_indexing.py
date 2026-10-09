@@ -329,3 +329,46 @@ def test_index_drops_only_redudant_scalars_and_keeps_cryptographic_locator():
     assert packed_row["release_remote_size"] == 1000
     assert packed_row["release_remote_digest"] == "sha256:" + "b" * 64
     assert "release_member" not in packed_row
+
+
+
+def test_lossless_existing_index_repo_compaction(tmp_path):
+    from index_run_manifest import (
+        compact_existing_index, hydrate_default_release_repository
+    )
+    root = _bootstrap_root(tmp_path)
+    path = root / "catalog/DATA_INDEX.json"
+    baseline = json.loads(path.read_text(encoding="utf-8"))
+    repo = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    baseline["shards"] = [{
+        "dataset_id": "historical-one", "quality_status": "PARTIAL",
+        "release_repository": repo, "release_tag": "a",
+        "release_asset": "evidence.jsonl.gz", "sha256": "a" * 64,
+        "bytes": 50, "event_count": 3,
+    }]
+    path.write_text(json.dumps(baseline, indent=2), encoding="utf-8")
+    result = compact_existing_index(root)
+    assert result["saved_bytes"] > 0
+    compact = json.loads(path.read_text(encoding="utf-8"))
+    assert compact["release_repository_default"] == repo
+    assert "release_repository" not in compact["shards"][0]
+    assert hydrate_default_release_repository(compact)[0]["release_repository"] == repo
+
+    # Repeatability: after a prior migration, byte content cannot drift.
+    migrated = path.read_bytes()
+    compact_existing_index(root)
+    assert path.read_bytes() == migrated
+
+
+def test_compaction_refuses_noncanonical_release_repository(tmp_path):
+    from index_run_manifest import compact_existing_index
+    root = _bootstrap_root(tmp_path)
+    path = root / "catalog/DATA_INDEX.json"
+    original = json.loads(path.read_text(encoding="utf-8"))
+    original["shards"] = [
+        {"dataset_id": "foreign", "release_repository": "another/repo"}
+    ]
+    path.write_text(json.dumps(original), encoding="utf-8")
+    import pytest
+    with pytest.raises(ValueError, match="CANONICAL"):
+        compact_existing_index(root)
