@@ -92,6 +92,10 @@ class AsyncPartitionSink:
         self.batch_size = max(1, int(batch_size))
         self.flush_interval_s = max(0.01, float(flush_interval_s))
         self.drops: dict[tuple[str, str, str], int] = defaultdict(int)
+        # Keep bounded temporal attribution for each dropped frame. A single
+        # cumulative drop counter must NOT poison every rotated shard of the
+        # same symbol (and cannot reconstruct frames that were actually lost).
+        self.drop_windows: dict[tuple[str, str, str, str, int], int] = defaultdict(int)
         self.accepted = 0
         self.persisted = 0
         self.backpressure_events = 0
@@ -150,6 +154,13 @@ class AsyncPartitionSink:
             return True
         except asyncio.QueueFull:
             self.drops[self.key(envelope)] += 1
+            try:
+                received_second = int(envelope.received_ts_ms) // 1000
+            except (TypeError, ValueError, OverflowError):
+                received_second = -1
+            self.drop_windows[
+                (*self.key(envelope), str(envelope.connection_id or ""), received_second)
+            ] += 1
             return False
 
     async def run(self) -> None:
@@ -176,6 +187,77 @@ class AsyncPartitionSink:
     async def close(self) -> None:
         self._stop = True
         await self.queue.join()
+
+
+def attribute_queue_drops(
+    manifests: list[Mapping[str, Any]],
+    dropped: Mapping[tuple[str, str, str], int],
+    drop_windows: Mapping[tuple[str, str, str, str, int], int],
+) -> list[int]:
+    """Attribute *real* ingress losses to the impacted immutable shards.
+
+    Time and causal connection identity are taken only from capture evidence.
+    Unknown times/connections are conservatively attached to all possible
+    shards; never make unrelated prior shards REJECT because a later drop occurred.
+    """
+    positions: dict[tuple[str, str, str], list[int]] = defaultdict(list)
+    for index, manifest in enumerate(manifests):
+        positions[(
+            str(manifest.get("source") or ""),
+            str(manifest.get("family") or ""),
+            str(manifest.get("symbol") or ""),
+        )].append(index)
+    attribution = [0] * len(manifests)
+    counts_by_key: dict[tuple[str, str, str], int] = defaultdict(int)
+    for (*key_values, connection, second), count in sorted(drop_windows.items()):
+        key = tuple(key_values)
+        if len(key) != 3 or int(count) <= 0:
+            raise ValueError("invalid queue-drop evidence")
+        counts_by_key[key] += int(count)
+        candidates = positions.get(key, [])
+        if not candidates:
+            raise ValueError(f"dropped frames have no corresponding durable shard: {key}")
+        if connection:
+            matches = [
+                index for index in candidates
+                if connection in (
+                    (manifests[index].get("synchronization") or {}).get("connection_ids") or []
+                )
+            ]
+            if matches:
+                candidates = matches
+        if second < 0:
+            # Timestamp untrustworthy: all possible shards remain uncertain.
+            for index in candidates:
+                attribution[index] += int(count)
+            continue
+        lower, upper = int(second) * 1000, (int(second) + 1) * 1000 - 1
+        distance_by_index: dict[int, int] = {}
+        for index in candidates:
+            first = int(manifests[index].get("start_ts_ms") or 0)
+            last = int(manifests[index].get("end_ts_ms") or first)
+            distance_by_index[index] = (
+                first - upper if upper < first
+                else lower - last if lower > last
+                else 0
+            )
+        closest = min(distance_by_index.values())
+        for index, distance in distance_by_index.items():
+            if distance == closest:
+                attribution[index] += int(count)
+    for key, total in dropped.items():
+        explained = counts_by_key.get(key, 0)
+        if total < explained:
+            raise ValueError(f"queue-drop evidence exceeds observed ingress losses: {key}")
+        if total == explained:
+            continue
+        candidates = positions.get(key, [])
+        if not candidates:
+            raise ValueError(f"unattributed queue losses without durable shard: {key}")
+        # Legacy callers lacking precise timestamps remain fail-closed.
+        for index in candidates:
+            attribution[index] += total - explained
+    return attribution
 
 
 async def _emit_with_backpressure(sink: Any, envelope: TickEnvelope) -> None:
@@ -1725,6 +1807,7 @@ async def collect(
 
     shards = await asyncio.to_thread(writer.rotate_all)
     manifests: list[dict[str, Any]] = []
+    shard_preliminaries: list[tuple[Path, dict[str, Any]]] = []
     for shard in shards:
         manifest = await asyncio.to_thread(
             build_manifest_from_tick_shard,
@@ -1732,12 +1815,13 @@ async def collect(
             collector_version=collector_version,
             reconciliation_status="UNVERIFIED",
         )
-        key = (
-            str(manifest["source"]),
-            str(manifest["family"]),
-            str(manifest["symbol"]),
-        )
-        drops = int(sink.drops.get(key, 0))
+        shard_preliminaries.append((shard, manifest))
+    drop_attribution = attribute_queue_drops(
+        [manifest for _shard, manifest in shard_preliminaries],
+        sink.drops,
+        sink.drop_windows,
+    )
+    for (shard, manifest), drops in zip(shard_preliminaries, drop_attribution):
         if drops:
             manifest["integrity"]["gap_count"] = (
                 int(manifest["integrity"].get("gap_count") or 0) + drops

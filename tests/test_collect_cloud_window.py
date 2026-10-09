@@ -905,3 +905,68 @@ def test_cross_venue_derived_receive_clock_does_not_invent_exchange_timestamp(tm
         raw = [json.loads(line) for line in source]
     assert len(raw) == 2
     assert all(row["exchange_ts_ms"] is None for row in raw)
+
+
+
+def test_queue_loss_affects_only_temporally_impacted_shards():
+    m = _module()
+    sample = lambda start, end: {
+        "source": "gate_public_ws", "family": "bbo", "symbol": "BTC_USDT",
+        "start_ts_ms": start, "end_ts_ms": end,
+        "synchronization": {"connection_ids": ["gate-1"]},
+    }
+    rows = [sample(1000, 1999), sample(2000, 2999), sample(3000, 3999)]
+    key = ("gate_public_ws", "bbo", "BTC_USDT")
+    attributed = m.attribute_queue_drops(
+        rows, {key: 3}, {(*key, "gate-1", 2): 3},
+    )
+    assert attributed == [0, 3, 0]
+
+
+def test_queue_loss_unknown_time_is_conservatively_fail_closed():
+    m = _module()
+    key = ("gate_public_ws", "trades", "ETH_USDT")
+    rows = [
+        {"source": key[0], "family": key[1], "symbol": key[2],
+         "start_ts_ms": 1000, "end_ts_ms": 1500,
+         "synchronization": {"connection_ids": ["gate-1"]}},
+        {"source": key[0], "family": key[1], "symbol": key[2],
+         "start_ts_ms": 2000, "end_ts_ms": 2500,
+         "synchronization": {"connection_ids": ["gate-1"]}},
+    ]
+    assert m.attribute_queue_drops(
+        rows, {key: 1}, {(*key, "gate-1", -1): 1}
+    ) == [1, 1]
+
+
+def test_queue_loss_refuses_orphaned_drops_without_persisted_evidence():
+    import pytest
+    m = _module()
+    key = ("bitget_public_ws", "l2Book", "BTCUSDT")
+    with pytest.raises(ValueError, match="no corresponding durable shard"):
+        m.attribute_queue_drops([], {key: 1}, {(*key, "conn-1", 2): 1})
+
+
+def test_sync_sink_records_queue_loss_clock_and_connection():
+    m = _module()
+    class Writer:
+        pass
+    sink = m.AsyncPartitionSink(Writer(), max_queue=1)
+    one = m._hyperliquid_envelope(
+        {"channel": "bbo", "data": {
+            "coin": "BTC", "time": 1000,
+            "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "1"}],
+        }},
+        received_ts_ms=1200, receive_mono_ns=100, connection_id="conn-1",
+    )
+    two = m._hyperliquid_envelope(
+        {"channel": "bbo", "data": {
+            "coin": "BTC", "time": 2200,
+            "bbo": [{"px": "100", "sz": "1"}, {"px": "101", "sz": "1"}],
+        }},
+        received_ts_ms=2300, receive_mono_ns=200, connection_id="conn-1",
+    )
+    sink.emit(one)
+    sink.emit(two)
+    assert sink.drops[("hyperliquid_public_ws", "bbo", "BTC")] == 1
+    assert sink.drop_windows[("hyperliquid_public_ws", "bbo", "BTC", "conn-1", 2)] == 1
