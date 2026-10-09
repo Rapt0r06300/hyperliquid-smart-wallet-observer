@@ -213,7 +213,11 @@ def _candidate(
         if (
             prior.get("replay_compatible") is not True
             and str(prior.get("verifier_version") or "")==VERIFIER_VERSION
+            and not metadata_repair
         ):
+            # A newly published exact global-v3 identity proof changes the
+            # evidence, so a historical failure must not permanently suppress
+            # the fully SHA-verified metadata repair path.
             return False
 
     manifest=_manifest_for_row(row)
