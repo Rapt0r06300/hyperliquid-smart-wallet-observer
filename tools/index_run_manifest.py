@@ -99,6 +99,24 @@ def _load_trade_count_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
     }
 
 
+def _load_global_unique_count_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
+    path = root / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    counts = doc.get("counts") if isinstance(doc, Mapping) else {}
+    if not isinstance(counts, Mapping):
+        return {}
+    return {
+        str(dataset_id): dict(row)
+        for dataset_id, row in counts.items()
+        if isinstance(row, Mapping)
+    }
+
+
 def _apply_trade_count_patch(
     manifest: dict[str, Any],
     patch_results: Mapping[str, Mapping[str, Any]],
@@ -245,7 +263,10 @@ def _compact_index_row(
     return out
 
 
-def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> dict[str, Any]:
+def _index_row(
+    manifest: Mapping[str, Any], manifest_path: Path, root: Path, *,
+    unique_patch_results: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
     row = {
         "dataset_id": manifest.get("dataset_id"),
         "family": manifest.get("family"),
@@ -286,53 +307,14 @@ def _index_row(manifest: Mapping[str, Any], manifest_path: Path, root: Path) -> 
         "duplicate_count": (manifest.get("integrity") or {}).get("duplicate_count"),
         "source": manifest.get("source"),
     }
-    patch_path = root / "catalog" / "TRADE_COUNT_PATCH.json"
-    if patch_path.is_file():
-        try:
-            patch_doc = json.loads(patch_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            patch_doc = {}
-        counts = patch_doc.get("counts") if isinstance(patch_doc, Mapping) else {}
-        patched = counts.get(str(manifest.get("dataset_id") or "")) if isinstance(counts, Mapping) else None
-        if isinstance(patched, Mapping):
-            expected_sha = str(manifest.get("sha256") or "").lower()
-            patched_sha = str(patched.get("asset_sha256") or "").lower()
-            if len(expected_sha) == 64 and patched_sha == expected_sha:
-                if patched.get("trade_count_exact") is True:
-                    row["trade_count"] = patched.get("trade_count")
-                    row["trade_count_exact"] = True
-                method = str(patched.get("unique_identity_method") or "")
-                if (
-                    str(manifest.get("venue") or "").lower() == "bybit"
-                    and method != BYBIT_IDENTITY_VERSION
-                ):
-                    row["unique_trade_count"] = None
-                    row["unique_trade_count_exact"] = False
-                elif patched.get("unique_trade_count_exact") is True:
-                    row["unique_trade_count"] = patched.get("unique_trade_count")
-                    row["unique_trade_count_exact"] = True
-                if method:
-                    row["unique_identity_method"] = method
-
-    unique_patch_path = root / "catalog" / "TRADE_UNIQUE_COUNT_PATCH.json"
-    if unique_patch_path.is_file():
-        try:
-            unique_doc = json.loads(unique_patch_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            unique_doc = {}
-        unique_counts = (
-            unique_doc.get("counts") if isinstance(unique_doc, Mapping) else {}
-        )
-        unique_row = (
-            unique_counts.get(str(manifest.get("dataset_id") or ""))
-            if isinstance(unique_counts, Mapping)
-            else None
-        )
-        if isinstance(unique_row, Mapping):
-            row["unique_trade_count"] = unique_row.get("unique_trade_count")
-            row["unique_trade_count_exact"] = (
-                unique_row.get("unique_trade_count_exact") is True
-            )
+    unique_row = (
+        unique_patch_results.get(str(manifest.get("dataset_id") or ""))
+        if unique_patch_results is not None else None
+    )
+    if isinstance(unique_row, Mapping):
+        # Preserve the independently verified global identity count.
+        row["unique_trade_count"] = unique_row.get("unique_trade_count")
+        row["unique_trade_count_exact"] = unique_row.get("unique_trade_count_exact") is True
 
     integration = manifest.get("event_intelligence")
     if isinstance(integration, Mapping):
@@ -365,6 +347,7 @@ def index_run_manifests(
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     replay_patch_results = _load_replay_patch_results(base)
     trade_count_patch_results = _load_trade_count_patch_results(base)
+    unique_patch_results = _load_global_unique_count_patch_results(base)
     expanded_rows = hydrate_default_release_repository(index)
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
     rows_by_id = {
@@ -437,7 +420,8 @@ def index_run_manifests(
             )
             pending_manifests[dataset_id] = (destination, manifest)
             rows_by_id[dataset_id] = _compact_index_row(
-                _index_row(manifest, destination, base), inherit_canonical_repo=True
+                _index_row(manifest, destination, base, unique_patch_results=unique_patch_results),
+                inherit_canonical_repo=True
             )
             statuses[status] = statuses.get(status, 0) + 1
             imported += 1
