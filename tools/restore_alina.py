@@ -315,6 +315,59 @@ def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
     )
 
 
+def _load_current_safe_catalog(
+    index_path: Path,
+    metrics_path: Path,
+) -> tuple[dict[str, tuple[str, str]], dict[str, Any]]:
+    """Bind SAFE restoration to the latest index with SHA-matched metrics.
+
+    A historical Release manifest may say SAFE although a later reconciliation
+    downgraded the same shard. Immutable Release claims cannot override the
+    current catalog's quality decision.
+    """
+    try:
+        index_bytes = index_path.read_bytes()
+        index = json.loads(index_bytes)
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RestoreError(f"invalid or missing canonical catalog/metrics: {exc}") from exc
+    if not isinstance(index, Mapping) or not isinstance(index.get("shards"), list):
+        raise RestoreError("canonical DATA_INDEX has no valid shards array")
+    if not isinstance(metrics, Mapping) or not isinstance(metrics.get("totals"), Mapping):
+        raise RestoreError("canonical DATA_METRICS has no valid totals")
+    digest = hashlib.sha256(index_bytes).hexdigest()
+    if (
+        metrics.get("schema_version") != "alina.data_metrics.v4"
+        or metrics.get("source_index_sha256") != digest
+        or type(metrics["totals"].get("TOTAL_SHARDS")) is not int
+        or metrics["totals"]["TOTAL_SHARDS"] != len(index["shards"])
+    ):
+        raise RestoreError("canonical DATA_METRICS does not match current DATA_INDEX")
+    safe: dict[str, tuple[str, str]] = {}
+    seen: set[str] = set()
+    for row in index["shards"]:
+        if not isinstance(row, Mapping):
+            raise RestoreError("malformed canonical catalog shard row")
+        identity = str(row.get("dataset_id") or "")
+        if not identity or identity in seen:
+            raise RestoreError("missing or duplicated dataset_id in canonical catalog")
+        seen.add(identity)
+        sha = str(row.get("sha256") or "").lower()
+        tag = str(row.get("release_tag") or "")
+        if (
+            row.get("quality_status") == "SAFE"
+            and row.get("replay_compatible") is True
+            and re.fullmatch(r"[0-9a-f]{64}", sha)
+            and tag
+        ):
+            safe[identity] = (sha, tag)
+    return safe, {
+        "source_index_sha256": digest,
+        "indexed_shards": len(seen),
+        "safe_catalog_shards": len(safe),
+    }
+
+
 def _safe_replay_row(
     row: Mapping[str, Any],
     *,
@@ -346,6 +399,8 @@ def _materialize_classified_shards(
     repository: str,
     releases_root: Path,
     destination: Path,
+    *,
+    catalog_safe: Mapping[str, tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "usable_shards": 0,
@@ -405,6 +460,10 @@ def _materialize_classified_shards(
             safe = _safe_replay_row(
                 row, repository=repository, release_tag=release_tag
             )
+            if catalog_safe is not None:
+                safe = safe and catalog_safe.get(dataset_id) == (
+                    str(row.get("sha256") or "").lower(), release_tag
+                )
             release = row.get("release")
             release = release if isinstance(release, Mapping) else {}
             storage = str(release.get("storage") or row.get("release_storage") or "")
@@ -754,7 +813,17 @@ def restore_everything(
     *,
     token: str | None = None,
     workspace: Path | None = None,
+    catalog_path: Path | None = None,
+    metrics_path: Path | None = None,
 ) -> dict[str, Any]:
+    catalog_safe: dict[str, tuple[str, str]] | None = None
+    catalog_verification: dict[str, Any] | None = None
+    if catalog_path is not None:
+        if metrics_path is None:
+            raise RestoreError("canonical DATA_METRICS is required with DATA_INDEX")
+        catalog_safe, catalog_verification = _load_current_safe_catalog(
+            catalog_path, metrics_path
+        )
     releases_root = destination / "releases"
     releases_root.mkdir(parents=True, exist_ok=True)
     releases = list(iter_releases(repository, token=token))
@@ -834,6 +903,7 @@ def restore_everything(
         "releases": [],
         "read_only": True,
         "real_execution": False,
+        "catalog_verification": catalog_verification,
     }
 
     for release in releases:
@@ -870,7 +940,7 @@ def restore_everything(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
     report["classification"] = _materialize_classified_shards(
-        repository, releases_root, destination
+        repository, releases_root, destination, catalog_safe=catalog_safe
     )
     report["local_snapshot"] = (
         materialize_latest_local_snapshot(releases_root, workspace)
@@ -898,6 +968,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
+    parser.add_argument("--catalog", default="catalog/DATA_INDEX.json",
+                        help="canonical index required to certify usable restored shards")
+    parser.add_argument("--metrics", default="catalog/DATA_METRICS.json",
+                        help="SHA-bound canonical metrics required for catalog verification")
     parser.add_argument(
         "--workspace",
         default=".",
@@ -923,6 +997,8 @@ def main(argv: list[str] | None = None) -> int:
             args.repository,
             destination,
             token=token,
+            catalog_path=Path(args.catalog).resolve(),
+            metrics_path=Path(args.metrics).resolve(),
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot
