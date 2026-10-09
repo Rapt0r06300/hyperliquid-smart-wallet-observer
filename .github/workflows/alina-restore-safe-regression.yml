@@ -48,6 +48,35 @@ jobs:
           print(f"ALINA_INDEX_WRITE_LIMIT_BYTES={ceiling}")
           print(f"ALINA_INDEX_HEADROOM_BYTES={ceiling - size}")
           PY
+      - name: Inspect lossless compactable index metadata
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          rows = json.loads(Path("catalog/DATA_INDEX.json").read_text())["shards"]
+          counts = Counter()
+          savings = Counter()
+          redundant = Counter()
+          repo = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+          for row in rows:
+              for key, value in row.items():
+                  counts[key] += 1
+                  savings[key] += len(json.dumps(key)) + 1 + len(json.dumps(value)) + 1
+              if row.get("release_repository") == repo:
+                  redundant["canonical_release_repository"] += 1
+              if row.get("run_manifest_release_tag") == row.get("release_tag"):
+                  redundant["duplicate_run_manifest_tag"] += 1
+              if row.get("record_count") == row.get("event_count"):
+                  redundant["duplicate_record_count"] += 1
+              if row.get("release_remote_size") == row.get("bytes"):
+                  redundant["duplicate_remote_size"] += 1
+              if row.get("replay_reason") == "STRICT_PARSE_CHRONOLOGY_OK":
+                  redundant["successful_replay_reason"] += 1
+          print("INDEX_ROWS=", len(rows))
+          print("TOP_INDEX_FIELD_BYTES=", savings.most_common(25))
+          print("REDUNDANT_FIELD_COUNTS=", dict(redundant))
+          PY
       - name: Run deterministic restore tests
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2
