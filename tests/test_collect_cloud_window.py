@@ -1132,3 +1132,41 @@ def test_native_ws_batches_are_persisted_as_individual_trade_events():
     assert trades[0].raw_payload["data"][0]["i"] == "trade-1"
     assert trades[1].raw_payload["data"][0]["i"] == "trade-2"
     assert all(row.provenance["access"] == "read_only" for row in trades)
+
+
+def test_hyperliquid_batches_preserve_exact_trade_evidence():
+    m = _module()
+    original = {
+        "channel": "trades",
+        "data": [
+            {"coin": "BTC", "tid": 101, "time": 1000, "px": "100", "sz": "1"},
+            {"coin": "BTC", "tid": 102, "time": 1001, "px": "101", "sz": "2"},
+        ],
+    }
+    rows = m._hyperliquid_envelopes(
+        original, received_ts_ms=1100, receive_mono_ns=500,
+        connection_id="hl-1",
+    )
+    assert len(rows) == 2
+    assert [row.raw_payload["data"][0]["tid"] for row in rows] == [101, 102]
+    assert [row.exchange_ts_ms for row in rows] == [1000, 1001]
+    assert [row.parsed_summary["event_count"] for row in rows] == [1, 1]
+    assert [row.parsed_summary["source_batch_index"] for row in rows] == [0, 1]
+    assert len({row.parsed_summary["source_batch_sha256"] for row in rows}) == 1
+    assert len(original["data"]) == 2
+    assert all(row.provenance["access"] == "read_only" for row in rows)
+
+
+def test_hyperliquid_malformed_batch_not_silently_truncated():
+    m = _module()
+    payload = {"channel": "trades", "data": [
+        {"coin": "BTC", "tid": 101, "time": 1000},
+        {"tid": 102, "time": 1001},
+    ]}
+    rows = m._hyperliquid_envelopes(
+        payload, received_ts_ms=1100, receive_mono_ns=500,
+        connection_id="hl-1",
+    )
+    assert len(rows) == 1
+    assert rows[0].parsed_summary["event_count"] == 2
+    assert len(rows[0].raw_payload["data"]) == 2
