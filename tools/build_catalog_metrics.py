@@ -124,6 +124,7 @@ def build() -> dict[str, Any]:
     by_symbol: dict[str, dict[str, int]] = {}
     by_family: dict[str, dict[str, int]] = {}
     valid_record_count_missing = 0
+    gap_count_missing = 0
     unique_record_count_missing = 0
     unique_unavailable_ids: set[str] = set()
     release_tags: set[str] = set()
@@ -185,7 +186,33 @@ def build() -> dict[str, Any]:
                 unique_record_count_missing += 1
                 valid_records = 0
                 unique_records = 0
-        gaps = _int(row.get("gap_count"))
+        # Older global-index rows omitted per-shard integrity, causing the
+        # published TOTAL_GAP_RECORDS to read as zero despite fatal gaps in
+        # thousands of rejected shards. Recover exact counters from the
+        # SHA-bound original manifest; never silently zero-fill an unknown.
+        gap_value = row.get("gap_count")
+        if type(gap_value) is not int or gap_value < 0:
+            rel = str(row.get("manifest_path") or "")
+            manifest_file = (ROOT / rel).resolve() if rel else ROOT
+            gap_value = None
+            try:
+                if not manifest_file.is_relative_to(ROOT.resolve()) or not manifest_file.is_file():
+                    raise ValueError("manifest missing")
+                original = json.loads(manifest_file.read_text(encoding="utf-8"))
+                source_integrity = original.get("integrity") if isinstance(original, dict) else None
+                if (
+                    isinstance(source_integrity, dict)
+                    and original.get("dataset_id") == dataset_id
+                    and str(original.get("sha256") or "").lower() == str(row.get("sha256") or "").lower()
+                    and type(source_integrity.get("gap_count")) is int
+                    and source_integrity["gap_count"] >= 0
+                ):
+                    gap_value = source_integrity["gap_count"]
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+        if gap_value is None:
+            gap_count_missing += 1
+        gaps = _int(gap_value)
         compressed = _int(row.get("bytes"))
         release_tag = str(row.get("release_tag") or "").strip()
         if release_tag:
@@ -366,6 +393,8 @@ def build() -> dict[str, Any]:
                 if replay:
                     bucket["replayable_trades"] += trades
 
+    totals["GAP_COUNT_MISSING_SHARDS"] = gap_count_missing
+    totals["GAP_COUNT_COVERAGE_COMPLETE"] = gap_count_missing == 0
     totals["TOTAL_RELEASES"] = len(release_tags)
     totals["MIN_COLLECTION_TS_MS"] = min(start_times) if start_times else None
     totals["MAX_COLLECTION_TS_MS"] = max(end_times) if end_times else None
