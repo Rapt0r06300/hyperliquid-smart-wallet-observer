@@ -189,6 +189,23 @@ class AsyncPartitionSink:
         await self.queue.join()
 
 
+def orphaned_queue_drops(
+    manifests: list[Mapping[str, Any]],
+    dropped: Mapping[tuple[str, str, str], int],
+) -> dict[str, int]:
+    """Missing partitions stay visible even when no shard could be persisted."""
+    available = {
+        (str(row.get("source") or ""), str(row.get("family") or ""),
+         str(row.get("symbol") or ""))
+        for row in manifests
+    }
+    return {
+        "|".join(key): int(count)
+        for key, count in sorted(dropped.items())
+        if key not in available and int(count) > 0
+    }
+
+
 def attribute_queue_drops(
     manifests: list[Mapping[str, Any]],
     dropped: Mapping[tuple[str, str, str], int],
@@ -216,7 +233,8 @@ def attribute_queue_drops(
         counts_by_key[key] += int(count)
         candidates = positions.get(key, [])
         if not candidates:
-            raise ValueError(f"dropped frames have no corresponding durable shard: {key}")
+            # Preserve other venues; orphaned losses are reported in bundle receipts.
+            continue
         if connection:
             matches = [
                 index for index in candidates
@@ -253,7 +271,7 @@ def attribute_queue_drops(
             continue
         candidates = positions.get(key, [])
         if not candidates:
-            raise ValueError(f"unattributed queue losses without durable shard: {key}")
+            continue
         # Legacy callers lacking precise timestamps remain fail-closed.
         for index in candidates:
             attribution[index] += total - explained
@@ -1821,12 +1839,16 @@ async def collect(
         sink.drops,
         sink.drop_windows,
     )
+    orphan_drops = orphaned_queue_drops(
+        [manifest for _shard, manifest in shard_preliminaries], sink.drops,
+    )
     for (shard, manifest), drops in zip(shard_preliminaries, drop_attribution):
         if drops:
             manifest["integrity"]["gap_count"] = (
                 int(manifest["integrity"].get("gap_count") or 0) + drops
             )
             manifest["collection_queue_drops"] = drops
+            manifest["queue_drop_attribution_method"] = "connection_receive_second_v1"
         manifest["collection_run_id"] = run_id
         manifest = finalize_manifest(manifest)
 
@@ -1930,6 +1952,8 @@ async def collect(
         "required": bool(require_l2),
     }
     bundle_index["replay_grade_coverage"] = replay_grade_coverage
+    bundle_index["unattributed_queue_drops"] = orphan_drops
+    bundle_index["collection_window_integrity_verified"] = not any(sink.drops.values())
     write_manifest(bundle_index, output / "BUNDLE_INDEX.json")
 
     summary = {
@@ -1947,6 +1971,7 @@ async def collect(
         "accepted_frames": sink.accepted,
         "persisted_frames": sink.persisted,
         "backpressure_events": sink.backpressure_events,
+        "unattributed_queue_drops": orphan_drops,
         "queue_drops": {
             "|".join(key): value for key, value in sorted(sink.drops.items())
         },
