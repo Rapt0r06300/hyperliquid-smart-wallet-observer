@@ -26,6 +26,13 @@ def _manifest(dataset_id: str, *, safe_now: bool) -> dict:
         "replay_compatible": True,
         "replay_schema_version": "alina.replay.v2",
         "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "tag": "archive-v2-test",
+            "asset_name": dataset_id + ".jsonl.gz",
+            "remote_size": 100,
+            "remote_digest": "sha256:" + "a" * 64,
+        },
         "trade_count": 10,
         "trade_count_exact": True,
         "unique_trade_count": 10,
@@ -195,3 +202,24 @@ def test_compact_root_causes_keeps_reasons_and_never_promotes():
     assert compact["status"] == "DIAGNOSIS_ONLY"
     assert compact["validation_allowed"] is False
     assert "non_safe_shards" not in compact["by_status"]
+
+
+
+def test_stale_repair_wont_mark_missing_release_coordinates_safe(tmp_path: Path):
+    catalog = tmp_path / "catalog"
+    q = tmp_path / "datasets" / "quarantine"
+    catalog.mkdir()
+    q.mkdir(parents=True)
+    doc = _manifest("missing-release", safe_now=True)
+    doc.pop("release", None)
+    (q / "missing-release.manifest.json").write_text(json.dumps(doc))
+    (catalog / "DATA_INDEX.json").write_text(json.dumps({"shards": [{
+        "dataset_id": "missing-release",
+        "manifest_path": "datasets/quarantine/missing-release.manifest.json",
+        "quality_status": "PARTIAL",
+    }]}))
+    (catalog / "DATA_QUALITY_REGISTRY.json").write_text(json.dumps({}))
+    (catalog / "DATA_CATALOG.json").write_text(json.dumps({}))
+    result = repair(tmp_path)
+    assert result["repaired_count"] == 0
+    assert not (tmp_path / "datasets" / "safe" / "missing-release.manifest.json").exists()
