@@ -1,0 +1,128 @@
+{
+  "asset_verified": true,
+  "bytes": 1178,
+  "collection_run_id": "market-e8-5-2026100718-v7-0",
+  "collector_version": "674bb2f044ca730096193380b885539a7e66de81",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-onds-usdt-swap-1791423799233-1791426983806-120297f561d2",
+  "end_ts_ms": 1791426983806,
+  "event_count": 5,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 5,
+    "live_only": 0,
+    "matched_count": 5,
+    "missing_from_live": 0,
+    "reference_count": 5,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 5,
+  "release": {
+    "asset_id": 620517476,
+    "asset_name": "packed-shards-0006.zip",
+    "member_name": "okx-public-ws-trades-onds-usdt-swap-1791423799233-1791426983806-120297f561d2.jsonl.gz",
+    "release_id": 406355204,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100718-v7-u0",
+    "remote_digest": "sha256:fb82e5fd7d12606407d749c90958d8be00291986446aba588df2af5755236ab7",
+    "remote_size": 53606308,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-onds-usdt-swap-1791423799233-1791426983806-120297f561d2.jsonl.gz",
+  "release_asset_id": 620517476,
+  "release_container_asset": "packed-shards-0006.zip",
+  "release_id": 406355204,
+  "release_member": "okx-public-ws-trades-onds-usdt-swap-1791423799233-1791426983806-120297f561d2.jsonl.gz",
+  "release_remote_digest": "sha256:fb82e5fd7d12606407d749c90958d8be00291986446aba588df2af5755236ab7",
+  "release_remote_size": 53606308,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100718-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "120297f561d2ccae7799e450eadbf8995c7eb43fd9d03370d925238111a19ae0",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791423799233,
+  "symbol": "ONDS-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 5,
+      "max": 28.5,
+      "min": 22.5,
+      "p50": 28.5,
+      "p95": 28.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-5ec58ec589cf433d859481d2b9c51229"
+    ],
+    "first_exchange_ts_ms": 1791423799153,
+    "last_exchange_ts_ms": 1791426983729,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 5,
+      "max": 80.0,
+      "min": 77.0,
+      "p50": 80.0,
+      "p95": 80.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 5,
+      "max": 138.766139,
+      "min": 138.759358,
+      "p50": 138.766139,
+      "p95": 138.766139
+    }
+  },
+  "trade_count": 5,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "0503b5f3344e739d86c891b0190bfcb72447616eff04e2d7a4a083d4d08d5bc0",
+    "31f8ce7b1ca398f8a72bd01f0e93fe207d51aed2b32164926d0ee624fc7ef9d3",
+    "48d0d86b88f2dbe7618a54b4a4daf3c518866f09e2d50ebac2810af65ef88d1d",
+    "8cc03084b36a52999e0b985e38e8324025f19810f7d3389b445e456d9d6fab68",
+    "b2c3df833468b40fd76eb1be2d0904b454408a7fee7d6953ab49ecc6aaaf60e2"
+  ],
+  "trade_identity_digests_exact": true,
+  "uncompressed_bytes": 7224,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 5,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

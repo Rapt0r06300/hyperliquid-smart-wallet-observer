@@ -1,0 +1,116 @@
+{
+  "asset_verified": true,
+  "bytes": 379538,
+  "collection_run_id": "market-e8-5-2026100613-v7-1",
+  "collector_version": "5ef94aada80d6830758d164b6ed431b75341bc43",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-derived-capacity-capacity-tape-naver-usdt-swap-1791444972525-1791448464874-ee662c4ccdcd",
+  "end_ts_ms": 1791448464874,
+  "event_count": 1063,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 1063,
+  "release": {
+    "asset_id": 621250635,
+    "asset_name": "packed-shards-0005.zip",
+    "member_name": "okx-derived-capacity-capacity-tape-naver-usdt-swap-1791444972525-1791448464874-ee662c4ccdcd.jsonl.gz",
+    "release_id": 406609856,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100613-v7-u1-retry-c58c378786c010a5",
+    "remote_digest": "sha256:6f158a9fd3bfa3294f85bbc9f1b2935231b4db846737d349bcead9c4e7db6d57",
+    "remote_size": 44127452,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-derived-capacity-capacity-tape-naver-usdt-swap-1791444972525-1791448464874-ee662c4ccdcd.jsonl.gz",
+  "release_asset_id": 621250635,
+  "release_container_asset": "packed-shards-0005.zip",
+  "release_id": 406609856,
+  "release_member": "okx-derived-capacity-capacity-tape-naver-usdt-swap-1791444972525-1791448464874-ee662c4ccdcd.jsonl.gz",
+  "release_remote_digest": "sha256:6f158a9fd3bfa3294f85bbc9f1b2935231b4db846737d349bcead9c4e7db6d57",
+  "release_remote_size": 44127452,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100613-v7-u1-retry-c58c378786c010a5",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "ee662c4ccdcd6378c092b3a0371ad2475bf76ac88a89be0e3208fb3de854f7c2",
+  "source": "okx_derived_capacity",
+  "start_ts_ms": 1791444972525,
+  "symbol": "NAVER-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1063,
+      "max": 106.5,
+      "min": 22.0,
+      "p50": 31.5,
+      "p95": 99.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-d2454b52837442dcbc0b2291c621aa96"
+    ],
+    "first_exchange_ts_ms": 1791444972307,
+    "last_exchange_ts_ms": 1791448464802,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1063,
+      "max": 329.0,
+      "min": 72.0,
+      "p50": 76.0,
+      "p95": 88.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1063,
+      "max": 207.537493,
+      "min": 0.0,
+      "p50": 147.017074,
+      "p95": 153.137766
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 10101401,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}

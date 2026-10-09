@@ -1,0 +1,125 @@
+{
+  "asset_verified": true,
+  "bytes": 30836,
+  "collection_run_id": "market-e8-5-2026100801-v7-0",
+  "collector_version": "5ef94aada80d6830758d164b6ed431b75341bc43",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-ar-1791436473036-1791439962199-d2e21a1c5590",
+  "end_ts_ms": 1791439962199,
+  "event_count": 139,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "UNIQUE_TRADE_COUNT_NOT_EXACT"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 277,
+    "live_only": 41,
+    "local_continuity_fallback": true,
+    "matched_count": 236,
+    "missing_from_live": 0,
+    "reference_count": 236,
+    "reference_status": "PARTIAL",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 139,
+  "release": {
+    "asset_id": 620930352,
+    "asset_name": "packed-shards-0005.zip",
+    "member_name": "hyperliquid-public-ws-trades-ar-1791436473036-1791439962199-d2e21a1c5590.jsonl.gz",
+    "release_id": 406481613,
+    "release_tag": "data-v2-campaign-market-e8-5-2026100801-v7-u0",
+    "remote_digest": "sha256:c21355a3babf631ba9f58f09cc7073706564ea76d06b2a93557004903860186a",
+    "remote_size": 48661596,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-ar-1791436473036-1791439962199-d2e21a1c5590.jsonl.gz",
+  "release_asset_id": 620930352,
+  "release_container_asset": "packed-shards-0005.zip",
+  "release_id": 406481613,
+  "release_member": "hyperliquid-public-ws-trades-ar-1791436473036-1791439962199-d2e21a1c5590.jsonl.gz",
+  "release_remote_digest": "sha256:c21355a3babf631ba9f58f09cc7073706564ea76d06b2a93557004903860186a",
+  "release_remote_size": 48661596,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026100801-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d2e21a1c5590b84cebeea0ec45fa77aaa4a35554033f04303d52c7a38905a5d1",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791436473036,
+  "symbol": "AR",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 138,
+      "max": -263.5,
+      "min": -561.0,
+      "p50": -459.0,
+      "p95": -276.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-a977176037614603ab4c7424ee9b2e7c"
+    ],
+    "first_exchange_ts_ms": 1791436433813,
+    "last_exchange_ts_ms": 1791439961911,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 139,
+      "max": 39223.0,
+      "min": 251.0,
+      "p50": 313.0,
+      "p95": 471.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 277,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "uncompressed_bytes": 242667,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
