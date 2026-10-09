@@ -1,11 +1,60 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
+
+import pytest
 
 from tools.build_catalog_metrics import build
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_verify_metrics_source_rejects_stale_index_even_when_schema_is_valid(tmp_path):
+    import tools.build_catalog_metrics as metrics
+
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    index_path.write_text(
+        json.dumps({"shards": [{"dataset_id": "a"}, {"dataset_id": "b"}]}),
+        encoding="utf-8",
+    )
+    metrics_path.write_text(
+        json.dumps({
+            "schema_version": "alina.data_metrics.v4",
+            "source_index_sha256": hashlib.sha256(b'{"shards": []}').hexdigest(),
+            "totals": {"TOTAL_SHARDS": 1},
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="DATA_METRICS_STALE_INDEX"):
+        metrics.verify_metrics_source(index_path, metrics_path)
+
+
+def test_verify_metrics_source_accepts_exact_sha_and_shard_count(tmp_path):
+    import tools.build_catalog_metrics as metrics
+
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    index_path.write_text(
+        json.dumps({"shards": [{"dataset_id": "a"}, {"dataset_id": "b"}]}),
+        encoding="utf-8",
+    )
+    metrics_path.write_text(
+        json.dumps({
+            "schema_version": "alina.data_metrics.v4",
+            "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+            "totals": {"TOTAL_SHARDS": 2},
+        }),
+        encoding="utf-8",
+    )
+
+    proof = metrics.verify_metrics_source(index_path, metrics_path)
+
+    assert proof["total_shards"] == 2
+    assert proof["source_index_sha256"] == hashlib.sha256(index_path.read_bytes()).hexdigest()
 
 
 def test_metrics_file_is_machine_readable_and_counts_shards():
@@ -520,3 +569,4 @@ def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, mo
     assert totals["TOTAL_GAP_RECORDS"] == 0
     assert totals["GAP_COUNT_COVERAGE_COMPLETE"] is False
     assert totals["GAP_COUNT_MISSING_SHARDS"] == 1
+

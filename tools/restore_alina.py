@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -97,13 +98,24 @@ def _download_to_path(
         headers["X-GitHub-Api-Version"] = "2022-11-28"
 
     for attempt in range(1, retries + 1):
-        target.unlink(missing_ok=True)
-        request = urllib.request.Request(url, headers=headers)
+        existing_size = target.stat().st_size if target.is_file() else 0
+        request_headers = dict(headers)
+        if existing_size:
+            request_headers["Range"] = f"bytes={existing_size}-"
+        request = urllib.request.Request(url, headers=request_headers)
         try:
             digest = hashlib.sha256()
-            size = 0
             with urllib.request.urlopen(request, timeout=120) as response:
-                with target.open("wb") as output:
+                status = getattr(response, "status", None)
+                append = existing_size > 0 and status == 206
+                if append:
+                    with target.open("rb") as prefix:
+                        for chunk in iter(lambda: prefix.read(8 * 1024 * 1024), b""):
+                            digest.update(chunk)
+                    size = existing_size
+                else:
+                    size = 0
+                with target.open("ab" if append else "wb") as output:
                     while True:
                         chunk = response.read(8 * 1024 * 1024)
                         if not chunk:
@@ -113,7 +125,11 @@ def _download_to_path(
                         size += len(chunk)
             return size, digest.hexdigest()
         except urllib.error.HTTPError as exc:
-            target.unlink(missing_ok=True)
+            if exc.code == 416 and existing_size:
+                # A stale or oversized partial cannot be resumed. Remove it and
+                # retry from byte zero instead of trusting an invalid prefix.
+                target.unlink(missing_ok=True)
+                continue
             transient = exc.code in {403, 429, 500, 502, 503, 504}
             if not transient or attempt >= retries:
                 detail = exc.read().decode("utf-8", errors="replace")[:800]
@@ -124,7 +140,6 @@ def _download_to_path(
                 delay = max(delay, min(120.0, int(reset) - time.time() + 2.0))
             time.sleep(max(1.0, delay))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            target.unlink(missing_ok=True)
             if attempt >= retries:
                 raise RestoreError(f"streaming download failure for {url}: {exc}") from exc
             time.sleep(min(60.0, float(2 ** attempt)))
@@ -231,6 +246,18 @@ def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
     )
 
 
+def _verify_zip_archive(path: Path, name: str) -> None:
+    if not name.lower().endswith(".zip"):
+        return
+    try:
+        with zipfile.ZipFile(path) as archive:
+            corrupt_member = archive.testzip()
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise RestoreError(f"invalid ZIP archive: {name}") from exc
+    if corrupt_member is not None:
+        raise RestoreError(f"corrupt ZIP member in {name}: {corrupt_member}")
+
+
 def download_asset(
     asset: Mapping[str, Any],
     destination: Path,
@@ -248,21 +275,190 @@ def download_asset(
     target = destination / _safe_component(name)
     target.parent.mkdir(parents=True, exist_ok=True)
     if _asset_ok(target, asset):
+        _verify_zip_archive(target, name)
         return {"name": name, "path": str(target), "status": "SKIPPED_VERIFIED"}
 
     tmp = target.with_suffix(target.suffix + ".partial")
-    tmp.unlink(missing_ok=True)
+    if _asset_ok(tmp, asset):
+        _verify_zip_archive(tmp, name)
+        tmp.replace(target)
+        return {"name": name, "path": str(target), "status": "RESUMED_VERIFIED"}
     actual_size, actual_sha = _download_to_path(url, tmp, token=token)
     expected_size = asset["size"]
     if actual_size != expected_size:
-        tmp.unlink(missing_ok=True)
+        # A short file is a resumable prefix; an oversized file is unusable.
+        if actual_size > expected_size:
+            tmp.unlink(missing_ok=True)
         raise RestoreError(f"size mismatch for {name}")
     expected_sha = _expected_digest(asset)
     if actual_sha != expected_sha:
         tmp.unlink(missing_ok=True)
         raise RestoreError(f"sha256 mismatch for {name}")
+    _verify_zip_archive(tmp, name)
     tmp.replace(target)
     return {"name": name, "path": str(target), "status": "DOWNLOADED_VERIFIED"}
+
+
+def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
+    expected_sha = str(row.get("sha256") or "").lower()
+    expected_size = row.get("bytes")
+    return (
+        path.is_file()
+        and type(expected_size) is int
+        and expected_size >= 0
+        and re.fullmatch(r"[0-9a-f]{64}", expected_sha) is not None
+        and path.stat().st_size == expected_size
+        and _sha256(path) == expected_sha
+    )
+
+
+def _safe_replay_row(
+    row: Mapping[str, Any],
+    *,
+    repository: str,
+    release_tag: str,
+) -> bool:
+    release = row.get("release")
+    release = release if isinstance(release, Mapping) else {}
+    row_repository = str(
+        release.get("repository") or row.get("release_repository") or ""
+    )
+    row_tag = str(
+        release.get("release_tag")
+        or release.get("tag")
+        or row.get("release_tag")
+        or ""
+    )
+    return (
+        row.get("quality_status") == "SAFE"
+        and row.get("validation_allowed") is True
+        and row.get("replay_compatible") is True
+        and row.get("asset_verified") is True
+        and row_repository == repository
+        and row_tag == release_tag
+    )
+
+
+def _materialize_classified_shards(
+    repository: str,
+    releases_root: Path,
+    destination: Path,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "usable_shards": 0,
+        "quarantined_shards": 0,
+        "excluded_rows": 0,
+        "missing_or_corrupt_rows": 0,
+        "verified_zip_members": 0,
+        "failures": [],
+    }
+    diagnostics = destination / "diagnostics" / "run_manifests"
+    for manifest_path in sorted(releases_root.glob("*/RUN_MANIFEST.json")):
+        release_tag = manifest_path.parent.name
+        diagnostic_dir = diagnostics / release_tag
+        diagnostic_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(manifest_path, diagnostic_dir / "RUN_MANIFEST.json")
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            report["failures"].append({
+                "manifest": str(manifest_path),
+                "error": f"INVALID_RUN_MANIFEST:{exc}",
+            })
+            continue
+        rows = payload.get("manifests") if isinstance(payload, Mapping) else None
+        if not isinstance(rows, list):
+            report["failures"].append({
+                "manifest": str(manifest_path),
+                "error": "INVALID_RUN_MANIFEST:missing manifests list",
+            })
+            continue
+        for row in rows:
+            if not isinstance(row, Mapping):
+                report["excluded_rows"] += 1
+                continue
+            dataset_id = str(row.get("dataset_id") or "")
+            if not dataset_id:
+                report["excluded_rows"] += 1
+                continue
+            safe = _safe_replay_row(
+                row, repository=repository, release_tag=release_tag
+            )
+            release = row.get("release")
+            release = release if isinstance(release, Mapping) else {}
+            storage = str(release.get("storage") or row.get("release_storage") or "")
+            outer_name = str(
+                release.get("asset_name")
+                or row.get("release_container_asset")
+                or row.get("release_asset")
+                or ""
+            )
+            member_name = str(
+                release.get("member_name") or row.get("release_member") or ""
+            )
+            if not outer_name:
+                report["missing_or_corrupt_rows"] += 1
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "RELEASE_ASSET_MISSING",
+                    "safe_candidate": safe,
+                })
+                continue
+            source = manifest_path.parent / _safe_component(outer_name)
+            target_root = (
+                destination
+                / ("usable" if safe else "quarantine")
+                / "shards"
+                / _safe_component(release_tag)
+            )
+            target_root.mkdir(parents=True, exist_ok=True)
+            target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+            tmp = target.with_suffix(target.suffix + ".partial")
+            tmp.unlink(missing_ok=True)
+            try:
+                if storage == "zip_entry" or member_name:
+                    if (
+                        Path(member_name).name != member_name
+                        or not member_name
+                        or not source.is_file()
+                    ):
+                        raise RestoreError("unsafe or missing ZIP member")
+                    with zipfile.ZipFile(source) as archive:
+                        info = archive.getinfo(member_name)
+                        expected_size = row.get("bytes")
+                        if (
+                            type(expected_size) is not int
+                            or expected_size < 0
+                            or info.file_size != expected_size
+                        ):
+                            raise RestoreError("ZIP member size does not match manifest")
+                        with archive.open(member_name) as member, tmp.open("wb") as output:
+                            shutil.copyfileobj(member, output, length=8 * 1024 * 1024)
+                    report["verified_zip_members"] += 1
+                else:
+                    if not source.is_file():
+                        raise RestoreError("release asset missing")
+                    try:
+                        os.link(source, tmp)
+                    except OSError:
+                        shutil.copy2(source, tmp)
+                if not _verified_row_bytes(tmp, row):
+                    raise RestoreError("shard member size/SHA-256 mismatch")
+                tmp.replace(target)
+            except (OSError, KeyError, zipfile.BadZipFile, RestoreError) as exc:
+                tmp.unlink(missing_ok=True)
+                report["missing_or_corrupt_rows"] += 1
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": str(exc),
+                    "safe_candidate": safe,
+                })
+                continue
+            if safe:
+                report["usable_shards"] += 1
+            else:
+                report["quarantined_shards"] += 1
+    return report
 
 
 def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
@@ -292,13 +488,26 @@ def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
             if not isinstance(row, Mapping):
                 bad += 1
                 continue
+            release = row.get("release")
+            release = release if isinstance(release, Mapping) else {}
             raw_tag = str(
-                row.get("release_tag")
+                release.get("release_tag")
+                or release.get("tag")
+                or row.get("release_tag")
                 or payload.get("data_release_base_tag")
                 or payload.get("release_tag")
                 or ""
             )
-            name = str(row.get("release_asset") or "")
+            storage = str(release.get("storage") or row.get("release_storage") or "")
+            name = str(
+                release.get("asset_name")
+                or row.get("release_container_asset")
+                or row.get("release_asset")
+                or ""
+            )
+            member_name = str(
+                release.get("member_name") or row.get("release_member") or ""
+            )
             expected = str(row.get("sha256") or "").lower()
             tag = _safe_component(raw_tag) if raw_tag else ""
             safe_name = _safe_component(name) if name else ""
@@ -306,7 +515,36 @@ def _verify_run_manifests(root: Path) -> list[dict[str, Any]]:
             if path is None:
                 missing += 1
                 continue
-            if len(expected) == 64 and _sha256(path) != expected:
+            if storage == "zip_entry" or member_name:
+                if Path(member_name).name != member_name or not member_name:
+                    bad += 1
+                    continue
+                try:
+                    digest = hashlib.sha256()
+                    member_size = 0
+                    with zipfile.ZipFile(path) as archive, archive.open(member_name) as source:
+                        for chunk in iter(lambda: source.read(8 * 1024 * 1024), b""):
+                            digest.update(chunk)
+                            member_size += len(chunk)
+                except (OSError, KeyError, zipfile.BadZipFile):
+                    bad += 1
+                    continue
+                expected_size = row.get("bytes")
+                if (
+                    re.fullmatch(r"[0-9a-f]{64}", expected) is None
+                    or digest.hexdigest() != expected
+                    or type(expected_size) is not int
+                    or member_size != expected_size
+                ):
+                    bad += 1
+                else:
+                    verified += 1
+            elif (
+                re.fullmatch(r"[0-9a-f]{64}", expected) is None
+                or type(row.get("bytes")) is not int
+                or path.stat().st_size != row.get("bytes")
+                or _sha256(path) != expected
+            ):
                 bad += 1
             else:
                 verified += 1
@@ -505,7 +743,10 @@ def restore_everything(
                 continue
             target = release_dir / _safe_component(name)
             if not _asset_ok(target, asset):
-                pending_download_bytes += max(0, int(asset.get("size") or 0))
+                expected_size = max(0, int(asset.get("size") or 0))
+                partial = target.with_suffix(target.suffix + ".partial")
+                partial_size = partial.stat().st_size if partial.is_file() else 0
+                pending_download_bytes += max(0, expected_size - partial_size)
 
     free_destination = shutil.disk_usage(destination).free
     safety_margin = 1024 * 1024 * 1024
@@ -523,6 +764,7 @@ def restore_everything(
         "release_count": 0,
         "asset_count": 0,
         "downloaded": 0,
+        "resumed_verified": 0,
         "skipped_verified": 0,
         "pending_download_bytes_at_start": pending_download_bytes,
         "free_destination_bytes_at_start": free_destination,
@@ -551,6 +793,8 @@ def restore_everything(
                 row["assets"].append(result)
                 if result["status"] == "DOWNLOADED_VERIFIED":
                     report["downloaded"] += 1
+                elif result["status"] == "RESUMED_VERIFIED":
+                    report["resumed_verified"] += 1
                 else:
                     report["skipped_verified"] += 1
             except RestoreError as exc:
@@ -563,6 +807,9 @@ def restore_everything(
     report["verification_failures"] = sum(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
+    report["classification"] = _materialize_classified_shards(
+        repository, releases_root, destination
+    )
     report["local_snapshot"] = (
         materialize_latest_local_snapshot(releases_root, workspace)
         if workspace is not None
@@ -571,7 +818,11 @@ def restore_everything(
     report["expected_assets"] = sum(len(release["assets"]) for release in releases)
     report["all_source_assets_accounted_for"] = (
         report["asset_count"] == report["expected_assets"]
-        and report["downloaded"] + report["skipped_verified"] + len(report["failures"]) == report["expected_assets"]
+        and report["downloaded"]
+        + report["resumed_verified"]
+        + report["skipped_verified"]
+        + len(report["failures"])
+        == report["expected_assets"]
     )
     report_path = destination / "RESTORE_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -588,7 +839,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workspace",
         default=".",
-        help="fresh clone root where the latest explicit local runtime snapshot is materialized",
+        help="fresh clone root used only with --materialize-local-snapshot",
+    )
+    parser.add_argument(
+        "--materialize-local-snapshot",
+        action="store_true",
+        help=(
+            "explicitly restore the latest whole-workspace snapshot; disabled by "
+            "default because only catalog-proven SAFE shards enter usable/"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -602,13 +861,21 @@ def main(argv: list[str] | None = None) -> int:
             args.repository,
             destination,
             token=token,
-            workspace=Path(args.workspace).resolve(),
+            workspace=(
+                Path(args.workspace).resolve()
+                if args.materialize_local_snapshot
+                else None
+            ),
         )
     except RestoreError as exc:
         print(f"ALINA_RESTORE_FAIL: {exc}", file=sys.stderr)
         return 2
 
-    failures = len(report["failures"]) + int(report["verification_failures"])
+    failures = (
+        len(report["failures"])
+        + int(report["verification_failures"])
+        + len(report["classification"]["failures"])
+    )
     if not report["all_source_assets_accounted_for"]:
         failures += 1
     print(
@@ -618,7 +885,11 @@ def main(argv: list[str] | None = None) -> int:
                 "release_count": report["release_count"],
                 "asset_count": report["asset_count"],
                 "downloaded": report["downloaded"],
+                "resumed_verified": report["resumed_verified"],
                 "skipped_verified": report["skipped_verified"],
+                "usable_shards": report["classification"]["usable_shards"],
+                "quarantined_shards": report["classification"]["quarantined_shards"],
+                "missing_or_corrupt_rows": report["classification"]["missing_or_corrupt_rows"],
                 "failures": failures,
                 "report": str(destination / "RESTORE_REPORT.json"),
             },
@@ -630,3 +901,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

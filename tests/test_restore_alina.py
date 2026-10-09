@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import io
 import json
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +42,7 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
                 "dataset_id": "test-trades",
                 "release_tag": "data-v2-test",
                 "release_asset": "trades.jsonl.gz",
+                "bytes": len(shard),
                 "sha256": shard_sha,
             }
         ],
@@ -97,6 +100,7 @@ def test_download_asset_rejects_digest_mismatch(tmp_path, monkeypatch):
         module.download_asset(asset, tmp_path)
     except module.RestoreError as exc:
         assert "size mismatch" in str(exc) or "sha256 mismatch" in str(exc)
+        assert not (tmp_path / "asset.bin.partial").exists()
     else:
         raise AssertionError("corrupted restore asset must fail closed")
 
@@ -308,3 +312,274 @@ def test_download_asset_rejects_missing_hash_even_when_cached(tmp_path):
     import pytest
     with pytest.raises(module.RestoreError, match="SHA-256"):
         module.download_asset(asset, tmp_path)
+
+
+def test_restore_materializes_only_proven_safe_replay_assets(tmp_path, monkeypatch):
+    module = _module()
+    safe = b'{"trade_id":"safe"}\n'
+    partial = b'{"trade_id":"partial"}\n'
+    manifest = {
+        "schema": "alina.dataset_run_manifest.v2",
+        "release_tag": "data-v2-classified",
+        "manifests": [
+            {
+                "dataset_id": "safe-trades",
+                "family": "trades",
+                "quality_status": "SAFE",
+                "validation_allowed": True,
+                "replay_compatible": True,
+                "asset_verified": True,
+                "bytes": len(safe),
+                "sha256": hashlib.sha256(safe).hexdigest(),
+                "release": {
+                    "repository": "owner/repo",
+                    "release_tag": "data-v2-classified",
+                    "asset_name": "safe.jsonl.gz",
+                },
+            },
+            {
+                "dataset_id": "partial-trades",
+                "family": "trades",
+                "quality_status": "PARTIAL",
+                "validation_allowed": False,
+                "replay_compatible": False,
+                "asset_verified": True,
+                "bytes": len(partial),
+                "sha256": hashlib.sha256(partial).hexdigest(),
+                "release": {
+                    "repository": "owner/repo",
+                    "release_tag": "data-v2-classified",
+                    "asset_name": "partial.jsonl.gz",
+                },
+            },
+        ],
+    }
+    manifest_bytes = json.dumps(manifest).encode()
+    payloads = {
+        "https://example.invalid/safe": safe,
+        "https://example.invalid/partial": partial,
+        "https://example.invalid/manifest": manifest_bytes,
+    }
+    release = {
+        "tag_name": "data-v2-classified",
+        "assets": [
+            _asset("safe.jsonl.gz", "https://example.invalid/safe", safe),
+            _asset("partial.jsonl.gz", "https://example.invalid/partial", partial),
+            _asset("RUN_MANIFEST.json", "https://example.invalid/manifest", manifest_bytes),
+        ],
+    }
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    monkeypatch.setattr(
+        module,
+        "_download_to_path",
+        lambda url, target, **_k: (
+            target.write_bytes(payloads[url]),
+            hashlib.sha256(payloads[url]).hexdigest(),
+        ),
+    )
+
+    report = module.restore_everything("owner/repo", tmp_path)
+
+    usable = tmp_path / "usable" / "shards" / "data-v2-classified"
+    quarantine = tmp_path / "quarantine" / "shards" / "data-v2-classified"
+    assert (usable / "safe-trades.jsonl.gz").read_bytes() == safe
+    assert not (usable / "partial-trades.jsonl.gz").exists()
+    assert (quarantine / "partial-trades.jsonl.gz").read_bytes() == partial
+    assert report["classification"]["usable_shards"] == 1
+    assert report["classification"]["quarantined_shards"] == 1
+
+
+def test_restore_verifies_zip_member_before_usable_materialization(tmp_path, monkeypatch):
+    module = _module()
+    member = b'{"trade_id":"inside"}\n'
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("inside.jsonl.gz", member)
+    packed = buffer.getvalue()
+    manifest = {
+        "schema": "alina.dataset_run_manifest.v2",
+        "release_tag": "data-v2-packed",
+        "manifests": [{
+            "dataset_id": "inside",
+            "quality_status": "SAFE",
+            "validation_allowed": True,
+            "replay_compatible": True,
+            "asset_verified": True,
+            "bytes": len(member),
+            "sha256": hashlib.sha256(member).hexdigest(),
+            "release": {
+                "repository": "owner/repo",
+                "release_tag": "data-v2-packed",
+                "asset_name": "packed.zip",
+                "member_name": "inside.jsonl.gz",
+                "storage": "zip_entry",
+                "remote_size": len(packed),
+                "remote_digest": "sha256:" + hashlib.sha256(packed).hexdigest(),
+            },
+        }],
+    }
+    manifest_bytes = json.dumps(manifest).encode()
+    payloads = {
+        "https://example.invalid/packed": packed,
+        "https://example.invalid/manifest": manifest_bytes,
+    }
+    release = {
+        "tag_name": "data-v2-packed",
+        "assets": [
+            _asset("packed.zip", "https://example.invalid/packed", packed),
+            _asset("RUN_MANIFEST.json", "https://example.invalid/manifest", manifest_bytes),
+        ],
+    }
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    monkeypatch.setattr(
+        module,
+        "_download_to_path",
+        lambda url, target, **_k: (
+            target.write_bytes(payloads[url]),
+            hashlib.sha256(payloads[url]).hexdigest(),
+        ),
+    )
+
+    report = module.restore_everything("owner/repo", tmp_path)
+
+    restored = tmp_path / "usable" / "shards" / "data-v2-packed" / "inside.jsonl.gz"
+    assert restored.read_bytes() == member
+    assert report["classification"]["verified_zip_members"] == 1
+    assert report["verification_failures"] == 0
+
+
+def test_streaming_download_resumes_existing_partial_with_http_range(tmp_path, monkeypatch):
+    module = _module()
+    target = tmp_path / "asset.partial"
+    target.write_bytes(b"prefix-")
+    requests = []
+
+    class Response:
+        status = 206
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            if hasattr(self, "done"):
+                return b""
+            self.done = True
+            return b"suffix"
+
+    def open_response(request, **_kwargs):
+        requests.append(request)
+        return Response()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", open_response)
+
+    size, digest = module._download_to_path("https://example.invalid/asset", target)
+
+    assert requests[0].headers["Range"] == "bytes=7-"
+    assert target.read_bytes() == b"prefix-suffix"
+    assert size == len(b"prefix-suffix")
+    assert digest == hashlib.sha256(b"prefix-suffix").hexdigest()
+
+
+def test_short_download_is_retained_as_resumable_partial(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"complete-payload"
+    prefix = payload[:8]
+    asset = _asset("asset.bin", "https://example.invalid/asset", payload)
+
+    def short_download(_url, target, **_kwargs):
+        target.write_bytes(prefix)
+        return len(prefix), hashlib.sha256(prefix).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", short_download)
+
+    import pytest
+    with pytest.raises(module.RestoreError, match="size mismatch"):
+        module.download_asset(asset, tmp_path)
+
+    assert (tmp_path / "asset.bin.partial").read_bytes() == prefix
+
+
+def test_manifest_verification_rejects_direct_asset_without_size(tmp_path):
+    module = _module()
+    release = tmp_path / "data-v2-test"
+    release.mkdir()
+    shard = b"payload"
+    (release / "asset.bin").write_bytes(shard)
+    (release / "RUN_MANIFEST.json").write_text(
+        json.dumps({
+            "release_tag": "data-v2-test",
+            "manifests": [{
+                "release_asset": "asset.bin",
+                "sha256": hashlib.sha256(shard).hexdigest(),
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    checks = module._verify_run_manifests(tmp_path)
+
+    assert checks[0]["status"] == "FAIL"
+    assert checks[0]["bad_assets"] == 1
+
+
+def test_cached_zip_with_valid_release_hash_but_invalid_structure_is_rejected(tmp_path):
+    module = _module()
+    payload = b"not-a-zip"
+    asset = _asset("archive.zip", "https://example.invalid/archive", payload)
+    (tmp_path / "archive.zip").write_bytes(payload)
+
+    import pytest
+    with pytest.raises(module.RestoreError, match="invalid ZIP archive"):
+        module.download_asset(asset, tmp_path)
+
+
+def test_safe_candidate_without_explicit_release_tag_stays_quarantined(tmp_path, monkeypatch):
+    module = _module()
+    shard = b'{"trade_id":"no-tag"}\n'
+    manifest = {
+        "schema": "alina.dataset_run_manifest.v2",
+        "release_tag": "data-v2-no-implicit-tag",
+        "manifests": [{
+            "dataset_id": "no-implicit-tag",
+            "quality_status": "SAFE",
+            "validation_allowed": True,
+            "replay_compatible": True,
+            "asset_verified": True,
+            "bytes": len(shard),
+            "sha256": hashlib.sha256(shard).hexdigest(),
+            "release": {
+                "repository": "owner/repo",
+                "asset_name": "shard.jsonl.gz",
+            },
+        }],
+    }
+    manifest_bytes = json.dumps(manifest).encode()
+    payloads = {
+        "https://example.invalid/shard": shard,
+        "https://example.invalid/manifest": manifest_bytes,
+    }
+    release = {
+        "tag_name": "data-v2-no-implicit-tag",
+        "assets": [
+            _asset("shard.jsonl.gz", "https://example.invalid/shard", shard),
+            _asset("RUN_MANIFEST.json", "https://example.invalid/manifest", manifest_bytes),
+        ],
+    }
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    monkeypatch.setattr(
+        module,
+        "_download_to_path",
+        lambda url, target, **_k: (
+            target.write_bytes(payloads[url]),
+            hashlib.sha256(payloads[url]).hexdigest(),
+        ),
+    )
+
+    report = module.restore_everything("owner/repo", tmp_path)
+
+    assert report["classification"]["usable_shards"] == 0
+    assert report["classification"]["quarantined_shards"] == 1
+

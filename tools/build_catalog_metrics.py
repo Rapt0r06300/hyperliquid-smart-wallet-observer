@@ -52,6 +52,38 @@ def _bucket(table: dict[str, dict[str, int]], key: str) -> dict[str, int]:
     return table[key]
 
 
+def verify_metrics_source(
+    index_path: Path = INDEX,
+    metrics_path: Path = METRICS,
+) -> dict[str, Any]:
+    """Fail closed unless metrics describe the exact current index bytes."""
+    try:
+        index_bytes = index_path.read_bytes()
+        index = json.loads(index_bytes)
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"DATA_METRICS_SOURCE_INVALID: {exc}") from exc
+    if not isinstance(index, dict) or not isinstance(index.get("shards"), list):
+        raise ValueError("DATA_METRICS_SOURCE_INVALID: DATA_INDEX shards must be a list")
+    if not isinstance(metrics, dict) or metrics.get("schema_version") != "alina.data_metrics.v4":
+        raise ValueError("DATA_METRICS_SOURCE_INVALID: unsupported metrics schema")
+    expected_sha = hashlib.sha256(index_bytes).hexdigest()
+    totals = metrics.get("totals")
+    measured_shards = totals.get("TOTAL_SHARDS") if isinstance(totals, dict) else None
+    if (
+        metrics.get("source_index_sha256") != expected_sha
+        or type(measured_shards) is not int
+        or measured_shards != len(index["shards"])
+    ):
+        raise ValueError(
+            "DATA_METRICS_STALE_INDEX: metrics do not describe current DATA_INDEX"
+        )
+    return {
+        "source_index_sha256": expected_sha,
+        "total_shards": len(index["shards"]),
+    }
+
+
 def build() -> dict[str, Any]:
     idx = json.loads(INDEX.read_text(encoding="utf-8"))
     shards = idx.get("shards") or []
@@ -550,3 +582,4 @@ def build() -> dict[str, Any]:
 
 if __name__ == "__main__":
     print(json.dumps(build()["totals"], sort_keys=True))
+

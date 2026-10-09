@@ -44,11 +44,42 @@ jobs:
           python -m pip install --disable-pip-version-check pytest
           python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py
       - name: Publish metrics
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json
-          git diff --cached --quiet && exit 0
-          git commit -m "data: refresh exact dataset metrics"
-          for i in 1 2 3 4 5; do git pull --rebase origin main && git push origin HEAD:main && exit 0; sleep $((i*2)); done
-          exit 1
+          published=false
+          for attempt in 1 2 3 4 5; do
+            # Generated metrics are valid only for the exact DATA_INDEX bytes
+            # used to build them. Never rebase an older generated file over a
+            # concurrently updated catalog.
+            git fetch origin main
+            git reset --hard origin/main
+            python tools/build_replay_compatibility_reasons.py
+            python tools/build_catalog_metrics.py
+            python tools/build_collection_metrics.py
+            python - <<'PY'
+          from tools.build_catalog_metrics import verify_metrics_source
+          print(verify_metrics_source())
+          PY
+            python tools/check_dataset_quality.py
+            git add catalog/DATA_METRICS.json catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/COLLECTION_METRICS.json
+            if git diff --cached --quiet; then
+              echo "Metrics already match the current catalog."
+              published=true
+              break
+            fi
+            git commit -m "data: refresh exact dataset metrics"
+            if git push origin HEAD:main; then
+              published=true
+              break
+            fi
+            echo "Concurrent catalog update; rebuilding metrics from latest main (attempt $attempt)."
+            sleep $((attempt * 2))
+          done
+          [ "$published" = true ] || {
+            echo "::error::Exact catalog metrics were not durably published"
+            exit 1
+          }
+
