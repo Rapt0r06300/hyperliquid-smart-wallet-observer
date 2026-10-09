@@ -174,9 +174,14 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
     stale_count = sum(row.get("quality_status") == "STALE" for row in new_rows)
     reject_count = sum(row.get("quality_status") in {"REJECT", "REJECTED"} for row in new_rows)
 
-    index["shards"] = new_rows
-    index["active_data_status"] = active
-    _atomic_json(index_path, index)
+    # The canonical index can already be close to GitHub's 100 MiB cap.
+    # A no-op audit must not rewrite/expand that blob or trip the 85 MiB
+    # *write* guard. Only actual SHA-verified SAFE repairs mutate index bytes.
+    # The guard remains enforced for every real index mutation.
+    if repaired:
+        index["shards"] = new_rows
+        index["active_data_status"] = active
+        _atomic_json(index_path, index)
 
     registry["active_dataset"] = {
         "status": active,
