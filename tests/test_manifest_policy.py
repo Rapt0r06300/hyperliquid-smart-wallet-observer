@@ -328,3 +328,28 @@ def test_capacity_replay_requires_independent_parent_l2_shard_proof():
     status, reasons = classify_manifest(value)
     assert status == "PARTIAL"
     assert "PARENT_L2_SHARD_NOT_VERIFIED" in reasons
+
+
+
+def test_public_rest_clock_sync_snapshot_is_safe_with_verified_sha_and_replay():
+    value = manifest()
+    value["family"] = "clock_sync"
+    value["venue"] = "bitget"
+    value["source"] = "bitget_public_rest"
+    value["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    value["provenance"]["transports"] = ["https"]
+    value["required_channels"] = []
+    value["observed_channels"] = ["clock_sync"]
+    status, reasons = classify_manifest(value)
+    assert status == "SAFE", reasons
+
+
+def test_unverified_clock_sync_and_fake_websocket_snapshots_are_not_safe():
+    value = manifest()
+    value["family"] = "clock_sync"
+    value["provenance"]["transports"] = ["https"]
+    value["reconciliation"] = {"status": "UNVERIFIED"}
+    assert classify_manifest(value)[0] != "SAFE"
+    value["provenance"]["transports"] = ["websocket"]
+    value["reconciliation"] = {"status": "SNAPSHOT_VERIFIED"}
+    assert classify_manifest(value)[0] != "SAFE"

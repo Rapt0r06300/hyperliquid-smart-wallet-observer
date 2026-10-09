@@ -293,7 +293,7 @@ def classify_manifest(manifest: Mapping[str, Any]) -> tuple[str, list[str]]:
     ):
         if reconciliation_status not in _SNAPSHOT_RECONCILIATION:
             reasons.append(f"RECONCILIATION_{reconciliation_status}")
-    elif family in {"instrument_metadata", "open_interest", "funding_settlement"} and transports and transports.issubset({"http", "https"}):
+    elif family in {"clock_sync", "instrument_metadata", "open_interest", "funding_settlement"} and transports and transports.issubset({"http", "https"}):
         if reconciliation_status not in _SNAPSHOT_RECONCILIATION:
             reasons.append(f"RECONCILIATION_{reconciliation_status}")
     elif "websocket" in transports:
