@@ -1,46 +1,46 @@
 {
-  "dataset_v2_head": "96b7189ac5eeee4b1cfb3146cfd7ece494abbf2e",
-  "generated_at_utc": "2026-10-09T05:33:24.331019Z",
+  "dataset_v2_head": "1b834543f725de1858b1cbd548259079a0697280",
+  "generated_at_utc": "2026-10-09T05:57:41.810156Z",
   "groups": [
     {
       "name": "dataset_control",
-      "output_sha256": "2cea01b3d0b6afbe03c7b57f0ac71b83af8b57a705c0bea8f8d9b9dbe72ca21f",
-      "output_tail": "............................................                             [100%]\n44 passed in 2.69s\n",
+      "output_sha256": "20e8ced6296e55aa7ae7cd5d3c022d136c08daa6bec75c118c4d7ef534290244",
+      "output_tail": "............................................                             [100%]\n44 passed in 2.13s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "dataset_data_and_recovery",
-      "output_sha256": "d5d69ab230064ccb69fb475b37a1dc028587ac1e6ba65b06507932388dc1d899",
-      "output_tail": "..........................F.........................                     [100%]\n=================================== FAILURES ===================================\n___ test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof ____\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-5/test_receive_only_copy_vault_s0')\n\n    def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_path):\n        for family in (\"copy_vault_positions\", \"copy_vault_selection\"):\n            path = tmp_path / (family + \".jsonl.gz\")\n            with gzip.open(path, \"wt\", encoding=\"utf-8\") as handle:\n                for ts in (1000, 1001):\n                    handle.write(json.dumps(_vault_tick(family=family, ts=ts)) + \"\\n\")\n            result = inspect_asset(path, {\n                \"family\": family, \"source\": _vault_tick(family=family)[\"source_id\"],\n                \"venue\": \"hyperliquid\",\n            })\n            assert result[\"record_count\"] == 2\n>           assert result[\"replay_compatible\"] is True\nE           assert False is True\n\ntests/test_replay_compatibility.py:155: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_compatibility.py::test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof - assert False is True\n1 failed, 51 passed in 3.85s\n",
+      "output_sha256": "31d6335771143fb32843ee93d09350a37467484c4b202639a5edf80dbbda4477",
+      "output_tail": "..........................F...........................                   [100%]\n=================================== FAILURES ===================================\n___ test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof ____\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-5/test_receive_only_copy_vault_s0')\n\n    def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_path):\n        for family in (\"copy_vault_positions\", \"copy_vault_selection\"):\n            path = tmp_path / (family + \".jsonl.gz\")\n            with gzip.open(path, \"wt\", encoding=\"utf-8\") as handle:\n                for ts in (1000, 1001):\n                    handle.write(json.dumps(_vault_tick(family=family, ts=ts)) + \"\\n\")\n            result = inspect_asset(path, {\n                \"family\": family, \"source\": _vault_tick(family=family)[\"source_id\"],\n                \"venue\": \"hyperliquid\",\n            })\n            assert result[\"record_count\"] == 2\n>           assert result[\"replay_compatible\"] is True\nE           assert False is True\n\ntests/test_replay_compatibility.py:155: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_compatibility.py::test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof - assert False is True\n1 failed, 53 passed in 3.19s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "main_certification_and_replay_policy",
-      "output_sha256": "b788f93ade36c617b5d1e87e82e97f243bb56a7de108e1c3f6fd0a41e3dcabb7",
-      "output_tail": ".........................................................F.............. [ 86%]\n...........                                                              [100%]\n=================================== FAILURES ===================================\n___ test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof ____\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-1/test_receive_only_copy_vault_s0')\n\n    def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_path):\n        for family in (\"copy_vault_positions\", \"copy_vault_selection\"):\n            path = tmp_path / (family + \".jsonl.gz\")\n            with gzip.open(path, \"wt\", encoding=\"utf-8\") as handle:\n                for ts in (1000, 1001):\n                    handle.write(json.dumps(_vault_tick(family=family, ts=ts)) + \"\\n\")\n            result = inspect_asset(path, {\n                \"family\": family, \"source\": _vault_tick(family=family)[\"source_id\"],\n                \"venue\": \"hyperliquid\",\n            })\n            assert result[\"record_count\"] == 2\n>           assert result[\"replay_compatible\"] is True\nE           assert False is True\n\ntests/test_replay_compatibility.py:155: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_compatibility.py::test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof - assert False is True\n1 failed, 82 passed in 5.16s\n",
+      "output_sha256": "84c7cb2031709e61b5fafb365cff82aef3a0c193e12fcdf653f88f0e60565b06",
+      "output_tail": ".........................................................F.............. [ 83%]\n..............                                                           [100%]\n=================================== FAILURES ===================================\n___ test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof ____\n\ntmp_path = PosixPath('/tmp/pytest-of-runner/pytest-1/test_receive_only_copy_vault_s0')\n\n    def test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof(tmp_path):\n        for family in (\"copy_vault_positions\", \"copy_vault_selection\"):\n            path = tmp_path / (family + \".jsonl.gz\")\n            with gzip.open(path, \"wt\", encoding=\"utf-8\") as handle:\n                for ts in (1000, 1001):\n                    handle.write(json.dumps(_vault_tick(family=family, ts=ts)) + \"\\n\")\n            result = inspect_asset(path, {\n                \"family\": family, \"source\": _vault_tick(family=family)[\"source_id\"],\n                \"venue\": \"hyperliquid\",\n            })\n            assert result[\"record_count\"] == 2\n>           assert result[\"replay_compatible\"] is True\nE           assert False is True\n\ntests/test_replay_compatibility.py:155: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_replay_compatibility.py::test_receive_only_copy_vault_snapshots_are_replayable_with_strict_proof - assert False is True\n1 failed, 85 passed in 4.31s\n",
       "returncode": 1,
       "status": "FAIL"
     },
     {
       "name": "main_control_and_closure",
-      "output_sha256": "e2d9524f32c6d02b42cd29c677b945760b594437dac6f5e11804fa163fce1225",
-      "output_tail": ".........                                                                [100%]\n9 passed in 1.44s\n",
+      "output_sha256": "7d11cf415414c639cbd80321ec4f49cdb5900fe72320a0d3d9d4d8c19acc5883",
+      "output_tail": ".........                                                                [100%]\n9 passed in 1.13s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_module_wiring",
-      "output_sha256": "d6d2e16957b2df2019d262dc47caeb46bdc559354c561945aef13cfde7a90017",
-      "output_tail": "..................................................                       [100%]\n50 passed in 3.30s\n",
+      "output_sha256": "c344d80e75e0768bc9b4d2c684542eb2a51c670cdfa040aee63a1082a8029fcf",
+      "output_tail": "..................................................                       [100%]\n50 passed in 2.93s\n",
       "returncode": 0,
       "status": "PASS"
     },
     {
       "name": "main_parity_and_economics",
-      "output_sha256": "3f7170c5deb21c75463a4139d9b68c7d96c62aeb4e157ecc91957d0d57f0ba64",
-      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 5.61s\n",
+      "output_sha256": "24e0d97d43fb94dbf82f0848749f6ff204985db22339af5fa74127c3f54d3b61",
+      "output_tail": "....................................................                     [100%]\n=============================== warnings summary ===============================\n../../../../..<hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.\n    from starlette.testclient import TestClient as TestClient  # noqa\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:99: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"startup\")\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <hostedtoolcache>/Python/3.12.15/x64/lib/python3.12/site-packages/fastapi/applications.py:4745: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    return self.router.on_event(event_type)  # ty: ignore[deprecated]\n\ntests/test_economic_family_scoreboard.py::test_scoreboards_are_reachable_from_the_read_only_runtime\n  <workspace>/src/hl_observer/ui/app.py:103: DeprecationWarning: \n          on_event is deprecated, use lifespan event handlers instead.\n  \n          Read more about it in the\n          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).\n          \n    @app.on_event(\"shutdown\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n52 passed, 5 warnings in 4.76s\n",
       "returncode": 0,
       "status": "PASS"
     },
@@ -52,17 +52,17 @@
       "status": "PASS"
     }
   ],
-  "main_alina_head": "96b7189ac5eeee4b1cfb3146cfd7ece494abbf2e",
+  "main_alina_head": "1b834543f725de1858b1cbd548259079a0697280",
   "paper_only": true,
   "python_version": "3.12.15",
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "63bcf94dd9ee7a6a8460ebad55f2c0b9dccf06c54a9167a335b611da4e36cfbf",
+  "receipt_digest": "64bc39d865a9be3a06ef7a485b66869b0ae8fa20d5f3f2b63e4494553f1a149a",
   "runner_architecture": "x86_64",
   "runner_os": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
   "schema": "alina.canonical_spec_verification.v1",
   "self_hosted_used": false,
   "status": "FAIL",
   "workflow_run_attempt": "1",
-  "workflow_run_id": "37888503696"
+  "workflow_run_id": "37889135343"
 }
