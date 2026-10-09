@@ -978,3 +978,109 @@ def test_sync_sink_records_queue_loss_clock_and_connection():
     sink.emit(two)
     assert sink.drops[("hyperliquid_public_ws", "bbo", "BTC")] == 1
     assert sink.drop_windows[("hyperliquid_public_ws", "bbo", "BTC", "conn-1", 2)] == 1
+
+
+
+def test_gate_book_gap_invalidates_capacity_until_authoritative_snapshot():
+    from hl_observer.collection.gate_market_data import GateMarketState
+
+    state = GateMarketState(contract="BTC_USDT")
+    base = {
+        "full": True, "id": 100, "current": 1_000,
+        "bids": [{"p": "100", "s": "10"}],
+        "asks": [{"p": "101", "s": "10"}],
+    }
+    assert state.apply_book(base, receive_ts_ms=1_010) == "EXPLOITABLE"
+    assert state.sequence == 100
+    assert state.apply_book({"U": 101, "u": 101, "b": [["100", "12"]], "a": []},
+                            receive_ts_ms=1_020) == "EXPLOITABLE"
+    assert state.apply_book({"U": 105, "u": 105, "b": [["100", "99"]], "a": []},
+                            receive_ts_ms=1_030) == "DESYNC"
+    assert state.reason == "SEQUENCE_GAP"
+    assert state.gap_count == 1
+    assert state.sequence is None
+    assert not state.bids and not state.asks
+    assert state.apply_book({"U": 106, "u": 106, "b": [["100", "99"]], "a": []},
+                            receive_ts_ms=1_040) == "UNMEASURABLE"
+    assert state.reason == "DELTA_BEFORE_SNAPSHOT"
+    assert state.gap_count == 1
+    assert state.apply_book({
+        "full": True, "id": 200, "current": 2_000,
+        "bids": [{"p": "99", "s": "8"}],
+        "asks": [{"p": "101", "s": "8"}],
+    }, receive_ts_ms=2_010) == "EXPLOITABLE"
+    assert state.sequence == 200
+    assert state.gap_count == 1
+
+
+def test_gate_missing_official_base_refuses_orphan_delta():
+    from hl_observer.collection.gate_market_data import GateMarketState
+    state = GateMarketState(contract="BTC_USDT")
+    assert state.apply_book({
+        "U": 1, "u": 1, "b": [["100", "10"]], "a": [["101", "10"]],
+    }, receive_ts_ms=1000) == "UNMEASURABLE"
+    assert state.sequence is None
+    assert state.reason == "DELTA_BEFORE_SNAPSHOT"
+
+
+def test_gate_gap_schedules_bounded_single_contract_rebootstrap_without_cutting_raw():
+    import asyncio
+    from types import SimpleNamespace
+
+    m = _module()
+    class Sink:
+        def __init__(self):
+            self.rows = []
+        def emit(self, envelope):
+            self.rows.append(envelope)
+    class Client:
+        def __init__(self):
+            self.bootstrap_calls = []
+        def measure_clock_sync(self):
+            return SimpleNamespace(
+                offset_ms=0, rtt_ms=1, server_ts_ms=1000,
+                receive_wall_ts_ms=1001,
+            )
+        def bootstrap_envelopes(self, contracts):
+            self.bootstrap_calls.append(tuple(contracts))
+            seq = 100 if len(self.bootstrap_calls) == 1 else 200
+            return [m.TickEnvelope(
+                source_id="gate_public_rest", channel="l2Book",
+                instrument=contracts[0], event_kind="SNAPSHOT",
+                raw_payload={
+                    "id": seq, "current": seq * 10,
+                    "bids": [{"p": "100", "s": "10"}],
+                    "asks": [{"p": "101", "s": "10"}],
+                }, exchange_ts_ms=seq * 10,
+                received_ts_ms=seq * 10 + 2, local_monotonic_ns=seq,
+                connection_id=None, sequence=seq,
+                provenance={"access": "read_only", "transport": "https"},
+                parsed_summary={},
+            )]
+        async def messages(self, _symbols):
+            def delta(first, last):
+                return {
+                    "channel": "futures.order_book_update", "event": "update",
+                    "result": {"contract": "BTC_USDT", "U": first, "u": last,
+                               "t": last * 10,
+                               "b": [{"p": "100", "s": "12"}], "a": []},
+                    "_alina_transport": {
+                        "connection_id": "gate-a",
+                        "receive_wall_ts_ms": last * 10 + 3,
+                        "receive_mono_ns": last * 1000,
+                    },
+                }
+            yield delta(101, 101)
+            yield delta(105, 105)  # real sequence gap, stays in RAW.
+            await asyncio.sleep(0.08)  # bounded on-demand REST reanchor.
+            yield delta(201, 201)
+
+    client, sink = Client(), Sink()
+    asyncio.run(m._native_with_clock_sync(
+        "gate", client, ["BTC_USDT"], sink, probe_interval_s=60,
+        capacity_size_multipliers={"BTC_USDT": 0.001},
+    ))
+    assert client.bootstrap_calls == [("BTC_USDT",), ("BTC_USDT",)]
+    assert len([r for r in sink.rows if r.source_id == "gate_public_ws"
+                and r.channel == "l2Book"]) == 3
+    assert len([r for r in sink.rows if r.channel == "capacity_tape"]) >= 3
