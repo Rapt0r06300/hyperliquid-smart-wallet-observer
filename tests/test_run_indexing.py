@@ -409,3 +409,51 @@ def test_index_size_failure_never_mutates_existing_manifests(tmp_path, monkeypat
     assert (root / "catalog/DATA_CATALOG.json").read_bytes() == original_catalog
     assert (root / "catalog/DATA_QUALITY_REGISTRY.json").read_bytes() == original_registry
 
+
+def test_index_loads_trade_patch_files_once_per_batch(tmp_path, monkeypatch):
+    """Large Release imports must not reread entire count patches per shard."""
+    root = _bootstrap_root(tmp_path)
+    catalog = root / "catalog"
+    entries = [
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id="trade-patch-1"),
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id="trade-patch-2"),
+    ]
+    for i, manifest in enumerate(entries, start=1):
+        manifest["unique_trade_count_exact"] = False
+        manifest["unique_trade_count"] = None
+
+    trade_patch = catalog / "TRADE_COUNT_PATCH.json"
+    unique_patch = catalog / "TRADE_UNIQUE_COUNT_PATCH.json"
+    trade_patch.write_text(json.dumps({"counts": {
+        m["dataset_id"]: {
+            "asset_sha256": m["sha256"], "trade_count": 10 + i,
+            "trade_count_exact": True,
+            "unique_identity_method": "full_native_or_deterministic_composite_string_v3",
+        } for i, m in enumerate(entries)
+    }}), encoding="utf-8")
+    unique_patch.write_text(json.dumps({"counts": {
+        m["dataset_id"]: {
+            "unique_trade_count": 10 + i,
+            "unique_trade_count_exact": True,
+        } for i, m in enumerate(entries)
+    }}), encoding="utf-8")
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, entries)
+
+    reads = {"TRADE_COUNT_PATCH.json": 0, "TRADE_UNIQUE_COUNT_PATCH.json": 0}
+    original = Path.read_text
+    def tracked(path, *args, **kwargs):
+        if path.name in reads:
+            reads[path.name] += 1
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", tracked)
+
+    index_run_manifests([run], root=root)
+    assert reads["TRADE_COUNT_PATCH.json"] == 1
+    assert reads["TRADE_UNIQUE_COUNT_PATCH.json"] == 1
+    rows = json.loads((catalog / "DATA_INDEX.json").read_text())["shards"]
+    assert [r["trade_count"] for r in rows] == [10, 11]
+    assert [r["unique_trade_count"] for r in rows] == [10, 11]
+
