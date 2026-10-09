@@ -625,6 +625,25 @@ def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
     _write_json(root/"catalog"/"DATA_QUALITY_REGISTRY.json",registry)
 
 
+def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
+    family = str(row.get("family") or "").lower()
+    source = str(row.get("source") or "").lower()
+    # Verified historical archives can repair otherwise irreplaceable missing
+    # trades in bulk. Prioritize them *within their family*, never bypassing
+    # strict asset SHA / replay verification or promoting mismatched data.
+    archive_priority = 0 if (
+        "official_archive" in source
+        and str(row.get("release_repository") or "")
+            == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    ) else 1
+    return (
+        _FAMILY_PRIORITY.get(family, 50),
+        archive_priority,
+        -int(row.get("end_ts_ms") or 0),
+        str(row.get("dataset_id") or ""),
+    )
+
+
 def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     index=_load_json(INDEX_PATH)
     rows=index.get("shards")
@@ -641,13 +660,7 @@ def backfill(limit: int, families: set[str]) -> dict[str,Any]:
         row for row in rows
         if isinstance(row,dict) and _candidate(row,known,families,unique_rows)
     ]
-    candidates.sort(
-        key=lambda row:(
-            _FAMILY_PRIORITY.get(str(row.get("family") or "").lower(),50),
-            -int(row.get("end_ts_ms") or 0),
-            str(row.get("dataset_id") or ""),
-        )
-    )
+    candidates.sort(key=_candidate_sort_key)
     candidates=candidates[:max(1,int(limit))]
 
     updated=0
