@@ -146,7 +146,8 @@ def test_index_run_manifest_writes_complete_safe_row(tmp_path) -> None:
     [row] = index["shards"]
     assert row["quality_status"] == "SAFE"
     assert row["bytes"] == 321
-    assert row["release_repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    assert index["release_repository_default"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    assert "release_repository" not in row
     assert row["release_tag"] == "data-v2-run-1-1-native"
     assert row["release_asset"] == "l2-safe.jsonl.gz"
     assert (root / row["manifest_path"]).is_file()
