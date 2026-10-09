@@ -101,6 +101,19 @@ class GateMarketState:
         transport = dict(meta) if isinstance(meta, Mapping) else {}
         first = _i(payload.get("U") or payload.get("first_update_id"))
         last = _i(payload.get("u") or payload.get("last_update_id") or payload.get("id"))
+        # Gate sends an explicit 'full' marker when a payload is a complete
+        # authoritative book snapshot. Replace the book and re-anchor its
+        # sequence rather than comparing against a prior incremental epoch.
+        # Historical gap counters are retained as evidence.
+        if payload.get("full") is True:
+            bids = payload.get("b") or payload.get("bids")
+            asks = payload.get("a") or payload.get("asks")
+            if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
+                self.quality, self.reason = UNMEASURABLE, "INCOMPLETE_FULL_SNAPSHOT"
+                return self.quality
+            self.bids.clear()
+            self.asks.clear()
+            self.sequence = None
         if self.sequence is not None and last is not None:
             if first is not None and first > self.sequence + 1:
                 self.gap_count += 1
