@@ -12,6 +12,8 @@ on:
       - tools/repair_stale_safe_classifications.py
       - tools/backfill_replay_compatibility.py
       - tools/index_run_manifest.py
+      - tools/check_dataset_quality.py
+      - tools/measure_uncompressed_sizes.py
       - tools/backfill_exact_trade_counts.py
       - tools/backfill_global_unique_trade_counts.py
       - src/hl_observer/datasets/v2_repository.py
@@ -86,6 +88,36 @@ jobs:
       - name: Identify code consumers of canonical release repository
         run: |
           grep -R -n --include='*.py' "release_repository" src/hl_observer tools | head -110 || true
+      - name: Prove compact index parity before any mutation
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.index_run_manifest import (
+              hydrate_default_release_repository, _compact_index_row,
+              CANONICAL_DATA_REPOSITORY,
+          )
+          path = Path("catalog/DATA_INDEX.json")
+          original = json.loads(path.read_text(encoding="utf-8"))
+          rows = hydrate_default_release_repository(original)
+          if any(row.get("release_repository") != CANONICAL_DATA_REPOSITORY for row in rows):
+              raise SystemExit("COMPACTION_NO_GO: foreign or unverified release repository")
+          compact = dict(original)
+          compact["release_repository_default"] = CANONICAL_DATA_REPOSITORY
+          compact["shards"] = [
+              _compact_index_row(row, inherit_canonical_repo=True) for row in rows
+          ]
+          assert hydrate_default_release_repository(compact) == [
+              _compact_index_row(row) for row in rows
+          ], "compaction changed economic evidence"
+          output = json.dumps(compact, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\\n"
+          new_bytes = len(output.encode("utf-8"))
+          print(f"COMPACT_INDEX_SHARDS={len(rows)}")
+          print(f"COMPACT_INDEX_BYTES={new_bytes}")
+          print(f"COMPACT_INDEX_SAVED_BYTES={path.stat().st_size - new_bytes}")
+          if new_bytes >= 85 * 1024 * 1024:
+              raise SystemExit("COMPACTION_NO_GO: index still too large")
+          PY
       - name: Run deterministic restore tests
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2 requests
