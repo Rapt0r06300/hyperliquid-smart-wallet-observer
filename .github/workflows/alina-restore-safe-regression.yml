@@ -7,6 +7,9 @@ on:
       - tools/restore_alina.py
       - tests/test_restore_alina.py
       - tests/test_native_trade_batch_split.py
+      - tests/test_quarantine_audit.py
+      - tools/build_quarantine_audit.py
+      - tools/repair_stale_safe_classifications.py
       - src/hl_observer/collection/native_market_tape.py
       - src/hl_observer/collection/native_venue_coordinator.py
       - .github/workflows/alina-restore-safe-regression.yml
@@ -35,7 +38,7 @@ jobs:
       - name: Run deterministic restore tests
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2
-          PYTHONPATH=src python -m pytest -q tests/test_restore_alina.py tests/test_native_trade_batch_split.py
+          PYTHONPATH=src python -m pytest -q tests/test_restore_alina.py tests/test_native_trade_batch_split.py tests/test_quarantine_audit.py tests/test_manifest_policy.py
       - name: Publish test result for verifiable GitHub status
         if: always()
         env:
