@@ -122,6 +122,21 @@ jobs:
                   }.get(kind,3)
                   other_rows.append((priority,order,campaign_id))
           other_ids=[campaign_id for _,_,campaign_id in sorted(other_rows)]
+          # Official immutable archives have been starved by a continuous
+          # market backlog despite having ready PENDING campaigns. Reserve at
+          # most one of the *free* market slots for a due official archive per
+          # wave; keep the remaining slots for live market collection. Never
+          # cancel or displace any already RUNNING collector.
+          archive_due=[
+              campaign_id for priority,_,campaign_id in sorted(other_rows)
+              if priority == 2
+          ]
+          if archive_due:
+              archive_first=archive_due[0]
+              other_ids=[archive_first]+[
+                  campaign_id for campaign_id in other_ids
+                  if campaign_id != archive_first
+              ]
           # Keep exactly one user-specific Copy-Vault lane active globally
           # for the current epoch. GitHub-hosted jobs may share an egress IP,
           # so separate runners must not be assumed to multiply Hyperliquid's
