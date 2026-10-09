@@ -313,6 +313,11 @@ class BybitMarketState:
         return bool(self.bids and self.asks and max(self.bids) < min(self.asks))
 
     def _desync(self, reason: str) -> str:
+        # After a true sequence failure the old book is not replay-grade.
+        # A fresh exchange SNAPSHOT, not later incremental deltas, must rearm it.
+        self.has_snapshot = False
+        self.bids.clear()
+        self.asks.clear()
         self.quality = DESYNC
         self.reason = reason
         return DESYNC
