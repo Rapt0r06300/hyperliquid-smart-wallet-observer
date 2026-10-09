@@ -344,3 +344,34 @@ def test_compacted_replay_release_hydrates_outer_and_member_locator():
     assert row["release_container_asset"] == "packed-shards-0000.zip"
     assert row["release_member"] == "x.jsonl.gz"
     assert row["release_remote_digest"] == "sha256:" + "a" * 64
+
+
+
+def test_historical_cross_venue_reject_is_inspected_only_with_immutable_release(tmp_path, monkeypatch):
+    monkeypatch.setattr(backfill, "ROOT", tmp_path)
+    target = tmp_path / "datasets/rejected/cross.manifest.json"
+    target.parent.mkdir(parents=True)
+    manifest = {
+        "dataset_id": "cross", "family": "cross_venue_capacity_tape",
+        "source": "cross_venue_derived_capacity", "asset_verified": True,
+        "sha256": "a" * 64, "bytes": 123,
+        "provenance": {
+            "authenticated": False, "public_data_only": True,
+            "real_execution": False, "transports": ["derived"],
+        },
+        "release": {
+            "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+            "tag": "data-v2-cross", "asset_name": "cross.jsonl.gz",
+        },
+    }
+    target.write_text(json.dumps(manifest), encoding="utf-8")
+    row = {
+        "dataset_id": "cross", "family": "cross_venue_capacity_tape",
+        "quality_status": "REJECT", "replay_compatible": False,
+        "sha256": "a" * 64, "bytes": 123,
+        "manifest_path": "datasets/rejected/cross.manifest.json",
+    }
+    assert backfill._candidate(dict(row), {}, {"cross_venue_capacity_tape"}) is True
+    manifest["asset_verified"] = False
+    target.write_text(json.dumps(manifest), encoding="utf-8")
+    assert backfill._candidate(dict(row), {}, {"cross_venue_capacity_tape"}) is False
