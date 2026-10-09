@@ -16,7 +16,7 @@ on:
   schedule:
     - cron: '53 * * * *'
   workflow_run:
-    workflows: ['resumable-campaign-controller']
+    workflows: ['resumable-campaign-controller', 'backfill-replay-compatibility', 'reconcile-v2-catalog']
     types: [completed]
   workflow_dispatch:
 permissions:
@@ -26,6 +26,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   metrics:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
