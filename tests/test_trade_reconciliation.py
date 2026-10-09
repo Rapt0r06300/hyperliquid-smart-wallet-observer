@@ -548,3 +548,68 @@ def test_hyperliquid_reference_sampler_fails_closed_without_window_coverage(tmp_
         await client.aclose()
 
     asyncio.run(scenario())
+
+
+
+def test_gate_empty_rest_window_is_unavailable_not_fabricated_mismatch(tmp_path):
+    from hl_observer.collection.trade_reconciliation import reconcile_gate_trade_shard
+
+    shard = tmp_path / "gate-trades.jsonl.gz"
+    with gzip.open(shard, "wt", encoding="utf-8") as f:
+        f.write(json.dumps({"raw_payload": {
+            "channel": "futures.trades", "result": [{
+                "id": "101", "create_time_ms": 1000, "contract": "BTC_USDT",
+            }],
+        }}) + "\n")
+
+    async def check():
+        client = httpx.AsyncClient(
+            base_url="https://api.gateio.ws/api/v4",
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, json=[])),
+        )
+        try:
+            out = await reconcile_gate_trade_shard(
+                shard, symbol="BTC_USDT", start_ms=1000, end_ms=2000,
+                client=client,
+            )
+        finally:
+            await client.aclose()
+        assert out["status"] == "UNAVAILABLE"
+        assert out["reason"] == "REFERENCE_EMPTY_FOR_NONEMPTY_LIVE"
+        assert out["live_count"] == 1
+        assert out["comparison_time_domain"] == "EXCHANGE_EVENT_TIME"
+
+    asyncio.run(check())
+
+
+def test_bitget_empty_rest_history_is_unavailable_not_false_mismatch(tmp_path):
+    from hl_observer.collection.trade_reconciliation import reconcile_bitget_trade_shard
+
+    shard = tmp_path / "bitget-trades.jsonl.gz"
+    with gzip.open(shard, "wt", encoding="utf-8") as f:
+        f.write(json.dumps({"raw_payload": {
+            "arg": {"channel": "trade", "instId": "BTCUSDT"}, "data": [{
+                "tradeId": "101", "ts": "1000",
+            }],
+        }}) + "\n")
+
+    async def check():
+        client = httpx.AsyncClient(
+            base_url="https://api.bitget.com",
+            transport=httpx.MockTransport(
+                lambda req: httpx.Response(200, json={"code": "00000", "data": []})
+            ),
+        )
+        try:
+            out = await reconcile_bitget_trade_shard(
+                shard, symbol="BTCUSDT", start_ms=1000, end_ms=2000,
+                client=client,
+            )
+        finally:
+            await client.aclose()
+        assert out["status"] == "UNAVAILABLE"
+        assert out["reason"] == "REFERENCE_EMPTY_FOR_NONEMPTY_LIVE"
+        assert out["live_count"] == 1
+        assert out["comparison_time_domain"] == "EXCHANGE_EVENT_TIME"
+
+    asyncio.run(check())
