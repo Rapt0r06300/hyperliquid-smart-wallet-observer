@@ -251,6 +251,9 @@ def _verify_zip_archive(path: Path, name: str) -> None:
         return
     try:
         with zipfile.ZipFile(path) as archive:
+            names = [info.filename for info in archive.infolist()]
+            if len(names) != len(set(names)):
+                raise RestoreError(f"ambiguous duplicate ZIP members: {name}")
             corrupt_member = archive.testzip()
     except (OSError, zipfile.BadZipFile) as exc:
         raise RestoreError(f"invalid ZIP archive: {name}") from exc
@@ -350,8 +353,10 @@ def _materialize_classified_shards(
         "excluded_rows": 0,
         "missing_or_corrupt_rows": 0,
         "verified_zip_members": 0,
+        "stale_usable_quarantined": 0,
         "failures": [],
     }
+    expected_usable: set[Path] = set()
     diagnostics = destination / "diagnostics" / "run_manifests"
     for manifest_path in sorted(releases_root.glob("*/RUN_MANIFEST.json")):
         release_tag = manifest_path.parent.name
@@ -373,6 +378,14 @@ def _materialize_classified_shards(
                 "error": "INVALID_RUN_MANIFEST:missing manifests list",
             })
             continue
+        # Ambiguous identities must never be allowed to overwrite one another.
+        dataset_counts: dict[str, int] = {}
+        for candidate in rows:
+            if isinstance(candidate, Mapping):
+                identity = str(candidate.get("dataset_id") or "")
+                if identity:
+                    dataset_counts[identity] = dataset_counts.get(identity, 0) + 1
+        duplicates = {key for key, count in dataset_counts.items() if count > 1}
         for row in rows:
             if not isinstance(row, Mapping):
                 report["excluded_rows"] += 1
@@ -380,6 +393,14 @@ def _materialize_classified_shards(
             dataset_id = str(row.get("dataset_id") or "")
             if not dataset_id:
                 report["excluded_rows"] += 1
+                continue
+            if dataset_id in duplicates:
+                report["excluded_rows"] += 1
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "DUPLICATE_DATASET_ID_IN_MANIFEST",
+                    "manifest": str(manifest_path),
+                })
                 continue
             safe = _safe_replay_row(
                 row, repository=repository, release_tag=release_tag
@@ -455,9 +476,43 @@ def _materialize_classified_shards(
                 })
                 continue
             if safe:
+                expected_usable.add(target)
                 report["usable_shards"] += 1
             else:
                 report["quarantined_shards"] += 1
+
+    # Restores are repeatable: a previously SAFE shard must not remain under
+    # usable/ after its latest manifest is downgraded, removed, or ambiguous.
+    # Keep the original verified Release unchanged; preserve old materializations
+    # separately for diagnosis rather than deleting potentially useful evidence.
+    usable_root = destination / "usable" / "shards"
+    if usable_root.is_dir():
+        for previous in sorted(usable_root.glob("*/*.jsonl.gz")):
+            if previous in expected_usable:
+                continue
+            if previous.is_symlink() or not previous.is_file():
+                report["failures"].append({
+                    "path": str(previous),
+                    "error": "UNSAFE_PREVIOUS_USABLE_FILE",
+                })
+                continue
+            try:
+                old_digest = _sha256(previous)
+                stale_root = destination / "quarantine" / "stale_usable" / previous.parent.name
+                stale_root.mkdir(parents=True, exist_ok=True)
+                stale_path = stale_root / f"{previous.name}.{old_digest[:20]}.stale"
+                if stale_path.exists():
+                    if _sha256(stale_path) != old_digest:
+                        raise RestoreError("stale quarantine destination collision")
+                    previous.unlink()  # identical preserved quarantine copy exists
+                else:
+                    previous.replace(stale_path)
+                report["stale_usable_quarantined"] += 1
+            except (OSError, RestoreError) as exc:
+                report["failures"].append({
+                    "path": str(previous),
+                    "error": f"STALE_USABLE_QUARANTINE_FAILED:{exc}",
+                })
     return report
 
 
