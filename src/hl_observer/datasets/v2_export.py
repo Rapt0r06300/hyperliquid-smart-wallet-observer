@@ -218,6 +218,11 @@ def build_manifest_from_tick_shard(
             summary = record.get("parsed_summary")
             sequence = _int(record.get("sequence"))
             previous_sequence = last_sequence.get(key)
+            # Exchange-authenticated full depth snapshots reset the causal
+            # sequence base. Do not compare their IDs to the previous delta
+            # epoch. Incremental frames still require predecessor continuity.
+            if channel == "l2Book" and str(record.get("event_kind") or "").upper() == "SNAPSHOT":
+                previous_sequence = None
             sequence_gap = False
             if isinstance(summary, Mapping):
                 if (
