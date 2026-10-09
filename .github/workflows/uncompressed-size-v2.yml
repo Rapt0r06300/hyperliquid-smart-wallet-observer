@@ -6,7 +6,8 @@ on:
       - ".github/workflows/uncompressed-size-v2.yml"
       - "tools/measure_uncompressed_sizes.py"
       - "tools/backfill_exact_trade_counts.py"
-      - "tools/build_catalog_metrics.py"\n      - "tools/merge_measured_catalog_patches.py"
+      - "tools/build_catalog_metrics.py"
+      - "tools/merge_measured_catalog_patches.py"
   workflow_dispatch:
     inputs:
       limit:
