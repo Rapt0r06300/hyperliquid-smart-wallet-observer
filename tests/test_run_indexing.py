@@ -457,3 +457,58 @@ def test_index_loads_trade_patch_files_once_per_batch(tmp_path, monkeypatch):
     assert [r["trade_count"] for r in rows] == [10, 11]
     assert [r["unique_trade_count"] for r in rows] == [10, 11]
 
+def test_index_drops_duplicate_diagnostics_only_when_sha_receipt_matches(tmp_path):
+    root = _bootstrap_root(tmp_path)
+    run = tmp_path / "RUN_MANIFEST.json"
+    _write_run(run, [_manifest(
+        family="trades",
+        reconciliation="SOURCE_CONTINUITY_VERIFIED",
+        dataset_id="sha-backed-diagnostics",
+    )])
+    index_run_manifests([run], root=root)
+    index_file = root / "catalog/DATA_INDEX.json"
+    result = json.loads(index_file.read_text(encoding="utf-8"))
+    [row] = result["shards"]
+    receipt = json.loads((root / row["manifest_path"]).read_text(encoding="utf-8"))
+
+    assert row["replay_compatible"] is True
+    assert row["quality_status"] == "SAFE"
+    assert row["sha256"] == receipt["sha256"]
+    assert "source" not in row
+    assert "replay_schema_version" not in row
+    assert "replay_reason" not in row
+    assert receipt["source"] == "bybit_public_ws"
+    assert receipt["replay_schema_version"] == "alina.replay.v1"
+    assert receipt["replay_reason"] == "SMOKE_OK"
+    original_index = index_file.read_bytes()
+    index_run_manifests([], root=root)
+    assert index_file.read_bytes() == original_index
+
+
+def test_index_preserves_unbacked_diagnostics_when_receipt_hash_mismatch(tmp_path):
+    root = _bootstrap_root(tmp_path)
+    path = root / "catalog/DATA_INDEX.json"
+    original = json.loads(path.read_text(encoding="utf-8"))
+    row = {
+        "dataset_id": "old-diagnostic",
+        "family": "trades",
+        "venue": "bybit",
+        "quality_status": "PARTIAL",
+        "sha256": "a" * 64,
+        "manifest_path": "datasets/quarantine/old-diagnostic.manifest.json",
+        "source": "old_source",
+        "replay_schema_version": "alina.replay.v1",
+        "replay_reason": "PROOF_PENDING",
+    }
+    original["shards"] = [row]
+    path.write_text(json.dumps(original), encoding="utf-8")
+    receipt = root / row["manifest_path"]
+    receipt.write_text(json.dumps({
+        **row, "sha256": "b" * 64,
+    }), encoding="utf-8")
+
+    index_run_manifests([], root=root)
+    [reindexed] = json.loads(path.read_text(encoding="utf-8"))["shards"]
+    assert reindexed["source"] == "old_source"
+    assert reindexed["replay_schema_version"] == "alina.replay.v1"
+    assert reindexed["replay_reason"] == "PROOF_PENDING"
