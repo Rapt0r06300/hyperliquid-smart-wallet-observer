@@ -289,7 +289,7 @@ def construire_staging(root: str | Path, staging: str | Path,
                     shutil.copy2(src, dst)
                 else:
                     transforme, n = neutraliser_metadonnees(texte, root)
-                    residus = chemins_absolus_residuels(transforme)
+                    residus = chemins_absolus_portables(transforme, rel)
                     if residus:
                         raise ArchiveRefuseeError(
                             "chemins absolus residuels dans %s: %s" % (rel, residus)
@@ -441,6 +441,55 @@ def chemins_absolus_residuels(texte: str) -> list[str]:
         elif isinstance(item, list):
             pending.extend(item)
     return sorted(detected)
+
+
+
+def chemins_absolus_portables(texte: str, rel: str) -> list[str]:
+    """Keep immutable non-SAFE collection provenance, never portable code paths.
+
+    Old quarantined shards identify a GitHub-hosted temporary source file that
+    no longer exists. Rewriting its source_shards path would forge provenance.
+    For the security scan alone, exempt only SHA-bound, non-executable origins;
+    all other absolute paths remain forbidden. The stored receipt is unchanged.
+    """
+    prefix = ("datasets/quarantine/", "datasets/rejected/")
+    if not (rel.startswith(prefix) and rel.endswith(".manifest.json")):
+        return chemins_absolus_residuels(texte)
+    try:
+        doc = json.loads(texte)
+    except (ValueError, TypeError):
+        return chemins_absolus_residuels(texte)
+    if not isinstance(doc, dict) or str(doc.get("quality_status") or "").upper() not in {
+        "PARTIAL", "REJECT", "STALE", "QUARANTINE", "QUARANTINED",
+    }:
+        return chemins_absolus_residuels(texte)
+    origins = doc.get("source_shards")
+    if not isinstance(origins, list):
+        return chemins_absolus_residuels(texte)
+    scrubbed: list[object] = []
+    for item in origins:
+        if not isinstance(item, dict):
+            scrubbed.append(item)
+            continue
+        row = dict(item)
+        path = row.get("path")
+        digest = row.get("sha256")
+        size = row.get("bytes")
+        if (
+            isinstance(path, str)
+            and path.startswith("/home/runner/work/_temp/")
+            and "\\" not in path
+            and ".." not in path.split("/")
+            and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-fA-F]{64}", digest) is not None
+            and type(size) is int and size > 0
+        ):
+            row["path"] = "<immutable-github-runner-provenance>"
+        scrubbed.append(row)
+    inspected = dict(doc)
+    inspected["source_shards"] = scrubbed
+    return chemins_absolus_residuels(json.dumps(inspected, ensure_ascii=False))
+
 
 
 def _git_sha_depuis_dossier(root: str | Path) -> str:

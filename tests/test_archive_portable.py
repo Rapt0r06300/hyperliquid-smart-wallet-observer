@@ -302,6 +302,37 @@ def test_refuse_si_session_active(tmp_path):
 
 
 # ── neutralisation des chemins absolus (item 20.6) ───────────────────────────────────────────
+
+def test_portable_preserves_sha_bound_quarantine_runner_provenance(tmp_path):
+    root = tmp_path / "source"
+    original = root / "datasets/quarantine/original.manifest.json"
+    original.parent.mkdir(parents=True)
+    source_path = "/home/runner/work/_temp/campaign-output/run/raw_shards/trades.jsonl.gz"
+    document = {
+        "dataset_id": "original", "quality_status": "PARTIAL",
+        "source_shards": [{"path": source_path, "sha256": "a" * 64, "bytes": 10203}],
+    }
+    original.write_text(json.dumps(document), encoding="utf-8")
+    stage = tmp_path / "stage"
+    out = AP.construire_staging(root, stage, ["datasets/quarantine/original.manifest.json"])
+    assert out["fichiers"] == ["datasets/quarantine/original.manifest.json"]
+    stored = json.loads((stage / "datasets/quarantine/original.manifest.json").read_text())
+    assert stored["source_shards"][0]["path"] == source_path
+    # Never grant the exception to metadata that could be used as a runtime path.
+    malicious = dict(document, executable_path="/home/runner/work/_temp/exec.py")
+    assert AP.chemins_absolus_portables(
+        json.dumps(malicious), "datasets/quarantine/original.manifest.json"
+    )
+    assert AP.chemins_absolus_portables(
+        json.dumps(document), "datasets/safe/original.manifest.json"
+    )
+    unproven = dict(document, source_shards=[dict(document["source_shards"][0], sha256="bad")])
+    assert AP.chemins_absolus_portables(
+        json.dumps(unproven), "datasets/quarantine/original.manifest.json"
+    )
+
+
+
 def test_neutralise_prefixe_racine():
     txt = '{"p": "/home/x/projet/runtime/data/sessions/r/bbo.jsonl"}'
     out, n = AP.neutraliser_metadonnees(txt, "/home/x/projet")
