@@ -963,6 +963,7 @@ def materialize_latest_local_snapshot(
         chunks[name] = path
 
     pending_materialization = 0
+    seen_workspace_targets: set[str] = set()
     for row in file_rows:
         if not isinstance(row, Mapping):
             raise RestoreError("invalid local snapshot file row")
@@ -972,6 +973,12 @@ def materialize_latest_local_snapshot(
         if not relative or len(expected_sha) != 64 or expected_size < 0:
             raise RestoreError("invalid local snapshot file identity")
         target = _safe_workspace_target(workspace, relative)
+        # Duplicate or case-only-different paths would overwrite snapshot
+        # evidence on Windows. Refuse the entire snapshot before any writes.
+        target_key = target.relative_to(workspace.resolve()).as_posix().casefold()
+        if not target_key or target_key == "." or target_key in seen_workspace_targets:
+            raise RestoreError(f"duplicate or unsafe local snapshot target: {relative}")
+        seen_workspace_targets.add(target_key)
         if not (
             target.is_file()
             and target.stat().st_size == expected_size

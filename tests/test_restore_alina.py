@@ -1178,3 +1178,34 @@ def test_failed_release_asset_never_reports_all_bytes_accounted_for(tmp_path, mo
     assert len(report["failures"]) == 1
     assert report["all_source_assets_accounted_for"] is False
     assert not (tmp_path / "releases" / "evidence-incomplete" / "evidence.bin").exists()
+
+
+def test_local_snapshot_refuses_case_insensitive_target_collision_before_writing(tmp_path):
+    import pytest
+    module = _module()
+    releases = tmp_path / "releases"
+    release = releases / "alina-local-snapshot-20990101T000000Z"
+    release.mkdir(parents=True)
+    raw = b"immutable-snapshot"
+    chunk = release / "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    chunk.write_bytes(raw)
+    row = {
+        "path": "runtime/Trade.bin",
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "segments": [{"chunk": chunk.name, "offset": 0, "bytes": len(raw)}],
+    }
+    (release / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1",
+            "chunks": [{"name": chunk.name, "bytes": len(raw),
+                        "sha256": hashlib.sha256(raw).hexdigest()}],
+            "files": [row, {**row, "path": "runtime/trade.bin"}],
+        }), encoding="utf-8",
+    )
+    workspace = tmp_path / "fresh-clone"
+    workspace.mkdir()
+    with pytest.raises(module.RestoreError, match="duplicate or unsafe local snapshot target"):
+        module.materialize_latest_local_snapshot(releases, workspace)
+    assert not (workspace / "runtime" / "Trade.bin").exists()
+    assert not (workspace / "runtime" / "trade.bin").exists()
