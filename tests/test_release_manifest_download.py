@@ -267,3 +267,56 @@ def test_release_listing_rejects_conflicting_reused_tag_across_pages():
         list_release_manifest_tags(
             "owner/repo", page_size=2, runner=runner, sleeper=lambda _: None,
         )
+
+def test_scoped_release_inventory_skips_known_and_unrelated_asset_lookups(tmp_path):
+    import json
+    from download_release_manifests import _known_tags_from_index, list_release_manifest_tags
+    index = tmp_path / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shards": [
+        {"release_tag": "data-v2-physical", "run_manifest_release_tag": "data-v2-canonical"},
+        {"release_tag": "archive-v2-part"},
+    ]}), encoding="utf-8")
+    known = _known_tags_from_index(index)
+    calls = []
+    def runner(command, **_kwargs):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        if "/assets?" in endpoint:
+            assert "/releases/30/" in endpoint
+            return subprocess.CompletedProcess(command, 0, json.dumps([{"name": "RUN_MANIFEST.json"}]), "")
+        assert endpoint.endswith("page=1")
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 10, "tag_name": "data-v2-canonical", "assets": [{"name": str(i)} for i in range(30)]},
+            {"id": 20, "tag_name": "alina-recovery-unrelated", "assets": [{"name": str(i)} for i in range(30)]},
+            {"id": 30, "tag_name": "data-v2-new", "assets": [{"name": str(i)} for i in range(30)]},
+        ]), "")
+    assert list_release_manifest_tags(
+        "owner/repo", runner=runner, skip_tags=known, only_production=True,
+    ) == [("data-v2-new", True)]
+    assert len([e for e in calls if "/assets?" in e]) == 1
+
+
+def test_embedded_manifest_saves_asset_query_when_list_is_full():
+    import json
+    from download_release_manifests import list_release_manifest_tags
+    calls = []
+    def runner(command, **_kwargs):
+        calls.append(command[-1])
+        assert "/assets?" not in command[-1]
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 1, "tag_name": "data-v2-visible",
+             "assets": [{"name": str(i)} for i in range(29)] + [{"name": "RUN_MANIFEST.json"}]},
+        ]), "")
+    assert list_release_manifest_tags("owner/repo", runner=runner) == [("data-v2-visible", True)]
+    assert len(calls) == 1
+
+
+def test_invalid_reconcile_index_aliases_fail_closed(tmp_path):
+    import json
+    import pytest
+    from download_release_manifests import _known_tags_from_index
+    index = tmp_path / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shards": [{"release_tag": "data-v2-part"}],
+        "run_manifest_release_tags_by_release": {"data-v2-part": 123}}))
+    with pytest.raises(RuntimeError, match="invalid canonical run manifest tag aliases"):
+        _known_tags_from_index(index)

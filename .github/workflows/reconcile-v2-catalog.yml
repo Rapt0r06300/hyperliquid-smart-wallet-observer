@@ -94,7 +94,8 @@ jobs:
           python tools/download_release_manifests.py \
             --repository "$GITHUB_REPOSITORY" \
             --list-tags-output "$ALL_TAGS" \
-            --list-page-size 50
+            --list-page-size 50 \
+            --reconcile-index catalog/DATA_INDEX.json
           python - <<'PY' "$ALL_TAGS" "$TAGS"
           import json, os, re, sys
           from pathlib import Path

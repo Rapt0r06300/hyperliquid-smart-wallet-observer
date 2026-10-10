@@ -17,6 +17,7 @@ import time
 
 
 MANIFEST_NAME = "RUN_MANIFEST.json"
+PRODUCTION_RELEASE_PREFIXES = ("data-v2-", "copy-vault-v2-", "archive-v2-", "event-intelligence-v2-")
 TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
@@ -215,15 +216,17 @@ def _api_page(
 def list_release_manifest_tags(
     repository: str,
     *,
+    skip_tags: set[str] | None = None,
+    only_production: bool = False,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     sleeper: Callable[[float], object] = time.sleep,
     page_size: int = 50,
     attempts: int = 5,
 ) -> list[tuple[str, bool]]:
-    """All Releases, with per-page retry and strict truncated-asset handling.
+    """Enumerate all Release identities, but inspect only new production assets.
 
-    Unlike one gh api --paginate stream, a 504 does not discard pages already
-    enumerated. No incomplete inventory is accepted as success.
+    Reconciliation-only filters omit known/unrelated tags from results without
+    skipping any Release page or weakening strict pagination for candidates.
     """
     if not 1 <= page_size <= 100:
         raise ValueError("page_size must be in 1..100")
@@ -266,9 +269,19 @@ def list_release_manifest_tags(
             assets = release.get("assets")
             if not isinstance(assets, list):
                 raise RuntimeError(f"missing assets for Release {tag}")
-            # The Releases list embeds at most 30 assets. A RUN_MANIFEST may
-            # be asset 31+, so paginate the dedicated assets endpoint if capped.
-            if len(assets) >= 30:
+            # Keep checking every Release identity, but never burn rate-limit
+            # budget on deep assets for cataloged or unrelated Releases.
+            if (skip_tags is not None and tag in skip_tags) or (
+                only_production and not tag.startswith(PRODUCTION_RELEASE_PREFIXES)
+            ):
+                continue
+            # The list embeds at most 30 assets; inspect extra pages only
+            # when the manifest is NOT already visible in that first batch.
+            visible = any(
+                isinstance(asset, dict) and asset.get("name") == MANIFEST_NAME
+                for asset in assets
+            )
+            if len(assets) >= 30 and not visible:
                 all_assets: list[dict[str, object]] = []
                 asset_page = 1
                 while True:
@@ -288,10 +301,36 @@ def list_release_manifest_tags(
             rows.append((tag, has_manifest))
         if len(page) < page_size:
             print(
-                f"GitHub Release inventory enumerated: {len(rows)} unique tags "
-                f"across {pages} pages, {shifted_page_duplicates} stable page overlaps"
+                f"GitHub Release inventory enumerated: {len(seen_ids)} unique tags, "
+                f"{len(rows)} candidate tags across {pages} pages, "
+                f"{shifted_page_duplicates} stable page overlaps"
             )
             return rows
+
+
+def _known_tags_from_index(path: Path) -> set[str]:
+    """Use canonical Release identities, including reversible run-tag aliases."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict) or not isinstance(doc.get("shards"), list):
+        raise RuntimeError("invalid canonical DATA_INDEX for Release enumeration")
+    aliases = doc.get("run_manifest_release_tags_by_release") or {}
+    if not isinstance(aliases, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in aliases.items()
+    ):
+        raise RuntimeError("invalid canonical run manifest tag aliases")
+    known: set[str] = set()
+    for row in doc["shards"]:
+        if not isinstance(row, dict):
+            raise RuntimeError("invalid canonical DATA_INDEX row")
+        tag = row.get("release_tag")
+        if not isinstance(tag, str) or not tag:
+            continue
+        canonical = row.get("run_manifest_release_tag") or aliases.get(tag) or tag
+        if not isinstance(canonical, str) or not TAG_PATTERN.fullmatch(canonical):
+            raise RuntimeError("invalid canonical run tag in DATA_INDEX")
+        known.add(canonical)
+    return known
 
 
 def _read_tags(paths: Sequence[Path], positional: Sequence[str]) -> list[str]:
@@ -313,6 +352,8 @@ def main() -> int:
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--list-tags-output", type=Path)
     parser.add_argument("--list-page-size", type=int, default=50)
+    parser.add_argument("--reconcile-index", type=Path,
+                        help="inspect deep assets only for unindexed production releases")
     parser.add_argument("--tags-file", action="append", type=Path, default=[])
     parser.add_argument("--attempts", type=int, default=12)
     parser.add_argument("--poll-seconds", type=float, default=10.0)
@@ -322,10 +363,12 @@ def main() -> int:
         if args.destination is not None or args.tags or args.tags_file:
             parser.error("--list-tags-output cannot be combined with download options")
         try:
+            known = _known_tags_from_index(args.reconcile_index) if args.reconcile_index else None
             inventory = list_release_manifest_tags(
                 args.repository, page_size=args.list_page_size,
+                skip_tags=known, only_production=args.reconcile_index is not None,
             )
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, OSError, json.JSONDecodeError) as exc:
             print(f"RELEASE_INVENTORY_INCOMPLETE: {exc}", file=sys.stderr)
             return 2
         args.list_tags_output.parent.mkdir(parents=True, exist_ok=True)
@@ -336,6 +379,8 @@ def main() -> int:
         )
         os.replace(tmp, args.list_tags_output)
         return 0
+    if args.reconcile_index is not None:
+        parser.error("--reconcile-index is only valid with --list-tags-output")
     if args.destination is None:
         parser.error("--destination is required to download manifests")
 
