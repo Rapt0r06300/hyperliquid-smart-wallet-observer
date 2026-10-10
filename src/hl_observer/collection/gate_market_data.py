@@ -96,6 +96,7 @@ class GateMarketState:
     transport_rtt_ms: float | None = None
     clock_offset_ms: float | None = None
     gap_count: int = 0
+    duplicate_count: int = 0
     regression_count: int = 0
 
     def apply_book(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
@@ -169,6 +170,13 @@ class GateMarketState:
                 return self.quality
             if first <= self.sequence + 1:
                 self.rest_anchor_pending = False
+        if self.sequence is not None and last is not None and not is_full_snapshot:
+            if last == self.sequence and not self.rest_anchor_pending:
+                # Exact sequence repeats are not new market observations.
+                # Ignore their levels/timestamps to prevent phantom liquidity
+                # and artificial freshness; retain duplicate evidence.
+                self.duplicate_count += 1
+                return self.quality
         if self.sequence is not None and last is not None:
             if first is not None and first > self.sequence + 1:
                 self.gap_count += 1
@@ -257,6 +265,7 @@ class GateMarketState:
             transport_rtt_ms=self.transport_rtt_ms,
             clock_offset_ms=self.clock_offset_ms,
             gap_count=self.gap_count,
+            duplicate_count=self.duplicate_count,
             regression_count=self.regression_count,
             reason=self.reason,
         )

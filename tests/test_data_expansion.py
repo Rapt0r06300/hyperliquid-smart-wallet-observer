@@ -215,6 +215,29 @@ def test_gate_orphan_delta_remains_unmeasurable() -> None:
 
 
 
+def test_gate_same_sequence_delta_never_mutates_book_or_refreshes_timestamp() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    assert state.apply_book({"full": True, "id": 10, "t": 1000,
+                             "b": [[100, 2]], "a": [[101, 3]]},
+                            receive_ts_ms=1001) == "EXPLOITABLE"
+    assert state.apply_book({"U": 11, "u": 11, "t": 1010,
+                             "b": [[100.5, 1]], "a": []},
+                            receive_ts_ms=1011) == "EXPLOITABLE"
+    before = (state.sequence, dict(state.bids), dict(state.asks),
+              state.exchange_ts_ms, state.receive_ts_ms)
+    assert state.apply_book({"U": 11, "u": 11, "t": 1020,
+                             "b": [[200, 99]], "a": [[99, 99]]},
+                            receive_ts_ms=1021) == "EXPLOITABLE"
+    assert (state.sequence, state.bids, state.asks,
+            state.exchange_ts_ms, state.receive_ts_ms) == before
+    assert state.duplicate_count == 1
+    assert state.snapshot(now_ms=1021).duplicate_count == 1
+    assert state.apply_book({"U": 12, "u": 12, "t": 1030,
+                             "b": [[100.75, 1]], "a": []},
+                            receive_ts_ms=1031) == "EXPLOITABLE"
+    assert state.sequence == 12 and state.bids[100.75] == 1
+
+
 def test_gate_rest_base_is_not_executable_until_ws_sequence_bridge() -> None:
     state = GateMarketState(contract="BTC_USDT")
     base = {"full": True, "_alina_rest_anchor": True, "id": 40, "t": 1000,
