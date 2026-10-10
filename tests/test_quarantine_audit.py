@@ -164,6 +164,30 @@ def test_integrity_and_proof_confounding_across_stored_and_current_reasons() -> 
     ) == "REJECT_INTEGRITY_AND_PROOF_MISSING"
 
 
+def test_historical_archive_monotonic_absence_is_not_fatal_when_proof_missing() -> None:
+    from tools.build_quarantine_audit import _category
+
+    archive = _category(
+        "REJECT", "REJECT", historical_archive=True,
+        stored_reasons=["FATAL_INTEGRITY:missing_monotonic_count=10"],
+        current_reasons=["RECONCILIATION_UNVERIFIED"],
+    )
+    live = _category(
+        "REJECT", "REJECT", historical_archive=False,
+        stored_reasons=["FATAL_INTEGRITY:missing_monotonic_count=10"],
+        current_reasons=["RECONCILIATION_UNVERIFIED"],
+    )
+    archive_with_gap = _category(
+        "REJECT", "REJECT", historical_archive=True,
+        stored_reasons=["FATAL_INTEGRITY:missing_monotonic_count=10",
+                        "FATAL_INTEGRITY:gap_count=1"],
+        current_reasons=["RECONCILIATION_UNVERIFIED"],
+    )
+    assert archive == "REJECT_RECONCILIATION_OR_PROOF_MISSING"
+    assert live == "REJECT_INTEGRITY_AND_PROOF_MISSING"
+    assert archive_with_gap == "REJECT_INTEGRITY_AND_PROOF_MISSING"
+
+
 def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
     catalog = tmp_path / "catalog"
     quarantine = tmp_path / "datasets" / "quarantine"

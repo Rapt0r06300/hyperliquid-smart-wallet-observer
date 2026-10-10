@@ -98,8 +98,12 @@ def _category(
             for reason in reasons
         )
         integrity_failed = any(
-            "FATAL_INTEGRITY" in reason or "DESYNC" in reason
-            or "SEQUENCE_GAP" in reason
+            ("FATAL_INTEGRITY" in reason or "DESYNC" in reason
+             or "SEQUENCE_GAP" in reason)
+            # An official historical archive has exchange timestamps, not
+            # live monotonic receive clocks. Do not mislabel that expected
+            # absence as damaged history, while still retaining genuine gaps.
+            and not (historical_archive and "missing_monotonic" in reason.lower())
             for reason in reasons
         )
         # Proof repair cannot by itself fix a sequence gap or missing source
