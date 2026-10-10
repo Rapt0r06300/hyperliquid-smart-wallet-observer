@@ -390,5 +390,6 @@ def test_safe_restore_parity_uses_same_lossless_alias_compaction_as_writers():
     text = _workflow("alina-restore-safe-regression.yml")
     assert "compact_index_rows(compact, rows)" in text
     assert "hydrate_default_release_repository(compact)" in text
-    assert "COMPACTION_NO_GO: index still too large" in text
+    assert "COMPACTION_NO_GO: inline index still too large" in text
+    assert "if not is_partitioned and new_bytes >= 85 * 1024 * 1024:" in text
     assert "Run deterministic restore tests" in text

@@ -392,14 +392,14 @@ def test_index_size_failure_never_mutates_existing_manifests(tmp_path, monkeypat
     _write_run(run, [_manifest(family="l2Book",
                                reconciliation="SOURCE_CONTINUITY_VERIFIED",
                                dataset_id="same-id")])
-    real_writer = module._atomic_json
-
+    # The canonical writer may publish verified partitions instead of a
+    # single DATA_INDEX blob. Inject failure at the real publication boundary,
+    # not at the old inline JSON helper which partitioned writes bypass.
     def reject_oversize_index(path, payload):
-        if Path(path).name == "DATA_INDEX.json":
-            raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
-        return real_writer(path, payload)
+        assert Path(path).name == "DATA_INDEX.json"
+        raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
 
-    monkeypatch.setattr(module, "_atomic_json", reject_oversize_index)
+    monkeypatch.setattr(module, "_publish_canonical_index", reject_oversize_index)
     with pytest.raises(ValueError, match="DATA_INDEX_TOO_LARGE"):
         module.index_run_manifests([run], root=root)
 
