@@ -66,6 +66,8 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add catalog/DATA_INDEX.json catalog/DATA_METRICS.json catalog/TRADE_COUNT_PATCH.json datasets
+          # The index root alone is incomplete after partition activation.
+          if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
           git diff --cached --quiet && exit 0
           git commit -m "data: backfill verified exact trade counts"
           if git push origin HEAD:main; then
