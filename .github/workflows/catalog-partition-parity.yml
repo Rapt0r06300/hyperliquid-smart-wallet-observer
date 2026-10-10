@@ -6,7 +6,13 @@ on:
     paths:
       - '.github/workflows/catalog-partition-parity.yml'
       - 'tools/partitioned_data_index.py'
+      - 'tools/index_run_manifest.py'
+      - 'tools/build_catalog_metrics.py'
+      - 'tools/build_quarantine_audit.py'
+      - 'tools/check_dataset_quality.py'
+      - 'tools/restore_alina.py'
       - 'tests/test_partitioned_data_index.py'
+      - 'tests/test_restore_alina.py'
   workflow_dispatch: {}
 
 permissions:
