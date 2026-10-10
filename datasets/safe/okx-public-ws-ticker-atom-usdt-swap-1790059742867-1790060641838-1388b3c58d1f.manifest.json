@@ -1,16 +1,18 @@
 {
   "asset_verified": true,
-  "bytes": 370752,
+  "bytes": 269966,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-ws-mark-price-celo-usdt-swap-1790059742867-1790060641991-501479a1823c",
-  "end_ts_ms": 1790060641991,
-  "event_count": 4462,
-  "family": "mark_price",
+  "dataset_id": "okx-public-ws-ticker-atom-usdt-swap-1790059742867-1790060641838-1388b3c58d1f",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790060641838,
+  "event_count": 3139,
+  "family": "ticker",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
-    "mark_price"
+    "ticker"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -33,39 +37,40 @@
       "websocket"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 3139,
   "release": {
-    "asset_id": 607753075,
-    "asset_name": "okx-public-ws-mark-price-celo-usdt-swap-1790059742867-1790060641991-501479a1823c.jsonl.gz",
+    "asset_id": 607753352,
+    "asset_name": "okx-public-ws-ticker-atom-usdt-swap-1790059742867-1790060641838-1388b3c58d1f.jsonl.gz",
     "release_id": 402495715,
-    "remote_digest": "sha256:501479a1823ce7a7cc3fe77c4b992d37a464c348f6a9521ec52b195f66076700",
-    "remote_size": 370752,
+    "remote_digest": "sha256:1388b3c58d1f41c29d4d174bc6b6e12d8afbfdae4e1ad3b2e013f7b50c4762ca",
+    "remote_size": 269966,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "data-v2-35696301919-s1"
   },
-  "release_asset": "okx-public-ws-mark-price-celo-usdt-swap-1790059742867-1790060641991-501479a1823c.jsonl.gz",
-  "release_asset_id": 607753075,
+  "release_asset": "okx-public-ws-ticker-atom-usdt-swap-1790059742867-1790060641838-1388b3c58d1f.jsonl.gz",
+  "release_asset_id": 607753352,
   "release_id": 402495715,
-  "release_remote_digest": "sha256:501479a1823ce7a7cc3fe77c4b992d37a464c348f6a9521ec52b195f66076700",
-  "release_remote_size": 370752,
+  "release_remote_digest": "sha256:1388b3c58d1f41c29d4d174bc6b6e12d8afbfdae4e1ad3b2e013f7b50c4762ca",
+  "release_remote_size": 269966,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "501479a1823ce7a7cc3fe77c4b992d37a464c348f6a9521ec52b195f66076700",
+  "sha256": "1388b3c58d1f41c29d4d174bc6b6e12d8afbfdae4e1ad3b2e013f7b50c4762ca",
   "source": "okx_public_ws",
   "start_ts_ms": 1790059742867,
-  "symbol": "CELO-USDT-SWAP",
+  "symbol": "ATOM-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
-      "count": 4462,
+      "count": 3139,
       "max": 70.5,
       "min": 13.5,
       "p50": 22.5,
@@ -75,25 +80,28 @@
     "connection_ids": [
       "okx-c60fb1455241468c85983fd6cd8743df"
     ],
-    "first_exchange_ts_ms": 1790059742756,
-    "last_exchange_ts_ms": 1790060641910,
+    "first_exchange_ts_ms": 1790059742566,
+    "last_exchange_ts_ms": 1790060641667,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
-      "count": 4462,
-      "max": 114.0,
+      "count": 3139,
+      "max": 301.0,
       "min": 77.0,
-      "p50": 82.0,
-      "p95": 87.0
+      "p50": 136.0,
+      "p95": 175.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
-      "count": 4462,
+      "count": 3139,
       "max": 156.474289,
       "min": 0.0,
       "p50": 154.998766,
       "p95": 155.747606
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v8"
 }
