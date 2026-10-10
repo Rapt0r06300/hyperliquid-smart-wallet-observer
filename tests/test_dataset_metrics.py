@@ -436,6 +436,15 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
     assert totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
     assert totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is True
 
+    patch_path = catalog / "TRADE_UNIQUE_COUNT_PATCH.json"
+    stale = json.loads(patch_path.read_text(encoding="utf-8"))
+    stale["counts"]["bybit-archive"]["asset_sha256"] = "f" * 64
+    patch_path.write_text(json.dumps(stale), encoding="utf-8")
+    stale_totals = metrics.build()["totals"]
+    assert stale_totals["GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
+    assert stale_totals["TOTAL_UNIQUE_TRADES_GLOBAL"] is None
+    assert stale_totals["TOTAL_UNIQUE_TRADES_COVERAGE_COMPLETE"] is False
+
 
 
 def test_metrics_rejects_v3_unique_row_when_scanned_trade_count_mismatches(tmp_path, monkeypatch):

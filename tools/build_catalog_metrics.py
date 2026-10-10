@@ -165,6 +165,7 @@ def build() -> dict[str, Any]:
     manifest_trade_identities: set[str] = set()
     manifest_identity_complete = True
     manifest_trade_shards = 0
+    global_unique_asset_receipts_bound = True
     unique_doc_early: dict[str, Any] = {}
     unique_rows: dict[str, Any] = {}
     unique_identity_current_early = False
@@ -358,6 +359,18 @@ def build() -> dict[str, Any]:
 
         if trade_family:
             manifest_trade_shards += 1
+            # A reusable dataset_id cannot bind a global identity count.
+            if trades > 0 and (
+                not trade_exact
+                or not isinstance(unique_entry, dict)
+                or len(str(row.get("sha256") or "")) != 64
+                or str(unique_entry.get("asset_sha256") or "").lower()
+                    != str(row.get("sha256") or "").lower()
+                or type(unique_entry.get("trade_count_scanned")) is not int
+                or unique_entry["trade_count_scanned"] != trades
+                or unique_entry.get("unique_trade_count_exact") is not True
+            ):
+                global_unique_asset_receipts_bound = False
             identity_rows = row.get("trade_identity_digests")
             identity_exact = row.get("trade_identity_digests_exact") is True
             if identity_exact and not isinstance(identity_rows, list):
@@ -486,6 +499,7 @@ def build() -> dict[str, Any]:
                     unique_patch.get("coverage_complete") is True
                     and unique_identity_current
                     and unique_scope_complete
+                    and global_unique_asset_receipts_bound
                 )
                 totals["GLOBAL_UNIQUE_FAILURE_REASON_COUNT"] = len(unique_patch.get("failure_reasons") or {})
                 if global_unique_complete:
