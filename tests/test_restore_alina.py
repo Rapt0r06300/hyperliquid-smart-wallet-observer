@@ -1076,3 +1076,24 @@ def test_restore_verified_overflow_via_canonical_manifest(tmp_path, monkeypatch)
     assert result["failures"] == []
     assert (tmp_path / "recovered" / "usable" / "shards" /
             data_tag / "overflow-trade-1.jsonl.gz").read_bytes() == shard
+
+
+def test_release_pagination_uses_small_pages_and_enumerates_every_release(monkeypatch):
+    module = _module()
+    urls = []
+    def fetch_json(url, **_kwargs):
+        urls.append(url)
+        if "releases?" not in url:
+            raise AssertionError(url)
+        page = int(url.rsplit("page=", 1)[1])
+        return [
+            {"id": n + 1, "tag_name": f"release-{n + 1}", "assets": []}
+            for n in range((page - 1) * 10, min(page * 10, 23))
+        ]
+    monkeypatch.setattr(module, "_json", fetch_json)
+    monkeypatch.setattr(module, "_list_release_assets", lambda *_a, **_k: [])
+    result = list(module.iter_releases("owner/repo"))
+    assert len(result) == 23
+    assert len({x["id"] for x in result}) == 23
+    assert len(urls) == 3
+    assert all("per_page=10" in url for url in urls)
