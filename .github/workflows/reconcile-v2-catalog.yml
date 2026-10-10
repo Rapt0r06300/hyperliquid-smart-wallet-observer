@@ -49,6 +49,69 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Prove complete partition migration before enabling any catalog write
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This checkout is disposable; preserve live collectors and GitHub main.
+          # Never enable partition publication without deterministic proof.
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_partitioned_data_index.py
+          if python - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.partitioned_data_index import SCHEMA, read_index
+          root=Path("catalog/DATA_INDEX.json")
+          meta=json.loads(root.read_text(encoding="utf-8"))
+          if meta.get("schema") != SCHEMA:
+              raise SystemExit(1)
+          print("PARTITION_ALREADY_ACTIVE_SHARDS",len(read_index(root)["shards"]))
+          PY
+          then
+            python tools/check_dataset_quality.py
+            echo "ALINA_CATALOG_PARTITION_ACTIVATE=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          OUT="$RUNNER_TEMP/alina-reconcile-partition-canary"
+          python tools/partitioned_data_index.py --index catalog/DATA_INDEX.json --output "$OUT"
+          python - <<'PY' "$OUT"
+          import json,sys
+          from pathlib import Path
+          proof=json.loads((Path(sys.argv[1])/"PARTITION_PROOF.json").read_text())
+          assert proof["status"]=="VERIFIED" and proof["source_unchanged"] is True
+          assert proof["original_shards"]==proof["partitioned_shards"]
+          print("PARTITION_RECONCILER_PROOF_OK",proof["original_shards"],proof["partition_count"])
+          PY
+          cp catalog/DATA_METRICS.json "$RUNNER_TEMP/pre-partition-metrics.json"
+          cp -a "$OUT/data-index-parts" catalog/
+          cp "$OUT/DATA_INDEX.json" catalog/DATA_INDEX.json
+          python tools/build_catalog_metrics.py
+          python tools/build_quarantine_audit.py
+          python tools/check_dataset_quality.py
+          python tools/build_replay_compatibility_reasons.py
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          from tools.restore_alina import _load_current_safe_catalog
+          before=json.loads((Path(os.environ["RUNNER_TEMP"])/"pre-partition-metrics.json").read_text())
+          after=json.loads(Path("catalog/DATA_METRICS.json").read_text())
+          if before["totals"] != after["totals"]:
+              raise SystemExit("PARTITION_CANARY_METRIC_PARITY_FAILED")
+          safe,proof=_load_current_safe_catalog(
+              Path("catalog/DATA_INDEX.json"),Path("catalog/DATA_METRICS.json"))
+          if proof["indexed_shards"] != after["totals"]["TOTAL_SHARDS"]:
+              raise SystemExit("PARTITION_CANARY_INDEX_COVERAGE_FAILED")
+          if len(safe) != after["totals"]["SAFE_SHARDS"]:
+              raise SystemExit("PARTITION_CANARY_SAFE_COVERAGE_FAILED")
+          print("PARTITION_CANARY_SAFE_PARITY_OK",len(safe),proof["indexed_shards"])
+          PY
+          # No canary bytes are committed. The next step rebuilds from current main.
+          git reset --hard HEAD
+          git clean -fd -- catalog/
+          test -z "$(git status --porcelain -- catalog/)"
+          echo "ALINA_CATALOG_PARTITION_ACTIVATE=true" >> "$GITHUB_ENV"
+
       - name: Measure canonical index field weights before reconciliation
         shell: bash
         run: |
