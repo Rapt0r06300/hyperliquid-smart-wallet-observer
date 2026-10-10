@@ -90,6 +90,13 @@ jobs:
           python tools/build_quarantine_audit.py
           python tools/check_dataset_quality.py
           python tools/build_replay_compatibility_reasons.py
+          # Exercise every critical reader against the partitioned checkout.
+          # A synthetic-only green result cannot authorize live migration.
+          python -m pytest -q \
+            tests/test_partitioned_data_index.py \
+            tests/test_dataset_metrics.py \
+            tests/test_quarantine_audit.py \
+            tests/test_restore_alina.py
           python - <<'PY'
           import json,os
           from pathlib import Path
