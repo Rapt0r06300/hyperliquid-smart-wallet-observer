@@ -90,20 +90,27 @@ def _category(
         if current_status == "PARTIAL":
             return "OVERSTRICT_REJECT_STILL_PARTIAL"
         reasons = [*stored_reasons, *current_reasons]
-        if any(
+        proof_missing = any(
             "RECONCILIATION" in reason
             or "REPLAY_COMPATIBILITY_NOT_PROVEN" in reason
             or "PARENT_L2_SHARD_NOT_VERIFIED" in reason
             or "ASSET_NOT_VERIFIED" in reason
             for reason in reasons
-        ):
-            return "REJECT_RECONCILIATION_OR_PROOF_MISSING"
-        if any(
+        )
+        integrity_failed = any(
             "FATAL_INTEGRITY" in reason or "DESYNC" in reason
             or "SEQUENCE_GAP" in reason
             for reason in reasons
-        ):
+        )
+        # Proof repair cannot by itself fix a sequence gap or missing source
+        # timestamps. Do not hide concurrent integrity failures in the
+        # potentially reconcilable-only bucket.
+        if integrity_failed and proof_missing:
+            return "REJECT_INTEGRITY_AND_PROOF_MISSING"
+        if integrity_failed:
             return "REJECT_INTEGRITY_FAILED_UNREPAIRED"
+        if proof_missing:
+            return "REJECT_RECONCILIATION_OR_PROOF_MISSING"
         return "REJECT_UNRESOLVED_NOT_PROVEN_PERMANENT"
     if stored_status in QUARANTINE_STATUSES:
         return "PARTIAL_EVIDENCE"

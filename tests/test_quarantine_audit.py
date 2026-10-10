@@ -126,6 +126,10 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
          "REJECT_RECONCILIATION_OR_PROOF_MISSING"),
         ("REJECT", "REJECT", ["FATAL_INTEGRITY:gap_count=1"],
          "REJECT_INTEGRITY_FAILED_UNREPAIRED"),
+        ("REJECT", "REJECT", ["FATAL_INTEGRITY:gap_count=1", "RECONCILIATION_UNVERIFIED"],
+         "REJECT_INTEGRITY_AND_PROOF_MISSING"),
+        ("REJECT", "REJECT", ["PARENT_L2_SHARD_NOT_VERIFIED", "SEQUENCE_GAP"],
+         "REJECT_INTEGRITY_AND_PROOF_MISSING"),
         ("REJECT", "REJECT", ["OTHER"],
          "REJECT_UNRESOLVED_NOT_PROVEN_PERMANENT"),
         ("REJECT", "PARTIAL", ["RECONCILIATION_UNVERIFIED"],
@@ -148,6 +152,16 @@ def test_non_safe_diagnostics_do_not_equate_reject_with_permanent_loss(
         current_reasons=current_reasons,
     )
     assert category == expected
+
+
+def test_integrity_and_proof_confounding_across_stored_and_current_reasons() -> None:
+    from tools.build_quarantine_audit import _category
+
+    assert _category(
+        "REJECT", "REJECT", historical_archive=False,
+        stored_reasons=["FATAL_INTEGRITY:missing_timestamp_count=2"],
+        current_reasons=["RECONCILIATION_UNVERIFIED"],
+    ) == "REJECT_INTEGRITY_AND_PROOF_MISSING"
 
 
 def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
