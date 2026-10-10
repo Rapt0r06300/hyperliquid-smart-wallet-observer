@@ -643,3 +643,34 @@ def test_mixed_collection_run_ids_stay_explicit_and_conflicts_fail_closed(tmp_pa
     index["collection_run_ids_by_release"] = {"data-v2-run-1-1-native": "forged"}
     with pytest.raises(ValueError, match="conflicting canonical collection run ID"):
         hydrate_default_release_repository(index)
+
+
+def test_measurement_writers_keep_index_alias_factorization():
+    """Round-trip expanded rows from backfills without duplicating huge fields."""
+    from index_run_manifest import (
+        CANONICAL_DATA_REPOSITORY, compact_index_rows,
+        hydrate_default_release_repository,
+    )
+    row = {
+        "dataset_id": "trade-a", "release_repository": CANONICAL_DATA_REPOSITORY,
+        "release_tag": "data-v2-shared", "run_manifest_release_tag": "data-v2-run",
+        "collection_run_id": "run-repeated", "quality_status": "SAFE",
+        "sha256": "a" * 64, "event_count": 10,
+    }
+    other = {**row, "dataset_id": "trade-b", "sha256": "b" * 64}
+    index = {"shards": [row, other], "release_repository_default": CANONICAL_DATA_REPOSITORY}
+    original = [dict(row), dict(other)]
+    for _ in range(3):
+        index["shards"] = compact_index_rows(
+            index, hydrate_default_release_repository(index)
+        )
+        assert all("collection_run_id" not in r for r in index["shards"])
+        assert all("run_manifest_release_tag" not in r for r in index["shards"])
+        assert all("release_repository" not in r for r in index["shards"])
+        assert index["run_manifest_release_tags_by_release"] == {
+            "data-v2-shared": "data-v2-run"
+        }
+        assert index["collection_run_ids_by_release"] == {
+            "data-v2-shared": "run-repeated"
+        }
+        assert hydrate_default_release_repository(index) == original

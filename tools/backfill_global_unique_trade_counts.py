@@ -34,12 +34,12 @@ except ModuleNotFoundError:
 
 try:
     from tools.index_run_manifest import (
-        hydrate_default_release_repository, _compact_index_row,
+        hydrate_default_release_repository, compact_index_rows,
         CANONICAL_DATA_REPOSITORY,
     )
 except ModuleNotFoundError:
     from index_run_manifest import (
-        hydrate_default_release_repository, _compact_index_row,
+        hydrate_default_release_repository, compact_index_rows,
         CANONICAL_DATA_REPOSITORY,
     )
 
@@ -367,9 +367,7 @@ def main() -> None:
     # Publish only compact scalar index evidence; identities remain in the
     # independent patch. Never republish the expanded in-memory view.
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
-    index["shards"] = [
-        _compact_index_row(row, inherit_canonical_repo=True) for row in rows
-    ]
+    index["shards"] = compact_index_rows(index, rows)
     serialized = json.dumps(
         index, sort_keys=True, separators=(",", ":"), ensure_ascii=False
     ) + "\n"

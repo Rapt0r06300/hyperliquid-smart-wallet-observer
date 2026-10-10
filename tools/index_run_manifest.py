@@ -420,6 +420,21 @@ def _compact_collection_run_ids(
     ]
 
 
+def compact_index_rows(index: dict[str, Any], rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Compact full in-memory rows without losing release/collection aliases.
+
+    Writers that rehydrate DATA_INDEX for measurement updates must invoke the
+    same reversible factorization as the ingest indexer. Otherwise every
+    backfill silently expands collection IDs and may exceed the 85 MiB guard.
+    """
+    return _compact_collection_run_ids(
+        index, _compact_run_manifest_tag_locators(index, [
+            _compact_index_row(row, inherit_canonical_repo=True)
+            for row in rows
+        ])
+    )
+
+
 def _index_row(
     manifest: Mapping[str, Any], manifest_path: Path, root: Path, *,
     unique_patch_results: Mapping[str, Mapping[str, Any]] | None = None,
@@ -620,9 +635,7 @@ def index_run_manifests(
         if any(row.get("quality_status") == "SAFE" for row in shards)
         else ("PARTIAL" if shards else "NO_DATA")
     )
-    index["shards"] = _compact_collection_run_ids(
-        index, _compact_run_manifest_tag_locators(index, shards)
-    )
+    index["shards"] = compact_index_rows(index, shards)
     index["active_data_status"] = active
     # Fail before attempting a GitHub push past its 100 MiB blob limit.
     _atomic_json(index_path, index)
@@ -685,10 +698,7 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
         if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
             raise ValueError("COMPACTION_REQUIRES_VERIFIED_CANONICAL_RELEASE_LOCATOR")
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
-    index["shards"] = _compact_collection_run_ids(index, _compact_run_manifest_tag_locators(index, [
-        _compact_index_row(row, inherit_canonical_repo=True)
-        for row in expanded
-    ]))
+    index["shards"] = compact_index_rows(index, expanded)
     # Exact and reversible for all existing fields except explicitly redundant
     # canonical release_repository, which is represented at the index root.
     expected = [_compact_index_row(row) for row in expanded]
