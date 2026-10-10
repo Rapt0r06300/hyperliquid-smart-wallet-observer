@@ -602,6 +602,52 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
     assert not state.rest_anchor_pending
 
 
+def test_gate_replays_ws_deltas_buffered_before_rest_response() -> None:
+    from threading import Event
+    from hl_observer.collection.tick_dataset import TickEnvelope
+    from hl_observer.realtime.feed_quality import FeedEventKind
+
+    ws_arrived = Event()
+
+    class Gate:
+        def bootstrap_envelopes(self, contracts, *, timeout_s):
+            assert tuple(contracts) == ("BTC_USDT",)
+            assert ws_arrived.wait(2), "REST returned before the WS delta arrived"
+            return [TickEnvelope(
+                source_id="gate_public_rest", channel="l2Book",
+                instrument="BTC_USDT", event_kind=FeedEventKind.SNAPSHOT,
+                raw_payload={"id": 41, "bids": [["100", "2"]],
+                             "asks": [["101", "2"]]},
+                received_ts_ms=1700000000010,
+                exchange_ts_ms=1700000000000,
+                sequence=41,
+                provenance={"transport": "https", "access": "read_only"},
+            )]
+
+        async def messages(self, contracts):
+            assert tuple(contracts) == ("BTC_USDT",)
+            # This arrives while the official REST request is still pending.
+            yield {"channel": "futures.order_book_update", "event": "update",
+                   "result": {"s": "BTC_USDT", "t": 1700000000020,
+                              "U": 42, "u": 42,
+                              "b": [["100.5", "1"]], "a": []}}
+            ws_arrived.set()
+            for _ in range(500):
+                state = coordinator._gate_states.get("BTC_USDT")
+                if state and state.sequence == 42 and state.quality == "EXPLOITABLE":
+                    break
+                await asyncio.sleep(0.002)
+            else:
+                raise AssertionError("Buffered WS delta was never bridged to REST")
+
+    coordinator = NativeVenueCoordinator(gate_client=Gate(), ccxt_snapshot_path=None)
+    coordinator.registry = {"BTC": {"gate": "BTC_USDT"}}
+    asyncio.run(asyncio.wait_for(coordinator.run_gate(), timeout=5))
+    state = coordinator._gate_states["BTC_USDT"]
+    assert state.sequence == 42 and state.quality == "EXPLOITABLE"
+    assert state.bids[100.5] == 1.0 and not state.rest_anchor_pending
+
+
 def test_gate_gap_recovers_from_new_rest_base_without_pausing_ws() -> None:
     from hl_observer.collection.tick_dataset import TickEnvelope
     from hl_observer.realtime.feed_quality import FeedEventKind

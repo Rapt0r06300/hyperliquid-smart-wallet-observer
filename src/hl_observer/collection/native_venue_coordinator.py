@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -655,6 +656,11 @@ class NativeVenueCoordinator:
 
         # Bound parallel public REST requests, especially on 100-symbol sessions.
         anchor_semaphore = asyncio.Semaphore(6)
+        # Gate requires WS frames to be cached *before* its REST base arrives.
+        # Keep the cache per contract and bounded; no duplicate raw writes.
+        pending_deltas: dict[str, deque[tuple[dict[str, Any], int]]] = {
+            contract: deque(maxlen=256) for contract in symbols
+        }
 
         async def collect_rest_anchor(contract: str) -> None:
             bootstrap = getattr(self.gate_client, "bootstrap_envelopes", None)
@@ -685,7 +691,10 @@ class NativeVenueCoordinator:
                         contract,
                         GateMarketState(contract=contract, stale_after_ms=self.stale_after_ms),
                     )
-                    if state.sequence is not None and base.sequence < state.sequence:
+                    if state.sequence is not None and (
+                        base.sequence < state.sequence
+                        or (state.quality == "EXPLOITABLE" and not state.rest_anchor_pending)
+                    ):
                         continue
                     if self.tick_writer is not None:
                         self.tick_writer.append(base)
@@ -695,7 +704,15 @@ class NativeVenueCoordinator:
                          "b": raw["bids"], "a": raw["asks"]},
                         receive_ts_ms=base.received_ts_ms,
                     )
-                    self.store.put(state.snapshot(now_ms=base.received_ts_ms))
+                    # Replay the WS frames already captured during REST latency.
+                    # Frames before base_id+1 cannot bridge it; a detected gap
+                    # invalidates depth instead of promoting it to SAFE.
+                    for delta, received_ms in pending_deltas[contract]:
+                        if state.sequence is None:
+                            break
+                        state.apply_book(delta, receive_ts_ms=received_ms)
+                    pending_deltas[contract].clear()
+                    self.store.put(state.snapshot(now_ms=int(time.time() * 1000)))
 
         # One task per contract permits bounded concurrent bootstrap and
         # targeted recovery after a gap, with no pause in raw WS ingestion.
@@ -708,14 +725,26 @@ class NativeVenueCoordinator:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
                     now = int(time.time() * 1000)
-                    self.ingest_gate(
-                        self._with_clock_sync(payload, "gate"),
-                        now_ms=now,
-                    )
-                    raw = payload.get("result")
-                    data = raw if isinstance(raw, Mapping) else payload
+                    enriched = self._with_clock_sync(payload, "gate")
+                    raw = enriched.get("result")
+                    data = raw if isinstance(raw, Mapping) else enriched
                     contract = str(data.get("contract") or data.get("s") or "").upper()
                     state = self._gate_states.get(contract)
+                    if (contract in pending_deltas
+                            and enriched.get("channel") == "futures.order_book_update"
+                            and enriched.get("event") == "update"
+                            and isinstance(data, Mapping)):
+                        transport = enriched.get("_alina_transport")
+                        cached = dict(data)
+                        if isinstance(transport, Mapping):
+                            cached["_alina_transport"] = dict(transport)
+                        pending_deltas[contract].append((cached, now))
+                    self.ingest_gate(enriched, now_ms=now)
+                    state = self._gate_states.get(contract)
+                    if (state is not None and state.quality == "EXPLOITABLE"
+                            and not state.rest_anchor_pending
+                            and contract in pending_deltas):
+                        pending_deltas[contract].clear()
                     if state is None or contract not in anchor_tasks:
                         continue
                     task = anchor_tasks[contract]
