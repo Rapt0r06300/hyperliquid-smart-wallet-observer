@@ -542,3 +542,56 @@ def test_sha_bound_size_compaction_never_drops_unproven_values():
         kept = _compact_index_row(row, size_patch_proven=False)
         assert kept["uncompressed_bytes"] == 1200
         assert kept["uncompressed_size_exact"] is True
+
+def test_index_factors_verified_homogeneous_run_manifest_tags_without_loss(tmp_path):
+    from index_run_manifest import hydrate_default_release_repository
+    root = _bootstrap_root(tmp_path)
+    run = tmp_path / "RUN_MANIFEST.json"
+    manifests = [
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id=name)
+        for name in ("first", "second")
+    ]
+    for manifest in manifests:
+        manifest["release"]["tag"] = "data-v2-physical-part"
+    _write_run(run, manifests)
+    index_run_manifests([run], root=root)
+    index_path = root / "catalog/DATA_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["run_manifest_release_tags_by_release"] == {
+        "data-v2-physical-part": "data-v2-run-1-1-native"
+    }
+    assert all("run_manifest_release_tag" not in row for row in index["shards"])
+    hydrated = hydrate_default_release_repository(index)
+    assert all(row["run_manifest_release_tag"] == "data-v2-run-1-1-native"
+               for row in hydrated)
+    assert all(row["release_tag"] == "data-v2-physical-part" for row in hydrated)
+    original_bytes = index_path.read_bytes()
+    index_run_manifests([], root=root)
+    assert index_path.read_bytes() == original_bytes
+
+
+def test_index_preserves_conflicting_run_manifest_tag_aliases(tmp_path):
+    root = _bootstrap_root(tmp_path)
+    manifests = [
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id=name)
+        for name in ("one", "two")
+    ]
+    for manifest in manifests:
+        manifest["release"]["tag"] = "data-v2-physical-part"
+    paths = []
+    for i, manifest in enumerate(manifests):
+        run = tmp_path / f"RUN_MANIFEST-{i}.json"
+        _write_run(run, [manifest])
+        body = json.loads(run.read_text(encoding="utf-8"))
+        body["release_tag"] = f"data-v2-canonical-{i}"
+        run.write_text(json.dumps(body), encoding="utf-8")
+        paths.append(run)
+    index_run_manifests(paths, root=root)
+    index = json.loads((root / "catalog/DATA_INDEX.json").read_text())
+    assert "run_manifest_release_tags_by_release" not in index
+    assert {row["run_manifest_release_tag"] for row in index["shards"]} == {
+        "data-v2-canonical-0", "data-v2-canonical-1"
+    }
+

@@ -30,6 +30,12 @@ def hydrate_default_release_repository(index: Mapping[str, Any]) -> list[dict[st
     default = index.get("release_repository_default")
     if default not in (None, CANONICAL_DATA_REPOSITORY):
         raise ValueError("foreign release_repository_default forbidden")
+    aliases = index.get("run_manifest_release_tags_by_release") or {}
+    if not isinstance(aliases, Mapping) or any(
+        not isinstance(k, str) or not k or not isinstance(v, str) or not v
+        for k, v in aliases.items()
+    ):
+        raise ValueError("invalid canonical RUN_MANIFEST tag mapping")
     expanded = []
     for item in raw:
         if not isinstance(item, Mapping):
@@ -37,6 +43,12 @@ def hydrate_default_release_repository(index: Mapping[str, Any]) -> list[dict[st
         row = dict(item)
         if "release_repository" not in row and default == CANONICAL_DATA_REPOSITORY:
             row["release_repository"] = CANONICAL_DATA_REPOSITORY
+        canonical = aliases.get(str(row.get("release_tag") or ""))
+        if canonical is not None:
+            existing = row.get("run_manifest_release_tag")
+            if existing not in (None, canonical):
+                raise ValueError("conflicting canonical RUN_MANIFEST tag mapping")
+            row["run_manifest_release_tag"] = canonical
         expanded.append(row)
     return expanded
 
@@ -330,6 +342,42 @@ def _compact_index_row(
     return out
 
 
+def _compact_run_manifest_tag_locators(
+    index: dict[str, Any], rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Factor repeated run tags into the *same* canonical index, reversibly.
+
+    Only fully homogeneous physical-Release groups may use the root mapping;
+    mixed or incomplete groups retain their explicit per-shard run tag.
+    The mapping is not inferred from release naming conventions.
+    """
+    groups: dict[str, set[str | None]] = {}
+    for row in rows:
+        physical = str(row.get("release_tag") or "")
+        if physical:
+            canonical = row.get("run_manifest_release_tag")
+            groups.setdefault(physical, set()).add(
+                str(canonical) if isinstance(canonical, str) and canonical else None
+            )
+    aliases = {
+        physical: next(iter(values))
+        for physical, values in groups.items()
+        if len(values) == 1 and None not in values
+        and next(iter(values)) != physical
+    }
+    if aliases:
+        index["run_manifest_release_tags_by_release"] = dict(sorted(aliases.items()))
+    else:
+        index.pop("run_manifest_release_tags_by_release", None)
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        value = dict(row)
+        if value.get("release_tag") in aliases:
+            value.pop("run_manifest_release_tag", None)
+        result.append(value)
+    return result
+
+
 def _index_row(
     manifest: Mapping[str, Any], manifest_path: Path, root: Path, *,
     unique_patch_results: Mapping[str, Mapping[str, Any]] | None = None,
@@ -530,7 +578,7 @@ def index_run_manifests(
         if any(row.get("quality_status") == "SAFE" for row in shards)
         else ("PARTIAL" if shards else "NO_DATA")
     )
-    index["shards"] = shards
+    index["shards"] = _compact_run_manifest_tag_locators(index, shards)
     index["active_data_status"] = active
     # Fail before attempting a GitHub push past its 100 MiB blob limit.
     _atomic_json(index_path, index)
@@ -593,10 +641,10 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
         if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
             raise ValueError("COMPACTION_REQUIRES_VERIFIED_CANONICAL_RELEASE_LOCATOR")
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
-    index["shards"] = [
+    index["shards"] = _compact_run_manifest_tag_locators(index, [
         _compact_index_row(row, inherit_canonical_repo=True)
         for row in expanded
-    ]
+    ])
     # Exact and reversible for all existing fields except explicitly redundant
     # canonical release_repository, which is represented at the index root.
     expected = [_compact_index_row(row) for row in expanded]
