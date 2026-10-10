@@ -42,7 +42,7 @@ def main() -> int:
         if ancestry.returncode:
             raise ValueError("publication parent is not an ancestor of remote HEAD")
         changed = git("diff", "--name-only", "-z", parent, args.remote).stdout
-        paths = [part.decode("utf-8") for part in changed.split(b"\\0") if part]
+        paths = [part.decode("utf-8") for part in changed.split(b"\0") if part]
         if not only_campaign_checkpoints(paths):
             sample = paths[:10]
             raise ValueError(f"remote changed source/control files: {sample}")
