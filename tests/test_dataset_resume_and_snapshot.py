@@ -83,13 +83,13 @@ def test_snapshot_fingerprint_change_si_manifeste_ou_asset_change(tmp_path: Path
     assert first != second
 
 
-def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path: Path) -> None:
+def test_resumable_campaign_validate_digest_matches_raw_manifest(tmp_path: Path) -> None:
     manifest = CampaignManifest(
         campaign_id="analysis-e3-pnl-proof-v2",
         kind="module_pnl_proof",
         code_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
         code_sha="a" * 40,
-        dataset_repo="Rapt0r06300/alina-smartflow-datasets-v2",
+        dataset_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
         dataset_generation="V2_FRESH",
         config_sha256="b" * 64,
         work_plan_sha256="c" * 64,
@@ -115,3 +115,24 @@ def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path
     )
 
     assert completed.stdout.strip() == sha256_json(raw)
+
+
+def test_v2_legacy_external_dataset_repository_is_refused(tmp_path: Path) -> None:
+    manifest = CampaignManifest(
+        campaign_id="foreign-data-refused", kind="market_collection",
+        code_repo="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        code_sha="a" * 40, dataset_repo="Rapt0r06300/alina-smartflow-datasets-v2",
+        dataset_generation="V2_FRESH", config_sha256="b" * 64,
+        work_plan_sha256="c" * 64, expires_at="2026-10-07T00:00:00+00:00",
+        created_at="2026-09-29T00:00:00+00:00",
+        schema_version="alina.resumable_campaign.v2",
+        creation_phase="COLLECT", phase_epoch=3,
+    )
+    path = tmp_path / "invalid-campaign.json"
+    path.write_text(json.dumps(manifest.to_dict()), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, "tools/resumable_campaign.py", "validate", str(path)],
+        check=False, capture_output=True, text=True,
+    )
+    assert completed.returncode != 0
+    assert "canonical Alina repository" in completed.stderr

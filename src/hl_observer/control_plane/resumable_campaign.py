@@ -139,6 +139,12 @@ def validate_manifest(m: CampaignManifest) -> None:
 
     # Schema V2 Specific Validations
     if m.schema_version == SCHEMA_VERSION_V2:
+        # The retired external data repository is never a valid operational
+        # source. V1 legacy manifests remain readable for audit, but V2
+        # workers must not consume or create cross-repository campaigns.
+        canonical = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+        if m.code_repo != canonical or m.dataset_repo != canonical:
+            raise ValueError("V2 campaign must use the canonical Alina repository")
         if m.creation_phase not in ("COLLECT", "ANALYZE", "IDLE"):
             raise ValueError("V2 manifest must specify valid creation_phase")
         if m.creation_phase == "COLLECT" and m.kind not in COLLECT_CAMPAIGN_KINDS:
