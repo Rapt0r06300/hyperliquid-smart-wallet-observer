@@ -210,9 +210,11 @@ def save_index(
         existing = json.loads(index_path.read_text(encoding="utf-8"))
         if not isinstance(existing, dict):
             raise ValueError("PARTITION_PARITY_EXISTING_ROOT_INVALID")
+        # Validate every existing layout, not only the partitioned one.
+        # An unknown/partial root must never be overwritten as if it were
+        # an ordinary inline index: doing so could discard evidence.
+        read_index(index_path)
         current_partitioned = existing.get("schema") == SCHEMA
-        if current_partitioned:
-            read_index(index_path)  # No mutation if the old state is corrupt.
     inline = _json_bytes(dict(logical_index))
     if not current_partitioned and len(inline) < max_inline_bytes:
         _validate_rows(logical_index.get("shards"))

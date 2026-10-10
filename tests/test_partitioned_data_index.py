@@ -217,3 +217,20 @@ def test_reconciliation_index_writer_requires_explicit_activation(tmp_path, monk
     monkeypatch.delenv("ALINA_CATALOG_PARTITION_ACTIVATE", raising=False)
     indexer._publish_canonical_index(path, legacy)
     assert read_index(path) == legacy  # No unsafe downgrade to legacy.
+
+
+def test_save_index_refuses_unknown_existing_layout_without_mutation(tmp_path):
+    from tools.partitioned_data_index import save_index
+
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    path.parent.mkdir(parents=True)
+    for corrupt in (
+        {"schema": "future", "partitions": [], "shards": []},
+        {"schema": "future", "shards": None},
+    ):
+        original = json.dumps(corrupt, sort_keys=True).encode("utf-8")
+        path.write_bytes(original)
+        with pytest.raises(ValueError, match="DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT"):
+            save_index(path, _index(), max_inline_bytes=100000)
+        assert path.read_bytes() == original
+        assert not (path.parent / "data-index-parts").exists()
