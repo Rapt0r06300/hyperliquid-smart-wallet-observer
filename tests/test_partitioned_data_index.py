@@ -105,3 +105,26 @@ def test_snapshot_cli_helper_refuses_output_inside_canonical_catalog(tmp_path):
     source = _stage(tmp_path, _index(), {})
     with pytest.raises(ValueError, match="OUTPUT_MUST_BE_OUTSIDE_SOURCE"):
         prove_partitioned_index(source, source.parent / "parallel-index")
+
+
+def test_read_index_verifies_both_legacy_and_partitioned(tmp_path):
+    from tools.partitioned_data_index import read_index
+
+    original = _index()
+    legacy_path = _stage(tmp_path, original, {})
+    assert read_index(legacy_path) == original
+    partition_root, files = partition_index(original, max_partition_bytes=240)
+    partition_path = _stage(tmp_path, partition_root, files)
+    assert read_index(partition_path) == original
+    first = next(iter(files))
+    (partition_path.parent / first).write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
+        read_index(partition_path)
+
+
+def test_read_index_refuses_unknown_partition_layout(tmp_path):
+    from tools.partitioned_data_index import read_index
+
+    path = _stage(tmp_path, {"schema": "future", "partitions": [], "shards": []}, {})
+    with pytest.raises(ValueError, match="UNKNOWN_OR_PARTIAL"):
+        read_index(path)

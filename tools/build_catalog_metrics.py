@@ -7,6 +7,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 METRICS = ROOT / "catalog" / "DATA_METRICS.json"
@@ -59,7 +64,7 @@ def verify_metrics_source(
     """Fail closed unless metrics describe the exact current index bytes."""
     try:
         index_bytes = index_path.read_bytes()
-        index = json.loads(index_bytes)
+        index = read_index(index_path)
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"DATA_METRICS_SOURCE_INVALID: {exc}") from exc
@@ -85,7 +90,7 @@ def verify_metrics_source(
 
 
 def build() -> dict[str, Any]:
-    idx = json.loads(INDEX.read_text(encoding="utf-8"))
+    idx = read_index(INDEX)
     shards = idx.get("shards") or []
     size_doc = {}
     try:

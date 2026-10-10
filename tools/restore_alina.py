@@ -24,6 +24,11 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 USER_AGENT = "alina-smartflow-disaster-restore/1"
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9._-]+")
@@ -486,7 +491,7 @@ def _load_current_safe_catalog(
     """
     try:
         index_bytes = index_path.read_bytes()
-        index = json.loads(index_bytes)
+        index = read_index(index_path)
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RestoreError(f"invalid or missing canonical catalog/metrics: {exc}") from exc

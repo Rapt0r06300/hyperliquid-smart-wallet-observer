@@ -13,6 +13,11 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 TABLES = (
     ("UNCOMPRESSED_SIZE_PATCH.json", "sizes", "alina.uncompressed_size_patch.v2"),
     ("RECORD_COUNT_PATCH.json", "records", "alina.record_count_patch.v1"),
@@ -127,7 +132,7 @@ def merge_patch(
 
 
 def merge_directory(measured_root: Path, repo_root: Path) -> dict[str, Any]:
-    index = _load(repo_root / "catalog" / "DATA_INDEX.json")
+    index = read_index(repo_root / "catalog" / "DATA_INDEX.json")
     rows = index.get("shards")
     if not isinstance(rows, list):
         raise ValueError("invalid active DATA_INDEX")

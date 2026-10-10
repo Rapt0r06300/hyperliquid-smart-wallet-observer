@@ -4,10 +4,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 root = Path(__file__).resolve().parents[1]
 reg = json.loads((root / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 cat = json.loads((root / "catalog/DATA_CATALOG.json").read_text())
-index = json.loads((root / "catalog/DATA_INDEX.json").read_text())
+index = read_index(root / "catalog/DATA_INDEX.json")
 
 statuses = set(reg["status_vocabulary"])
 assert statuses == {"SAFE", "PARTIAL", "STALE", "REJECT", "NO_DATA"}

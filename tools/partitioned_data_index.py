@@ -159,6 +159,24 @@ def load_partitioned_index(index_path: Path) -> dict[str, Any]:
     return reconstructed
 
 
+
+def read_index(index_path: Path) -> dict[str, Any]:
+    """Return the complete logical index, legacy or fully verified partitions.
+
+    No partial shard list or silent fallback is permitted.
+    """
+    index_path = Path(index_path)
+    raw = json.loads(index_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("DATA_INDEX_INVALID_ROOT")
+    if raw.get("schema") == SCHEMA:
+        return load_partitioned_index(index_path)
+    if "partitions" in raw or not isinstance(raw.get("shards"), list):
+        raise ValueError("DATA_INDEX_UNKNOWN_OR_PARTIAL_LAYOUT")
+    _validate_rows(raw["shards"])
+    return raw
+
+
 def prove_partitioned_index(
     index_path: Path, output_directory: Path
 ) -> dict[str, Any]:

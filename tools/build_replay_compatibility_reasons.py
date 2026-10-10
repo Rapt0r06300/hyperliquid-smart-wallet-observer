@@ -9,6 +9,11 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 OUTPUT = ROOT / "catalog" / "REPLAY_COMPATIBILITY_REASONS.json"
@@ -57,7 +62,7 @@ def main() -> int:
     parser.add_argument("--output", default=str(OUTPUT))
     args = parser.parse_args()
 
-    index = json.loads(INDEX.read_text(encoding="utf-8"))
+    index = read_index(INDEX)
     rows = index.get("shards") or []
     primary_counts: Counter[str] = Counter()
     blocker_shards: Counter[str] = Counter()

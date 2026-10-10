@@ -14,6 +14,11 @@ try:
 except ModuleNotFoundError:
     from manifest_policy import classify_manifest, is_official_historical_archive
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 ROOT = Path(__file__).resolve().parents[1]
 QUARANTINE_STATUSES = {"PARTIAL", "QUARANTINE", "QUARANTINED"}
 REJECT_STATUSES = {"REJECT", "REJECTED"}
@@ -121,7 +126,7 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     index_path = base / "catalog" / "DATA_INDEX.json"
     metrics_path = base / "catalog" / "DATA_METRICS.json"
     record_patch_path = base / "catalog" / "RECORD_COUNT_PATCH.json"
-    index = _load(index_path, {})
+    index = read_index(index_path)
     metrics = _load(metrics_path, {})
     record_patch = _load(record_patch_path, {})
     record_rows = record_patch.get("records") if isinstance(record_patch, Mapping) else {}
