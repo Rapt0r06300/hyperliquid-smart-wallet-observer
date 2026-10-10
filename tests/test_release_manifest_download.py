@@ -337,3 +337,38 @@ def test_primary_api_exhaustion_stops_without_repeating_requests():
         )
     assert calls == ["repos/owner/repo/releases?per_page=50&page=1"]
     assert sleeps == []
+
+def test_release_listing_fails_closed_when_full_pages_repeat_forever():
+    import json
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    calls: list[str] = []
+    def runner(command, **_):
+        calls.append(command[-1])
+        # Broken pagination repeats page 1 at every subsequent offset.
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 1, "tag_name": "data-v2-one", "assets": []},
+            {"id": 2, "tag_name": "data-v2-two", "assets": []},
+        ]), "")
+
+    with pytest.raises(RuntimeError, match="pagination made no progress"):
+        list_release_manifest_tags("owner/repo", runner=runner, page_size=2)
+    assert len(calls) == 3
+
+
+def test_release_listing_refuses_exhausted_page_budget():
+    import json
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+
+    calls: list[str] = []
+    def runner(command, **_):
+        calls.append(command[-1])
+        return subprocess.CompletedProcess(command, 0, json.dumps([
+            {"id": 1, "tag_name": "data-v2-one", "assets": []},
+        ]), "")
+
+    with pytest.raises(RuntimeError, match="page budget exhausted"):
+        list_release_manifest_tags("owner/repo", runner=runner, page_size=1, max_pages=1)
+    assert len(calls) == 1
