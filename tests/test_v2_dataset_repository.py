@@ -194,3 +194,103 @@ def test_selector_resolves_canonical_inherited_repository_only_when_declared():
         select_safe_shards({"shards": [compact]})
     with pytest.raises(DatasetV2Error, match="foreign"):
         select_safe_shards({"release_repository_default": "another/repo", "shards": [compact]})
+
+
+def test_safe_release_download_retries_504_then_verifies_sha(tmp_path, monkeypatch):
+    import hashlib
+    import requests
+    from hl_observer.datasets.v2_repository import download_safe_shard
+
+    data = b"immutable trade history"
+    shard = SafeShard.from_index_row(_safe_row(
+        sha256=hashlib.sha256(data).hexdigest(), bytes=len(data),
+    ))
+    calls = []
+
+    class Response:
+        def __init__(self, status):
+            self.status = status
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def raise_for_status(self):
+            if self.status != 200:
+                error_response = requests.Response()
+                error_response.status_code = self.status
+                raise requests.HTTPError(response=error_response)
+        def iter_content(self, chunk_size):
+            yield data
+
+    def get(*_args, **_kwargs):
+        calls.append(1)
+        return Response(504 if len(calls) == 1 else 200)
+
+    monkeypatch.setattr("hl_observer.datasets.v2_repository.requests.get", get)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    path = tmp_path / "trades.jsonl.gz"
+    assert download_safe_shard(shard, path).read_bytes() == data
+    assert len(calls) == 2
+    assert not path.with_suffix(".gz.part").exists()
+
+
+def test_safe_release_download_does_not_retry_404(tmp_path, monkeypatch):
+    import requests
+    from hl_observer.datasets.v2_repository import download_safe_shard
+
+    calls = []
+
+    class NotFound:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def raise_for_status(self):
+            response = requests.Response()
+            response.status_code = 404
+            raise requests.HTTPError(response=response)
+
+    def get(*_args, **_kwargs):
+        calls.append(1)
+        return NotFound()
+
+    monkeypatch.setattr("hl_observer.datasets.v2_repository.requests.get", get)
+    with pytest.raises(DatasetV2Error, match="HTTP 404"):
+        download_safe_shard(SafeShard.from_index_row(_safe_row()), tmp_path / "trades.jsonl.gz")
+    assert len(calls) == 1
+
+
+def test_safe_release_stream_retry_removes_partial_bytes(tmp_path, monkeypatch):
+    import hashlib
+    import requests
+    from hl_observer.datasets.v2_repository import download_safe_shard
+
+    data = b"verified-data"
+    shard = SafeShard.from_index_row(_safe_row(
+        sha256=hashlib.sha256(data).hexdigest(), bytes=len(data),
+    ))
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def raise_for_status(self):
+            return None
+        def iter_content(self, chunk_size):
+            if len(calls) == 1:
+                yield b"bad-prefix"
+                raise requests.ConnectionError("connection reset")
+            yield data
+
+    def get(*_args, **_kwargs):
+        calls.append(1)
+        return Response()
+
+    monkeypatch.setattr("hl_observer.datasets.v2_repository.requests.get", get)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    path = tmp_path / "trades.jsonl.gz"
+    assert download_safe_shard(shard, path).read_bytes() == data
+    assert len(calls) == 2
+    assert not path.with_suffix(".gz.part").exists()

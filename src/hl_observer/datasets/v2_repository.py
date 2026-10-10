@@ -269,44 +269,51 @@ def download_safe_shard(
     archive_temp.unlink(missing_ok=True)
     download_to = archive_temp if shard.release_container_asset else temporary
     url = _release_asset_url(shard)
-    try:
-        with requests.get(
-            url,
-            headers=_headers(),
-            timeout=TIMEOUT,
-            stream=True,
-            allow_redirects=True,
-        ) as response:
-            response.raise_for_status()
-            with download_to.open("wb") as handle:
-                for chunk in response.iter_content(chunk_size=4 * 1024 * 1024):
-                    if chunk:
-                        handle.write(chunk)
-                handle.flush()
-                os.fsync(handle.fileno())
-    except requests.HTTPError as exc:
-        temporary.unlink(missing_ok=True)
-        archive_temp.unlink(missing_ok=True)
-        status = getattr(getattr(exc, "response", None), "status_code", None)
-        if status in {408, 425, 429, 500, 502, 503, 504}:
+    # Immutable Release downloads are read-only GETs. Transient network/API
+    # errors are retried in bounded fashion; integrity failures are NEVER retried
+    # or treated as a reason to accept an unverified asset.
+    import time
+
+    retryable_http = {408, 425, 429, 500, 502, 503, 504}
+    for attempt in range(1, 4):
+        try:
+            with requests.get(
+                url,
+                headers=_headers(),
+                timeout=TIMEOUT,
+                stream=True,
+                allow_redirects=True,
+            ) as response:
+                response.raise_for_status()
+                with download_to.open("wb") as handle:
+                    for chunk in response.iter_content(chunk_size=4 * 1024 * 1024):
+                        if chunk:
+                            handle.write(chunk)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            break
+        except requests.HTTPError as exc:
+            temporary.unlink(missing_ok=True)
+            archive_temp.unlink(missing_ok=True)
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status not in retryable_http or attempt == 3:
+                raise DatasetV2Error(
+                    f"SAFE shard download failed: HTTP {status if status is not None else 'error'}"
+                ) from exc
+        except requests.RequestException as exc:
+            temporary.unlink(missing_ok=True)
+            archive_temp.unlink(missing_ok=True)
+            if attempt == 3:
+                raise DatasetV2Error(
+                    f"temporary external SAFE shard download failure after 3 attempts: {type(exc).__name__}"
+                ) from exc
+        except OSError as exc:
+            temporary.unlink(missing_ok=True)
+            archive_temp.unlink(missing_ok=True)
             raise DatasetV2Error(
-                f"temporary external SAFE shard download failure: HTTP {status}"
+                f"SAFE shard local write failed: {type(exc).__name__}"
             ) from exc
-        raise DatasetV2Error(
-            f"SAFE shard download failed: HTTP {status if status is not None else 'error'}"
-        ) from exc
-    except requests.RequestException as exc:
-        temporary.unlink(missing_ok=True)
-        archive_temp.unlink(missing_ok=True)
-        raise DatasetV2Error(
-            f"temporary external SAFE shard download failure: {type(exc).__name__}"
-        ) from exc
-    except OSError as exc:
-        temporary.unlink(missing_ok=True)
-        archive_temp.unlink(missing_ok=True)
-        raise DatasetV2Error(
-            f"SAFE shard local write failed: {type(exc).__name__}"
-        ) from exc
+        time.sleep(attempt)
 
     if shard.release_container_asset:
         try:
