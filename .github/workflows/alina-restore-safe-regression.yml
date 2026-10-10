@@ -11,6 +11,7 @@ on:
       - tests/test_quarantine_audit.py
       - tools/build_quarantine_audit.py
       - tools/repair_stale_safe_classifications.py
+      - tests/test_repair_stale_safe_partition.py
       - tools/backfill_replay_compatibility.py
       - tools/index_run_manifest.py
       - tools/check_dataset_quality.py
@@ -126,7 +127,7 @@ jobs:
       - name: Run deterministic restore tests
         run: |
           python -m pip install --disable-pip-version-check pytest==8.4.2 requests
-          PYTHONPATH=src python -m pytest -q tests/test_restore_alina.py tests/test_restore_alina_launcher.py tests/test_native_trade_batch_split.py tests/test_quarantine_audit.py tests/test_manifest_policy.py tests/test_backfill_replay_compatibility_candidates.py tests/test_run_indexing.py tests/test_v2_dataset_repository.py
+          PYTHONPATH=src python -m pytest -q tests/test_restore_alina.py tests/test_restore_alina_launcher.py tests/test_repair_stale_safe_partition.py tests/test_native_trade_batch_split.py tests/test_quarantine_audit.py tests/test_manifest_policy.py tests/test_backfill_replay_compatibility_candidates.py tests/test_run_indexing.py tests/test_v2_dataset_repository.py
       - name: Publish test result for verifiable GitHub status
         if: always()
         env:
