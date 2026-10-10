@@ -153,6 +153,32 @@ def _download_to_path(
 
 
 
+def _validate_release_asset(
+    asset: Mapping[str, Any], release_id: int, ids: set[int], names: set[str],
+) -> None:
+    """Apply identical strict identity, completeness and digest gates to all sources."""
+    if not isinstance(asset, Mapping):
+        raise RestoreError(f"invalid asset record in release {release_id}")
+    asset_id = asset.get("id")
+    name = asset.get("name")
+    size = asset.get("size")
+    url = asset.get("browser_download_url")
+    if type(asset_id) is not int or asset_id <= 0 or asset_id in ids:
+        raise RestoreError(f"missing or duplicated asset id in release {release_id}")
+    if not isinstance(name, str) or not name or name in names:
+        raise RestoreError(f"missing or duplicated asset name in release {release_id}")
+    if type(size) is not int or size < 0:
+        raise RestoreError(f"invalid asset size for {name}")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise RestoreError(f"invalid download URL for {name}")
+    if _expected_digest(asset) is None:
+        raise RestoreError(f"missing/invalid SHA-256 for {name}")
+    if asset.get("state") != "uploaded":
+        raise RestoreError(f"asset not fully uploaded: {name}")
+    ids.add(asset_id)
+    names.add(name)
+
+
 def _list_release_assets(
     repository: str, release_id: int, *, token: str | None = None
 ) -> list[Mapping[str, Any]]:
@@ -172,26 +198,7 @@ def _list_release_assets(
         if not isinstance(payload, list):
             raise RestoreError(f"invalid asset listing for release {release_id} page {page}")
         for asset in payload:
-            if not isinstance(asset, Mapping):
-                raise RestoreError(f"invalid asset record in release {release_id}")
-            asset_id = asset.get("id")
-            name = asset.get("name")
-            size = asset.get("size")
-            url = asset.get("browser_download_url")
-            if type(asset_id) is not int or asset_id <= 0 or asset_id in ids:
-                raise RestoreError(f"missing or duplicated asset id in release {release_id}")
-            if not isinstance(name, str) or not name or name in names:
-                raise RestoreError(f"missing or duplicated asset name in release {release_id}")
-            if type(size) is not int or size < 0:
-                raise RestoreError(f"invalid asset size for {name}")
-            if not isinstance(url, str) or not url.startswith("https://"):
-                raise RestoreError(f"invalid download URL for {name}")
-            if _expected_digest(asset) is None:
-                raise RestoreError(f"missing/invalid SHA-256 for {name}")
-            if asset.get("state") != "uploaded":
-                raise RestoreError(f"asset not fully uploaded: {name}")
-            ids.add(asset_id)
-            names.add(name)
+            _validate_release_asset(asset, release_id, ids, names)
             assets.append(asset)
         if len(payload) < 100:
             return assets
@@ -224,9 +231,23 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
             seen_ids.add(release_id)
             seen_tags.add(tag)
             complete_release = dict(release)
-            complete_release["assets"] = _list_release_assets(
-                repository, release_id, token=token
-            )
+            embedded = release.get("assets")
+            if not isinstance(embedded, list):
+                raise RestoreError(f"missing embedded asset array for release {release_id}")
+            # GitHub's Releases list embeds at most 30 assets. A short,
+            # nonempty list is complete; 30 can be truncated and an empty
+            # list is independently checked rather than trusted blindly.
+            # This avoids >1,000 needless API requests on large restores.
+            if 0 < len(embedded) < 30:
+                ids: set[int] = set()
+                names: set[str] = set()
+                for asset in embedded:
+                    _validate_release_asset(asset, release_id, ids, names)
+                complete_release["assets"] = list(embedded)
+            else:
+                complete_release["assets"] = _list_release_assets(
+                    repository, release_id, token=token
+                )
             yield complete_release
         if len(payload) < 10:
             return

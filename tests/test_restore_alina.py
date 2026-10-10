@@ -1124,3 +1124,35 @@ def test_snapshot_segment_copy_refuses_short_source_without_padding():
     with pytest.raises(module.RestoreError, match="short chunk read"):
         module._copy_exact_segment(io.BytesIO(b"abc"), output, 7)
     assert output.getvalue() == b"abc"
+
+
+def test_restore_accepts_verified_short_embedded_release_asset_inventory(monkeypatch):
+    module = _module()
+    asset = {**_asset("one.bin", "https://example.invalid/one", b"one"),
+             "id": 77, "state": "uploaded"}
+    urls = []
+    def fake_json(url, **_kwargs):
+        urls.append(url)
+        assert "/releases?" in url
+        return [{"id": 3, "tag_name": "archive-3", "assets": [asset]}]
+    monkeypatch.setattr(module, "_json", fake_json)
+    monkeypatch.setattr(
+        module, "_list_release_assets",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("needless asset listing")),
+    )
+    result = list(module.iter_releases("owner/repo"))
+    assert len(result) == 1
+    assert result[0]["assets"] == [asset]
+    assert len(urls) == 1
+
+
+def test_restore_refuses_unverified_short_embedded_release_asset(monkeypatch):
+    module = _module()
+    asset = {**_asset("one.bin", "https://example.invalid/one", b"one"),
+             "id": 77, "state": "uploaded", "digest": None}
+    monkeypatch.setattr(module, "_json", lambda *_a, **_k: [
+        {"id": 3, "tag_name": "archive-3", "assets": [asset]}
+    ])
+    import pytest
+    with pytest.raises(module.RestoreError, match="SHA-256"):
+        list(module.iter_releases("owner/repo"))
