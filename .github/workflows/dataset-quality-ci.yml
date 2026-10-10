@@ -20,7 +20,9 @@ on:
 
 concurrency:
   group: dataset-quality-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not cancel every regression run during frequent DATA_INDEX/main commits.
+  # A running SHA-bound proof must finish; the newest pending run is retained.
+  cancel-in-progress: false
 
 permissions:
   contents: read

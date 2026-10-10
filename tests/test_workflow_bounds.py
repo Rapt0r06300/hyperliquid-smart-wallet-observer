@@ -9,6 +9,18 @@ def _workflow(name: str) -> str:
     return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
 
+
+def test_critical_qualification_and_collector_proofs_are_not_starved_by_main_pushes():
+    for workflow in ("dataset-quality-ci.yml", "collector-replay-integrity-ci.yml"):
+        text = _workflow(workflow)
+        assert "concurrency:" in text
+        assert "cancel-in-progress: false" in text
+        assert "cancel-in-progress: true" not in text
+        assert "runs-on: ubuntu-latest" in text
+        assert "self-hosted" not in text
+
+
+
 def test_legacy_long_collectors_are_manual_only():
     for name in (
         "collect-market-data-v2.yml",
