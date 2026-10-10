@@ -353,6 +353,40 @@ def test_remote_v2_reader_fails_closed_if_partition_bytes_corrupted(monkeypatch)
         module.load_index()
 
 
+def test_remote_v2_reader_refuses_valid_json_partition_sha_mismatch(monkeypatch):
+    """A valid, same-size JSON substitution must not bypass the SHA gate."""
+    import json
+    from tools.partitioned_data_index import partition_index
+    from hl_observer.datasets import v2_repository as module
+
+    root, parts = partition_index({
+        "schema": "alina.data_index.v2",
+        "shards": [_safe_row(dataset_id="one")],
+    })
+    part_path, original = next(iter(parts.items()))
+    modified = original.replace(b'"one"', b'"two"', 1)
+    assert modified != original and len(modified) == len(original)
+    assert isinstance(json.loads(modified), list)
+    assets = {
+        "catalog/DATA_INDEX.json": json.dumps(root).encode(),
+        "catalog/" + part_path: modified,
+    }
+
+    class Response:
+        def __init__(self, body):
+            self.content = body
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(
+        module.requests, "get",
+        lambda url, **_k: Response(assets[url.split("/main/")[-1]]),
+    )
+    with pytest.raises(DatasetV2Error, match="SHA-256/size mismatch"):
+        module.load_index()
+
+
 def test_remote_v2_reader_refuses_partition_path_escape(monkeypatch):
     import json
     from tools.partitioned_data_index import partition_index

@@ -159,13 +159,21 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _read_public_index_json(url: str, label: str) -> tuple[dict[str, Any] | list[Any], bytes]:
+def _read_public_index_json(
+    url: str, label: str, *, expected_size: int | None = None,
+    expected_sha256: str | None = None,
+) -> tuple[dict[str, Any] | list[Any], bytes]:
     try:
         response = requests.get(url, timeout=TIMEOUT)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise DatasetV2Error(f"unable to load {label}: {type(exc).__name__}") from exc
     raw = response.content
+    # Verify immutable partition bytes before parsing untrusted JSON. Corrupt
+    # bytes (including malformed JSON) must fail the SHA-bound integrity gate.
+    if expected_size is not None and expected_sha256 is not None:
+        if len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != expected_sha256:
+            raise DatasetV2Error(f"{label} SHA-256/size mismatch")
     try:
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -217,9 +225,9 @@ def _load_remote_partitioned_index(
                 or any(c not in "0123456789abcdef" for c in digest)):
             raise DatasetV2Error("invalid V2 partition path or integrity descriptor")
         url = f"{RAW_ROOT}/{repository}/{ref}/catalog/{relative}"
-        payload, raw = _read_public_index_json(url, "V2 partition")
-        if len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != digest:
-            raise DatasetV2Error("V2 partition SHA-256/size mismatch")
+        payload, _raw = _read_public_index_json(
+            url, "V2 partition", expected_size=expected_size, expected_sha256=digest,
+        )
         if not isinstance(payload, list) or len(payload) != expected_rows:
             raise DatasetV2Error("V2 partition row count mismatch")
         for item in payload:
