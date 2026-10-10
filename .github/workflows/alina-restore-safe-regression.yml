@@ -33,7 +33,8 @@ permissions:
 
 concurrency:
   group: alina-restore-regression-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep an already-running validation despite rapid main pushes.
+  cancel-in-progress: false
 
 jobs:
   restore-safety:
@@ -52,13 +53,20 @@ jobs:
       - name: Measure canonical index headroom
         run: |
           python - <<'PY'
+          import json
           from pathlib import Path
+          from tools.partitioned_data_index import read_index, SCHEMA as PARTITION_SCHEMA
           path = Path("catalog/DATA_INDEX.json")
+          root = json.loads(path.read_text(encoding="utf-8"))
+          logical = read_index(path)
           size = path.stat().st_size
           ceiling = 85 * 1024 * 1024
-          print(f"ALINA_INDEX_BYTES={size}")
+          partitioned = root.get("schema") == PARTITION_SCHEMA
+          print(f"ALINA_INDEX_LAYOUT={'PARTITIONED' if partitioned else 'INLINE'}")
+          print(f"ALINA_INDEX_ROOT_BYTES={size}")
+          print(f"ALINA_INDEX_LOGICAL_SHARDS={len(logical['shards'])}")
           print(f"ALINA_INDEX_WRITE_LIMIT_BYTES={ceiling}")
-          print(f"ALINA_INDEX_HEADROOM_BYTES={ceiling - size}")
+          print(f"ALINA_INLINE_HEADROOM_BYTES={None if partitioned else ceiling - size}")
           PY
       - name: Inspect lossless compactable index metadata
         run: |
@@ -66,7 +74,8 @@ jobs:
           import json
           from collections import Counter
           from pathlib import Path
-          rows = json.loads(Path("catalog/DATA_INDEX.json").read_text())["shards"]
+          from tools.partitioned_data_index import read_index
+          rows = read_index(Path("catalog/DATA_INDEX.json"))["shards"]
           counts = Counter()
           savings = Counter()
           redundant = Counter()
@@ -103,7 +112,9 @@ jobs:
               CANONICAL_DATA_REPOSITORY,
           )
           path = Path("catalog/DATA_INDEX.json")
-          original = json.loads(path.read_text(encoding="utf-8"))
+          from tools.partitioned_data_index import read_index, SCHEMA as PARTITION_SCHEMA
+          is_partitioned = json.loads(path.read_text(encoding="utf-8")).get("schema") == PARTITION_SCHEMA
+          original = read_index(path)
           rows = hydrate_default_release_repository(original)
           if any(row.get("release_repository") != CANONICAL_DATA_REPOSITORY for row in rows):
               raise SystemExit("COMPACTION_NO_GO: foreign or unverified release repository")
@@ -121,8 +132,8 @@ jobs:
           print(f"COMPACT_INDEX_SHARDS={len(rows)}")
           print(f"COMPACT_INDEX_BYTES={new_bytes}")
           print(f"COMPACT_INDEX_SAVED_BYTES={path.stat().st_size - new_bytes}")
-          if new_bytes >= 85 * 1024 * 1024:
-              raise SystemExit("COMPACTION_NO_GO: index still too large")
+          if not is_partitioned and new_bytes >= 85 * 1024 * 1024:
+              raise SystemExit("COMPACTION_NO_GO: inline index still too large")
           PY
       - name: Run deterministic restore tests
         run: |
