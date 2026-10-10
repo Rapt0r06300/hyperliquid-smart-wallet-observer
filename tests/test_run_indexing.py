@@ -514,3 +514,31 @@ def test_index_preserves_unbacked_diagnostics_when_receipt_hash_mismatch(tmp_pat
     assert reindexed["source"] == "old_source"
     assert reindexed["replay_schema_version"] == "alina.replay.v1"
     assert reindexed["replay_reason"] == "PROOF_PENDING"
+
+
+def test_sha_bound_size_compaction_never_drops_unproven_values():
+    from index_run_manifest import _compact_index_row, _size_proof_matches
+    row = {
+        "dataset_id": "one",
+        "sha256": "a" * 64,
+        "uncompressed_bytes": 1200,
+        "uncompressed_size_exact": True,
+        "event_count": 12,
+    }
+    verified = {
+        "one": {"asset_sha256": "a" * 64, "uncompressed_bytes": 1200}
+    }
+    assert _size_proof_matches(row, verified)
+    compact = _compact_index_row(row, size_patch_proven=True)
+    assert "uncompressed_bytes" not in compact
+    assert "uncompressed_size_exact" not in compact
+    assert compact["sha256"] == row["sha256"]
+    for invalid in (
+        {"one": {"asset_sha256": "b" * 64, "uncompressed_bytes": 1200}},
+        {"one": {"asset_sha256": "a" * 64, "uncompressed_bytes": 2000}},
+        {},
+    ):
+        assert _size_proof_matches(row, invalid) is False
+        kept = _compact_index_row(row, size_patch_proven=False)
+        assert kept["uncompressed_bytes"] == 1200
+        assert kept["uncompressed_size_exact"] is True

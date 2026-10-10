@@ -117,6 +117,36 @@ def _load_global_unique_count_patch_results(root: Path) -> dict[str, Mapping[str
     }
 
 
+
+def _load_size_proofs(root: Path) -> dict[str, Mapping[str, Any]]:
+    path = root / "catalog" / "UNCOMPRESSED_SIZE_PATCH.json"
+    if not path.is_file():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    entries = doc.get("sizes") if isinstance(doc, Mapping) else None
+    return dict(entries) if isinstance(entries, Mapping) else {}
+
+
+def _size_proof_matches(
+    row: Mapping[str, Any], proofs: Mapping[str, Mapping[str, Any]],
+) -> bool:
+    sha = str(row.get("sha256") or "").lower()
+    proof = proofs.get(str(row.get("dataset_id") or ""))
+    return bool(
+        isinstance(proof, Mapping)
+        and len(sha) == 64
+        and str(proof.get("asset_sha256") or "").lower() == sha
+        and row.get("uncompressed_size_exact") is True
+        and type(row.get("uncompressed_bytes")) is int
+        and type(proof.get("uncompressed_bytes")) is int
+        and proof["uncompressed_bytes"] == row["uncompressed_bytes"]
+        and row["uncompressed_bytes"] >= 0
+    )
+
+
 def _apply_trade_count_patch(
     manifest: dict[str, Any],
     patch_results: Mapping[str, Mapping[str, Any]],
@@ -259,6 +289,7 @@ def _has_sha_bound_receipt(root: Path, row: Mapping[str, Any]) -> bool:
 def _compact_index_row(
     row: Mapping[str, Any], *, inherit_canonical_repo: bool = False,
     receipt_backed: bool = False,
+    size_patch_proven: bool = False,
 ) -> dict[str, Any]:
     """Omit redundant fields, retaining all independent causal proofs.
 
@@ -274,6 +305,11 @@ def _compact_index_row(
         # per-shard manifest. Their removal from the search index never drops
         # replay compatibility or source provenance from its authoritative proof.
         if receipt_backed and key in {"replay_reason", "replay_schema_version"}:
+            continue
+        # The independent measurement patch already preserves these exact
+        # scalar values under the immutable asset SHA. Keep them in the index
+        # whenever this independent proof is absent or mismatched.
+        if size_patch_proven and key in {"uncompressed_bytes", "uncompressed_size_exact"}:
             continue
         if (inherit_canonical_repo and key == "release_repository"
                 and value == CANONICAL_DATA_REPOSITORY):
@@ -391,6 +427,7 @@ def index_run_manifests(
     replay_patch_results = _load_replay_patch_results(base)
     trade_count_patch_results = _load_trade_count_patch_results(base)
     unique_patch_results = _load_global_unique_count_patch_results(base)
+    size_proofs = _load_size_proofs(base)
     expanded_rows = hydrate_default_release_repository(index)
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
     rows_by_id = {
@@ -408,6 +445,7 @@ def index_run_manifests(
                 any(k in old_row for k in ("replay_reason", "replay_schema_version"))
                 and _has_sha_bound_receipt(base, old_row)
             ),
+            size_patch_proven=_size_proof_matches(old_row, size_proofs),
         )
         for key, old_row in rows_by_id.items()
     }
@@ -471,7 +509,8 @@ def index_run_manifests(
             rows_by_id[dataset_id] = _compact_index_row(
                 _index_row(manifest, destination, base, unique_patch_results=unique_patch_results),
                 inherit_canonical_repo=True,
-                receipt_backed=True
+                receipt_backed=True,
+                size_patch_proven=_size_proof_matches(manifest, size_proofs),
             )
             statuses[status] = statuses.get(status, 0) + 1
             imported += 1

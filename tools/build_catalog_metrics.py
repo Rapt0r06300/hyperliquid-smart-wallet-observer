@@ -443,9 +443,20 @@ def build() -> dict[str, Any]:
             bucket["records"] += records
             bucket["bytes"] += compressed
             bucket["uncompressed_bytes"] += uncompressed
-            if isinstance(size_entry, dict) and isinstance(size_entry.get("uncompressed_bytes"), int):
+            # Per-venue/family/symbol counters must use the same SHA-bound
+            # measurement decision as the corpus total, not a stale id-only
+            # patch entry.
+            if (
+                size_entry_sha_bound
+                and type(size_entry.get("uncompressed_bytes")) is int
+                and size_entry["uncompressed_bytes"] >= 0
+            ) or (
+                row.get("uncompressed_size_exact") is True
+                and type(row.get("uncompressed_bytes")) is int
+                and row["uncompressed_bytes"] >= 0
+            ):
                 bucket["uncompressed_exact_assets"] += 1
-            elif isinstance(size_entry, dict) and size_entry.get("status") == "UNAVAILABLE":
+            elif size_entry_sha_bound and size_entry.get("status") == "UNAVAILABLE":
                 bucket["uncompressed_unavailable_assets"] += 1
             if trade_family:
                 if trade_exact:
