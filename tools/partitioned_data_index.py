@@ -225,6 +225,10 @@ def save_index(
 
     root, parts = partition_index(logical_index, max_partition_bytes=max_partition_bytes)
     index_path.parent.mkdir(parents=True, exist_ok=True)
+    # Refuse a pre-existing link at the partition directory before writing
+    # anything. Checking only each final part misses parent-symlink escapes.
+    if (index_path.parent / "data-index-parts").is_symlink():
+        raise ValueError("PARTITION_PARITY_SYMLINK_DIRECTORY")
     with tempfile.TemporaryDirectory(prefix=".catalog-partition-stage-", dir=index_path.parent) as td:
         stage = Path(td)
         staged_root = stage / "DATA_INDEX.json"

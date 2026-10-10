@@ -170,3 +170,20 @@ def test_save_index_refuses_preexisting_tampered_partition(tmp_path):
     with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
         save_index(path, logical, max_inline_bytes=100000, max_partition_bytes=240)
     assert path.read_bytes() == old
+
+
+def test_save_index_refuses_symlinked_partition_destination_before_write(tmp_path):
+    from tools.partitioned_data_index import save_index
+
+    original = _index()
+    original["shards"][0]["extra"] = "x" * 4000
+    index_path = _stage(tmp_path, original, {})
+    before = index_path.read_bytes()
+    outside = tmp_path / "external-destination"
+    outside.mkdir()
+    link = index_path.parent / "data-index-parts"
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="PARTITION_PARITY_SYMLINK_DIRECTORY"):
+        save_index(index_path, original, max_inline_bytes=1024)
+    assert index_path.read_bytes() == before
+    assert list(outside.iterdir()) == []
