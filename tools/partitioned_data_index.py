@@ -130,7 +130,14 @@ def load_partitioned_index(index_path: Path) -> dict[str, Any]:
             raise ValueError("PARTITION_PARITY_INVALID_PATH")
         if path != f"data-index-parts/part-{i:06d}.json":
             raise ValueError("PARTITION_PARITY_NONCANONICAL_SEQUENCE")
+        # Do not let a partition directory symlink redirect a supposedly
+        # canonical read outside catalog/, even when the inner file is regular.
+        parts_dir = index_path.parent / "data-index-parts"
+        if parts_dir.is_symlink():
+            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         file_path = index_path.parent / path
+        if not file_path.resolve().is_relative_to(index_path.parent.resolve()):
+            raise ValueError("PARTITION_PARITY_UNSAFE_DIRECTORY")
         if file_path.is_symlink() or not file_path.is_file():
             raise ValueError("PARTITION_PARITY_MISSING_FILE")
         size = file_path.stat().st_size

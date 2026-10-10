@@ -128,3 +128,15 @@ def test_read_index_refuses_unknown_partition_layout(tmp_path):
     path = _stage(tmp_path, {"schema": "future", "partitions": [], "shards": []}, {})
     with pytest.raises(ValueError, match="UNKNOWN_OR_PARTIAL"):
         read_index(path)
+
+
+def test_partition_reader_rejects_symlinked_parent_directory(tmp_path):
+    # A valid digest is not permission to read outside the checked-out catalog.
+    root, files = partition_index(_index(), max_partition_bytes=240)
+    index_path = _stage(tmp_path, root, files)
+    folder = index_path.parent / "data-index-parts"
+    moved = tmp_path / "outside-partition-payload"
+    folder.rename(moved)
+    folder.symlink_to(moved, target_is_directory=True)
+    with pytest.raises(ValueError, match="PARTITION_PARITY_UNSAFE_DIRECTORY"):
+        load_partitioned_index(index_path)
