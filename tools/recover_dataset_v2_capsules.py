@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -37,13 +38,36 @@ def _gh(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
         raise RecoveryError("GitHub CLI (gh) is required")
     if not (os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")):
         raise RecoveryError("GH_TOKEN/GITHUB_TOKEN is missing")
-    result = subprocess.run(
-        [executable, *args],
-        text=True,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
+
+    # Only retry idempotent API GETs and replaceable Release downloads.
+    # GitHub can intermittently return HTTP 502/503/504 while enumerating
+    # historical Releases; failing once would strand recoverable capsules.
+    retryable_read = (
+        (bool(args) and args[0] == "api"
+         and not any(arg in {"-X", "--method"} for arg in args))
+        or args[:2] == ["release", "download"]
     )
+    attempts = 4 if retryable_read else 1
+    for attempt in range(attempts):
+        result = subprocess.run(
+            [executable, *args],
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode == 0:
+            break
+        detail = (result.stderr or result.stdout or "").lower()
+        transient = (
+            any(f"http {status}" in detail for status in (429, 502, 503, 504))
+            or "timed out" in detail
+            or "timeout" in detail
+            or "couldn't respond" in detail
+        )
+        if not retryable_read or not transient or attempt + 1 == attempts:
+            break
+        time.sleep(min(2 ** attempt, 4))
     if check and result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RecoveryError(f"gh {' '.join(args)} failed: {detail}")
@@ -127,6 +151,11 @@ def _canonical_complete(repository: str, requested_tag: str) -> bool:
         ["api", f"repos/{repository}/releases/tags/{requested_tag}"],
         check=False,
     )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "").lower()
+        if "http 404" in message:
+            return False
+        raise RecoveryError("cannot verify canonical Release status: " + message[:300])
     if result.returncode == 0:
         try:
             payload = json.loads(result.stdout)
@@ -186,7 +215,10 @@ def _any_canonical_complete(repository: str, tags: list[str]) -> str | None:
             check=False,
         )
         if result.returncode != 0:
-            continue
+            message = (result.stderr or result.stdout or "").lower()
+            if "http 404" in message:
+                continue
+            raise RecoveryError("cannot verify canonical Release status: " + message[:300])
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError:
