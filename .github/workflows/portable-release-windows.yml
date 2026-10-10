@@ -15,7 +15,9 @@ permissions:
 
 concurrency:
   group: portable-release-${{ github.ref }}
-  cancel-in-progress: true
+  # Frequent non-collector code commits must not indefinitely cancel the
+  # sole Windows extraction proof. Keep one running and one latest pending.
+  cancel-in-progress: false
 
 env:
   PYTHONUTF8: "1"
