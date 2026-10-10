@@ -657,15 +657,49 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
             "saved_bytes": before_size - path.stat().st_size}
 
 
+def index_field_size_stats(root: str | Path = ROOT) -> dict[str, Any]:
+    """Read-only byte inventory to plan lossless index compaction."""
+    from collections import Counter
+
+    path = Path(root) / "catalog" / "DATA_INDEX.json"
+    index = json.loads(path.read_text(encoding="utf-8"))
+    rows = index.get("shards")
+    if not isinstance(rows, list):
+        raise ValueError("invalid DATA_INDEX.shards")
+    field_bytes: Counter[str] = Counter()
+    field_rows: Counter[str] = Counter()
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("invalid index row")
+        for key, value in row.items():
+            field_bytes[key] += len(json.dumps(key, ensure_ascii=False).encode("utf-8")) + len(
+                json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ) + 2
+            field_rows[key] += 1
+    return {
+        "indexed_shards": len(rows),
+        "index_bytes": path.stat().st_size,
+        "field_estimated_bytes": dict(field_bytes.most_common(24)),
+        "field_counts": {k: field_rows[k] for k, _ in field_bytes.most_common(24)},
+        "read_only": True,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Index verified dataset V2 RUN_MANIFEST release evidence."
     )
     parser.add_argument("run_manifests", nargs="*")
+    parser.add_argument("--index-field-stats", action="store_true",
+                        help="read-only field-weight inventory for safe compaction")
     parser.add_argument("--compact-existing", action="store_true",
                         help="losslessly compact canonical release locator metadata")
     args = parser.parse_args()
-    if args.compact_existing:
+    if args.index_field_stats:
+        if args.run_manifests or args.compact_existing:
+            parser.error("--index-field-stats is read-only and exclusive")
+        result = index_field_size_stats()
+    elif args.compact_existing:
         if args.run_manifests:
             parser.error("--compact-existing does not accept run manifests")
         result = compact_existing_index()
