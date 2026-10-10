@@ -231,8 +231,34 @@ def _valid_release_locator(manifest: Mapping[str, Any]) -> bool:
     return True
 
 
+def _has_sha_bound_receipt(root: Path, row: Mapping[str, Any]) -> bool:
+    """Drop duplicate index diagnostics only when the canonical receipt proves them."""
+    relative = str(row.get("manifest_path") or "")
+    if not relative:
+        return False
+    base = root.resolve()
+    path = (base / relative).resolve()
+    if not path.is_relative_to(base) or not path.is_file():
+        return False
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (
+        isinstance(receipt, Mapping)
+        and receipt.get("dataset_id") == row.get("dataset_id")
+        and str(receipt.get("sha256") or "").lower() == str(row.get("sha256") or "").lower()
+        and len(str(row.get("sha256") or "")) == 64
+        and all(
+            key not in row or receipt.get(key) == row.get(key)
+            for key in ("replay_reason", "replay_schema_version", "source")
+        )
+    )
+
+
 def _compact_index_row(
-    row: Mapping[str, Any], *, inherit_canonical_repo: bool = False
+    row: Mapping[str, Any], *, inherit_canonical_repo: bool = False,
+    receipt_backed: bool = False,
 ) -> dict[str, Any]:
     """Omit redundant fields, retaining all independent causal proofs.
 
@@ -243,6 +269,11 @@ def _compact_index_row(
     out: dict[str, Any] = {}
     for key, value in row.items():
         if value is None or key in {"trade_identity_digests", "quality_reasons"}:
+            continue
+        # Duplicated human-readable diagnostics live in the immutable SHA-bound
+        # per-shard manifest. Their removal from the search index never drops
+        # replay compatibility or source provenance from its authoritative proof.
+        if receipt_backed and key in {"replay_reason", "replay_schema_version", "source"}:
             continue
         if (inherit_canonical_repo and key == "release_repository"
                 and value == CANONICAL_DATA_REPOSITORY):
@@ -359,7 +390,10 @@ def index_run_manifests(
     # digest vectors, already ~77 MiB for only 11k rows. Immutable manifests
     # retain the original vectors for SHA-bound aggregate proof.
     rows_by_id = {
-        key: _compact_index_row(old_row, inherit_canonical_repo=True)
+        key: _compact_index_row(
+            old_row, inherit_canonical_repo=True,
+            receipt_backed=_has_sha_bound_receipt(base, old_row),
+        )
         for key, old_row in rows_by_id.items()
     }
 
@@ -421,7 +455,8 @@ def index_run_manifests(
             pending_manifests[dataset_id] = (destination, manifest)
             rows_by_id[dataset_id] = _compact_index_row(
                 _index_row(manifest, destination, base, unique_patch_results=unique_patch_results),
-                inherit_canonical_repo=True
+                inherit_canonical_repo=True,
+                receipt_backed=True
             )
             statuses[status] = statuses.get(status, 0) + 1
             imported += 1
