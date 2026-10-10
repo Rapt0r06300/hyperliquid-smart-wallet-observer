@@ -106,6 +106,20 @@ class GateMarketState:
         # sequence rather than comparing against a prior incremental epoch.
         # Historical gap counters are retained as evidence.
         is_full_snapshot = payload.get("full") is True
+        connection = str(transport.get("connection_id") or "")
+        if connection and self.connection_id and connection != self.connection_id:
+            # An old, seemingly contiguous update number cannot prove that a
+            # WebSocket reconnect delivered every message in between.
+            if not is_full_snapshot:
+                self.sequence = None
+                self.bids.clear()
+                self.asks.clear()
+                self.gap_count += 1
+                self.connection_id = connection
+                self.quality, self.reason = DESYNC, "WS_RECONNECT_REQUIRES_SNAPSHOT"
+                return self.quality
+        if connection:
+            self.connection_id = connection
         if not is_full_snapshot and self.sequence is None:
             # Never reconstruct an executable L2 book from orphan deltas.
             # Retain raw websocket frames separately for later diagnosis.

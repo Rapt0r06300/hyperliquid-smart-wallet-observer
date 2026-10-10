@@ -241,6 +241,29 @@ def test_gate_full_snapshot_requires_native_id() -> None:
 
 
 
+
+def test_gate_reconnect_requires_fresh_snapshot_even_if_ids_appear_contiguous() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    first = {"full": True, "id": 10, "t": 1000,
+             "b": [[100, 2]], "a": [[101, 3]],
+             "_alina_transport": {"connection_id": "old"}}
+    assert state.apply_book(first, receive_ts_ms=1000) == "EXPLOITABLE"
+    next_frame = {"U": 11, "u": 11, "t": 1010, "b": [], "a": [],
+                  "_alina_transport": {"connection_id": "new"}}
+    assert state.apply_book(next_frame, receive_ts_ms=1010) == "DESYNC"
+    assert state.reason == "WS_RECONNECT_REQUIRES_SNAPSHOT"
+    assert state.gap_count == 1
+    assert state.sequence is None and not state.bids and not state.asks
+    assert state.connection_id == "new"
+    assert state.apply_book(next_frame, receive_ts_ms=1010) == "UNMEASURABLE"
+    # Explicit source snapshot (not a guessed delta) reanchors a new session.
+    replacement = dict(first, id=20, t=1020,
+                       _alina_transport={"connection_id": "new"})
+    assert state.apply_book(replacement, receive_ts_ms=1020) == "EXPLOITABLE"
+    assert state.sequence == 20
+
+
+
 def test_bitget_instrument_and_book_normalization() -> None:
     payload = {
         "data": [{"symbol": "ETHUSDT", "baseCoin": "ETH", "quoteCoin": "USDT", "symbolStatus": "normal"}]
