@@ -691,13 +691,17 @@ def test_gate_gap_recovers_from_new_rest_base_without_pausing_ws() -> None:
             yield {"channel": "futures.order_book_update", "event": "update",
                    "result": {"s": "BTC_USDT", "t": 1700000000030,
                               "U": 44, "u": 44, "b": [], "a": []}}
-            # The missing id 43 must first DESYNC the book; recovery then
-            # obtains a separate official base id 43, still UNMEASURABLE.
-            second = await await_book(43)
-            assert second.rest_anchor_pending and second.quality == "UNMEASURABLE"
+            # The missing id 43 must first DESYNC. A new official REST
+            # base id 43 can then bridge the buffered WS frame 44 without
+            # waiting for another websocket message.
+            second = await await_book(44)
+            assert gate.calls == 2
+            assert second.quality == "EXPLOITABLE"
+            assert not second.rest_anchor_pending
+            assert second.gap_count == 1
             yield {"channel": "futures.order_book_update", "event": "update",
                    "result": {"s": "BTC_USDT", "t": 1700000000040,
-                              "U": 44, "u": 44,
+                              "U": 45, "u": 45,
                               "b": [["100.5", "1"]], "a": []}}
 
     gate = Gate()
@@ -707,7 +711,8 @@ def test_gate_gap_recovers_from_new_rest_base_without_pausing_ws() -> None:
     asyncio.run(asyncio.wait_for(coordinator.run_gate(), timeout=5))
     state = coordinator._gate_states["BTC_USDT"]
     assert gate.calls == 2
-    assert state.sequence == 44 and state.quality == "EXPLOITABLE"
+    assert state.sequence == 45 and state.quality == "EXPLOITABLE"
+    assert state.bids[100.5] == 1.0
     assert not state.rest_anchor_pending
     assert state.gap_count == 1  # Gap evidence is never erased by re-anchor.
 
