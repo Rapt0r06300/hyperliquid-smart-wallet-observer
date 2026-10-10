@@ -595,3 +595,51 @@ def test_index_preserves_conflicting_run_manifest_tag_aliases(tmp_path):
         "data-v2-canonical-0", "data-v2-canonical-1"
     }
 
+def test_repeated_collection_run_ids_are_reversibly_factored(tmp_path):
+    from index_run_manifest import hydrate_default_release_repository, compact_existing_index
+    root = _bootstrap_root(tmp_path)
+    run = tmp_path / "RUN_MANIFEST.json"
+    manifests = [
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id=dataset_id)
+        for dataset_id in ("same-run-first", "same-run-second")
+    ]
+    for manifest in manifests:
+        manifest["collection_run_id"] = "run-shared-123"
+    _write_run(run, manifests)
+    index_run_manifests([run], root=root)
+    index_path = root / "catalog/DATA_INDEX.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    assert index["collection_run_ids_by_release"] == {
+        "data-v2-run-1-1-native": "run-shared-123"
+    }
+    assert all("collection_run_id" not in row for row in index["shards"])
+    expanded = hydrate_default_release_repository(index)
+    assert [row["collection_run_id"] for row in expanded] == [
+        "run-shared-123", "run-shared-123"
+    ]
+    original = index_path.read_bytes()
+    compact_existing_index(root)
+    assert index_path.read_bytes() == original
+
+
+def test_mixed_collection_run_ids_stay_explicit_and_conflicts_fail_closed(tmp_path):
+    import pytest
+    from index_run_manifest import hydrate_default_release_repository
+    root = _bootstrap_root(tmp_path)
+    run = tmp_path / "RUN_MANIFEST.json"
+    manifests = [
+        _manifest(family="trades", reconciliation="SOURCE_CONTINUITY_VERIFIED",
+                  dataset_id=dataset_id)
+        for dataset_id in ("different-run-first", "different-run-second")
+    ]
+    manifests[0]["collection_run_id"] = "run-a"
+    manifests[1]["collection_run_id"] = "run-b"
+    _write_run(run, manifests)
+    index_run_manifests([run], root=root)
+    index = json.loads((root / "catalog/DATA_INDEX.json").read_text(encoding="utf-8"))
+    assert "collection_run_ids_by_release" not in index
+    assert {row["collection_run_id"] for row in index["shards"]} == {"run-a", "run-b"}
+    index["collection_run_ids_by_release"] = {"data-v2-run-1-1-native": "forged"}
+    with pytest.raises(ValueError, match="conflicting canonical collection run ID"):
+        hydrate_default_release_repository(index)

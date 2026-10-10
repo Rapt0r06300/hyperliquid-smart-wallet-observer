@@ -36,6 +36,12 @@ def hydrate_default_release_repository(index: Mapping[str, Any]) -> list[dict[st
         for k, v in aliases.items()
     ):
         raise ValueError("invalid canonical RUN_MANIFEST tag mapping")
+    run_ids = index.get("collection_run_ids_by_release") or {}
+    if not isinstance(run_ids, Mapping) or any(
+        not isinstance(k, str) or not k or not isinstance(v, str) or not v
+        for k, v in run_ids.items()
+    ):
+        raise ValueError("invalid canonical collection run ID mapping")
     expanded = []
     for item in raw:
         if not isinstance(item, Mapping):
@@ -49,6 +55,12 @@ def hydrate_default_release_repository(index: Mapping[str, Any]) -> list[dict[st
             if existing not in (None, canonical):
                 raise ValueError("conflicting canonical RUN_MANIFEST tag mapping")
             row["run_manifest_release_tag"] = canonical
+        grouped_run = run_ids.get(str(row.get("release_tag") or ""))
+        if grouped_run is not None:
+            existing = row.get("collection_run_id")
+            if existing not in (None, grouped_run):
+                raise ValueError("conflicting canonical collection run ID mapping")
+            row["collection_run_id"] = grouped_run
         expanded.append(row)
     return expanded
 
@@ -378,6 +390,36 @@ def _compact_run_manifest_tag_locators(
     return result
 
 
+def _compact_collection_run_ids(
+    index: dict[str, Any], rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Reversibly factor homogeneous, repeated collection IDs by physical Release.
+
+    The per-shard manifest continues to own the complete original evidence.
+    Inhomogeneous groups are always left uncompressed, with explicit IDs.
+    """
+    groups: dict[str, list[Any]] = {}
+    for row in rows:
+        physical = str(row.get("release_tag") or "")
+        if physical:
+            groups.setdefault(physical, []).append(row.get("collection_run_id"))
+    aliases: dict[str, str] = {}
+    for physical, values in groups.items():
+        first = values[0]
+        if (len(values) > 1 and isinstance(first, str) and first
+                and all(value == first for value in values[1:])):
+            aliases[physical] = first
+    if aliases:
+        index["collection_run_ids_by_release"] = dict(sorted(aliases.items()))
+    else:
+        index.pop("collection_run_ids_by_release", None)
+    return [
+        {key: value for key, value in row.items()
+         if not (key == "collection_run_id" and row.get("release_tag") in aliases)}
+        for row in rows
+    ]
+
+
 def _index_row(
     manifest: Mapping[str, Any], manifest_path: Path, root: Path, *,
     unique_patch_results: Mapping[str, Mapping[str, Any]] | None = None,
@@ -578,7 +620,9 @@ def index_run_manifests(
         if any(row.get("quality_status") == "SAFE" for row in shards)
         else ("PARTIAL" if shards else "NO_DATA")
     )
-    index["shards"] = _compact_run_manifest_tag_locators(index, shards)
+    index["shards"] = _compact_collection_run_ids(
+        index, _compact_run_manifest_tag_locators(index, shards)
+    )
     index["active_data_status"] = active
     # Fail before attempting a GitHub push past its 100 MiB blob limit.
     _atomic_json(index_path, index)
@@ -641,10 +685,10 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
         if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
             raise ValueError("COMPACTION_REQUIRES_VERIFIED_CANONICAL_RELEASE_LOCATOR")
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
-    index["shards"] = _compact_run_manifest_tag_locators(index, [
+    index["shards"] = _compact_collection_run_ids(index, _compact_run_manifest_tag_locators(index, [
         _compact_index_row(row, inherit_canonical_repo=True)
         for row in expanded
-    ])
+    ]))
     # Exact and reversible for all existing fields except explicitly redundant
     # canonical release_repository, which is represented at the index root.
     expected = [_compact_index_row(row) for row in expanded]
