@@ -63,6 +63,7 @@ on:
       - 'tests/test_publish_dataset_v2_release.py'
       - 'tests/test_official_archive_backfill.py'
       - 'tests/test_native_market_tape.py'
+      - 'tests/test_native_trade_batch_split.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_bybit_market_data.py'
       - 'tests/test_binance_clock_sync.py'
@@ -175,6 +176,7 @@ jobs:
             tests/test_publish_dataset_v2_release.py \
             tests/test_official_archive_backfill.py \
             tests/test_native_market_tape.py \
+            tests/test_native_trade_batch_split.py \
             tests/test_native_venue_market.py \
             tests/test_bybit_market_data.py \
             tests/test_binance_clock_sync.py \
