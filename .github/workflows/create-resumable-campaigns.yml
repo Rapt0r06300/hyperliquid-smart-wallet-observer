@@ -44,9 +44,11 @@ permissions:
 
 concurrency:
   group: resumable-campaign-creation-hourly
-  # Campaign creation is deterministic/idempotent and reloads origin/main.
-  # A newer phase/stage request supersedes obsolete queued creation runs.
-  cancel-in-progress: true
+  # The creator reloads latest main and phase-gates each new campaign.
+  # Cancelling a running creation on every fresh COLLECT code push can
+  # permanently starve the launched workers; serialize instead.
+  # GitHub automatically replaces redundant queued runs in this group.
+  cancel-in-progress: false
 
 jobs:
   create:
