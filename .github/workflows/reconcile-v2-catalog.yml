@@ -113,6 +113,14 @@ jobs:
               raise SystemExit("PARTITION_CANARY_SAFE_COVERAGE_FAILED")
           print("PARTITION_CANARY_SAFE_PARITY_OK",len(safe),proof["indexed_shards"])
           PY
+          # Verify downstream SAFE/restore invariants against real partitioned
+          # data in this disposable checkout, not just synthetic fixtures.
+          # A single regression must block partition activation for this run.
+          python -m pytest -q \
+            tests/test_partitioned_data_index.py \
+            tests/test_dataset_metrics.py \
+            tests/test_quarantine_audit.py \
+            tests/test_restore_alina.py
           # No canary bytes are committed. The next step rebuilds from current main.
           git reset --hard HEAD
           git clean -fd -- catalog/
