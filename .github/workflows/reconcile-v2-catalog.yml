@@ -175,12 +175,6 @@ jobs:
           echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
           echo "canonical run manifests found: $COUNT"
 
-      - name: Losslessly compact canonical index before ingesting new evidence
-        if: env.RUN_MANIFEST_COUNT != '0'
-        run: |
-          set -euo pipefail
-          python tools/index_run_manifest.py --compact-existing
-
       - name: Rebuild control-plane index from target-native manifests
         if: env.RUN_MANIFEST_COUNT != '0'
         shell: bash
@@ -228,7 +222,6 @@ jobs:
           for attempt in 1 2 3 4 5; do
             git fetch origin main
             git reset --hard origin/main
-            python tools/index_run_manifest.py --compact-existing
             python tools/index_run_manifest.py "${MANIFESTS[@]}"
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
