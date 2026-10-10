@@ -49,6 +49,9 @@ def test_controller_does_not_serialize_fresh_market_behind_copy_fanout() -> None
     assert "group: resumable-campaign-controller-${{ github.event_name == 'push' && github.sha || 'v5' }}" in controller
     assert "copy_ids=copy_ids[:1]" in controller
     assert "active_other=0" in controller
+    # A leftover RUNNING lease from e6 must not starve e8 runners.
+    assert 'or int(row.get("phase_epoch") or 0)!=phase_epoch' in controller
+    assert 'or int(row.get("phase_epoch") or 0)>phase_epoch' not in controller
     assert "other_capacity=max(0,16-active_other)" in controller
     assert "reserved_canary=bounded_canaries[:1]" in controller
     assert "other_ids=reserved_canary+ordinary_ids" in controller
