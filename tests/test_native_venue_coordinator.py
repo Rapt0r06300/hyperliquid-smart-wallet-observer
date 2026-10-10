@@ -535,6 +535,67 @@ def test_gate_trade_event_cannot_mutate_replay_depth() -> None:
 
 
 
+
+def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
+    from hl_observer.collection.tick_dataset import TickEnvelope
+    from hl_observer.realtime.feed_quality import FeedEventKind
+
+    class Writer:
+        def __init__(self):
+            self.rows = []
+        def append(self, row):
+            self.rows.append(row)
+
+    class Gate:
+        def bootstrap_envelopes(self, contracts, *, timeout_s):
+            assert tuple(contracts) == ("BTC_USDT",)
+            return [TickEnvelope(
+                source_id="gate_public_rest",
+                channel="l2Book",
+                instrument="BTC_USDT",
+                event_kind=FeedEventKind.SNAPSHOT,
+                raw_payload={
+                    "id": 41, "current": 1700000000000,
+                    "bids": [["100", "2"]], "asks": [["101", "3"]],
+                },
+                received_ts_ms=1700000000010,
+                exchange_ts_ms=1700000000000,
+                sequence=41,
+                provenance={"transport": "https", "access": "read_only"},
+            )]
+
+        async def messages(self, contracts):
+            assert tuple(contracts) == ("BTC_USDT",)
+            for _ in range(500):
+                state = coordinator._gate_states.get("BTC_USDT")
+                if state is not None and state.sequence == 41:
+                    break
+                await asyncio.sleep(0.001)
+            else:
+                raise AssertionError("REST bootstrap was never wired to Gate WS")
+            yield {
+                "channel": "futures.order_book_update",
+                "event": "update",
+                "result": {
+                    "contract": "BTC_USDT", "t": 1700000000020,
+                    "U": 42, "u": 42,
+                    "b": [["100.5", "1"]], "a": [],
+                },
+            }
+
+    writer = Writer()
+    coordinator = NativeVenueCoordinator(
+        gate_client=Gate(), tick_writer=writer, ccxt_snapshot_path=None,
+    )
+    coordinator.registry = {"BTC": {"gate": "BTC_USDT"}}
+    asyncio.run(asyncio.wait_for(coordinator.run_gate(), timeout=5))
+    assert writer.rows[0].source_id == "gate_public_rest"
+    state = coordinator._gate_states["BTC_USDT"]
+    assert state.sequence == 42
+    assert state.bids[100.5] == 1.0 and state.asks[101.0] == 3.0
+    assert state.gap_count == 0
+
+
 def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
     gate_client = _OneShotStream({"channel": "futures.trades", "result": []})
     bitget_client = _OneShotStream(
