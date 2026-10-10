@@ -28,7 +28,9 @@ def test_resumable_creator_is_continuous_hosted_and_frozen():
     assert "schedule:" in text
     assert "cron: \'2 * * * *\'" in text
     assert "group: resumable-campaign-creation-hourly" in text
-    assert "cancel-in-progress: true" in text
+    # A creator already generating a current-epoch batch must not be
+    # repeatedly cancelled by ongoing main pushes.
+    assert "cancel-in-progress: false" in text
     assert "runs-on: ubuntu-latest" in text
     assert "self-hosted" not in text
     assert '"duration_s":3500' in text
