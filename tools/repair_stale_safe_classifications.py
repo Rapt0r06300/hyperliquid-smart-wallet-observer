@@ -15,6 +15,11 @@ except ModuleNotFoundError:
     from manifest_policy import classify_manifest
     from index_run_manifest import _compact_index_row, _normalize_manifest, _valid_release_locator
 
+try:
+    from tools.partitioned_data_index import read_index, save_index, partition_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index, save_index, partition_index
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = Path("catalog/DATA_INDEX.json")
 REGISTRY_PATH = Path("catalog/DATA_QUALITY_REGISTRY.json")
@@ -66,7 +71,7 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
     index_path = base / INDEX_PATH
     registry_path = base / REGISTRY_PATH
     catalog_path = base / CATALOG_PATH
-    index = _load(index_path)
+    index = read_index(index_path)
     registry = _load(registry_path)
     catalog = _load(catalog_path)
 
@@ -188,8 +193,11 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
             json.dumps(dict(index), ensure_ascii=False, sort_keys=True,
                        separators=(",", ":")) + "\n"
         ).encode("utf-8")
+        # Check partition feasibility before moving any classification receipt.
+        # Never bypass content/identity checks merely because the inline index
+        # is near GitHub's hard blob limit.
         if len(compact_index_bytes) >= INDEX_WRITE_LIMIT_BYTES:
-            raise ValueError("DATA_INDEX_TOO_LARGE: cannot publish unbounded index")
+            partition_index(index)
         for destination, manifest, _old_path in pending_manifests:
             if destination.exists():
                 existing = _load(destination)
@@ -201,7 +209,7 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
                     raise ValueError(f"SAFE_MANIFEST_DESTINATION_CONFLICT: {destination}")
         for destination, manifest, _old_path in pending_manifests:
             _atomic_json(destination, manifest)
-        _atomic_json(index_path, index)
+        save_index(index_path, index, max_inline_bytes=INDEX_WRITE_LIMIT_BYTES)
 
     registry["active_dataset"] = {
         "status": active,
