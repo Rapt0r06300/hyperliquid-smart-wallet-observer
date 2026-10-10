@@ -190,6 +190,9 @@ jobs:
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py \
             tests/test_native_venue_coordinator.py \
+            tests/test_data_expansion.py::test_gate_rest_base_is_not_executable_until_ws_sequence_bridge \
+            tests/test_data_expansion.py::test_gate_rest_base_missing_first_ws_update_fails_closed \
+            tests/test_data_expansion.py::test_gate_rest_reanchor_clears_old_ws_connection_without_allowing_unbridged_execution \
             tests/test_native_venues_collector.py \
             tests/test_copy_vault_transport_timing.py \
             tests/test_collect_cloud_copy_vault.py \
