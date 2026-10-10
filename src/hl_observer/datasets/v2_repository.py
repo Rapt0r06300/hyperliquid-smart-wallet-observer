@@ -159,25 +159,110 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _read_public_index_json(url: str, label: str) -> tuple[dict[str, Any] | list[Any], bytes]:
+    try:
+        response = requests.get(url, timeout=TIMEOUT)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise DatasetV2Error(f"unable to load {label}: {type(exc).__name__}") from exc
+    raw = response.content
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise DatasetV2Error(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(payload, (dict, list)):
+        raise DatasetV2Error(f"{label} must be a JSON object or array")
+    return payload, raw
+
+
+def _canonical_row_sha(rows: list[Any]) -> str:
+    encoded = (json.dumps(rows, sort_keys=True, ensure_ascii=False,
+                          separators=(",", ":"), allow_nan=False) + "\n").encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_remote_partitioned_index(
+    root: Mapping[str, Any], *, repository: str, ref: str,
+) -> dict[str, Any]:
+    """Read every partition and refuse missing/tampered/duplicate rows.
+
+    Each part path is fixed, sizes and bytes are verified independently, and
+    exact logical row order is pinned by the canonical root's shards_sha256.
+    Ref changes during downloading can only yield a hash failure, never a
+    partially certified SAFE selection. Pin a commit SHA for stable OOS runs.
+    """
+    limit = root.get("partition_max_bytes")
+    count = root.get("shard_count")
+    parts = root.get("partitions")
+    if (root.get("legacy_schema") != "alina.data_index.v2"
+            or type(limit) is not int or not 4 <= limit <= 8 * 1024 * 1024
+            or type(count) is not int or count < 0
+            or not isinstance(parts, list) or len(parts) > 512
+            or not isinstance(root.get("shards_sha256"), str)
+            or len(root["shards_sha256"]) != 64):
+        raise DatasetV2Error("invalid V2 partitioned index metadata")
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for number, desc in enumerate(parts, 1):
+        if not isinstance(desc, Mapping):
+            raise DatasetV2Error("invalid V2 partition descriptor")
+        relative = f"data-index-parts/part-{number:06d}.json"
+        expected_size, expected_rows = desc.get("bytes"), desc.get("row_count")
+        digest = desc.get("sha256")
+        if (desc.get("path") != relative
+                or type(expected_size) is not int
+                or not 0 < expected_size <= limit
+                or type(expected_rows) is not int or expected_rows <= 0
+                or not isinstance(digest, str) or len(digest) != 64
+                or any(c not in "0123456789abcdef" for c in digest)):
+            raise DatasetV2Error("invalid V2 partition path or integrity descriptor")
+        url = f"{RAW_ROOT}/{repository}/{ref}/catalog/{relative}"
+        payload, raw = _read_public_index_json(url, "V2 partition")
+        if len(raw) != expected_size or hashlib.sha256(raw).hexdigest() != digest:
+            raise DatasetV2Error("V2 partition SHA-256/size mismatch")
+        if not isinstance(payload, list) or len(payload) != expected_rows:
+            raise DatasetV2Error("V2 partition row count mismatch")
+        for item in payload:
+            identity = item.get("dataset_id") if isinstance(item, dict) else None
+            if not isinstance(identity, str) or not identity or identity in seen:
+                raise DatasetV2Error("V2 partition duplicate or invalid dataset_id")
+            seen.add(identity)
+            rows.append(item)
+        if len(rows) > count:
+            raise DatasetV2Error("V2 partition global count exceeded")
+    if len(rows) != count or _canonical_row_sha(rows) != root["shards_sha256"]:
+        raise DatasetV2Error("V2 partition global identity/order mismatch")
+    reconstructed = {
+        key: value for key, value in root.items()
+        if key not in {"schema", "legacy_schema", "partition_max_bytes",
+                       "shard_count", "shards_sha256", "partitions"}
+    }
+    reconstructed["schema"] = "alina.data_index.v2"
+    reconstructed["shards"] = rows
+    return reconstructed
+
+
 def load_index(
     *,
     repository: str = DEFAULT_REPOSITORY,
     ref: str = DEFAULT_REF,
 ) -> tuple[dict[str, Any], str]:
+    if repository != DEFAULT_REPOSITORY:
+        raise DatasetV2Error("foreign Dataset V2 repository refused")
     url = f"{RAW_ROOT}/{repository}/{ref}/catalog/DATA_INDEX.json"
-    response = requests.get(url, timeout=TIMEOUT)
-    try:
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise DatasetV2Error(f"unable to load V2 index: {type(exc).__name__}") from exc
-    raw = response.content
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise DatasetV2Error("V2 index is not valid UTF-8 JSON") from exc
-    if not isinstance(payload, dict) or payload.get("schema") != "alina.data_index.v2":
+    payload, raw = _read_public_index_json(url, "V2 index")
+    if not isinstance(payload, dict):
+        raise DatasetV2Error("V2 index must be a JSON object")
+    source_digest = hashlib.sha256(raw).hexdigest()
+    if payload.get("schema") == "alina.data_index_partitioned.v1":
+        payload = _load_remote_partitioned_index(
+            payload, repository=repository, ref=ref,
+        )
+    elif payload.get("schema") != "alina.data_index.v2":
         raise DatasetV2Error("unexpected V2 index schema")
-    return payload, hashlib.sha256(raw).hexdigest()
+    if not isinstance(payload.get("shards"), list):
+        raise DatasetV2Error("V2 index missing shards array")
+    return payload, source_digest
 
 
 def select_safe_shards(

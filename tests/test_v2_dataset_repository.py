@@ -294,3 +294,83 @@ def test_safe_release_stream_retry_removes_partial_bytes(tmp_path, monkeypatch):
     assert download_safe_shard(shard, path).read_bytes() == data
     assert len(calls) == 2
     assert not path.with_suffix(".gz.part").exists()
+
+
+def test_remote_v2_reader_reconstructs_verified_partitions_without_network(monkeypatch):
+    import hashlib
+    import json
+    from tools.partitioned_data_index import partition_index
+    from hl_observer.datasets import v2_repository as module
+
+    original = {
+        "schema": "alina.data_index.v2",
+        "release_repository_default": module.DEFAULT_REPOSITORY,
+        "shards": [_safe_row(dataset_id=f"shard-{n}") for n in range(9)],
+    }
+    root, parts = partition_index(original, max_partition_bytes=650)
+    raw_index = json.dumps(root).encode("utf-8")
+    assets = {"catalog/DATA_INDEX.json": raw_index, **{
+        "catalog/" + key: value for key, value in parts.items()
+    }}
+    calls = []
+    class Response:
+        def __init__(self, body):
+            self.content = body
+        def raise_for_status(self):
+            return None
+    def get(url, **_kwargs):
+        path = url.split("/main/")[-1]
+        calls.append(path)
+        return Response(assets[path])
+    monkeypatch.setattr(module.requests, "get", get)
+    loaded, sha = module.load_index()
+    assert loaded == original
+    assert sha == hashlib.sha256(raw_index).hexdigest()
+    assert len(calls) == len(parts) + 1
+    assert len(module.select_safe_shards(loaded)) == 9
+
+
+def test_remote_v2_reader_fails_closed_if_partition_bytes_corrupted(monkeypatch):
+    import json
+    from tools.partitioned_data_index import partition_index
+    from hl_observer.datasets import v2_repository as module
+
+    root, parts = partition_index({
+        "schema": "alina.data_index.v2",
+        "shards": [_safe_row(dataset_id="one")],
+    })
+    assets = {"catalog/DATA_INDEX.json": json.dumps(root).encode(), **{
+        "catalog/" + key: b"corrupt" for key in parts
+    }}
+    class Response:
+        def __init__(self, body): self.content = body
+        def raise_for_status(self): pass
+    monkeypatch.setattr(
+        module.requests, "get",
+        lambda url, **_k: Response(assets[url.split("/main/")[-1]]),
+    )
+    with pytest.raises(DatasetV2Error, match="SHA-256/size mismatch"):
+        module.load_index()
+
+
+def test_remote_v2_reader_refuses_partition_path_escape(monkeypatch):
+    import json
+    from tools.partitioned_data_index import partition_index
+    from hl_observer.datasets import v2_repository as module
+
+    root, parts = partition_index({
+        "schema": "alina.data_index.v2",
+        "shards": [_safe_row(dataset_id="one")],
+    })
+    root["partitions"][0]["path"] = "../bad.json"
+    calls = []
+    class Response:
+        content = json.dumps(root).encode()
+        def raise_for_status(self): pass
+    def get(url, **_kwargs):
+        calls.append(url)
+        return Response()
+    monkeypatch.setattr(module.requests, "get", get)
+    with pytest.raises(DatasetV2Error, match="partition path"):
+        module.load_index()
+    assert len(calls) == 1
