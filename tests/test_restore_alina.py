@@ -859,3 +859,50 @@ def test_restore_ignores_cached_release_absent_from_current_inventory(tmp_path, 
     assert list((tmp_path / "quarantine" / "stale_usable").rglob("*.stale"))
     assert (old_release / "old.jsonl.gz").read_bytes() == stale_shard
 
+
+
+def test_restore_rejects_zip_unsafe_members_and_symlinks(tmp_path):
+    import stat
+    import pytest
+
+    module = _module()
+    for member in (
+        "../../outside.jsonl.gz",
+        "/absolute/file.jsonl.gz",
+        "C:/drive/file.jsonl.gz",
+        "dir\\\\windows.jsonl.gz",
+        "folder/../escape.jsonl.gz",
+        "CON.txt",
+        "folder/trailing. ",
+    ):
+        archive_path = tmp_path / "unsafe.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr(member, b"not safe")
+        with pytest.raises(module.RestoreError, match="unsafe ZIP member"):
+            module._verify_zip_archive(archive_path, archive_path.name)
+
+    archive_path = tmp_path / "symlink.zip"
+    link = zipfile.ZipInfo("link.jsonl.gz")
+    link.create_system = 3
+    link.external_attr = (stat.S_IFLNK | 0o777) << 16
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(link, "../../escape")
+    with pytest.raises(module.RestoreError, match="unsafe ZIP member type"):
+        module._verify_zip_archive(archive_path, archive_path.name)
+
+
+def test_restore_zip_rejects_casefold_collisions_but_accepts_safe_nested_files(tmp_path):
+    import pytest
+
+    module = _module()
+    archive_path = tmp_path / "casefold.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("Trades/BTC.jsonl.gz", b"a")
+        archive.writestr("trades/btc.jsonl.gz", b"b")
+    with pytest.raises(module.RestoreError, match="duplicate ZIP members"):
+        module._verify_zip_archive(archive_path, archive_path.name)
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("safe/BTC.jsonl.gz", b"a")
+        archive.writestr("safe/ETH.jsonl.gz", b"b")
+    module._verify_zip_archive(archive_path, archive_path.name)
