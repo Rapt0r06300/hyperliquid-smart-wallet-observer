@@ -94,6 +94,7 @@ def test_resumable_campaign_validate_digest_matches_legacy_raw_manifest(tmp_path
         config_sha256="b" * 64,
         work_plan_sha256="c" * 64,
         expires_at="2026-10-07T00:00:00+00:00",
+        created_at="2026-09-29T00:00:00+00:00",
         schema_version="alina.resumable_campaign.v2",
         creation_phase="ANALYZE",
         phase_epoch=3,
