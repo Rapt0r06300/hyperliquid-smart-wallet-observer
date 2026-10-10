@@ -176,7 +176,7 @@ def test_gate_contract_and_sequenced_book_normalization() -> None:
     rows = parse_gate_contracts([{"name": "BTC_USDT", "in_delisting": False}])
     assert rows == [("BTC", "BTC_USDT")]
     state = GateMarketState(contract="BTC_USDT", stale_after_ms=1_000)
-    state.apply_book({"t": 1000, "U": 1, "u": 1, "b": [[100, 2]], "a": [[101, 3]]}, receive_ts_ms=1_010)
+    state.apply_book({"full": True, "t": 1000, "U": 1, "u": 1, "b": [[100, 2]], "a": [[101, 3]]}, receive_ts_ms=1_010)
     state.apply_book({"t": 1010, "U": 2, "u": 2, "b": [[100.5, 1]], "a": []}, receive_ts_ms=1_020)
     state.apply_ticker(
         {
@@ -196,8 +196,22 @@ def test_gate_contract_and_sequenced_book_normalization() -> None:
 
 def test_gate_sequence_gap_fails_closed() -> None:
     state = GateMarketState(contract="BTC_USDT")
-    state.apply_book({"t": 1000, "U": 1, "u": 1, "b": [[100, 2]], "a": [[101, 3]]}, receive_ts_ms=1_000)
+    state.apply_book({"full": True, "t": 1000, "U": 1, "u": 1, "b": [[100, 2]], "a": [[101, 3]]}, receive_ts_ms=1_000)
     assert state.apply_book({"t": 1010, "U": 3, "u": 3, "b": [], "a": []}, receive_ts_ms=1_010) == "DESYNC"
+
+
+
+def test_gate_orphan_delta_remains_unmeasurable() -> None:
+    # A WebSocket delta cannot bootstrap a replay-grade L2 book on its own.
+    state = GateMarketState(contract="BTC_USDT")
+    result = state.apply_book(
+        {"t": 1000, "U": 1, "u": 1, "b": [[100, 2]], "a": [[101, 3]]},
+        receive_ts_ms=1_000,
+    )
+    assert result == "UNMEASURABLE"
+    assert state.reason == "DELTA_BEFORE_SNAPSHOT"
+    assert not state.bids and not state.asks
+    assert state.sequence is None
 
 
 def test_bitget_instrument_and_book_normalization() -> None:
