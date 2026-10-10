@@ -906,3 +906,116 @@ def test_restore_zip_rejects_casefold_collisions_but_accepts_safe_nested_files(t
         archive.writestr("safe/BTC.jsonl.gz", b"a")
         archive.writestr("safe/ETH.jsonl.gz", b"b")
     module._verify_zip_archive(archive_path, archive_path.name)
+
+
+def _lfs_fixture(tmp_path, payload, *, release_tag="data-v2-lfs"):
+    """Small real-byte Git LFS worktree with an immutable Release identity."""
+    asset = _asset("source.jsonl.gz", "https://example.invalid/source", payload)
+    asset.update({"id": 7, "state": "uploaded"})
+    release = {"id": 91, "tag_name": release_tag, "assets": [asset]}
+    rel = f"clone_payload/releases/{release_tag}/7--source.jsonl.gz"
+    source = tmp_path / rel
+    source.parent.mkdir(parents=True)
+    source.write_bytes(payload)
+    manifest = {
+        "schema": "alina.clone_payload_manifest.v1",
+        "repository": "owner/repo",
+        "entries": [{
+            "asset_id": 7, "release_id": 91,
+            "release_tag": release_tag, "asset_name": asset["name"],
+            "clone_path": rel, "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }],
+        "total_assets": 1, "total_bytes": len(payload),
+    }
+    path = tmp_path / "clone_payload" / "MANIFEST.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return release, source, path
+
+
+def test_restore_reuses_exact_lfs_bytes_without_redownloading(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"verified-bytes-in-git-lfs"
+    release, source, _ = _lfs_fixture(tmp_path, payload, release_tag="evidence-lfs")
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    monkeypatch.setattr(module, "_download_to_path",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            AssertionError("verified LFS must not download")))
+    output = tmp_path / "restored"
+    report = module.restore_everything("owner/repo", output, clone_root=tmp_path)
+    assert report["lfs_reused_verified"] == 1
+    assert report["downloaded"] == 0
+    assert report["all_source_assets_accounted_for"] is True
+    assert (output / "releases" / "evidence-lfs" / "source.jsonl.gz").read_bytes() == payload
+    assert source.read_bytes() == payload
+
+
+def test_restore_corrupt_lfs_falls_back_to_verified_release(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"correct-release-payload"
+    release, source, _ = _lfs_fixture(tmp_path, payload, release_tag="evidence-lfs")
+    source.write_bytes(b"damaged-lfs-payload")
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    calls = []
+    def download(_url, target, **_k):
+        calls.append(_url)
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", download)
+    report = module.restore_everything(
+        "owner/repo", tmp_path / "restored", clone_root=tmp_path,
+    )
+    assert calls == ["https://example.invalid/source"]
+    assert report["downloaded"] == 1
+    assert report["lfs_reused_verified"] == 0
+    assert source.read_bytes() == b"damaged-lfs-payload"
+
+
+def test_restore_never_trusts_stale_lfs_release_identity(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"remote-is-authoritative"
+    release, _, path = _lfs_fixture(tmp_path, payload, release_tag="evidence-lfs")
+    manifest = json.loads(path.read_text())
+    manifest["entries"][0]["release_id"] = 999
+    path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    calls = []
+    def download(url, target, **_k):
+        calls.append(url)
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", download)
+    report = module.restore_everything("owner/repo", tmp_path / "restored",
+                                       clone_root=tmp_path)
+    assert report["lfs_reused_verified"] == 0
+    assert report["downloaded"] == 1
+    assert len(calls) == 1
+
+
+def test_restore_rejects_unsafe_lfs_mirror_paths_before_transfer(tmp_path, monkeypatch):
+    import pytest
+    module = _module()
+    release, _, path = _lfs_fixture(tmp_path, b"source")
+    manifest = json.loads(path.read_text())
+    manifest["entries"][0]["clone_path"] = "clone_payload/releases/../../outside"
+    path.write_text(json.dumps(manifest))
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([release]))
+    monkeypatch.setattr(module, "_download_to_path",
+                        lambda *_a, **_k: (_ for _ in ()).throw(
+                            AssertionError("must not download unsafe paths")))
+    with pytest.raises(module.RestoreError, match="unsafe Git LFS clone asset path"):
+        module.restore_everything("owner/repo", tmp_path / "restored",
+                                  clone_root=tmp_path)
+
+
+def test_restore_rejects_duplicate_lfs_asset_ids(tmp_path):
+    import pytest
+    module = _module()
+    release, _, path = _lfs_fixture(tmp_path, b"source")
+    manifest = json.loads(path.read_text())
+    manifest["entries"].append(dict(manifest["entries"][0]))
+    manifest["total_assets"] = 2
+    manifest["total_bytes"] *= 2
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(module.RestoreError, match="duplicate or invalid Git LFS asset id"):
+        module._clone_lfs_sources(tmp_path, "owner/repo", [release])

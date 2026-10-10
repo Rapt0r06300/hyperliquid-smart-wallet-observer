@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping
 
 DEFAULT_REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -247,6 +247,103 @@ def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
     )
 
 
+
+def _clone_lfs_sources(
+    clone_root: Path | None,
+    repository: str,
+    releases: list[Mapping[str, Any]],
+) -> dict[tuple[str, str], Path]:
+    """Reuse only materialized LFS bytes bound to the current Release inventory.
+
+    A Git LFS pointer, a stale mirror manifest or a corrupted blob is never
+    accepted as data. Missing/corrupt objects fall back to verified Releases.
+    """
+    if clone_root is None:
+        return {}
+    clone_root = Path(clone_root).resolve()
+    manifest_path = clone_root / "clone_payload" / "MANIFEST.json"
+    if not manifest_path.exists():
+        return {}
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise RestoreError("unsafe Git LFS clone manifest")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RestoreError(f"invalid Git LFS clone manifest: {exc}") from exc
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("schema") != "alina.clone_payload_manifest.v1"
+        or manifest.get("repository") != repository
+        or not isinstance(manifest.get("entries"), list)
+    ):
+        raise RestoreError("Git LFS clone manifest provenance mismatch")
+
+    rows: dict[int, tuple[Mapping[str, Any], Path]] = {}
+    paths: set[str] = set()
+    payload_root = clone_root / "clone_payload" / "releases"
+    for row in manifest["entries"]:
+        if not isinstance(row, Mapping):
+            raise RestoreError("invalid Git LFS clone asset row")
+        asset_id = row.get("asset_id")
+        raw = row.get("clone_path")
+        if type(asset_id) is not int or asset_id <= 0 or asset_id in rows:
+            raise RestoreError("duplicate or invalid Git LFS asset id")
+        if not isinstance(raw, str) or not raw or raw in paths or "\\" in raw or ":" in raw:
+            raise RestoreError("invalid Git LFS clone asset path")
+        parts = PurePosixPath(raw).parts
+        if (
+            len(parts) != 4
+            or parts[:2] != ("clone_payload", "releases")
+            or any(part in ("", ".", "..") for part in parts)
+            or PurePosixPath(raw).as_posix() != raw
+        ):
+            raise RestoreError("unsafe Git LFS clone asset path")
+        candidate = clone_root.joinpath(*parts)
+        if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != clone_root and clone_root in part.parents):
+            raise RestoreError("symlink in Git LFS clone payload")
+        if not candidate.resolve().is_relative_to(payload_root.resolve()):
+            raise RestoreError("Git LFS clone asset path escapes repository")
+        if (
+            type(row.get("bytes")) is not int or row["bytes"] < 0
+            or not isinstance(row.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", row["sha256"])
+        ):
+            raise RestoreError("invalid Git LFS asset size or SHA-256")
+        paths.add(raw)
+        rows[asset_id] = (row, candidate)
+
+    if (
+        type(manifest.get("total_assets")) is not int
+        or manifest["total_assets"] != len(rows)
+        or type(manifest.get("total_bytes")) is not int
+        or manifest["total_bytes"] != sum(row["bytes"] for row, _ in rows.values())
+    ):
+        raise RestoreError("Git LFS clone manifest totals mismatch")
+
+    verified: dict[tuple[str, str], Path] = {}
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        release_id = release.get("id")
+        for asset in release.get("assets") or []:
+            asset_id = asset.get("id")
+            item = rows.get(asset_id) if type(asset_id) is int else None
+            if item is None:
+                continue
+            row, source = item
+            if (
+                row.get("release_id") != release_id
+                or row.get("release_tag") != tag
+                or row.get("asset_name") != asset.get("name")
+                or row.get("bytes") != asset.get("size")
+                or row["sha256"].lower() != _expected_digest(asset)
+            ):
+                continue
+            if not _asset_ok(source, asset):
+                continue
+            verified[(tag, str(asset["name"]))] = source
+    return verified
+
+
 def _verify_zip_archive(path: Path, name: str) -> None:
     """Refuse ambiguous or unsafe members even in a SHA-verified Release ZIP.
 
@@ -304,6 +401,7 @@ def download_asset(
     destination: Path,
     *,
     token: str | None = None,
+    clone_candidate: Path | None = None,
 ) -> dict[str, Any]:
     name = str(asset.get("name") or "")
     url = str(asset.get("browser_download_url") or "")
@@ -320,6 +418,24 @@ def download_asset(
         return {"name": name, "path": str(target), "status": "SKIPPED_VERIFIED"}
 
     tmp = target.with_suffix(target.suffix + ".partial")
+    if clone_candidate is not None and _asset_ok(clone_candidate, asset):
+        # A verified hardlink avoids a second multi-GB transfer when both
+        # paths share a filesystem; cross-volume restores copy the bytes.
+        tmp.unlink(missing_ok=True)
+        try:
+            try:
+                os.link(clone_candidate, tmp)
+            except OSError:
+                shutil.copy2(clone_candidate, tmp)
+            if not _asset_ok(tmp, asset):
+                raise RestoreError(f"Git LFS restored bytes changed: {name}")
+            _verify_zip_archive(tmp, name)
+            tmp.replace(target)
+            return {"name": name, "path": str(target),
+                    "status": "LFS_REUSED_VERIFIED"}
+        except (OSError, RestoreError):
+            tmp.unlink(missing_ok=True)
+            raise
     if _asset_ok(tmp, asset):
         _verify_zip_archive(tmp, name)
         tmp.replace(target)
@@ -864,6 +980,7 @@ def restore_everything(
     workspace: Path | None = None,
     catalog_path: Path | None = None,
     metrics_path: Path | None = None,
+    clone_root: Path | None = None,
 ) -> dict[str, Any]:
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
@@ -908,6 +1025,8 @@ def restore_everything(
                 raise RestoreError(f"invalid download URL for {tag}/{name}")
             seen_names.add(name)
 
+    clone_sources = _clone_lfs_sources(clone_root, repository, releases)
+
     # Old cached Releases must never be treated as part of the current GitHub
     # inventory or silently reintroduce formerly SAFE local materializations.
     allowed_release_dirs = {_safe_component(tag) for tag in seen_tags}
@@ -929,6 +1048,11 @@ def restore_everything(
                 continue
             target = release_dir / _safe_component(name)
             if not _asset_ok(target, asset):
+                source = clone_sources.get((tag, name))
+                # A verified LFS hardlink occupies no new payload space on
+                # the same volume. A cross-volume copy still needs capacity.
+                if source is not None and source.stat().st_dev == releases_root.stat().st_dev:
+                    continue
                 expected_size = max(0, int(asset.get("size") or 0))
                 partial = target.with_suffix(target.suffix + ".partial")
                 partial_size = partial.stat().st_size if partial.is_file() else 0
@@ -952,6 +1076,7 @@ def restore_everything(
         "downloaded": 0,
         "resumed_verified": 0,
         "skipped_verified": 0,
+        "lfs_reused_verified": 0,
         "pending_download_bytes_at_start": pending_download_bytes,
         "free_destination_bytes_at_start": free_destination,
         "failures": [],
@@ -976,12 +1101,17 @@ def restore_everything(
                 continue
             report["asset_count"] += 1
             try:
-                result = download_asset(asset, release_dir, token=token)
+                result = download_asset(
+                    asset, release_dir, token=token,
+                    clone_candidate=clone_sources.get((tag, str(asset.get("name") or ""))),
+                )
                 row["assets"].append(result)
                 if result["status"] == "DOWNLOADED_VERIFIED":
                     report["downloaded"] += 1
                 elif result["status"] == "RESUMED_VERIFIED":
                     report["resumed_verified"] += 1
+                elif result["status"] == "LFS_REUSED_VERIFIED":
+                    report["lfs_reused_verified"] += 1
                 else:
                     report["skipped_verified"] += 1
             except RestoreError as exc:
@@ -1010,6 +1140,7 @@ def restore_everything(
         report["asset_count"] == report["expected_assets"]
         and report["downloaded"]
         + report["resumed_verified"]
+        + report["lfs_reused_verified"]
         + report["skipped_verified"]
         + len(report["failures"])
         == report["expected_assets"]
@@ -1026,6 +1157,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
+    parser.add_argument("--clone-root", default=".",
+                        help="fresh clone with optional verified clone_payload/ Git LFS assets")
     parser.add_argument("--catalog", default="catalog/DATA_INDEX.json",
                         help="canonical index required to certify usable restored shards")
     parser.add_argument("--metrics", default="catalog/DATA_METRICS.json",
@@ -1057,6 +1190,7 @@ def main(argv: list[str] | None = None) -> int:
             token=token,
             catalog_path=Path(args.catalog).resolve(),
             metrics_path=Path(args.metrics).resolve(),
+            clone_root=Path(args.clone_root).resolve(),
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot
@@ -1083,6 +1217,7 @@ def main(argv: list[str] | None = None) -> int:
                 "downloaded": report["downloaded"],
                 "resumed_verified": report["resumed_verified"],
                 "skipped_verified": report["skipped_verified"],
+                "lfs_reused_verified": report["lfs_reused_verified"],
                 "usable_shards": report["classification"]["usable_shards"],
                 "quarantined_shards": report["classification"]["quarantined_shards"],
                 "missing_or_corrupt_rows": report["classification"]["missing_or_corrupt_rows"],
