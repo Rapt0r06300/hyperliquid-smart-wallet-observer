@@ -117,13 +117,18 @@ jobs:
             fi
             git fetch origin main
             if ! git rebase origin/main; then
-              # Only a deterministic metrics-only conflict can be rebuilt.
-              # Conflicts involving source/index/quality evidence fail closed.
+              # Generated metrics and reason summaries are rebuildable from
+              # the already merged SHA-bound index. Immutable shard receipts,
+              # classification evidence and index conflicts must fail closed.
               mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-              if [ "${#conflicts[@]}" -eq 1 ] && [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ]; then
+              if [ "${#conflicts[@]}" -eq 1 ] && {
+                [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ] ||
+                [ "${conflicts[0]}" = "catalog/REPLAY_COMPATIBILITY_REASONS.json" ]
+              }; then
+                python tools/build_replay_compatibility_reasons.py
                 python tools/build_catalog_metrics.py
                 python tools/build_quarantine_audit.py
-                git add catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
+                git add catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
                 if ! GIT_EDITOR=true git rebase --continue; then
                   git rebase --abort || true
                   exit 1
