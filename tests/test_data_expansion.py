@@ -225,8 +225,8 @@ def test_gate_same_sequence_delta_never_mutates_book_or_refreshes_timestamp() ->
                             receive_ts_ms=1011) == "EXPLOITABLE"
     before = (state.sequence, dict(state.bids), dict(state.asks),
               state.exchange_ts_ms, state.receive_ts_ms)
-    assert state.apply_book({"U": 11, "u": 11, "t": 1020,
-                             "b": [[200, 99]], "a": [[99, 99]]},
+    assert state.apply_book({"U": 11, "u": 11, "t": 1010,
+                             "b": [[100.5, 1]], "a": []},
                             receive_ts_ms=1021) == "EXPLOITABLE"
     assert (state.sequence, state.bids, state.asks,
             state.exchange_ts_ms, state.receive_ts_ms) == before
@@ -236,6 +236,24 @@ def test_gate_same_sequence_delta_never_mutates_book_or_refreshes_timestamp() ->
                              "b": [[100.75, 1]], "a": []},
                             receive_ts_ms=1031) == "EXPLOITABLE"
     assert state.sequence == 12 and state.bids[100.75] == 1
+
+
+def test_gate_conflicting_same_sequence_fails_closed() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    state.apply_book({"full": True, "id": 10, "t": 1000,
+                      "b": [[100, 2]], "a": [[101, 3]]}, receive_ts_ms=1001)
+    assert state.apply_book({"U": 11, "u": 11, "t": 1010,
+                             "b": [[100.5, 1]], "a": []},
+                            receive_ts_ms=1011) == "EXPLOITABLE"
+    assert state.apply_book({"U": 11, "u": 11, "t": 1010,
+                             "b": [[200, 99]], "a": [[99, 99]]},
+                            receive_ts_ms=1012) == "DESYNC"
+    assert state.reason == "CONFLICTING_DUPLICATE_SEQUENCE"
+    assert state.regression_count == 1
+    assert state.sequence is None and not state.bids and not state.asks
+    assert state.apply_book({"U": 12, "u": 12, "t": 1020,
+                             "b": [[100.75, 1]], "a": []},
+                            receive_ts_ms=1021) == "UNMEASURABLE"
 
 
 def test_gate_rest_base_is_not_executable_until_ws_sequence_bridge() -> None:

@@ -98,6 +98,7 @@ class GateMarketState:
     gap_count: int = 0
     duplicate_count: int = 0
     regression_count: int = 0
+    last_ws_delta_signature: str | None = None
 
     def apply_book(self, payload: dict[str, Any], *, receive_ts_ms: int | None = None) -> str:
         meta = payload.get("_alina_transport")
@@ -116,6 +117,7 @@ class GateMarketState:
             if not is_full_snapshot:
                 self.sequence = None
                 self.rest_anchor_pending = False
+                self.last_ws_delta_signature = None
                 self.bids.clear()
                 self.asks.clear()
                 self.gap_count += 1
@@ -138,6 +140,7 @@ class GateMarketState:
             self.quality, self.reason = UNMEASURABLE, "MISSING_OR_INVALID_SEQUENCE"
             self.sequence = None
             self.rest_anchor_pending = False
+            self.last_ws_delta_signature = None
             self.bids.clear()
             self.asks.clear()
             return self.quality
@@ -152,6 +155,7 @@ class GateMarketState:
                 self.asks.clear()
                 return self.quality
             self.rest_anchor_pending = payload.get("_alina_rest_anchor") is True
+            self.last_ws_delta_signature = None
             if self.rest_anchor_pending:
                 # A new REST baseline does not belong to the old WS connection.
                 # The next matching WS delta must establish its own connection.
@@ -170,18 +174,35 @@ class GateMarketState:
                 return self.quality
             if first <= self.sequence + 1:
                 self.rest_anchor_pending = False
+        signature = None
+        if not is_full_snapshot:
+            signature = json.dumps(
+                [first, last, payload.get("b", payload.get("bids", [])),
+                 payload.get("a", payload.get("asks", [])),
+                 payload.get("time_ms", payload.get("t", payload.get("time")))],
+                sort_keys=True, separators=(",", ":"), default=str,
+            )
         if self.sequence is not None and last is not None and not is_full_snapshot:
             if last == self.sequence and not self.rest_anchor_pending:
-                # Exact sequence repeats are not new market observations.
-                # Ignore their levels/timestamps to prevent phantom liquidity
-                # and artificial freshness; retain duplicate evidence.
-                self.duplicate_count += 1
+                if signature == self.last_ws_delta_signature:
+                    # Identical retransmission: preserve original market time.
+                    self.duplicate_count += 1
+                    return self.quality
+                # Same sequence, different data is not a harmless duplicate.
+                # Never claim a consistent order book without a new base.
+                self.regression_count += 1
+                self.quality, self.reason = DESYNC, "CONFLICTING_DUPLICATE_SEQUENCE"
+                self.sequence = None
+                self.last_ws_delta_signature = None
+                self.bids.clear()
+                self.asks.clear()
                 return self.quality
         if self.sequence is not None and last is not None:
             if first is not None and first > self.sequence + 1:
                 self.gap_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_GAP"
                 self.rest_anchor_pending = False
+                self.last_ws_delta_signature = None
                 # Invalidate stale depth immediately; old sequence/levels can
                 # never justify future derived execution capacity.
                 self.sequence = None
@@ -192,6 +213,7 @@ class GateMarketState:
                 self.regression_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_REGRESSION"
                 self.rest_anchor_pending = False
+                self.last_ws_delta_signature = None
                 self.sequence = None
                 self.bids.clear()
                 self.asks.clear()
@@ -214,6 +236,8 @@ class GateMarketState:
                 else:
                     target[price] = size
         self.sequence = last if last is not None else self.sequence
+        if not is_full_snapshot:
+            self.last_ws_delta_signature = signature
         self.exchange_ts_ms = _epoch_ms(payload.get("time_ms") or payload.get("t") or payload.get("time")) or self.exchange_ts_ms
         self.receive_ts_ms = receive_ts_ms or _i(transport.get("receive_wall_ts_ms")) or int(time.time() * 1000)
         self.receive_mono_ns = _i(transport.get("receive_mono_ns")) or self.receive_mono_ns
