@@ -1,16 +1,18 @@
 {
   "asset_verified": true,
-  "bytes": 2558,
+  "bytes": 2648,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-ws-funding-cfx-usdt-swap-1790059927219-1790060776957-fcd54d82cde1",
-  "end_ts_ms": 1790060776957,
+  "dataset_id": "okx-public-ws-funding-bio-usdt-swap-1790059927219-1790060778438-ce15ddd21efe",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790060778438,
   "event_count": 16,
   "family": "funding",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "funding"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -33,36 +37,37 @@
       "websocket"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 16,
   "release": {
-    "asset_id": 607758071,
-    "asset_name": "okx-public-ws-funding-cfx-usdt-swap-1790059927219-1790060776957-fcd54d82cde1.jsonl.gz",
+    "asset_id": 607758044,
+    "asset_name": "okx-public-ws-funding-bio-usdt-swap-1790059927219-1790060778438-ce15ddd21efe.jsonl.gz",
     "release_id": 402497053,
-    "remote_digest": "sha256:fcd54d82cde1b4a5dd6b3bdafbdc4496ecbeff58a0c8976ee5feebb09853013a",
-    "remote_size": 2558,
+    "remote_digest": "sha256:ce15ddd21efe8cee97290ad1d2774b06c55b704a8e9e6dcae72d559a450458a7",
+    "remote_size": 2648,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "data-v2-35696301919-s2"
   },
-  "release_asset": "okx-public-ws-funding-cfx-usdt-swap-1790059927219-1790060776957-fcd54d82cde1.jsonl.gz",
-  "release_asset_id": 607758071,
+  "release_asset": "okx-public-ws-funding-bio-usdt-swap-1790059927219-1790060778438-ce15ddd21efe.jsonl.gz",
+  "release_asset_id": 607758044,
   "release_id": 402497053,
-  "release_remote_digest": "sha256:fcd54d82cde1b4a5dd6b3bdafbdc4496ecbeff58a0c8976ee5feebb09853013a",
-  "release_remote_size": 2558,
+  "release_remote_digest": "sha256:ce15ddd21efe8cee97290ad1d2774b06c55b704a8e9e6dcae72d559a450458a7",
+  "release_remote_size": 2648,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s2",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "fcd54d82cde1b4a5dd6b3bdafbdc4496ecbeff58a0c8976ee5feebb09853013a",
+  "sha256": "ce15ddd21efe8cee97290ad1d2774b06c55b704a8e9e6dcae72d559a450458a7",
   "source": "okx_public_ws",
   "start_ts_ms": 1790059927219,
-  "symbol": "CFX-USDT-SWAP",
+  "symbol": "BIO-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 16,
@@ -75,25 +80,28 @@
     "connection_ids": [
       "okx-ad478c333e7b45b6b0cb522aa7bd4147"
     ],
-    "first_exchange_ts_ms": 1790059890900,
-    "last_exchange_ts_ms": 1790060776883,
+    "first_exchange_ts_ms": 1790059892325,
+    "last_exchange_ts_ms": 1790060778362,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 16,
-      "max": 36319.0,
-      "min": 63.0,
+      "max": 34894.0,
+      "min": 73.0,
       "p50": 75.0,
-      "p95": 79.0
+      "p95": 81.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
       "count": 16,
       "max": 121.270244,
       "min": 0.0,
-      "p50": 116.852577,
+      "p50": 116.914851,
       "p95": 118.417669
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v8"
 }

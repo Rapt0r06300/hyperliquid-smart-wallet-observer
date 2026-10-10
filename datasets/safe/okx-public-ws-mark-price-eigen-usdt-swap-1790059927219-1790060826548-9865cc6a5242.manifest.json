@@ -1,16 +1,18 @@
 {
   "asset_verified": true,
-  "bytes": 481297,
+  "bytes": 368795,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-ws-ticker-avax-usdt-swap-1790059927219-1790060826621-013ec7c2e88f",
-  "end_ts_ms": 1790060826621,
-  "event_count": 5457,
-  "family": "ticker",
+  "dataset_id": "okx-public-ws-mark-price-eigen-usdt-swap-1790059927219-1790060826548-9865cc6a5242",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790060826548,
+  "event_count": 4463,
+  "family": "mark_price",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
-    "ticker"
+    "mark_price"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -33,39 +37,40 @@
       "websocket"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 4463,
   "release": {
-    "asset_id": 607758790,
-    "asset_name": "okx-public-ws-ticker-avax-usdt-swap-1790059927219-1790060826621-013ec7c2e88f.jsonl.gz",
+    "asset_id": 607758547,
+    "asset_name": "okx-public-ws-mark-price-eigen-usdt-swap-1790059927219-1790060826548-9865cc6a5242.jsonl.gz",
     "release_id": 402497053,
-    "remote_digest": "sha256:013ec7c2e88f6b57014e29f2c5a08206b9e41196132209b40d50b1b899f7cc88",
-    "remote_size": 481297,
+    "remote_digest": "sha256:9865cc6a5242ddbfe24a8ace939ef3ca72d5310db7b6275c23655aa68463a3b0",
+    "remote_size": 368795,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "data-v2-35696301919-s2"
   },
-  "release_asset": "okx-public-ws-ticker-avax-usdt-swap-1790059927219-1790060826621-013ec7c2e88f.jsonl.gz",
-  "release_asset_id": 607758790,
+  "release_asset": "okx-public-ws-mark-price-eigen-usdt-swap-1790059927219-1790060826548-9865cc6a5242.jsonl.gz",
+  "release_asset_id": 607758547,
   "release_id": 402497053,
-  "release_remote_digest": "sha256:013ec7c2e88f6b57014e29f2c5a08206b9e41196132209b40d50b1b899f7cc88",
-  "release_remote_size": 481297,
+  "release_remote_digest": "sha256:9865cc6a5242ddbfe24a8ace939ef3ca72d5310db7b6275c23655aa68463a3b0",
+  "release_remote_size": 368795,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s2",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "013ec7c2e88f6b57014e29f2c5a08206b9e41196132209b40d50b1b899f7cc88",
+  "sha256": "9865cc6a5242ddbfe24a8ace939ef3ca72d5310db7b6275c23655aa68463a3b0",
   "source": "okx_public_ws",
   "start_ts_ms": 1790059927219,
-  "symbol": "AVAX-USDT-SWAP",
+  "symbol": "EIGEN-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
-      "count": 5457,
+      "count": 4463,
       "max": 48.5,
       "min": 21.0,
       "p50": 25.5,
@@ -75,25 +80,28 @@
     "connection_ids": [
       "okx-ad478c333e7b45b6b0cb522aa7bd4147"
     ],
-    "first_exchange_ts_ms": 1790059927071,
-    "last_exchange_ts_ms": 1790060826468,
+    "first_exchange_ts_ms": 1790059927133,
+    "last_exchange_ts_ms": 1790060826484,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
-      "count": 5457,
-      "max": 200.0,
+      "count": 4463,
+      "max": 108.0,
       "min": 60.0,
-      "p50": 128.0,
-      "p95": 160.0
+      "p50": 65.0,
+      "p95": 72.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
-      "count": 5457,
+      "count": 4463,
       "max": 124.310872,
       "min": 0.0,
       "p50": 116.984042,
       "p95": 120.809265
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v8"
 }
