@@ -667,7 +667,7 @@ class NativeVenueCoordinator:
                     )
                 except Exception as exc:
                     self._discovery_errors[f"gate_rest_anchor:{contract}"] = type(exc).__name__
-                    continue
+                    return
                 for base in bases:
                     raw = base.raw_payload
                     if (base.source_id != "gate_public_rest"
