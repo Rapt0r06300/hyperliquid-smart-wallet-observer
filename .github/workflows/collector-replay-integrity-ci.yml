@@ -193,6 +193,7 @@ jobs:
             tests/test_okx_market_data.py \
             tests/test_native_venue_transport_integrity.py \
             tests/test_native_venue_coordinator.py \
+            tests/test_data_expansion.py::test_gate_same_sequence_delta_never_mutates_book_or_refreshes_timestamp \
             tests/test_data_expansion.py::test_gate_rest_base_is_not_executable_until_ws_sequence_bridge \
             tests/test_data_expansion.py::test_gate_rest_base_missing_first_ws_update_fails_closed \
             tests/test_data_expansion.py::test_gate_rest_reanchor_clears_old_ws_connection_without_allowing_unbridged_execution \
