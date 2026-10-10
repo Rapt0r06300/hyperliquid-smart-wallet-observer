@@ -367,11 +367,19 @@ def test_recovery_contract_finishes_even_when_main_advances():
     assert "tests/test_recover_dataset_v2_capsules.py" in text
 
 
-def test_replay_publisher_recomputes_sha_bound_evidence_after_main_advances():
+def test_replay_publisher_reapplies_sha_verified_receipts_after_main_advances():
     text = _workflow("backfill-replay-compatibility.yml")
     publish = text.split("- name: Publish replay-proof progress", 1)[1]
+    # Captured receipts were verified against immutable Release SHA and size.
+    # Retrying against moving main must rebind those exact receipts instead
+    # of redownloading assets or blindly rebasing the generated catalog.
+    assert 'python tools/replay_receipt_publish.py capture "$RECEIPTS"' in publish
     assert "git reset --hard origin/main" in publish
-    assert "python tools/backfill_replay_compatibility.py" in publish
+    assert 'python tools/replay_receipt_publish.py apply "$RECEIPTS"' in publish
+    assert publish.index("git reset --hard origin/main") < publish.index(
+        'python tools/replay_receipt_publish.py apply "$RECEIPTS"'
+    )
+    assert "python tools/backfill_replay_compatibility.py" not in publish
     assert "python tools/check_dataset_quality.py" in publish
     assert "git rebase origin/main" not in publish
     assert "git rebase --continue" not in publish
