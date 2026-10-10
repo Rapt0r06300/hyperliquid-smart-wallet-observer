@@ -248,37 +248,50 @@ def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
 
 
 def _verify_zip_archive(path: Path, name: str) -> None:
-    """Validate ZIP integrity and portable member paths before accepting a SHA-verified asset.
+    """Refuse ambiguous or unsafe members even in a SHA-verified Release ZIP.
 
-    A GitHub SHA-256 verifies the bytes, but does not make embedded paths safe.
-    Reject traversal, Windows aliases and symlinks even when current shard
-    materialization streams a named member rather than extracting everything.
+    The Release digest proves which bytes were published, not that every member
+    is safe to materialize on Windows. Do not extract any member here.
     """
     if not name.lower().endswith(".zip"):
         return
+    windows_reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
     try:
         with zipfile.ZipFile(path) as archive:
-            exact_names: set[str] = set()
-            portable_names: set[str] = set()
+            seen: set[str] = set()
             for info in archive.infolist():
                 member = info.filename
-                parts = member.rstrip("/").split("/")
+                relative = member[:-1] if member.endswith("/") else member
+                components = relative.split("/")
                 if (
-                    not member
+                    not relative
                     or member.startswith(("/", "\\"))
                     or "\\" in member
-                    or any(part in ("", ".", "..") for part in parts)
-                    or any(":" in part or any(ord(c) < 32 for c in part) for part in parts)
+                    or ":" in relative
+                    or any(ord(ch) < 32 for ch in member)
+                    or any(
+                        part in ("", ".", "..")
+                        or part.endswith((" ", "."))
+                        or part.split(".", 1)[0].upper() in windows_reserved
+                        for part in components
+                    )
                 ):
-                    raise RestoreError(f"unsafe ZIP member path in {name}: {member!r}")
-                portable = "/".join(part.casefold() for part in parts)
-                if member in exact_names or portable in portable_names:
+                    raise RestoreError(f"unsafe ZIP member in {name}: {member!r}")
+                # Windows targets are case-insensitive by default.
+                normalized = relative.casefold()
+                if normalized in seen:
                     raise RestoreError(f"ambiguous duplicate ZIP members: {name}")
-                exact_names.add(member)
-                portable_names.add(portable)
-                mode = (info.external_attr >> 16) & 0o170000
-                if info.create_system == 3 and mode == 0o120000:
-                    raise RestoreError(f"unsafe ZIP symlink in {name}: {member!r}")
+                seen.add(normalized)
+                mode = (info.external_attr >> 16) & 0xFFFF
+                kind = stat.S_IFMT(mode)
+                if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    raise RestoreError(f"unsafe ZIP member type in {name}: {member!r}")
+                if info.flag_bits & 1:
+                    raise RestoreError(f"encrypted ZIP member in {name}: {member!r}")
             corrupt_member = archive.testzip()
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         raise RestoreError(f"invalid ZIP archive: {name}") from exc
