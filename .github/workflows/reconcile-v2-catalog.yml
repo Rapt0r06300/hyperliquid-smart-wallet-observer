@@ -20,8 +20,11 @@ permissions:
   actions: write
   contents: write
 
+# A high-frequency metrics/identity writer must not replace a queued
+# historical reconciler. Reconciliation rebuilds every candidate publication
+# from the latest main and retries conflicting pushes, so keep its own lane.
 concurrency:
-  group: dataset-v2-control-plane-index
+  group: dataset-v2-catalog-reconcile
   cancel-in-progress: false
 
 jobs:
