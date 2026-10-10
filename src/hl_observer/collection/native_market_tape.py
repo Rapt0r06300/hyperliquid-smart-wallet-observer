@@ -246,6 +246,21 @@ def native_tick_envelopes(
             "source_batch_sha256": batch_digest,
         })
         envelopes.append(envelope)
+    if venue_key == "bitget" and rows_key == "data":
+        times = [_int(row.get("ts")) for row in rows]
+        native_ids = [row.get("tradeId") for row in rows]
+        if all(ts is not None and ts > 0 for ts in times) and all(native_ids):
+            envelopes.sort(key=lambda e: (
+                int(e.exchange_ts_ms),
+                int(e.parsed_summary["source_batch_index"]),
+            ))
+            for index, envelope in enumerate(envelopes):
+                envelope.parsed_summary["source_batch_chronological_index"] = index
+                envelope.parsed_summary["source_batch_chronology"] = "EXCHANGE_TIME_WITHIN_FRAME"
+        else:
+            for envelope in envelopes:
+                envelope.parsed_summary["source_batch_chronology"] = "UNKNOWN"
+                envelope.parsed_summary["data_gate_ready"] = False
     return envelopes
 
 
