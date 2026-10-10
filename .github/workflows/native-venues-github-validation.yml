@@ -29,6 +29,7 @@ on:
       - 'tests/test_native_venue_coordinator.py'
       - 'tests/test_native_venue_market.py'
       - 'tests/test_native_market_tape.py'
+      - 'tests/test_native_trade_batch_split.py'
       - 'tests/test_multi_venue_execution.py'
       - 'tests/test_native_cross_venue_replay.py'
       - 'src/hl_observer/backtesting/native_cross_venue_replay.py'
@@ -106,6 +107,7 @@ jobs:
             tests/test_native_venue_coordinator.py \
             tests/test_native_venue_market.py \
             tests/test_native_market_tape.py \
+            tests/test_native_trade_batch_split.py \
             tests/test_multi_venue_execution.py \
             tests/test_native_cross_venue_replay.py \
             tests/test_frais_venues.py \
