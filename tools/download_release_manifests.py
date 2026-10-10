@@ -314,7 +314,10 @@ def list_release_manifest_tags(
             # zero new IDs indicate a stuck service; fail closed, never spin.
             stagnant_pages = stagnant_pages + 1 if len(seen_ids) == prior_unique else 0
             if stagnant_pages >= 2:
-                raise RuntimeError("Release listing pagination made no progress; partial inventory refused")
+                raise RuntimeError(
+                    "Release listing pagination made no progress; "
+                    "partial inventory refused"
+                )
         if len(page) < page_size:
             print(
                 f"GitHub Release inventory enumerated: {len(seen_ids)} unique tags, "
