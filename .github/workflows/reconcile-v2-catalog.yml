@@ -84,7 +84,7 @@ jobs:
             exit 1
           fi
 
-      - name: Download only new production V2 run manifests (all Releases, bounded batch)
+      - name: Download new Dataset principal run manifests (bounded batch)
         shell: bash
         run: |
           set -euo pipefail

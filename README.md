@@ -1,5 +1,7 @@
 # Alina Smart Flow
 
+**Dataset principal** : données, manifestes, catalogues et preuves de collecte réunis dans **ce dépôt GitHub unique**, sur `main`. L'appellation historique « Dataset V2 » ne désigne pas un second dépôt actif ; les identifiants de format et les chemins techniques `v2` restent inchangés pour garantir la compatibilité.
+
 **Moteur de recherche quantitative crypto strictement paper/read-only, conçu pour produire des preuves économiques reproductibles plutôt que de simples backtests positifs.**
 
 Alina Smart Flow — nom historique : **HyperSmart** — collecte et normalise des données de marché réelles, reconstruit les conditions d'exécution, exécute replays/backtests/OOS/forward paper, mesure les coûts et la capacité, puis décide si un edge est réellement démontré.
@@ -117,7 +119,7 @@ les valider de façon déterministe.
 
 ---
 
-## 4. Repository unique et ancien Dataset V2
+## 4. Dépôt unique et Dataset principal
 
 ### Repository actif — code, data plane, orchestration et économie
 
@@ -141,7 +143,7 @@ Responsabilités :
 Le package historique `hyper_smart_observer/` reste présent pour compatibilité/audit. **Il ne
 doit pas devenir une architecture concurrente.**
 
-### Ancien repository Dataset V2
+### Ancien dépôt de données (retiré)
 
 `Rapt0r06300/alina-smartflow-datasets-v2` est **retiré de l'architecture active** et peut être
 supprimé sans interrompre Alina. Aucun workflow ni chemin de données actif ne doit en dépendre.
@@ -339,9 +341,9 @@ CCXT ne doit pas remplacer :
 
 ---
 
-## 10. Dataset V2 : lifecycle et preuve
+## 10. Dataset principal : cycle de vie et preuves
 
-Cycle conceptuel Dataset V2 :
+Cycle conceptuel du Dataset principal (format interne V2) :
 
 ~~~text
 incoming
@@ -487,7 +489,7 @@ Le dépôt contient un sous-système `src/hl_observer/event_intelligence/` couvr
 - validation/placebos
 - outcomes
 - scoreboard
-- Dataset V2 integration
+- Intégration du Dataset principal
 
 Le registre humain actuel couvre techniquement les **120 idées** :
 
@@ -603,7 +605,7 @@ Ce tableau décrit l'état structurel actuel sans transformer un composant prés
 | Control plane IDLE/COLLECT/ANALYZE | **Fondation implémentée dans le repo principal** |
 | Campaign schema v2 / phase epoch | **Fondation implémentée** |
 | Dispatch receipts / idempotency primitives | **Fondation implémentée** |
-| Dataset V2 resumable manifests/leases/checkpoints | **Actif** |
+| Dataset principal : manifestes, leases et checkpoints résumables | **Actif** |
 | Data collection multi-venue | **Code natif présent sur les venues prioritaires** |
 | Hyperliquid/Binance clock evidence | **Implémenté dans le code de collecte** |
 | Replay data contracts | **Présents** |
@@ -698,7 +700,7 @@ python -m hl_observer.control_plane.phase_cli --help
 python -m hl_observer.control_plane.phase_cli status
 ~~~
 
-Cette surface est une **fondation de contrôle**. Le statut cloud final doit refléter l'autorité durable du repository Alina unique, ses manifests/receipts Dataset V2-format et la spec canonique, pas une approximation locale.
+Cette surface est une **fondation de contrôle**. Le statut cloud final doit refléter l'autorité durable du repository Alina unique, ses manifestes et preuves du Dataset principal (format V2 interne) et la spécification canonique, pas une approximation locale.
 
 ---
 
@@ -759,7 +761,7 @@ src/hl_observer/
 ├── collection/          # collectors, clocks, books, market data
 ├── hyperliquid/         # read-only HL REST/WS contracts
 ├── data_sources/        # acquisition/backfill/provider infrastructure
-├── datasets/            # replay workspace / Dataset V2 bridge contracts
+├── datasets/            # espace replay / contrats internes du Dataset principal
 ├── market_truth/        # executable market truth / replay
 ├── copy_vault/          # robust Copy-Vault semantics
 ├── copying/             # leader/copy support
@@ -858,7 +860,7 @@ C'est un **système de recherche, de collecte, de simulation paper et de preuve 
 | `docs/event-intelligence-120-coverage.md` | Registre technique Event Intelligence |
 | `src/hl_observer/strategies/active_scope.py` | Autorité code du scope économique |
 | `src/hl_observer/control_plane/` | Fondation phase/campaign control plane |
-| Dataset V2 | Durable data/campaign evidence |
+| Dataset principal | Preuves durables de collecte et des campagnes |
 
 ---
 
