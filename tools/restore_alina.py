@@ -390,6 +390,9 @@ def _verify_zip_archive(path: Path, name: str) -> None:
                 if info.flag_bits & 1:
                     raise RestoreError(f"encrypted ZIP member in {name}: {member!r}")
             corrupt_member = archive.testzip()
+    except RestoreError:
+        # Preserve explicit unsafe-member and duplicate-member diagnostics.
+        raise
     except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
         raise RestoreError(f"invalid ZIP archive: {name}") from exc
     if corrupt_member is not None:
