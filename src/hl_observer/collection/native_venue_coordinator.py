@@ -82,6 +82,7 @@ class NativeVenueCoordinator:
             30.0, float(discovery_refresh_interval_s)
         )
         self.venue_session_s = max(30.0, float(venue_session_s))
+        self.gate_rest_retry_s = 30.0
         self.store = MultiVenueMarketStore(stale_after_ms=self.stale_after_ms)
         self.registry: dict[str, dict[str, str]] = {}
         self._bybit_states: dict[str, BybitMarketState] = {}
@@ -652,11 +653,14 @@ class NativeVenueCoordinator:
         self._active_symbols["gate"] = tuple(symbols)
         self._configure_capture_profile("gate", symbols)
 
-        async def collect_rest_anchors() -> None:
+        # Bound parallel public REST requests, especially on 100-symbol sessions.
+        anchor_semaphore = asyncio.Semaphore(6)
+
+        async def collect_rest_anchor(contract: str) -> None:
             bootstrap = getattr(self.gate_client, "bootstrap_envelopes", None)
             if not callable(bootstrap):
                 return
-            for contract in symbols:
+            async with anchor_semaphore:
                 try:
                     bases = await asyncio.to_thread(
                         bootstrap, (contract,), timeout_s=4.0,
@@ -693,24 +697,52 @@ class NativeVenueCoordinator:
                     )
                     self.store.put(state.snapshot(now_ms=base.received_ts_ms))
 
-        anchor_task = asyncio.create_task(collect_rest_anchors())
+        # One task per contract permits bounded concurrent bootstrap and
+        # targeted recovery after a gap, with no pause in raw WS ingestion.
+        anchor_tasks = {
+            contract: asyncio.create_task(collect_rest_anchor(contract))
+            for contract in symbols
+        }
+        anchor_last_attempt = {contract: time.monotonic() for contract in symbols}
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
-                    if anchor_task.done() and not anchor_task.cancelled():
-                        error = anchor_task.exception()
-                        if error is not None:
-                            raise error
                     now = int(time.time() * 1000)
                     self.ingest_gate(
                         self._with_clock_sync(payload, "gate"),
                         now_ms=now,
                     )
+                    raw = payload.get("result")
+                    data = raw if isinstance(raw, Mapping) else payload
+                    contract = str(data.get("contract") or data.get("s") or "").upper()
+                    state = self._gate_states.get(contract)
+                    if state is None or contract not in anchor_tasks:
+                        continue
+                    task = anchor_tasks[contract]
+                    if task.done() and not task.cancelled():
+                        error = task.exception()
+                        if error is not None:
+                            raise error
+                    if state.reason not in {
+                        "WS_RECONNECT_REQUIRES_SNAPSHOT",
+                        "SEQUENCE_GAP",
+                        "SEQUENCE_REGRESSION",
+                        "DELTA_BEFORE_SNAPSHOT",
+                        "MISSING_OR_INVALID_SEQUENCE",
+                    } or not task.done():
+                        continue
+                    elapsed = time.monotonic() - anchor_last_attempt[contract]
+                    if elapsed >= self.gate_rest_retry_s:
+                        anchor_last_attempt[contract] = time.monotonic()
+                        anchor_tasks[contract] = asyncio.create_task(
+                            collect_rest_anchor(contract)
+                        )
         except TimeoutError:
             return
         finally:
-            anchor_task.cancel()
-            outcomes = await asyncio.gather(anchor_task, return_exceptions=True)
+            for task in anchor_tasks.values():
+                task.cancel()
+            outcomes = await asyncio.gather(*anchor_tasks.values(), return_exceptions=True)
             self._active_symbols.pop("gate", None)
             for outcome in outcomes:
                 if isinstance(outcome, Exception):

@@ -602,6 +602,66 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
     assert not state.rest_anchor_pending
 
 
+def test_gate_gap_recovers_from_new_rest_base_without_pausing_ws() -> None:
+    from hl_observer.collection.tick_dataset import TickEnvelope
+    from hl_observer.realtime.feed_quality import FeedEventKind
+
+    class Gate:
+        def __init__(self):
+            self.calls = 0
+
+        def bootstrap_envelopes(self, contracts, *, timeout_s):
+            self.calls += 1
+            base_id = 41 if self.calls == 1 else 43
+            return [TickEnvelope(
+                source_id="gate_public_rest", channel="l2Book",
+                instrument="BTC_USDT", event_kind=FeedEventKind.SNAPSHOT,
+                raw_payload={"id": base_id, "bids": [["100", "2"]],
+                             "asks": [["101", "2"]]},
+                received_ts_ms=1700000000010 + self.calls,
+                exchange_ts_ms=1700000000000 + self.calls,
+                sequence=base_id,
+                provenance={"transport": "https", "access": "read_only"},
+            )]
+
+        async def messages(self, _contracts):
+            async def await_book(expected):
+                for _ in range(500):
+                    state = coordinator._gate_states.get("BTC_USDT")
+                    if state is not None and state.sequence == expected:
+                        return state
+                    await asyncio.sleep(0.002)
+                raise AssertionError(f"Gate REST base {expected} not collected")
+
+            first = await await_book(41)
+            assert first.rest_anchor_pending
+            yield {"channel": "futures.order_book_update", "event": "update",
+                   "result": {"s": "BTC_USDT", "t": 1700000000020,
+                              "U": 42, "u": 42, "b": [], "a": []}}
+            yield {"channel": "futures.order_book_update", "event": "update",
+                   "result": {"s": "BTC_USDT", "t": 1700000000030,
+                              "U": 44, "u": 44, "b": [], "a": []}}
+            # The missing id 43 must first DESYNC the book; recovery then
+            # obtains a separate official base id 43, still UNMEASURABLE.
+            second = await await_book(43)
+            assert second.rest_anchor_pending and second.quality == "UNMEASURABLE"
+            yield {"channel": "futures.order_book_update", "event": "update",
+                   "result": {"s": "BTC_USDT", "t": 1700000000040,
+                              "U": 44, "u": 44,
+                              "b": [["100.5", "1"]], "a": []}}
+
+    gate = Gate()
+    coordinator = NativeVenueCoordinator(gate_client=gate, ccxt_snapshot_path=None)
+    coordinator.gate_rest_retry_s = 0.0  # Deterministic immediate retry in test only.
+    coordinator.registry = {"BTC": {"gate": "BTC_USDT"}}
+    asyncio.run(asyncio.wait_for(coordinator.run_gate(), timeout=5))
+    state = coordinator._gate_states["BTC_USDT"]
+    assert gate.calls == 2
+    assert state.sequence == 44 and state.quality == "EXPLOITABLE"
+    assert not state.rest_anchor_pending
+    assert state.gap_count == 1  # Gap evidence is never erased by re-anchor.
+
+
 def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
     gate_client = _OneShotStream({"channel": "futures.trades", "result": []})
     bitget_client = _OneShotStream(
