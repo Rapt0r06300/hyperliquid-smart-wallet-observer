@@ -676,9 +676,24 @@ def index_field_size_stats(root: str | Path = ROOT) -> dict[str, Any]:
                 json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             ) + 2
             field_rows[key] += 1
+    consumer_paths = []
+    for directory in ("tools", "src", "tests"):
+        base = Path(root) / directory
+        if not base.is_dir():
+            continue
+        for candidate in base.rglob("*.py"):
+            if candidate.resolve() == Path(__file__).resolve():
+                continue
+            try:
+                source = candidate.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            if "DATA_INDEX.json" in source:
+                consumer_paths.append(str(candidate.relative_to(root)))
     return {
         "indexed_shards": len(rows),
         "index_bytes": path.stat().st_size,
+        "index_consumer_paths": sorted(consumer_paths),
         "field_estimated_bytes": dict(field_bytes.most_common(24)),
         "field_counts": {k: field_rows[k] for k, _ in field_bytes.most_common(24)},
         "read_only": True,
