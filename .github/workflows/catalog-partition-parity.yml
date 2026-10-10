@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/catalog-partition-parity.yml'
-      - 'tools/catalog_index_partitions.py'
-      - 'tests/test_catalog_index_partitions.py'
+      - 'tools/partitioned_data_index.py'
+      - 'tests/test_partitioned_data_index.py'
   workflow_dispatch: {}
 
 permissions:
@@ -34,30 +34,24 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_catalog_index_partitions.py
+          python -m pytest -q tests/test_partitioned_data_index.py
 
-      - name: Prove complete existing DATA_INDEX partition roundtrip without publishing it
+      - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash
         run: |
           set -euo pipefail
-          python tools/catalog_index_partitions.py \
+          python tools/partitioned_data_index.py \
             --index catalog/DATA_INDEX.json \
-            --output "$RUNNER_TEMP/alina-partition-check" \
-            | tee "$RUNNER_TEMP/partition-build.json"
-          python tools/catalog_index_partitions.py \
-            --index catalog/DATA_INDEX.json \
-            --output "$RUNNER_TEMP/alina-partition-check" \
-            | tee "$RUNNER_TEMP/partition-verify.json"
+            --output "$RUNNER_TEMP/alina-partition-proof" \
+            | tee "$RUNNER_TEMP/partition-proof.json"
           python - <<'PY'
-          import json
-          import os
+          import json,os
           from pathlib import Path
-          base=Path(os.environ["RUNNER_TEMP"])
-          created=json.loads((base/"partition-build.json").read_text())
-          verified=json.loads((base/"partition-verify.json").read_text())
-          assert created["status"] == "VERIFIED_NEW", created
-          assert verified["status"] == "VERIFIED_EXISTING", verified
-          assert created["shards"] == verified["shards"], (created, verified)
-          assert created["source_index_sha256"] == verified["source_index_sha256"]
-          print("PARTITION_ROUNDTRIP_OK", created["shards"], created["partitions"])
+          path=Path(os.environ["RUNNER_TEMP"])/"alina-partition-proof"/"PARTITION_PROOF.json"
+          receipt=json.loads(path.read_text())
+          assert receipt["status"] == "VERIFIED", receipt
+          assert receipt["source_unchanged"] is True
+          assert receipt["original_shards"] == receipt["partitioned_shards"]
+          assert receipt["partition_count"] >= 1
+          print("FULL_CATALOG_PARTITION_PARITY_PROVED", receipt["original_shards"])
           PY

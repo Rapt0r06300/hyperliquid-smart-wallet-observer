@@ -157,3 +157,64 @@ def load_partitioned_index(index_path: Path) -> dict[str, Any]:
     reconstructed["schema"] = legacy_schema
     reconstructed["shards"] = rows
     return reconstructed
+
+
+def prove_partitioned_index(
+    index_path: Path, output_directory: Path
+) -> dict[str, Any]:
+    """Prove byte-bound, exact logical reconstruction without replacing DATA_INDEX."""
+    import os
+    import tempfile
+
+    index_path = Path(index_path).resolve()
+    output_directory = Path(output_directory).resolve()
+    if output_directory == index_path.parent or index_path.parent in output_directory.parents:
+        raise ValueError("PARTITION_PARITY_OUTPUT_MUST_BE_OUTSIDE_SOURCE")
+    if output_directory.exists():
+        raise ValueError("PARTITION_PARITY_OUTPUT_ALREADY_EXISTS")
+    source = index_path.read_bytes()
+    original = json.loads(source)
+    root, parts = partition_index(original)
+    output_directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".partition-proof-", dir=output_directory.parent) as tmp:
+        stage = Path(tmp)
+        path = stage / "DATA_INDEX.json"
+        path.write_bytes(_json_bytes(root))
+        for relative, data in parts.items():
+            target = stage / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        reconstructed = load_partitioned_index(path)
+        if reconstructed != original:
+            raise ValueError("PARTITION_PARITY_RECONSTRUCTION_MISMATCH")
+        report = {
+            "schema": "alina.partition_parity_proof.v1",
+            "status": "VERIFIED",
+            "source_sha256": hashlib.sha256(source).hexdigest(),
+            "original_shards": len(original["shards"]),
+            "partitioned_shards": len(reconstructed["shards"]),
+            "partition_count": len(parts),
+            "partitions_sha256": root["shards_sha256"],
+            "source_unchanged": hashlib.sha256(index_path.read_bytes()).digest()
+                == hashlib.sha256(source).digest(),
+            "paper_read_only": True,
+        }
+        if not report["source_unchanged"]:
+            raise ValueError("PARTITION_PARITY_SOURCE_CHANGED")
+        (stage / "PARTITION_PROOF.json").write_bytes(_json_bytes(report))
+        os.replace(stage, output_directory)
+        return report
+
+
+def main() -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description="Read-only DATA_INDEX partition parity proof")
+    parser.add_argument("--index", type=Path, default=Path("catalog/DATA_INDEX.json"))
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    print(json.dumps(prove_partitioned_index(args.index, args.output), sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -84,3 +84,24 @@ def test_partition_refuses_global_count_mismatch(tmp_path):
     root["shard_count"] += 1
     with pytest.raises(ValueError, match="PARTITION_PARITY_GLOBAL_MISMATCH"):
         load_partitioned_index(_stage(tmp_path, root, files))
+
+def test_snapshot_cli_helper_preserves_source_and_reconstructs_all(tmp_path):
+    from tools.partitioned_data_index import prove_partitioned_index
+    source = _stage(tmp_path, _index(), {})
+    original = source.read_bytes()
+    output = tmp_path.parent / (tmp_path.name + "-parity")
+    result = prove_partitioned_index(source, output)
+    assert result["status"] == "VERIFIED"
+    assert result["source_unchanged"] is True
+    assert result["partitioned_shards"] == 9
+    assert source.read_bytes() == original
+    assert load_partitioned_index(output / "DATA_INDEX.json") == _index()
+    with pytest.raises(ValueError, match="OUTPUT_ALREADY_EXISTS"):
+        prove_partitioned_index(source, output)
+
+
+def test_snapshot_cli_helper_refuses_output_inside_canonical_catalog(tmp_path):
+    from tools.partitioned_data_index import prove_partitioned_index
+    source = _stage(tmp_path, _index(), {})
+    with pytest.raises(ValueError, match="OUTPUT_MUST_BE_OUTSIDE_SOURCE"):
+        prove_partitioned_index(source, source.parent / "parallel-index")
