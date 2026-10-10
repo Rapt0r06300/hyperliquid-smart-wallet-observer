@@ -97,6 +97,7 @@ jobs:
           from pathlib import Path
           from tools.index_run_manifest import (
               hydrate_default_release_repository, _compact_index_row,
+              compact_index_rows,
               CANONICAL_DATA_REPOSITORY,
           )
           path = Path("catalog/DATA_INDEX.json")
@@ -106,9 +107,10 @@ jobs:
               raise SystemExit("COMPACTION_NO_GO: foreign or unverified release repository")
           compact = dict(original)
           compact["release_repository_default"] = CANONICAL_DATA_REPOSITORY
-          compact["shards"] = [
-              _compact_index_row(row, inherit_canonical_repo=True) for row in rows
-          ]
+          # Preserve both root-level Release aliases and repeated run IDs.
+          # Re-expanding those aliases here made this read-only gate falsely
+          # fail above 85 MiB, even when the real index remained safely small.
+          compact["shards"] = compact_index_rows(compact, rows)
           assert hydrate_default_release_repository(compact) == [
               _compact_index_row(row) for row in rows
           ], "compaction changed economic evidence"

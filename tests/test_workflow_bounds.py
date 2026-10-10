@@ -384,3 +384,11 @@ def test_replay_publisher_reapplies_sha_verified_receipts_after_main_advances():
     assert "git rebase origin/main" not in publish
     assert "git rebase --continue" not in publish
     assert "git diff --cached --quiet" in publish
+
+
+def test_safe_restore_parity_uses_same_lossless_alias_compaction_as_writers():
+    text = _workflow("alina-restore-safe-regression.yml")
+    assert "compact_index_rows(compact, rows)" in text
+    assert "hydrate_default_release_repository(compact)" in text
+    assert "COMPACTION_NO_GO: index still too large" in text
+    assert "Run deterministic restore tests" in text
