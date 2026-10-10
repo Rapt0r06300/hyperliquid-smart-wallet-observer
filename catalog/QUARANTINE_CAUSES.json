@@ -5,8 +5,8 @@
       "shards": 15030
     },
     "PARTIAL_EVIDENCE": {
-      "records": 13833684,
-      "shards": 14659
+      "records": 13784521,
+      "shards": 14641
     }
   },
   "by_family": {
@@ -47,8 +47,8 @@
       "shards": 6
     },
     "funding": {
-      "records": 576,
-      "shards": 36
+      "records": 480,
+      "shards": 30
     },
     "instrument_metadata": {
       "records": 53,
@@ -63,12 +63,12 @@
       "shards": 87
     },
     "mark_price": {
-      "records": 160929,
-      "shards": 36
+      "records": 134077,
+      "shards": 30
     },
     "ticker": {
-      "records": 6459943,
-      "shards": 1647
+      "records": 6437728,
+      "shards": 1641
     },
     "trades": {
       "records": 5439175,
@@ -77,8 +77,8 @@
   },
   "by_status": {
     "PARTIAL": {
-      "records": 13833684,
-      "shards": 14659
+      "records": 13784521,
+      "shards": 14641
     },
     "REJECT": {
       "records": 39425179,
@@ -99,8 +99,8 @@
       "shards": 3347
     },
     "okx": {
-      "records": 28261643,
-      "shards": 5519
+      "records": 28212480,
+      "shards": 5501
     },
     "unknown": {
       "records": 3024166,
@@ -205,20 +205,20 @@
       "shards": 17
     },
     "okx|funding": {
-      "records": 576,
-      "shards": 36
+      "records": 480,
+      "shards": 30
     },
     "okx|l2Book": {
       "records": 6293968,
       "shards": 643
     },
     "okx|mark_price": {
-      "records": 160929,
-      "shards": 36
+      "records": 134077,
+      "shards": 30
     },
     "okx|ticker": {
-      "records": 6130713,
-      "shards": 685
+      "records": 6108498,
+      "shards": 679
     },
     "okx|trades": {
       "records": 3310470,
@@ -471,12 +471,12 @@
       "shards": 20414
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 15130685,
-      "shards": 5798
+      "records": 15081522,
+      "shards": 5780
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 29689,
+  "non_safe_shards": 29671,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -893,8 +893,8 @@
       "shards": 23
     },
     "okx|funding|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 576,
-      "shards": 36
+      "records": 480,
+      "shards": 30
     },
     "okx|l2Book|FATAL_INTEGRITY:gap_count=6": {
       "records": 129798,
@@ -909,8 +909,8 @@
       "shards": 642
     },
     "okx|mark_price|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 160929,
-      "shards": 36
+      "records": 134077,
+      "shards": 30
     },
     "okx|ticker|FATAL_INTEGRITY:gap_count=2": {
       "records": 97757,
@@ -925,8 +925,8 @@
       "shards": 650
     },
     "okx|ticker|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 130911,
-      "shards": 35
+      "records": 108696,
+      "shards": 29
     },
     "okx|trades|FATAL_INTEGRITY:gap_count=1": {
       "records": 15172,
@@ -968,7 +968,7 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "c5da4b0a8cf84e325e7df086c1d575fed5c21b564ef627ea60ef07b8677543b1",
+  "source_audit_digest": "d508163377a0eada1832e8a3a505a3195436db08efcb751d785665370da3508c",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
@@ -1103,20 +1103,20 @@
       "shards": 17
     },
     "okx|funding|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 576,
-      "shards": 36
+      "records": 480,
+      "shards": 30
     },
     "okx|l2Book|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 6293968,
       "shards": 643
     },
     "okx|mark_price|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 160929,
-      "shards": 36
+      "records": 134077,
+      "shards": 30
     },
     "okx|ticker|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 130911,
-      "shards": 35
+      "records": 108696,
+      "shards": 29
     },
     "okx|ticker|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 5999802,
@@ -1143,7 +1143,7 @@
       "shards": 6
     }
   },
-  "source_index_sha256": "0788dc7a623a88693ae7bf834d2117c8c4d8558abf1cb2fe0a43d903d473dd5a",
+  "source_index_sha256": "1ee66dcd746ba39edcf44054a345582ffad7e97052a77626eec600ddaf39f59b",
   "source_shards": 74866,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
@@ -1372,8 +1372,8 @@
       "shards": 20414
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 15130685,
-      "shards": 5798
+      "records": 15081522,
+      "shards": 5780
     },
     "TRADE_COUNT_NOT_EXACT": {
       "records": 85088,
@@ -1384,8 +1384,8 @@
       "shards": 2117
     },
     "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
-      "records": 292416,
-      "shards": 107
+      "records": 243253,
+      "shards": 89
     }
   },
   "unreadable_manifest_count": 0,
