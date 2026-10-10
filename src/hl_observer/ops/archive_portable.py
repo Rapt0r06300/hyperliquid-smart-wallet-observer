@@ -416,7 +416,31 @@ def neutraliser_metadonnees(texte: str, racine: str | Path) -> tuple[str, int]:
 
 
 def chemins_absolus_residuels(texte: str) -> list[str]:
-    return sorted({m.group(0) for m in _ABSOLU.finditer(texte)})
+    """Check decoded JSON strings to avoid treating Unicode escapes as UNC paths.
+
+    The raw text scan remains authoritative for non-JSON metadata. For JSON,
+    escaped backslashes and Unicode sequences belong to the serialization,
+    not the logical path, so test all decoded string keys and values instead.
+    """
+    raw = {m.group(0) for m in _ABSOLU.finditer(texte)}
+    if not raw:
+        return []
+    try:
+        value = json.loads(texte)
+    except (ValueError, TypeError):
+        return sorted(raw)
+    detected: set[str] = set()
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            detected.update(m.group(0) for m in _ABSOLU.finditer(item))
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return sorted(detected)
 
 
 def _git_sha_depuis_dossier(root: str | Path) -> str:

@@ -104,6 +104,24 @@ def test_exclusions_et_conservation(tmp_path):
     assert not any(path.startswith(".portable-preflight-") for path in inclus)
 
 
+def test_chemins_absolus_json_decodes_unicode_escapes_before_unc_scan():
+    # JSON serializes a harmless emoticon as backslashes and a Unicode
+    # escape. A scan of serialized bytes alone falsely sees a UNC path.
+    decorative = json.dumps({"face": "\\_(ツ)_/"}, ensure_ascii=True)
+    assert AP._ABSOLU.search(decorative) is not None
+    assert AP.chemins_absolus_residuels(decorative) == []
+
+    # Real Windows, UNC and Linux paths remain blocked after JSON decoding.
+    for dangerous in ("C:\\Users\\test\\data", r"\\server\share\data",
+                      "/home/runner/work/data", "/Users/alina/secret"):
+        assert AP.chemins_absolus_residuels(
+            json.dumps({"path": dangerous}, ensure_ascii=True)
+        ), dangerous
+
+    # Non-JSON strings retain the existing fail-closed raw scan.
+    assert AP.chemins_absolus_residuels("C:\\Users\\test\\data")
+
+
 def test_est_exclu_regles():
     assert AP.est_exclu("runtime/data/lanceur_pids.json")
     assert AP.est_exclu("x/y/.git/config") and AP.est_exclu("a.lock") and AP.est_exclu("b/c.tmp")
