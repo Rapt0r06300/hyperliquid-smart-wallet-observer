@@ -8,9 +8,11 @@
     "ready": false
   },
   "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-wct-1791626316832-1791629815994-e52d06fddc96",
+  "duplicate_count": 0,
   "end_ts_ms": 1791629815994,
   "event_count": 7972,
   "family": "cross_venue_capacity_tape",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 6
   },
+  "invalid_record_count": 445,
   "observed_channels": [
     "cross_venue_capacity_tape"
   ],
+  "out_of_order_count": 2,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -67,8 +71,8 @@
   "release_storage": "zip_entry",
   "release_tag": "data-v2-campaign-market-e8-9-2026101009-v7-u0",
   "replay_compatible": false,
-  "replay_reason": "regression_count",
-  "replay_schema_version": "alina.replay.v1",
+  "replay_reason": "INVALID_RECORD",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
   "sha256": "e52d06fddc9604d89a5eb895625dc6c1d2e2e3451aaa67756c6ad3bfa1433edf",
@@ -105,7 +109,7 @@
     }
   },
   "trade_count": 0,
-  "trade_count_exact": false,
+  "trade_count_exact": true,
   "trade_identity_digests": [],
   "trade_identity_digests_exact": false,
   "trade_identity_set_count": null,
@@ -116,5 +120,6 @@
   "unique_trade_count": null,
   "unique_trade_count_exact": false,
   "validation_allowed": false,
-  "venue": "unknown"
+  "venue": "unknown",
+  "verifier_version": "alina.replay.compatibility.v8"
 }
