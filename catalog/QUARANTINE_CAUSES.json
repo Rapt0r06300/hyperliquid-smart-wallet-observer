@@ -5,8 +5,8 @@
       "shards": 16316
     },
     "PARTIAL_EVIDENCE": {
-      "records": 14389674,
-      "shards": 14882
+      "records": 14384939,
+      "shards": 14864
     }
   },
   "by_family": {
@@ -47,8 +47,8 @@
       "shards": 12
     },
     "funding": {
-      "records": 368,
-      "shards": 23
+      "records": 96,
+      "shards": 6
     },
     "instrument_metadata": {
       "records": 53,
@@ -63,8 +63,8 @@
       "shards": 87
     },
     "mark_price": {
-      "records": 26800,
-      "shards": 6
+      "records": 22337,
+      "shards": 5
     },
     "ticker": {
       "records": 6353271,
@@ -77,8 +77,8 @@
   },
   "by_status": {
     "PARTIAL": {
-      "records": 14389674,
-      "shards": 14882
+      "records": 14384939,
+      "shards": 14864
     },
     "REJECT": {
       "records": 39607612,
@@ -99,8 +99,8 @@
       "shards": 3369
     },
     "okx": {
-      "records": 28336048,
-      "shards": 5502
+      "records": 28331313,
+      "shards": 5484
     },
     "unknown": {
       "records": 3294559,
@@ -205,16 +205,16 @@
       "shards": 17
     },
     "okx|funding": {
-      "records": 368,
-      "shards": 23
+      "records": 96,
+      "shards": 6
     },
     "okx|l2Book": {
       "records": 6293968,
       "shards": 643
     },
     "okx|mark_price": {
-      "records": 26800,
-      "shards": 6
+      "records": 22337,
+      "shards": 5
     },
     "okx|ticker": {
       "records": 6024041,
@@ -471,12 +471,12 @@
       "shards": 20702
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 15072109,
-      "shards": 7012
+      "records": 15067374,
+      "shards": 6994
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 31198,
+  "non_safe_shards": 31180,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -542,6 +542,10 @@
     },
     "bitget|ticker|FATAL_INTEGRITY:gap_count=1795": {
       "records": 1149,
+      "shards": 8
+    },
+    "bitget|ticker|FATAL_INTEGRITY:gap_count=1798": {
+      "records": 1102,
       "shards": 8
     },
     "bitget|ticker|FATAL_INTEGRITY:gap_count=1804": {
@@ -896,10 +900,6 @@
       "records": 98628,
       "shards": 23
     },
-    "okx|funding|REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 368,
-      "shards": 23
-    },
     "okx|l2Book|FATAL_INTEGRITY:gap_count=6": {
       "records": 129798,
       "shards": 10
@@ -968,7 +968,7 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "9af65fe1deadd9a11d590e5d1d9f1c739de7604f96776599edbcbc293d4a39b9",
+  "source_audit_digest": "7cdb9ed2e32e4e545895ab41e125e144abda91316696852e5ba1f964cbe2fcb3",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
@@ -1103,16 +1103,16 @@
       "shards": 17
     },
     "okx|funding|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 368,
-      "shards": 23
+      "records": 96,
+      "shards": 6
     },
     "okx|l2Book|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 6293968,
       "shards": 643
     },
     "okx|mark_price|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 26800,
-      "shards": 6
+      "records": 22337,
+      "shards": 5
     },
     "okx|ticker|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
       "records": 24239,
@@ -1143,7 +1143,7 @@
       "shards": 12
     }
   },
-  "source_index_sha256": "4336b09ee7465e7d57f8686c7e5d975cf331ea0b051971377f1c5e72125c44ff",
+  "source_index_sha256": "a74bca72bd384b35b007990469c22e165171b0ced194e06272b0a54bf956b208",
   "source_shards": 80661,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
@@ -1275,6 +1275,10 @@
       "records": 24202,
       "shards": 31
     },
+    "FATAL_INTEGRITY:gap_count=39": {
+      "records": 27150,
+      "shards": 20
+    },
     "FATAL_INTEGRITY:gap_count=4": {
       "records": 406564,
       "shards": 162
@@ -1372,8 +1376,8 @@
       "shards": 20702
     },
     "REPLAY_COMPATIBILITY_NOT_PROVEN": {
-      "records": 15072109,
-      "shards": 7012
+      "records": 15067374,
+      "shards": 6994
     },
     "TRADE_COUNT_NOT_EXACT": {
       "records": 85088,
@@ -1382,10 +1386,6 @@
     "UNIQUE_TRADE_COUNT_NOT_EXACT": {
       "records": 143260,
       "shards": 2117
-    },
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY": {
-      "records": 51407,
-      "shards": 35
     }
   },
   "unreadable_manifest_count": 0,

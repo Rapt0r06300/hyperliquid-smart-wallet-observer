@@ -1,16 +1,18 @@
 {
   "asset_verified": true,
-  "bytes": 2544,
+  "bytes": 2630,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-ws-funding-crv-usdt-swap-1790059727764-1790060609609-935fb15eecb5",
-  "end_ts_ms": 1790060609609,
+  "dataset_id": "okx-public-ws-funding-etc-usdt-swap-1790059727764-1790060609251-b74518d487b3",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790060609251,
   "event_count": 16,
   "family": "funding",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "funding"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -33,36 +37,37 @@
       "websocket"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 16,
   "release": {
-    "asset_id": 607746842,
-    "asset_name": "okx-public-ws-funding-crv-usdt-swap-1790059727764-1790060609609-935fb15eecb5.jsonl.gz",
+    "asset_id": 607746883,
+    "asset_name": "okx-public-ws-funding-etc-usdt-swap-1790059727764-1790060609251-b74518d487b3.jsonl.gz",
     "release_id": 402494337,
-    "remote_digest": "sha256:935fb15eecb5b39907a3f5598a8fe617ac0e857822831699889699bb83b28b70",
-    "remote_size": 2544,
+    "remote_digest": "sha256:b74518d487b31cfe4d7b46720401172cd1048c6dd9114c5f9bbc141737f439f9",
+    "remote_size": 2630,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "data-v2-35696301919-s5"
   },
-  "release_asset": "okx-public-ws-funding-crv-usdt-swap-1790059727764-1790060609609-935fb15eecb5.jsonl.gz",
-  "release_asset_id": 607746842,
+  "release_asset": "okx-public-ws-funding-etc-usdt-swap-1790059727764-1790060609251-b74518d487b3.jsonl.gz",
+  "release_asset_id": 607746883,
   "release_id": 402494337,
-  "release_remote_digest": "sha256:935fb15eecb5b39907a3f5598a8fe617ac0e857822831699889699bb83b28b70",
-  "release_remote_size": 2544,
+  "release_remote_digest": "sha256:b74518d487b31cfe4d7b46720401172cd1048c6dd9114c5f9bbc141737f439f9",
+  "release_remote_size": 2630,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s5",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "935fb15eecb5b39907a3f5598a8fe617ac0e857822831699889699bb83b28b70",
+  "sha256": "b74518d487b31cfe4d7b46720401172cd1048c6dd9114c5f9bbc141737f439f9",
   "source": "okx_public_ws",
   "start_ts_ms": 1790059727764,
-  "symbol": "CRV-USDT-SWAP",
+  "symbol": "ETC-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 16,
@@ -75,15 +80,15 @@
     "connection_ids": [
       "okx-04539ffac3bd4c9bb3eb1bbb764274c1"
     ],
-    "first_exchange_ts_ms": 1790059707487,
-    "last_exchange_ts_ms": 1790060609501,
+    "first_exchange_ts_ms": 1790059707138,
+    "last_exchange_ts_ms": 1790060609145,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 16,
-      "max": 20277.0,
-      "min": 107.0,
-      "p50": 108.0,
-      "p95": 110.0
+      "max": 20626.0,
+      "min": 98.0,
+      "p50": 107.0,
+      "p95": 109.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
@@ -94,6 +99,9 @@
       "p95": 159.652149
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v8"
 }

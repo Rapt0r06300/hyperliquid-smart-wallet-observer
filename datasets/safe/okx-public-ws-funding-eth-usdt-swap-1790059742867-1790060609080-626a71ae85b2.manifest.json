@@ -1,16 +1,18 @@
 {
   "asset_verified": true,
-  "bytes": 2603,
+  "bytes": 2795,
   "collection_run_id": "market-35696301919",
   "collector_version": "8681e7bba1bf6c6d70c4d86543d3f42ece362ac7",
   "cost_model": {
     "applicable": false,
     "ready": false
   },
-  "dataset_id": "okx-public-ws-funding-bigtime-usdt-swap-1790059742867-1790060608714-127359cb39f8",
-  "end_ts_ms": 1790060608714,
+  "dataset_id": "okx-public-ws-funding-eth-usdt-swap-1790059742867-1790060609080-626a71ae85b2",
+  "duplicate_count": 0,
+  "end_ts_ms": 1790060609080,
   "event_count": 16,
   "family": "funding",
+  "gap_count": 0,
   "integrity": {
     "desync_count": 0,
     "duplicate_count": 0,
@@ -20,9 +22,11 @@
     "missing_timestamp_count": 0,
     "regression_count": 0
   },
+  "invalid_record_count": 0,
   "observed_channels": [
     "funding"
   ],
+  "out_of_order_count": 0,
   "proof_of_pnl_allowed": false,
   "provenance": {
     "authenticated": false,
@@ -33,36 +37,37 @@
       "websocket"
     ]
   },
-  "quality_reasons": [
-    "VALIDATION_WITHOUT_REPLAY_COMPATIBILITY",
-    "REPLAY_COMPATIBILITY_NOT_PROVEN"
-  ],
-  "quality_status": "PARTIAL",
+  "quality_reasons": [],
+  "quality_status": "SAFE",
   "reconciliation": {
     "status": "SOURCE_CONTINUITY_VERIFIED"
   },
+  "record_count": 16,
   "release": {
-    "asset_id": 607752622,
-    "asset_name": "okx-public-ws-funding-bigtime-usdt-swap-1790059742867-1790060608714-127359cb39f8.jsonl.gz",
+    "asset_id": 607752716,
+    "asset_name": "okx-public-ws-funding-eth-usdt-swap-1790059742867-1790060609080-626a71ae85b2.jsonl.gz",
     "release_id": 402495715,
-    "remote_digest": "sha256:127359cb39f85a70dfe0c5b8e823be8a8ae869805da86c649bc5bc172b3ed380",
-    "remote_size": 2603,
+    "remote_digest": "sha256:626a71ae85b2d8dd16f069a5fe77e13a9dbc7896241b3e63d4e546f6ac036de9",
+    "remote_size": 2795,
     "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
     "tag": "data-v2-35696301919-s1"
   },
-  "release_asset": "okx-public-ws-funding-bigtime-usdt-swap-1790059742867-1790060608714-127359cb39f8.jsonl.gz",
-  "release_asset_id": 607752622,
+  "release_asset": "okx-public-ws-funding-eth-usdt-swap-1790059742867-1790060609080-626a71ae85b2.jsonl.gz",
+  "release_asset_id": 607752716,
   "release_id": 402495715,
-  "release_remote_digest": "sha256:127359cb39f85a70dfe0c5b8e823be8a8ae869805da86c649bc5bc172b3ed380",
-  "release_remote_size": 2603,
+  "release_remote_digest": "sha256:626a71ae85b2d8dd16f069a5fe77e13a9dbc7896241b3e63d4e546f6ac036de9",
+  "release_remote_size": 2795,
   "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "release_tag": "data-v2-35696301919-s1",
+  "replay_compatible": true,
+  "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+  "replay_schema_version": "alina.replay.v2",
   "required_channels": [],
   "schema": "alina.shard_manifest.v2",
-  "sha256": "127359cb39f85a70dfe0c5b8e823be8a8ae869805da86c649bc5bc172b3ed380",
+  "sha256": "626a71ae85b2d8dd16f069a5fe77e13a9dbc7896241b3e63d4e546f6ac036de9",
   "source": "okx_public_ws",
   "start_ts_ms": 1790059742867,
-  "symbol": "BIGTIME-USDT-SWAP",
+  "symbol": "ETH-USDT-SWAP",
   "synchronization": {
     "clock_offset_ms": {
       "count": 16,
@@ -75,15 +80,15 @@
     "connection_ids": [
       "okx-c60fb1455241468c85983fd6cd8743df"
     ],
-    "first_exchange_ts_ms": 1790059706656,
-    "last_exchange_ts_ms": 1790060608622,
+    "first_exchange_ts_ms": 1790059706994,
+    "last_exchange_ts_ms": 1790060608987,
     "max_reconnect_count": 0,
     "receive_minus_exchange_ms": {
       "count": 16,
-      "max": 36211.0,
-      "min": 83.0,
-      "p50": 92.0,
-      "p95": 94.0
+      "max": 35873.0,
+      "min": 87.0,
+      "p50": 93.0,
+      "p95": 123.0
     },
     "reconnect_delta": 0,
     "transport_rtt_ms": {
@@ -94,6 +99,9 @@
       "p95": 155.611878
     }
   },
-  "validation_allowed": false,
-  "venue": "okx"
+  "trade_count": 0,
+  "trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx",
+  "verifier_version": "alina.replay.compatibility.v8"
 }
