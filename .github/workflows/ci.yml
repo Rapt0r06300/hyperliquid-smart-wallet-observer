@@ -16,7 +16,8 @@ permissions:
 
 concurrency:
   group: hypersmart-ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep one running CI proof; newer main commits replace only the pending run.
+  cancel-in-progress: false
 
 env:
   PYTHONPATH: src:tools
