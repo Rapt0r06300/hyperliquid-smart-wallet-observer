@@ -1156,3 +1156,25 @@ def test_restore_refuses_unverified_short_embedded_release_asset(monkeypatch):
     import pytest
     with pytest.raises(module.RestoreError, match="SHA-256"):
         list(module.iter_releases("owner/repo"))
+
+
+def test_failed_release_asset_never_reports_all_bytes_accounted_for(tmp_path, monkeypatch):
+    module = _module()
+    expected = b"canonical-verified-evidence"
+    release = {"tag_name": "evidence-incomplete", "assets": [
+        _asset("evidence.bin", "https://example.invalid/evidence", expected),
+    ]}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+
+    def incomplete_download(_url, target, **_kw):
+        target.write_bytes(expected[:6])
+        return 6, hashlib.sha256(expected[:6]).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", incomplete_download)
+    report = module.restore_everything("owner/repo", tmp_path)
+    assert report["expected_assets"] == 1
+    assert report["asset_count"] == 1
+    assert report["downloaded"] == 0
+    assert len(report["failures"]) == 1
+    assert report["all_source_assets_accounted_for"] is False
+    assert not (tmp_path / "releases" / "evidence-incomplete" / "evidence.bin").exists()

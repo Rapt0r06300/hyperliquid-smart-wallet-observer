@@ -1248,8 +1248,8 @@ def restore_everything(
         + report["resumed_verified"]
         + report["lfs_reused_verified"]
         + report["skipped_verified"]
-        + len(report["failures"])
         == report["expected_assets"]
+        and not report["failures"]
     )
     report_path = destination / "RESTORE_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
