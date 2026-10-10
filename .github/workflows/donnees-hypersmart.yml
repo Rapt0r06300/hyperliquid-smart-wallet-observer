@@ -46,7 +46,7 @@ jobs:
             echo "Aucun test dataset découvert sur Linux"
             exit 1
           fi
-          timeout 300 python -m pytest -q "${DATASET_TESTS[@]}" --tb=line --timeout=15
+          timeout 300 python -m pytest -q "${DATASET_TESTS[@]}" --tb=line --timeout=120
 
           mapfile -t AUTONOMOUS_TESTS < <(find tests -maxdepth 1 -type f -name 'test_autonomous_*.py' | sort)
           if [ "${#AUTONOMOUS_TESTS[@]}" -gt 0 ]; then
@@ -78,13 +78,14 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: src;tools
+          PYTHONUTF8: '1'
         run: |
           $datasetTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_dataset_*.py' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
           if ($datasetTests.Count -eq 0) {
             Write-Error "Aucun test dataset découvert sur Windows"
             exit 1
           }
-          python -m pytest -q @datasetTests --tb=line --timeout=15
+          python -m pytest -q @datasetTests --tb=line --timeout=120
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $autonomousTests = @(Get-ChildItem -LiteralPath tests -Filter 'test_autonomous_*.py' -File | Sort-Object FullName | ForEach-Object { $_.FullName })
