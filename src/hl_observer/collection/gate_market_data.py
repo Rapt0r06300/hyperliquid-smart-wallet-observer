@@ -151,6 +151,13 @@ class GateMarketState:
                 self.asks.clear()
                 return self.quality
             self.rest_anchor_pending = payload.get("_alina_rest_anchor") is True
+            if self.rest_anchor_pending:
+                # A new REST baseline does not belong to the old WS connection.
+                # The next matching WS delta must establish its own connection.
+                self.connection_id = None
+                self.receive_mono_ns = None
+                self.transport_rtt_ms = None
+                self.clock_offset_ms = None
             self.bids.clear()
             self.asks.clear()
             self.sequence = None

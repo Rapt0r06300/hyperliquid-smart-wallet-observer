@@ -233,6 +233,25 @@ def test_gate_rest_base_is_not_executable_until_ws_sequence_bridge() -> None:
     assert 100.5 in state.bids and 101.5 not in state.bids
 
 
+def test_gate_rest_reanchor_clears_old_ws_connection_without_allowing_unbridged_execution() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    old = {"full": True, "id": 10, "t": 1000,
+           "b": [[100, 2]], "a": [[101, 3]],
+           "_alina_transport": {"connection_id": "old"}}
+    assert state.apply_book(old, receive_ts_ms=1000) == "EXPLOITABLE"
+    assert state.connection_id == "old"
+    base = {"full": True, "_alina_rest_anchor": True, "id": 20, "t": 1010,
+            "b": [[100, 2]], "a": [[101, 3]]}
+    assert state.apply_book(base, receive_ts_ms=1010) == "UNMEASURABLE"
+    assert state.connection_id is None and state.rest_anchor_pending
+    next_frame = {"U": 21, "u": 21, "t": 1020,
+                  "b": [[100.5, 1]], "a": [],
+                  "_alina_transport": {"connection_id": "new"}}
+    assert state.apply_book(next_frame, receive_ts_ms=1020) == "EXPLOITABLE"
+    assert state.connection_id == "new"
+    assert not state.rest_anchor_pending
+
+
 def test_gate_rest_base_missing_first_ws_update_fails_closed() -> None:
     state = GateMarketState(contract="BTC_USDT")
     assert state.apply_book({"full": True, "_alina_rest_anchor": True, "id": 40,
