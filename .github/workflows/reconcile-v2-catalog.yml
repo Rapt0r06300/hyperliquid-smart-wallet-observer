@@ -272,8 +272,37 @@ jobs:
           echo "RUN_MANIFEST_COUNT=$COUNT" >> "$GITHUB_ENV"
           echo "canonical run manifests found: $COUNT"
 
+      - name: Prove deterministic complete partitioning before import
+        if: env.RUN_MANIFEST_COUNT != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import tempfile
+          from pathlib import Path
+          from tools.partitioned_data_index import (
+              read_index, partition_index, load_partitioned_index,
+          )
+          index = read_index(Path("catalog/DATA_INDEX.json"))
+          root, parts = partition_index(index)
+          with tempfile.TemporaryDirectory(prefix="alina-partition-preflight-") as tmp:
+              base = Path(tmp)
+              path = base / "DATA_INDEX.json"
+              path.write_text(json.dumps(root, sort_keys=True), encoding="utf-8")
+              for name, data in parts.items():
+                  dest = base / name
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  dest.write_bytes(data)
+              if load_partitioned_index(path) != index:
+                  raise ValueError("PARTITION_IMPORT_PRECHECK_PARITY_MISMATCH")
+          print("PARTITION_IMPORT_PRECHECK_VERIFIED", len(index["shards"]), len(parts))
+          PY
+
       - name: Rebuild control-plane index from target-native manifests
         if: env.RUN_MANIFEST_COUNT != '0'
+        env:
+          ALINA_CATALOG_PARTITION_ACTIVATE: "true"
         shell: bash
         run: |
           set -euo pipefail
@@ -299,10 +328,12 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_partitioned_data_index.py             tests/test_restore_alina.py             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'
+        env:
+          ALINA_CATALOG_PARTITION_ACTIVATE: "true"
         shell: bash
         run: |
           set -euo pipefail
