@@ -572,6 +572,7 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
                     # The REST snapshot is not a verified WS sequence bridge.
                     assert state.quality == "UNMEASURABLE"
                     assert state.reason == "REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE"
+                    assert state.rest_anchor_pending
                     break
                 await asyncio.sleep(0.001)
             else:
@@ -598,6 +599,7 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
     assert state.bids[100.5] == 1.0 and state.asks[101.0] == 3.0
     assert state.gap_count == 0
     assert state.quality == "EXPLOITABLE"
+    assert not state.rest_anchor_pending
 
 
 def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:

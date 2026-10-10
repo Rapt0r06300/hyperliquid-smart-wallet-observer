@@ -215,6 +215,37 @@ def test_gate_orphan_delta_remains_unmeasurable() -> None:
 
 
 
+def test_gate_rest_base_is_not_executable_until_ws_sequence_bridge() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    base = {"full": True, "_alina_rest_anchor": True, "id": 40, "t": 1000,
+            "b": [[100, 2]], "a": [[101, 3]]}
+    assert state.apply_book(base, receive_ts_ms=1010) == "UNMEASURABLE"
+    assert state.reason == "REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE"
+    assert state.sequence == 40 and state.rest_anchor_pending
+    # Neither stale nor same-id WS data proves the REST->WS bridge.
+    assert state.apply_book({"t": 1011, "U": 39, "u": 40, "b": [[101.5, 1]], "a": []},
+                            receive_ts_ms=1011) == "UNMEASURABLE"
+    assert state.sequence == 40 and state.rest_anchor_pending
+    assert 101.5 not in state.bids
+    assert state.apply_book({"t": 1012, "U": 40, "u": 41,
+                             "b": [[100.5, 1]], "a": []}, receive_ts_ms=1012) == "EXPLOITABLE"
+    assert state.sequence == 41 and not state.rest_anchor_pending
+    assert 100.5 in state.bids and 101.5 not in state.bids
+
+
+def test_gate_rest_base_missing_first_ws_update_fails_closed() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    assert state.apply_book({"full": True, "_alina_rest_anchor": True, "id": 40,
+                             "b": [[100, 2]], "a": [[101, 3]]},
+                            receive_ts_ms=1010) == "UNMEASURABLE"
+    assert state.apply_book({"t": 1012, "U": 42, "u": 42,
+                             "b": [[100.5, 1]], "a": []},
+                            receive_ts_ms=1012) == "DESYNC"
+    assert state.reason == "SEQUENCE_GAP"
+    assert state.sequence is None and not state.rest_anchor_pending
+    assert not state.bids and not state.asks
+
+
 def test_gate_missing_update_sequence_invalidates_book() -> None:
     state = GateMarketState(contract="BTC_USDT")
     assert state.apply_book(

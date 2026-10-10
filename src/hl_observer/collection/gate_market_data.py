@@ -79,6 +79,8 @@ class GateMarketState:
     bids: dict[float, float] = field(default_factory=dict)
     asks: dict[float, float] = field(default_factory=dict)
     sequence: int | None = None
+    # An official REST base is evidence, not an executable WS book until bridged.
+    rest_anchor_pending: bool = False
     exchange_ts_ms: int = 0
     receive_ts_ms: int = 0
     quality: str = UNMEASURABLE
@@ -112,6 +114,7 @@ class GateMarketState:
             # WebSocket reconnect delivered every message in between.
             if not is_full_snapshot:
                 self.sequence = None
+                self.rest_anchor_pending = False
                 self.bids.clear()
                 self.asks.clear()
                 self.gap_count += 1
@@ -133,6 +136,7 @@ class GateMarketState:
         ):
             self.quality, self.reason = UNMEASURABLE, "MISSING_OR_INVALID_SEQUENCE"
             self.sequence = None
+            self.rest_anchor_pending = False
             self.bids.clear()
             self.asks.clear()
             return self.quality
@@ -141,14 +145,28 @@ class GateMarketState:
             asks = payload.get("a") or payload.get("asks")
             if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
                 self.quality, self.reason = UNMEASURABLE, "INCOMPLETE_FULL_SNAPSHOT"
+                self.sequence = None
+                self.rest_anchor_pending = False
+                self.bids.clear()
+                self.asks.clear()
                 return self.quality
+            self.rest_anchor_pending = payload.get("_alina_rest_anchor") is True
             self.bids.clear()
             self.asks.clear()
             self.sequence = None
+        if self.rest_anchor_pending and not is_full_snapshot and self.sequence is not None:
+            # A replayable REST->WS bridge requires U <= base_id+1 <= u.
+            # Old/equal deltas do not establish continuity, even if the book is crossed-free.
+            if last <= self.sequence:
+                self.quality, self.reason = UNMEASURABLE, "REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE"
+                return self.quality
+            if first <= self.sequence + 1:
+                self.rest_anchor_pending = False
         if self.sequence is not None and last is not None:
             if first is not None and first > self.sequence + 1:
                 self.gap_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_GAP"
+                self.rest_anchor_pending = False
                 # Invalidate stale depth immediately; old sequence/levels can
                 # never justify future derived execution capacity.
                 self.sequence = None
@@ -158,6 +176,7 @@ class GateMarketState:
             if last < self.sequence:
                 self.regression_count += 1
                 self.quality, self.reason = DESYNC, "SEQUENCE_REGRESSION"
+                self.rest_anchor_pending = False
                 self.sequence = None
                 self.bids.clear()
                 self.asks.clear()
@@ -188,8 +207,9 @@ class GateMarketState:
             self.transport_rtt_ms = _f(transport.get("transport_rtt_ms"))
         if transport.get("clock_offset_ms") is not None:
             self.clock_offset_ms = _f(transport.get("clock_offset_ms"))
-        self.quality = EXPLOITABLE if self._valid() else UNMEASURABLE
-        self.reason = "" if self.quality == EXPLOITABLE else "INVALID_BBO"
+        self.quality = EXPLOITABLE if self._valid() and not self.rest_anchor_pending else UNMEASURABLE
+        self.reason = ("REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE" if self.rest_anchor_pending
+                       else "" if self.quality == EXPLOITABLE else "INVALID_BBO")
         return self.quality
 
     def apply_ticker(self, payload: dict[str, Any]) -> str:
