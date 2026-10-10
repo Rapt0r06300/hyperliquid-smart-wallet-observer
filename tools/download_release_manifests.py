@@ -16,6 +16,11 @@ import tempfile
 import time
 
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 MANIFEST_NAME = "RUN_MANIFEST.json"
 PRODUCTION_RELEASE_PREFIXES = ("data-v2-", "copy-vault-v2-", "archive-v2-", "event-intelligence-v2-")
 TAG_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -329,7 +334,7 @@ def list_release_manifest_tags(
 
 def _known_tags_from_index(path: Path) -> set[str]:
     """Use canonical Release identities, including reversible run-tag aliases."""
-    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc = read_index(path)
     if not isinstance(doc, dict) or not isinstance(doc.get("shards"), list):
         raise RuntimeError("invalid canonical DATA_INDEX for Release enumeration")
     aliases = doc.get("run_manifest_release_tags_by_release") or {}

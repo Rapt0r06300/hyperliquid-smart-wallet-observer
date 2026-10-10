@@ -273,8 +273,8 @@ def test_scoped_release_inventory_skips_known_and_unrelated_asset_lookups(tmp_pa
     from download_release_manifests import _known_tags_from_index, list_release_manifest_tags
     index = tmp_path / "DATA_INDEX.json"
     index.write_text(json.dumps({"shards": [
-        {"release_tag": "data-v2-physical", "run_manifest_release_tag": "data-v2-canonical"},
-        {"release_tag": "archive-v2-part"},
+        {"dataset_id": "physical-1", "release_tag": "data-v2-physical", "run_manifest_release_tag": "data-v2-canonical"},
+        {"dataset_id": "physical-2", "release_tag": "archive-v2-part"},
     ]}), encoding="utf-8")
     known = _known_tags_from_index(index)
     calls = []
@@ -316,7 +316,7 @@ def test_invalid_reconcile_index_aliases_fail_closed(tmp_path):
     import pytest
     from download_release_manifests import _known_tags_from_index
     index = tmp_path / "DATA_INDEX.json"
-    index.write_text(json.dumps({"shards": [{"release_tag": "data-v2-part"}],
+    index.write_text(json.dumps({"shards": [{"dataset_id": "physical-3", "release_tag": "data-v2-part"}],
         "run_manifest_release_tags_by_release": {"data-v2-part": 123}}))
     with pytest.raises(RuntimeError, match="invalid canonical run manifest tag aliases"):
         _known_tags_from_index(index)
@@ -372,3 +372,30 @@ def test_release_listing_refuses_exhausted_page_budget():
     with pytest.raises(RuntimeError, match="page budget exhausted"):
         list_release_manifest_tags("owner/repo", runner=runner, page_size=1, max_pages=1)
     assert len(calls) == 1
+
+
+def test_reconcile_known_tags_supports_partitioned_index_and_detects_tampering(tmp_path):
+    import json
+    import pytest
+    from download_release_manifests import _known_tags_from_index
+    from partitioned_data_index import partition_index
+
+    original = {
+        "schema": "alina.data_index.v2",
+        "run_manifest_release_tags_by_release": {"data-v2-physical": "data-v2-control"},
+        "shards": [{"dataset_id": "shard-one", "release_tag": "data-v2-physical"}],
+    }
+    root, parts = partition_index(original)
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    index_path = catalog / "DATA_INDEX.json"
+    index_path.write_text(json.dumps(root), encoding="utf-8")
+    for name, content in parts.items():
+        target = catalog / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    assert _known_tags_from_index(index_path) == {"data-v2-control"}
+    first = catalog / next(iter(parts))
+    first.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
+        _known_tags_from_index(index_path)
