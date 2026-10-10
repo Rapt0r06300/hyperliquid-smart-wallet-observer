@@ -222,3 +222,24 @@ def test_recovery_git_refs_refuses_ambiguous_release_status(monkeypatch):
     with pytest.raises(module.RecoveryError, match="HTTP 403"):
         module._recovery_releases_from_git_refs("owner/repo")
 
+
+
+def test_recovery_metadata_request_timeout_retries_but_never_assumes_missing(monkeypatch):
+    module = _module()
+    import subprocess
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/gh")
+    calls, waits = [], []
+
+    def fake_run(command, **kwargs):
+        calls.append(kwargs["timeout"])
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(command, timeout=kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 0, "[]", "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.time, "sleep", waits.append)
+    result = module._gh(["api", "repos/owner/repo/releases?per_page=25&page=40"])
+    assert result.returncode == 0
+    assert calls == [60, 60]
+    assert waits == [1]

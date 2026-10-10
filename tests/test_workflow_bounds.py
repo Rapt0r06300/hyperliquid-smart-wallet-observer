@@ -358,3 +358,10 @@ def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():
     assert 'python tools/index_run_manifest.py "${MANIFESTS[@]}"' in text
     assert "git push origin HEAD:main" in text
     assert 'if [ "$published" != true ]; then' in text
+
+
+def test_recovery_contract_finishes_even_when_main_advances():
+    text = _workflow("recovery-contract.yml")
+    assert "group: recovery-contract-" in text
+    assert "cancel-in-progress: false" in text
+    assert "tests/test_recover_dataset_v2_capsules.py" in text

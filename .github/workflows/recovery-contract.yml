@@ -34,7 +34,7 @@ on:
 # Only redundant recovery test runs are superseded. This never cancels collectors.
 concurrency:
   group: recovery-contract-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

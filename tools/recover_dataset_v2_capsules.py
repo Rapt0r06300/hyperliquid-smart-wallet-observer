@@ -48,15 +48,24 @@ def _gh(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
          and not any(arg in {"-X", "--method"} for arg in args))
         or args[:2] == ["release", "download"]
     )
-    attempts = 4 if retryable_read else 1
+    attempts = 6 if retryable_read else 1
     for attempt in range(attempts):
-        result = subprocess.run(
-            [executable, *args],
-            text=True,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        try:
+            result = subprocess.run(
+                [executable, *args],
+                text=True,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                # Bound metadata requests; large immutable archive downloads
+                # use the original unbounded streaming transport.
+                timeout=60 if args and args[0] == "api" else None,
+            )
+        except subprocess.TimeoutExpired:
+            # An API GET timeout is transient, never an absent Release proof.
+            result = subprocess.CompletedProcess(
+                [executable, *args], 124, "", "GitHub API request timeout"
+            )
         if result.returncode == 0:
             break
         detail = (result.stderr or result.stdout or "").lower()
