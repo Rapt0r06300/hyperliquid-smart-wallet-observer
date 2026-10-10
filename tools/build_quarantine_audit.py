@@ -165,7 +165,13 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             continue
 
         record_evidence = record_rows.get(str(row.get("dataset_id") or ""))
-        if isinstance(record_evidence, Mapping) and record_evidence.get("exact") is True:
+        if (
+            isinstance(record_evidence, Mapping)
+            and record_evidence.get("exact") is True
+            and len(str(row.get("sha256") or "")) == 64
+            and str(record_evidence.get("asset_sha256") or "").lower()
+                == str(row.get("sha256") or "").lower()
+        ):
             records = _count(record_evidence.get("record_count"))
         else:
             records = _count(row.get("record_count") or row.get("event_count"))

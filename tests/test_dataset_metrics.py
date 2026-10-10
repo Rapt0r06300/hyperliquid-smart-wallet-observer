@@ -630,3 +630,48 @@ def test_gap_totals_use_original_sha_bound_manifest_not_a_fake_zero(tmp_path, mo
     assert totals["GAP_COUNT_COVERAGE_COMPLETE"] is False
     assert totals["GAP_COUNT_MISSING_SHARDS"] == 1
 
+
+
+def test_metrics_ignore_stale_record_and_size_patch_sha(tmp_path, monkeypatch):
+    import tools.build_catalog_metrics as metrics
+    import json
+
+    cat = tmp_path / "catalog"
+    cat.mkdir()
+    (cat / "DATA_INDEX.json").write_text(json.dumps({
+        "shards": [{
+            "dataset_id": "reuse",
+            "family": "bbo",
+            "venue": "okx",
+            "quality_status": "SAFE",
+            "sha256": "a" * 64,
+            "event_count": 2,
+            "record_count": 2,
+            "bytes": 50,
+            "uncompressed_bytes": 300,
+            "uncompressed_size_exact": True,
+        }]
+    }), encoding="utf-8")
+    (cat / "RECORD_COUNT_PATCH.json").write_text(json.dumps({
+        "records": {"reuse": {
+            "asset_sha256": "b" * 64, "record_count": 1000,
+            "valid_record_count": 1000, "unique_record_count": 1000,
+            "exact": True,
+        }}
+    }), encoding="utf-8")
+    (cat / "UNCOMPRESSED_SIZE_PATCH.json").write_text(json.dumps({
+        "sizes": {"reuse": {"asset_sha256": "b" * 64,
+                            "uncompressed_bytes": 123456}}
+    }), encoding="utf-8")
+    monkeypatch.setattr(metrics, "ROOT", tmp_path)
+    monkeypatch.setattr(metrics, "INDEX", cat / "DATA_INDEX.json")
+    monkeypatch.setattr(metrics, "METRICS", cat / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "RECORD_PATCH", cat / "RECORD_COUNT_PATCH.json")
+    monkeypatch.setattr(metrics, "UNCOMPRESSED_PATCH", cat / "UNCOMPRESSED_SIZE_PATCH.json")
+    monkeypatch.setattr(metrics, "UNIQUE_PATCH", cat / "missing-unique.json")
+    monkeypatch.setattr(metrics, "TRADE_COUNT_PATCH", cat / "missing-trade.json")
+    totals = metrics.build()["totals"]
+    assert totals["TOTAL_RECORDS"] == 2
+    assert totals["TOTAL_UNCOMPRESSED_BYTES"] == 300
+    assert totals["VALID_RECORDS_COVERAGE_COMPLETE"] is False
+    assert totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] == 1

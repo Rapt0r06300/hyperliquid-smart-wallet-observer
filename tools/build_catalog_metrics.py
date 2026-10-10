@@ -204,7 +204,13 @@ def build() -> dict[str, Any]:
                 == str(row.get("sha256") or "").lower()
         )
         record_entry = record_rows.get(dataset_id)
-        if isinstance(record_entry, dict) and record_entry.get("exact") is True:
+        record_entry_sha_bound = (
+            isinstance(record_entry, dict)
+            and len(str(row.get("sha256") or "")) == 64
+            and str(record_entry.get("asset_sha256") or "").lower()
+                == str(row.get("sha256") or "").lower()
+        )
+        if record_entry_sha_bound and record_entry.get("exact") is True:
             records = _int(record_entry.get("record_count"))
             valid_records = _int(record_entry.get("valid_record_count"))
             unique_records = _int(record_entry.get("unique_record_count"))
@@ -214,7 +220,7 @@ def build() -> dict[str, Any]:
             records = _int(row.get("record_count") or row.get("event_count"))
             invalid = _int(row.get("invalid_record_count"))
             duplicates = _int(row.get("duplicate_count"))
-            if isinstance(record_entry, dict) and record_entry.get("status") == "UNAVAILABLE" and record_entry.get("retryable") is not True:
+            if record_entry_sha_bound and record_entry.get("status") == "UNAVAILABLE" and record_entry.get("retryable") is not True:
                 valid_records = 0
                 unique_records = 0
             else:
@@ -258,7 +264,17 @@ def build() -> dict[str, Any]:
         if isinstance(row.get("end_ts_ms"), int):
             end_times.append(int(row["end_ts_ms"]))
         size_entry = size_rows.get(str(row.get("dataset_id")))
-        if isinstance(size_entry, dict) and isinstance(size_entry.get("uncompressed_bytes"), int):
+        size_entry_sha_bound = (
+            isinstance(size_entry, dict)
+            and len(str(row.get("sha256") or "")) == 64
+            and str(size_entry.get("asset_sha256") or "").lower()
+                == str(row.get("sha256") or "").lower()
+        )
+        if (
+            size_entry_sha_bound
+            and type(size_entry.get("uncompressed_bytes")) is int
+            and size_entry["uncompressed_bytes"] >= 0
+        ):
             uncompressed = int(size_entry["uncompressed_bytes"])
             totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] += 1
         elif (
@@ -269,7 +285,7 @@ def build() -> dict[str, Any]:
         ):
             uncompressed = int(row["uncompressed_bytes"])
             totals["UNCOMPRESSED_SIZE_EXACT_ASSETS"] += 1
-        elif isinstance(size_entry, dict) and size_entry.get("status") == "UNAVAILABLE":
+        elif size_entry_sha_bound and size_entry.get("status") == "UNAVAILABLE":
             uncompressed = 0
             totals["UNCOMPRESSED_SIZE_UNAVAILABLE_ASSETS"] += 1
         else:

@@ -83,7 +83,12 @@ def _measure_candidate(
         return dataset_id, size_result, record_result
     except Exception as exc:
         reason = f"{type(exc).__name__}:{str(exc)[:240]}"
-        unavailable = {"status": "UNAVAILABLE", "reason": reason, "retryable": True}
+        unavailable = {
+            "status": "UNAVAILABLE",
+            "reason": reason,
+            "retryable": True,
+            "asset_sha256": str(row.get("sha256") or "").lower(),
+        }
         return dataset_id, dict(unavailable), dict(unavailable)
     finally:
         shutil.rmtree(target, ignore_errors=True)
