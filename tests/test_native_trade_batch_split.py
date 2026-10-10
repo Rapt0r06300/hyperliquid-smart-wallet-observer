@@ -126,3 +126,41 @@ def test_native_trade_batches_preserve_every_trade_exactly_once(
         row.raw_payload[rows_key][0][identity_key] for row in envelopes
     ] == identities
     assert all(len(row.raw_payload[rows_key]) == 1 for row in envelopes)
+
+
+def test_bitget_reverse_timestamp_batch_preserves_identity():
+    source = {
+        "arg": {"channel": "trade", "instId": "BTCUSDT"},
+        "data": [
+            {"tradeId": "later", "ts": "1992"},
+            {"tradeId": "middle", "ts": "1991"},
+            {"tradeId": "earlier", "ts": "1990"},
+        ],
+        "_alina_transport": _transport(),
+    }
+    events = native_tick_envelopes("bitget", source)
+    assert [e.exchange_ts_ms for e in events] == [1990, 1991, 1992]
+    assert [e.raw_payload["data"][0]["tradeId"] for e in events] == [
+        "earlier", "middle", "later",
+    ]
+    assert [e.parsed_summary["source_batch_index"] for e in events] == [2, 1, 0]
+    assert [e.parsed_summary["source_batch_chronological_index"] for e in events] == [0, 1, 2]
+    assert len({e.parsed_summary["source_batch_sha256"] for e in events}) == 1
+    assert source["data"][0]["tradeId"] == "later"
+
+
+def test_bitget_missing_native_timestamp_does_not_get_fabricated_order():
+    source = {
+        "arg": {"channel": "trade", "instId": "BTCUSDT"},
+        "data": [
+            {"tradeId": "a", "ts": "1992"},
+            {"tradeId": "b"},
+            {"tradeId": "c", "ts": "1990"},
+        ],
+        "_alina_transport": _transport(),
+    }
+    events = native_tick_envelopes("bitget", source)
+    assert [e.raw_payload["data"][0]["tradeId"] for e in events] == ["a", "b", "c"]
+    assert all(e.parsed_summary["source_batch_chronology"] == "UNKNOWN" for e in events)
+    assert all(e.parsed_summary["data_gate_ready"] is False for e in events)
+
