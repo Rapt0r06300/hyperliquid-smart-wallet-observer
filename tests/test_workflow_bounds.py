@@ -338,6 +338,15 @@ def test_single_repo_phase_control_propagates_generated_request_id():
     assert '-f request_id="$REQUEST_ID"' in text
 
 
+def test_reconcile_near_limit_uses_one_release_without_dropping_backlog():
+    text = _workflow("reconcile-v2-catalog.yml")
+    assert "if indexed_bytes >= 75 * 1024 * 1024:" in text
+    assert "batch_size = 1" in text
+    assert "remaining = max(0, len(new_tags) - len(batch))" in text
+    assert "REMAINING_NEW_TAGS" in text
+    assert "if: env.RUN_MANIFEST_COUNT != '0' && env.REMAINING_NEW_TAGS != '0'" in text
+
+
 def test_reconcile_regenerates_from_release_manifests_after_concurrent_commit():
     text = _workflow("reconcile-v2-catalog.yml")
     assert "git pull --rebase" not in text
