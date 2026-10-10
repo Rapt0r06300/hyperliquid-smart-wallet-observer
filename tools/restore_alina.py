@@ -875,6 +875,21 @@ def _safe_workspace_target(workspace: Path, relative: str) -> Path:
     return target
 
 
+def _copy_exact_segment(source: Any, output: Any, length: int) -> None:
+    """Copy exactly one snapshot segment with bounded memory, even for multi-GB parts."""
+    if type(length) is not int or length < 0:
+        raise RestoreError("invalid snapshot segment length")
+    remaining = length
+    while remaining:
+        chunk = source.read(min(remaining, 8 * 1024 * 1024))
+        if not chunk:
+            raise RestoreError("short chunk read for snapshot segment")
+        if len(chunk) > remaining:
+            raise RestoreError("snapshot segment exceeded declared length")
+        output.write(chunk)
+        remaining -= len(chunk)
+
+
 def materialize_latest_local_snapshot(
     releases_root: Path,
     workspace: Path,
@@ -976,10 +991,7 @@ def materialize_latest_local_snapshot(
                     raise RestoreError(f"invalid chunk reference for {relative}")
                 with chunk.open("rb") as source:
                     source.seek(offset)
-                    data = source.read(length)
-                if len(data) != length:
-                    raise RestoreError(f"short chunk read for {relative}")
-                output.write(data)
+                    _copy_exact_segment(source, output, length)
         if tmp.stat().st_size != expected_size or _sha256(tmp) != expected_sha:
             tmp.unlink(missing_ok=True)
             raise RestoreError(f"restored local file sha256 mismatch: {relative}")

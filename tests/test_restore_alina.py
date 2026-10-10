@@ -1097,3 +1097,30 @@ def test_release_pagination_uses_small_pages_and_enumerates_every_release(monkey
     assert len({x["id"] for x in result}) == 23
     assert len(urls) == 3
     assert all("per_page=10" in url for url in urls)
+
+
+def test_snapshot_segment_copy_is_exact_and_bounded():
+    module = _module()
+    source_payload = b"segment-payload" * 700000  # > 8 MiB
+    class MeasuredSource(io.BytesIO):
+        largest_request = 0
+        def read(self, size=-1):
+            assert 0 < size <= 8 * 1024 * 1024
+            self.largest_request = max(self.largest_request, size)
+            return super().read(size)
+
+    source = MeasuredSource(source_payload)
+    output = io.BytesIO()
+    module._copy_exact_segment(source, output, len(source_payload) - 3)
+    assert output.getvalue() == source_payload[:-3]
+    assert source.tell() == len(source_payload) - 3
+    assert source.largest_request == 8 * 1024 * 1024
+
+
+def test_snapshot_segment_copy_refuses_short_source_without_padding():
+    import pytest
+    module = _module()
+    output = io.BytesIO()
+    with pytest.raises(module.RestoreError, match="short chunk read"):
+        module._copy_exact_segment(io.BytesIO(b"abc"), output, 7)
+    assert output.getvalue() == b"abc"
