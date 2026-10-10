@@ -70,7 +70,9 @@ def build_snapshot(
         existing = load_snapshot(destination / "MANIFEST.json")
         if existing["source_index_sha256"] != source_sha:
             raise PartitionError("existing snapshot provenance mismatch")
-        if existing["shards"] != rows:
+        if (sorted(existing["shards"], key=lambda r: r["dataset_id"])
+                != sorted(rows, key=lambda r: r["dataset_id"])
+                or existing["source_metadata"] != {k: v for k, v in index.items() if k != "shards"}):
             raise PartitionError("existing snapshot parity mismatch")
         return {"status": "VERIFIED_EXISTING", "shards": len(rows),
                 "source_index_sha256": source_sha, "directory": str(destination)}
