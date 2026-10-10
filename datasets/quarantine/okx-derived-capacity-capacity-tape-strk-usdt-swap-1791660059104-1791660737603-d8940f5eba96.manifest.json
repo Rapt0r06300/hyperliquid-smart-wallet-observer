@@ -1,0 +1,119 @@
+{
+  "asset_verified": true,
+  "bytes": 3857298,
+  "collection_run_id": "market-e8-8-2026101018-v7-0",
+  "collector_version": "0f7757098cddcbdb928c273a48e93c3d70d7223b",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-derived-capacity-capacity-tape-strk-usdt-swap-1791660059104-1791660737603-d8940f5eba96",
+  "end_ts_ms": 1791660737603,
+  "event_count": 6777,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 6777,
+  "release": {
+    "asset_id": 628858914,
+    "asset_name": "packed-shards-0067.zip",
+    "member_name": "okx-derived-capacity-capacity-tape-strk-usdt-swap-1791660059104-1791660737603-d8940f5eba96.jsonl.gz",
+    "release_id": 409170257,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101018-v7-u0",
+    "remote_digest": "sha256:b6d5ff7de1929268e567722289b4eecdddfb7268e59e3e87469e502cd2f09d7b",
+    "remote_size": 93844022,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-derived-capacity-capacity-tape-strk-usdt-swap-1791660059104-1791660737603-d8940f5eba96.jsonl.gz",
+  "release_asset_id": 628858914,
+  "release_container_asset": "packed-shards-0067.zip",
+  "release_id": 409170257,
+  "release_member": "okx-derived-capacity-capacity-tape-strk-usdt-swap-1791660059104-1791660737603-d8940f5eba96.jsonl.gz",
+  "release_remote_digest": "sha256:b6d5ff7de1929268e567722289b4eecdddfb7268e59e3e87469e502cd2f09d7b",
+  "release_remote_size": 93844022,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101018-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d8940f5eba962c7fbf3a4400f48fa8dbfd0bf8091808a3064d2f9380f80d9f6d",
+  "source": "okx_derived_capacity",
+  "start_ts_ms": 1791660059104,
+  "symbol": "STRK-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 6777,
+      "max": 69.0,
+      "min": 1.0,
+      "p50": 33.0,
+      "p95": 69.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-cf608c17275643cca50cd1ca750a0a22"
+    ],
+    "first_exchange_ts_ms": 1791660059004,
+    "last_exchange_ts_ms": 1791660737504,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 6777,
+      "max": 288.0,
+      "min": 91.0,
+      "p50": 101.0,
+      "p95": 114.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 6777,
+      "max": 167.547121,
+      "min": 163.198393,
+      "p50": 163.99244,
+      "p95": 167.081484
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 64538400,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}
