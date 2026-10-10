@@ -14,7 +14,8 @@ permissions:
   attestations: write
 
 concurrency:
-  group: portable-release-${{ github.ref }}
+  # Isolate the fail-closed, non-cancelling proof from legacy queued runs.
+  group: portable-release-stable-v2-${{ github.ref }}
   # Frequent non-collector code commits must not indefinitely cancel the
   # sole Windows extraction proof. Keep one running and one latest pending.
   cancel-in-progress: false
