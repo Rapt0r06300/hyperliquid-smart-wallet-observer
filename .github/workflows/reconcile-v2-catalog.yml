@@ -43,6 +43,44 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Compact existing canonical index before growing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Keep the separate immutable manifest receipts; this only removes
+          # provably repeated release/tag fields from the SAME canonical index.
+          # Commit a compacted, SHA-rebound catalogue before any new Release
+          # can exceed the 85 MiB fail-closed staging limit.
+          published=false
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main
+            git reset --hard origin/main
+            python tools/index_run_manifest.py --compact-existing
+            python tools/build_catalog_metrics.py
+            python tools/build_quarantine_audit.py
+            python tools/check_dataset_quality.py
+            git add catalog
+            if git diff --cached --quiet; then
+              echo "Existing catalog already compacted; no empty commit."
+              published=true
+              break
+            fi
+            git commit -m "data: losslessly compact canonical run locators"
+            if git push origin HEAD:main; then
+              echo "Lossless index compaction durably published."
+              published=true
+              break
+            fi
+            echo "Concurrent main update; rebuilding compaction ($attempt/5)."
+            sleep $((attempt * 3))
+          done
+          if [ "$published" != true ]; then
+            echo "::error::Could not publish lossless index compaction"
+            exit 1
+          fi
+
       - name: Download only new production V2 run manifests (all Releases, bounded batch)
         shell: bash
         run: |
@@ -161,7 +199,7 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'
