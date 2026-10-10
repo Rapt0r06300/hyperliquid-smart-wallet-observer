@@ -68,7 +68,11 @@ SUFFIXES_EXCLUS = (".pyc", ".pyo", ".log", ".lock", ".pid", ".tmp", ".bundle",
                    "-wal", "-shm", ".db-wal", ".db-shm")
 SUFFIXES_ARCHIVES = (".zip", ".7z", ".rar", ".sha256")
 SUFFIXES_SECRETS = (".key", ".p12", ".pfx", ".mnemonic", ".seed", ".keystore")
+# Historical analysis provenance includes absolute Linux runner paths. Keep
+# the exact receipt in the canonical Git clone; never forge/rewrap its
+# immutable economic evidence inside the relocatable Windows-only archive.
 FICHIERS_EXCLUS = (REGISTRE_RELPATH.as_posix(),
+                   "catalog/ANALYSIS_SCOREBOARD_RECEIPT.json",
                    "runtime/data/lanceur_session_marqueur.txt",
                    "runtime/data/COURANTE.json",
                    "moisson_console.txt",

@@ -551,3 +551,11 @@ def test_pointeur_git_lfs_non_materialise_refuse(tmp_path):
     except AP.ArchiveRefuseeError as exc:
         assert "lfs" in str(exc).lower()
     assert not cible.exists()
+
+
+def test_portable_excludes_historical_linux_runner_scoreboard_but_keeps_live_catalogue():
+    # The immutable receipt remains versioned in Git; portable Windows releases
+    # are not permitted to rewrite source provenance for relocatability.
+    assert AP.est_exclu("catalog/ANALYSIS_SCOREBOARD_RECEIPT.json")
+    assert not AP.est_exclu("catalog/DATA_INDEX.json")
+    assert not AP.est_exclu("catalog/DATA_METRICS.json")
