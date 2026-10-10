@@ -108,48 +108,38 @@ jobs:
           git add catalog datasets
           git diff --cached --quiet && exit 0
           git commit -m "data: backfill verified replay compatibility"
-          # Concurrent collectors and control-plane writers can advance main
-          # between a clean rebase and push. Retry with a bounded lease-safe loop.
+          # Do not rebase generated DATA_INDEX/metrics against a moving
+          # canonical main. Discard only this job's unpublished derived work,
+          # then deterministically replay the same immutable-asset verifier on
+          # the latest canonical main before each new push.
           for attempt in 1 2 3 4 5; do
             if git push origin HEAD:main; then
               echo "Replay proof durably published at $(git rev-parse HEAD)"
               exit 0
             fi
-            git fetch origin main
-            if ! git rebase origin/main; then
-              # Generated metrics and reason summaries are rebuildable from
-              # the already merged SHA-bound index. Immutable shard receipts,
-              # classification evidence and index conflicts must fail closed.
-              mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-              rebuildable=${#conflicts[@]}
-              if [ "${#conflicts[@]}" -eq 0 ]; then
-                rebuildable=0
-              fi
-              for conflict in "${conflicts[@]}"; do
-                case "$conflict" in
-                  catalog/DATA_METRICS.json|catalog/REPLAY_COMPATIBILITY_REASONS.json|catalog/QUARANTINE_AUDIT.json|catalog/QUARANTINE_CAUSES.json)
-                    ;;
-                  *)
-                    rebuildable=0
-                    ;;
-                esac
-              done
-              if [ "$rebuildable" -gt 0 ]; then
-                python tools/build_replay_compatibility_reasons.py
-                python tools/build_catalog_metrics.py
-                python tools/build_quarantine_audit.py
-                git add catalog/REPLAY_COMPATIBILITY_REASONS.json catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
-                if ! GIT_EDITOR=true git rebase --continue; then
-                  git rebase --abort || true
-                  exit 1
-                fi
-              else
-                printf 'Unresolved replay publish conflicts:\\n%s\\n' "${conflicts[*]}" >&2
-                git rebase --abort || true
-                exit 1
-              fi
+            if [ "$attempt" -eq 5 ]; then
+              break
             fi
-            echo "Concurrent main update; retrying replay publication ($attempt/5)."
+            git fetch origin main
+            git reset --hard origin/main
+            LIMIT="${{ inputs.per_family_limit || '36' }}"
+            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "trades,agg_trades,fills,userfills,user_fills"
+            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
+            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "bbo"
+            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "l2book,l2,book"
+            python tools/backfill_replay_compatibility.py --limit 18 --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
+            python tools/backfill_replay_compatibility.py --limit 18 --families "cross_venue_capacity_tape"
+            python tools/build_replay_compatibility_reasons.py
+            python tools/build_catalog_metrics.py
+            python tools/build_quarantine_audit.py
+            python tools/check_dataset_quality.py
+            git add catalog datasets
+            if git diff --cached --quiet; then
+              echo "No remaining replay-proof diff on refreshed canonical main."
+              exit 0
+            fi
+            git commit -m "data: backfill verified replay compatibility"
+            echo "Reverified immutable assets against moving main ($attempt/5)"
             sleep $((attempt * 2))
           done
           echo "::error::Replay verification was not published after 5 bounded attempts"

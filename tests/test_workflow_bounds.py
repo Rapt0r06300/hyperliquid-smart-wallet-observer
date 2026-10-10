@@ -365,3 +365,14 @@ def test_recovery_contract_finishes_even_when_main_advances():
     assert "group: recovery-contract-" in text
     assert "cancel-in-progress: false" in text
     assert "tests/test_recover_dataset_v2_capsules.py" in text
+
+
+def test_replay_publisher_recomputes_sha_bound_evidence_after_main_advances():
+    text = _workflow("backfill-replay-compatibility.yml")
+    publish = text.split("- name: Publish replay-proof progress", 1)[1]
+    assert "git reset --hard origin/main" in publish
+    assert "python tools/backfill_replay_compatibility.py" in publish
+    assert "python tools/check_dataset_quality.py" in publish
+    assert "git rebase origin/main" not in publish
+    assert "git rebase --continue" not in publish
+    assert "git diff --cached --quiet" in publish
