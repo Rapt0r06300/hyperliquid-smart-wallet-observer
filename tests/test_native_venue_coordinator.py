@@ -281,7 +281,11 @@ def test_discovery_refresh_detects_new_listing_without_restart() -> None:
         coordinator.discovery_refresh_interval_s = 0.01
         task = asyncio.create_task(coordinator.run_discovery_refresh())
         try:
-            await asyncio.sleep(0.04)
+            # Hosted runners may not schedule the threaded discovery within
+            # an arbitrary 40 ms sleep; wait for the actual event, bounded.
+            async with asyncio.timeout(2.0):
+                while "ETH" not in coordinator.registry:
+                    await asyncio.sleep(0.01)
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
