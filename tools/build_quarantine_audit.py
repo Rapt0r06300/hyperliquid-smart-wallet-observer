@@ -126,7 +126,14 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
     index_path = base / "catalog" / "DATA_INDEX.json"
     metrics_path = base / "catalog" / "DATA_METRICS.json"
     record_patch_path = base / "catalog" / "RECORD_COUNT_PATCH.json"
-    index = read_index(index_path)
+    try:
+        index = read_index(index_path)
+    except ValueError as exc:
+        # Keep the public audit error code stable while rejecting duplicates
+        # early in the shared, fail-closed legacy/partition reader.
+        if "PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID" in str(exc):
+            raise ValueError("QUARANTINE_DUPLICATE_IDENTITY") from exc
+        raise ValueError(f"QUARANTINE_INVALID_INDEX:{exc}") from exc
     metrics = _load(metrics_path, {})
     record_patch = _load(record_patch_path, {})
     record_rows = record_patch.get("records") if isinstance(record_patch, Mapping) else {}

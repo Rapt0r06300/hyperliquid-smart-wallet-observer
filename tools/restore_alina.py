@@ -512,7 +512,14 @@ def _load_current_safe_catalog(
     """
     try:
         index_bytes = index_path.read_bytes()
-        index = read_index(index_path)
+        try:
+            index = read_index(index_path)
+        except ValueError as exc:
+            # Preserve the canonical restore contract after the shared
+            # partition reader detects an invalid identity earlier.
+            if "PARTITION_PARITY_DUPLICATE_OR_MISSING_DATASET_ID" in str(exc):
+                raise RestoreError("missing or duplicated dataset_id in canonical catalog") from exc
+            raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise RestoreError(f"invalid or missing canonical catalog/metrics: {exc}") from exc
