@@ -243,3 +243,29 @@ def test_recovery_metadata_request_timeout_retries_but_never_assumes_missing(mon
     assert result.returncode == 0
     assert calls == [60, 60]
     assert waits == [1]
+
+
+def test_recovery_one_publication_failure_does_not_abandon_other_capsules(
+    monkeypatch,
+):
+    module = _module()
+    releases = [
+        {"tag_name": "alina-recovery-broken", "assets": [{"name": module.INDEX_NAME}]},
+        {"tag_name": "alina-recovery-valid", "assets": [{"name": module.INDEX_NAME}]},
+    ]
+    monkeypatch.setattr(module, "list_recovery_releases", lambda _repo: releases)
+    calls = []
+
+    def fake_recover(_repository, release, _root):
+        calls.append(release["tag_name"])
+        if release["tag_name"] == "alina-recovery-broken":
+            raise module.publisher.PublishError("remote release publication failed")
+        return {"status": "RECOVERED", "recovery_tag": release["tag_name"]}
+
+    monkeypatch.setattr(module, "recover_one", fake_recover)
+    report = module.recover_pending("owner/repo", limit=2)
+    assert calls == ["alina-recovery-broken", "alina-recovery-valid"]
+    assert report["attempted"] == 2
+    assert report["recovered"] == 1
+    assert len(report["failures"]) == 1
+    assert report["failures"][0]["tag"] == "alina-recovery-broken"

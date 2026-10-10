@@ -418,7 +418,10 @@ def recover_pending(repository: str, *, limit: int) -> dict[str, Any]:
                     continue
                 report["attempted"] += 1
                 report["recovered"] += 1
-            except RecoveryError as exc:
+            except (RecoveryError, publisher.PublishError, OSError, ValueError) as exc:
+                # A single bad capsule or failed remote publication must not
+                # strand unrelated recoverable evidence. Preserve each error;
+                # main() still returns a failing exit code for the whole batch.
                 report["attempted"] += 1
                 report["failures"].append(
                     {"tag": release.get("tag_name"), "error": str(exc)}
