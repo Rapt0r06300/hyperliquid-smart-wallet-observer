@@ -195,7 +195,7 @@ def test_reconcile_covers_all_production_release_families_and_pins_actions():
     assert "actions/setup-python@v5" not in text
     assert "actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683" in text
     assert "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065" in text
-    assert "Download only new production V2 run manifests" in text
+    assert "Download new Dataset principal run manifests (bounded batch)" in text
     assert "known={" in text
     assert "group: dataset-v2-catalog-reconcile" in text
     assert "cancel-in-progress: false" in text
