@@ -7,6 +7,8 @@ on:
     paths:
       - '.github/workflows/reconcile-v2-catalog.yml'
       - 'tools/index_run_manifest.py'
+      - 'tools/rebase_disjoint_catalog_publication.py'
+      - 'tests/test_rebase_disjoint_catalog_publication.py'
       - 'tools/download_release_manifests.py'
       - 'tests/test_release_manifest_download.py'
       - 'tools/manifest_policy.py'
@@ -77,6 +79,21 @@ jobs:
               published=true
               break
             fi
+            # Rebase only when *all* remote changes are independent campaign
+            # checkpoints. A catalog, spec, code or policy change forces the
+            # original full rebuild on the next outer attempt.
+            for race in 1 2 3 4 5; do
+              git fetch origin main
+              if ! python tools/rebase_disjoint_catalog_publication.py --remote origin/main; then
+                break
+              fi
+              if git push origin HEAD:main; then
+                echo "Lossless compaction published after safe campaign-only rebase."
+                published=true
+                break
+              fi
+            done
+            [ "$published" = true ] && break
             echo "Concurrent main update; rebuilding compaction ($attempt/5)."
             sleep $((attempt * 3))
           done
@@ -204,7 +221,7 @@ jobs:
           set -euo pipefail
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
+          python -m pytest -q             tests/test_rebase_disjoint_catalog_publication.py             tests/test_run_indexing.py             tests/test_dataset_policy.py             tests/test_dataset_metrics.py             tests/test_manifest_policy.py             tests/test_release_manifest_download.py             tests/test_collection_metrics.py
 
       - name: Commit reconciled catalog
         if: env.RUN_MANIFEST_COUNT != '0'
@@ -240,6 +257,18 @@ jobs:
               published=true
               break
             fi
+            for race in 1 2 3 4 5; do
+              git fetch origin main
+              if ! python tools/rebase_disjoint_catalog_publication.py --remote origin/main; then
+                break
+              fi
+              if git push origin HEAD:main; then
+                echo "Durable reconciliation published after safe campaign-only rebase."
+                published=true
+                break
+              fi
+            done
+            [ "$published" = true ] && break
             echo "Concurrent update detected; rebuilding from immutable manifests (attempt $attempt)."
             sleep $((attempt * 3))
           done
