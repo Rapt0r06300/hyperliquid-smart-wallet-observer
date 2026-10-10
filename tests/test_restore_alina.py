@@ -679,9 +679,7 @@ def test_restore_rejects_zip_with_duplicate_member_names(tmp_path):
         module._verify_zip_archive(archive_path, archive_path.name)
 
 
-def test_restore_rejects_data_release_without_run_manifest_before_download(
-    tmp_path, monkeypatch
-):
+def test_restore_archives_orphan_release_without_claiming_safe(tmp_path, monkeypatch):
     module = _module()
     shard = b"unclassified-data"
     release = {
@@ -689,15 +687,16 @@ def test_restore_rejects_data_release_without_run_manifest_before_download(
         "assets": [_asset("trades.jsonl.gz", "https://example.invalid/shard", shard)],
     }
     monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
-    monkeypatch.setattr(
-        module, "_download_to_path",
-        lambda *_a, **_kw: (_ for _ in ()).throw(
-            AssertionError("incomplete evidence must not be downloaded")
-        ),
-    )
-    import pytest
-    with pytest.raises(module.RestoreError, match="RUN_MANIFEST.json"):
-        module.restore_everything("owner/repo", tmp_path)
+    def fake_download(_url, target, **_kw):
+        target.write_bytes(shard)
+        return len(shard), hashlib.sha256(shard).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    report = module.restore_everything("owner/repo", tmp_path)
+    assert report["downloaded"] == 1
+    assert report["unclaimed_dataset_release_count"] == 1
+    assert report["classification"]["usable_shards"] == 0
+    assert (tmp_path / "releases" / release["tag_name"] /
+            "trades.jsonl.gz").read_bytes() == shard
 
 
 def test_current_catalog_downgrade_overrides_historical_safe_manifest(tmp_path):
@@ -1019,3 +1018,61 @@ def test_restore_rejects_duplicate_lfs_asset_ids(tmp_path):
     path.write_text(json.dumps(manifest))
     with pytest.raises(module.RestoreError, match="duplicate or invalid Git LFS asset id"):
         module._clone_lfs_sources(tmp_path, "owner/repo", [release])
+
+
+def test_restore_verified_overflow_via_canonical_manifest(tmp_path, monkeypatch):
+    module = _module()
+    shard = b"verified-overflow-bytes"
+    digest = hashlib.sha256(shard).hexdigest()
+    data_tag, control_tag = "data-v2-overflow-test", "data-v2-overflow-test-manifest"
+    row = {
+        "dataset_id": "overflow-trade-1", "quality_status": "SAFE",
+        "validation_allowed": True, "replay_compatible": True,
+        "asset_verified": True, "bytes": len(shard), "sha256": digest,
+        "release": {"repository": "owner/repo", "release_tag": data_tag,
+                    "asset_name": "trades.jsonl.gz"},
+    }
+    canonical = {
+        "schema": "alina.dataset_run_manifest.v2",
+        "release_tag": control_tag,
+        "release_parts": [{"release_tag": data_tag}],
+        "manifests": [row],
+    }
+    body = json.dumps(canonical).encode("utf-8")
+    releases = [
+        {"tag_name": data_tag, "assets": [
+            _asset("trades.jsonl.gz", "https://example.invalid/trades", shard)]},
+        {"tag_name": control_tag, "assets": [
+            _asset("RUN_MANIFEST.json", "https://example.invalid/manifest", body)]},
+    ]
+    data = {"https://example.invalid/trades": shard,
+            "https://example.invalid/manifest": body}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter(releases))
+    def fake_download(url, target, **_kw):
+        payload = data[url]
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    index = tmp_path / "DATA_INDEX.json"
+    index.write_text(json.dumps({"shards": [{
+        "dataset_id": row["dataset_id"], "sha256": digest,
+        "quality_status": "SAFE", "replay_compatible": True,
+        "release_tag": data_tag,
+    }]}))
+    metrics = tmp_path / "DATA_METRICS.json"
+    metrics.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }))
+    result = module.restore_everything(
+        "owner/repo", tmp_path / "recovered",
+        catalog_path=index, metrics_path=metrics,
+    )
+    assert result["unclaimed_dataset_release_count"] == 0
+    assert result["verification_failures"] == 0
+    assert result["classification"]["usable_shards"] == 1
+    assert result["classification"]["missing_or_corrupt_rows"] == 0
+    assert result["failures"] == []
+    assert (tmp_path / "recovered" / "usable" / "shards" /
+            data_tag / "overflow-trade-1.jsonl.gz").read_bytes() == shard

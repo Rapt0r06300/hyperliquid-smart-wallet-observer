@@ -619,15 +619,32 @@ def _materialize_classified_shards(
                     "manifest": str(manifest_path),
                 })
                 continue
+            release = row.get("release")
+            release = release if isinstance(release, Mapping) else {}
+            # Overflow run manifests live in a separate control Release.
+            # Each row must resolve to its own immutable data Release.
+            data_tag = str(
+                release.get("release_tag") or release.get("tag")
+                or row.get("release_tag")
+                or payload.get("data_release_base_tag")
+                or release_tag
+            )
             safe = _safe_replay_row(
-                row, repository=repository, release_tag=release_tag
+                row, repository=repository, release_tag=data_tag
             )
             if catalog_safe is not None:
                 safe = safe and catalog_safe.get(dataset_id) == (
-                    str(row.get("sha256") or "").lower(), release_tag
+                    str(row.get("sha256") or "").lower(), data_tag
                 )
-            release = row.get("release")
-            release = release if isinstance(release, Mapping) else {}
+            if (allowed_release_dirs is not None
+                    and _safe_component(data_tag) not in allowed_release_dirs):
+                report["missing_or_corrupt_rows"] += 1
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "RELEASE_TAG_NOT_IN_CURRENT_SOURCE",
+                    "data_release_tag": data_tag,
+                })
+                continue
             storage = str(release.get("storage") or row.get("release_storage") or "")
             outer_name = str(
                 release.get("asset_name")
@@ -646,12 +663,12 @@ def _materialize_classified_shards(
                     "safe_candidate": safe,
                 })
                 continue
-            source = manifest_path.parent / _safe_component(outer_name)
+            source = releases_root / _safe_component(data_tag) / _safe_component(outer_name)
             target_root = (
                 destination
                 / ("usable" if safe else "quarantine")
                 / "shards"
-                / _safe_component(release_tag)
+                / _safe_component(data_tag)
             )
             target_root.mkdir(parents=True, exist_ok=True)
             target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
@@ -975,6 +992,40 @@ def materialize_latest_local_snapshot(
     }
 
 
+def _claimed_data_release_tags(
+    releases_root: Path, allowed_release_dirs: set[str]
+) -> set[str]:
+    """Find data-only Releases claimed by canonical verified manifest files."""
+    claimed: set[str] = set()
+    for path in sorted(releases_root.glob("*/RUN_MANIFEST.json")):
+        if path.parent.name not in allowed_release_dirs:
+            continue
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, Mapping):
+            continue
+        parts = manifest.get("release_parts")
+        for part in parts if isinstance(parts, list) else []:
+            if isinstance(part, Mapping) and isinstance(part.get("release_tag"), str):
+                claimed.add(_safe_component(part["release_tag"]))
+        rows = manifest.get("manifests")
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, Mapping):
+                continue
+            release = row.get("release")
+            release = release if isinstance(release, Mapping) else {}
+            tag = (
+                release.get("release_tag") or release.get("tag")
+                or row.get("release_tag") or manifest.get("data_release_base_tag")
+                or manifest.get("release_tag")
+            )
+            if isinstance(tag, str) and tag:
+                claimed.add(_safe_component(tag))
+    return claimed
+
+
 def restore_everything(
     repository: str,
     destination: Path,
@@ -1006,13 +1057,8 @@ def restore_everything(
         if not isinstance(assets, list):
             raise RestoreError(f"missing asset list for Release {tag}")
         seen_tags.add(tag)
-        # Dataset Releases without the authoritative run manifest cannot be
-        # classified for replay. Refuse an incomplete inventory before download.
-        if tag.lower().startswith(("data-v2", "alina-data-v2")) and not any(
-            isinstance(asset, Mapping) and asset.get("name") == "RUN_MANIFEST.json"
-            for asset in assets
-        ):
-            raise RestoreError(f"dataset Release has no RUN_MANIFEST.json: {tag}")
+        # Data-only Releases are intentional in oversized Dataset runs.
+        # Preserve every SHA-verified byte and classify via canonical manifest.
         seen_names: set[str] = set()
         for asset in assets:
             if not isinstance(asset, Mapping):
@@ -1123,6 +1169,23 @@ def restore_everything(
                 row["assets"].append({"name": asset.get("name"), "status": "FAIL", "error": str(exc)})
         report["releases"].append(row)
 
+    # Interrupted publications remain archived, but cannot claim a fully
+    # qualified restore without a canonical manifest naming their data part.
+    claimed_tags = _claimed_data_release_tags(releases_root, allowed_release_dirs)
+    unclaimed = sorted(
+        str(release["tag_name"])
+        for release in releases
+        if str(release["tag_name"]).lower().startswith(
+            ("data-v2", "alina-data-v2", "alina-data-part-")
+        )
+        and not any(
+            isinstance(asset, Mapping) and asset.get("name") == "RUN_MANIFEST.json"
+            for asset in release["assets"]
+        )
+        and _safe_component(str(release["tag_name"])) not in claimed_tags
+    )
+    report["unclaimed_dataset_release_count"] = len(unclaimed)
+    report["unclaimed_dataset_releases_sample"] = unclaimed[:50]
     report["run_manifest_checks"] = _verify_run_manifests(
         releases_root, allowed_release_dirs=allowed_release_dirs
     )
@@ -1208,6 +1271,7 @@ def main(argv: list[str] | None = None) -> int:
         len(report["failures"])
         + int(report["verification_failures"])
         + len(report["classification"]["failures"])
+        + int(report["unclaimed_dataset_release_count"])
     )
     if not report["all_source_assets_accounted_for"]:
         failures += 1
@@ -1224,6 +1288,7 @@ def main(argv: list[str] | None = None) -> int:
                 "usable_shards": report["classification"]["usable_shards"],
                 "quarantined_shards": report["classification"]["quarantined_shards"],
                 "missing_or_corrupt_rows": report["classification"]["missing_or_corrupt_rows"],
+                "unclaimed_dataset_release_count": report["unclaimed_dataset_release_count"],
                 "failures": failures,
                 "report": str(destination / "RESTORE_REPORT.json"),
             },
