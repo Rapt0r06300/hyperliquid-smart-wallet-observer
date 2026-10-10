@@ -103,7 +103,10 @@ jobs:
           # single-blob hard limit. Keep all pending tags discoverable so the
           # next run resumes, and fail closed at the indexer's 85 MiB guard.
           indexed_bytes = Path("catalog/DATA_INDEX.json").stat().st_size
-          if indexed_bytes >= 80 * 1024 * 1024:
+          # Near the 85 MiB atomic index guard, a two-Release wave
+          # exceeded capacity (verified 2026-10-10). Try a single
+          # immutable Release first; retain all other tags as backlog.
+          if indexed_bytes >= 75 * 1024 * 1024:
               batch_size = 1
           elif indexed_bytes >= 65 * 1024 * 1024:
               batch_size = 2
