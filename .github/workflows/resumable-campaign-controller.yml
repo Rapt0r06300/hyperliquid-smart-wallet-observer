@@ -155,8 +155,9 @@ jobs:
                   continue
               if (
                   row.get("creation_phase")!="COLLECT"
-                  or int(row.get("phase_epoch") or 0)<1
-                  or int(row.get("phase_epoch") or 0)>phase_epoch
+                  # A RUNNING lease from a prior collection epoch must
+                  # never consume capacity in the current COLLECT epoch.
+                  or int(row.get("phase_epoch") or 0)!=phase_epoch
                   or row.get("status")!="RUNNING"
               ):
                   continue
