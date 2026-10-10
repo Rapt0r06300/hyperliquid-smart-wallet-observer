@@ -1,12 +1,16 @@
 {
   "by_category": {
-    "LEGITIMATE_EXCLUSION": {
-      "records": 40037599,
-      "shards": 18895
-    },
     "PARTIAL_EVIDENCE": {
       "records": 15566330,
       "shards": 15408
+    },
+    "REJECT_INTEGRITY_FAILED_UNREPAIRED": {
+      "records": 1089,
+      "shards": 252
+    },
+    "REJECT_RECONCILIATION_OR_PROOF_MISSING": {
+      "records": 40036510,
+      "shards": 18643
     }
   },
   "by_family": {
@@ -952,7 +956,7 @@
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "8999b9ec39b133f845e839c1929cd5792e5cf15c6447be564768461d12991d8f",
+  "source_audit_digest": "ee1a4544da59afa8a9d696211b27a324e0e845ba4a21dfb06e9e813dd619eb1d",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
