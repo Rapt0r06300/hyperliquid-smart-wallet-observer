@@ -164,6 +164,38 @@ def test_listing_retries_504_per_page_without_discarding_previous_pages():
     assert sleeps == [2.0]
 
 
+def test_release_inventory_adapts_deep_504_without_dropping_offsets():
+    import json
+    from download_release_manifests import list_release_manifest_tags
+    calls = []
+
+    def runner(command, **_kwargs):
+        endpoint = command[-1]
+        calls.append(endpoint)
+        size = int(endpoint.split("per_page=")[1].split("&")[0])
+        page = int(endpoint.split("&page=")[1])
+        offset = (page - 1) * size
+        if size == 50 and offset == 50:
+            return subprocess.CompletedProcess(command, 1, "", "HTTP 504 timeout")
+        body = [
+            {"id": 1000 + n, "tag_name": f"data-v2-{n:03d}",
+             "assets": [{"name": "RUN_MANIFEST.json"}]}
+            for n in range(offset, min(80, offset + size))
+        ]
+        return subprocess.CompletedProcess(command, 0, json.dumps(body), "")
+
+    tags = list_release_manifest_tags(
+        "owner/repo", page_size=50, attempts=1,
+        runner=runner, sleeper=lambda _: None,
+    )
+    assert len(tags) == 80
+    assert len(set(tag for tag, _ in tags)) == 80
+    assert tags[0] == ("data-v2-000", True)
+    assert tags[-1] == ("data-v2-079", True)
+    assert any("per_page=25&page=3" in endpoint for endpoint in calls)
+    assert any("per_page=25&page=4" in endpoint for endpoint in calls)
+
+
 def test_listing_reads_truncated_asset_pages():
     from download_release_manifests import list_release_manifest_tags
     import json

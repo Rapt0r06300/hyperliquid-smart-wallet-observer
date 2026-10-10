@@ -242,6 +242,8 @@ def list_release_manifest_tags(
     if max_pages < 1:
         raise ValueError("max_pages must be positive")
     pages = 0
+    offset = 0
+    active_page_size = page_size
     stagnant_pages = 0
     seen_ids: dict[int, str] = {}
     seen_tags: dict[str, int] = {}
@@ -252,10 +254,25 @@ def list_release_manifest_tags(
         if pages > max_pages:
             raise RuntimeError("Release listing page budget exhausted; partial inventory refused")
         prior_unique = len(seen_ids)
-        endpoint = f"repos/{repository}/releases?per_page={page_size}&page={pages}"
-        page = _api_page(
-            endpoint, runner=runner, sleeper=sleeper, attempts=attempts
-        )
+        endpoint = f"repos/{repository}/releases?per_page={active_page_size}&page={offset // active_page_size + 1}"
+        try:
+            page = _api_page(
+                endpoint, runner=runner, sleeper=sleeper, attempts=attempts
+            )
+        except RuntimeError as exc:
+            # Deep-offset HTTP 502/504 may persist even after GET retries.
+            # Keep the exact next *absolute* offset when shrinking pages;
+            # never restart, skip a page, or declare an incomplete inventory.
+            if offset and active_page_size > 10 and any(
+                status in str(exc).lower() for status in ("http 502", "http 504")
+            ):
+                smaller = next((n for n in range(active_page_size // 2, 9, -1)
+                                if offset % n == 0), None)
+                if smaller is not None:
+                    active_page_size = smaller
+                    print(f"Release page request reduced to {smaller} at offset {offset}")
+                    continue
+            raise
         current_page_ids: set[int] = set()
         current_page_tags: set[str] = set()
         for release in page:
@@ -314,7 +331,7 @@ def list_release_manifest_tags(
                 raise RuntimeError(f"malformed asset listing for Release {tag}")
             has_manifest = any(a["name"] == MANIFEST_NAME for a in assets)
             rows.append((tag, has_manifest))
-        if len(page) == page_size:
+        if len(page) == active_page_size:
             # Concurrent Releases can shift offsets. Two complete pages with
             # zero new IDs indicate a stuck service; fail closed, never spin.
             stagnant_pages = stagnant_pages + 1 if len(seen_ids) == prior_unique else 0
@@ -323,13 +340,14 @@ def list_release_manifest_tags(
                     "Release listing pagination made no progress; "
                     "partial inventory refused"
                 )
-        if len(page) < page_size:
+        if len(page) < active_page_size:
             print(
                 f"GitHub Release inventory enumerated: {len(seen_ids)} unique tags, "
                 f"{len(rows)} candidate tags across {pages} pages, "
                 f"{shifted_page_duplicates} stable page overlaps"
             )
             return rows
+        offset += active_page_size
 
 
 def _known_tags_from_index(path: Path) -> set[str]:
