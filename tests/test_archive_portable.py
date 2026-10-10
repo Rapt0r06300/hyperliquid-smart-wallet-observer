@@ -118,6 +118,14 @@ def test_chemins_absolus_json_decodes_unicode_escapes_before_unc_scan():
             json.dumps({"path": dangerous}, ensure_ascii=True)
         ), dangerous
 
+    # A JSON producer can encode the *whole* absolute prefix in Unicode.
+    escaped = r'{"path": "\u0043:\u005cUsers\u005ctest\u005cdata"}'
+    assert AP.chemins_absolus_residuels(escaped)
+
+    # JSON-escaped POSIX slashes must also be decoded before validation.
+    escaped_linux = r'{"path": "\u002fhome\u002frunner\u002fdata"}'
+    assert AP.chemins_absolus_residuels(escaped_linux)
+
     # Non-JSON strings retain the existing fail-closed raw scan.
     assert AP.chemins_absolus_residuels("C:\\Users\\test\\data")
 

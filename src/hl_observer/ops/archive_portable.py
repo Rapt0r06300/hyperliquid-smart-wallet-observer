@@ -423,8 +423,8 @@ def chemins_absolus_residuels(texte: str) -> list[str]:
     not the logical path, so test all decoded string keys and values instead.
     """
     raw = {m.group(0) for m in _ABSOLU.finditer(texte)}
-    if not raw:
-        return []
+    # Decode JSON even when the serialized text has no literal path marker:
+    # Unicode escapes can hide every character of an absolute path.
     try:
         value = json.loads(texte)
     except (ValueError, TypeError):
