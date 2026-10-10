@@ -1,0 +1,116 @@
+{
+  "asset_verified": true,
+  "bytes": 122319,
+  "collection_run_id": "market-e8-7-2026101009-v7-0",
+  "collector_version": "04e6e2d9b2876946f2fd5deb958f57f8ec867f93",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-l2book-csopsamsung2l-usdt-swap-1791626271983-1791629766969-781ba2064d8c",
+  "end_ts_ms": 1791629766969,
+  "event_count": 1111,
+  "family": "l2Book",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "l2Book"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 1111,
+  "release": {
+    "asset_id": 627749672,
+    "asset_name": "packed-shards-0055.zip",
+    "member_name": "okx-public-ws-l2book-csopsamsung2l-usdt-swap-1791626271983-1791629766969-781ba2064d8c.jsonl.gz",
+    "release_id": 408889839,
+    "release_tag": "data-v2-campaign-market-e8-7-2026101009-v7-u0",
+    "remote_digest": "sha256:9111b731ee223427cedcc748dc54b493639973f92f1e926cd4a3c2501d374c89",
+    "remote_size": 39542926,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-l2book-csopsamsung2l-usdt-swap-1791626271983-1791629766969-781ba2064d8c.jsonl.gz",
+  "release_asset_id": 627749672,
+  "release_container_asset": "packed-shards-0055.zip",
+  "release_id": 408889839,
+  "release_member": "okx-public-ws-l2book-csopsamsung2l-usdt-swap-1791626271983-1791629766969-781ba2064d8c.jsonl.gz",
+  "release_remote_digest": "sha256:9111b731ee223427cedcc748dc54b493639973f92f1e926cd4a3c2501d374c89",
+  "release_remote_size": 39542926,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026101009-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "781ba2064d8c5024d952d649d81420ce73c5dc3eac49618a0e94a3d3e959f94b",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791626271983,
+  "symbol": "CSOPSAMSUNG2L-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1111,
+      "max": 122.5,
+      "min": 15.5,
+      "p50": 21.5,
+      "p95": 35.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-8a0cb9ca02b5420e8e7b1e1871d75156"
+    ],
+    "first_exchange_ts_ms": 1791626271604,
+    "last_exchange_ts_ms": 1791629766907,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1111,
+      "max": 379.0,
+      "min": 55.0,
+      "p50": 65.0,
+      "p95": 94.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1111,
+      "max": 118.792696,
+      "min": 0.0,
+      "p50": 104.206929,
+      "p95": 109.993309
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 1685565,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": true,
+  "venue": "okx"
+}

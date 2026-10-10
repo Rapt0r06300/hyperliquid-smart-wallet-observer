@@ -1,0 +1,119 @@
+{
+  "asset_verified": true,
+  "bytes": 2265064,
+  "collection_run_id": "market-e8-7-2026101008-v7-0",
+  "collector_version": "06e7e0acd612a13fbf008998e791d45dae978041",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-derived-capacity-capacity-tape-moodeng-usdt-swap-1791621004389-1791624502839-1d3530c596ef",
+  "end_ts_ms": 1791624502839,
+  "event_count": 6217,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 6217,
+  "release": {
+    "asset_id": 627571492,
+    "asset_name": "packed-shards-0053.zip",
+    "member_name": "okx-derived-capacity-capacity-tape-moodeng-usdt-swap-1791621004389-1791624502839-1d3530c596ef.jsonl.gz",
+    "release_id": 408848812,
+    "release_tag": "data-v2-campaign-market-e8-7-2026101008-v7-u0",
+    "remote_digest": "sha256:f13583d90b6da36dee3603be7cce9265666972ea47ff6b7e961eaf23f3c67efd",
+    "remote_size": 103801274,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-derived-capacity-capacity-tape-moodeng-usdt-swap-1791621004389-1791624502839-1d3530c596ef.jsonl.gz",
+  "release_asset_id": 627571492,
+  "release_container_asset": "packed-shards-0053.zip",
+  "release_id": 408848812,
+  "release_member": "okx-derived-capacity-capacity-tape-moodeng-usdt-swap-1791621004389-1791624502839-1d3530c596ef.jsonl.gz",
+  "release_remote_digest": "sha256:f13583d90b6da36dee3603be7cce9265666972ea47ff6b7e961eaf23f3c67efd",
+  "release_remote_size": 103801274,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026101008-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1d3530c596efb37a2e7a0699c1debf9b3f5897bce355d48ff7faa39ee1441a03",
+  "source": "okx_derived_capacity",
+  "start_ts_ms": 1791621004389,
+  "symbol": "MOODENG-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 6217,
+      "max": 95.5,
+      "min": 7.5,
+      "p50": 18.5,
+      "p95": 78.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-public-0b2cfe9cdd6d4f5e9d23c867c92e86c6"
+    ],
+    "first_exchange_ts_ms": 1791621003908,
+    "last_exchange_ts_ms": 1791624502704,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 6217,
+      "max": 481.0,
+      "min": 102.0,
+      "p50": 118.0,
+      "p95": 149.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 6217,
+      "max": 241.224392,
+      "min": 0.0,
+      "p50": 190.50592,
+      "p95": 193.245989
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 59512279,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "okx"
+}
