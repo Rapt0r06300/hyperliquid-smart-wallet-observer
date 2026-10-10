@@ -474,7 +474,7 @@ def test_index_drops_duplicate_diagnostics_only_when_sha_receipt_matches(tmp_pat
     assert row["replay_compatible"] is True
     assert row["quality_status"] == "SAFE"
     assert row["sha256"] == receipt["sha256"]
-    assert "source" not in row
+    assert row["source"] == "bybit_public_ws"
     assert "replay_schema_version" not in row
     assert "replay_reason" not in row
     assert receipt["source"] == "bybit_public_ws"

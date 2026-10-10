@@ -251,7 +251,7 @@ def _has_sha_bound_receipt(root: Path, row: Mapping[str, Any]) -> bool:
         and len(str(row.get("sha256") or "")) == 64
         and all(
             key not in row or receipt.get(key) == row.get(key)
-            for key in ("replay_reason", "replay_schema_version", "source")
+            for key in ("replay_reason", "replay_schema_version")
         )
     )
 
@@ -273,7 +273,7 @@ def _compact_index_row(
         # Duplicated human-readable diagnostics live in the immutable SHA-bound
         # per-shard manifest. Their removal from the search index never drops
         # replay compatibility or source provenance from its authoritative proof.
-        if receipt_backed and key in {"replay_reason", "replay_schema_version", "source"}:
+        if receipt_backed and key in {"replay_reason", "replay_schema_version"}:
             continue
         if (inherit_canonical_repo and key == "release_repository"
                 and value == CANONICAL_DATA_REPOSITORY):
@@ -393,7 +393,7 @@ def index_run_manifests(
         key: _compact_index_row(
             old_row, inherit_canonical_repo=True,
             receipt_backed=(
-                any(k in old_row for k in ("replay_reason", "replay_schema_version", "source"))
+                any(k in old_row for k in ("replay_reason", "replay_schema_version"))
                 and _has_sha_bound_receipt(base, old_row)
             ),
         )
