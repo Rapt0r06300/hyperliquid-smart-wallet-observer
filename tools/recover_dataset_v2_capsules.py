@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tarfile
@@ -86,6 +87,38 @@ RECOVERY_RELEASE_PAGE_SIZE = 100
 MIN_RECOVERY_RELEASE_PAGE_SIZE = 25
 
 
+def _recovery_releases_from_git_refs(repository: str) -> list[Mapping[str, Any]]:
+    """Avoid deep-offset GitHub Release pagination; verify every candidate tag."""
+    refs = _json_api(f"repos/{repository}/git/matching-refs/tags/{RECOVERY_PREFIX}")
+    if not isinstance(refs, list):
+        raise RecoveryError("recovery Git-ref inventory is not a list")
+    prefix = "refs/tags/" + RECOVERY_PREFIX
+    tags: set[str] = set()
+    for ref in refs:
+        full = ref.get("ref") if isinstance(ref, Mapping) else None
+        if isinstance(full, str) and full.startswith(prefix):
+            tag = full[len("refs/tags/"):]
+            if re.fullmatch(r"alina-recovery-[A-Za-z0-9._-]{1,100}", tag):
+                tags.add(tag)
+    releases: list[Mapping[str, Any]] = []
+    for tag in sorted(tags):
+        response = _gh(["api", f"repos/{repository}/releases/tags/{tag}"], check=False)
+        if response.returncode != 0:
+            message = (response.stderr or response.stdout or "").lower()
+            if "http 404" in message:
+                continue
+            raise RecoveryError(f"recovery Release lookup failed for {tag}: {message[:300]}")
+        try:
+            release = json.loads(response.stdout)
+        except json.JSONDecodeError as exc:
+            raise RecoveryError(f"invalid recovery Release JSON: {tag}") from exc
+        if not isinstance(release, Mapping) or release.get("tag_name") != tag:
+            raise RecoveryError(f"recovery Git-ref/Release mismatch: {tag}")
+        releases.append(release)
+    releases.sort(key=lambda row: (str(row.get("created_at") or ""), str(row["tag_name"])))
+    return releases
+
+
 def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
     releases: list[Mapping[str, Any]] = []
     page_size = RECOVERY_RELEASE_PAGE_SIZE
@@ -107,6 +140,10 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
                 page_size //= 2
                 page = start_offset // page_size + 1
                 continue
+            if "http 504" in message or "http 502" in message:
+                # Changing page size is insufficient when GitHub's deep
+                # offset itself is slow. Switch methods rather than looping.
+                return _recovery_releases_from_git_refs(repository)
             raise
         if not isinstance(payload, list):
             raise RecoveryError("release listing is not an array")

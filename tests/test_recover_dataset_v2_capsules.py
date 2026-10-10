@@ -173,3 +173,52 @@ def test_recovery_listing_504_at_min_page_never_returns_partial(monkeypatch):
     monkeypatch.setattr(module, "_json_api", fake_api)
     with pytest.raises(module.RecoveryError, match="HTTP 504"):
         module.list_recovery_releases("owner/repo")
+
+def test_recovery_deep_offset_failure_switches_to_verified_git_refs(monkeypatch):
+    module = _module()
+    import subprocess
+
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    monkeypatch.setattr(module, "MIN_RECOVERY_RELEASE_PAGE_SIZE", 1)
+
+    def fake_api(path):
+        if "/releases?" in path:
+            raise module.RecoveryError("HTTP 504")
+        if "/git/matching-refs/tags/" in path:
+            return [
+                {"ref": "refs/tags/alina-recovery-aaa"},
+                {"ref": "refs/tags/alina-recovery-bbb"},
+                {"ref": "refs/tags/unrelated"},
+            ]
+        raise AssertionError(path)
+
+    def fake_gh(args, *, check=True):
+        tag = args[1].rsplit("/", 1)[-1]
+        if tag.endswith("bbb"):
+            return subprocess.CompletedProcess(args, 1, "", "HTTP 404")
+        return subprocess.CompletedProcess(args, 0, __import__("json").dumps({
+            "tag_name": tag, "created_at": "2026-10-10T00:00:00Z",
+            "assets": [{"name": module.INDEX_NAME}],
+        }), "")
+
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    monkeypatch.setattr(module, "_gh", fake_gh)
+    assert [r["tag_name"] for r in module.list_recovery_releases("owner/repo")] == [
+        "alina-recovery-aaa"
+    ]
+
+
+def test_recovery_git_refs_refuses_ambiguous_release_status(monkeypatch):
+    module = _module()
+    import subprocess
+    import pytest
+    monkeypatch.setattr(module, "_json_api", lambda _path: [
+        {"ref": "refs/tags/alina-recovery-one"},
+    ])
+    monkeypatch.setattr(
+        module, "_gh", lambda args, *, check=True:
+        subprocess.CompletedProcess(args, 1, "", "HTTP 403"),
+    )
+    with pytest.raises(module.RecoveryError, match="HTTP 403"):
+        module._recovery_releases_from_git_refs("owner/repo")
+
