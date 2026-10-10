@@ -392,7 +392,10 @@ def index_run_manifests(
     rows_by_id = {
         key: _compact_index_row(
             old_row, inherit_canonical_repo=True,
-            receipt_backed=_has_sha_bound_receipt(base, old_row),
+            receipt_backed=(
+                any(k in old_row for k in ("replay_reason", "replay_schema_version", "source"))
+                and _has_sha_bound_receipt(base, old_row)
+            ),
         )
         for key, old_row in rows_by_id.items()
     }
