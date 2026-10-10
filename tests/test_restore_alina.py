@@ -262,6 +262,39 @@ def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkey
     assert len([url for url in calls if "/assets?" in url]) == 2
 
 
+
+def test_iter_releases_504_retries_same_absolute_offset(monkeypatch):
+    module = _module()
+    calls = []
+
+    def fake_json(url, **_kwargs):
+        calls.append(url)
+        if "per_page=10&page=2" in url:
+            raise module.RestoreError("HTTP 504 for deep Release page")
+        size = int(url.split("per_page=")[1].split("&")[0])
+        page = int(url.split("&page=")[1])
+        offset = (page - 1) * size
+        return [
+            {"id": i + 1, "tag_name": f"data-v2-{i}",
+             "assets": [{
+                 "id": i + 100,
+                 "name": "shard.jsonl.gz",
+                 "size": 1,
+                 "digest": "sha256:" + "a" * 64,
+                 "browser_download_url": f"https://example.invalid/{i}",
+                 "state": "uploaded",
+             }]}
+            for i in range(offset, min(12, offset + size))
+        ]
+
+    monkeypatch.setattr(module, "_json", fake_json)
+    rows = list(module.iter_releases("owner/repo"))
+    assert len(rows) == 12
+    assert len({row["id"] for row in rows}) == 12
+    assert any("per_page=5&page=3" in url for url in calls)
+
+
+
 def test_iter_releases_rejects_malformed_or_duplicate_asset_pages(monkeypatch):
     module = _module()
     asset = {**_asset("one.bin", "https://example.invalid/one", b"a"), "id": 7, "state": "uploaded"}
