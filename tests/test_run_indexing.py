@@ -435,6 +435,8 @@ def test_index_loads_trade_patch_files_once_per_batch(tmp_path, monkeypatch):
     }}), encoding="utf-8")
     unique_patch.write_text(json.dumps({"counts": {
         m["dataset_id"]: {
+            "asset_sha256": m["sha256"],
+            "trade_count_scanned": 10 + i,
             "unique_trade_count": 10 + i,
             "unique_trade_count_exact": True,
         } for i, m in enumerate(entries)
