@@ -114,6 +114,42 @@ def test_quarantine_audit_finds_historical_live_only_false_quarantine(tmp_path: 
     assert report["by_category"]["PARTIAL_EVIDENCE"]["shards"] == 1
 
 
+
+@pytest.mark.parametrize(
+    ("stored_status", "current_status", "current_reasons", "expected"),
+    [
+        ("REJECT", "UNAVAILABLE", ["MANIFEST_UNREADABLE"],
+         "EVIDENCE_UNAVAILABLE_NOT_IRRECOVERABLE"),
+        ("REJECT", "REJECT", ["RECONCILIATION_UNVERIFIED"],
+         "REJECT_RECONCILIATION_OR_PROOF_MISSING"),
+        ("REJECT", "REJECT", ["REPLAY_COMPATIBILITY_NOT_PROVEN"],
+         "REJECT_RECONCILIATION_OR_PROOF_MISSING"),
+        ("REJECT", "REJECT", ["FATAL_INTEGRITY:gap_count=1"],
+         "REJECT_INTEGRITY_FAILED_UNREPAIRED"),
+        ("REJECT", "REJECT", ["OTHER"],
+         "REJECT_UNRESOLVED_NOT_PROVEN_PERMANENT"),
+        ("REJECT", "PARTIAL", ["RECONCILIATION_UNVERIFIED"],
+         "OVERSTRICT_REJECT_STILL_PARTIAL"),
+        ("PARTIAL", "PARTIAL", ["ASSET_NOT_VERIFIED"], "PARTIAL_EVIDENCE"),
+        ("REJECT", "SAFE", [],
+         "STALE_CLASSIFICATION_NOW_SAFE"),
+    ],
+)
+def test_non_safe_diagnostics_do_not_equate_reject_with_permanent_loss(
+    stored_status, current_status, current_reasons, expected,
+):
+    from tools.build_quarantine_audit import _category
+
+    category = _category(
+        stored_status,
+        current_status,
+        historical_archive=False,
+        stored_reasons=[],
+        current_reasons=current_reasons,
+    )
+    assert category == expected
+
+
 def test_repair_stale_safe_classification_preserves_evidence(tmp_path: Path):
     catalog = tmp_path / "catalog"
     quarantine = tmp_path / "datasets" / "quarantine"

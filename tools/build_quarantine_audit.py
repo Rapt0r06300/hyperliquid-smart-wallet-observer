@@ -62,7 +62,15 @@ def _category(
     *,
     historical_archive: bool,
     stored_reasons: list[str],
+    current_reasons: list[str],
 ) -> str:
+    """Diagnostic, never a statement that rejected bytes are irrecoverable.
+
+    REJECT means unsafe for replay now. An unverified asset or reconciliation
+    is not proof that its authoritative source cannot be recovered later.
+    """
+    if current_status == "UNAVAILABLE":
+        return "EVIDENCE_UNAVAILABLE_NOT_IRRECOVERABLE"
     live_only = (
         historical_archive
         and current_status == "SAFE"
@@ -73,11 +81,28 @@ def _category(
         return "HISTORICAL_LIVE_RULE_FALSE_QUARANTINE"
     if current_status == "SAFE":
         return "STALE_CLASSIFICATION_NOW_SAFE"
-    if stored_status in REJECT_STATUSES and current_status == "PARTIAL":
-        return "OVERSTRICT_REJECT_STILL_PARTIAL"
+    if stored_status in REJECT_STATUSES:
+        if current_status == "PARTIAL":
+            return "OVERSTRICT_REJECT_STILL_PARTIAL"
+        reasons = [*stored_reasons, *current_reasons]
+        if any(
+            "RECONCILIATION" in reason
+            or "REPLAY_COMPATIBILITY_NOT_PROVEN" in reason
+            or "PARENT_L2_SHARD_NOT_VERIFIED" in reason
+            or "ASSET_NOT_VERIFIED" in reason
+            for reason in reasons
+        ):
+            return "REJECT_RECONCILIATION_OR_PROOF_MISSING"
+        if any(
+            "FATAL_INTEGRITY" in reason or "DESYNC" in reason
+            or "SEQUENCE_GAP" in reason
+            for reason in reasons
+        ):
+            return "REJECT_INTEGRITY_FAILED_UNREPAIRED"
+        return "REJECT_UNRESOLVED_NOT_PROVEN_PERMANENT"
     if stored_status in QUARANTINE_STATUSES:
         return "PARTIAL_EVIDENCE"
-    return "LEGITIMATE_EXCLUSION"
+    return "OTHER_NON_SAFE_UNRESOLVED"
 
 
 def _add_bucket(
@@ -199,6 +224,7 @@ def build(root: str | Path = ROOT) -> dict[str, Any]:
             current_status,
             historical_archive=historical,
             stored_reasons=stored_reasons,
+            current_reasons=list(current_reasons),
         )
         if historical:
             historical_non_safe += 1
