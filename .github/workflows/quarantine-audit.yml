@@ -107,6 +107,8 @@ jobs:
               datasets/safe \
               datasets/quarantine \
               datasets/rejected
+            # Never publish a partition root without its matching Git blobs.
+            if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
             if git diff --cached --quiet; then
               echo "Quarantine audit and repaired catalog already current."
               published=true
