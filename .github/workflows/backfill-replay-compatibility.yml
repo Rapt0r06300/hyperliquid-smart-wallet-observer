@@ -64,6 +64,7 @@ jobs:
           python -m pytest -q \
             tests/test_replay_compatibility.py \
             tests/test_backfill_replay_compatibility_candidates.py \
+            tests/test_replay_receipt_publish.py \
             tests/test_manifest_policy.py --tb=line
 
       - name: Enforce SAFE implies replay-compatible
@@ -107,40 +108,38 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add catalog datasets
           git diff --cached --quiet && exit 0
+          # Capture only NEW Release-verified SHA/size-bound results before the
+          # first push. A competing writer must not force another large remote
+          # download or an unsafe rebase of a generated catalog.
+          RECEIPTS="$RUNNER_TEMP/alina-verified-replay-receipts.json"
+          python tools/replay_receipt_publish.py capture "$RECEIPTS"
           git commit -m "data: backfill verified replay compatibility"
-          # Do not rebase generated DATA_INDEX/metrics against a moving
-          # canonical main. Discard only this job's unpublished derived work,
-          # then deterministically replay the same immutable-asset verifier on
-          # the latest canonical main before each new push.
-          for attempt in 1 2 3 4 5; do
+          for attempt in 1 2 3 4 5 6 7 8; do
             if git push origin HEAD:main; then
               echo "Replay proof durably published at $(git rev-parse HEAD)"
               exit 0
             fi
-            if [ "$attempt" -eq 5 ]; then
+            if [ "$attempt" -eq 8 ]; then
               break
             fi
+            # Rebuild on the actual latest main, never git merge/rebase the
+            # generated DATA_INDEX. Reapply only immutable receipts whose
+            # manifest, source locator, SHA, size and verifier still match.
             git fetch origin main
             git reset --hard origin/main
-            LIMIT="${{ inputs.per_family_limit || '36' }}"
-            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "trades,agg_trades,fills,userfills,user_fills"
-            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "copy_vault_fills,copy_vault_l2,copy_vault_positions,copy_vault_selection,copy_vault_snapshot"
-            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "bbo"
-            python tools/backfill_replay_compatibility.py --limit "$LIMIT" --families "l2book,l2,book"
-            python tools/backfill_replay_compatibility.py --limit 18 --families "capacity_tape,ticker,mark_price,open_interest,funding,funding_settlement,instrument_metadata,activeassetctx"
-            python tools/backfill_replay_compatibility.py --limit 18 --families "cross_venue_capacity_tape"
+            python tools/replay_receipt_publish.py apply "$RECEIPTS"
             python tools/build_replay_compatibility_reasons.py
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
             python tools/check_dataset_quality.py
             git add catalog datasets
             if git diff --cached --quiet; then
-              echo "No remaining replay-proof diff on refreshed canonical main."
+              echo "Replay receipts already published on canonical main."
               exit 0
             fi
             git commit -m "data: backfill verified replay compatibility"
-            echo "Reverified immutable assets against moving main ($attempt/5)"
-            sleep $((attempt * 2))
+            echo "Rebuilt SHA-verified receipts on latest main ($attempt/8)"
+            sleep "$attempt"
           done
-          echo "::error::Replay verification was not published after 5 bounded attempts"
+          echo "::error::Replay verification was not published after 8 bounded attempts"
           exit 1
