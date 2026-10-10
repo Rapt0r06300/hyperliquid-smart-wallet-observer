@@ -5,8 +5,8 @@
       "shards": 15030
     },
     "PARTIAL_EVIDENCE": {
-      "records": 13784521,
-      "shards": 14641
+      "records": 13784893,
+      "shards": 14647
     }
   },
   "by_family": {
@@ -43,8 +43,8 @@
       "shards": 1287
     },
     "external_events": {
-      "records": 549,
-      "shards": 6
+      "records": 921,
+      "shards": 12
     },
     "funding": {
       "records": 480,
@@ -77,8 +77,8 @@
   },
   "by_status": {
     "PARTIAL": {
-      "records": 13784521,
-      "shards": 14641
+      "records": 13784893,
+      "shards": 14647
     },
     "REJECT": {
       "records": 39425179,
@@ -103,8 +103,8 @@
       "shards": 5501
     },
     "unknown": {
-      "records": 3024166,
-      "shards": 1293
+      "records": 3024538,
+      "shards": 1299
     }
   },
   "by_venue_family": {
@@ -229,8 +229,8 @@
       "shards": 1287
     },
     "unknown|external_events": {
-      "records": 549,
-      "shards": 6
+      "records": 921,
+      "shards": 12
     }
   },
   "current_reasons": {
@@ -476,7 +476,7 @@
     }
   },
   "legacy_cumulative_queue_drops_may_be_repeated_across_rotations": true,
-  "non_safe_shards": 29671,
+  "non_safe_shards": 29677,
   "paper_only": true,
   "potential_false_non_safe_count": 0,
   "quarantine_total_matches_metrics": true,
@@ -542,10 +542,6 @@
     },
     "bitget|ticker|FATAL_INTEGRITY:gap_count=1795": {
       "records": 1149,
-      "shards": 8
-    },
-    "bitget|ticker|FATAL_INTEGRITY:gap_count=1798": {
-      "records": 1102,
       "shards": 8
     },
     "bitget|ticker|FATAL_INTEGRITY:gap_count=1804": {
@@ -963,12 +959,16 @@
     "unknown|cross_venue_capacity_tape|REPLAY_COMPATIBILITY_NOT_PROVEN": {
       "records": 886887,
       "shards": 191
+    },
+    "unknown|external_events|RECONCILIATION_UNAVAILABLE": {
+      "records": 921,
+      "shards": 12
     }
   },
   "record_counts_overlap_reasons": true,
   "schema": "alina.quarantine_root_causes.v1",
   "scope": "indexed_dataset_only",
-  "source_audit_digest": "0fd77554633479eecbf88bedf47e4644c1f4ed1897de45fd997f7b87645d4754",
+  "source_audit_digest": "60871dd68eb1932ae92c0d12d9d0e4009c5e6368dd8cadfa5a91f41ec5a1db63",
   "source_gap_causes": {
     "bitget|bbo|LEGACY_CUMULATIVE_INGRESS_LOSS": {
       "records": 102670,
@@ -1139,12 +1139,12 @@
       "shards": 273
     },
     "unknown|external_events|EVIDENCE_OR_RECONCILIATION_NOT_GAP": {
-      "records": 549,
-      "shards": 6
+      "records": 921,
+      "shards": 12
     }
   },
-  "source_index_sha256": "0ecd219526e5f5f038a4ca6780e5bf73783376a10fc76b9b2e296e4fa332734a",
-  "source_shards": 74866,
+  "source_index_sha256": "ddcc79166a6d05eef0b085edddd55e027fa6409e0997f68420b4f713e9b5e9b9",
+  "source_shards": 74872,
   "status": "DIAGNOSIS_ONLY",
   "stored_reasons": {
     "FATAL_INTEGRITY:gap_count=1": {
