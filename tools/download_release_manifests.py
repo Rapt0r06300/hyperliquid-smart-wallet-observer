@@ -198,6 +198,9 @@ def _api_page(
                 raise RuntimeError(f"malformed GitHub page {endpoint}")
             return body
         error = (proc.stderr or proc.stdout or "unknown API failure")[:350]
+        # A depleted installation allowance will not recover via short retries.
+        if "rate limit exceeded for installation" in error.lower() or "api rate limit exceeded" in error.lower():
+            raise RuntimeError(f"Primary GitHub API allowance exhausted at {endpoint}; defer to scheduled retry")
         transient = bool(re.search(
             r"(?:HTTP\s*(?:403|429|5\d\d)|rate.limit|stream error|"
             r"timeout|timed out|connection reset|temporar)",

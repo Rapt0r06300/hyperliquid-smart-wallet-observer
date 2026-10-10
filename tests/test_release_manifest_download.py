@@ -320,3 +320,20 @@ def test_invalid_reconcile_index_aliases_fail_closed(tmp_path):
         "run_manifest_release_tags_by_release": {"data-v2-part": 123}}))
     with pytest.raises(RuntimeError, match="invalid canonical run manifest tag aliases"):
         _known_tags_from_index(index)
+
+def test_primary_api_exhaustion_stops_without_repeating_requests():
+    import pytest
+    from download_release_manifests import list_release_manifest_tags
+    calls = []
+    sleeps = []
+    def runner(command, **_kwargs):
+        calls.append(command[-1])
+        return subprocess.CompletedProcess(
+            command, 1, "", "gh: API rate limit exceeded for installation",
+        )
+    with pytest.raises(RuntimeError, match="allowance exhausted"):
+        list_release_manifest_tags(
+            "owner/repo", runner=runner, sleeper=sleeps.append, attempts=5,
+        )
+    assert calls == ["repos/owner/repo/releases?per_page=50&page=1"]
+    assert sleeps == []
