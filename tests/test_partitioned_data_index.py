@@ -48,8 +48,15 @@ def test_partition_refuses_tampered_evidence(tmp_path):
     root, files = partition_index(_index(), max_partition_bytes=240)
     path = _stage(tmp_path, root, files)
     first = next(iter(files))
-    (path.parent / first).write_bytes(files[first] + b" ")
+    damaged = bytearray(files[first])
+    damaged[-1] ^= 1  # Same length: SHA mismatch, not a size mismatch.
+    (path.parent / first).write_bytes(damaged)
     with pytest.raises(ValueError, match="PARTITION_PARITY_DIGEST_MISMATCH"):
+        load_partitioned_index(path)
+
+    # Length changes are a separate, equally fail-closed check.
+    (path.parent / first).write_bytes(files[first] + b" ")
+    with pytest.raises(ValueError, match="PARTITION_PARITY_SIZE_MISMATCH"):
         load_partitioned_index(path)
 
 
