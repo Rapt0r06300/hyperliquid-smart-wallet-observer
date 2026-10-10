@@ -514,6 +514,27 @@ def test_clock_sync_preserves_client_measurement_source() -> None:
 
 
 
+
+def test_gate_trade_event_cannot_mutate_replay_depth() -> None:
+    coordinator = NativeVenueCoordinator(
+        bybit_client=_EmptyDiscovery(),
+        okx_client=_EmptyDiscovery(),
+        gate_client=_EmptyDiscovery(),
+        bitget_client=_EmptyDiscovery(),
+        ccxt_snapshot_path=None,
+    )
+    trade = {
+        "channel": "futures.trades", "event": "update",
+        "result": {"contract": "BTC_USDT", "id": 1,
+                   "price": "100", "size": "2"},
+    }
+    assert coordinator.ingest_gate(trade, receive_ts_ms=1000, now_ms=1000) is None
+    assert coordinator._gate_states["BTC_USDT"].sequence is None
+    assert not coordinator._gate_states["BTC_USDT"].bids
+    assert not coordinator._gate_states["BTC_USDT"].asks
+
+
+
 def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
     gate_client = _OneShotStream({"channel": "futures.trades", "result": []})
     bitget_client = _OneShotStream(

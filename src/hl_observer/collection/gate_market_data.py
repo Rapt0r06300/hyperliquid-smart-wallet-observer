@@ -111,6 +111,17 @@ class GateMarketState:
             # Retain raw websocket frames separately for later diagnosis.
             self.quality, self.reason = UNMEASURABLE, "DELTA_BEFORE_SNAPSHOT"
             return self.quality
+        # A timestamp or L2 price level cannot replace a native sequence.
+        # Missing U/u after a valid snapshot would otherwise reuse old depth
+        # and incorrectly mark the synthetic BBO as executable.
+        if last is None or (not is_full_snapshot and first is None) or (
+            first is not None and last < first
+        ):
+            self.quality, self.reason = UNMEASURABLE, "MISSING_OR_INVALID_SEQUENCE"
+            self.sequence = None
+            self.bids.clear()
+            self.asks.clear()
+            return self.quality
         if is_full_snapshot:
             bids = payload.get("b") or payload.get("bids")
             asks = payload.get("a") or payload.get("asks")

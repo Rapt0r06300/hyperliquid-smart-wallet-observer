@@ -214,6 +214,33 @@ def test_gate_orphan_delta_remains_unmeasurable() -> None:
     assert state.sequence is None
 
 
+
+def test_gate_missing_update_sequence_invalidates_book() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    assert state.apply_book(
+        {"full": True, "id": 10, "t": 1000,
+         "b": [[100, 2]], "a": [[101, 3]]},
+        receive_ts_ms=1000,
+    ) == "EXPLOITABLE"
+    assert state.apply_book(
+        {"t": 1010, "u": 11, "b": [[100.5, 1]], "a": []},
+        receive_ts_ms=1010,
+    ) == "UNMEASURABLE"
+    assert state.reason == "MISSING_OR_INVALID_SEQUENCE"
+    assert state.sequence is None and not state.bids and not state.asks
+
+
+def test_gate_full_snapshot_requires_native_id() -> None:
+    state = GateMarketState(contract="BTC_USDT")
+    result = state.apply_book(
+        {"full": True, "t": 1000, "b": [[100, 2]], "a": [[101, 3]]},
+        receive_ts_ms=1000,
+    )
+    assert result == "UNMEASURABLE"
+    assert state.reason == "MISSING_OR_INVALID_SEQUENCE"
+
+
+
 def test_bitget_instrument_and_book_normalization() -> None:
     payload = {
         "data": [{"symbol": "ETHUSDT", "baseCoin": "ETH", "quoteCoin": "USDT", "symbolStatus": "normal"}]

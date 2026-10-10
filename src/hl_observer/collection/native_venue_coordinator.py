@@ -470,8 +470,12 @@ class NativeVenueCoordinator:
         channel = str(payload.get("channel") or payload.get("event") or "").lower()
         if "ticker" in channel:
             state.apply_ticker(data)
-        else:
+        elif channel == "futures.order_book_update":
             state.apply_book(data, receive_ts_ms=receive_ts_ms)
+        else:
+            # Futures trades and control frames stay in the immutable raw
+            # capture; they must never mutate or "refresh" executable L2.
+            return None
         snapshot = state.snapshot(now_ms=now_ms)
         self.store.put(snapshot)
         return snapshot
