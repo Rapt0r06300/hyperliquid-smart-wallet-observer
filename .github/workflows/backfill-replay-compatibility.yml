@@ -108,30 +108,34 @@ jobs:
           git add catalog datasets
           git diff --cached --quiet && exit 0
           git commit -m "data: backfill verified replay compatibility"
-          if git push origin HEAD:main; then
-            exit 0
-          fi
-
-          # Main advances frequently because collection and catalog workflows
-          # publish concurrently. Rebase generated evidence, but never hand-edit
-          # a semantic conflict. DATA_METRICS is deterministic and may be safely
-          # regenerated from the rebased DATA_INDEX/catalog state.
-          git fetch origin main
-          if git rebase origin/main; then
-            git push origin HEAD:main
-            exit 0
-          fi
-
-          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-          if [ "${#conflicts[@]}" -eq 1 ] && [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ]; then
-            python tools/build_catalog_metrics.py
-            python tools/build_quarantine_audit.py
-            git add catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
-            GIT_EDITOR=true git rebase --continue
-            git push origin HEAD:main
-            exit 0
-          fi
-
-          printf 'Unresolved replay publish conflicts:\n%s\n' "${conflicts[*]}" >&2
-          git rebase --abort || true
+          # Concurrent collectors and control-plane writers can advance main
+          # between a clean rebase and push. Retry with a bounded lease-safe loop.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:main; then
+              echo "Replay proof durably published at $(git rev-parse HEAD)"
+              exit 0
+            fi
+            git fetch origin main
+            if ! git rebase origin/main; then
+              # Only a deterministic metrics-only conflict can be rebuilt.
+              # Conflicts involving source/index/quality evidence fail closed.
+              mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+              if [ "${#conflicts[@]}" -eq 1 ] && [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ]; then
+                python tools/build_catalog_metrics.py
+                python tools/build_quarantine_audit.py
+                git add catalog/DATA_METRICS.json catalog/QUARANTINE_AUDIT.json catalog/QUARANTINE_CAUSES.json
+                if ! GIT_EDITOR=true git rebase --continue; then
+                  git rebase --abort || true
+                  exit 1
+                fi
+              else
+                printf 'Unresolved replay publish conflicts:\\n%s\\n' "${conflicts[*]}" >&2
+                git rebase --abort || true
+                exit 1
+              fi
+            fi
+            echo "Concurrent main update; retrying replay publication ($attempt/5)."
+            sleep $((attempt * 2))
+          done
+          echo "::error::Replay verification was not published after 5 bounded attempts"
           exit 1
