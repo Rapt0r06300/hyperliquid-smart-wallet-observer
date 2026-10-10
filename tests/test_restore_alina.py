@@ -995,7 +995,7 @@ def test_restore_never_trusts_stale_lfs_release_identity(tmp_path, monkeypatch):
 def test_restore_rejects_unsafe_lfs_mirror_paths_before_transfer(tmp_path, monkeypatch):
     import pytest
     module = _module()
-    release, _, path = _lfs_fixture(tmp_path, b"source")
+    release, _, path = _lfs_fixture(tmp_path, b"source", release_tag="evidence-lfs")
     manifest = json.loads(path.read_text())
     manifest["entries"][0]["clone_path"] = "clone_payload/releases/../../outside"
     path.write_text(json.dumps(manifest))
