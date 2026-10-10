@@ -22,6 +22,11 @@ try:
 except ModuleNotFoundError:
     from index_run_manifest import hydrate_default_release_repository
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "catalog" / "DATA_INDEX.json"
 SIZE_PATCH = ROOT / "catalog" / "UNCOMPRESSED_SIZE_PATCH.json"
@@ -108,7 +113,7 @@ def main() -> None:
     args = parser.parse_args()
     worker_count = min(32, max(1, args.workers))
 
-    index = json.loads(INDEX.read_text(encoding="utf-8"))
+    index = read_index(INDEX)
     rows = hydrate_default_release_repository(index)
     size_doc = (
         json.loads(SIZE_PATCH.read_text(encoding="utf-8"))
