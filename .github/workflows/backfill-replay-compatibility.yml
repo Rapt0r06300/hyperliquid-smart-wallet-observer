@@ -121,10 +121,20 @@ jobs:
               # the already merged SHA-bound index. Immutable shard receipts,
               # classification evidence and index conflicts must fail closed.
               mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
-              if [ "${#conflicts[@]}" -eq 1 ] && {
-                [ "${conflicts[0]}" = "catalog/DATA_METRICS.json" ] ||
-                [ "${conflicts[0]}" = "catalog/REPLAY_COMPATIBILITY_REASONS.json" ]
-              }; then
+              rebuildable=${#conflicts[@]}
+              if [ "${#conflicts[@]}" -eq 0 ]; then
+                rebuildable=0
+              fi
+              for conflict in "${conflicts[@]}"; do
+                case "$conflict" in
+                  catalog/DATA_METRICS.json|catalog/REPLAY_COMPATIBILITY_REASONS.json|catalog/QUARANTINE_AUDIT.json|catalog/QUARANTINE_CAUSES.json)
+                    ;;
+                  *)
+                    rebuildable=0
+                    ;;
+                esac
+              done
+              if [ "$rebuildable" -gt 0 ]; then
                 python tools/build_replay_compatibility_reasons.py
                 python tools/build_catalog_metrics.py
                 python tools/build_quarantine_audit.py
