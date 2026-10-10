@@ -184,6 +184,84 @@ def read_index(index_path: Path) -> dict[str, Any]:
     return raw
 
 
+
+def save_index(
+    index_path: Path,
+    logical_index: Mapping[str, Any],
+    *,
+    max_inline_bytes: int = 85 * 1024 * 1024,
+    max_partition_bytes: int = MAX_PARTITION_BYTES,
+) -> dict[str, Any]:
+    """Write complete index in small inline form or SHA-verified partitions.
+
+    The caller must include the root and all referenced parts in a single
+    Git commit. A failed checkout is never pushed by the reconciliation job.
+    Never silently truncate shards, promote SAFE, or override a partitioned
+    root with an inline index.
+    """
+    import os
+    import tempfile
+
+    index_path = Path(index_path)
+    if max_inline_bytes < 1024:
+        raise ValueError("PARTITION_PARITY_INVALID_INLINE_LIMIT")
+    current_partitioned = False
+    if index_path.is_file():
+        existing = json.loads(index_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            raise ValueError("PARTITION_PARITY_EXISTING_ROOT_INVALID")
+        current_partitioned = existing.get("schema") == SCHEMA
+        if current_partitioned:
+            read_index(index_path)  # No mutation if the old state is corrupt.
+    inline = _json_bytes(dict(logical_index))
+    if not current_partitioned and len(inline) < max_inline_bytes:
+        _validate_rows(logical_index.get("shards"))
+        index_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = index_path.with_suffix(index_path.suffix + ".publish.tmp")
+        temp.write_bytes(inline)
+        os.replace(temp, index_path)
+        return {"format": "INLINE", "shards": len(logical_index["shards"]),
+                "index_bytes": len(inline)}
+
+    root, parts = partition_index(logical_index, max_partition_bytes=max_partition_bytes)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".catalog-partition-stage-", dir=index_path.parent) as td:
+        stage = Path(td)
+        staged_root = stage / "DATA_INDEX.json"
+        staged_root.write_bytes(_json_bytes(root))
+        for rel, content in parts.items():
+            file = stage / rel
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_bytes(content)
+        if load_partitioned_index(staged_root) != dict(logical_index):
+            raise ValueError("PARTITION_PARITY_STAGED_WRITE_MISMATCH")
+        # Git publication is the atomic boundary. No incomplete working-tree
+        # state is ever committed; every single part is checked before root.
+        for rel, content in parts.items():
+            destination = index_path.parent / rel
+            if destination.is_symlink():
+                raise ValueError("PARTITION_PARITY_SYMLINK_DESTINATION")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            temporary = destination.with_suffix(".publish.tmp")
+            temporary.write_bytes(content)
+            os.replace(temporary, destination)
+        os.replace(staged_root, index_path)
+    if read_index(index_path) != dict(logical_index):
+        raise ValueError("PARTITION_PARITY_PUBLISHED_WRITE_MISMATCH")
+    current_parts = set(parts)
+    base = index_path.parent / "data-index-parts"
+    # Prune *only* files matching the canonical format, leaving other
+    # evidence untouched; the old bytes remain available in Git history.
+    for obsolete in sorted(base.glob("part-*.json")):
+        rel = obsolete.relative_to(index_path.parent).as_posix()
+        if rel not in current_parts and obsolete.is_file() and not obsolete.is_symlink():
+            obsolete.unlink()
+    return {"format": "PARTITIONED", "shards": len(logical_index["shards"]),
+            "partitions": len(parts),
+            "root_bytes": index_path.stat().st_size,
+            "parts_bytes": sum(map(len, parts.values()))}
+
+
 def prove_partitioned_index(
     index_path: Path, output_directory: Path
 ) -> dict[str, Any]:

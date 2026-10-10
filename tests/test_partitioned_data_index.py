@@ -140,3 +140,33 @@ def test_partition_reader_rejects_symlinked_parent_directory(tmp_path):
     folder.symlink_to(moved, target_is_directory=True)
     with pytest.raises(ValueError, match="PARTITION_PARITY_UNSAFE_DIRECTORY"):
         load_partitioned_index(index_path)
+
+def test_save_index_keeps_small_inline_and_switches_to_verified_partitions(tmp_path):
+    from tools.partitioned_data_index import save_index, read_index
+
+    logical = _index()
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    first = save_index(path, logical, max_inline_bytes=100000)
+    assert first["format"] == "INLINE"
+    assert read_index(path) == logical
+    second = save_index(path, logical, max_inline_bytes=1024, max_partition_bytes=240)
+    assert second["format"] == "PARTITIONED"
+    assert second["partitions"] > 1
+    assert read_index(path) == logical
+    third = save_index(path, logical, max_inline_bytes=100000, max_partition_bytes=240)
+    assert third["format"] == "PARTITIONED"  # Never revert to inline accidentally.
+    assert read_index(path) == logical
+
+
+def test_save_index_refuses_preexisting_tampered_partition(tmp_path):
+    from tools.partitioned_data_index import save_index
+
+    path = tmp_path / "catalog" / "DATA_INDEX.json"
+    logical = _index()
+    save_index(path, logical, max_inline_bytes=1024, max_partition_bytes=240)
+    file = sorted((path.parent / "data-index-parts").glob("part-*.json"))[0]
+    file.write_bytes(b"tamper")
+    old = path.read_bytes()
+    with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
+        save_index(path, logical, max_inline_bytes=100000, max_partition_bytes=240)
+    assert path.read_bytes() == old
