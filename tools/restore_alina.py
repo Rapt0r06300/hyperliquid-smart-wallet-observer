@@ -209,12 +209,25 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
     """Read complete historical Releases and their independently paged asset lists."""
     # Ten full Release objects per call avoids 504s when releases carry many assets.
     # Asset lists remain independently paginated and SHA-verified.
-    page = 1
+    page_size = 10
+    offset = 0
     seen_ids: set[int] = set()
     seen_tags: set[str] = set()
     while True:
-        url = f"https://api.github.com/repos/{repository}/releases?per_page=10&page={page}"
-        payload = _json(url, token=token)
+        page = offset // page_size + 1
+        url = f"https://api.github.com/repos/{repository}/releases?per_page={page_size}&page={page}"
+        try:
+            payload = _json(url, token=token)
+        except RestoreError as exc:
+            if offset and page_size > 1 and any(
+                status in str(exc).lower() for status in ("http 502", "http 504")
+            ):
+                smaller = next((n for n in range(page_size // 2, 0, -1)
+                                if offset % n == 0), None)
+                if smaller is not None:
+                    page_size = smaller
+                    continue
+            raise
         if not isinstance(payload, list):
             raise RestoreError("release listing is not a JSON array")
         if not payload:
@@ -249,9 +262,9 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
                     repository, release_id, token=token
                 )
             yield complete_release
-        if len(payload) < 10:
+        if len(payload) < page_size:
             return
-        page += 1
+        offset += page_size
 
 
 def _expected_digest(asset: Mapping[str, Any]) -> str | None:
