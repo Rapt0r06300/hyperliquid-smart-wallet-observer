@@ -130,3 +130,46 @@ def test_recovery_missing_release_remains_recoverable(monkeypatch):
     )
     assert module._canonical_complete("owner/repo", "missing-tag") is False
     assert module._any_canonical_complete("owner/repo", ["missing-tag"]) is None
+
+
+def test_recovery_pages_halve_on_504_without_skipping_or_repeating(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 4)
+    monkeypatch.setattr(module, "MIN_RECOVERY_RELEASE_PAGE_SIZE", 1)
+    calls = []
+
+    def fake_api(path):
+        from urllib.parse import parse_qs
+        query = parse_qs(path.split("?", 1)[1])
+        size = int(query["per_page"][0])
+        page = int(query["page"][0])
+        calls.append((size, page))
+        if size == 4 and page == 2:
+            raise module.RecoveryError("GitHub HTTP 504")
+        tags = [
+            {"tag_name": f"alina-recovery-{i}", "created_at": f"2026-10-{i + 1:02}T00:00:00Z"}
+            for i in range(7)
+        ]
+        first = (page - 1) * size
+        return tags[first:first + size]
+
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    found = module.list_recovery_releases("owner/repo")
+    assert [x["tag_name"] for x in found] == [f"alina-recovery-{i}" for i in range(7)]
+    assert calls == [(4, 1), (4, 2), (2, 3), (2, 4)]
+
+
+def test_recovery_listing_504_at_min_page_never_returns_partial(monkeypatch):
+    module = _module()
+    import pytest
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    monkeypatch.setattr(module, "MIN_RECOVERY_RELEASE_PAGE_SIZE", 1)
+
+    def fake_api(path):
+        if "page=1" in path:
+            return [{"tag_name": "alina-recovery-first"}] * 2
+        raise module.RecoveryError("GitHub HTTP 504")
+
+    monkeypatch.setattr(module, "_json_api", fake_api)
+    with pytest.raises(module.RecoveryError, match="HTTP 504"):
+        module.list_recovery_releases("owner/repo")

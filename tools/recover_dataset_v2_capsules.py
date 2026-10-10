@@ -82,11 +82,32 @@ def _json_api(path: str) -> Any:
         raise RecoveryError(f"invalid JSON from GitHub API: {path}") from exc
 
 
+RECOVERY_RELEASE_PAGE_SIZE = 100
+MIN_RECOVERY_RELEASE_PAGE_SIZE = 25
+
+
 def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
     releases: list[Mapping[str, Any]] = []
+    page_size = RECOVERY_RELEASE_PAGE_SIZE
     page = 1
     while True:
-        payload = _json_api(f"repos/{repository}/releases?per_page=100&page={page}")
+        path = f"repos/{repository}/releases?per_page={page_size}&page={page}"
+        try:
+            payload = _json_api(path)
+        except RecoveryError as exc:
+            # GitHub times out on high-numbered 100-item Release pages.
+            # Halve only the failed request window, preserving its absolute
+            # offset; never silently treat an incomplete listing as complete.
+            message = str(exc).lower()
+            if (
+                page_size > MIN_RECOVERY_RELEASE_PAGE_SIZE
+                and ("http 504" in message or "http 502" in message)
+            ):
+                start_offset = (page - 1) * page_size
+                page_size //= 2
+                page = start_offset // page_size + 1
+                continue
+            raise
         if not isinstance(payload, list):
             raise RecoveryError("release listing is not an array")
         if not payload:
@@ -96,7 +117,7 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
                 RECOVERY_PREFIX
             ):
                 releases.append(row)
-        if len(payload) < 100:
+        if len(payload) < page_size:
             break
         page += 1
     releases.sort(key=lambda row: str(row.get("created_at") or ""))
