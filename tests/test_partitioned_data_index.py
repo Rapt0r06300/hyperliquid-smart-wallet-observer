@@ -187,3 +187,26 @@ def test_save_index_refuses_symlinked_partition_destination_before_write(tmp_pat
         save_index(index_path, original, max_inline_bytes=1024)
     assert index_path.read_bytes() == before
     assert list(outside.iterdir()) == []
+
+
+def test_reconciliation_index_writer_requires_explicit_activation(tmp_path, monkeypatch):
+    from tools import index_run_manifest as indexer
+    from tools.partitioned_data_index import read_index, save_index
+
+    legacy = _index()
+    path = _stage(tmp_path, legacy, {})
+    monkeypatch.delenv("ALINA_CATALOG_PARTITION_ACTIVATE", raising=False)
+    indexer._publish_canonical_index(path, legacy)
+    assert read_index(path) == legacy
+    assert json.loads(path.read_text())["schema"] == legacy["schema"]
+
+    monkeypatch.setenv("ALINA_CATALOG_PARTITION_ACTIVATE", "true")
+    monkeypatch.setattr(indexer, "save_index",
+                        lambda p, payload: save_index(p, payload,
+                            max_inline_bytes=1024, max_partition_bytes=240))
+    indexer._publish_canonical_index(path, legacy)
+    assert read_index(path) == legacy
+    assert json.loads(path.read_text())["schema"].endswith("partitioned.v1")
+    monkeypatch.delenv("ALINA_CATALOG_PARTITION_ACTIVATE", raising=False)
+    indexer._publish_canonical_index(path, legacy)
+    assert read_index(path) == legacy  # No unsafe downgrade to legacy.

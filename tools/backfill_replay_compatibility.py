@@ -20,7 +20,11 @@ from urllib.parse import quote
 
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
-from index_run_manifest import compact_index_rows, hydrate_default_release_repository
+from index_run_manifest import compact_index_rows, hydrate_default_release_repository, _publish_canonical_index
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
 
 try:
     from tools.backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
@@ -612,7 +616,7 @@ def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
     # A plain row update otherwise retains the per-shard hydrated run IDs
     # and can make an already near-limit canonical index unpublishable.
     index["shards"] = compact_index_rows(index, rows)
-    _write_json(root/"catalog"/"DATA_INDEX.json",index)
+    _publish_canonical_index(root/"catalog"/"DATA_INDEX.json",index)
 
     catalog=_load_json(root/"catalog"/"DATA_CATALOG.json")
     registry=_load_json(root/"catalog"/"DATA_QUALITY_REGISTRY.json")
@@ -662,7 +666,7 @@ def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
 
 
 def backfill(limit: int, families: set[str]) -> dict[str,Any]:
-    index=_load_json(INDEX_PATH)
+    index=read_index(INDEX_PATH)
     try:
         rows=hydrate_default_release_repository(index)
     except (TypeError, ValueError) as exc:

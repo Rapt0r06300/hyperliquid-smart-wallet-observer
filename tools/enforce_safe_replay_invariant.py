@@ -7,6 +7,13 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from tools.partitioned_data_index import read_index
+    from tools.index_run_manifest import _publish_canonical_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+    from index_run_manifest import _publish_canonical_index
+
 ROOT=Path(__file__).resolve().parents[1]
 INDEX=ROOT/"catalog"/"DATA_INDEX.json"
 CATALOG=ROOT/"catalog"/"DATA_CATALOG.json"
@@ -28,7 +35,7 @@ def _write(path: Path, value: Mapping[str,Any]) -> None:
 
 
 def migrate() -> dict[str,int]:
-    index=_load(INDEX)
+    index=read_index(INDEX)
     rows=index.get("shards")
     if not isinstance(rows,list):
         raise ValueError("invalid DATA_INDEX shards")
@@ -88,7 +95,7 @@ def migrate() -> dict[str,int]:
         else ("PARTIAL" if rows else "NO_DATA")
     )
     index["active_data_status"]=active
-    _write(INDEX,index)
+    _publish_canonical_index(INDEX,index)
 
     safe=sum(1 for r in rows if isinstance(r,dict) and r.get("quality_status")=="SAFE")
     partial=sum(1 for r in rows if isinstance(r,dict) and r.get("quality_status")=="PARTIAL")

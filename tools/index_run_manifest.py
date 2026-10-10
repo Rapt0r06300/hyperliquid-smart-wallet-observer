@@ -12,6 +12,11 @@ try:
 except ModuleNotFoundError:
     from manifest_policy import classify_manifest
 
+try:
+    from tools.partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index, save_index, SCHEMA as PARTITION_SCHEMA
+
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
 REGISTRY_PATH = ROOT / "catalog" / "DATA_QUALITY_REGISTRY.json"
@@ -85,6 +90,19 @@ def _atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
         temporary.unlink(missing_ok=True)
         raise ValueError("DATA_INDEX_TOO_LARGE: index mutation not published")
     os.replace(temporary, path)
+
+
+def _publish_canonical_index(path: Path, payload: Mapping[str, Any]) -> None:
+    # Partition activation remains opt-in until full consumer parity is
+    # proven on GitHub-hosted runners. Never downgrade an activated index.
+    existing = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    enabled = os.environ.get("ALINA_CATALOG_PARTITION_ACTIVATE") == "true"
+    if isinstance(existing, Mapping) and existing.get("schema") == PARTITION_SCHEMA:
+        enabled = True
+    if enabled:
+        save_index(path, payload)
+    else:
+        _atomic_json(path, payload)
 
 
 def _load_replay_patch_results(root: Path) -> dict[str, Mapping[str, Any]]:
@@ -526,7 +544,7 @@ def index_run_manifests(
     registry_path = base / "catalog" / "DATA_QUALITY_REGISTRY.json"
     catalog_path = base / "catalog" / "DATA_CATALOG.json"
 
-    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index = read_index(index_path)
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     replay_patch_results = _load_replay_patch_results(base)
@@ -638,7 +656,7 @@ def index_run_manifests(
     index["shards"] = compact_index_rows(index, shards)
     index["active_data_status"] = active
     # Fail before attempting a GitHub push past its 100 MiB blob limit.
-    _atomic_json(index_path, index)
+    _publish_canonical_index(index_path, index)
     if index_path.stat().st_size >= 85 * 1024 * 1024:
         raise ValueError("DATA_INDEX_TOO_LARGE: shard the catalogue before publication; no SAFE evidence dropped")
 
@@ -692,7 +710,7 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
     """
     base = Path(root)
     path = base / INDEX_PATH.relative_to(ROOT) if INDEX_PATH.is_absolute() else base / INDEX_PATH
-    index = json.loads(path.read_text(encoding="utf-8"))
+    index = read_index(path)
     expanded = hydrate_default_release_repository(index)
     for row in expanded:
         if str(row.get("release_repository") or "") != CANONICAL_DATA_REPOSITORY:
@@ -705,7 +723,7 @@ def compact_existing_index(root: str | Path = ROOT) -> dict[str, Any]:
     if hydrate_default_release_repository(index) != expected:
         raise ValueError("COMPACTION_PARITY_MISMATCH")
     before_size = path.stat().st_size
-    _atomic_json(path, index)
+    _publish_canonical_index(path, index)
     return {"shards": len(expanded), "before_bytes": before_size,
             "after_bytes": path.stat().st_size,
             "saved_bytes": before_size - path.stat().st_size}
@@ -716,7 +734,7 @@ def index_field_size_stats(root: str | Path = ROOT) -> dict[str, Any]:
     from collections import Counter
 
     path = Path(root) / "catalog" / "DATA_INDEX.json"
-    index = json.loads(path.read_text(encoding="utf-8"))
+    index = read_index(path)
     rows = index.get("shards")
     if not isinstance(rows, list):
         raise ValueError("invalid DATA_INDEX.shards")
