@@ -1,6 +1,12 @@
 name: recover-durable-publication
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recover-durable-publication.yml'
+      - 'tools/recover_dataset_v2_capsules.py'
+      - 'tests/test_recover_dataset_v2_capsules.py'
   workflow_dispatch:
   schedule:
     - cron: "17 * * * *"
