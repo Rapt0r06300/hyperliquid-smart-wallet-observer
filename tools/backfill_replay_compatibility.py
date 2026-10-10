@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 from manifest_policy import classify_manifest, is_official_historical_archive
 from replay_compatibility import VERIFIER_VERSION, inspect_asset
+from index_run_manifest import compact_index_rows, hydrate_default_release_repository
 
 try:
     from tools.backfill_exact_trade_counts import IDENTITY_VERSION, _extract_packed_verified_shard
@@ -598,16 +599,19 @@ def _apply_result(
 
 
 def _refresh_catalog(index: dict[str,Any], root: Path) -> None:
-    rows=[row for row in (index.get("shards") or []) if isinstance(row,dict)]
+    # Always expand the root aliases before rewriting the index. This
+    # also makes a second refresh byte-for-byte stable.
+    rows=hydrate_default_release_repository(index)
     active=(
         "SAFE" if any(row.get("quality_status")=="SAFE" for row in rows)
         else ("PARTIAL" if rows else "NO_DATA")
     )
     index["active_data_status"]=active
     index["release_repository_default"]="Rapt0r06300/hyperliquid-smart-wallet-observer"
-    for row in rows:
-        if row.get("release_repository") == index["release_repository_default"]:
-            row.pop("release_repository")
+    # Round-trip compact release/run aliases after every verified replay wave.
+    # A plain row update otherwise retains the per-shard hydrated run IDs
+    # and can make an already near-limit canonical index unpublishable.
+    index["shards"] = compact_index_rows(index, rows)
     _write_json(root/"catalog"/"DATA_INDEX.json",index)
 
     catalog=_load_json(root/"catalog"/"DATA_CATALOG.json")
@@ -659,9 +663,11 @@ def _candidate_sort_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
 
 def backfill(limit: int, families: set[str]) -> dict[str,Any]:
     index=_load_json(INDEX_PATH)
-    rows=index.get("shards")
-    if not isinstance(rows,list):
-        raise BackfillError("invalid data index")
+    try:
+        rows=hydrate_default_release_repository(index)
+    except (TypeError, ValueError) as exc:
+        raise BackfillError(f"invalid canonical index alias mapping: {exc}") from exc
+    index["shards"]=rows
 
     patch=_load_patch()
     known=patch.get("results")

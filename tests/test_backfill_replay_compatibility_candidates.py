@@ -459,3 +459,42 @@ def test_no_candidate_replay_wave_preserves_exact_index_bytes(monkeypatch, tmp_p
     assert result["updated"] == 0
     assert index.read_text(encoding="utf-8") == original
     assert patch.is_file()
+
+
+def test_replay_refresh_preserves_reversible_compaction(tmp_path):
+    from index_run_manifest import (
+        CANONICAL_DATA_REPOSITORY, hydrate_default_release_repository,
+    )
+    catalog = tmp_path / "catalog"
+    catalog.mkdir()
+    for name in ("DATA_CATALOG.json", "DATA_QUALITY_REGISTRY.json"):
+        (catalog / name).write_text("{}", encoding="utf-8")
+    original = [
+        {
+            "dataset_id": name, "quality_status": "SAFE",
+            "replay_compatible": True,
+            "release_repository": CANONICAL_DATA_REPOSITORY,
+            "release_tag": "data-v2-bundle",
+            "run_manifest_release_tag": "data-v2-run",
+            "collection_run_id": "durable-run-abc",
+            "sha256": "a" * 64, "event_count": 1,
+        }
+        for name in ("shard-a", "shard-b")
+    ]
+    index = {
+        "schema": "alina.data_index.v2",
+        "shards": original,
+    }
+    backfill._refresh_catalog(index, tmp_path)
+    saved = json.loads((catalog / "DATA_INDEX.json").read_text(encoding="utf-8"))
+    assert all("collection_run_id" not in r for r in saved["shards"])
+    assert all("run_manifest_release_tag" not in r for r in saved["shards"])
+    assert all("release_repository" not in r for r in saved["shards"])
+    assert saved["collection_run_ids_by_release"] == {
+        "data-v2-bundle": "durable-run-abc",
+    }
+    assert hydrate_default_release_repository(saved) == original
+    # Repeated waves must not inflate or change the canonical index bytes.
+    first = (catalog / "DATA_INDEX.json").read_bytes()
+    backfill._refresh_catalog(saved, tmp_path)
+    assert (catalog / "DATA_INDEX.json").read_bytes() == first
