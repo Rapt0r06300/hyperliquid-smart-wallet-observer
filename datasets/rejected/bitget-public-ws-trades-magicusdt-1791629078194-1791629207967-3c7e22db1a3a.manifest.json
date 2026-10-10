@@ -1,0 +1,129 @@
+{
+  "asset_verified": true,
+  "bytes": 120137,
+  "collection_run_id": "market-e8-8-2026101009-v7-0",
+  "collector_version": "04e6e2d9b2876946f2fd5deb958f57f8ec867f93",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-magicusdt-1791629078194-1791629207967-3c7e22db1a3a",
+  "end_ts_ms": 1791629207967,
+  "event_count": 1402,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 63
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "FATAL_INTEGRITY:regression_count=63",
+    "REPLAY_COMPATIBILITY_NOT_PROVEN"
+  ],
+  "quality_status": "REJECT",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 1402,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 1402,
+    "missing_from_live": 0,
+    "reference_count": 1402,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 1402,
+  "release": {
+    "asset_id": 627791995,
+    "asset_name": "packed-shards-0053.zip",
+    "member_name": "bitget-public-ws-trades-magicusdt-1791629078194-1791629207967-3c7e22db1a3a.jsonl.gz",
+    "release_id": 408900056,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101009-v7-u0",
+    "remote_digest": "sha256:309da4b591b113c396e3875d56774452d4a0a0b54a2265c6a9b489b8dd910cd7",
+    "remote_size": 3469213,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-magicusdt-1791629078194-1791629207967-3c7e22db1a3a.jsonl.gz",
+  "release_asset_id": 627791995,
+  "release_container_asset": "packed-shards-0053.zip",
+  "release_id": 408900056,
+  "release_member": "bitget-public-ws-trades-magicusdt-1791629078194-1791629207967-3c7e22db1a3a.jsonl.gz",
+  "release_remote_digest": "sha256:309da4b591b113c396e3875d56774452d4a0a0b54a2265c6a9b489b8dd910cd7",
+  "release_remote_size": 3469213,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101009-v7-u0",
+  "replay_compatible": false,
+  "replay_reason": "regression_count",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3c7e22db1a3a208403f67a56d8ecc5d96b914764d821c4a444a5083c63068181",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791629078194,
+  "symbol": "MAGICUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1402,
+      "max": 109.5,
+      "min": 69.0,
+      "p50": 94.5,
+      "p95": 94.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-3ea1bb3b03a340ebbd207ebdccf76119"
+    ],
+    "first_exchange_ts_ms": 1791629041489,
+    "last_exchange_ts_ms": 1791629207887,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1402,
+      "max": 36705.0,
+      "min": 78.0,
+      "p50": 87.0,
+      "p95": 601.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1402,
+      "max": 206.075714,
+      "min": 0.0,
+      "p50": 160.572353,
+      "p95": 165.501694
+    }
+  },
+  "trade_count": 1402,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 1402,
+  "trade_identity_set_sha256": "760bd0fd07cd8558f95cb6161150160ef535c9e3786ac1b04158d21424ac87ae",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 2168516,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 1402,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "bitget"
+}

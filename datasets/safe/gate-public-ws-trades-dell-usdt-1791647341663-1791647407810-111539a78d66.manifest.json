@@ -1,0 +1,134 @@
+{
+  "asset_verified": true,
+  "bytes": 1509,
+  "collection_run_id": "market-e8-8-2026101015-v7-0",
+  "collector_version": "3e89efc765019d00b5b47e6cd62715f93684aa7b",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-public-ws-trades-dell-usdt-1791647341663-1791647407810-111539a78d66",
+  "end_ts_ms": 1791647407810,
+  "event_count": 7,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 7,
+    "live_only": null,
+    "local_continuity_fallback": true,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 0,
+    "reference_status": "UNAVAILABLE",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 7,
+  "release": {
+    "asset_id": 628482565,
+    "asset_name": "packed-shards-0070.zip",
+    "member_name": "gate-public-ws-trades-dell-usdt-1791647341663-1791647407810-111539a78d66.jsonl.gz",
+    "release_id": 409075932,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101015-v7-u0",
+    "remote_digest": "sha256:c94046eb9c970348b2a6742a5d8e23ed33efb1018b7a24777582e1e0d662114f",
+    "remote_size": 8077374,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-public-ws-trades-dell-usdt-1791647341663-1791647407810-111539a78d66.jsonl.gz",
+  "release_asset_id": 628482565,
+  "release_container_asset": "packed-shards-0070.zip",
+  "release_id": 409075932,
+  "release_member": "gate-public-ws-trades-dell-usdt-1791647341663-1791647407810-111539a78d66.jsonl.gz",
+  "release_remote_digest": "sha256:c94046eb9c970348b2a6742a5d8e23ed33efb1018b7a24777582e1e0d662114f",
+  "release_remote_size": 8077374,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101015-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "111539a78d66ebafd5a1866713e0a48285776ee95318ada1150476d1199865bf",
+  "source": "gate_public_ws",
+  "start_ts_ms": 1791647341663,
+  "symbol": "DELL_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 7,
+      "max": 376.5,
+      "min": 324.0,
+      "p50": 376.5,
+      "p95": 376.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-af680cf927d847e9921de5e8e8f2f0b1"
+    ],
+    "first_exchange_ts_ms": 1791647341575,
+    "last_exchange_ts_ms": 1791647407596,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 7,
+      "max": 740.0,
+      "min": 80.0,
+      "p50": 88.0,
+      "p95": 740.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 7,
+      "max": 158.112851,
+      "min": 0.0,
+      "p50": 157.416497,
+      "p95": 158.112851
+    }
+  },
+  "trade_count": 7,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "2faed6330861c51731e843850482e1f3fe834f6cf79f08642563a09c0f2f9ea3",
+    "2fd8ac66c33dcb4a3c774f09433f049d944e045d3d30a0cfdcdde1d7cce8660f",
+    "4eb392383c3b88b9baead3ac98dfdac891f446ecb473183d208ccf2aefe808e1",
+    "7fd3c5b4337b35e5cac8afd4d45179ea95cbfb8972ba39fe6f942d8536a5e8c5",
+    "94a88d2b4dc01630d9efeac39dd42c5fd228e43250ff026f7b442542402d07cf",
+    "a0a0732b4350775df94d4ded1139a49e0e78c6bcacf8de6bb8b0126b7980f603",
+    "c3cae9dcf4bdedcd0d01f0f892bf4a9cd6c15afb1e14b87a7c84ea5d01276542"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 7,
+  "trade_identity_set_sha256": "7da091c3267cea34c10f8519897457bf18e4d5e027605d43d646c1d891805bbd",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 9846,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 7,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "gate"
+}

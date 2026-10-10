@@ -1,0 +1,131 @@
+{
+  "asset_verified": true,
+  "bytes": 1113,
+  "collection_run_id": "market-e8-8-2026101001-v7-0",
+  "collector_version": "25f3a42868833d32a668b03a3bff46353d39c119",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-dell-usdt-swap-1791597242003-1791597242080-28384a11ed03",
+  "end_ts_ms": 1791597242080,
+  "event_count": 4,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 4,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 4,
+    "missing_from_live": 0,
+    "reference_count": 4,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 4,
+  "release": {
+    "asset_id": 626889569,
+    "asset_name": "packed-shards-0125.zip",
+    "member_name": "okx-public-ws-trades-dell-usdt-swap-1791597242003-1791597242080-28384a11ed03.jsonl.gz",
+    "release_id": 408590666,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101001-v7-u0",
+    "remote_digest": "sha256:da402876c6256a202f7495ad90e4389e7e2d492bb810c43de8b4a74301cef67e",
+    "remote_size": 450605,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-dell-usdt-swap-1791597242003-1791597242080-28384a11ed03.jsonl.gz",
+  "release_asset_id": 626889569,
+  "release_container_asset": "packed-shards-0125.zip",
+  "release_id": 408590666,
+  "release_member": "okx-public-ws-trades-dell-usdt-swap-1791597242003-1791597242080-28384a11ed03.jsonl.gz",
+  "release_remote_digest": "sha256:da402876c6256a202f7495ad90e4389e7e2d492bb810c43de8b4a74301cef67e",
+  "release_remote_size": 450605,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101001-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "28384a11ed0339940a3b2777cb1e9d3b41a296a94fb873454e5294d37e8474d7",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791597242003,
+  "symbol": "DELL-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 4,
+      "max": 54.0,
+      "min": 54.0,
+      "p50": 54.0,
+      "p95": 54.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-5f2c5e4bc5294a8db64434454021ead5"
+    ],
+    "first_exchange_ts_ms": 1791597240303,
+    "last_exchange_ts_ms": 1791597240361,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 4,
+      "max": 1719.0,
+      "min": 1700.0,
+      "p50": 1718.0,
+      "p95": 1719.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 4,
+      "max": 177.685928,
+      "min": 177.685928,
+      "p50": 177.685928,
+      "p95": 177.685928
+    }
+  },
+  "trade_count": 4,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "7aa4960d370a1330439ece2507bd9c81759a28bd0aa5fbdcc221346f672358bb",
+    "aa635b4ef2736980c2cfe581c1712ddbb9d6dfe60093df7438e9c8db68976552",
+    "da69da5816670181d6d9678e0e8fcd5a5b35ce344d954c00fe5d389e60ddb7d5",
+    "f2d87cbb01527075099445b8c7c795a87b778edb046d7e0d55dfd3299adba69b"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 4,
+  "trade_identity_set_sha256": "e949997b751022484e4648a1e90c9e279e6796f6fe3644c109a128308a555a0c",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 6196,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 4,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

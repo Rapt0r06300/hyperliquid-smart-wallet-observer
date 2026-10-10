@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 39793,
+  "collection_run_id": "market-e8-8-2026101008-v7-0",
+  "collector_version": "06e7e0acd612a13fbf008998e791d45dae978041",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-celo-usdt-swap-1791621007092-1791624503245-d67af52fae72",
+  "end_ts_ms": 1791624503245,
+  "event_count": 412,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 412,
+    "live_only": 25,
+    "local_continuity_fallback": true,
+    "matched_count": 387,
+    "missing_from_live": 0,
+    "reference_count": 387,
+    "reference_status": "PARTIAL",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 412,
+  "release": {
+    "asset_id": 627600330,
+    "asset_name": "packed-shards-0070.zip",
+    "member_name": "okx-public-ws-trades-celo-usdt-swap-1791621007092-1791624503245-d67af52fae72.jsonl.gz",
+    "release_id": 408854743,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101008-v7-u0",
+    "remote_digest": "sha256:000bfceabd02ad0f852f8ce8d6f3edf2e164843dee03dd886e998749dd1465de",
+    "remote_size": 60363828,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-celo-usdt-swap-1791621007092-1791624503245-d67af52fae72.jsonl.gz",
+  "release_asset_id": 627600330,
+  "release_container_asset": "packed-shards-0070.zip",
+  "release_id": 408854743,
+  "release_member": "okx-public-ws-trades-celo-usdt-swap-1791621007092-1791624503245-d67af52fae72.jsonl.gz",
+  "release_remote_digest": "sha256:000bfceabd02ad0f852f8ce8d6f3edf2e164843dee03dd886e998749dd1465de",
+  "release_remote_size": 60363828,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101008-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "d67af52fae720b254bc85c4dd2f8c5fbb434e3eafff4e4b19f33e0d0b2a42be8",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791621007092,
+  "symbol": "CELO-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 412,
+      "max": 101.5,
+      "min": 14.0,
+      "p50": 25.5,
+      "p95": 82.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-4cce0db57e82475c89d2d4ef2e24a42d"
+    ],
+    "first_exchange_ts_ms": 1791621007007,
+    "last_exchange_ts_ms": 1791624503170,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 412,
+      "max": 568.0,
+      "min": 74.0,
+      "p50": 78.0,
+      "p95": 126.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 412,
+      "max": 632.792861,
+      "min": 0.0,
+      "p50": 142.770717,
+      "p95": 179.680717
+    }
+  },
+  "trade_count": 412,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 412,
+  "trade_identity_set_sha256": "51fb1287473b3210b2a75bf0dbfaaab29fda79566abe34bbb4c685bc3abe0e9c",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 639536,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 412,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

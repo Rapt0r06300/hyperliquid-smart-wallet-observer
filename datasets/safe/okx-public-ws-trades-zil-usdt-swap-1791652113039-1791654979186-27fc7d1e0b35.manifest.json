@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 32204,
+  "collection_run_id": "market-e8-7-2026101016-v7-0",
+  "collector_version": "7aced9464d90caff70ba9fdde3369cfa17f56129",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-zil-usdt-swap-1791652113039-1791654979186-27fc7d1e0b35",
+  "end_ts_ms": 1791654979186,
+  "event_count": 345,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 345,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 345,
+    "missing_from_live": 0,
+    "reference_count": 345,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 345,
+  "release": {
+    "asset_id": 628665647,
+    "asset_name": "packed-shards-0056.zip",
+    "member_name": "okx-public-ws-trades-zil-usdt-swap-1791652113039-1791654979186-27fc7d1e0b35.jsonl.gz",
+    "release_id": 409121932,
+    "release_tag": "data-v2-campaign-market-e8-7-2026101016-v7-u0",
+    "remote_digest": "sha256:a79dafd16fb0f373e8c8401c6c190b6662e5c11152f2b9e4ca02c60d8c900c6c",
+    "remote_size": 14751939,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-zil-usdt-swap-1791652113039-1791654979186-27fc7d1e0b35.jsonl.gz",
+  "release_asset_id": 628665647,
+  "release_container_asset": "packed-shards-0056.zip",
+  "release_id": 409121932,
+  "release_member": "okx-public-ws-trades-zil-usdt-swap-1791652113039-1791654979186-27fc7d1e0b35.jsonl.gz",
+  "release_remote_digest": "sha256:a79dafd16fb0f373e8c8401c6c190b6662e5c11152f2b9e4ca02c60d8c900c6c",
+  "release_remote_size": 14751939,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-7-2026101016-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "27fc7d1e0b350b503dd70b850c6f35e3f7c7a3c4f2a34366f30b2118dfc91733",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791652113039,
+  "symbol": "ZIL-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 345,
+      "max": 78.0,
+      "min": 15.5,
+      "p50": 26.5,
+      "p95": 56.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-fcbce3abdd1046adaa40e665ed0206f2"
+    ],
+    "first_exchange_ts_ms": 1791652112971,
+    "last_exchange_ts_ms": 1791654979116,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 345,
+      "max": 120.0,
+      "min": 68.0,
+      "p50": 70.0,
+      "p95": 89.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 345,
+      "max": 141.058108,
+      "min": 0.0,
+      "p50": 136.914837,
+      "p95": 140.318341
+    }
+  },
+  "trade_count": 345,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 345,
+  "trade_identity_set_sha256": "23dc215c389027fd1039c9a3ba3a6f223b221d7aeb3b82ba43e6b5dc47b38cb8",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 533925,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 345,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}

@@ -1,0 +1,144 @@
+{
+  "asset_verified": true,
+  "bytes": 2554,
+  "collection_run_id": "market-e8-8-2026101001-v7-0",
+  "collector_version": "25f3a42868833d32a668b03a3bff46353d39c119",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-dell-usdt-swap-1791599153609-1791599275523-29f35ea748bd",
+  "end_ts_ms": 1791599275523,
+  "event_count": 17,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 17,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 17,
+    "missing_from_live": 0,
+    "reference_count": 17,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 17,
+  "release": {
+    "asset_id": 626889569,
+    "asset_name": "packed-shards-0125.zip",
+    "member_name": "okx-public-ws-trades-dell-usdt-swap-1791599153609-1791599275523-29f35ea748bd.jsonl.gz",
+    "release_id": 408590666,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101001-v7-u0",
+    "remote_digest": "sha256:da402876c6256a202f7495ad90e4389e7e2d492bb810c43de8b4a74301cef67e",
+    "remote_size": 450605,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-dell-usdt-swap-1791599153609-1791599275523-29f35ea748bd.jsonl.gz",
+  "release_asset_id": 626889569,
+  "release_container_asset": "packed-shards-0125.zip",
+  "release_id": 408590666,
+  "release_member": "okx-public-ws-trades-dell-usdt-swap-1791599153609-1791599275523-29f35ea748bd.jsonl.gz",
+  "release_remote_digest": "sha256:da402876c6256a202f7495ad90e4389e7e2d492bb810c43de8b4a74301cef67e",
+  "release_remote_size": 450605,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101001-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "29f35ea748bdfd612b20ad08143990113abe29dffb9aad5de60ee38158039429",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791599153609,
+  "symbol": "DELL-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 17,
+      "max": 51.0,
+      "min": -432.5,
+      "p50": -432.5,
+      "p95": 51.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-050d7375c1c64075985733cc1f8ec45d"
+    ],
+    "first_exchange_ts_ms": 1791599152531,
+    "last_exchange_ts_ms": 1791599274446,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 17,
+      "max": 10986.0,
+      "min": 165.0,
+      "p50": 5017.0,
+      "p95": 10984.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 17,
+      "max": 7161.846515,
+      "min": 190.422578,
+      "p50": 4338.925092,
+      "p95": 7161.846515
+    }
+  },
+  "trade_count": 17,
+  "trade_count_exact": true,
+  "trade_identity_digests": [
+    "3a50ae7d19c02b2afe5b87ceda9b57d918367c2b7e1ef99633ee42832bc1e054",
+    "584e54427d7004e92ed8e3237003a7163b018be9b27a19d03eb389ef1e9821d4",
+    "59c8196d60ba97f43ae165e7c7bcb0038754b91bedea0f3327b14d985196f9a6",
+    "64e3b7beb8d15503f4e142bcc635f863797f482bf55a76b6a20f9f5ece27a419",
+    "688dce6768d850deb0bd69f31f0e537cf7cdac858203e7fffb41c98dd766dc9c",
+    "728db26d3c20e967c8f96dfb22b00c6cb0b35371b7187e5c45c0ec83af713f68",
+    "746e032e1ffc8fea5587fdf8e312f3f8b942945cf367b8a286c59888b2929a4b",
+    "96c074620a391d15aec8b3cc551021b4392b0dcc7a328adea3fc1fc7150302cd",
+    "9c0feae8f67efd4cc283491f253afb1d401cff189d73ee123cd6dc436cee0a73",
+    "b1261d74acbf036e6a93bd7906c2dbe8a8ce5a42515d098b1794960bd04e74f8",
+    "b471b0c0095127a019c975fccf4f5b11093e36e7227a80cf7adf2552674a232e",
+    "c80bac19ebc9767bfa348063921d952e5ec9276ea4ee084716a2afe4b02a8ff5",
+    "c920fda5a37c581010d67129d32591617a1c4f7003675065c255afa5be3a3141",
+    "d973342f969c2946765d6bdb00f0341667d9992c15b8d423da157f29626be843",
+    "dafb027012fe8317de0ecf84dd475e5c11f7aee685c2038e21690bd2148986e1",
+    "fbd458c3c86b361984b20f64538d4977bbcd84bce90fb8359d211f23eac66f72",
+    "fed856e854da743ba4551ce75073ceac8491d751f650923bdcd2c5490eafeac1"
+  ],
+  "trade_identity_digests_exact": true,
+  "trade_identity_set_count": 17,
+  "trade_identity_set_sha256": "5ef6338acec9dfe7539af75afb7bdc8b23ef7f8ea997b92ada37e56addadcf67",
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 26415,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 17,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}
