@@ -651,9 +651,56 @@ class NativeVenueCoordinator:
             return
         self._active_symbols["gate"] = tuple(symbols)
         self._configure_capture_profile("gate", symbols)
+
+        async def collect_rest_anchors() -> None:
+            bootstrap = getattr(self.gate_client, "bootstrap_envelopes", None)
+            if not callable(bootstrap):
+                return
+            for contract in symbols:
+                try:
+                    bases = await asyncio.to_thread(
+                        bootstrap, (contract,), timeout_s=4.0,
+                    )
+                except Exception as exc:
+                    self._discovery_errors[f"gate_rest_anchor:{contract}"] = type(exc).__name__
+                    continue
+                for base in bases:
+                    raw = base.raw_payload
+                    if (base.source_id != "gate_public_rest"
+                            or base.channel != "l2Book"
+                            or str(getattr(base.event_kind, "value", base.event_kind)) != "SNAPSHOT"
+                            or base.instrument != contract
+                            or type(base.sequence) is not int
+                            or type(base.exchange_ts_ms) is not int
+                            or not isinstance(raw, Mapping)
+                            or str(raw.get("id")) != str(base.sequence)
+                            or not isinstance(raw.get("bids"), list) or not raw["bids"]
+                            or not isinstance(raw.get("asks"), list) or not raw["asks"]):
+                        continue
+                    state = self._gate_states.setdefault(
+                        contract,
+                        GateMarketState(contract=contract, stale_after_ms=self.stale_after_ms),
+                    )
+                    if state.sequence is not None and base.sequence < state.sequence:
+                        continue
+                    if self.tick_writer is not None:
+                        self.tick_writer.append(base)
+                    state.apply_book(
+                        {**raw, "full": True, "id": base.sequence,
+                         "time_ms": base.exchange_ts_ms,
+                         "b": raw["bids"], "a": raw["asks"]},
+                        receive_ts_ms=base.received_ts_ms,
+                    )
+                    self.store.put(state.snapshot(now_ms=base.received_ts_ms))
+
+        anchor_task = asyncio.create_task(collect_rest_anchors())
         try:
             async with asyncio.timeout(self.venue_session_s):
                 async for payload in self.gate_client.messages(symbols):
+                    if anchor_task.done() and not anchor_task.cancelled():
+                        error = anchor_task.exception()
+                        if error is not None:
+                            raise error
                     now = int(time.time() * 1000)
                     self.ingest_gate(
                         self._with_clock_sync(payload, "gate"),
@@ -662,7 +709,12 @@ class NativeVenueCoordinator:
         except TimeoutError:
             return
         finally:
+            anchor_task.cancel()
+            outcomes = await asyncio.gather(anchor_task, return_exceptions=True)
             self._active_symbols.pop("gate", None)
+            for outcome in outcomes:
+                if isinstance(outcome, Exception):
+                    raise outcome
 
     async def run_bitget(self) -> None:
         symbols = self.symbols_for("bitget")
