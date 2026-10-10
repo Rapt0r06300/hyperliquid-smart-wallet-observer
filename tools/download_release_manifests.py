@@ -225,6 +225,7 @@ def list_release_manifest_tags(
     sleeper: Callable[[float], object] = time.sleep,
     page_size: int = 50,
     attempts: int = 5,
+    max_pages: int = 2000,
 ) -> list[tuple[str, bool]]:
     """Enumerate all Release identities, but inspect only new production assets.
 
@@ -233,13 +234,19 @@ def list_release_manifest_tags(
     """
     if not 1 <= page_size <= 100:
         raise ValueError("page_size must be in 1..100")
+    if max_pages < 1:
+        raise ValueError("max_pages must be positive")
     pages = 0
+    stagnant_pages = 0
     seen_ids: dict[int, str] = {}
     seen_tags: dict[str, int] = {}
     shifted_page_duplicates = 0
     rows: list[tuple[str, bool]] = []
     while True:
         pages += 1
+        if pages > max_pages:
+            raise RuntimeError("Release listing page budget exhausted; partial inventory refused")
+        prior_unique = len(seen_ids)
         endpoint = f"repos/{repository}/releases?per_page={page_size}&page={pages}"
         page = _api_page(
             endpoint, runner=runner, sleeper=sleeper, attempts=attempts
@@ -302,6 +309,12 @@ def list_release_manifest_tags(
                 raise RuntimeError(f"malformed asset listing for Release {tag}")
             has_manifest = any(a["name"] == MANIFEST_NAME for a in assets)
             rows.append((tag, has_manifest))
+        if len(page) == page_size:
+            # Concurrent Releases can shift offsets. Two complete pages with
+            # zero new IDs indicate a stuck service; fail closed, never spin.
+            stagnant_pages = stagnant_pages + 1 if len(seen_ids) == prior_unique else 0
+            if stagnant_pages >= 2:
+                raise RuntimeError("Release listing pagination made no progress; partial inventory refused")
         if len(page) < page_size:
             print(
                 f"GitHub Release inventory enumerated: {len(seen_ids)} unique tags, "
