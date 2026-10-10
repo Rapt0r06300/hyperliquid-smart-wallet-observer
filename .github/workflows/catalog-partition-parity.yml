@@ -16,6 +16,7 @@ on:
       - 'tests/test_run_indexing.py'
       - 'tests/test_workflow_bounds.py'
       - 'tests/test_dataset_metrics.py'
+      - 'tests/test_dataset_policy.py'
       - 'tests/test_quarantine_audit.py'
       - 'tests/test_restore_alina.py'
   workflow_dispatch: {}
@@ -97,6 +98,7 @@ jobs:
           python -m pytest -q \
             tests/test_partitioned_data_index.py \
             tests/test_dataset_metrics.py \
+            tests/test_dataset_policy.py \
             tests/test_quarantine_audit.py \
             tests/test_restore_alina.py
           # The next actual publication must be a separately validated atomic

@@ -1,10 +1,14 @@
 import json
 from pathlib import Path
 
+from tools.partitioned_data_index import read_index
+
 ROOT = Path(__file__).resolve().parents[1]
 REG = json.loads((ROOT / "catalog/DATA_QUALITY_REGISTRY.json").read_text())
 CAT = json.loads((ROOT / "catalog/DATA_CATALOG.json").read_text())
-INDEX = json.loads((ROOT / "catalog/DATA_INDEX.json").read_text())
+# Every consumer must reconstruct and SHA-verify the complete partitioned
+# catalog; a root without inline shards must never be mistaken for NO_DATA.
+INDEX = read_index(ROOT / "catalog/DATA_INDEX.json")
 
 
 def test_safe_only_validation():
