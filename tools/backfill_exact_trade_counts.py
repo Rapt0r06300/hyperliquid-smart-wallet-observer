@@ -24,13 +24,18 @@ from urllib.parse import quote
 try:
     from tools.index_run_manifest import (
         hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY,
+        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
     )
 except ModuleNotFoundError:
     from index_run_manifest import (
         hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY,
+        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
     )
+
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
@@ -626,7 +631,7 @@ def _candidate_priority(row: Mapping[str, Any]) -> tuple[int, int, str]:
 
 
 def backfill(limit: int) -> dict[str, Any]:
-    index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    index = read_index(INDEX_PATH)
     rows = hydrate_default_release_repository(index)
     index["shards"] = rows
     patch_doc = _load_patch()
@@ -688,12 +693,7 @@ def backfill(limit: int) -> dict[str, Any]:
     if updated or restored_from_patch:
         index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
         index["shards"] = compact_index_rows(index, rows)
-        serialized = json.dumps(
-            index, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-        ) + "\n"
-        if len(serialized.encode("utf-8")) >= 85 * 1024 * 1024:
-            raise BackfillError("DATA_INDEX_TOO_LARGE: exact trade scan proof retained in patch")
-        INDEX_PATH.write_text(serialized, encoding="utf-8")
+        _publish_canonical_index(INDEX_PATH, index)
     return {
         "updated": updated,
         "restored_from_patch": restored_from_patch,

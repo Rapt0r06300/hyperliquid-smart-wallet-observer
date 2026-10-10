@@ -35,13 +35,18 @@ except ModuleNotFoundError:
 try:
     from tools.index_run_manifest import (
         hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY,
+        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
     )
 except ModuleNotFoundError:
     from index_run_manifest import (
         hydrate_default_release_repository, compact_index_rows,
-        CANONICAL_DATA_REPOSITORY,
+        CANONICAL_DATA_REPOSITORY, _publish_canonical_index,
     )
+
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "catalog" / "DATA_INDEX.json"
@@ -228,7 +233,7 @@ def main() -> None:
     if not 1 <= args.workers <= 32:
         raise SystemExit("workers must be between 1 and 32")
 
-    index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    index = read_index(INDEX_PATH)
     rows = hydrate_default_release_repository(index)
     index["shards"] = rows
 
@@ -368,12 +373,7 @@ def main() -> None:
     # independent patch. Never republish the expanded in-memory view.
     index["release_repository_default"] = CANONICAL_DATA_REPOSITORY
     index["shards"] = compact_index_rows(index, rows)
-    serialized = json.dumps(
-        index, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-    ) + "\n"
-    if len(serialized.encode("utf-8")) >= 85 * 1024 * 1024:
-        raise ValueError("DATA_INDEX_TOO_LARGE: preserve global identity proofs in patch")
-    INDEX_PATH.write_text(serialized, encoding="utf-8")
+    _publish_canonical_index(INDEX_PATH, index)
 
     all_candidate_ids = {
         str(row.get("dataset_id") or "") for row in all_candidates
