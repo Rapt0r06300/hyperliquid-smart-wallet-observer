@@ -30,6 +30,8 @@ from hl_observer.collection.native_market_tape import (
     native_tick_envelopes,
 )
 from hl_observer.collection.native_venue_market import (
+    EXPLOITABLE,
+    UNMEASURABLE,
     MarketLevel,
     MultiVenueMarketStore,
     NativeMarketSnapshot,
@@ -685,12 +687,18 @@ class NativeVenueCoordinator:
                         continue
                     if self.tick_writer is not None:
                         self.tick_writer.append(base)
-                    state.apply_book(
+                    result = state.apply_book(
                         {**raw, "full": True, "id": base.sequence,
                          "time_ms": base.exchange_ts_ms,
                          "b": raw["bids"], "a": raw["asks"]},
                         receive_ts_ms=base.received_ts_ms,
                     )
+                    if result == EXPLOITABLE:
+                        # Gate requires U <= baseID+1 <= u from an actual WS
+                        # delta before a REST book can become executable.
+                        # Do not publish an unbridged REST-only L2 as SAFE BBO.
+                        state.quality = UNMEASURABLE
+                        state.reason = "REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE"
                     self.store.put(state.snapshot(now_ms=base.received_ts_ms))
 
         anchor_task = asyncio.create_task(collect_rest_anchors())

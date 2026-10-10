@@ -569,6 +569,9 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
             for _ in range(500):
                 state = coordinator._gate_states.get("BTC_USDT")
                 if state is not None and state.sequence == 41:
+                    # The REST snapshot is not a verified WS sequence bridge.
+                    assert state.quality == "UNMEASURABLE"
+                    assert state.reason == "REST_BASE_AWAITING_WS_SEQUENCE_BRIDGE"
                     break
                 await asyncio.sleep(0.001)
             else:
@@ -594,6 +597,7 @@ def test_gate_rest_anchor_replays_sequenced_ws_delta() -> None:
     assert state.sequence == 42
     assert state.bids[100.5] == 1.0 and state.asks[101.0] == 3.0
     assert state.gap_count == 0
+    assert state.quality == "EXPLOITABLE"
 
 
 def test_gate_and_bitget_streams_apply_clock_sync_before_ingest() -> None:
