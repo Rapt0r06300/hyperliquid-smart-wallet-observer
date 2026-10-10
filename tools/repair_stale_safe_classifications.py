@@ -207,9 +207,11 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
                     != str(manifest.get("sha256") or "").lower()
                 ):
                     raise ValueError(f"SAFE_MANIFEST_DESTINATION_CONFLICT: {destination}")
+        # Publish the SHA-verified index first. A failed partition/index write
+        # must never create a SAFE manifest or retire quarantine evidence.
+        save_index(index_path, index, max_inline_bytes=INDEX_WRITE_LIMIT_BYTES)
         for destination, manifest, _old_path in pending_manifests:
             _atomic_json(destination, manifest)
-        save_index(index_path, index, max_inline_bytes=INDEX_WRITE_LIMIT_BYTES)
 
     registry["active_dataset"] = {
         "status": active,

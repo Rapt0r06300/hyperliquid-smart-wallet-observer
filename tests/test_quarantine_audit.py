@@ -397,7 +397,7 @@ def test_no_op_stale_repair_never_rewrites_large_catalog_index(tmp_path: Path, m
     assert (catalog / "DATA_INDEX.json").read_text(encoding="utf-8") == original_index
 
 
-def test_stale_repair_index_limit_never_partially_moves_manifest(tmp_path: Path, monkeypatch):
+def test_stale_repair_index_write_failure_never_partially_moves_manifest(tmp_path: Path, monkeypatch):
     from tools import repair_stale_safe_classifications as stale
 
     catalog = tmp_path / "catalog"
@@ -407,7 +407,7 @@ def test_stale_repair_index_limit_never_partially_moves_manifest(tmp_path: Path,
     manifest = _manifest("capacity-blocked", safe_now=True)
     source = quarantine / "capacity-blocked.manifest.json"
     source.write_text(json.dumps(manifest), encoding="utf-8")
-    original_index = json.dumps({"shards": [{
+    original_index = json.dumps({"schema": "alina.data_index.v2", "shards": [{
         "dataset_id": manifest["dataset_id"],
         "sha256": manifest["sha256"],
         "quality_status": "PARTIAL",
@@ -418,7 +418,12 @@ def test_stale_repair_index_limit_never_partially_moves_manifest(tmp_path: Path,
     (catalog / "DATA_QUALITY_REGISTRY.json").write_text("{}", encoding="utf-8")
     (catalog / "DATA_CATALOG.json").write_text("{}", encoding="utf-8")
 
+    # Force the partitioned index publication to fail after feasibility
+    # validation. SAFE manifests may not be materialized before that barrier.
     monkeypatch.setattr(stale, "INDEX_WRITE_LIMIT_BYTES", 1)
+    def fail_index_publish(*_args, **_kwargs):
+        raise ValueError("DATA_INDEX_TOO_LARGE: simulated publication error")
+    monkeypatch.setattr(stale, "save_index", fail_index_publish)
     with pytest.raises(ValueError, match="DATA_INDEX_TOO_LARGE"):
         stale.repair(tmp_path)
 

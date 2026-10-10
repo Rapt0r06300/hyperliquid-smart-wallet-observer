@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from tools.build_catalog_metrics import build
+from tools.partitioned_data_index import read_index
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -109,7 +110,7 @@ def test_replayable_totals_exclude_non_safe_compatible_shards(tmp_path, monkeypa
 
 def test_metrics_file_is_machine_readable_and_counts_shards():
     out = build()
-    idx = json.loads((ROOT / "catalog" / "DATA_INDEX.json").read_text())
+    idx = read_index(ROOT / "catalog" / "DATA_INDEX.json")
     totals = out["totals"]
     assert totals["TOTAL_SHARDS"] == len(idx.get("shards") or [])
     assert "TOTAL_TRADES_COLLECTED" in totals
