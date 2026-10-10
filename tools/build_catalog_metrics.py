@@ -290,6 +290,9 @@ def build() -> dict[str, Any]:
             and trade_exact
             and unique_identity_current_early
             and isinstance(unique_entry, dict)
+            and len(str(row.get("sha256") or "")) == 64
+            and str(unique_entry.get("asset_sha256") or "").lower()
+                == str(row.get("sha256") or "").lower()
             and unique_entry.get("unique_trade_count_exact") is True
             and _int(unique_entry.get("trade_count_scanned")) == trades
             and 0 <= _int(unique_entry.get("unique_trade_count")) <= trades

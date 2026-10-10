@@ -342,10 +342,22 @@ def _index_row(
         unique_patch_results.get(str(manifest.get("dataset_id") or ""))
         if unique_patch_results is not None else None
     )
-    if isinstance(unique_row, Mapping):
-        # Preserve the independently verified global identity count.
-        row["unique_trade_count"] = unique_row.get("unique_trade_count")
-        row["unique_trade_count_exact"] = unique_row.get("unique_trade_count_exact") is True
+    if (
+        isinstance(unique_row, Mapping)
+        and manifest.get("trade_count_exact") is True
+        and type(manifest.get("trade_count")) is int
+        and len(str(manifest.get("sha256") or "")) == 64
+        and str(unique_row.get("asset_sha256") or "").lower()
+            == str(manifest.get("sha256") or "").lower()
+        and unique_row.get("unique_trade_count_exact") is True
+        and type(unique_row.get("trade_count_scanned")) is int
+        and unique_row["trade_count_scanned"] == manifest["trade_count"]
+        and type(unique_row.get("unique_trade_count")) is int
+        and 0 <= unique_row["unique_trade_count"] <= manifest["trade_count"]
+    ):
+        # Never attach a dataset-id-only receipt to an unrelated new asset.
+        row["unique_trade_count"] = unique_row["unique_trade_count"]
+        row["unique_trade_count_exact"] = True
 
     integration = manifest.get("event_intelligence")
     if isinstance(integration, Mapping):

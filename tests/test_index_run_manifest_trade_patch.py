@@ -163,3 +163,30 @@ def test_compacted_publisher_keeps_canonical_manifest_release_independent_of_dat
     assert row["release_tag"] == "data-v2-collection-part0"
     assert row["run_manifest_release_tag"] == "data-v2-collection-part0-manifest"
     assert row["release_container_asset"] == "packed-shards-0000.zip"
+
+
+def test_global_unique_patch_requires_same_asset_sha_and_exact_scan():
+    from pathlib import Path
+    from tools.index_run_manifest import _index_row
+    base = Path("/tmp/alina-global-identity-contract")
+    manifest = {
+        "dataset_id": "reused-id", "family": "trades", "venue": "bybit",
+        "sha256": "a" * 64, "trade_count": 10, "trade_count_exact": True,
+        "unique_trade_count": 9, "unique_trade_count_exact": True,
+    }
+    dest = base / "datasets/safe/reused-id.manifest.json"
+    evidence = {
+        "asset_sha256": "a" * 64, "trade_count_scanned": 10,
+        "unique_trade_count": 8, "unique_trade_count_exact": True,
+    }
+    valid = _index_row(manifest, dest, base, unique_patch_results={"reused-id": evidence})
+    assert valid["unique_trade_count"] == 8
+    for altered in (
+        {**evidence, "asset_sha256": "b" * 64},
+        {**evidence, "trade_count_scanned": 9},
+        {**evidence, "unique_trade_count": 11},
+        {k: v for k, v in evidence.items() if k != "asset_sha256"},
+    ):
+        invalid = _index_row(manifest, dest, base, unique_patch_results={"reused-id": altered})
+        assert invalid["unique_trade_count"] == 9
+        assert invalid["unique_trade_count_exact"] is True

@@ -337,6 +337,7 @@ def main() -> None:
 
             unique_count = int(scanned["unique_trade_count"])
             counts[dataset_id] = {
+                "asset_sha256": str(row.get("sha256") or "").lower(),
                 "trade_count_scanned": int(scanned["trade_count_scanned"]),
                 "unique_trade_count": unique_count,
                 "unique_trade_count_exact": True,

@@ -411,6 +411,7 @@ def test_metrics_uses_current_global_unique_patch_for_bybit_per_shard_unique(tmp
             "failure_reasons": {},
             "counts": {
                 "bybit-archive": {
+                    "asset_sha256": sha,
                     "trade_count_scanned": 190000,
                     "unique_trade_count": 190000,
                     "unique_trade_count_exact": True,
