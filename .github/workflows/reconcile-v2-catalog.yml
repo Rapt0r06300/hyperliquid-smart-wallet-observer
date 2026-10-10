@@ -49,6 +49,12 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Measure canonical index field weights before reconciliation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/index_run_manifest.py --index-field-stats
+
       - name: Compact existing canonical index before growing it
         shell: bash
         run: |
