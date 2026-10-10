@@ -55,6 +55,11 @@ MUTATING_WORKFLOWS = frozenset({
     "recover-current-market-publication.yml",
     "resumable-campaign-worker.yml",
     "uncompressed-size-v2.yml",
+    "clone-lfs-probe.yml",
+    "clone-payload-lfs-mirror.yml",
+    "collect-two-segment-resume-smoke.yml",
+    "quarantine-audit.yml",
+    "recover-durable-publication.yml",
 })
 
 
