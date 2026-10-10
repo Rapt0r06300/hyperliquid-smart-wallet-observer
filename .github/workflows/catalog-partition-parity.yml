@@ -55,3 +55,38 @@ jobs:
           assert receipt["partition_count"] >= 1
           print("FULL_CATALOG_PARTITION_PARITY_PROVED", receipt["original_shards"])
           PY
+
+      - name: Dry-run all critical SAFE consumers on partitioned index (never push)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This job owns a disposable checkout. The canonical GitHub main is
+          # never altered; a failure blocks any production partition migration.
+          cp catalog/DATA_METRICS.json "$RUNNER_TEMP/legacy-data-metrics.json"
+          test ! -e catalog/data-index-parts
+          cp -a "$RUNNER_TEMP/alina-partition-proof/data-index-parts" catalog/
+          cp "$RUNNER_TEMP/alina-partition-proof/DATA_INDEX.json" catalog/DATA_INDEX.json
+          python tools/build_catalog_metrics.py
+          python tools/build_quarantine_audit.py
+          python tools/check_dataset_quality.py
+          python tools/build_replay_compatibility_reasons.py
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          from tools.restore_alina import _load_current_safe_catalog
+          previous=json.loads(Path(os.environ["RUNNER_TEMP"]).joinpath("legacy-data-metrics.json").read_text())
+          current=json.loads(Path("catalog/DATA_METRICS.json").read_text())
+          assert previous["totals"] == current["totals"], "PARTITION_METRICS_TOTALS_CHANGED"
+          safe,verification=_load_current_safe_catalog(
+              Path("catalog/DATA_INDEX.json"), Path("catalog/DATA_METRICS.json"))
+          assert len(safe) == current["totals"]["SAFE_SHARDS"]
+          assert verification["indexed_shards"] == current["totals"]["TOTAL_SHARDS"]
+          print("PARTITION_SAFE_CONSUMERS_PROVED", len(safe), verification["indexed_shards"])
+          PY
+          python -m pytest -q \
+            tests/test_partitioned_data_index.py \
+            tests/test_dataset_metrics.py \
+            tests/test_quarantine_audit.py \
+            tests/test_restore_alina.py
+          # The next actual publication must be a separately validated atomic
+          # Git commit containing both the root and all referenced parts.
