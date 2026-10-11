@@ -116,8 +116,8 @@ def _recovery_releases_from_git_refs(repository: str) -> list[Mapping[str, Any]]
     for tag in sorted(tags):
         response = _gh(["api", f"repos/{repository}/releases/tags/{tag}"], check=False)
         if response.returncode != 0:
-            message = (response.stderr or response.stdout or "").lower()
-            if "http 404" in message:
+            message = (response.stderr or response.stdout or "").strip()
+            if "http 404" in message.lower():
                 continue
             raise RecoveryError(f"recovery Release lookup failed for {tag}: {message[:300]}")
         try:
