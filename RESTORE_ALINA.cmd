@@ -21,10 +21,14 @@ if not defined GH_TOKEN if not defined GITHUB_TOKEN (
   echo ALINA_RESTORE_AUTH_WARNING: GitHub anonymous API quotas may block this large restore.
   echo Use 'gh auth login' or set GH_TOKEN / GITHUB_TOKEN if rate-limited.
 )
-if exist "%~dp0tools\python\python.exe" goto :embedded
-where py >nul 2>nul && goto :pylauncher
-where python >nul 2>nul && goto :system
-echo ALINA_RESTORE_FAIL: Python 3 is required (embedded, py -3 or python).
+rem Python >= 3.10 is required. A broken embedded interpreter, missing
+rem py -3 installation, or Windows Store alias must not block another valid one.
+if exist "%~dp0tools\python\python.exe" (
+  "%~dp0tools\python\python.exe" -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :embedded
+)
+where py >nul 2>nul && py -3 -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :pylauncher
+where python >nul 2>nul && python -c "import sys; sys.exit(sys.version_info[:2] < (3, 10))" >nul 2>nul && goto :system
+echo ALINA_RESTORE_FAIL: Python 3.10 or newer is required (embedded, py -3 or python).
 exit /b 2
 
 :embedded
