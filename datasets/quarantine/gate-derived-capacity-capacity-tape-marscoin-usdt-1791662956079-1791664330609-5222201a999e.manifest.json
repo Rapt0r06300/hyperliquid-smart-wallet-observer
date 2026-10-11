@@ -1,0 +1,119 @@
+{
+  "asset_verified": true,
+  "bytes": 3550295,
+  "collection_run_id": "market-e8-5-2026101019-v7-0",
+  "collector_version": "601b74d7e8c3a45a607e4664804b564680d597ab",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-derived-capacity-capacity-tape-marscoin-usdt-1791662956079-1791664330609-5222201a999e",
+  "end_ts_ms": 1791664330609,
+  "event_count": 6961,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 6961,
+  "release": {
+    "asset_id": 629013141,
+    "asset_name": "packed-shards-0041.zip",
+    "member_name": "gate-derived-capacity-capacity-tape-marscoin-usdt-1791662956079-1791664330609-5222201a999e.jsonl.gz",
+    "release_id": 409210836,
+    "release_tag": "data-v2-campaign-market-e8-5-2026101019-v7-u0",
+    "remote_digest": "sha256:17f5b29508fbff2e6c3e97dbccbb13a9bc73c776e7cb0d8936b168a5941540bf",
+    "remote_size": 85515037,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-derived-capacity-capacity-tape-marscoin-usdt-1791662956079-1791664330609-5222201a999e.jsonl.gz",
+  "release_asset_id": 629013141,
+  "release_container_asset": "packed-shards-0041.zip",
+  "release_id": 409210836,
+  "release_member": "gate-derived-capacity-capacity-tape-marscoin-usdt-1791662956079-1791664330609-5222201a999e.jsonl.gz",
+  "release_remote_digest": "sha256:17f5b29508fbff2e6c3e97dbccbb13a9bc73c776e7cb0d8936b168a5941540bf",
+  "release_remote_size": 85515037,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026101019-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "5222201a999ecb97f5ec5130234a408be3ca09812a8e9ff4b502839f243eea70",
+  "source": "gate_derived_capacity",
+  "start_ts_ms": 1791662956079,
+  "symbol": "MARSCOIN_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 6960,
+      "max": 513.5,
+      "min": 188.5,
+      "p50": 227.0,
+      "p95": 314.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-24ab194cbe244d34a20fb0963abf7d32"
+    ],
+    "first_exchange_ts_ms": 0,
+    "last_exchange_ts_ms": 1791664330497,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 6961,
+      "max": 1791662956079.0,
+      "min": 55.0,
+      "p50": 91.0,
+      "p95": 147.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 6960,
+      "max": 112.874079,
+      "min": 0.0,
+      "p50": 109.810458,
+      "p95": 110.985331
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 67112462,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "gate"
+}

@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 42113,
+  "collection_run_id": "market-e8-5-2026101019-v7-0",
+  "collector_version": "601b74d7e8c3a45a607e4664804b564680d597ab",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "okx-public-ws-trades-zeta-usdt-swap-1791662987126-1791666438818-3620c93bf0a2",
+  "end_ts_ms": 1791666438818,
+  "event_count": 471,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 471,
+    "live_only": 5,
+    "local_continuity_fallback": true,
+    "matched_count": 466,
+    "missing_from_live": 0,
+    "reference_count": 466,
+    "reference_status": "PARTIAL",
+    "status": "SOURCE_CONTINUITY_VERIFIED"
+  },
+  "record_count": 471,
+  "release": {
+    "asset_id": 629013631,
+    "asset_name": "packed-shards-0046.zip",
+    "member_name": "okx-public-ws-trades-zeta-usdt-swap-1791662987126-1791666438818-3620c93bf0a2.jsonl.gz",
+    "release_id": 409210836,
+    "release_tag": "data-v2-campaign-market-e8-5-2026101019-v7-u0",
+    "remote_digest": "sha256:26c39d4651b6b9c2a411f7ee6069e1590a92e1d9ae9acf940c71c6ac7c9bb55b",
+    "remote_size": 9186675,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "okx-public-ws-trades-zeta-usdt-swap-1791662987126-1791666438818-3620c93bf0a2.jsonl.gz",
+  "release_asset_id": 629013631,
+  "release_container_asset": "packed-shards-0046.zip",
+  "release_id": 409210836,
+  "release_member": "okx-public-ws-trades-zeta-usdt-swap-1791662987126-1791666438818-3620c93bf0a2.jsonl.gz",
+  "release_remote_digest": "sha256:26c39d4651b6b9c2a411f7ee6069e1590a92e1d9ae9acf940c71c6ac7c9bb55b",
+  "release_remote_size": 9186675,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-5-2026101019-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3620c93bf0a23c831616bb99674e0425210aa92addbf4b03efbaee28a655ad73",
+  "source": "okx_public_ws",
+  "start_ts_ms": 1791662987126,
+  "symbol": "ZETA-USDT-SWAP",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 471,
+      "max": 60.5,
+      "min": 20.0,
+      "p50": 26.0,
+      "p95": 47.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "okx-business-aa628772602b4125bc37b1326dadb79e"
+    ],
+    "first_exchange_ts_ms": 1791662987060,
+    "last_exchange_ts_ms": 1791666438752,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 471,
+      "max": 82.0,
+      "min": 64.0,
+      "p50": 66.0,
+      "p95": 77.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 471,
+      "max": 119.509218,
+      "min": 116.919353,
+      "p50": 117.17958,
+      "p95": 118.420765
+    }
+  },
+  "trade_count": 471,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 471,
+  "trade_identity_set_sha256": "afb20ab5b5bb5f86ffc83253ebec5678e22dbfb0717fb1dec47b813ea1bd3a1a",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 729320,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 471,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "okx"
+}
