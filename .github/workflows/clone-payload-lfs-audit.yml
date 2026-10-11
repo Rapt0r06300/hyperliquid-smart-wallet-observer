@@ -65,6 +65,8 @@ jobs:
           print("SOURCE_RELEASE_ASSETS=", report.get("source_assets"))
           print("SOURCE_RELEASE_BYTES=", report.get("source_bytes"))
           print("MISSING_LFS_ASSETS=", report.get("missing_asset_count"))
+          print("UNVERIFIABLE_SOURCE_ASSETS=", report.get("unverifiable_source_asset_count"))
+          print("UNVERIFIABLE_SOURCE_SAMPLE=", report.get("unverifiable_source_asset_ids_sample"))
           print("CURRENT_CLONE_BYTES=", report.get("clone_bytes"))
           PY
 
