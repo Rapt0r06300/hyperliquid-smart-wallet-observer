@@ -38,6 +38,27 @@ The main Alina Smart Flow repository owns the phase state, campaign manifests, d
 
 The Alina Smart Flow repository is the only operational data repository. Every new collection Release, run manifest, catalog row, replay/backtest input and durability checkpoint must resolve to `Rapt0r06300/hyperliquid-smart-wallet-observer`. No collector, reconciler, validator or analysis workflow may require another repository at runtime.
 
+### Canonical full-clone and incremental restoration
+
+Git files are restored from `main`; immutable heavy evidence is downloaded
+from GitHub Releases of the **same** canonical repository. Plain `git clone`
+does not include Release assets. Operators use the existing
+`ALINA_SYNC_COMPLETE.cmd` / `ALINA_SYNC_COMPLETE.sh` wrappers (implemented by
+`tools/sync_complete_clone.py`) after a fresh clone or inside an existing
+local checkout. This updates `main` by fast-forward only and calls the single
+`tools/restore_alina.py` engine, with paginated Release inventory,
+size/SHA-256 identity, resumable verified downloads, SAFE/quarantine gates,
+and a durable `SYNC_REPORT.json` plus `RESTORE_REPORT.json`.
+
+Git LFS is not part of the operational backup, clone or restoration path:
+no smudge/mirror/migration workflow, no LFS object as a required source.
+Legacy LFS read compatibility is disabled by default and must never be
+enabled by the canonical wrappers. Any unavailable/unpublished/unsigned
+asset causes an explicit incomplete report rather than a 100% claim.
+Snapshots of ignored local files are restored only if verifiably published.
+The recovery process does not stop cloud collection, operate the user's PC
+remotely, require another dataset repository, or execute trading orders.
+
 Historical assets from the retired Dataset V2 repository are **not** an operational dependency and are **not** to be migrated into the canonical repository. The accepted architecture is fresh-main-only:
 
 - new collection, manifests, catalogs, replay inputs, backtests and durability checkpoints originate only from `Rapt0r06300/hyperliquid-smart-wallet-observer`;
