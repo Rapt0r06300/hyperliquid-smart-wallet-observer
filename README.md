@@ -32,9 +32,12 @@ chunks et SHA-256 ; les secrets sont exclus. Le bouton de push Git ne
 téléverse PAS implicitement des centaines de Go de runtime vers l'historique
 Git. Cela ne sauvegarde pas rétroactivement les artifacts Actions expirés.
 
-Après publication, `ALINA_SYNC_COMPLETE.cmd` (ou
-`ALINA_SYNC_COMPLETE.sh`) met à jour la branche `main` locale par
-avance rapide et restaure les assets GitHub Releases avec contrôle SHA-256.
+Après publication, **`ALINA_SYNC_COMPLETE.cmd`** (ou
+**`ALINA_SYNC_COMPLETE.sh`**) met à jour la branche `main` locale par
+avance rapide et restaure tous les assets GitHub Releases avec contrôle SHA-256.
+C'est aussi l'unique commande à relancer dans un dossier déjà cloné.
+Un checkpoint `runtime/recovery/full/SYNC_REPORT.json` lie le HEAD Git
+au résultat exact de `RESTORE_REPORT.json`.
 Il refuse d'effacer silencieusement des modifications de code locales non
 publiées. La restauration complète n'est certifiée que si l'inventaire des
 données publiées est intégralement vérifié ; sinon, le résultat est INCOMPLETE.
@@ -52,13 +55,13 @@ quota Git LFS n'est nécessaire pour cette restauration.
 Windows CMD (Git, Python 3.10+ et place disque suffisante) :
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable --materialize-local-snapshot
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd
 ```
 
 Linux/macOS :
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable --materialize-local-snapshot
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
 ```
 
 La commande récupère le code, tous les catalogues et workflows suivis par
