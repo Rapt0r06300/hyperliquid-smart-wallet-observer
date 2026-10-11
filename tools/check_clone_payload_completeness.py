@@ -123,6 +123,7 @@ def source_inventory(
     repository: str,
     *,
     token: str | None,
+    include_unverifiable: bool = False,
 ) -> dict[int, dict[str, Any]]:
     inventory: dict[int, dict[str, Any]] = {}
     # Source-side byte parity must always use the dedicated paginated assets API,
@@ -146,10 +147,12 @@ def source_inventory(
                     f"GitHub Release asset has invalid size: {asset_id}"
                 )
             digest = str(asset.get("digest") or "")
-            if (
-                not digest.lower().startswith("sha256:")
-                or not re.fullmatch(r"[0-9a-fA-F]{64}", digest.split(":", 1)[1])
-            ):
+            verifiable = (
+                asset.get("state") == "uploaded"
+                and digest.lower().startswith("sha256:")
+                and re.fullmatch(r"[0-9a-fA-F]{64}", digest.split(":", 1)[1]) is not None
+            )
+            if not verifiable and not include_unverifiable:
                 raise CompletenessError(
                     f"GitHub Release asset has missing or invalid SHA-256 digest: {asset_id}"
                 )
@@ -158,7 +161,9 @@ def source_inventory(
                 "release_tag": str(release.get("tag_name") or ""),
                 "asset_name": str(asset.get("name") or ""),
                 "bytes": int(asset.get("size") or 0),
-                "source_digest": str(asset.get("digest") or ""),
+                "source_digest": digest if verifiable else "",
+                "source_verifiable": verifiable,
+                "state": asset.get("state"),
             }
     return inventory
 
@@ -226,7 +231,17 @@ def audit(
             "read_only": True,
             "real_execution": False,
         }
-    source = source_inventory(repository, token=token)
+    source = source_inventory(
+        repository, token=token,
+        include_unverifiable=force_source_inventory,
+    )
+    # In inventory-only mode, represent unfinished historical GitHub assets
+    # by identity and declared size without inventing a SHA-256. Such an
+    # inventory is never proof of a complete byte-identical clone.
+    unverifiable_source = sorted(
+        asset_id for asset_id, row in source.items()
+        if row.get("source_verifiable") is False
+    )
 
     source_ids = set(source)
     cloned_ids = set(cloned)
@@ -365,7 +380,8 @@ def audit(
     source_bytes = sum(int(row["bytes"]) for row in source.values())
     cloned_bytes = sum(int(row.get("bytes") or 0) for row in cloned.values())
     complete = (
-        not missing_ids
+        not unverifiable_source
+        and not missing_ids
         and not extra_ids
         and not mismatches
         and not physical_failures
@@ -376,6 +392,8 @@ def audit(
         "repository": repository,
         "complete": complete,
         "source_assets": len(source),
+        "unverifiable_source_asset_count": len(unverifiable_source),
+        "unverifiable_source_asset_ids_sample": unverifiable_source[:50],
         "clone_assets": len(cloned),
         "source_bytes": source_bytes,
         "clone_bytes": cloned_bytes,
