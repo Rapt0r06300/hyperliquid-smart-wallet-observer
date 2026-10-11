@@ -82,6 +82,11 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     assert report["failures"] == []
     assert report["verification_failures"] == 0
     assert report["run_manifest_checks"][0]["status"] == "OK"
+    assert report["status"] == "ASSETS_VERIFIED_ONLY"  # no canonical SAFE catalog supplied
+    assert len(report["source_inventory_sha256"]) == 64
+    identities = report["releases"][0]["assets"]
+    assert identities[0]["sha256"] == shard_sha
+    assert identities[0]["size_bytes"] == len(shard)
     assert (tmp_path / "releases" / "data-v2-test" / "trades.jsonl.gz").read_bytes() == shard
 
 
@@ -516,6 +521,44 @@ def test_restore_materializes_only_proven_safe_replay_assets(tmp_path, monkeypat
     assert repeat["classification"]["skipped_verified_shards"] == 2
     assert repeat["classification"]["usable_shards"] == 1
     assert repeat["classification"]["quarantined_shards"] == 1
+
+    # Certification requires catalog parity, not merely downloaded assets.
+    safe_sha = hashlib.sha256(safe).hexdigest()
+    catalog = tmp_path / "DATA_INDEX.json"
+    metrics = tmp_path / "DATA_METRICS.json"
+    catalog.write_text("{}", encoding="utf-8")
+    metrics.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        module, "_load_current_safe_catalog",
+        lambda *_a: (
+            {"safe-trades": (safe_sha, "data-v2-classified")},
+            {"source_index_sha256": "verified-test-catalog"},
+        ),
+    )
+    certified = module.restore_everything(
+        "owner/repo", tmp_path, catalog_path=catalog, metrics_path=metrics,
+    )
+    assert certified["status"] == "RESTORE_COMPLETE"
+    assert certified["classification"]["missing_catalog_safe_shards"] == 0
+    monkeypatch.setattr(
+        module, "_load_current_safe_catalog",
+        lambda *_a: (
+            {
+                "safe-trades": (safe_sha, "data-v2-classified"),
+                "unpublished": ("a" * 64, "no-release"),
+            },
+            {"source_index_sha256": "verified-test-catalog"},
+        ),
+    )
+    incomplete = module.restore_everything(
+        "owner/repo", tmp_path, catalog_path=catalog, metrics_path=metrics,
+    )
+    assert incomplete["status"] == "RESTORE_INCOMPLETE"
+    assert incomplete["classification"]["missing_catalog_safe_shards"] == 1
+    assert any(
+        row["error"] == "CATALOG_SAFE_SHARDS_NOT_RESTORED"
+        for row in incomplete["classification"]["failures"]
+    )
 
 
 def test_restore_verifies_zip_member_before_usable_materialization(tmp_path, monkeypatch):
