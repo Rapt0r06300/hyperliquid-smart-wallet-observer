@@ -363,3 +363,34 @@ def test_source_inventory_never_trusts_partial_embedded_assets(monkeypatch):
     inventory = module.source_inventory("owner/repo", token=None)
     assert len(inventory) == 2
     assert inventory[2]["bytes"] == 2
+
+
+def test_inventory_source_lists_starter_asset_without_certifying_clone(monkeypatch, tmp_path):
+    module = _module()
+    monkeypatch.setattr(module.mirror, "iter_releases_oldest_first", lambda *_a, **_k: [
+        {"id": 40, "tag_name": "history", "assets": [
+            {"id": 1, "name": "complete.bin", "size": 10,
+             "digest": "sha256:" + "a" * 64, "state": "uploaded"},
+            {"id": 2, "name": "unfinished.bin", "size": 20,
+             "digest": None, "state": "starter"},
+        ]},
+    ])
+    source = module.source_inventory("owner/repo", token=None, include_unverifiable=True)
+    assert len(source) == 2
+    assert source[1]["source_verifiable"] is True
+    assert source[2]["source_verifiable"] is False
+    assert source[2]["bytes"] == 20
+    monkeypatch.setattr(module.mirror, "load_manifest", lambda _p: {
+        "schema": "alina.clone_payload_manifest.v1", "entries": [],
+        "total_assets": 0, "total_bytes": 0,
+    })
+    monkeypatch.setattr(module, "git_tracked_payload_paths", lambda _p: set())
+    report = module.audit(
+        "owner/repo", root=tmp_path, token=None,
+        verify_git_pointers=True, force_source_inventory=True,
+    )
+    assert report["source_assets"] == 2
+    assert report["source_bytes"] == 30
+    assert report["unverifiable_source_asset_count"] == 1
+    assert report["unverifiable_source_asset_ids_sample"] == [2]
+    assert report["complete"] is False
