@@ -1093,6 +1093,7 @@ def materialize_latest_local_snapshot(
     *,
     allowed_release_dirs: set[str] | None = None,
     repository: str | None = None,
+    refuse_existing_changes: bool = False,
 ) -> dict[str, Any] | None:
     """Restore a verified current-inventory snapshot, never a stale cached Release."""
     candidates: list[tuple[str, Path, Mapping[str, Any]]] = []
@@ -1170,11 +1171,20 @@ def materialize_latest_local_snapshot(
         if target_key in tracked_paths:
             raise RestoreError(f"local snapshot would overwrite tracked Git file: {relative}")
         seen_workspace_targets.add(target_key)
-        if not (
-            target.is_file()
+        matches_snapshot = (
+            not target.is_symlink()
+            and target.is_file()
             and target.stat().st_size == expected_size
             and _sha256(target) == expected_sha
-        ):
+        )
+        if not matches_snapshot:
+            # A local synchronization must never overwrite unsaved ignored
+            # workspace files. Only the explicit --materialize-local-snapshot
+            # mode can replace them after the user chooses that behavior.
+            if refuse_existing_changes and (target.exists() or target.is_symlink()):
+                raise RestoreError(
+                    f"local snapshot conflicts with existing file: {relative}"
+                )
             pending_materialization += expected_size
 
     free_workspace = shutil.disk_usage(workspace).free
@@ -1608,6 +1618,7 @@ def restore_everything(
                 releases_root, workspace,
                 allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
                 repository=repository,
+                refuse_existing_changes=optional_local_snapshot,
             )
             if report["local_snapshot"] is None:
                 if optional_local_snapshot:
