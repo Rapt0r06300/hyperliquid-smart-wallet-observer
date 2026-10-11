@@ -1524,3 +1524,35 @@ def test_recovery_rejects_symlinked_release_asset_and_partial(tmp_path):
     with pytest.raises(module.RestoreError, match="symlinked Release asset partial"):
         module.download_asset(asset, directory)
     assert victim.read_bytes() == b"do-not-overwrite"
+
+def test_restore_rejects_symlinked_release_storage_directory(tmp_path):
+    import pytest
+    module = _module()
+    external = tmp_path / "external"
+    external.mkdir()
+    destination = tmp_path / "restore"
+    destination.mkdir()
+    try:
+        (destination / "releases").symlink_to(external, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(module.RestoreError, match="symlinked Release storage"):
+        module.restore_everything("owner/repo", destination)
+    assert list(external.iterdir()) == []
+
+
+def test_restore_retains_atomic_failure_report_for_bad_local_snapshot(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+
+    def fail_snapshot(*_a, **_kw):
+        raise module.RestoreError("bad local snapshot segment")
+
+    monkeypatch.setattr(module, "materialize_latest_local_snapshot", fail_snapshot)
+    result = module.restore_everything("owner/repo", tmp_path, workspace=tmp_path)
+    assert result["status"] == "RESTORE_INCOMPLETE"
+    assert result["local_snapshot"]["status"] == "FAIL"
+    assert result["failures"][0]["stage"] == "local_snapshot"
+    report_path = tmp_path / "RESTORE_REPORT.json"
+    assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == "RESTORE_INCOMPLETE"
+    assert not (tmp_path / "RESTORE_REPORT.json.partial").exists()
