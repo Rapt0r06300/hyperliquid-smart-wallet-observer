@@ -210,7 +210,7 @@ def _validate_release_asset(
         raise RestoreError(f"invalid download URL for {name}")
     if _expected_digest(asset) is None and not allow_incomplete:
         raise RestoreError(f"missing/invalid SHA-256 for {name}")
-    if asset.get("state") != "uploaded" and not allow_incomplete:
+    if asset.get("state", "uploaded") != "uploaded" and not allow_incomplete:
         raise RestoreError(f"asset not fully uploaded: {name}")
     ids.add(asset_id)
     names.add(name)
@@ -1283,7 +1283,7 @@ def restore_everything(
             name = asset.get("name")
             if not isinstance(name, str) or not name or name in seen_names:
                 raise RestoreError(f"duplicate or missing asset name in Release {tag}")
-            if (_expected_digest(asset) is None or asset.get("state") != "uploaded"):
+            if (_expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"):
                 if not recover_verifiable:
                     raise RestoreError(f"unverifiable Release asset: {tag}/{name}")
                 unverified_source_assets.append({
@@ -1355,7 +1355,7 @@ def restore_everything(
             if target.is_symlink() or partial.is_symlink():
                 raise RestoreError(f"symlinked Release asset during preflight: {tag}/{name}")
             if recover_verifiable and (
-                _expected_digest(asset) is None or asset.get("state") != "uploaded"
+                _expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"
             ):
                 continue
             if not _asset_ok(target, asset):
@@ -1457,7 +1457,7 @@ def restore_everything(
                 "sha256": _expected_digest(asset),
             }
             if recover_verifiable and (
-                _expected_digest(asset) is None or asset.get("state") != "uploaded"
+                _expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"
             ):
                 reason = "UNVERIFIABLE_SOURCE_ASSET"
                 report["failures"].append({
