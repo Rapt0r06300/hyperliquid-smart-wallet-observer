@@ -40,6 +40,43 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Inventory exact Release/LFS byte gap without downloading payloads
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Full authoritative source inventory (not just the empty-mirror
+          # short circuit). This is read-only and NEVER starts LFS migration.
+          python tools/check_clone_payload_completeness.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --root . \
+            --inventory-source \
+            --output "$RUNNER_TEMP/clone-payload-source-inventory.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          report = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "clone-payload-source-inventory.json")
+              .read_text(encoding="utf-8")
+          )
+          if report.get("complete") is not False:
+              print("Inventory indicates parity; require separate clone proof.")
+          print("SOURCE_RELEASE_ASSETS=", report.get("source_assets"))
+          print("SOURCE_RELEASE_BYTES=", report.get("source_bytes"))
+          print("MISSING_LFS_ASSETS=", report.get("missing_asset_count"))
+          print("CURRENT_CLONE_BYTES=", report.get("clone_bytes"))
+          PY
+
+      - name: Upload authoritative source backlog
+        if: always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: clone-source-inventory
+          path: "${{ runner.temp }}/clone-payload-source-inventory.json"
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Audit Release bytes against current-tree LFS pointers
         shell: bash
         run: |
