@@ -74,6 +74,9 @@ def _gh(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[s
             or "timed out" in detail
             or "timeout" in detail
             or "couldn't respond" in detail
+            or "stream error" in detail
+            or "received from peer" in detail
+            or "connection reset" in detail
         )
         if not retryable_read or not transient or attempt + 1 == attempts:
             break
@@ -132,6 +135,7 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
     releases: list[Mapping[str, Any]] = []
     page_size = RECOVERY_RELEASE_PAGE_SIZE
     page = 1
+    seen_tags: set[str] = set()
     while True:
         path = f"repos/{repository}/releases?per_page={page_size}&page={page}"
         try:
@@ -141,28 +145,34 @@ def list_recovery_releases(repository: str) -> list[Mapping[str, Any]]:
             # Halve only the failed request window, preserving its absolute
             # offset; never silently treat an incomplete listing as complete.
             message = str(exc).lower()
-            if (
-                page_size > MIN_RECOVERY_RELEASE_PAGE_SIZE
-                and ("http 504" in message or "http 502" in message)
-            ):
+            transient_listing = any(term in message for term in (
+                "http 504", "http 502", "stream error",
+                "received from peer", "connection reset",
+            ))
+            if page_size > MIN_RECOVERY_RELEASE_PAGE_SIZE and transient_listing:
                 start_offset = (page - 1) * page_size
                 page_size //= 2
                 page = start_offset // page_size + 1
                 continue
-            if "http 504" in message or "http 502" in message:
+            if transient_listing:
                 # Changing page size is insufficient when GitHub's deep
                 # offset itself is slow. Switch methods rather than looping.
                 return _recovery_releases_from_git_refs(repository)
             raise
         if not isinstance(payload, list):
             raise RecoveryError("release listing is not an array")
+        if len(payload) > page_size:
+            raise RecoveryError("release listing exceeds requested page size")
         if not payload:
             break
         for row in payload:
-            if isinstance(row, Mapping) and str(row.get("tag_name") or "").startswith(
-                RECOVERY_PREFIX
-            ):
-                releases.append(row)
+            if isinstance(row, Mapping):
+                tag = str(row.get("tag_name") or "")
+                if tag.startswith(RECOVERY_PREFIX):
+                    if tag in seen_tags:
+                        raise RecoveryError(f"duplicate recovery Release in paged inventory: {tag}")
+                    seen_tags.add(tag)
+                    releases.append(row)
         if len(payload) < page_size:
             break
         page += 1

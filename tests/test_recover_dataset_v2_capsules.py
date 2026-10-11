@@ -162,17 +162,81 @@ def test_recovery_pages_halve_on_504_without_skipping_or_repeating(monkeypatch):
 def test_recovery_listing_504_at_min_page_never_returns_partial(monkeypatch):
     module = _module()
     import pytest
+    from urllib.parse import parse_qs
     monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
     monkeypatch.setattr(module, "MIN_RECOVERY_RELEASE_PAGE_SIZE", 1)
+    fallback_calls = []
 
     def fake_api(path):
-        if "page=1" in path:
-            return [{"tag_name": "alina-recovery-first"}] * 2
+        query = parse_qs(path.split("?", 1)[1])
+        if int(query["page"][0]) == 1 and int(query["per_page"][0]) == 2:
+            return [
+                {"tag_name": "alina-recovery-first"},
+                {"tag_name": "alina-recovery-second"},
+            ]
         raise module.RecoveryError("GitHub HTTP 504")
 
+    def fallback(repository):
+        fallback_calls.append(repository)
+        raise module.RecoveryError("GitHub HTTP 504: ref inventory unavailable")
+
     monkeypatch.setattr(module, "_json_api", fake_api)
+    monkeypatch.setattr(module, "_recovery_releases_from_git_refs", fallback)
     with pytest.raises(module.RecoveryError, match="HTTP 504"):
         module.list_recovery_releases("owner/repo")
+    assert fallback_calls == ["owner/repo"]
+
+
+def test_recovery_refuses_oversized_page_instead_of_looping(monkeypatch):
+    import pytest
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    monkeypatch.setattr(module, "_json_api", lambda _path: [
+        {"tag_name": f"alina-recovery-{i}"} for i in range(3)
+    ])
+    with pytest.raises(module.RecoveryError, match="exceeds requested page size"):
+        module.list_recovery_releases("owner/repo")
+
+
+def test_recovery_retries_http2_stream_cancel(monkeypatch):
+    import subprocess
+    module = _module()
+    monkeypatch.setenv("GH_TOKEN", "test-token")
+    monkeypatch.setattr(module.shutil, "which", lambda _: "/usr/bin/gh")
+    calls, waits = [], []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs.get("timeout")))
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(
+                command, 1, "", "stream error: stream ID 1; CANCEL; received from peer"
+            )
+        return subprocess.CompletedProcess(command, 0, "[]", "")
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.time, "sleep", waits.append)
+    result = module._gh(["api", "repos/owner/repo/releases?per_page=25&page=14"])
+    assert result.returncode == 0
+    assert len(calls) == 2
+    assert waits == [1]
+
+
+def test_recovery_stream_cancel_falls_back_to_verified_refs(monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "RECOVERY_RELEASE_PAGE_SIZE", 2)
+    monkeypatch.setattr(module, "MIN_RECOVERY_RELEASE_PAGE_SIZE", 1)
+    monkeypatch.setattr(module, "_json_api", lambda _path: (_ for _ in ()).throw(
+        module.RecoveryError("gh api failed: stream error; CANCEL; received from peer")
+    ))
+    calls = []
+    def fallback(repo):
+        calls.append(repo)
+        return [{"tag_name": "alina-recovery-verified"}]
+    monkeypatch.setattr(module, "_recovery_releases_from_git_refs", fallback)
+    assert [x["tag_name"] for x in module.list_recovery_releases("owner/repo")] == [
+        "alina-recovery-verified"
+    ]
+    assert calls == ["owner/repo"]
 
 def test_recovery_deep_offset_failure_switches_to_verified_git_refs(monkeypatch):
     module = _module()
