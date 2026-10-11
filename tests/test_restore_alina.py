@@ -1957,4 +1957,4 @@ def test_recover_verifiable_reports_source_gaps_in_preflight(tmp_path, monkeypat
     )
     assert result["unverified_source_asset_count"] == 1
     assert result["pending_download_bytes"] == 0
-    assert result["status"] == "PREFLIGHT_READY_NOT_RESTORED"
+    assert result["status"] == "PREFLIGHT_SOURCE_UNVERIFIABLE"
