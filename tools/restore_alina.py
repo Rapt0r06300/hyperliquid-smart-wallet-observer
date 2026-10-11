@@ -1339,6 +1339,14 @@ def restore_everything(
     source_inventory_sha256 = hashlib.sha256(
         json.dumps(source_inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    # Every published byte has an explicit, immutable source identity and size.
+    # Prove parity at byte level as well as asset count. No floating estimates.
+    source_asset_bytes = sum(
+        int(asset["size"]) for release in releases for asset in release["assets"]
+    )
+    unverified_source_bytes = sum(
+        int(row["size_bytes"]) for row in unverified_source_assets
+    )
     clone_sources = _clone_lfs_sources(clone_root, repository, releases)
 
     # Old cached Releases must never be treated as part of the current GitHub
@@ -1397,6 +1405,8 @@ def restore_everything(
             "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
             "asset_count": sum(len(release["assets"]) for release in releases),
+            "source_asset_bytes": source_asset_bytes,
+            "unverified_source_bytes": unverified_source_bytes,
             "unverified_source_asset_count": len(unverified_source_assets),
             "unverified_source_assets_sample": unverified_source_assets[:50],
             "pending_download_bytes": pending_download_bytes,
@@ -1428,6 +1438,10 @@ def restore_everything(
         "destination": str(destination),
         "release_count": 0,
         "asset_count": 0,
+        "source_asset_bytes": source_asset_bytes,
+        "unverified_source_bytes": unverified_source_bytes,
+        "verified_asset_bytes": 0,
+        "verified_asset_count": 0,
         "downloaded": 0,
         "resumed_verified": 0,
         "skipped_verified": 0,
@@ -1487,6 +1501,8 @@ def restore_everything(
                     clone_candidate=clone_sources.get((tag, str(asset.get("name") or ""))),
                 )
                 row["assets"].append({**identity, **result})
+                report["verified_asset_bytes"] += int(asset["size"])
+                report["verified_asset_count"] += 1
                 if result["status"] == "DOWNLOADED_VERIFIED":
                     report["downloaded"] += 1
                 elif result["status"] == "RESUMED_VERIFIED":
@@ -1541,6 +1557,16 @@ def restore_everything(
         + report["skipped_verified"]
         == report["expected_assets"]
         and not report["failures"]
+        and report["verified_asset_count"] == report["expected_assets"]
+        and report["verified_asset_bytes"] == report["source_asset_bytes"]
+    )
+    report["missing_asset_bytes"] = (
+        report["source_asset_bytes"] - report["verified_asset_bytes"]
+    )
+    report["source_byte_parity"] = (
+        report["all_source_assets_accounted_for"]
+        and report["missing_asset_bytes"] == 0
+        and report["unverified_source_asset_count"] == 0
     )
     report["local_snapshot"] = None
     if workspace is not None:
@@ -1559,7 +1585,8 @@ def restore_everything(
                 "stage": "local_snapshot", "error": str(exc),
             })
     complete = (
-        report["all_source_assets_accounted_for"]
+        report["source_byte_parity"]
+        and report["all_source_assets_accounted_for"]
         and not report["failures"]
         and not report["verification_failures"]
         and not report["classification"]["failures"]
@@ -1670,6 +1697,10 @@ def main(argv: list[str] | None = None) -> int:
                 "source_inventory_sha256": report["source_inventory_sha256"],
                 "release_count": report["release_count"],
                 "asset_count": report["asset_count"],
+                "source_asset_bytes": report.get("source_asset_bytes"),
+                "verified_asset_bytes": report.get("verified_asset_bytes"),
+                "missing_asset_bytes": report.get("missing_asset_bytes"),
+                "source_byte_parity": report.get("source_byte_parity", False),
                 "downloaded": report["downloaded"],
                 "resumed_verified": report["resumed_verified"],
                 "skipped_verified": report["skipped_verified"],
