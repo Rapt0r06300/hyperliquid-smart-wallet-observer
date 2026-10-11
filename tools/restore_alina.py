@@ -1282,6 +1282,7 @@ def restore_everything(
     clone_root: Path | None = None,
     preflight_only: bool = False,
     recover_verifiable: bool = False,
+    optional_local_snapshot: bool = False,
 ) -> dict[str, Any]:
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
@@ -1609,7 +1610,14 @@ def restore_everything(
                 repository=repository,
             )
             if report["local_snapshot"] is None:
-                raise RestoreError("no verified local snapshot available to materialize")
+                if optional_local_snapshot:
+                    # No local-only source was ever published in this inventory:
+                    # there are no published snapshot bytes to reconstruct.
+                    report["local_snapshot"] = {
+                        "status": "NOT_PUBLISHED", "restored_files": 0,
+                    }
+                else:
+                    raise RestoreError("no verified local snapshot available to materialize")
         except (RestoreError, OSError, ValueError, TypeError) as exc:
             # Preserve the verified Release inventory and a failure checkpoint.
             report["local_snapshot"] = {"status": "FAIL", "error": str(exc)}
@@ -1664,13 +1672,16 @@ def main(argv: list[str] | None = None) -> int:
         default=".",
         help="fresh clone root used only with --materialize-local-snapshot",
     )
-    parser.add_argument(
+    snapshot_group = parser.add_mutually_exclusive_group()
+    snapshot_group.add_argument(
         "--materialize-local-snapshot",
         action="store_true",
-        help=(
-            "explicitly restore the latest whole-workspace snapshot; disabled by "
-            "default because only catalog-proven SAFE shards enter usable/"
-        ),
+        help="require and restore the latest published verified workspace snapshot",
+    )
+    snapshot_group.add_argument(
+        "--materialize-available-local-snapshot",
+        action="store_true",
+        help="restore the latest published snapshot when available; refuse corrupt snapshots",
     )
     args = parser.parse_args(argv)
 
@@ -1689,9 +1700,10 @@ def main(argv: list[str] | None = None) -> int:
             clone_root=Path(args.clone_root).resolve(),
             preflight_only=args.preflight_only,
             recover_verifiable=args.recover_verifiable,
+            optional_local_snapshot=args.materialize_available_local_snapshot,
             workspace=(
                 Path(args.workspace).resolve()
-                if args.materialize_local_snapshot
+                if args.materialize_local_snapshot or args.materialize_available_local_snapshot
                 else None
             ),
         )
