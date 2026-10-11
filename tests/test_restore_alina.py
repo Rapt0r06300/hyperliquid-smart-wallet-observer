@@ -79,6 +79,10 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     assert report["release_count"] == 1
     assert report["asset_count"] == 2
     assert report["downloaded"] == 2
+    assert report["source_asset_bytes"] == len(shard) + len(manifest_bytes)
+    assert report["verified_asset_bytes"] == report["source_asset_bytes"]
+    assert report["missing_asset_bytes"] == 0
+    assert report["source_byte_parity"] is True
     assert report["failures"] == []
     assert report["verification_failures"] == 0
     assert report["run_manifest_checks"][0]["status"] == "OK"
@@ -1383,6 +1387,10 @@ def test_failed_release_asset_never_reports_all_bytes_accounted_for(tmp_path, mo
     assert report["downloaded"] == 0
     assert len(report["failures"]) == 1
     assert report["all_source_assets_accounted_for"] is False
+    assert report["source_asset_bytes"] == len(expected)
+    assert report["verified_asset_bytes"] == 0
+    assert report["missing_asset_bytes"] == len(expected)
+    assert report["source_byte_parity"] is False
     assert not (tmp_path / "releases" / "evidence-incomplete" / "evidence.bin").exists()
 
 
@@ -1905,6 +1913,11 @@ def test_recover_verifiable_salvages_only_hashed_assets(tmp_path, monkeypatch):
     assert result["status"] == "RESTORE_INCOMPLETE"
     assert result["unverified_source_asset_count"] == 1
     assert result["downloaded"] == 1
+    assert result["source_asset_bytes"] == len(payload) + 400
+    assert result["unverified_source_bytes"] == 400
+    assert result["verified_asset_bytes"] == len(payload)
+    assert result["missing_asset_bytes"] == 400
+    assert result["source_byte_parity"] is False
     assert result["all_source_assets_accounted_for"] is False
     assert result["failures"][0]["error"] == "UNVERIFIABLE_SOURCE_ASSET"
     assert not (root / "releases" / "data-v2-mixed" / "invalid.bin").exists()
@@ -1957,6 +1970,8 @@ def test_recover_verifiable_reports_source_gaps_in_preflight(tmp_path, monkeypat
     )
     assert result["unverified_source_asset_count"] == 1
     assert result["pending_download_bytes"] == 0
+    assert result["source_asset_bytes"] == 999
+    assert result["unverified_source_bytes"] == 999
     assert result["status"] == "PREFLIGHT_SOURCE_UNVERIFIABLE"
 
 
