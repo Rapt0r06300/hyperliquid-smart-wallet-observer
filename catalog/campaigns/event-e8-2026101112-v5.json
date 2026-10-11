@@ -1,18 +1,38 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "event-e8-2026101112-v5",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "49e11f5a4d7c60453cbf0600f89d061a9b2de14c",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "43e8f13cccc3c256df367d544611924c658a6f7d782ab6f1a702b922d099a598",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release create alina-recovery-b78345d041299273aaeb --repo Rapt0r06300/hyperliquid-smart-wallet-observer --target main --title Alina Dataset V2 event-e8-2026101112-v5 unit 0 recovery capsule --notes Exact pre-publication disaster-recovery capsule for one Alina collection unit. It exists so GitHub Release API throttling cannot destroy fresh trades/L2 evidence when an ephemeral hosted runner exits. failed: HTTP 422: Validation Failed (https://api.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases) Release.tag_name already exists",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "5b2d6b442f1eff0d5f708b93a07c459ef3714c1a5fd0f9366a82730fa19c6471"
+    }
+  },
   "config_sha256": "dd35ebf6332244b5890c47cc9d000e3bb6ba7006ecb9b4efe08aeda14fe370d0",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-11T12:38:23.204632+00:00",
   "creation_phase": "COLLECT",
-  "cursor": {},
+  "cursor": {
+    "checkpoint_id": "5b2d6b442f1eff0d5f708b93a07c459ef3714c1a5fd0f9366a82730fa19c6471",
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "38147225944",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null
+  },
   "dataset_generation": "V2_FRESH",
   "dataset_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "dataset_selection_id": null,
@@ -27,15 +47,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-11T14:37:02.502156Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "event_intelligence_collection",
-  "lease": {
-    "acquired_at": "2026-10-11T14:34:34.903694Z",
-    "expires_at": "2026-10-11T20:19:34.903694Z",
-    "lease_token_sha256": "d4ba56f5a3fff01b775be63590c2ca27ab1d21c93d70302d1870d8934f775252",
-    "owner_run_id": "38147225944"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -44,7 +65,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -53,9 +74,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-11T14:34:34.903745Z",
+  "updated_at": "2026-10-11T14:37:02.502156Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
