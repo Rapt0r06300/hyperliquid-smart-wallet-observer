@@ -1124,6 +1124,7 @@ def restore_everything(
     catalog_path: Path | None = None,
     metrics_path: Path | None = None,
     clone_root: Path | None = None,
+    preflight_only: bool = False,
 ) -> dict[str, Any]:
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
@@ -1198,7 +1199,34 @@ def restore_everything(
 
     free_destination = shutil.disk_usage(destination).free
     safety_margin = 1024 * 1024 * 1024
-    if pending_download_bytes + safety_margin > free_destination:
+    enough_disk = pending_download_bytes + safety_margin <= free_destination
+    if preflight_only:
+        # Planning never downloads assets and is not a recovery certificate.
+        plan = {
+            "schema": "alina.restore_preflight.v1",
+            "status": (
+                "PREFLIGHT_READY_NOT_RESTORED"
+                if enough_disk else "PREFLIGHT_INSUFFICIENT_DISK"
+            ),
+            "repository": repository,
+            "release_count": len(releases),
+            "asset_count": sum(len(release["assets"]) for release in releases),
+            "pending_download_bytes": pending_download_bytes,
+            "free_destination_bytes": free_destination,
+            "safety_margin_bytes": safety_margin,
+            "enough_disk_for_release_assets": enough_disk,
+            "note": (
+                "No Release assets downloaded. SAFE shard materialization and "
+                "optional local snapshots require additional disk space."
+            ),
+            "read_only": True,
+            "real_execution": False,
+        }
+        plan_path = destination / "RESTORE_PREFLIGHT.json"
+        plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
+        plan["report"] = str(plan_path)
+        return plan
+    if not enough_disk:
         raise RestoreError(
             "insufficient disk space for complete GitHub Release restore: "
             f"need_at_least={pending_download_bytes + safety_margin} "
@@ -1310,6 +1338,10 @@ def main(argv: list[str] | None = None) -> int:
         description="Restore every canonical Alina GitHub Release asset after cloning the repository."
     )
     parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
+    parser.add_argument(
+        "--preflight-only", action="store_true",
+        help="inventory Releases and check space without downloading assets",
+    )
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
     parser.add_argument("--clone-root", default=".",
@@ -1346,6 +1378,7 @@ def main(argv: list[str] | None = None) -> int:
             catalog_path=Path(args.catalog).resolve(),
             metrics_path=Path(args.metrics).resolve(),
             clone_root=Path(args.clone_root).resolve(),
+            preflight_only=args.preflight_only,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot
@@ -1355,6 +1388,10 @@ def main(argv: list[str] | None = None) -> int:
     except RestoreError as exc:
         print(f"ALINA_RESTORE_FAIL: {exc}", file=sys.stderr)
         return 2
+
+    if args.preflight_only:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0 if report["enough_disk_for_release_assets"] else 3
 
     failures = (
         len(report["failures"])

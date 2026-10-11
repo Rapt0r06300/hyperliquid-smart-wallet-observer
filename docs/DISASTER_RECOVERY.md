@@ -26,6 +26,16 @@ authenticated GitHub CLI token without printing or persisting it. Anonymous
 API quotas may not suffice. If rate-limited, the restore aborts promptly;
 rerunning the same command reuses SHA-verified downloaded assets.
 
+Before a multi-hundred-GB download, run `RESTORE_ALINA.cmd --preflight-only`
+on Windows, `bash RESTORE_ALINA.sh --preflight-only`, or
+`python tools/restore_alina.py --everything --preflight-only`.
+This enumerates the Release inventory and checks minimum disk capacity
+**without downloading asset bytes**. It saves
+`runtime/recovery/full/RESTORE_PREFLIGHT.json` and reports either
+`PREFLIGHT_READY_NOT_RESTORED` or `PREFLIGHT_INSUFFICIENT_DISK`.
+A successful preflight is NOT a completed restore; SAFE shards and local
+snapshots may require additional disk space.
+
 Published collection and analysis files are restored into
 `runtime/recovery/full/releases/`. Only catalog-proven SAFE/replay-compatible
 shards enter `runtime/recovery/full/usable/shards/`; others are quarantined.

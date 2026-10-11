@@ -198,6 +198,45 @@ def test_safe_component_is_collision_resistant_for_sanitized_names():
     assert "/" not in first
 
 
+def test_preflight_estimates_bytes_without_downloading(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"published bytes"
+    releases = [{"tag_name": "data-v2-test",
+                 "assets": [_asset("asset.bin", "https://example.invalid/asset", payload)]}]
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter(releases))
+    monkeypatch.setattr(
+        module, "_download_to_path",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("preflight must not download any Release asset")
+        ),
+    )
+    class Usage:
+        free = 0
+    monkeypatch.setattr(module.shutil, "disk_usage", lambda *_a: Usage())
+    root = tmp_path / "restored"
+    report = module.restore_everything("owner/repo", root, preflight_only=True)
+    assert report["status"] == "PREFLIGHT_INSUFFICIENT_DISK"
+    assert report["release_count"] == 1
+    assert report["asset_count"] == 1
+    assert report["pending_download_bytes"] == len(payload)
+    assert report["enough_disk_for_release_assets"] is False
+    assert (root / "RESTORE_PREFLIGHT.json").is_file()
+    assert not (root / "RESTORE_REPORT.json").exists()
+
+
+def test_preflight_cli_does_not_claim_completed_restore(tmp_path, monkeypatch, capsys):
+    module = _module()
+    def fake_restore(*_args, **kwargs):
+        assert kwargs["preflight_only"] is True
+        return {"status": "PREFLIGHT_INSUFFICIENT_DISK",
+                "enough_disk_for_release_assets": False}
+    monkeypatch.setattr(module, "restore_everything", fake_restore)
+    exit_code = module.main(["--everything", "--preflight-only",
+                             "--destination", str(tmp_path / "restore")])
+    assert exit_code == 3
+    assert "PREFLIGHT_INSUFFICIENT_DISK" in capsys.readouterr().out
+
+
 def test_restore_fails_before_download_when_disk_is_insufficient(tmp_path, monkeypatch):
     module = _module()
     payload = b"x" * 1024

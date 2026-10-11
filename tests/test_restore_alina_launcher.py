@@ -12,6 +12,7 @@ def test_restore_alina_cmd_selects_portable_then_python_and_keeps_fail_closed():
     assert script.count("tools\\restore_alina.py --everything") == 3
     assert script.count("--clone-root") == 3
     assert script.count("--destination") == 3
+    assert script.count("%*") == 3
     assert "gh auth token" in script
     assert "GH_TOKEN" in script and "GITHUB_TOKEN" in script
     assert script.count("exit /b %ERRORLEVEL%") == 3
