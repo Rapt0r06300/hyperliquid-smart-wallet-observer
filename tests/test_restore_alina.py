@@ -1879,3 +1879,82 @@ def test_restore_rejects_unrecognized_current_snapshot_schema(tmp_path):
         module.materialize_latest_local_snapshot(
             releases, tmp_path, allowed_release_dirs={current.name},
         )
+
+
+def test_recover_verifiable_salvages_only_hashed_assets(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"exact-source-bytes"
+    valid = {**_asset("valid.bin", "https://example.invalid/valid", payload),
+             "id": 101, "state": "uploaded"}
+    incomplete = {"id": 102, "name": "invalid.bin", "size": 400,
+                  "digest": None, "state": "starter",
+                  "browser_download_url": "https://example.invalid/invalid"}
+    releases = [{"id": 7, "tag_name": "data-v2-mixed", "assets": [valid, incomplete]}]
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter(releases))
+    calls = []
+    def fake_download(url, target, **_k):
+        calls.append(url)
+        assert url.endswith("/valid")
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    root = tmp_path / "restore"
+    result = module.restore_everything("owner/repo", root, recover_verifiable=True)
+    assert calls == ["https://example.invalid/valid"]
+    assert (root / "releases" / "data-v2-mixed" / "valid.bin").read_bytes() == payload
+    assert result["status"] == "RESTORE_INCOMPLETE"
+    assert result["unverified_source_asset_count"] == 1
+    assert result["downloaded"] == 1
+    assert result["all_source_assets_accounted_for"] is False
+    assert result["failures"][0]["error"] == "UNVERIFIABLE_SOURCE_ASSET"
+    assert not (root / "releases" / "data-v2-mixed" / "invalid.bin").exists()
+    report = json.loads((root / "RESTORE_REPORT.json").read_text())
+    assert report["unverified_source_assets_sample"][0]["asset_id"] == 102
+
+
+def test_recover_verifiable_never_promotes_stale_manifest(tmp_path, monkeypatch):
+    module = _module()
+    payload = b"uncertified"
+    root = tmp_path / "restore"
+    release = root / "releases" / "data-v2-starter"
+    release.mkdir(parents=True)
+    (release / "safe.bin").write_bytes(payload)
+    (release / "RUN_MANIFEST.json").write_text(json.dumps({
+        "manifests": [{
+            "dataset_id": "danger", "quality_status": "SAFE",
+            "validation_allowed": True, "replay_compatible": True,
+            "asset_verified": True, "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "release": {"repository": "owner/repo",
+                        "release_tag": release.name, "asset_name": "safe.bin"},
+        }],
+    }))
+    valid = {**_asset("safe.bin", "https://example.invalid/safe", payload),
+             "id": 1, "state": "uploaded"}
+    invalid = {"id": 2, "name": "RUN_MANIFEST.json", "size": 999,
+               "digest": None, "state": "starter",
+               "browser_download_url": "https://example.invalid/missing"}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([
+        {"id": 7, "tag_name": "data-v2-starter", "assets": [valid, invalid]},
+    ]))
+    result = module.restore_everything("owner/repo", root, recover_verifiable=True)
+    assert result["status"] == "RESTORE_INCOMPLETE"
+    assert result["classification"]["usable_shards"] == 0
+    assert not list((root / "usable").rglob("*.jsonl.gz"))
+
+
+def test_recover_verifiable_reports_source_gaps_in_preflight(tmp_path, monkeypatch):
+    module = _module()
+    invalid = {"id": 2, "name": "RUN_MANIFEST.json", "size": 999,
+               "digest": None, "state": "starter",
+               "browser_download_url": "https://example.invalid/missing"}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_k: iter([
+        {"id": 7, "tag_name": "data-v2-starter", "assets": [invalid]},
+    ]))
+    result = module.restore_everything(
+        "owner/repo", tmp_path / "restore",
+        preflight_only=True, recover_verifiable=True,
+    )
+    assert result["unverified_source_asset_count"] == 1
+    assert result["pending_download_bytes"] == 0
+    assert result["status"] == "PREFLIGHT_READY_NOT_RESTORED"
