@@ -681,6 +681,12 @@ def _materialize_classified_shards(
         if allowed_release_dirs is not None and release_tag not in allowed_release_dirs:
             report["ignored_stale_release_manifests"] += 1
             continue
+        if manifest_path.is_symlink():
+            report["failures"].append({
+                "manifest": str(manifest_path),
+                "error": "SYMLINKED_RUN_MANIFEST",
+            })
+            continue
         diagnostic_dir = diagnostics / release_tag
         diagnostic_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(manifest_path, diagnostic_dir / "RUN_MANIFEST.json")
@@ -774,6 +780,14 @@ def _materialize_classified_shards(
                 / "shards"
                 / _safe_component(data_tag)
             )
+            if any(part.is_symlink() for part in (
+                target_root, target_root.parent, target_root.parent.parent
+            )):
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "SYMLINKED_SHARD_DIRECTORY",
+                })
+                continue
             target_root.mkdir(parents=True, exist_ok=True)
             target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
             if target.is_symlink():
@@ -1196,6 +1210,8 @@ def restore_everything(
             catalog_path, metrics_path
         )
     releases_root = destination / "releases"
+    if releases_root.is_symlink():
+        raise RestoreError("symlinked Release storage directory")
     releases_root.mkdir(parents=True, exist_ok=True)
     releases = list(iter_releases(repository, token=token))
     # Never start transferring data with a partial/malformed source inventory.
@@ -1260,6 +1276,8 @@ def restore_everything(
         if not tag:
             continue
         release_dir = releases_root / _safe_component(tag)
+        if release_dir.is_symlink():
+            raise RestoreError(f"symlinked Release directory: {tag}")
         assets = release.get("assets")
         for asset in assets if isinstance(assets, list) else []:
             if not isinstance(asset, Mapping):
@@ -1345,6 +1363,8 @@ def restore_everything(
             continue
         safe_tag = _safe_component(tag)
         release_dir = releases_root / safe_tag
+        if release_dir.is_symlink():
+            raise RestoreError(f"symlinked Release directory: {tag}")
         assets = release.get("assets")
         assets = assets if isinstance(assets, list) else []
         row = {
@@ -1413,11 +1433,18 @@ def restore_everything(
         repository, releases_root, destination, catalog_safe=catalog_safe,
         allowed_release_dirs=allowed_release_dirs,
     )
-    report["local_snapshot"] = (
-        materialize_latest_local_snapshot(releases_root, workspace)
-        if workspace is not None
-        else None
-    )
+    report["local_snapshot"] = None
+    if workspace is not None:
+        try:
+            report["local_snapshot"] = materialize_latest_local_snapshot(
+                releases_root, workspace
+            )
+        except (RestoreError, OSError, ValueError, TypeError) as exc:
+            # Preserve the verified Release inventory and a failure checkpoint.
+            report["local_snapshot"] = {"status": "FAIL", "error": str(exc)}
+            report["failures"].append({
+                "stage": "local_snapshot", "error": str(exc),
+            })
     report["expected_assets"] = sum(len(release["assets"]) for release in releases)
     report["all_source_assets_accounted_for"] = (
         report["asset_count"] == report["expected_assets"]
@@ -1440,7 +1467,11 @@ def restore_everything(
         else "RESTORE_INCOMPLETE"
     )
     report_path = destination / "RESTORE_REPORT.json"
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_partial = report_path.with_name(report_path.name + ".partial")
+    report_partial.write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    report_partial.replace(report_path)
     return report
 
 
