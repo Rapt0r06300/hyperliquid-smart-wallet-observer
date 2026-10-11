@@ -1,0 +1,126 @@
+{
+  "asset_verified": true,
+  "bytes": 34661,
+  "collection_run_id": "market-e8-8-2026101022-v7-0",
+  "collector_version": "c4b57efc0a338fda732b9a8614316764b4ade4d1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "bitget-public-ws-trades-magicusdt-1791675289764-1791675423301-a36561e709c2",
+  "end_ts_ms": 1791675423301,
+  "event_count": 390,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [],
+  "quality_status": "SAFE",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": 0,
+    "live_count": 390,
+    "live_only": 0,
+    "local_continuity_fallback": false,
+    "matched_count": 390,
+    "missing_from_live": 0,
+    "reference_count": 390,
+    "reference_status": "MATCHED",
+    "status": "MATCHED"
+  },
+  "record_count": 390,
+  "release": {
+    "asset_id": 629342695,
+    "asset_name": "packed-shards-0052.zip",
+    "member_name": "bitget-public-ws-trades-magicusdt-1791675289764-1791675423301-a36561e709c2.jsonl.gz",
+    "release_id": 409289649,
+    "release_tag": "data-v2-campaign-market-e8-8-2026101022-v7-u0",
+    "remote_digest": "sha256:722fcda2a90ef14c305522e19a3ad88addcc30897dbfc57a2231886d730386dc",
+    "remote_size": 830654,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "bitget-public-ws-trades-magicusdt-1791675289764-1791675423301-a36561e709c2.jsonl.gz",
+  "release_asset_id": 629342695,
+  "release_container_asset": "packed-shards-0052.zip",
+  "release_id": 409289649,
+  "release_member": "bitget-public-ws-trades-magicusdt-1791675289764-1791675423301-a36561e709c2.jsonl.gz",
+  "release_remote_digest": "sha256:722fcda2a90ef14c305522e19a3ad88addcc30897dbfc57a2231886d730386dc",
+  "release_remote_size": 830654,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-8-2026101022-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "a36561e709c2ffedf604b61eebe992b3bec98314d866d2f41a9c450c382365f8",
+  "source": "bitget_public_ws",
+  "start_ts_ms": 1791675289764,
+  "symbol": "MAGICUSDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 390,
+      "max": 107.0,
+      "min": 76.5,
+      "p50": 84.0,
+      "p95": 107.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "bitget-v2-57c7529d07cf42eaaf41652d7fe1acc1"
+    ],
+    "first_exchange_ts_ms": 1791675189916,
+    "last_exchange_ts_ms": 1791675423225,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 390,
+      "max": 99848.0,
+      "min": 71.0,
+      "p50": 76.0,
+      "p95": 89023.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 390,
+      "max": 164.647643,
+      "min": 0.0,
+      "p50": 152.824215,
+      "p95": 164.647643
+    }
+  },
+  "trade_count": 390,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 390,
+  "trade_identity_set_sha256": "d3444330cd552f80d3e62e044bf8c394c09a0ff6a25255d216f278345473bef6",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 626338,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 390,
+  "unique_trade_count_exact": true,
+  "validation_allowed": true,
+  "venue": "bitget"
+}
