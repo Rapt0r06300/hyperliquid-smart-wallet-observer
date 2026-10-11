@@ -1824,3 +1824,58 @@ def test_restore_snapshot_end_to_end_only_from_current_repository(tmp_path, monk
     assert report["local_snapshot"]["tag"] == release_tag
     assert (workspace / "runtime" / "restored-evidence.bin").read_bytes() == data
     assert report["status"] == "ASSETS_VERIFIED_ONLY"
+
+
+def test_restore_missing_current_snapshot_index_fails_closed(tmp_path):
+    import pytest
+
+    module = _module()
+    releases = tmp_path / "releases"
+    current = releases / "alina-local-snapshot-new"
+    current.mkdir(parents=True)
+    with pytest.raises(module.RestoreError, match="missing current local snapshot index"):
+        module.materialize_latest_local_snapshot(
+            releases, tmp_path, allowed_release_dirs={current.name},
+        )
+
+
+def test_restore_corrupt_current_snapshot_does_not_use_older_snapshot(tmp_path):
+    import pytest
+
+    module = _module()
+    releases = tmp_path / "releases"
+    older = releases / "alina-local-snapshot-older"
+    newer = releases / "alina-local-snapshot-newer"
+    older.mkdir(parents=True)
+    newer.mkdir(parents=True)
+    (older / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1", "tag": older.name,
+            "created_at_utc": "2026-10-10",
+            "chunks": [], "files": [],
+        }), encoding="utf-8",
+    )
+    (newer / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        "{invalid json", encoding="utf-8",
+    )
+    with pytest.raises(module.RestoreError, match="invalid current local snapshot index"):
+        module.materialize_latest_local_snapshot(
+            releases, tmp_path, allowed_release_dirs={older.name, newer.name},
+        )
+
+
+def test_restore_rejects_unrecognized_current_snapshot_schema(tmp_path):
+    import pytest
+
+    module = _module()
+    releases = tmp_path / "releases"
+    current = releases / "alina-local-snapshot-current"
+    current.mkdir(parents=True)
+    (current / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({"schema": "unknown", "chunks": [], "files": []}),
+        encoding="utf-8",
+    )
+    with pytest.raises(module.RestoreError, match="invalid current local snapshot schema"):
+        module.materialize_latest_local_snapshot(
+            releases, tmp_path, allowed_release_dirs={current.name},
+        )
