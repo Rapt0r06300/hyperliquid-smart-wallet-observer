@@ -5,11 +5,14 @@ cd /d "%~dp0"
 
 set "HYPERSMART_GIT=%~dp0tools\git\cmd\git.exe"
 if not exist "%HYPERSMART_GIT%" (
-  echo   [ERREUR] Le Git embarque tools\git\cmd\git.exe est introuvable.
-  echo   Aucun repli vers le Git systeme n'est autorise.
-  echo   Lance PREPARER_GIT_PORTABLE.cmd une fois, puis relance ce bouton.
-  set "RC=2"
-  goto :echec_code
+  rem Codex local may use a normal system Git; embedded Git is not required.
+  for %%G in (git.exe) do if not "%%~$PATH:G"=="" set "HYPERSMART_GIT=%%~$PATH:G"
+  if not exist "%HYPERSMART_GIT%" (
+    echo   [ERREUR] Git est introuvable, embarque ou installe.
+    echo   Installe Git ou lance PREPARER_GIT_PORTABLE.cmd.
+    set "RC=2"
+    goto :echec_code
+  )
 )
 
 if /I "%~1"=="--portable-self-check" goto :portable_self_check
