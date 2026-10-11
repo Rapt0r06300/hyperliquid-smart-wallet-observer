@@ -1038,6 +1038,7 @@ def materialize_latest_local_snapshot(
     workspace: Path,
     *,
     allowed_release_dirs: set[str] | None = None,
+    repository: str | None = None,
 ) -> dict[str, Any] | None:
     """Restore a verified current-inventory snapshot, never a stale cached Release."""
     candidates: list[tuple[str, Path, Mapping[str, Any]]] = []
@@ -1056,6 +1057,8 @@ def materialize_latest_local_snapshot(
         except json.JSONDecodeError:
             continue
         if isinstance(payload, Mapping) and payload.get("schema") == "alina.local_snapshot.v1":
+            if repository is not None and payload.get("repository") != repository:
+                raise RestoreError("local snapshot source repository mismatch")
             if payload.get("tag") not in (None, directory.name):
                 raise RestoreError("local snapshot index Release tag mismatch")
             created_at = str(payload.get("created_at_utc") or directory.name)
@@ -1070,21 +1073,25 @@ def materialize_latest_local_snapshot(
         raise RestoreError("latest local snapshot index is incomplete")
 
     chunks: dict[str, Path] = {}
+    chunk_casefold_names: set[str] = set()
     for row in chunk_rows:
         if not isinstance(row, Mapping):
             raise RestoreError("invalid local snapshot chunk row")
         name = str(row.get("name") or "")
         expected_sha = str(row.get("sha256") or "").lower()
         expected_size = row.get("bytes")
-        if (not name or name in chunks or type(expected_size) is not int
-                or expected_size < 0 or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
+        safe_name = _safe_component(name) if name else ""
+        if (not name or safe_name.casefold() in chunk_casefold_names
+                or type(expected_size) is not int or expected_size < 0
+                or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
             raise RestoreError(f"invalid or duplicate local snapshot chunk identity: {name}")
-        path = directory / _safe_component(name)
+        path = directory / safe_name
         if path.is_symlink() or not path.is_file() or path.stat().st_size != expected_size:
             raise RestoreError(f"missing local snapshot chunk: {name}")
         if _sha256(path) != expected_sha:
             raise RestoreError(f"local snapshot chunk sha256 mismatch: {name}")
         chunks[name] = path
+        chunk_casefold_names.add(safe_name.casefold())
 
     pending_materialization = 0
     seen_workspace_targets: set[str] = set()
@@ -1475,6 +1482,7 @@ def restore_everything(
             report["local_snapshot"] = materialize_latest_local_snapshot(
                 releases_root, workspace,
                 allowed_release_dirs=allowed_release_dirs,
+                repository=repository,
             )
             if report["local_snapshot"] is None:
                 raise RestoreError("no verified local snapshot available to materialize")
