@@ -12,6 +12,35 @@ Alina Smart Flow — nom historique : **HyperSmart** — collecte et normalise d
 
 ---
 
+## Travail sur PC avec Codex : sauvegarder puis resynchroniser
+
+Depuis le dossier de travail local, lancer **`POUSSER-GITHUB-FORCE.cmd`**
+(ou **`POUSSER_TOUT_LE_TRAVAIL.cmd`**) lorsque les changements Codex
+doivent être publiés. Le nom historique FORCE est trompeur : le bouton
+contrôle que `origin` désigne le dépôt Alina principal, ajoute les fichiers
+de code/docs/config admissibles, crée un commit non vide si nécessaire,
+intègre les nouveaux commits distants et exécute un `git push origin
+main:main` **sans `--force`**. Il vérifie ensuite le SHA réellement présent
+sur GitHub. En cas de conflit, fichier secret ou fichier trop gros, il
+échoue sans écraser les commits des collecteurs. Une alternative Git système
+est admise quand le Git portable n'est pas installé.
+
+**Pour les preuves ignorées/locales produites par Codex**, lancer
+`BACKUP_LOCAL_ALINA.cmd` lorsque leur conservation sur GitHub est souhaitée.
+Ce bouton crée une sauvegarde en GitHub Releases du **même dépôt** avec
+chunks et SHA-256 ; les secrets sont exclus. Le bouton de push Git ne
+téléverse PAS implicitement des centaines de Go de runtime vers l'historique
+Git. Cela ne sauvegarde pas rétroactivement les artifacts Actions expirés.
+
+Après publication, `ALINA_SYNC_COMPLETE.cmd` (ou
+`ALINA_SYNC_COMPLETE.sh`) met à jour la branche `main` locale par
+avance rapide et restaure les assets GitHub Releases avec contrôle SHA-256.
+Il refuse d'effacer silencieusement des modifications de code locales non
+publiées. La restauration complète n'est certifiée que si l'inventaire des
+données publiées est intégralement vérifié ; sinon, le résultat est INCOMPLETE.
+
+---
+
 ## Clone principal + récupération de toutes les données publiées (sans Git LFS)
 
 **Un simple `git clone` ne télécharge pas les GitHub Releases.** Un clone
