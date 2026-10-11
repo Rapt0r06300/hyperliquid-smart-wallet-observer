@@ -191,6 +191,7 @@ def _download_to_path(
 
 def _validate_release_asset(
     asset: Mapping[str, Any], release_id: int, ids: set[int], names: set[str],
+    *, allow_incomplete: bool = False,
 ) -> None:
     """Apply identical strict identity, completeness and digest gates to all sources."""
     if not isinstance(asset, Mapping):
@@ -207,16 +208,17 @@ def _validate_release_asset(
         raise RestoreError(f"invalid asset size for {name}")
     if not isinstance(url, str) or not url.startswith("https://"):
         raise RestoreError(f"invalid download URL for {name}")
-    if _expected_digest(asset) is None:
+    if _expected_digest(asset) is None and not allow_incomplete:
         raise RestoreError(f"missing/invalid SHA-256 for {name}")
-    if asset.get("state") != "uploaded":
+    if asset.get("state") != "uploaded" and not allow_incomplete:
         raise RestoreError(f"asset not fully uploaded: {name}")
     ids.add(asset_id)
     names.add(name)
 
 
 def _list_release_assets(
-    repository: str, release_id: int, *, token: str | None = None
+    repository: str, release_id: int, *, token: str | None = None,
+    allow_incomplete: bool = False,
 ) -> list[Mapping[str, Any]]:
     """Enumerate every asset; the Releases list can truncate embedded assets at 30."""
     if type(release_id) is not int or release_id <= 0:
@@ -234,14 +236,19 @@ def _list_release_assets(
         if not isinstance(payload, list):
             raise RestoreError(f"invalid asset listing for release {release_id} page {page}")
         for asset in payload:
-            _validate_release_asset(asset, release_id, ids, names)
+            _validate_release_asset(
+                asset, release_id, ids, names, allow_incomplete=allow_incomplete,
+            )
             assets.append(asset)
         if len(payload) < 100:
             return assets
         page += 1
 
 
-def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapping[str, Any]]:
+def iter_releases(
+    repository: str, *, token: str | None = None,
+    allow_incomplete: bool = False,
+) -> Iterable[Mapping[str, Any]]:
     """Read complete historical Releases and their independently paged asset lists."""
     # Ten full Release objects per call avoids 504s when releases carry many assets.
     # Asset lists remain independently paginated and SHA-verified.
@@ -298,8 +305,14 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
             embedded_ids: set[int] = set()
             embedded_names: set[str] = set()
             for asset in embedded:
-                _validate_release_asset(asset, release_id, embedded_ids, embedded_names)
-            complete_assets = _list_release_assets(repository, release_id, token=token)
+                _validate_release_asset(
+                    asset, release_id, embedded_ids, embedded_names,
+                    allow_incomplete=allow_incomplete,
+                )
+            complete_assets = _list_release_assets(
+                repository, release_id, token=token,
+                allow_incomplete=allow_incomplete,
+            )
             by_id = {asset["id"]: asset for asset in complete_assets}
             for asset in embedded:
                 current = by_id.get(asset["id"])
@@ -1224,6 +1237,7 @@ def restore_everything(
     metrics_path: Path | None = None,
     clone_root: Path | None = None,
     preflight_only: bool = False,
+    recover_verifiable: bool = False,
 ) -> dict[str, Any]:
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
@@ -1237,10 +1251,14 @@ def restore_everything(
     if releases_root.is_symlink():
         raise RestoreError("symlinked Release storage directory")
     releases_root.mkdir(parents=True, exist_ok=True)
-    releases = list(iter_releases(repository, token=token))
+    releases = list(iter_releases(
+        repository, token=token, allow_incomplete=recover_verifiable,
+    ))
     # Never start transferring data with a partial/malformed source inventory.
     seen_tags: set[str] = set()
     seen_windows_release_dirs: set[str] = set()
+    unverified_source_assets: list[dict[str, Any]] = []
+    unsafe_manifest_release_dirs: set[str] = set()
     for release in releases:
         tag = release.get("tag_name")
         assets = release.get("assets")
@@ -1265,8 +1283,18 @@ def restore_everything(
             name = asset.get("name")
             if not isinstance(name, str) or not name or name in seen_names:
                 raise RestoreError(f"duplicate or missing asset name in Release {tag}")
-            if _expected_digest(asset) is None:
-                raise RestoreError(f"missing/invalid SHA-256 for {tag}/{name}")
+            if (_expected_digest(asset) is None or asset.get("state") != "uploaded"):
+                if not recover_verifiable:
+                    raise RestoreError(f"unverifiable Release asset: {tag}/{name}")
+                unverified_source_assets.append({
+                    "release_tag": tag, "asset_id": asset.get("id"),
+                    "name": name, "size_bytes": asset.get("size"),
+                    "state": asset.get("state"),
+                    "reason": "UNVERIFIABLE_SOURCE_ASSET",
+                })
+                # Never promote any asset from a Release with unresolved
+                # source data into replay-usable material.
+                unsafe_manifest_release_dirs.add(_safe_component(tag))
             if type(asset.get("size")) is not int or asset["size"] < 0:
                 raise RestoreError(f"missing/invalid size for {tag}/{name}")
             if not isinstance(asset.get("browser_download_url"), str) or not asset["browser_download_url"].startswith("https://"):
@@ -1289,6 +1317,7 @@ def restore_everything(
                     "name": asset["name"],
                     "size_bytes": asset["size"],
                     "sha256": _expected_digest(asset),
+                    "state": asset.get("state"),
                 }
                 for asset in release["assets"]
             ],
@@ -1325,6 +1354,10 @@ def restore_everything(
             partial = target.with_suffix(target.suffix + ".partial")
             if target.is_symlink() or partial.is_symlink():
                 raise RestoreError(f"symlinked Release asset during preflight: {tag}/{name}")
+            if recover_verifiable and (
+                _expected_digest(asset) is None or asset.get("state") != "uploaded"
+            ):
+                continue
             if not _asset_ok(target, asset):
                 source = clone_sources.get((tag, name))
                 # A verified LFS hardlink occupies no new payload space on
@@ -1351,6 +1384,8 @@ def restore_everything(
             "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
             "asset_count": sum(len(release["assets"]) for release in releases),
+            "unverified_source_asset_count": len(unverified_source_assets),
+            "unverified_source_assets_sample": unverified_source_assets[:50],
             "pending_download_bytes": pending_download_bytes,
             "free_destination_bytes": free_destination,
             "safety_margin_bytes": safety_margin,
@@ -1391,6 +1426,8 @@ def restore_everything(
         "read_only": True,
         "real_execution": False,
         "catalog_verification": catalog_verification,
+        "unverified_source_asset_count": len(unverified_source_assets),
+        "unverified_source_assets_sample": unverified_source_assets[:50],
     }
 
     for release in releases:
@@ -1419,6 +1456,18 @@ def restore_everything(
                 "size_bytes": asset.get("size"),
                 "sha256": _expected_digest(asset),
             }
+            if recover_verifiable and (
+                _expected_digest(asset) is None or asset.get("state") != "uploaded"
+            ):
+                reason = "UNVERIFIABLE_SOURCE_ASSET"
+                report["failures"].append({
+                    "tag": tag, "asset": asset.get("name"), "error": reason,
+                })
+                row["assets"].append({
+                    **identity, "name": asset.get("name"),
+                    "status": "FAIL", "error": reason,
+                })
+                continue
             try:
                 result = download_asset(
                     asset, release_dir, token=token,
@@ -1460,14 +1509,15 @@ def restore_everything(
     report["unclaimed_dataset_release_count"] = len(unclaimed)
     report["unclaimed_dataset_releases_sample"] = unclaimed[:50]
     report["run_manifest_checks"] = _verify_run_manifests(
-        releases_root, allowed_release_dirs=allowed_release_dirs
+        releases_root,
+        allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
     )
     report["verification_failures"] = sum(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
     report["classification"] = _materialize_classified_shards(
         repository, releases_root, destination, catalog_safe=catalog_safe,
-        allowed_release_dirs=allowed_release_dirs,
+        allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
     )
     report["expected_assets"] = sum(len(release["assets"]) for release in releases)
     report["all_source_assets_accounted_for"] = (
@@ -1522,6 +1572,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
     parser.add_argument(
+        "--recover-verifiable", action="store_true",
+        help="salvage valid SHA-256 assets despite incomplete Releases; never claim success",
+    )
+    parser.add_argument(
         "--preflight-only", action="store_true",
         help="inventory Releases and check space without downloading assets",
     )
@@ -1562,6 +1616,7 @@ def main(argv: list[str] | None = None) -> int:
             metrics_path=Path(args.metrics).resolve(),
             clone_root=Path(args.clone_root).resolve(),
             preflight_only=args.preflight_only,
+            recover_verifiable=args.recover_verifiable,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot
@@ -1576,7 +1631,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.preflight_only:
         print(json.dumps(report, indent=2, sort_keys=True))
-        return 0 if report["enough_disk_for_release_assets"] else 3
+        return 0 if (
+            report["enough_disk_for_release_assets"]
+            and not report["unverified_source_asset_count"]
+        ) else 3
 
     failures = (
         len(report["failures"])
