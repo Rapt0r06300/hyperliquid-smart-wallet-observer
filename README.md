@@ -12,6 +12,59 @@ Alina Smart Flow — nom historique : **HyperSmart** — collecte et normalise d
 
 ---
 
+## Cloner le bot ET restaurer les octets de toutes les archives
+
+Un simple `git clone` ne télécharge **pas** les assets GitHub Releases. À l'heure
+actuelle, `clone_payload/MANIFEST.json` contient zéro octet LFS ; annoncer qu'un
+`git clone` seul restaure l'intégralité des données serait faux. Le contenu
+des Releases reste dans **ce même dépôt principal**, sans dépôt secondaire.
+
+Parcours Windows (dans `cmd.exe`, Python >= 3.10 et Git installés) :
+
+```cmd
+git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable
+```
+
+Parcours Linux/macOS (Bash) :
+
+```bash
+git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable
+```
+
+Le bot et ses fichiers suivis proviennent du même HEAD `main`. Les archives
+immuables sont téléchargées séparément depuis **ses** GitHub Releases vers
+`runtime/recovery/full/releases/`; chaque fichier publié et vérifiable est
+comparé à sa taille et à son SHA-256 source, avec reprise des téléchargements.
+Les shards n'entrent dans `usable/` que si leurs preuves SAFE sont concordantes
+avec le catalogue canonique ; les autres restent hors du chemin de replay sûr.
+
+**La commande ne retourne le code 0 que pour `RESTORE_COMPLETE`.**
+Avec `--recover-verifiable`, les archives inachevées (`starter`), sans SHA-256
+ou indisponibles n'empêchent plus de récupérer toutes les autres archives
+vérifiables. Elles restent explicitement dans `RESTORE_REPORT.json` et
+forcent un code de sortie non nul : **ce n'est pas une copie complète**.
+Sans ce drapeau, la restauration s'arrête avant transfert si la source
+n'est pas entièrement certifiable. Utiliser `--preflight-only --recover-verifiable`
+pour mesurer l'espace disque nécessaire avant de lancer les téléchargements.
+
+Si un snapshot des fichiers locaux Git-ignorés a **été publié au préalable**,
+ajouter explicitement `--materialize-local-snapshot` sur un clone vierge pour
+reconstituer ces fichiers. Un fichier qui n'a jamais été sauvegardé sur GitHub
+ne peut pas être retrouvé après perte de son disque d'origine.
+
+**Identité « octet pour octet »** : tailles et SHA-256 égaux pour chacun des
+fichiers du bot et des assets publiés à une date de référence ; l'empreinte
+du rapport lie l'inventaire des Releases réellement observé. Le contenu binaire
+peut être identique sans que les dossiers `.git` (packfiles, index locaux)
+aient eux-mêmes une taille ou des octets identiques.
+
+Le contrat plus strict `git clone` **seul** reste conditionné à une copie
+exhaustive des assets en Git LFS, à une capacité GitHub LFS suffisante et à la
+preuve `--require-complete`. On ne contourne jamais les garde-fous de coûts.
+Les collecteurs cloud continuent sans utiliser ton PC.
+
+---
+
 ## 1. Source de vérité
 
 La spécification canonique actuelle est :
