@@ -2035,3 +2035,55 @@ def test_local_snapshot_rejects_nested_git_directories(tmp_path):
     for relative in (".GIT/config", "runtime/.GiT/config", "runtime\\.git\\config"):
         with pytest.raises(module.RestoreError, match="inside .git|unsafe snapshot path"):
             module._safe_workspace_target(tmp_path, relative)
+
+
+def test_optional_published_snapshot_succeeds_without_any_snapshot(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+    report = module.restore_everything(
+        "owner/repo", tmp_path, workspace=tmp_path,
+        optional_local_snapshot=True,
+    )
+    assert report["local_snapshot"] == {
+        "status": "NOT_PUBLISHED", "restored_files": 0,
+    }
+    assert report["failures"] == []
+    assert report["source_byte_parity"] is True
+    assert report["status"] == "ASSETS_VERIFIED_ONLY"
+    assert json.loads((tmp_path / "RESTORE_REPORT.json").read_text())[
+        "local_snapshot"
+    ]["status"] == "NOT_PUBLISHED"
+
+
+def test_optional_published_snapshot_refuses_corrupt_index(tmp_path, monkeypatch):
+    module = _module()
+    release = {
+        "id": 55,
+        "tag_name": "alina-local-snapshot-corrupt",
+        "assets": [],
+    }
+    monkeypatch.setattr(
+        module, "iter_releases", lambda *_a, **_kw: iter([release]),
+    )
+    directory = tmp_path / "releases" / release["tag_name"]
+    directory.mkdir(parents=True)
+    (directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text("{broken")
+    report = module.restore_everything(
+        "owner/repo", tmp_path, workspace=tmp_path,
+        optional_local_snapshot=True,
+    )
+    assert report["status"] == "RESTORE_INCOMPLETE"
+    assert report["local_snapshot"]["status"] == "FAIL"
+    assert report["failures"][0]["stage"] == "local_snapshot"
+
+
+def test_snapshot_cli_options_are_mutually_exclusive(tmp_path):
+    import pytest
+    module = _module()
+    with pytest.raises(SystemExit) as ex:
+        module.main([
+            "--everything", "--destination", str(tmp_path),
+            "--materialize-local-snapshot",
+            "--materialize-available-local-snapshot",
+        ])
+    assert ex.value.code == 2
