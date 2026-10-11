@@ -269,6 +269,14 @@ def test_iter_releases_504_retries_same_absolute_offset(monkeypatch):
 
     def fake_json(url, **_kwargs):
         calls.append(url)
+        if "/assets?" in url:
+            i = int(url.split("/releases/")[1].split("/assets?")[0]) - 1
+            return [{
+                "id": i + 100, "name": "shard.jsonl.gz", "size": 1,
+                "digest": "sha256:" + "a" * 64,
+                "browser_download_url": f"https://example.invalid/{i}",
+                "state": "uploaded",
+            }]
         if "per_page=10&page=2" in url:
             raise module.RestoreError("HTTP 504 for deep Release page")
         size = int(url.split("per_page=")[1].split("&")[0])
@@ -1159,24 +1167,60 @@ def test_snapshot_segment_copy_refuses_short_source_without_padding():
     assert output.getvalue() == b"abc"
 
 
-def test_restore_accepts_verified_short_embedded_release_asset_inventory(monkeypatch):
+def test_restore_checks_independent_assets_for_short_embedded_inventory(monkeypatch):
     module = _module()
-    asset = {**_asset("one.bin", "https://example.invalid/one", b"one"),
-             "id": 77, "state": "uploaded"}
+    one = {**_asset("one.bin", "https://example.invalid/one", b"one"),
+           "id": 77, "state": "uploaded"}
+    two = {**_asset("two.bin", "https://example.invalid/two", b"two"),
+           "id": 78, "state": "uploaded"}
     urls = []
     def fake_json(url, **_kwargs):
         urls.append(url)
-        assert "/releases?" in url
-        return [{"id": 3, "tag_name": "archive-3", "assets": [asset]}]
+        if "/releases?" in url:
+            return [{"id": 3, "tag_name": "archive-3", "assets": [one]}]
+        if "/releases/3/assets?" in url:
+            return [one, two]
+        raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
-    monkeypatch.setattr(
-        module, "_list_release_assets",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("needless asset listing")),
-    )
-    result = list(module.iter_releases("owner/repo"))
-    assert len(result) == 1
-    assert result[0]["assets"] == [asset]
-    assert len(urls) == 1
+    rows = list(module.iter_releases("owner/repo"))
+    assert len(rows) == 1
+    assert rows[0]["assets"] == [one, two]
+    assert len(urls) == 2
+
+
+def test_restore_rejects_disappearing_embedded_asset(monkeypatch):
+    import pytest
+    module = _module()
+    one = {**_asset("one.bin", "https://example.invalid/one", b"one"),
+           "id": 77, "state": "uploaded"}
+    monkeypatch.setattr(module, "_json", lambda *_a, **_k: [
+        {"id": 3, "tag_name": "archive-3", "assets": [one]}
+    ])
+    monkeypatch.setattr(module, "_list_release_assets", lambda *_a, **_k: [])
+    with pytest.raises(module.RestoreError, match="inventory changed"):
+        list(module.iter_releases("owner/repo"))
+
+
+def test_restore_rate_limit_fails_fast_with_resume_hint(monkeypatch, tmp_path):
+    import io
+    import pytest
+    import urllib.error
+    module = _module()
+    calls = []
+    def quota_exhausted(request, **_kwargs):
+        calls.append(request)
+        raise urllib.error.HTTPError(
+            "https://api.github.com/example", 403, "rate limit",
+            {"X-RateLimit-Remaining": "0"}, io.BytesIO(b"rate limit"),
+        )
+    monkeypatch.setattr(module.urllib.request, "urlopen", quota_exhausted)
+    with pytest.raises(module.RestoreError, match="rate limit exhausted"):
+        module._request("https://api.github.com/example")
+    assert len(calls) == 1
+    calls.clear()
+    with pytest.raises(module.RestoreError, match="rate limit exhausted"):
+        module._download_to_path("https://api.github.com/example", tmp_path / "part.partial")
+    assert len(calls) == 1
 
 
 def test_restore_refuses_unverified_short_embedded_release_asset(monkeypatch):

@@ -68,6 +68,15 @@ def _request(url: str, *, token: str | None = None, retries: int = 8) -> bytes:
             with urllib.request.urlopen(request, timeout=120) as response:
                 return response.read()
         except urllib.error.HTTPError as exc:
+            if (
+                exc.code in {403, 429}
+                and exc.headers.get("X-RateLimit-Remaining") == "0"
+            ):
+                raise RestoreError(
+                    "GitHub API rate limit exhausted; run 'gh auth login' "
+                    "or set GH_TOKEN/GITHUB_TOKEN and retry. Already-verified "
+                    "downloads are reusable."
+                ) from exc
             transient = exc.code in {403, 429, 500, 502, 503, 504}
             if not transient or attempt >= retries:
                 detail = exc.read().decode("utf-8", errors="replace")[:800]
@@ -131,6 +140,15 @@ def _download_to_path(
                         size += len(chunk)
             return size, digest.hexdigest()
         except urllib.error.HTTPError as exc:
+            if (
+                exc.code in {403, 429}
+                and exc.headers.get("X-RateLimit-Remaining") == "0"
+            ):
+                raise RestoreError(
+                    "GitHub API rate limit exhausted; run 'gh auth login' "
+                    "or set GH_TOKEN/GITHUB_TOKEN and retry. Already-verified "
+                    "downloads are reusable."
+                ) from exc
             if exc.code == 416 and existing_size:
                 # A stale or oversized partial cannot be resumed. Remove it and
                 # retry from byte zero instead of trusting an invalid prefix.
@@ -247,20 +265,24 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
             embedded = release.get("assets")
             if not isinstance(embedded, list):
                 raise RestoreError(f"missing embedded asset array for release {release_id}")
-            # GitHub's Releases list embeds at most 30 assets. A short,
-            # nonempty list is complete; 30 can be truncated and an empty
-            # list is independently checked rather than trusted blindly.
-            # This avoids >1,000 needless API requests on large restores.
-            if 0 < len(embedded) < 30:
-                ids: set[int] = set()
-                names: set[str] = set()
-                for asset in embedded:
-                    _validate_release_asset(asset, release_id, ids, names)
-                complete_release["assets"] = list(embedded)
-            else:
-                complete_release["assets"] = _list_release_assets(
-                    repository, release_id, token=token
-                )
+            # A short embedded asset array is not an independent inventory.
+            # Always page the Release-assets API, even for <30 embedded assets.
+            embedded_ids: set[int] = set()
+            embedded_names: set[str] = set()
+            for asset in embedded:
+                _validate_release_asset(asset, release_id, embedded_ids, embedded_names)
+            complete_assets = _list_release_assets(repository, release_id, token=token)
+            by_id = {asset["id"]: asset for asset in complete_assets}
+            for asset in embedded:
+                current = by_id.get(asset["id"])
+                if current is None or any(
+                    current.get(key) != asset.get(key)
+                    for key in ("name", "size", "digest", "state")
+                ):
+                    raise RestoreError(
+                        f"Release asset inventory changed during enumeration: {tag}"
+                    )
+            complete_release["assets"] = complete_assets
             yield complete_release
         if len(payload) < page_size:
             return

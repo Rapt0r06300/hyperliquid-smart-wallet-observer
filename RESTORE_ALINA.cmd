@@ -10,6 +10,17 @@ rem Restore is strictly read-only against GitHub. No collector is stopped.
 rem The Python restore verifies the canonical SHA-bound catalog and every
 rem Release/LFS asset before placing any shard under usable/.
 rem Do not force git lfs pull here: space requirements must be preflighted.
+rem On large restores, use a read-only GitHub session without printing/storing tokens.
+if not defined GH_TOKEN if not defined GITHUB_TOKEN (
+  where gh >nul 2>nul
+  if not errorlevel 1 (
+    for /f "delims=" %%T in ('gh auth token 2^>nul') do set "GH_TOKEN=%%T"
+  )
+)
+if not defined GH_TOKEN if not defined GITHUB_TOKEN (
+  echo ALINA_RESTORE_AUTH_WARNING: GitHub anonymous API quotas may block this large restore.
+  echo Use 'gh auth login' or set GH_TOKEN / GITHUB_TOKEN if rate-limited.
+)
 if exist "%~dp0tools\python\python.exe" goto :embedded
 where py >nul 2>nul && goto :pylauncher
 where python >nul 2>nul && goto :system

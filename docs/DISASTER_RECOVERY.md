@@ -19,6 +19,22 @@ cd hyperliquid-smart-wallet-observer
    `runtime/recovery/full/RESTORE_REPORT.json` and require the
    command's successful exit status; never treat a partial restore as complete.
 
+For this high-cardinality repository, authenticate with `gh auth login`
+before starting a Windows restore, or provide a read-only `GH_TOKEN`/
+`GITHUB_TOKEN` environment variable. The launcher can borrow an already
+authenticated GitHub CLI token without printing or persisting it. Anonymous
+API quotas may not suffice. If rate-limited, the restore aborts promptly;
+rerunning the same command reuses SHA-verified downloaded assets.
+
+Published collection and analysis files are restored into
+`runtime/recovery/full/releases/`. Only catalog-proven SAFE/replay-compatible
+shards enter `runtime/recovery/full/usable/shards/`; others are quarantined.
+Published replay/backtest/OOS/scoreboard receipts remain accessible under
+their Release folders. The launcher does not rerun analyses or automatically
+overwrite the cloned workspace with a historical local snapshot. Restoring
+the latter requires explicit `--materialize-local-snapshot` opt-in and
+separate free disk capacity. Nonpublished/expired files cannot be recovered.
+
 The independent paginated Release-assets API is consulted for **every** Release;
 the list embedded in the Releases API response is not trusted as complete.
 For large repositories, set `GH_TOKEN` or `GITHUB_TOKEN` to a token
