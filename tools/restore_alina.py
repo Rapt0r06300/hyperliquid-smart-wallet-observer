@@ -337,6 +337,18 @@ def _expected_digest(asset: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _source_asset_eligible(asset: Mapping[str, Any], *, salvage: bool) -> bool:
+    """Never certify an unknown GitHub asset state in salvage mode.
+
+    Legacy synthetic restore fixtures omit state; production enumeration has
+    already checked state strictly before reaching ordinary restore.
+    """
+    return (
+        _expected_digest(asset) is not None
+        and asset.get("state", "missing" if salvage else "uploaded") == "uploaded"
+    )
+
+
 def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
     if path.is_symlink() or not path.is_file():
         return False
@@ -1283,7 +1295,7 @@ def restore_everything(
             name = asset.get("name")
             if not isinstance(name, str) or not name or name in seen_names:
                 raise RestoreError(f"duplicate or missing asset name in Release {tag}")
-            if (_expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"):
+            if (not _source_asset_eligible(asset, salvage=recover_verifiable)):
                 if not recover_verifiable:
                     raise RestoreError(f"unverifiable Release asset: {tag}/{name}")
                 unverified_source_assets.append({
@@ -1355,7 +1367,7 @@ def restore_everything(
             if target.is_symlink() or partial.is_symlink():
                 raise RestoreError(f"symlinked Release asset during preflight: {tag}/{name}")
             if recover_verifiable and (
-                _expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"
+                not _source_asset_eligible(asset, salvage=recover_verifiable)
             ):
                 continue
             if not _asset_ok(target, asset):
@@ -1458,7 +1470,7 @@ def restore_everything(
                 "sha256": _expected_digest(asset),
             }
             if recover_verifiable and (
-                _expected_digest(asset) is None or asset.get("state", "uploaded") != "uploaded"
+                not _source_asset_eligible(asset, salvage=recover_verifiable)
             ):
                 reason = "UNVERIFIABLE_SOURCE_ASSET"
                 report["failures"].append({
