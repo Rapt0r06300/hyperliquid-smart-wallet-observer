@@ -12813,6 +12813,55 @@ git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
 
 A normal clone must then make all canonical heavy payload bytes available through the current tree's Git LFS objects under `clone_payload/`. GitHub Releases remain immutable durability/migration sources because Git itself does not clone Release assets.
 
+### Single-`main` zero-LFS-cost recovery route (Release-hydrated, byte verified)
+
+The repository remains `Rapt0r06300/hyperliquid-smart-wallet-observer`
+on `main`; no second dataset repository, self-hosted runner or trading
+capability is permitted. Git itself does **not** fetch GitHub Release assets:
+a literal `git clone` cannot be claimed complete while the Git LFS mirror has
+missing asset bytes. This is a hard Git transport property, not an issue that
+can be solved using repository hooks or an unconfigured local smudge filter.
+
+As the operational, billing-independent restoration route, run a normal clone
+followed by the existing `Alina-restore.cmd --recover-verifiable` (Windows) or
+`RESTORE_ALINA.sh --recover-verifiable` (Unix) from that clone. These launch
+`tools/restore_alina.py --everything`. The program downloads the immutable
+assets from Releases **of the same repository**, verifies each declared byte
+size and SHA-256, reuses only hash-verified LFS bytes if already present, and
+generates `runtime/recovery/full/RESTORE_REPORT.json`, including the
+observed source-inventory SHA-256, missing/incomplete asset identities and
+SAFE replay classification. The download is resumable and is never a real
+market order or a cloud-to-PC automation dependency.
+
+Historical GitHub Release assets with `state != uploaded`, without an
+authoritative `sha256:` digest, or otherwise unavailable are **not**
+losslessly recoverable by assumption. Normal strict restore fails closed;
+opt-in `--recover-verifiable` allows *only* the remaining published,
+SHA-verifiable assets to be copied. It must always exit nonzero when any
+source asset cannot be accounted for and must never promote shards from an
+incomplete Release to SAFE. The catalog-bound `RESTORE_COMPLETE` verdict
+is the only exit-zero completion signal. Git-ignored, local-only files require
+an explicitly published, SHA-verified local snapshot and an explicit
+`--materialize-local-snapshot` request; unpublished local bytes are lost
+upon source-disk failure.
+
+The independent read-only `clone-payload-lfs-audit` job may enumerate
+incomplete legacy assets for size/backlog planning, but an unknown digest
+must remain explicitly unverified and force `complete=false`; inventory
+alone is not a successful clone proof.
+
+**Scope of byte identity:** exact raw payload bytes at per-file size/SHA-256
+granularity and a fixed source-inventory snapshot, not physical `.git`
+packfile identity (which Git may rewrite). Releases published later during
+live COLLECT form a new inventory and require another restore/reconciliation;
+do not pause collectors to manufacture a static snapshot.
+
+The Release-hydrated route is distinct from the stronger `CLONE_COMPLETE`
+contract below. The strict literal-one-`git clone` acceptance remains
+conditional on complete current-tree Git LFS byte mirroring, verified fresh
+clone materialization, and separately approved free LFS capacity/billing
+policy. Never label the Release-hydrated fallback as literal clone-complete.
+
 ### Byte-parity authority
 
 Physical server/client `.git` directory sizes are not an admissible equality test because Git may repack and compress an identical object graph differently.
