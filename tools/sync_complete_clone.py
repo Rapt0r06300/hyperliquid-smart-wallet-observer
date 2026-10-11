@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         path = report_dir / "SYNC_REPORT.json"
         temporary = path.with_suffix(".json.partial")
-        temporary.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\\n",
+        temporary.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\n",
                              encoding="utf-8")
         temporary.replace(path)
     except OSError as exc:
