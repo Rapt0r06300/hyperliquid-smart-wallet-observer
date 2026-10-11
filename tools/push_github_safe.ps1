@@ -225,6 +225,18 @@ try {
         throw "Branche active '$branch'. Ce bouton travaille uniquement sur main."
     }
 
+    # A push action must never write into a fork or another repository.
+    $remoteUrl = Get-GitText @("remote", "get-url", "origin")
+    $allowed = @(
+        "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git",
+        "git@github.com:Rapt0r06300/hyperliquid-smart-wallet-observer",
+        "git@github.com:Rapt0r06300/hyperliquid-smart-wallet-observer.git"
+    )
+    if ($allowed -cnotcontains $remoteUrl) {
+        throw "Le remote origin ne pointe pas sur le depot principal Alina. Push refuse."
+    }
+
     $gitDirText = Get-GitText @("rev-parse", "--git-dir")
     $gitDir = if ([IO.Path]::IsPathRooted($gitDirText)) {
         $gitDirText
@@ -263,13 +275,49 @@ try {
             if ($runtimeOnly) { $runtimeDirty += $line } else { $blockingDirty += $line }
         }
         if ($blockingDirty.Count -gt 0) {
-            throw "Du code, de la documentation ou de la configuration n'est pas committe. Le push est refuse pour ne rien oublier.`n$($blockingDirty -join [Environment]::NewLine)"
+            if ($DryRun) {
+                Write-Host "  [DRY-RUN] Code local non committe : un vrai commit serait cree." -ForegroundColor Yellow
+            }
+            else {
+                Write-Step "Preparer les modifications de Codex (sans archives lourdes ni secrets)..."
+                # Git n'embarque pas les donnees massives : elles vont dans
+                # les Releases par BACKUP_LOCAL_ALINA.cmd. Ne jamais pousser
+                # ces donnees brutes ou des bundles dans le Git principal.
+                Invoke-Git @(
+                    "add", "-A", "--", ".",
+                    ":(exclude)runtime", ":(exclude)logs", ":(exclude)data",
+                    ":(exclude)datasets", ":(exclude)archive",
+                    ":(exclude)*.bundle"
+                )
+            }
         }
         if ($runtimeDirty.Count -gt 0) {
             Write-Host "  [INFO] Artefacts runtime vivants ignores pour le push; ils restent intacts sur le PC." -ForegroundColor DarkYellow
             foreach ($line in $runtimeDirty) {
                 Write-Host "         $line" -ForegroundColor DarkGray
             }
+        }
+    }
+
+    # Check staged files before committing: never leak private data.
+    # The local Codex editor may have created new, previously untracked files.
+    if (-not $DryRun) {
+        $stagedPaths = Get-GitText @("diff", "--cached", "--name-only", "--diff-filter=ACMR")
+        foreach ($path in ($stagedPaths -split "`r?`n")) {
+            if ([string]::IsNullOrWhiteSpace($path)) { continue }
+            $normal = $path.Replace("\", "/")
+            if ($normal -match "(?i)(^|/)(\.env($|\.)|id_rsa|id_ed25519|credentials|secret[s]?|private[-_]?key|mnemonic|seed[-_]?phrase)(/|\.|$)" -or $normal -match "(?i)\.(pem|p12|pfx|key|keystore)$") {
+                throw "Fichier potentiellement secret interdit dans le commit : $normal"
+            }
+            $fullPath = Join-Path $ProjectRoot $path
+            if ((Test-Path -LiteralPath $fullPath -PathType Leaf) -and
+                (Get-Item -LiteralPath $fullPath).Length -gt 95MB) {
+                throw "Fichier > 95 Mio a publier via GitHub Releases et non dans Git : $normal"
+            }
+        }
+        if (-not (Test-Git @("diff", "--cached", "--quiet"))) {
+            Write-Step "Creer un commit reel contenant les modifications Codex..."
+            Invoke-Git @("commit", "-m", "chore(codex): sauvegarder modifications locales Alina")
         }
     }
 
