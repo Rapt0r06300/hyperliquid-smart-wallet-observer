@@ -1051,18 +1051,21 @@ def materialize_latest_local_snapshot(
         if index_path.is_symlink():
             raise RestoreError("unsafe local snapshot index symlink")
         if not index_path.is_file():
-            continue
+            # An incomplete current Release must not cause silent restoration
+            # of a previous local snapshot.
+            raise RestoreError(f"missing current local snapshot index: {directory.name}")
         try:
             payload = json.loads(index_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, Mapping) and payload.get("schema") == "alina.local_snapshot.v1":
-            if repository is not None and payload.get("repository") != repository:
-                raise RestoreError("local snapshot source repository mismatch")
-            if payload.get("tag") not in (None, directory.name):
-                raise RestoreError("local snapshot index Release tag mismatch")
-            created_at = str(payload.get("created_at_utc") or directory.name)
-            candidates.append((created_at, directory, payload))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RestoreError(f"invalid current local snapshot index: {directory.name}") from exc
+        if not isinstance(payload, Mapping) or payload.get("schema") != "alina.local_snapshot.v1":
+            raise RestoreError(f"invalid current local snapshot schema: {directory.name}")
+        if repository is not None and payload.get("repository") != repository:
+            raise RestoreError("local snapshot source repository mismatch")
+        if payload.get("tag") not in (None, directory.name):
+            raise RestoreError("local snapshot index Release tag mismatch")
+        created_at = str(payload.get("created_at_utc") or directory.name)
+        candidates.append((created_at, directory, payload))
     if not candidates:
         return None
 
