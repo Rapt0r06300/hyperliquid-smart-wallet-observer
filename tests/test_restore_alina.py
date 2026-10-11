@@ -1551,6 +1551,7 @@ def test_restore_retains_atomic_failure_report_for_bad_local_snapshot(tmp_path, 
     monkeypatch.setattr(module, "materialize_latest_local_snapshot", fail_snapshot)
     result = module.restore_everything("owner/repo", tmp_path, workspace=tmp_path)
     assert result["status"] == "RESTORE_INCOMPLETE"
+    assert result["all_source_assets_accounted_for"] is True
     assert result["local_snapshot"]["status"] == "FAIL"
     assert result["failures"][0]["stage"] == "local_snapshot"
     report_path = tmp_path / "RESTORE_REPORT.json"
