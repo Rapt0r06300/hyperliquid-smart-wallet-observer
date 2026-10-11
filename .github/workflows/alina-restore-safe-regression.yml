@@ -235,3 +235,6 @@ jobs:
           } finally {
             Pop-Location
           }
+          # Clear the deliberately tested native exit code before Actions'
+          # PowerShell wrapper propagates $LASTEXITCODE as the job status.
+          exit 0
