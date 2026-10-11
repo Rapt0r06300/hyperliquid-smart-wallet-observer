@@ -3,7 +3,7 @@
     "active_lane_count": 1,
     "campaigns": [
       {
-        "campaign_id": "copy-vault-e8-broad-2026101105-v8",
+        "campaign_id": "copy-vault-e8-broad-2026101112-v8",
         "collected": false,
         "completed_units": 0,
         "published": false,
@@ -14,7 +14,7 @@
     ],
     "collected_lane_count": 0,
     "completed_unit_count": 0,
-    "created_at_max": "2026-10-11T05:27:38.920304+00:00",
+    "created_at_max": "2026-10-11T12:38:23.107660+00:00",
     "declared_universe_count": 3082,
     "duplicate_lane_indices": [],
     "explicit_unavailable_lane_count": 0,
@@ -32,15 +32,15 @@
     "qualified_shard_count": 0,
     "scheduled_lane_count": 1,
     "selected_count": 3082,
-    "selection_file": "catalog/copy_vault_selections/e8/2026101105.json",
-    "selection_sha256": "84c299a5a3962017380dfdef1f6a0fc8c3fe4813b9de09f65cc46c84bf3c2d06",
+    "selection_file": "catalog/copy_vault_selections/e8/2026101112.json",
+    "selection_sha256": "2107f07f8a81e588060b303b8084e1ad9111c621b4298c003c832461875e0133",
     "selection_verified": true,
     "status": "BLOCKED",
     "terminal_lane_count": 0,
     "unexpected_failures": [],
     "users_per_largest_lane": 3082
   },
-  "candidate_campaign_count": 24,
+  "candidate_campaign_count": 25,
   "collection_cutoff_at_utc": null,
   "invalid_manifest_paths": [],
   "paper_only": true,
@@ -991,10 +991,51 @@
       "users_per_largest_lane": 3082
     },
     {
-      "active_lane_count": 1,
+      "active_lane_count": 0,
       "campaigns": [
         {
           "campaign_id": "copy-vault-e8-broad-2026101105-v8",
+          "collected": true,
+          "completed_units": 1,
+          "published": true,
+          "shard_index": 0,
+          "status": "COMPLETE",
+          "status_reason": "unit_complete"
+        }
+      ],
+      "collected_lane_count": 1,
+      "completed_unit_count": 1,
+      "created_at_max": "2026-10-11T05:27:38.920304+00:00",
+      "declared_universe_count": 3082,
+      "duplicate_lane_indices": [],
+      "explicit_unavailable_lane_count": 0,
+      "fully_published": false,
+      "lane_indices": [
+        0
+      ],
+      "manifest_lane_count": 1,
+      "max_users_per_lane_contract": 10,
+      "missing_lane_indices": [],
+      "no_silent_loss": true,
+      "out_of_range_lane_indices": [],
+      "plan_valid": false,
+      "published_lane_count": 1,
+      "qualified_shard_count": 108,
+      "scheduled_lane_count": 1,
+      "selected_count": 3082,
+      "selection_file": "catalog/copy_vault_selections/e8/2026101105.json",
+      "selection_sha256": "84c299a5a3962017380dfdef1f6a0fc8c3fe4813b9de09f65cc46c84bf3c2d06",
+      "selection_verified": true,
+      "status": "BLOCKED",
+      "terminal_lane_count": 1,
+      "unexpected_failures": [],
+      "users_per_largest_lane": 3082
+    },
+    {
+      "active_lane_count": 1,
+      "campaigns": [
+        {
+          "campaign_id": "copy-vault-e8-broad-2026101112-v8",
           "collected": false,
           "completed_units": 0,
           "published": false,
@@ -1005,7 +1046,7 @@
       ],
       "collected_lane_count": 0,
       "completed_unit_count": 0,
-      "created_at_max": "2026-10-11T05:27:38.920304+00:00",
+      "created_at_max": "2026-10-11T12:38:23.107660+00:00",
       "declared_universe_count": 3082,
       "duplicate_lane_indices": [],
       "explicit_unavailable_lane_count": 0,
@@ -1023,8 +1064,8 @@
       "qualified_shard_count": 0,
       "scheduled_lane_count": 1,
       "selected_count": 3082,
-      "selection_file": "catalog/copy_vault_selections/e8/2026101105.json",
-      "selection_sha256": "84c299a5a3962017380dfdef1f6a0fc8c3fe4813b9de09f65cc46c84bf3c2d06",
+      "selection_file": "catalog/copy_vault_selections/e8/2026101112.json",
+      "selection_sha256": "2107f07f8a81e588060b303b8084e1ad9111c621b4298c003c832461875e0133",
       "selection_verified": true,
       "status": "BLOCKED",
       "terminal_lane_count": 0,
@@ -1034,7 +1075,7 @@
   ],
   "read_only": true,
   "real_execution": false,
-  "receipt_digest": "ceeac640006cd9bb85fa715233544e57b28826fa59b9745a1643b0d5c6898d50",
+  "receipt_digest": "c2ea29834bfcdf6c58ae78d3df14257ec5f7cf32deb4717e54349ec42d56eeb9",
   "reconciliation": {
     "all_lane_indices_accounted": true,
     "no_silent_loss": true,
