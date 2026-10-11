@@ -219,13 +219,18 @@ jobs:
           }
           Push-Location $root
           try {
-            & .\Alina-restore.cmd --help | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "CMD alias help failed with $LASTEXITCODE" }
-            # Parse rejection runs before any GitHub API call or data modification.
+            # GitHub's PowerShell wrapper may turn a deliberate nonzero native
+            # exit into a terminating exception before we can inspect it.
+            $PSNativeCommandUseErrorActionPreference = $false
             $ErrorActionPreference = "Continue"
-            & .\Alina-restore.cmd --definitely-invalid-restore-option 2>&1 | Out-Null
+            & .\Alina-restore.cmd --help
+            $helpCode = $LASTEXITCODE
+            Write-Host "RESTORE_WINDOWS_HELP_EXIT=$helpCode"
+            if ($helpCode -ne 0) { throw "CMD alias help failed with $helpCode" }
+            # Parse rejection runs before any GitHub API call or data modification.
+            & .\Alina-restore.cmd --definitely-invalid-restore-option 2>&1
             $exitCode = $LASTEXITCODE
-            $ErrorActionPreference = "Stop"
+            Write-Host "RESTORE_WINDOWS_INVALID_ARG_EXIT=$exitCode"
             if ($exitCode -ne 2) { throw "CMD alias did not propagate Python exit 2: $exitCode" }
           } finally {
             Pop-Location
