@@ -1633,7 +1633,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0 if (
             report["enough_disk_for_release_assets"]
-            and not report["unverified_source_asset_count"]
+            and not report.get("unverified_source_asset_count", 0)
         ) else 3
 
     failures = (
