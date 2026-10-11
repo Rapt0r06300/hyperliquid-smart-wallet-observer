@@ -1760,3 +1760,67 @@ def test_restore_rejects_duplicate_snapshot_chunks_and_git_case_alias(tmp_path):
         module.materialize_latest_local_snapshot(
             releases, tmp_path, allowed_release_dirs={directory.name},
         )
+
+
+def test_restore_snapshot_rejects_foreign_repository_provenance(tmp_path):
+    import pytest
+
+    module = _module()
+    releases = tmp_path / "releases"
+    release = releases / "alina-local-snapshot-current"
+    release.mkdir(parents=True)
+    (release / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1", "tag": release.name,
+            "repository": "other-owner/other-repo", "chunks": [], "files": [],
+        }), encoding="utf-8",
+    )
+    with pytest.raises(module.RestoreError, match="source repository mismatch"):
+        module.materialize_latest_local_snapshot(
+            releases, tmp_path, allowed_release_dirs={release.name},
+            repository="owner/repo",
+        )
+
+
+def test_restore_snapshot_end_to_end_only_from_current_repository(tmp_path, monkeypatch):
+    module = _module()
+    release_tag = "alina-local-snapshot-current"
+    data = b"recover-this-evidence"
+    part_name = "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    index_name = "ALINA_LOCAL_SNAPSHOT_INDEX.json"
+    index = json.dumps({
+        "schema": "alina.local_snapshot.v1",
+        "tag": release_tag, "repository": "owner/repo",
+        "chunks": [{
+            "name": part_name, "bytes": len(data),
+            "sha256": hashlib.sha256(data).hexdigest(),
+        }],
+        "files": [{
+            "path": "runtime/restored-evidence.bin",
+            "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+            "segments": [{"chunk": part_name, "offset": 0, "bytes": len(data)}],
+        }],
+    }).encode()
+    source = {
+        "https://example.invalid/part": data,
+        "https://example.invalid/index": index,
+    }
+    release = {"tag_name": release_tag, "assets": [
+        _asset(part_name, "https://example.invalid/part", data),
+        _asset(index_name, "https://example.invalid/index", index),
+    ]}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    def fake_download(url, target, **_kwargs):
+        target.write_bytes(source[url])
+        return len(source[url]), hashlib.sha256(source[url]).hexdigest()
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    report = module.restore_everything(
+        "owner/repo", tmp_path / "restore", workspace=workspace,
+    )
+    assert report["failures"] == []
+    assert report["local_snapshot"]["restored_files"] == 1
+    assert report["local_snapshot"]["tag"] == release_tag
+    assert (workspace / "runtime" / "restored-evidence.bin").read_bytes() == data
+    assert report["status"] == "ASSETS_VERIFIED_ONLY"
