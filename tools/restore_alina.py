@@ -1377,8 +1377,9 @@ def restore_everything(
         plan = {
             "schema": "alina.restore_preflight.v1",
             "status": (
-                "PREFLIGHT_READY_NOT_RESTORED"
-                if enough_disk else "PREFLIGHT_INSUFFICIENT_DISK"
+                "PREFLIGHT_INSUFFICIENT_DISK" if not enough_disk
+                else "PREFLIGHT_SOURCE_UNVERIFIABLE" if unverified_source_assets
+                else "PREFLIGHT_READY_NOT_RESTORED"
             ),
             "repository": repository,
             "source_inventory_sha256": source_inventory_sha256,
@@ -1534,7 +1535,7 @@ def restore_everything(
         try:
             report["local_snapshot"] = materialize_latest_local_snapshot(
                 releases_root, workspace,
-                allowed_release_dirs=allowed_release_dirs,
+                allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
                 repository=repository,
             )
             if report["local_snapshot"] is None:
@@ -1653,6 +1654,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "status": "OK" if failures == 0 else "FAIL",
                 "restoration_status": report["status"],
+                "unverified_source_asset_count": report["unverified_source_asset_count"],
                 "source_inventory_sha256": report["source_inventory_sha256"],
                 "release_count": report["release_count"],
                 "asset_count": report["asset_count"],
