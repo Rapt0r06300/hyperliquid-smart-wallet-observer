@@ -1987,3 +1987,51 @@ def test_salvage_refuses_unknown_release_state_even_with_a_sha256():
     assert not module._source_asset_eligible(candidate, salvage=True)
     candidate["state"] = "uploaded"
     assert module._source_asset_eligible(candidate, salvage=True)
+
+
+def test_local_snapshot_cannot_overwrite_tracked_git_file(tmp_path):
+    import subprocess
+    import pytest
+
+    module = _module()
+    clone = tmp_path / "fresh clone"
+    clone.mkdir()
+    subprocess.run(["git", "init", "-q", str(clone)], check=True)
+    tracked = clone / "README.md"
+    tracked.write_bytes(b"canonical-git-file")
+    subprocess.run(["git", "-C", str(clone), "add", "README.md"], check=True)
+    releases = tmp_path / "releases"
+    directory = releases / "alina-local-snapshot-proven"
+    directory.mkdir(parents=True)
+    payload = b"malicious-snapshot-overwrite"
+    name = "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    (directory / name).write_bytes(payload)
+    (directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1",
+            "tag": directory.name,
+            "chunks": [{
+                "name": name, "bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }],
+            "files": [{
+                "path": "README.md", "bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "segments": [{"chunk": name, "offset": 0, "bytes": len(payload)}],
+            }],
+        }), encoding="utf-8",
+    )
+    with pytest.raises(module.RestoreError, match="overwrite tracked Git file"):
+        module.materialize_latest_local_snapshot(
+            releases, clone, allowed_release_dirs={directory.name},
+        )
+    assert tracked.read_bytes() == b"canonical-git-file"
+
+
+def test_local_snapshot_rejects_nested_git_directories(tmp_path):
+    import pytest
+
+    module = _module()
+    for relative in (".GIT/config", "runtime/.GiT/config", "runtime\\.git\\config"):
+        with pytest.raises(module.RestoreError, match="inside .git|unsafe snapshot path"):
+            module._safe_workspace_target(tmp_path, relative)
