@@ -1013,7 +1013,7 @@ def _safe_workspace_target(workspace: Path, relative: str) -> Path:
     root = workspace.resolve()
     if root != target and root not in target.parents:
         raise RestoreError(f"snapshot path escapes workspace: {relative!r}")
-    if rel.parts[0] == ".git":
+    if rel.parts[0].casefold() == ".git":
         raise RestoreError("local snapshot may never write inside .git")
     return target
 
@@ -1036,10 +1036,19 @@ def _copy_exact_segment(source: Any, output: Any, length: int) -> None:
 def materialize_latest_local_snapshot(
     releases_root: Path,
     workspace: Path,
+    *,
+    allowed_release_dirs: set[str] | None = None,
 ) -> dict[str, Any] | None:
+    """Restore a verified current-inventory snapshot, never a stale cached Release."""
     candidates: list[tuple[str, Path, Mapping[str, Any]]] = []
     for directory in releases_root.glob("alina-local-snapshot-*"):
+        if allowed_release_dirs is not None and directory.name not in allowed_release_dirs:
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise RestoreError("unsafe local snapshot Release directory")
         index_path = directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json"
+        if index_path.is_symlink():
+            raise RestoreError("unsafe local snapshot index symlink")
         if not index_path.is_file():
             continue
         try:
@@ -1047,6 +1056,8 @@ def materialize_latest_local_snapshot(
         except json.JSONDecodeError:
             continue
         if isinstance(payload, Mapping) and payload.get("schema") == "alina.local_snapshot.v1":
+            if payload.get("tag") not in (None, directory.name):
+                raise RestoreError("local snapshot index Release tag mismatch")
             created_at = str(payload.get("created_at_utc") or directory.name)
             candidates.append((created_at, directory, payload))
     if not candidates:
@@ -1064,11 +1075,14 @@ def materialize_latest_local_snapshot(
             raise RestoreError("invalid local snapshot chunk row")
         name = str(row.get("name") or "")
         expected_sha = str(row.get("sha256") or "").lower()
-        expected_size = int(row.get("bytes") or 0)
+        expected_size = row.get("bytes")
+        if (not name or name in chunks or type(expected_size) is not int
+                or expected_size < 0 or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
+            raise RestoreError(f"invalid or duplicate local snapshot chunk identity: {name}")
         path = directory / _safe_component(name)
-        if not path.is_file() or path.stat().st_size != expected_size:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size != expected_size:
             raise RestoreError(f"missing local snapshot chunk: {name}")
-        if len(expected_sha) != 64 or _sha256(path) != expected_sha:
+        if _sha256(path) != expected_sha:
             raise RestoreError(f"local snapshot chunk sha256 mismatch: {name}")
         chunks[name] = path
 
@@ -1459,7 +1473,8 @@ def restore_everything(
     if workspace is not None:
         try:
             report["local_snapshot"] = materialize_latest_local_snapshot(
-                releases_root, workspace
+                releases_root, workspace,
+                allowed_release_dirs=allowed_release_dirs,
             )
             if report["local_snapshot"] is None:
                 raise RestoreError("no verified local snapshot available to materialize")
