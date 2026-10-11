@@ -200,6 +200,7 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
+            src
             tools
             tests
       - name: Set up Python
@@ -212,6 +213,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -m pip install --disable-pip-version-check pytest==8.4.2
           if ($LASTEXITCODE -ne 0) { throw "pytest installation failed" }
+          $env:PYTHONPATH = "src"
           python -m pytest -q tests/test_restore_alina.py tests/test_restore_alina_launcher.py
           if ($LASTEXITCODE -ne 0) { throw "Windows restore regression failed" }
       - name: Smoke test alias from a path containing spaces without network
