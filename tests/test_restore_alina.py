@@ -1618,3 +1618,47 @@ def test_local_snapshot_failure_cannot_mark_certified_restore_complete(tmp_path,
     )
     assert report["status"] == "RESTORE_INCOMPLETE"
     assert report["failures"][0]["stage"] == "local_snapshot"
+def test_restore_cli_refuses_asset_only_success(tmp_path, monkeypatch, capsys):
+    """Verified downloads are not a certified catalog-bound SAFE restore."""
+    module = _module()
+    report = {
+        "status": "ASSETS_VERIFIED_ONLY",
+        "source_inventory_sha256": "a" * 64,
+        "release_count": 1,
+        "asset_count": 1,
+        "downloaded": 1,
+        "resumed_verified": 0,
+        "skipped_verified": 0,
+        "lfs_reused_verified": 0,
+        "classification": {
+            "usable_shards": 0, "quarantined_shards": 0,
+            "missing_or_corrupt_rows": 0, "failures": [],
+        },
+        "failures": [],
+        "verification_failures": 0,
+        "unclaimed_dataset_release_count": 0,
+        "all_source_assets_accounted_for": True,
+    }
+    monkeypatch.setattr(module, "restore_everything", lambda *_a, **_kw: report)
+    exit_code = module.main(["--everything", "--destination", str(tmp_path)])
+    result = json.loads(capsys.readouterr().out)
+    assert exit_code == 3
+    assert result["status"] == "FAIL"
+    assert result["restoration_status"] == "ASSETS_VERIFIED_ONLY"
+    assert result["failures"] >= 1
+
+
+def test_restore_cli_handles_filesystem_failure_without_traceback(
+    tmp_path, monkeypatch, capsys,
+):
+    module = _module()
+
+    def disk_failure(*_args, **_kwargs):
+        raise OSError("destination disk unavailable")
+
+    monkeypatch.setattr(module, "restore_everything", disk_failure)
+    assert module.main(["--everything", "--destination", str(tmp_path)]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "ALINA_RESTORE_FAIL: destination disk unavailable" in output.err
+    assert "Traceback" not in output.err
