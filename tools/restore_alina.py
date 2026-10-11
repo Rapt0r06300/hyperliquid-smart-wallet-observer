@@ -1666,7 +1666,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "status": "OK" if failures == 0 else "FAIL",
                 "restoration_status": report["status"],
-                "unverified_source_asset_count": report["unverified_source_asset_count"],
+                "unverified_source_asset_count": report.get("unverified_source_asset_count", 0),
                 "source_inventory_sha256": report["source_inventory_sha256"],
                 "release_count": report["release_count"],
                 "asset_count": report["asset_count"],
