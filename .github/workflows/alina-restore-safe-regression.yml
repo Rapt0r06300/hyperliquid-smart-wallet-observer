@@ -167,6 +167,7 @@ jobs:
           python - <<'PY'
           import json
           import os
+          import urllib.error
           import urllib.request
           job_state = os.environ["TEST_JOB_STATUS"]
           state = "success" if job_state == "success" else "error" if job_state == "cancelled" else "failure"
@@ -188,8 +189,17 @@ jobs:
                   "Content-Type": "application/json",
               },
           )
-          with urllib.request.urlopen(request, timeout=30):
-              pass
+          try:
+              with urllib.request.urlopen(request, timeout=30):
+                  pass
+          except urllib.error.HTTPError as exc:
+              # Some installations deny the legacy statuses REST API even
+              # though GitHub Actions checks still report the actual job result.
+              # Never convert a failed pytest into success: only the optional
+              # status POST itself is allowed to be unavailable.
+              if exc.code != 403:
+                  raise
+              print("ALINA_STATUS_POST_DENIED_403: use the authoritative Actions job conclusion")
           PY
 
   launcher-windows:
