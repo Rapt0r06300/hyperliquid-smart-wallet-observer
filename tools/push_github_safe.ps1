@@ -19,28 +19,24 @@ function Write-Step {
 }
 
 function Invoke-Git {
-    param([string[]]$GitArgs)
-
-    & $script:GitExecutable @GitArgs
+    # All positional arguments are supplied by array-splatting at call sites.
+    # A single declared [string[]] parameter could bind only the first item.
+    & $script:GitExecutable @args
     if ($LASTEXITCODE -ne 0) {
-        throw "git $($GitArgs -join ' ') a echoue (code $LASTEXITCODE)."
+        throw "git $($args -join ' ') a echoue (code $LASTEXITCODE)."
     }
 }
 
 function Get-GitText {
-    param([string[]]$GitArgs)
-
-    $output = & $script:GitExecutable @GitArgs 2>&1
+    $output = & $script:GitExecutable @args 2>&1
     if ($LASTEXITCODE -ne 0) {
-        throw "git $($GitArgs -join ' ') a echoue : $($output -join [Environment]::NewLine)"
+        throw "git $($args -join ' ') a echoue : $($output -join [Environment]::NewLine)"
     }
     return (($output | Out-String).Trim())
 }
 
 function Test-Git {
-    param([string[]]$GitArgs)
-
-    & $script:GitExecutable @GitArgs *> $null
+    & $script:GitExecutable @args *> $null
     return ($LASTEXITCODE -eq 0)
 }
 
