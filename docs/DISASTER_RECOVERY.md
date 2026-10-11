@@ -19,50 +19,50 @@ est limitée, sans consigner ce secret dans les rapports.
 
 ## Synchronisation simple — dossier neuf ou dossier existant
 
-**Dossier neuf, invite de commandes Windows (une seule ligne)** :
+**Dossier neuf, Windows CMD (une seule ligne) :**
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-sync.cmd
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd
 ```
 
-**Dossier neuf, Linux/macOS (une seule ligne)** :
+**Dossier neuf, Linux/macOS (une seule ligne) :**
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC.sh
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
 ```
 
-**Dossier existant, déjà cloné depuis le même dépôt** : ouvrir le dossier
-racine, puis lancer `Alina-sync.cmd` (Windows CMD) ou
-`bash ALINA_SYNC.sh` (Linux/macOS). Il n'y a **aucun autre dépôt**
-à synchroniser, aucun transfert LFS et aucune automatisation sur le PC
-en dehors de cette action déclenchée explicitement par l'opérateur.
+**Dossier existant déjà cloné du dépôt canonique :** lancer
+`ALINA_SYNC_COMPLETE.cmd` (Windows CMD) ou `bash ALINA_SYNC_COMPLETE.sh`
+(Linux/macOS) depuis la racine. Cela synchronise **les deux** couches dans
+la même opération : les fichiers Git depuis `main`, puis les assets de
+toutes les Releases publiées dans **ce même dépôt**. Les données déjà
+vérifiées sont réutilisées, les téléchargements partiels sont repris.
 
-Le même outil :
-1. vérifie `origin`, la branche `main` et l'absence de modifications
-   locales **suivies** ; refuse toute ambiguïté au lieu de faire un reset ;
-2. exécute `git fetch origin main` puis `git merge --ff-only FETCH_HEAD`
-   avec smudge LFS désactivé ;
-3. reprend le restaurateur existant, énumère **toutes les Releases du même
-   dépôt**, conserve le cache vérifié et ne retélécharge que les données
-   manquantes/invalides ; vérifie les tailles/SHA-256 et les preuves SAFE ;
-4. matérialise un snapshot local publié lorsqu'il existe, sans l'inventer
-   lorsqu'il n'a jamais été publié ;
-5. écrit `runtime/recovery/full/SYNC_REPORT.json` et
-   `runtime/recovery/full/RESTORE_REPORT.json` ; transmet le véritable code
-   de sortie du restaurateur.
+Le synchroniseur existant `tools/sync_complete_clone.py` contrôle :
+- racine Git, `origin` exact, branche `main` et arbre suivi propre ;
+- `fetch` + `merge --ff-only`, sans reset/rebase/écrasement des changements ;
+- restauration via le **seul** `tools/restore_alina.py`, sans Git LFS ;
+- source vérifiée par taille/SHA-256, manifests et catalogue SAFE ;
+- snapshot de fichiers locaux ignorés lorsqu'il a réellement été publié ;
+- vrai code de sortie en échec si inventaire/source/catalogue non certifiables.
 
-Les options `--preflight-only`, `--materialize-local-snapshot` (snapshot
-obligatoire) et `--materialize-available-local-snapshot` (snapshot disponible)
-sont supportées. La synchronisation normale utilise automatiquement
-`--recover-verifiable` : récupérer au maximum **n'autorise pas** un statut
-100 % lorsque des archives sont définitivement invérifiables. L'inventaire
-de chaque run est borné aux Releases vues au début ; relancer la même commande
-pour les nouveaux assets publiés ensuite.
+Options : `--preflight-only` inventorie sans télécharger ;
+`--skip-update` évite le fetch après un clone déjà à jour ;
+`--no-snapshot-materialization` conserve les fichiers locaux existants
+(sans empêcher de télécharger les assets du snapshot).
 
-La mise à jour refuse les changements Git locaux suivis et les branches
-divergentes : sauvegarder ou résoudre explicitement ces changements avant de
-relancer, sans supprimer les données ignorées. Elle n'exécute aucun ordre,
-ne contacte aucun dépôt Dataset V2 et ne modifie aucun collecteur cloud.
+Rapports locaux : `runtime/recovery/full/SYNC_REPORT.json` (HEAD du
+code + résultat du restaurateur) et `RESTORE_REPORT.json` (preuves des
+assets, volumes, manquants et quarantaines), ou
+`RESTORE_PREFLIGHT.json` en préflight. `RESTORE_COMPLETE` et exit 0
+restent indispensables pour revendiquer une récupération totale de
+l'inventaire initial. Une nouvelle exécution récupère les nouveaux
+assets publiés pendant ou après la précédente synchronisation.
+
+Aucun processus GitHub ne peut démarrer cette commande sur le PC ;
+elle n'est exécutée que lorsque l'opérateur la lance. Aucun collecteur
+cloud n'est arrêté, aucune donnée privée Dataset V2 n'est réimportée et
+aucun ordre n'est exécuté.
 
 ## Inventaire exact et preuve d'identité des données
 
