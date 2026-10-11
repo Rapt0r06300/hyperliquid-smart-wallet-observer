@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -116,6 +117,7 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert len(calls) == 1
     command, kwargs = calls[0]
     assert "--everything" in command
+    assert "--clone-root" not in command  # Legacy LFS reuse is disabled.
     assert "--recover-verifiable" in command
     assert "--materialize-available-local-snapshot" in command
     assert "--preflight-only" not in command
@@ -149,3 +151,41 @@ def test_root_entrypoints_are_reusable_in_existing_checkout():
     assert "GIT_LFS_SKIP_SMUDGE=1" in windows
     assert 'exec python3 tools/sync_complete_clone.py "$@"' in unix
     assert "GIT_LFS_SKIP_SMUDGE=1" in unix
+
+
+def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path):
+    module = _module()
+    mock_script = tmp_path / "tools" / "sync_complete_clone.py"
+    monkeypatch.setattr(module, "__file__", str(mock_script))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "a" * 40)
+    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
+    assert module.main([]) == 0
+    path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
+    result = json.loads(path.read_text(encoding="utf-8"))
+    assert result["git_head"] == "a" * 40
+    assert result["status"] == "RESTORE_EXIT_ZERO"
+    assert result["restore_exit_code"] == 0
+    assert result["restore_report"] == "RESTORE_REPORT.json"
+
+
+def test_failed_restore_cannot_write_successful_sync_checkpoint(monkeypatch, tmp_path):
+    module = _module()
+    mock_script = tmp_path / "tools" / "sync_complete_clone.py"
+    monkeypatch.setattr(module, "__file__", str(mock_script))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "b" * 40)
+    monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 3)
+    assert module.main(["--preflight-only"]) == 3
+    path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
+    result = json.loads(path.read_text(encoding="utf-8"))
+    assert result["git_head"] == "b" * 40
+    assert result["status"] == "RESTORE_INCOMPLETE"
+    assert result["restore_exit_code"] == 3
+    assert result["restore_report"] == "RESTORE_PREFLIGHT.json"
+
+
+def test_lfs_filters_disabled_in_attributes():
+    text = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert not any(
+        "filter=lfs" in line and not line.lstrip().startswith("#")
+        for line in text.splitlines()
+    )
