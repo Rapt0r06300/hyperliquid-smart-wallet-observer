@@ -1,0 +1,118 @@
+{
+  "asset_verified": true,
+  "bytes": 2000308,
+  "collection_run_id": "market-e8-10-2026101022-v7-0",
+  "collector_version": "c4b57efc0a338fda732b9a8614316764b4ade4d1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "cross-venue-derived-capacity-cross-venue-capacity-tape-people-1791673318593-1791676802987-36987779eef0",
+  "end_ts_ms": 1791676802987,
+  "event_count": 6526,
+  "family": "cross_venue_capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "cross_venue_capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [
+      "receive_observation_time_only"
+    ],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 6526,
+  "release": {
+    "asset_id": 629323789,
+    "asset_name": "packed-shards-0051.zip",
+    "member_name": "cross-venue-derived-capacity-cross-venue-capacity-tape-people-1791673318593-1791676802987-36987779eef0.jsonl.gz",
+    "release_id": 409284639,
+    "release_tag": "data-v2-campaign-market-e8-10-2026101022-v7-u0",
+    "remote_digest": "sha256:1d6437d935e72cf331cafac50b33c385861ebd336265e9b74a67cd168927adc1",
+    "remote_size": 58355234,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "cross-venue-derived-capacity-cross-venue-capacity-tape-people-1791673318593-1791676802987-36987779eef0.jsonl.gz",
+  "release_asset_id": 629323789,
+  "release_container_asset": "packed-shards-0051.zip",
+  "release_id": 409284639,
+  "release_member": "cross-venue-derived-capacity-cross-venue-capacity-tape-people-1791673318593-1791676802987-36987779eef0.jsonl.gz",
+  "release_remote_digest": "sha256:1d6437d935e72cf331cafac50b33c385861ebd336265e9b74a67cd168927adc1",
+  "release_remote_size": 58355234,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-10-2026101022-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "36987779eef0f60e386d087cc5e521f90aeef71306ee4eaf8007d3e14a98dd6e",
+  "source": "cross_venue_derived_capacity",
+  "start_ts_ms": 1791673318593,
+  "symbol": "PEOPLE",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "connection_count": 0,
+    "connection_ids": [],
+    "first_exchange_ts_ms": null,
+    "last_exchange_ts_ms": null,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 45819987,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "unknown"
+}

@@ -1,0 +1,119 @@
+{
+  "asset_verified": true,
+  "bytes": 726823,
+  "collection_run_id": "market-e8-11-2026101022-v7-0",
+  "collector_version": "c4b57efc0a338fda732b9a8614316764b4ade4d1",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "gate-derived-capacity-capacity-tape-pha-usdt-1791673446451-1791676913962-1243dfea6123",
+  "end_ts_ms": 1791676913962,
+  "event_count": 1864,
+  "family": "capacity_tape",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "capacity_tape"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "derived"
+    ]
+  },
+  "quality_reasons": [
+    "PARENT_L2_SHARD_NOT_VERIFIED",
+    "RECONCILIATION_UNVERIFIED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "status": "UNVERIFIED"
+  },
+  "record_count": 1864,
+  "release": {
+    "asset_id": 629327069,
+    "asset_name": "packed-shards-0047.zip",
+    "member_name": "gate-derived-capacity-capacity-tape-pha-usdt-1791673446451-1791676913962-1243dfea6123.jsonl.gz",
+    "release_id": 409285459,
+    "release_tag": "data-v2-campaign-market-e8-11-2026101022-v7-u0",
+    "remote_digest": "sha256:1d4e4af98b2214c0b253660fc2d24e0501753e095a6da733885af62f469a6b9f",
+    "remote_size": 78074106,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "gate-derived-capacity-capacity-tape-pha-usdt-1791673446451-1791676913962-1243dfea6123.jsonl.gz",
+  "release_asset_id": 629327069,
+  "release_container_asset": "packed-shards-0047.zip",
+  "release_id": 409285459,
+  "release_member": "gate-derived-capacity-capacity-tape-pha-usdt-1791673446451-1791676913962-1243dfea6123.jsonl.gz",
+  "release_remote_digest": "sha256:1d4e4af98b2214c0b253660fc2d24e0501753e095a6da733885af62f469a6b9f",
+  "release_remote_size": 78074106,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-11-2026101022-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "1243dfea61230499749e3529bfb107031985c2936f63ce194bcc71c0068a7ab5",
+  "source": "gate_derived_capacity",
+  "start_ts_ms": 1791673446451,
+  "symbol": "PHA_USDT",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1863,
+      "max": 536.5,
+      "min": 271.5,
+      "p50": 325.5,
+      "p95": 417.5
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "gate-addaa771794848b4baf31a67a32ed70c"
+    ],
+    "first_exchange_ts_ms": 0,
+    "last_exchange_ts_ms": 1791676913790,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1864,
+      "max": 1791673446451.0,
+      "min": 77.0,
+      "p50": 123.0,
+      "p95": 173.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 1863,
+      "max": 170.800895,
+      "min": 159.19367,
+      "p50": 167.199152,
+      "p95": 168.867161
+    }
+  },
+  "trade_count": 0,
+  "trade_count_exact": false,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": null,
+  "trade_identity_set_sha256": null,
+  "trade_identity_vector_omitted": false,
+  "uncompressed_bytes": 17855887,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": null,
+  "unique_trade_count_exact": false,
+  "validation_allowed": false,
+  "venue": "gate"
+}
