@@ -302,6 +302,46 @@ def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkey
 
 
 
+def test_iter_releases_handles_overlapping_pages_from_live_publication(monkeypatch):
+    module = _module()
+    # Page 2 shifts right after a new Release appears while COLLECT continues.
+    calls = []
+    def fake_json(url, **_kwargs):
+        calls.append(url)
+        if "/assets?" in url:
+            return []
+        page = int(url.split("&page=")[1])
+        ids = {
+            1: list(range(20, 10, -1)),
+            2: list(range(11, 1, -1)),  # id=11 repeats from page 1
+            3: [1],
+        }.get(page, [])
+        return [{"id": i, "tag_name": f"data-v2-{i}", "assets": []}
+                for i in ids]
+    monkeypatch.setattr(module, "_json", fake_json)
+    found = list(module.iter_releases("owner/repo"))
+    assert [r["id"] for r in found] == list(range(20, 0, -1))
+    assert len([url for url in calls if "/assets?" in url]) == 20
+
+
+def test_iter_releases_rejects_conflicting_overlap(monkeypatch):
+    import pytest
+    module = _module()
+    def fake_json(url, **_kwargs):
+        if "/assets?" in url:
+            return []
+        page = int(url.split("&page=")[1])
+        if page == 1:
+            return [{"id": i, "tag_name": f"data-v2-{i}", "assets": []}
+                    for i in range(10)]
+        if page == 2:
+            return [{"id": 9, "tag_name": "changed-tag", "assets": []}]
+        return []
+    monkeypatch.setattr(module, "_json", fake_json)
+    with pytest.raises(module.RestoreError, match="changed tag"):
+        list(module.iter_releases("owner/repo"))
+
+
 def test_iter_releases_504_retries_same_absolute_offset(monkeypatch):
     module = _module()
     calls = []

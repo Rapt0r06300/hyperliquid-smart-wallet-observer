@@ -229,7 +229,7 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
     # Asset lists remain independently paginated and SHA-verified.
     page_size = 10
     offset = 0
-    seen_ids: set[int] = set()
+    seen_ids: dict[int, str] = {}
     seen_tags: set[str] = set()
     while True:
         page = offset // page_size + 1
@@ -250,16 +250,26 @@ def iter_releases(repository: str, *, token: str | None = None) -> Iterable[Mapp
             raise RestoreError("release listing is not a JSON array")
         if not payload:
             return
+        page_ids: set[int] = set()
         for release in payload:
             if not isinstance(release, Mapping):
                 raise RestoreError("malformed Release in listing")
             release_id = release.get("id")
             tag = release.get("tag_name")
-            if type(release_id) is not int or release_id <= 0 or release_id in seen_ids:
-                raise RestoreError("missing or duplicated Release id")
-            if not isinstance(tag, str) or not tag or tag in seen_tags:
-                raise RestoreError("missing or duplicated Release tag")
-            seen_ids.add(release_id)
+            if type(release_id) is not int or release_id <= 0 or release_id in page_ids:
+                raise RestoreError("missing or duplicated Release id within one page")
+            page_ids.add(release_id)
+            if not isinstance(tag, str) or not tag:
+                raise RestoreError("missing Release tag")
+            if release_id in seen_ids:
+                # New Releases inserted at the front can repeat a previously seen
+                # row on the next offset page. Preserve its first verified copy.
+                if seen_ids[release_id] != tag:
+                    raise RestoreError("Release id changed tag during pagination")
+                continue
+            if tag in seen_tags:
+                raise RestoreError("duplicate Release tag across distinct ids")
+            seen_ids[release_id] = tag
             seen_tags.add(tag)
             complete_release = dict(release)
             embedded = release.get("assets")
