@@ -205,6 +205,34 @@ A successful restoration certifies the **published inventory snapshot**,
 not future Releases concurrently added by live COLLECT, the quality of
 unpublished local files, or economic profitability.
 
+### Restore verification and repeatability
+
+From a clean checkout, run `RESTORE_ALINA.cmd --preflight-only` on Windows
+(or `./RESTORE_ALINA.sh --preflight-only` on Unix) to inventory published
+Releases and estimate download space **without restoring any asset**. Leave
+additional free space for extracted shards and any explicitly requested local
+snapshot. Run the same launcher without `--preflight-only` to restore all
+available historical Release assets; interrupted `.partial` transfers are
+resumed only when HTTP byte ranges agree, then verified against the published
+size and SHA-256. Previously verified assets and materialized shards are reused.
+
+Inspect `runtime/recovery/full/RESTORE_REPORT.json` and its `status`:
+`RESTORE_COMPLETE` means the initial Release inventory, run manifests and
+every SAFE shard expected by the SHA-bound current catalog were verified;
+`RESTORE_INCOMPLETE` means checks failed; `ASSETS_VERIFIED_ONLY` means
+the asset inventory was verified **without** catalog certification (library
+calls only; the launcher requires the catalog). The report records
+`source_inventory_sha256`, each asset's release/asset IDs when supplied by
+GitHub, expected byte size, expected SHA-256, download status and classification
+failures. The `usable/` directory is not a shortcut around catalog gates;
+other evidence remains preserved under `releases/` or `quarantine/`.
+
+A successful restore does **not** prove complete retention of unpublished
+historical files, a fresh-machine full restore, replay validity, OOS quality,
+backtest realism or the target of +5 USD net/day/module. Each requires its
+own independent proof. Restoration does not change phase COLLECT or operate
+any cloud collector.
+
 ## Hard platform prerequisite
 
 A clone can materialize the real Git LFS payload only if:
