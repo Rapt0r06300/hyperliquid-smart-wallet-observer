@@ -1557,3 +1557,64 @@ def test_restore_retains_atomic_failure_report_for_bad_local_snapshot(tmp_path, 
     report_path = tmp_path / "RESTORE_REPORT.json"
     assert json.loads(report_path.read_text(encoding="utf-8"))["status"] == "RESTORE_INCOMPLETE"
     assert not (tmp_path / "RESTORE_REPORT.json.partial").exists()
+
+
+def test_restore_rejects_case_insensitive_release_tag_collision_before_transfer(tmp_path, monkeypatch):
+    import pytest
+    module = _module()
+    releases = [
+        {"tag_name": "alina-Data", "assets": []},
+        {"tag_name": "alina-data", "assets": []},
+    ]
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter(releases))
+    monkeypatch.setattr(module, "download_asset", lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("colliding releases must never be downloaded")
+    ))
+    with pytest.raises(module.RestoreError, match="case-insensitive Release directory collision"):
+        module.restore_everything("owner/repo", tmp_path)
+
+
+def test_restore_rejects_case_insensitive_asset_collision_before_transfer(tmp_path, monkeypatch):
+    import pytest
+    module = _module()
+    release = {
+        "tag_name": "safe-release", "assets": [
+            _asset("Trades.jsonl.gz", "https://example.invalid/upper", b"first"),
+            _asset("trades.jsonl.gz", "https://example.invalid/lower", b"second"),
+        ],
+    }
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    monkeypatch.setattr(module, "download_asset", lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("colliding assets must never be downloaded")
+    ))
+    with pytest.raises(module.RestoreError, match="case-insensitive asset name collision"):
+        module.restore_everything("owner/repo", tmp_path)
+
+
+def test_explicit_missing_local_snapshot_fails_closed_and_writes_report(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+    report = module.restore_everything("owner/repo", tmp_path, workspace=tmp_path)
+    assert report["status"] == "RESTORE_INCOMPLETE"
+    assert report["local_snapshot"]["status"] == "FAIL"
+    assert "no verified local snapshot" in report["local_snapshot"]["error"]
+    assert report["all_source_assets_accounted_for"] is True
+    assert report["failures"] == [{
+        "stage": "local_snapshot",
+        "error": "no verified local snapshot available to materialize",
+    }]
+    persisted = json.loads((tmp_path / "RESTORE_REPORT.json").read_text(encoding="utf-8"))
+    assert persisted["status"] == "RESTORE_INCOMPLETE"
+
+
+def test_local_snapshot_failure_cannot_mark_certified_restore_complete(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+    monkeypatch.setattr(module, "materialize_latest_local_snapshot",
+                        lambda *_a, **_kw: (_ for _ in ()).throw(
+                            module.RestoreError("snapshot checksum failed")))
+    report = module.restore_everything(
+        "owner/repo", tmp_path, workspace=tmp_path,
+    )
+    assert report["status"] == "RESTORE_INCOMPLETE"
+    assert report["failures"][0]["stage"] == "local_snapshot"
