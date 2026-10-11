@@ -1542,7 +1542,9 @@ def main(argv: list[str] | None = None) -> int:
                 else None
             ),
         )
-    except RestoreError as exc:
+    except (RestoreError, OSError, ValueError, TypeError, zipfile.BadZipFile) as exc:
+        # Expected filesystem, catalog and archive failures must never produce
+        # a misleading success code or an unhandled Windows traceback.
         print(f"ALINA_RESTORE_FAIL: {exc}", file=sys.stderr)
         return 2
 
@@ -1557,6 +1559,10 @@ def main(argv: list[str] | None = None) -> int:
         + int(report["unclaimed_dataset_release_count"])
     )
     if not report["all_source_assets_accounted_for"]:
+        failures += 1
+    # Downloading every Release asset does not certify a SAFE restore.
+    # No invocation may exit zero unless catalog-bound restore is complete.
+    if report.get("status") != "RESTORE_COMPLETE":
         failures += 1
     print(
         json.dumps(
