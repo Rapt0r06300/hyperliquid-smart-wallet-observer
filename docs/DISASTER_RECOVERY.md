@@ -1,267 +1,98 @@
 # Alina Smart Flow — Disaster Recovery
 
-## Current supported recovery: clone + GitHub Releases
+## Politique en vigueur : zéro LFS, dépôt et branche uniques
 
-The user's PC is never an operational dependency of cloud Alina Smart Flow.
-For recovery on a fresh machine, use **two stages**:
+Dépôt principal : `Rapt0r06300/hyperliquid-smart-wallet-observer`, branche
+`main`. Git contient le bot, les modules, catalogues, manifests, receipts et
+workflows suivis. Les actifs lourds sont des GitHub Releases du **même dépôt**.
+Git ne copie pas les Releases lors d'un simple `git clone`. Aucun hook
+implicite, réglage LFS ou dépôt supplémentaire ne résout cette limite.
 
-1. Clone the canonical bot, modules, scripts, and tracked configuration:
+La reconstruction complète est réalisée en **une commande composée de deux
+étapes**, détaillée au début de `README.md` : clone Git, puis
+`Alina-restore.cmd --recover-verifiable --materialize-local-snapshot` (Windows)
+ou `bash RESTORE_ALINA.sh --recover-verifiable --materialize-local-snapshot`
+(Unix). `GIT_LFS_SKIP_SMUDGE=1` exclut tout téléchargement LFS.
+Python 3.10+, Git, assez d'espace disque et l'accès API GitHub sont requis.
+Utiliser `gh auth login` ou un jeton avec lecture GitHub si l'API anonyme
+est limitée, sans consigner ce secret dans les rapports.
 
-   ```bash
-git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
-cd hyperliquid-smart-wallet-observer
-```
+## Inventaire exact et preuve d'identité des données
 
-2. Run `RESTORE_ALINA.cmd` (Windows) or `bash RESTORE_ALINA.sh` (Linux/macOS)
-   with Python 3, enough disk space, and GitHub API access. This downloads
-   **all published Release assets in the inventory taken at startup** and
-   verifies the expected sizes and SHA-256 digests. Review
-   `runtime/recovery/full/RESTORE_REPORT.json` and require the
-   command's successful exit status; never treat a partial restore as complete.
+Le restaurateur énumère les Releases et leurs assets via API paginée
+**indépendante**, sans faire confiance aux listes embarquées tronquées.
+Il vérifie ID, nom, tag, taille, état `uploaded`, SHA-256 puis la totalité
+des octets téléchargés. Il conserve dans `runtime/recovery/full/releases/`
+les collectes, historiques, carnets, capsules, manifests, replays, backtests,
+OOS/forward, résultats, scoreboards et checkpoints **publiés sur GitHub**.
 
-For this high-cardinality repository, authenticate with `gh auth login`
-before starting a Windows restore, or provide a read-only `GH_TOKEN`/
-`GITHUB_TOKEN` environment variable. The launcher can borrow an already
-authenticated GitHub CLI token without printing or persisting it. Anonymous
-API quotas may not suffice. If rate-limited, the restore aborts promptly;
-rerunning the same command reuses SHA-verified downloaded assets.
+Chaque reprise est liée au SHA-256 déterministe de son inventaire initial ;
+les collecteurs continuent et peuvent publier de nouveaux actifs pendant
+l'opération, qui ne font pas partie de cette première preuve. Une nouvelle
+synchronisation les récupère ensuite. Les fichiers Git suivis sont liés au
+commit `main` cloné ; l'identité physique des packfiles `.git` n'est pas
+l'identité des octets applicatifs.
 
-Before a multi-hundred-GB download, run `RESTORE_ALINA.cmd --preflight-only`
-on Windows, `bash RESTORE_ALINA.sh --preflight-only`, or
-`python tools/restore_alina.py --everything --preflight-only`.
-This enumerates the Release inventory and checks minimum disk capacity
-**without downloading asset bytes**. It saves
-`runtime/recovery/full/RESTORE_PREFLIGHT.json` and reports either
-`PREFLIGHT_READY_NOT_RESTORED` or `PREFLIGHT_INSUFFICIENT_DISK`.
-A successful preflight is NOT a completed restore; SAFE shards and local
-snapshots may require additional disk space.
+Les shards ne deviennent `usable/` qu'après accord des manifests Release
+ET du catalogue SAFE courant lié à son SHA-256. L'inventaire incomplet,
+les erreurs de téléchargement, un ZIP ambigu, les pertes de données, une
+qualification révoquée ou des SHA contradictoires échouent de façon fermée.
 
-Published collection and analysis files are restored into
-`runtime/recovery/full/releases/`. Only catalog-proven SAFE/replay-compatible
-shards enter `runtime/recovery/full/usable/shards/`; others are quarantined.
-Published replay/backtest/OOS/scoreboard receipts remain accessible under
-their Release folders. The launcher does not rerun analyses or automatically
-overwrite the cloned workspace with a historical local snapshot. Restoring
-the latter requires explicit `--materialize-local-snapshot` opt-in and
-separate free disk capacity. Nonpublished/expired files cannot be recovered.
+`--recover-verifiable` permet de sauver toutes les pièces de source
+vérifiables même lorsqu'une ancienne archive est `starter`, sans empreinte
+ou définitivement inaccessible ; ces défauts restent dans
+`RESTORE_REPORT.json` et forcent `RESTORE_INCOMPLETE` / exit non nul.
+Ne jamais interpréter un grand nombre de fichiers téléchargés comme un
+succès à 100 %.
 
-The independent paginated Release-assets API is consulted for **every** Release;
-the list embedded in the Releases API response is not trusted as complete.
-For large repositories, set `GH_TOKEN` or `GITHUB_TOKEN` to a token
-with read access if anonymous API rate limits are encountered. A successful
-restore is complete only for the **published assets included in its initial
-inventory**; cloud collection can publish additional Releases concurrently.
-It cannot recover unpublished data, missing GitHub assets or ephemeral
-GitHub Actions artifacts that have expired.
+`--preflight-only --recover-verifiable` dresse l'inventaire des manques
+et estime la capacité disque sans télécharger d'assets.
+Les téléchargements utilisent un cache et reprennent les transferts partiels
+lorsque les en-têtes HTTP sont cohérents ; un fichier n'est complet qu'après
+contrôle SHA-256. Un `RESTORE_COMPLETE` de code 0 prouve **uniquement**
+la disponibilité de tous les actifs de l'inventaire initial et les contrôles
+catalogue/manifest associés, pas la profitabilité économique.
 
-**Future optional objective:** make a single Git clone include heavy payload
-bytes by mirroring GitHub Releases to LFS. This is **not yet implemented as
-a complete mirror**, and must not be advertised as ready. The clone payload
-manifest currently contains no Release assets and the LFS-free capacity gate
-remains closed (see below).
+## Fichiers locaux ignorés et preuve de disponibilité
 
+Les fichiers de travail ignorés par Git ne sont pas dans un simple clone.
+Leur récupération nécessite un snapshot `alina-local-snapshot-*` qui a été
+réellement publié sur GitHub, avec index/chunks et SHA-256. Le drapeau
+`--materialize-local-snapshot` fait échouer la restauration intégrale
+si aucun snapshot vérifié n'est disponible. Un fichier jamais publié,
+un artifact Actions expiré ou une donnée uniquement présente sur un PC
+perdu est irrécupérable rétrospectivement : il faut le signaler.
 
-## Byte-parity definition
+Pour préparer une sauvegarde locale depuis un poste **sur demande explicite**,
+utiliser `BACKUP_LOCAL_ALINA.cmd`. Cela ne déclenche aucune utilisation du PC
+depuis GitHub et exclut les credentials, clés privées, `.env`, seeds et
+artefacts dangereux.
 
-"Same bytes" means application payload identity, not equality of the physical
-server/client `.git` directory size. Git may repack/compress identical Git
-objects differently.
+La collecte GitHub-hosted publie d'abord les capsules
+`alina-recovery-*` contenant le bundle et ses SHA-256. Les processus de
+récupération peuvent reprendre les publications inachevées depuis cette
+capsule exacte sans recollecter une autre fenêtre temporelle.
 
-Clone completeness is accepted only when
-`tools/check_clone_payload_completeness.py --require-complete` proves:
+## Critères stricts de réussite
 
-- every explicit GitHub Release asset id is represented exactly once;
-- source asset byte size equals clone manifest byte size;
-- source SHA-256, when supplied by GitHub, equals clone SHA-256;
-- every current-tree `clone_payload/releases/**` Git blob is a Git LFS pointer;
-- the LFS pointer OID equals the payload SHA-256;
-- the LFS pointer size equals the payload byte size;
-- `source_assets == clone_assets`;
-- `source_bytes == clone_bytes`;
-- missing, extra and mismatched asset counts are all zero.
+- clone des fichiers Git du HEAD canonique sur `main` ;
+- 100 % des assets GitHub Releases **publiés et inventoriés** copiés, pas
+  seulement les shards qualifiés ; totaux comptes/octets vérifiés ;
+- chaque asset a sa taille attendue et un SHA-256 source égal au SHA-256 local ;
+- aucune archive `starter`, absente ou non vérifiable déguisée en succès ;
+- preuves SAFE, manifests et catalogues concordants ;
+- snapshot local explicitement requis disponible et restauré à l'octet près ;
+- `RESTORE_REPORT.json` durable, `RESTORE_COMPLETE` et code de sortie 0.
 
-## Git clone only: quota and current blocker
+Si un point manque : récupérer au maximum mais **ne pas certifier 100 %**.
+La collecte reste `COLLECT`, GitHub-hosted, paper/read-only, sans clés privées,
+signatures, ordres réels, self-hosted runner ou dépendance au PC utilisateur.
 
-A ZIP downloaded with GitHub's "Download ZIP" is NOT the accepted recovery
-mechanism. It does not contain historical Git objects and it does not
-automatically include arbitrary GitHub Release assets.
+## Git LFS : abandonné
 
-GitHub Free and Pro include 10 GiB of Git LFS storage and 10 GiB of LFS
-download bandwidth per billing cycle. These allowances are account-wide and
-NOT proof of remaining free entitlement. The LFS billing budget must be
-verified as zero dollars at the account level before any bulk mirroring,
-and the complete source inventory must be smaller than the verified unused
-storage and bandwidth headroom. A zero-dollar budget blocks overages,
-but it does not magically make a larger clone possible.
-
-The full source byte count can be requested via:
-
-`python tools/check_clone_payload_completeness.py --inventory-source --require-complete`
-
-This command may take a long time with many large Release inventories; it must
-report INCOMPLETE until source assets and current LFS pointers match exactly.
-
-The GitHub Releases list can embed a truncated asset list; for any Release
-with 30 or more embedded assets the mirror enumerates the separate
-paginated Release-assets endpoint. The independent strict completeness audit
-re-enumerates the paginated assets endpoint for EVERY Release, even if the
-embedded list contains fewer than 30 assets. Missing pages and malformed records
-are fatal. An absent API response cannot be interpreted as zero bytes.
-
-**Important:** evidence that still exists only on an unuploaded local machine
-cannot be proven to reside in GitHub. It must first be published using the
-existing safe local recovery snapshot process; cloud GitHub must never access
-or rely on that machine.
-
-### Measured, non-exhaustive capacity preflight — 2026-10-08
-
-A read-only GitHub API sample of the first 50 listed Releases found **467
-asset IDs, 467 distinct nonempty SHA-256 digests, and exactly
-12,080,885,180 bytes** (11.2512 GiB) of distinct payload content.
-
-This lower bound alone exceeds the **10 GiB LFS storage allowance** available
-on GitHub Free and Pro. It does not include older Releases, newly published
-assets, other LFS objects or unpublished local-only evidence. Because all
-467 digests in this sample are distinct, LFS object deduplication cannot
-reduce this sample beneath the Free/Pro allowance.
-
-This is NOT a complete source inventory or a restored-clone proof.
-The owner's exact GitHub plan, account-level LFS balance and zero-dollar
-billing budget have not been read through the connector. Consequently, no
-mass LFS migration is authorized or attempted. The mirror manifest remains the
-authority for mirrored bytes, not these sample totals.
-
-## Release-to-LFS migration
-
-`tools/mirror_releases_to_clone_lfs.py` mirrors immutable Release assets into
-`clone_payload/` in bounded batches. It is idempotent by GitHub Release asset
-id and verifies byte size/SHA-256 before accepting a payload.
-
-`.github/workflows/clone-payload-lfs-mirror.yml` is GitHub-hosted only. It is
-cost-gated because Git LFS storage/bandwidth can become billable. Scheduled
-automatic mirroring becomes active only when the repository variable
-`ALINA_LFS_MIRROR_ENABLED=true` exists. Canonical campaign workers also queue
-the mirror after durable collection/analysis publication only under that flag.
-
-The mirror never deletes Releases and never introduces execution/trading.
-Both the workflow and the CLI reject all LFS migration while
-`ALINA_LFS_ZERO_COST_BUDGET_VERIFIED` is absent or not exactly `true`.
-The mirror workflow is disabled unless the repository variable
-`ALINA_LFS_ZERO_COST_BUDGET_VERIFIED=true` is explicitly set *after*
-independently confirming an account-wide zero-dollar LFS budget and sufficient
-unused free allowance. That variable is a safety attestation, not a technical
-way to read billing information, and no workflow changes the billing settings.
-
-## Existing Release durability
-
-Dataset V2 collection publication writes a deterministic
-`alina-recovery-*` Release before the high-cardinality per-shard uploads.
-That capsule contains exact manifests/assets with SHA-256 identities. If later
-Release publication is rate-limited, `recover-durable-publication.yml` resumes
-from the exact capsule without recollection.
-
-These Releases are the durable source from which the LFS clone payload is built.
-
-## Local Codex data
-
-Cloud Alina never depends on the PC. Important ignored local evidence is first
-published with:
-
-```text
-BACKUP_LOCAL_ALINA.cmd
-```
-
-The local snapshot is resumable, chunked and SHA-256 verified. It covers useful
-Git-ignored project evidence while excluding secret-like material, private keys,
-`.env`, credentials, seeds/mnemonics and reproducible caches/toolchains/builds.
-
-Large historical files that exceed GitHub/Git-LFS per-file limits are represented
-losslessly as bounded chunks plus manifests. Every original content byte remains
-represented, although those historical bytes may be stored as chunks rather
-than one giant source file.
-
-Once the snapshot chunks exist as Release assets, the same Release-to-LFS mirror
-makes those bytes part of the clone-complete payload.
-
-## Accepted restoration contract: clone + verified GitHub Releases
-
-`git clone` followed by `RESTORE_ALINA.cmd` (or `RESTORE_ALINA.sh`)
-is the **currently accepted** recovery method. Git LFS mirroring remains an
-optional, quota-dependent future enhancement, not a prerequisite.
-
-The restore command reads the current clone's canonical
-`catalog/DATA_INDEX.json` and `catalog/DATA_METRICS.json` before downloading.
-It fails closed if the metrics do not match the index SHA-256. It materializes
-a verified shard to `usable/` only when the immutable Release manifest AND
-the current catalog agree on its identity, SHA-256, release tag, SAFE quality
-and replay compatibility. Historical SAFE rows revoked by the catalog,
-duplicate shard identities and ambiguous ZIP entries do not become usable.
-Previously materialized SAFE files no longer expected by the catalog are
-preserved under quarantine, never silently treated as still eligible.
-
-The restore report and exit code must show that all assets in the initial
-Release inventory were accounted for, verified and classified without failures.
-A successful restoration certifies the **published inventory snapshot**,
-not future Releases concurrently added by live COLLECT, the quality of
-unpublished local files, or economic profitability.
-
-### Restore verification and repeatability
-
-From a clean checkout, run `RESTORE_ALINA.cmd --preflight-only` on Windows
-(or `./RESTORE_ALINA.sh --preflight-only` on Unix) to inventory published
-Releases and estimate download space **without restoring any asset**. Leave
-additional free space for extracted shards and any explicitly requested local
-snapshot. Run the same launcher without `--preflight-only` to restore all
-available historical Release assets; interrupted `.partial` transfers are
-resumed only when HTTP byte ranges agree, then verified against the published
-size and SHA-256. Previously verified assets and materialized shards are reused.
-
-Inspect `runtime/recovery/full/RESTORE_REPORT.json` and its `status`:
-`RESTORE_COMPLETE` means the initial Release inventory, run manifests and
-every SAFE shard expected by the SHA-bound current catalog were verified;
-`RESTORE_INCOMPLETE` means checks failed; `ASSETS_VERIFIED_ONLY` means
-the asset inventory was verified **without** catalog certification (library
-calls only; the launcher requires the catalog). The report records
-`source_inventory_sha256`, each asset's release/asset IDs when supplied by
-GitHub, expected byte size, expected SHA-256, download status and classification
-failures. The `usable/` directory is not a shortcut around catalog gates;
-other evidence remains preserved under `releases/` or `quarantine/`.
-
-A successful restore does **not** prove complete retention of unpublished
-historical files, a fresh-machine full restore, replay validity, OOS quality,
-backtest realism or the target of +5 USD net/day/module. Each requires its
-own independent proof. Restoration does not change phase COLLECT or operate
-any cloud collector.
-
-## Hard platform prerequisite
-
-A clone can materialize the real Git LFS payload only if:
-
-1. Git LFS is installed/enabled on the new machine; and
-2. the GitHub repository has sufficient LFS storage/bandwidth entitlement.
-
-Without those two platform conditions Git can only obtain LFS pointer files.
-The repository must never claim clone-complete while that condition or the
-byte-parity audit is unmet.
-
-## Acceptance rule
-
-The accepted two-step recovery is `RESTORE_COMPLETE` only when
-`RESTORE_ALINA.cmd` or `RESTORE_ALINA.sh` exits successfully, its
-`RESTORE_REPORT.json` lists all inventoried Release assets with no missing,
-corrupt, unverified or misclassified rows, and usable shards are bound to
-the current SHA-verified canonical catalog. `PARTIAL` and `REJECT` evidence
-can remain in quarantine for diagnosis but must never enter the usable set.
-
-The separate, optional single-clone-plus-LFS objective is
-`CLONE_COMPLETE` only when:
-
-- `check_clone_payload_completeness.py --require-complete` is green;
-- source and clone asset counts are identical;
-- source and clone byte totals are identical;
-- all LFS OID/size identities are verified;
-- fresh-machine clone validation succeeds with Git LFS materialization;
-- local-only evidence required for preservation has already been published and
-  mirrored;
-- no secrets, private keys, signatures, real orders or self-hosted runners are
-  introduced.
+Aucune duplication de données lourdes en LFS, aucun quota/achat LFS,
+aucun lancement de migration LFS ni exigence `CLONE_COMPLETE` fondée sur
+ses pointeurs. Les anciens manifests/scripts sont conservés uniquement si
+nécessaires à la compatibilité et ne sont pas un chemin de récupération actif.
+Un simple `git clone` sans étape d'hydratation des Releases n'est **pas**
+une copie intégrale.
