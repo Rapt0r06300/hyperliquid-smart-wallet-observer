@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             "--materialize-available-local-snapshot" not in flags):
         flags.append("--materialize-available-local-snapshot")
     command = [sys.executable, "tools/restore_alina.py", "--everything",
-               "--repository", REPOSITORY, "--clone-root", ".",
+               "--repository", REPOSITORY,
                "--workspace", ".", "--destination", "runtime/recovery/full",
                *flags]
     env = {**os.environ, "GIT_LFS_SKIP_SMUDGE": "1"}
