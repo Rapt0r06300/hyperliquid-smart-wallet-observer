@@ -236,6 +236,38 @@ jobs:
             "$PWD/tools/push_github_safe.ps1", [ref]$tokens, [ref]$errors
           ) | Out-Null
           if ($errors.Count -ne 0) { throw "Codex push PowerShell parse failure: $errors" }
+      - name: Prove every Git wrapper forwards all arguments
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $code = Get-Content tools/push_github_safe.ps1 -Raw
+          $tokens = $null; $errors = $null
+          $ast = [System.Management.Automation.Language.Parser]::ParseInput(
+            $code, [ref]$tokens, [ref]$errors
+          )
+          if ($errors.Count -gt 0) { throw "PowerShell parse errors: $errors" }
+          foreach ($name in @("Invoke-Git", "Get-GitText", "Test-Git")) {
+            $fn = $ast.Find({
+              param($node)
+              $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $node.Name -eq $name
+            }, $true)
+            if ($null -eq $fn) { throw "Missing Git wrapper $name" }
+            Invoke-Expression $fn.Extent.Text
+          }
+          $script:GitExecutable = (Get-Command git.exe).Source
+          $probe = Join-Path $env:RUNNER_TEMP "Alina safe Git wrapper probe"
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          Push-Location $probe
+          try {
+            Invoke-Git @("init", "-b", "main")
+            $branch = Get-GitText @("symbolic-ref", "--quiet", "--short", "HEAD")
+            if ($branch -ne "main") { throw "Multi-argument Git forwarding failed" }
+            if (-not (Test-Git @("rev-parse", "--is-inside-work-tree"))) {
+              throw "Boolean Git wrapper failed"
+            }
+            Write-Host "ALINA_GIT_WRAPPERS_OK"
+          } finally { Pop-Location }
       - name: Exercise full offline restore regression suite on Windows
         shell: pwsh
         run: |
