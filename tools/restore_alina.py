@@ -210,7 +210,7 @@ def _validate_release_asset(
         raise RestoreError(f"invalid download URL for {name}")
     if _expected_digest(asset) is None and not allow_incomplete:
         raise RestoreError(f"missing/invalid SHA-256 for {name}")
-    if asset.get("state", "uploaded") != "uploaded" and not allow_incomplete:
+    if asset.get("state") != "uploaded" and not allow_incomplete:
         raise RestoreError(f"asset not fully uploaded: {name}")
     ids.add(asset_id)
     names.add(name)
