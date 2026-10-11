@@ -1216,6 +1216,7 @@ def restore_everything(
     releases = list(iter_releases(repository, token=token))
     # Never start transferring data with a partial/malformed source inventory.
     seen_tags: set[str] = set()
+    seen_windows_release_dirs: set[str] = set()
     for release in releases:
         tag = release.get("tag_name")
         assets = release.get("assets")
@@ -1224,9 +1225,16 @@ def restore_everything(
         if not isinstance(assets, list):
             raise RestoreError(f"missing asset list for Release {tag}")
         seen_tags.add(tag)
+        # Release and asset names are case-insensitive on Windows. Reject
+        # ambiguous destinations before writing even one Release byte.
+        windows_release_dir = _safe_component(tag).casefold()
+        if windows_release_dir in seen_windows_release_dirs:
+            raise RestoreError("case-insensitive Release directory collision")
+        seen_windows_release_dirs.add(windows_release_dir)
         # Data-only Releases are intentional in oversized Dataset runs.
         # Preserve every SHA-verified byte and classify via canonical manifest.
         seen_names: set[str] = set()
+        seen_windows_asset_names: set[str] = set()
         for asset in assets:
             if not isinstance(asset, Mapping):
                 raise RestoreError(f"invalid asset record in Release {tag}")
@@ -1240,6 +1248,10 @@ def restore_everything(
             if not isinstance(asset.get("browser_download_url"), str) or not asset["browser_download_url"].startswith("https://"):
                 raise RestoreError(f"invalid download URL for {tag}/{name}")
             seen_names.add(name)
+            windows_asset_name = _safe_component(name).casefold()
+            if windows_asset_name in seen_windows_asset_names:
+                raise RestoreError(f"case-insensitive asset name collision in Release {tag}")
+            seen_windows_asset_names.add(windows_asset_name)
 
     # Bind the report to the exact, paginated immutable inventory read at
     # the start. Later Releases published during COLLECT are not certified.
@@ -1449,6 +1461,8 @@ def restore_everything(
             report["local_snapshot"] = materialize_latest_local_snapshot(
                 releases_root, workspace
             )
+            if report["local_snapshot"] is None:
+                raise RestoreError("no verified local snapshot available to materialize")
         except (RestoreError, OSError, ValueError, TypeError) as exc:
             # Preserve the verified Release inventory and a failure checkpoint.
             report["local_snapshot"] = {"status": "FAIL", "error": str(exc)}
@@ -1457,6 +1471,7 @@ def restore_everything(
             })
     complete = (
         report["all_source_assets_accounted_for"]
+        and not report["failures"]
         and not report["verification_failures"]
         and not report["classification"]["failures"]
         and not report["unclaimed_dataset_release_count"]
