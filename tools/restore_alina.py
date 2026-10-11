@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -86,7 +87,7 @@ def _request(url: str, *, token: str | None = None, retries: int = 8) -> bytes:
             if reset and reset.isdigit():
                 delay = max(delay, min(120.0, int(reset) - time.time() + 2.0))
             time.sleep(max(1.0, delay))
-        except (urllib.error.URLError, TimeoutError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
             if attempt >= retries:
                 raise RestoreError(f"network failure for {url}: {exc}") from exc
             time.sleep(min(60.0, float(2 ** attempt)))
@@ -122,6 +123,23 @@ def _download_to_path(
             digest = hashlib.sha256()
             with urllib.request.urlopen(request, timeout=120) as response:
                 status = getattr(response, "status", None)
+                if status == 206:
+                    # A partial response must begin at the requested offset.
+                    # Never append an unrelated range to an existing prefix.
+                    content_range = getattr(response, "headers", {}).get("Content-Range")
+                    match = re.fullmatch(
+                        r"bytes (\d+)-(\d+)/(\d+|\*)", str(content_range or "")
+                    )
+                    if (
+                        not existing_size or match is None
+                        or int(match.group(1)) != existing_size
+                        or int(match.group(2)) < existing_size
+                        or (match.group(3) != "*"
+                            and int(match.group(2)) >= int(match.group(3)))
+                    ):
+                        raise RestoreError(f"invalid HTTP Content-Range for {url}")
+                elif status not in (200, None):
+                    raise RestoreError(f"unexpected HTTP status {status} for {url}")
                 append = existing_size > 0 and status == 206
                 if append:
                     with target.open("rb") as prefix:
@@ -163,7 +181,7 @@ def _download_to_path(
             if reset and reset.isdigit():
                 delay = max(delay, min(120.0, int(reset) - time.time() + 2.0))
             time.sleep(max(1.0, delay))
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
             if attempt >= retries:
                 raise RestoreError(f"streaming download failure for {url}: {exc}") from exc
             time.sleep(min(60.0, float(2 ** attempt)))
@@ -307,7 +325,7 @@ def _expected_digest(asset: Mapping[str, Any]) -> str | None:
 
 
 def _asset_ok(path: Path, asset: Mapping[str, Any]) -> bool:
-    if not path.is_file():
+    if path.is_symlink() or not path.is_file():
         return False
     size = asset.get("size")
     digest = _expected_digest(asset)
@@ -489,11 +507,15 @@ def download_asset(
         raise RestoreError(f"invalid size for {name}")
     target = destination / _safe_component(name)
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        raise RestoreError(f"symlinked Release asset target: {name}")
     if _asset_ok(target, asset):
         _verify_zip_archive(target, name)
         return {"name": name, "path": str(target), "status": "SKIPPED_VERIFIED"}
 
     tmp = target.with_suffix(target.suffix + ".partial")
+    if tmp.is_symlink():
+        raise RestoreError(f"symlinked Release asset partial: {name}")
     if clone_candidate is not None and _asset_ok(clone_candidate, asset):
         # A verified hardlink avoids a second multi-GB transfer when both
         # paths share a filesystem; cross-volume restores copy the bytes.
@@ -646,6 +668,7 @@ def _materialize_classified_shards(
         "excluded_rows": 0,
         "missing_or_corrupt_rows": 0,
         "verified_zip_members": 0,
+        "skipped_verified_shards": 0,
         "stale_usable_quarantined": 0,
         "ignored_stale_release_manifests": 0,
         "failures": [],
@@ -752,6 +775,21 @@ def _materialize_classified_shards(
             )
             target_root.mkdir(parents=True, exist_ok=True)
             target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+            if target.is_symlink():
+                report["failures"].append({
+                    "dataset_id": dataset_id,
+                    "error": "SYMLINKED_MATERIALIZED_SHARD",
+                })
+                continue
+            if _verified_row_bytes(target, row):
+                # Repeated restores must not rewrite already-verified shards.
+                if safe:
+                    expected_usable.add(target)
+                    report["usable_shards"] += 1
+                else:
+                    report["quarantined_shards"] += 1
+                report["skipped_verified_shards"] += 1
+                continue
             tmp = target.with_suffix(target.suffix + ".partial")
             tmp.unlink(missing_ok=True)
             try:
@@ -1196,6 +1234,9 @@ def restore_everything(
             if not name:
                 continue
             target = release_dir / _safe_component(name)
+            partial = target.with_suffix(target.suffix + ".partial")
+            if target.is_symlink() or partial.is_symlink():
+                raise RestoreError(f"symlinked Release asset during preflight: {tag}/{name}")
             if not _asset_ok(target, asset):
                 source = clone_sources.get((tag, name))
                 # A verified LFS hardlink occupies no new payload space on
