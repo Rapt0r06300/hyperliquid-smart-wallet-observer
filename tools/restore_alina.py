@@ -674,6 +674,7 @@ def _materialize_classified_shards(
         "failures": [],
     }
     expected_usable: set[Path] = set()
+    restored_safe_ids: set[str] = set()
     diagnostics = destination / "diagnostics" / "run_manifests"
     for manifest_path in sorted(releases_root.glob("*/RUN_MANIFEST.json")):
         release_tag = manifest_path.parent.name
@@ -785,6 +786,7 @@ def _materialize_classified_shards(
                 # Repeated restores must not rewrite already-verified shards.
                 if safe:
                     expected_usable.add(target)
+                    restored_safe_ids.add(dataset_id)
                     report["usable_shards"] += 1
                 else:
                     report["quarantined_shards"] += 1
@@ -833,6 +835,7 @@ def _materialize_classified_shards(
                 continue
             if safe:
                 expected_usable.add(target)
+                restored_safe_ids.add(dataset_id)
                 report["usable_shards"] += 1
             else:
                 report["quarantined_shards"] += 1
@@ -869,6 +872,16 @@ def _materialize_classified_shards(
                     "path": str(previous),
                     "error": f"STALE_USABLE_QUARANTINE_FAILED:{exc}",
                 })
+    if catalog_safe is not None:
+        missing = sorted(set(catalog_safe) - restored_safe_ids)
+        report["missing_catalog_safe_shards"] = len(missing)
+        report["missing_catalog_safe_sample"] = missing[:50]
+        if missing:
+            report["failures"].append({
+                "error": "CATALOG_SAFE_SHARDS_NOT_RESTORED",
+                "count": len(missing),
+                "sample": missing[:10],
+            })
     return report
 
 
@@ -1212,6 +1225,27 @@ def restore_everything(
                 raise RestoreError(f"invalid download URL for {tag}/{name}")
             seen_names.add(name)
 
+    # Bind the report to the exact, paginated immutable inventory read at
+    # the start. Later Releases published during COLLECT are not certified.
+    source_inventory = [
+        {
+            "release_id": release.get("id"),
+            "tag": release["tag_name"],
+            "assets": [
+                {
+                    "asset_id": asset.get("id"),
+                    "name": asset["name"],
+                    "size_bytes": asset["size"],
+                    "sha256": _expected_digest(asset),
+                }
+                for asset in release["assets"]
+            ],
+        }
+        for release in releases
+    ]
+    source_inventory_sha256 = hashlib.sha256(
+        json.dumps(source_inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
     clone_sources = _clone_lfs_sources(clone_root, repository, releases)
 
     # Old cached Releases must never be treated as part of the current GitHub
@@ -1260,6 +1294,7 @@ def restore_everything(
                 if enough_disk else "PREFLIGHT_INSUFFICIENT_DISK"
             ),
             "repository": repository,
+            "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
             "asset_count": sum(len(release["assets"]) for release in releases),
             "pending_download_bytes": pending_download_bytes,
@@ -1287,6 +1322,7 @@ def restore_everything(
     report: dict[str, Any] = {
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
+        "source_inventory_sha256": source_inventory_sha256,
         "destination": str(destination),
         "release_count": 0,
         "asset_count": 0,
@@ -1311,18 +1347,28 @@ def restore_everything(
         release_dir = releases_root / safe_tag
         assets = release.get("assets")
         assets = assets if isinstance(assets, list) else []
-        row = {"tag": tag, "asset_count": len(assets), "assets": []}
+        row = {
+            "tag": tag,
+            "release_id": release.get("id"),
+            "asset_count": len(assets),
+            "assets": [],
+        }
         report["release_count"] += 1
         for asset in assets:
             if not isinstance(asset, Mapping):
                 continue
             report["asset_count"] += 1
+            identity = {
+                "asset_id": asset.get("id"),
+                "size_bytes": asset.get("size"),
+                "sha256": _expected_digest(asset),
+            }
             try:
                 result = download_asset(
                     asset, release_dir, token=token,
                     clone_candidate=clone_sources.get((tag, str(asset.get("name") or ""))),
                 )
-                row["assets"].append(result)
+                row["assets"].append({**identity, **result})
                 if result["status"] == "DOWNLOADED_VERIFIED":
                     report["downloaded"] += 1
                 elif result["status"] == "RESUMED_VERIFIED":
@@ -1334,7 +1380,10 @@ def restore_everything(
             except RestoreError as exc:
                 failure = {"tag": tag, "asset": asset.get("name"), "error": str(exc)}
                 report["failures"].append(failure)
-                row["assets"].append({"name": asset.get("name"), "status": "FAIL", "error": str(exc)})
+                row["assets"].append({
+                    **identity, "name": asset.get("name"),
+                    "status": "FAIL", "error": str(exc),
+                })
         report["releases"].append(row)
 
     # Interrupted publications remain archived, but cannot claim a fully
@@ -1378,6 +1427,17 @@ def restore_everything(
         + report["skipped_verified"]
         == report["expected_assets"]
         and not report["failures"]
+    )
+    complete = (
+        report["all_source_assets_accounted_for"]
+        and not report["verification_failures"]
+        and not report["classification"]["failures"]
+        and not report["unclaimed_dataset_release_count"]
+    )
+    report["status"] = (
+        "RESTORE_COMPLETE" if complete and catalog_verification is not None
+        else "ASSETS_VERIFIED_ONLY" if complete
+        else "RESTORE_INCOMPLETE"
     )
     report_path = destination / "RESTORE_REPORT.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -1456,6 +1516,8 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(
             {
                 "status": "OK" if failures == 0 else "FAIL",
+                "restoration_status": report["status"],
+                "source_inventory_sha256": report["source_inventory_sha256"],
                 "release_count": report["release_count"],
                 "asset_count": report["asset_count"],
                 "downloaded": report["downloaded"],
