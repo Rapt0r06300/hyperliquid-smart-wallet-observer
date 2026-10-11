@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import time
 import urllib.error
@@ -1031,16 +1032,44 @@ def _verify_run_manifests(
 
 
 def _safe_workspace_target(workspace: Path, relative: str) -> Path:
+    # Snapshot paths must be portable and may never overwrite Git internals.
+    if "\\" in relative or ":" in relative:
+        raise RestoreError(f"unsafe snapshot path: {relative!r}")
     rel = Path(relative)
     if rel.is_absolute() or ".." in rel.parts or not rel.parts:
         raise RestoreError(f"unsafe snapshot path: {relative!r}")
-    target = (workspace / rel).resolve()
+    if any(part.casefold() == ".git" for part in rel.parts):
+        raise RestoreError("local snapshot may never write inside .git")
     root = workspace.resolve()
+    candidate = root
+    for part in rel.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise RestoreError(f"symlinked snapshot target: {relative!r}")
+    target = candidate.resolve()
     if root != target and root not in target.parents:
         raise RestoreError(f"snapshot path escapes workspace: {relative!r}")
-    if rel.parts[0].casefold() == ".git":
-        raise RestoreError("local snapshot may never write inside .git")
     return target
+
+
+def _tracked_clone_paths(workspace: Path) -> set[str]:
+    """Fail closed if an ignored-file snapshot could overwrite Git's HEAD."""
+    root = workspace.resolve()
+    if not (root / ".git").exists():
+        return set()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True, check=False,
+        )
+    except OSError as exc:
+        raise RestoreError("cannot validate Git-tracked snapshot targets") from exc
+    if result.returncode != 0:
+        raise RestoreError("cannot enumerate Git-tracked snapshot targets")
+    return {
+        os.fsdecode(path).replace("\\", "/").casefold()
+        for path in result.stdout.split(b"\x00") if path
+    }
 
 
 def _copy_exact_segment(source: Any, output: Any, length: int) -> None:
@@ -1123,6 +1152,7 @@ def materialize_latest_local_snapshot(
 
     pending_materialization = 0
     seen_workspace_targets: set[str] = set()
+    tracked_paths = _tracked_clone_paths(workspace)
     for row in file_rows:
         if not isinstance(row, Mapping):
             raise RestoreError("invalid local snapshot file row")
@@ -1137,6 +1167,8 @@ def materialize_latest_local_snapshot(
         target_key = target.relative_to(workspace.resolve()).as_posix().casefold()
         if not target_key or target_key == "." or target_key in seen_workspace_targets:
             raise RestoreError(f"duplicate or unsafe local snapshot target: {relative}")
+        if target_key in tracked_paths:
+            raise RestoreError(f"local snapshot would overwrite tracked Git file: {relative}")
         seen_workspace_targets.add(target_key)
         if not (
             target.is_file()
