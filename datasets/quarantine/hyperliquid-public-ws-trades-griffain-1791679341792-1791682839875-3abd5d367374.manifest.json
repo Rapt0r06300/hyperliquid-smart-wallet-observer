@@ -1,0 +1,128 @@
+{
+  "asset_verified": true,
+  "bytes": 216448,
+  "collection_run_id": "market-e8-9-2026101100-v7-0",
+  "collector_version": "f6548b67fea1d305dfea5e1476edd108c0e59517",
+  "cost_model": {
+    "applicable": false,
+    "ready": false
+  },
+  "dataset_id": "hyperliquid-public-ws-trades-griffain-1791679341792-1791682839875-3abd5d367374",
+  "end_ts_ms": 1791682839875,
+  "event_count": 1746,
+  "family": "trades",
+  "integrity": {
+    "desync_count": 0,
+    "duplicate_count": 0,
+    "duplicates_deduped": true,
+    "gap_count": 0,
+    "missing_monotonic_count": 0,
+    "missing_timestamp_count": 0,
+    "regression_count": 0
+  },
+  "observed_channels": [
+    "trades"
+  ],
+  "proof_of_pnl_allowed": false,
+  "provenance": {
+    "authenticated": false,
+    "public_data_only": true,
+    "real_execution": false,
+    "timestamp_semantics": [],
+    "transports": [
+      "websocket"
+    ]
+  },
+  "quality_reasons": [
+    "RECONCILIATION_MATCH_REQUIRED"
+  ],
+  "quality_status": "PARTIAL",
+  "reconciliation": {
+    "backfill_error": null,
+    "backfill_status": null,
+    "duplicate_live_keys": null,
+    "live_count": 1746,
+    "live_only": null,
+    "local_continuity_fallback": false,
+    "matched_count": null,
+    "missing_from_live": null,
+    "reference_count": 1105,
+    "reference_status": "PARTIAL",
+    "status": "PARTIAL"
+  },
+  "record_count": 1746,
+  "release": {
+    "asset_id": 629501715,
+    "asset_name": "packed-shards-0054.zip",
+    "member_name": "hyperliquid-public-ws-trades-griffain-1791679341792-1791682839875-3abd5d367374.jsonl.gz",
+    "release_id": 409331523,
+    "release_tag": "data-v2-campaign-market-e8-9-2026101100-v7-u0",
+    "remote_digest": "sha256:84960216fddcd410e7144f4c6b7c9af91e81f7c2830a5152d02c457eb2ec4a9d",
+    "remote_size": 73435696,
+    "repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+    "storage": "zip_entry"
+  },
+  "release_asset": "hyperliquid-public-ws-trades-griffain-1791679341792-1791682839875-3abd5d367374.jsonl.gz",
+  "release_asset_id": 629501715,
+  "release_container_asset": "packed-shards-0054.zip",
+  "release_id": 409331523,
+  "release_member": "hyperliquid-public-ws-trades-griffain-1791679341792-1791682839875-3abd5d367374.jsonl.gz",
+  "release_remote_digest": "sha256:84960216fddcd410e7144f4c6b7c9af91e81f7c2830a5152d02c457eb2ec4a9d",
+  "release_remote_size": 73435696,
+  "release_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "release_storage": "zip_entry",
+  "release_tag": "data-v2-campaign-market-e8-9-2026101100-v7-u0",
+  "replay_compatible": true,
+  "replay_reason": "SMOKE_OK",
+  "replay_schema_version": "alina.replay.v1",
+  "required_channels": [],
+  "schema": "alina.shard_manifest.v2",
+  "sha256": "3abd5d367374a7a6083972a3de44d7d2503597011b129c941eb1ad99be9c8c95",
+  "source": "hyperliquid_public_ws",
+  "start_ts_ms": 1791679341792,
+  "symbol": "GRIFFAIN",
+  "synchronization": {
+    "clock_offset_ms": {
+      "count": 1716,
+      "max": -227.0,
+      "min": -555.5,
+      "p50": -401.5,
+      "p95": -229.0
+    },
+    "connection_count": 1,
+    "connection_ids": [
+      "hl-cloud-b6687e59cb7948bc99dee58bf273e4c9"
+    ],
+    "first_exchange_ts_ms": 1791679257829,
+    "last_exchange_ts_ms": 1791682839581,
+    "max_reconnect_count": 0,
+    "receive_minus_exchange_ms": {
+      "count": 1746,
+      "max": 83963.0,
+      "min": 208.0,
+      "p50": 276.0,
+      "p95": 482.0
+    },
+    "reconnect_delta": 0,
+    "transport_rtt_ms": {
+      "count": 0,
+      "max": null,
+      "min": null,
+      "p50": null,
+      "p95": null
+    }
+  },
+  "trade_count": 1746,
+  "trade_count_exact": true,
+  "trade_identity_digests": [],
+  "trade_identity_digests_exact": false,
+  "trade_identity_set_count": 1746,
+  "trade_identity_set_sha256": "a01524e0d9c868ce994cc1b1111dc0d544c18a0cb2dc327f08bf1eb6ed98a6d2",
+  "trade_identity_vector_omitted": true,
+  "uncompressed_bytes": 2705849,
+  "uncompressed_size_exact": true,
+  "unique_trade_count": 1746,
+  "unique_trade_count_exact": true,
+  "validation_allowed": false,
+  "venue": "hyperliquid"
+}
