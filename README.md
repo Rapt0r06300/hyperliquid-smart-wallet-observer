@@ -12,58 +12,57 @@ Alina Smart Flow — nom historique : **HyperSmart** — collecte et normalise d
 
 ---
 
-## Cloner le bot ET restaurer les octets de toutes les archives
+## Clone principal + récupération de toutes les données publiées (sans Git LFS)
 
-Un simple `git clone` ne télécharge **pas** les assets GitHub Releases. À l'heure
-actuelle, `clone_payload/MANIFEST.json` contient zéro octet LFS ; annoncer qu'un
-`git clone` seul restaure l'intégralité des données serait faux. Le contenu
-des Releases reste dans **ce même dépôt principal**, sans dépôt secondaire.
+**Un simple `git clone` ne télécharge pas les GitHub Releases.** Un clone
+véritablement complet exige donc un second téléchargement **du même dépôt**,
+incorporé ci-dessous dans une seule commande. Les données lourdes ne sont pas
+placées dans l'historique Git (cela rendrait le dépôt inexploitable). Aucun
+quota Git LFS n'est nécessaire pour cette restauration.
 
-Parcours Windows (dans `cmd.exe`, Python >= 3.10 et Git installés) :
+Windows CMD (Git, Python 3.10+ et place disque suffisante) :
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable --materialize-local-snapshot
 ```
 
-Parcours Linux/macOS (Bash) :
+Linux/macOS :
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable --materialize-local-snapshot
 ```
 
-Ces commandes désactivent uniquement le téléchargement automatique LFS pendant le
-clone : toutes les archives disponibles sont récupérées par le restaurateur
-Release, sans consommation supplémentaire de bande passante LFS.\n\nLe bot et ses fichiers suivis proviennent du même HEAD `main`. Les archives
-immuables sont téléchargées séparément depuis **ses** GitHub Releases vers
-`runtime/recovery/full/releases/`; chaque fichier publié et vérifiable est
-comparé à sa taille et à son SHA-256 source, avec reprise des téléchargements.
-Les shards n'entrent dans `usable/` que si leurs preuves SAFE sont concordantes
-avec le catalogue canonique ; les autres restent hors du chemin de replay sûr.
+La commande récupère le code, tous les catalogues et workflows suivis par
+`main`, puis **toutes** les archives publiées dans les Releases du dépôt :
+trades, carnets L2, données historiques, capsules de récupération,
+replays, backtests, OOS, forward paper, résultats économiques, scoreboards
+et checkpoints. Les octets sont vérifiés par taille et SHA-256 ; les transferts
+interrompus sont repris. Les preuves non SAFE restent conservées sans être
+qualifiées pour le replay. Le snapshot de fichiers locaux ignorés est restauré
+seulement s'il a été préalablement publié et vérifié ; sinon la demande
+de restauration intégrale échoue explicitement.
 
-**La commande ne retourne le code 0 que pour `RESTORE_COMPLETE`.**
-Avec `--recover-verifiable`, les archives inachevées (`starter`), sans SHA-256
-ou indisponibles n'empêchent plus de récupérer toutes les autres archives
-vérifiables. Elles restent explicitement dans `RESTORE_REPORT.json` et
-forcent un code de sortie non nul : **ce n'est pas une copie complète**.
-Sans ce drapeau, la restauration s'arrête avant transfert si la source
-n'est pas entièrement certifiable. Utiliser `--preflight-only --recover-verifiable`
-pour mesurer l'espace disque nécessaire avant de lancer les téléchargements.
+**100 % = succès de `RESTORE_COMPLETE` et code de sortie zéro**, sans un seul
+asset manquant, corrompu ou sans empreinte vérifiable, pour l'inventaire
+GitHub observé au début. Les archives historiques `starter` ou privées
+d'empreinte SHA-256 ne sont pas magiquement récupérables.
+`--recover-verifiable` sauvegarde tout ce qui est prouvable, mais retourne un
+code non nul tant que des éléments manquent : ne jamais l'appeler « 100 % ».
+Le rapport détaillé est `runtime/recovery/full/RESTORE_REPORT.json`.
 
-Si un snapshot des fichiers locaux Git-ignorés a **été publié au préalable**,
-ajouter explicitement `--materialize-local-snapshot` sur un clone vierge pour
-reconstituer ces fichiers. Un fichier qui n'a jamais été sauvegardé sur GitHub
-ne peut pas être retrouvé après perte de son disque d'origine.
+Pour connaître la place nécessaire sans télécharger de données :
+`Alina-restore.cmd --preflight-only --recover-verifiable` sous Windows
+(équivalent `RESTORE_ALINA.sh` sous Linux/macOS).
 
-**Identité « octet pour octet »** : tailles et SHA-256 égaux pour chacun des
-fichiers du bot et des assets publiés à une date de référence ; l'empreinte
-du rapport lie l'inventaire des Releases réellement observé. Le contenu binaire
-peut être identique sans que les dossiers `.git` (packfiles, index locaux)
-aient eux-mêmes une taille ou des octets identiques.
+La collecte cloud continue indépendamment du PC et de cette restauration.
+Les nouveaux fichiers publiés après l'inventaire initial nécessitent une
+nouvelle synchronisation. Seuls les octets déjà sauvegardés sur GitHub
+peuvent être récupérés après perte d'un disque local.
 
-Le contrat plus strict `git clone` **seul** reste conditionné à une copie
-exhaustive des assets en Git LFS, à une capacité GitHub LFS suffisante et à la
-preuve `--require-complete`. On ne contourne jamais les garde-fous de coûts.
-Les collecteurs cloud continuent sans utiliser ton PC.
+**Décision : Git LFS est abandonné pour le mécanisme de récupération.**
+Le dossier `.git` n'est pas nécessairement physiquement identique octet
+pour octet (Git recompresse ses packfiles) ; les fichiers et les archives
+restaurées, eux, doivent avoir des tailles et SHA-256 identiques.
 
 ---
 
@@ -761,24 +760,15 @@ Cette surface est une **fondation de contrôle**. Le statut cloud final doit ref
 
 ## 20.1 Restauration intégrale sur une nouvelle machine
 
-**Contrat accepté actuellement : `git clone` + `RESTORE_ALINA.cmd`** (Windows), ou `RESTORE_ALINA.sh` sous Linux/macOS. Le simple clone récupère le code et le catalogue suivi par Git, **pas** tous les gros assets des GitHub Releases.
+La procédure canonique de clone et restauration des archives, sans LFS, est
+définie au début du README et dans `docs/DISASTER_RECOVERY.md`.
+Elle récupère les fichiers suivis par `main` puis chaque asset publié dans
+les GitHub Releases du même dépôt, avec vérification taille/SHA-256 et
+restauration facultative des snapshots locaux **publiés**. Un simple clone Git
+ne suffit pas. Seul `RESTORE_COMPLETE` + code de sortie 0 est une preuve
+de réussite pour l'inventaire figé. Toute archive incomplète ou non vérifiable
+entraîne un verdict non complet, sans masquer les octets récupérables.
 
-~~~bash
-git clone https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git
-cd hyperliquid-smart-wallet-observer
-~~~
-
-Puis, sous Windows, lancer `RESTORE_ALINA.cmd` avec Python 3, de la place disque et l'accès à l'API GitHub. La restauration parcourt les Releases et leurs assets paginés, vérifie SHA-256, tailles et ZIP, reprend les téléchargements interrompus et génère `runtime/recovery/full/RESTORE_REPORT.json`.
-
-Les shards ne vont dans `usable/` que lorsque **le manifeste Release ET le catalogue actuel `catalog/DATA_INDEX.json` lié par SHA-256 à `catalog/DATA_METRICS.json`** confirment la qualification SAFE et la compatibilité replay. Les autres données vérifiables restent isolées dans `quarantine/`, les manifestes dans `diagnostics/`. Une restauration incomplète renvoie un code d'échec ; ne jamais l'interpréter comme un succès.
-
-Le projet ne doit jamais dépendre du PC de l'utilisateur pour collecter, réparer, réconcilier ou tester les datasets dans le cloud. `BACKUP_LOCAL_ALINA.cmd` sert uniquement si l'utilisateur décide explicitement de sauvegarder des preuves restées locales.
-
-**Git LFS / `clone_payload/` est un objectif optionnel** subordonné au quota et au budget : ne pas annoncer « clone seul suffisant » tant qu'une preuve `check_clone_payload_completeness.py --require-complete` n'est pas verte pour tous les assets.
-
-Voir `docs/DISASTER_RECOVERY.md`.
-
----
 
 ## 21. Tests et CI
 
