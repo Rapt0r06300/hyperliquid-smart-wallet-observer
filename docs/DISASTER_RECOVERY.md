@@ -10,9 +10,9 @@ implicite, réglage LFS ou dépôt supplémentaire ne résout cette limite.
 
 La reconstruction complète est réalisée en **une commande composée de deux
 étapes**, détaillée au début de `README.md` : clone Git, puis
-`Alina-restore.cmd --recover-verifiable --materialize-local-snapshot` (Windows)
-ou `bash RESTORE_ALINA.sh --recover-verifiable --materialize-local-snapshot`
-(Unix). `GIT_LFS_SKIP_SMUDGE=1` exclut tout téléchargement LFS.
+`ALINA_SYNC_COMPLETE.cmd` (Windows)
+ou `bash ALINA_SYNC_COMPLETE.sh` (Unix), pour un clone neuf comme pour
+une synchronisation ultérieure. `GIT_LFS_SKIP_SMUDGE=1` exclut tout téléchargement LFS.
 Python 3.10+, Git, assez d'espace disque et l'accès API GitHub sont requis.
 Utiliser `gh auth login` ou un jeton avec lecture GitHub si l'API anonyme
 est limitée, sans consigner ce secret dans les rapports.
