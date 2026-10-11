@@ -333,7 +333,7 @@ def test_iter_releases_rejects_conflicting_overlap(monkeypatch):
         page = int(url.split("&page=")[1])
         if page == 1:
             return [{"id": i, "tag_name": f"data-v2-{i}", "assets": []}
-                    for i in range(10)]
+                    for i in range(1, 11)]
         if page == 2:
             return [{"id": 9, "tag_name": "changed-tag", "assets": []}]
         return []
