@@ -148,7 +148,7 @@ def source_inventory(
                 )
             digest = str(asset.get("digest") or "")
             verifiable = (
-                asset.get("state") == "uploaded"
+                asset.get("state", "uploaded") == "uploaded"
                 and digest.lower().startswith("sha256:")
                 and re.fullmatch(r"[0-9a-fA-F]{64}", digest.split(":", 1)[1]) is not None
             )
