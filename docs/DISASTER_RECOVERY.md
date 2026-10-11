@@ -17,6 +17,53 @@ Python 3.10+, Git, assez d'espace disque et l'accès API GitHub sont requis.
 Utiliser `gh auth login` ou un jeton avec lecture GitHub si l'API anonyme
 est limitée, sans consigner ce secret dans les rapports.
 
+## Synchronisation simple — dossier neuf ou dossier existant
+
+**Dossier neuf, invite de commandes Windows (une seule ligne)** :
+
+```cmd
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-sync.cmd
+```
+
+**Dossier neuf, Linux/macOS (une seule ligne)** :
+
+```bash
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC.sh
+```
+
+**Dossier existant, déjà cloné depuis le même dépôt** : ouvrir le dossier
+racine, puis lancer `Alina-sync.cmd` (Windows CMD) ou
+`bash ALINA_SYNC.sh` (Linux/macOS). Il n'y a **aucun autre dépôt**
+à synchroniser, aucun transfert LFS et aucune automatisation sur le PC
+en dehors de cette action déclenchée explicitement par l'opérateur.
+
+Le même outil :
+1. vérifie `origin`, la branche `main` et l'absence de modifications
+   locales **suivies** ; refuse toute ambiguïté au lieu de faire un reset ;
+2. exécute `git fetch origin main` puis `git merge --ff-only FETCH_HEAD`
+   avec smudge LFS désactivé ;
+3. reprend le restaurateur existant, énumère **toutes les Releases du même
+   dépôt**, conserve le cache vérifié et ne retélécharge que les données
+   manquantes/invalides ; vérifie les tailles/SHA-256 et les preuves SAFE ;
+4. matérialise un snapshot local publié lorsqu'il existe, sans l'inventer
+   lorsqu'il n'a jamais été publié ;
+5. écrit `runtime/recovery/full/SYNC_REPORT.json` et
+   `runtime/recovery/full/RESTORE_REPORT.json` ; transmet le véritable code
+   de sortie du restaurateur.
+
+Les options `--preflight-only`, `--materialize-local-snapshot` (snapshot
+obligatoire) et `--materialize-available-local-snapshot` (snapshot disponible)
+sont supportées. La synchronisation normale utilise automatiquement
+`--recover-verifiable` : récupérer au maximum **n'autorise pas** un statut
+100 % lorsque des archives sont définitivement invérifiables. L'inventaire
+de chaque run est borné aux Releases vues au début ; relancer la même commande
+pour les nouveaux assets publiés ensuite.
+
+La mise à jour refuse les changements Git locaux suivis et les branches
+divergentes : sauvegarder ou résoudre explicitement ces changements avant de
+relancer, sans supprimer les données ignorées. Elle n'exécute aucun ordre,
+ne contacte aucun dépôt Dataset V2 et ne modifie aucun collecteur cloud.
+
 ## Inventaire exact et preuve d'identité des données
 
 Le restaurateur énumère les Releases et leurs assets via API paginée
