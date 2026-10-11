@@ -32,13 +32,13 @@ echo ALINA_RESTORE_FAIL: Python 3.10 or newer is required (embedded, py -3 or py
 exit /b 2
 
 :embedded
-"%~dp0tools\python\python.exe" tools\restore_alina.py --everything --clone-root "." --destination "runtime\recovery\full" %*
+"%~dp0tools\python\python.exe" tools\restore_alina.py --everything --destination "runtime\recovery\full" %*
 exit /b %ERRORLEVEL%
 
 :pylauncher
-py -3 tools\restore_alina.py --everything --clone-root "." --destination "runtime\recovery\full" %*
+py -3 tools\restore_alina.py --everything --destination "runtime\recovery\full" %*
 exit /b %ERRORLEVEL%
 
 :system
-python tools\restore_alina.py --everything --clone-root "." --destination "runtime\recovery\full" %*
+python tools\restore_alina.py --everything --destination "runtime\recovery\full" %*
 exit /b %ERRORLEVEL%
