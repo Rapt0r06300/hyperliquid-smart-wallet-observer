@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - Alina-restore.cmd
+      - RESTORE_ALINA.cmd
       - tools/restore_alina.py
       - tests/test_restore_alina.py
       - tests/test_restore_alina_launcher.py
@@ -187,3 +189,44 @@ jobs:
           with urllib.request.urlopen(request, timeout=30):
               pass
           PY
+
+  launcher-windows:
+    name: Execute real Windows CMD restore launcher contract
+    runs-on: windows-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout launcher and restore runtime
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            tools
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Smoke test alias from a path containing spaces without network
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:RUNNER_TEMP "Alina restore path with spaces"
+          New-Item -ItemType Directory -Force (Join-Path $root "tools") | Out-Null
+          foreach ($name in @("Alina-restore.cmd", "RESTORE_ALINA.cmd")) {
+            Copy-Item -LiteralPath $name -Destination (Join-Path $root $name)
+          }
+          foreach ($name in @("restore_alina.py", "partitioned_data_index.py")) {
+            Copy-Item -LiteralPath (Join-Path "tools" $name) -Destination (Join-Path $root "tools")
+          }
+          Push-Location $root
+          try {
+            & .\Alina-restore.cmd --help | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "CMD alias help failed with $LASTEXITCODE" }
+            # Parse rejection runs before any GitHub API call or data modification.
+            $ErrorActionPreference = "Continue"
+            & .\Alina-restore.cmd --definitely-invalid-restore-option 2>&1 | Out-Null
+            $exitCode = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+            if ($exitCode -ne 2) { throw "CMD alias did not propagate Python exit 2: $exitCode" }
+          } finally {
+            Pop-Location
+          }
