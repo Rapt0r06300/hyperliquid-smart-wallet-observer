@@ -511,6 +511,12 @@ def test_restore_materializes_only_proven_safe_replay_assets(tmp_path, monkeypat
     assert report["classification"]["usable_shards"] == 1
     assert report["classification"]["quarantined_shards"] == 1
 
+    repeat = module.restore_everything("owner/repo", tmp_path)
+    assert repeat["all_source_assets_accounted_for"]
+    assert repeat["classification"]["skipped_verified_shards"] == 2
+    assert repeat["classification"]["usable_shards"] == 1
+    assert repeat["classification"]["quarantined_shards"] == 1
+
 
 def test_restore_verifies_zip_member_before_usable_materialization(tmp_path, monkeypatch):
     module = _module()
@@ -579,6 +585,7 @@ def test_streaming_download_resumes_existing_partial_with_http_range(tmp_path, m
 
     class Response:
         status = 206
+        headers = {"Content-Range": "bytes 7-12/13"}
 
         def __enter__(self):
             return self
@@ -1365,3 +1372,112 @@ def test_local_snapshot_refuses_case_insensitive_target_collision_before_writing
         module.materialize_latest_local_snapshot(releases, workspace)
     assert not (workspace / "runtime" / "Trade.bin").exists()
     assert not (workspace / "runtime" / "trade.bin").exists()
+
+def test_resumed_download_refuses_unmatched_content_range_without_touching_prefix(tmp_path, monkeypatch):
+    import pytest
+    module = _module()
+    target = tmp_path / "asset.partial"
+    target.write_bytes(b"prefix-")
+
+    class Response:
+        status = 206
+        headers = {"Content-Range": "bytes 0-5/13"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return b"suffix"
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    with pytest.raises(module.RestoreError, match="Content-Range"):
+        module._download_to_path("https://example.invalid/asset", target)
+    assert target.read_bytes() == b"prefix-"
+
+
+def test_resumed_download_refuses_missing_content_range(tmp_path, monkeypatch):
+    import pytest
+    module = _module()
+    target = tmp_path / "asset.partial"
+    target.write_bytes(b"prefix-")
+
+    class Response:
+        status = 206
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return b"suffix"
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    with pytest.raises(module.RestoreError, match="Content-Range"):
+        module._download_to_path("https://example.invalid/asset", target)
+    assert target.read_bytes() == b"prefix-"
+
+
+def test_streaming_download_retries_http_incomplete_read(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+
+    class Response:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            if hasattr(self, "done"):
+                return b""
+            self.done = True
+            return b"complete"
+
+    def urlopen(*_args, **_kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise module.http.client.IncompleteRead(b"", 1)
+        return Response()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(module.time, "sleep", lambda *_a: None)
+    destination = tmp_path / "asset.partial"
+    size, sha = module._download_to_path("https://example.invalid/asset", destination)
+    assert len(calls) == 2
+    assert destination.read_bytes() == b"complete"
+    assert size == 8 and sha == hashlib.sha256(b"complete").hexdigest()
+
+
+def test_recovery_rejects_symlinked_release_asset_and_partial(tmp_path):
+    import pytest
+    module = _module()
+    victim = tmp_path / "outside.bin"
+    victim.write_bytes(b"do-not-overwrite")
+    directory = tmp_path / "releases"
+    directory.mkdir()
+    asset = _asset("asset.bin", "https://example.invalid/asset", b"safe")
+
+    target = directory / "asset.bin"
+    try:
+        target.symlink_to(victim)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unavailable")
+    with pytest.raises(module.RestoreError, match="symlinked Release asset target"):
+        module.download_asset(asset, directory)
+    target.unlink()
+
+    partial = directory / "asset.bin.partial"
+    partial.symlink_to(victim)
+    with pytest.raises(module.RestoreError, match="symlinked Release asset partial"):
+        module.download_asset(asset, directory)
+    assert victim.read_bytes() == b"do-not-overwrite"
