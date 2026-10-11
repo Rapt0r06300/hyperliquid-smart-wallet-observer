@@ -7,6 +7,7 @@ or depend on a user's PC from cloud GitHub Actions. No trading or uploads.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -80,7 +81,6 @@ def restore_published(root: Path, *, preflight: bool = False,
     cmd = [
         sys.executable, "-u", str(root / "tools" / "restore_alina.py"),
         "--everything", "--recover-verifiable",
-        "--clone-root", str(root),
         "--destination", str(root / "runtime" / "recovery" / "full"),
         "--catalog", str(root / "catalog" / "DATA_INDEX.json"),
         "--metrics", str(root / "catalog" / "DATA_METRICS.json"),
@@ -141,6 +141,29 @@ def main(argv: list[str] | None = None) -> int:
         )
     except SyncError as exc:
         print(f"ALINA_SYNC_FAIL: {exc}", file=sys.stderr)
+        return 2
+    # Bind the local update and Release result to a durable, non-secret checkpoint.
+    try:
+        report_dir = root / "runtime" / "recovery" / "full"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint = {
+            "schema": "alina.main_sync.v1",
+            "repository": REPOSITORY,
+            "branch": "main",
+            "git_head": head,
+            "restore_exit_code": code,
+            "status": "RESTORE_EXIT_ZERO" if code == 0 else "RESTORE_INCOMPLETE",
+            "restore_report": (
+                "RESTORE_PREFLIGHT.json" if args.preflight_only else "RESTORE_REPORT.json"
+            ),
+        }
+        path = report_dir / "SYNC_REPORT.json"
+        temporary = path.with_suffix(".json.partial")
+        temporary.write_text(json.dumps(checkpoint, indent=2, sort_keys=True) + "\\n",
+                             encoding="utf-8")
+        temporary.replace(path)
+    except OSError as exc:
+        print(f"ALINA_SYNC_FAIL: cannot persist sync checkpoint: {exc}", file=sys.stderr)
         return 2
     if code:
         print(
