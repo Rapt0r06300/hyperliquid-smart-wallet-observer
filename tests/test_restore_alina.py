@@ -1662,3 +1662,101 @@ def test_restore_cli_handles_filesystem_failure_without_traceback(
     assert output.out == ""
     assert "ALINA_RESTORE_FAIL: destination disk unavailable" in output.err
     assert "Traceback" not in output.err
+
+
+def test_restore_local_snapshot_does_not_revive_stale_cached_release(tmp_path, monkeypatch):
+    """Removed Releases cannot materialize ignored workspace files from old cache."""
+    module = _module()
+    root = tmp_path / "restore"
+    stale = root / "releases" / "alina-local-snapshot-stale"
+    stale.mkdir(parents=True)
+    content = b"not-in-current-source-inventory"
+    chunk = stale / "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    chunk.write_bytes(content)
+    (stale / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1", "tag": stale.name,
+            "chunks": [{
+                "name": chunk.name, "bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+            }],
+            "files": [{
+                "path": "runtime/ignored-old.bin", "bytes": len(content),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "segments": [{"chunk": chunk.name, "offset": 0, "bytes": len(content)}],
+            }],
+        }), encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([]))
+    workspace = tmp_path / "fresh-clone"
+    workspace.mkdir()
+    report = module.restore_everything(
+        "owner/repo", root, workspace=workspace,
+    )
+    assert report["status"] == "RESTORE_INCOMPLETE"
+    assert report["local_snapshot"]["status"] == "FAIL"
+    assert not (workspace / "runtime" / "ignored-old.bin").exists()
+
+
+def test_restore_local_snapshot_accepts_current_release_only(tmp_path):
+    module = _module()
+    releases = tmp_path / "releases"
+    cached = releases / "alina-local-snapshot-cached"
+    current = releases / "alina-local-snapshot-current"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for directory, payload in ((cached, b"old"), (current, b"current")):
+        directory.mkdir(parents=True)
+        name = "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+        (directory / name).write_bytes(payload)
+        (directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+            json.dumps({
+                "schema": "alina.local_snapshot.v1", "tag": directory.name,
+                "created_at_utc": "9999-01-01" if directory == cached else "2026-10-11",
+                "chunks": [{
+                    "name": name, "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                }],
+                "files": [{
+                    "path": "runtime/restored.bin", "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "segments": [{
+                        "chunk": name, "offset": 0, "bytes": len(payload),
+                    }],
+                }],
+            }), encoding="utf-8",
+        )
+    result = module.materialize_latest_local_snapshot(
+        releases, workspace, allowed_release_dirs={current.name},
+    )
+    assert result["tag"] == current.name
+    assert (workspace / "runtime" / "restored.bin").read_bytes() == b"current"
+
+
+def test_restore_rejects_duplicate_snapshot_chunks_and_git_case_alias(tmp_path):
+    import pytest
+
+    module = _module()
+    with pytest.raises(module.RestoreError, match="inside .git"):
+        module._safe_workspace_target(tmp_path, ".GIT/config")
+
+    releases = tmp_path / "releases"
+    directory = releases / "alina-local-snapshot-duplicate"
+    directory.mkdir(parents=True)
+    name = "ALINA_LOCAL_SNAPSHOT.chunk0000.bin"
+    payload = b"present"
+    (directory / name).write_bytes(payload)
+    row = {
+        "name": name, "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    (directory / "ALINA_LOCAL_SNAPSHOT_INDEX.json").write_text(
+        json.dumps({
+            "schema": "alina.local_snapshot.v1",
+            "tag": directory.name, "chunks": [row, dict(row)], "files": [],
+        }), encoding="utf-8",
+    )
+    with pytest.raises(module.RestoreError, match="duplicate local snapshot chunk"):
+        module.materialize_latest_local_snapshot(
+            releases, tmp_path, allowed_release_dirs={directory.name},
+        )
