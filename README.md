@@ -22,16 +22,18 @@ des Releases reste dans **ce même dépôt principal**, sans dépôt secondaire.
 Parcours Windows (dans `cmd.exe`, Python >= 3.10 et Git installés) :
 
 ```cmd
-git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable
 ```
 
 Parcours Linux/macOS (Bash) :
 
 ```bash
-git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable
 ```
 
-Le bot et ses fichiers suivis proviennent du même HEAD `main`. Les archives
+Ces commandes désactivent uniquement le téléchargement automatique LFS pendant le
+clone : toutes les archives disponibles sont récupérées par le restaurateur
+Release, sans consommation supplémentaire de bande passante LFS.\n\nLe bot et ses fichiers suivis proviennent du même HEAD `main`. Les archives
 immuables sont téléchargées séparément depuis **ses** GitHub Releases vers
 `runtime/recovery/full/releases/`; chaque fichier publié et vérifiable est
 comparé à sa taille et à son SHA-256 source, avec reprise des téléchargements.
