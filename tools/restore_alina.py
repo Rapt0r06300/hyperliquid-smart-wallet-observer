@@ -1433,6 +1433,16 @@ def restore_everything(
         repository, releases_root, destination, catalog_safe=catalog_safe,
         allowed_release_dirs=allowed_release_dirs,
     )
+    report["expected_assets"] = sum(len(release["assets"]) for release in releases)
+    report["all_source_assets_accounted_for"] = (
+        report["asset_count"] == report["expected_assets"]
+        and report["downloaded"]
+        + report["resumed_verified"]
+        + report["lfs_reused_verified"]
+        + report["skipped_verified"]
+        == report["expected_assets"]
+        and not report["failures"]
+    )
     report["local_snapshot"] = None
     if workspace is not None:
         try:
@@ -1445,16 +1455,6 @@ def restore_everything(
             report["failures"].append({
                 "stage": "local_snapshot", "error": str(exc),
             })
-    report["expected_assets"] = sum(len(release["assets"]) for release in releases)
-    report["all_source_assets_accounted_for"] = (
-        report["asset_count"] == report["expected_assets"]
-        and report["downloaded"]
-        + report["resumed_verified"]
-        + report["lfs_reused_verified"]
-        + report["skipped_verified"]
-        == report["expected_assets"]
-        and not report["failures"]
-    )
     complete = (
         report["all_source_assets_accounted_for"]
         and not report["verification_failures"]
