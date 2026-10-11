@@ -1958,3 +1958,17 @@ def test_recover_verifiable_reports_source_gaps_in_preflight(tmp_path, monkeypat
     assert result["unverified_source_asset_count"] == 1
     assert result["pending_download_bytes"] == 0
     assert result["status"] == "PREFLIGHT_SOURCE_UNVERIFIABLE"
+
+
+def test_salvage_refuses_unknown_release_state_even_with_a_sha256():
+    module = _module()
+    candidate = {
+        "name": "missing-state.bin", "size": 3,
+        "digest": "sha256:" + hashlib.sha256(b"abc").hexdigest(),
+    }
+    assert module._source_asset_eligible(candidate, salvage=False)
+    assert not module._source_asset_eligible(candidate, salvage=True)
+    candidate["state"] = "starter"
+    assert not module._source_asset_eligible(candidate, salvage=True)
+    candidate["state"] = "uploaded"
+    assert module._source_asset_eligible(candidate, salvage=True)
