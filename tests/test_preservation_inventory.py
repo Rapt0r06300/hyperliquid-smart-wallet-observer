@@ -157,3 +157,35 @@ def test_recovery_triage_reports_incomplete_source_identity(tmp_path):
     assert item["source_evidence"] == "INDEX_IDENTITY_INCOMPLETE"
     assert item["missing_evidence"] == ["release_tag", "sha256"]
     assert item["recovery_status"] == "NOT_ASSESSED"
+
+
+def test_recovery_triage_verification_fails_on_tampering(tmp_path):
+    from tools.preservation_inventory import write_recovery_triage, verify_recovery_triage
+    rows = [row("a", "PARTIAL", quality_reasons=["GAP"]),
+            row("b", "REJECT", sha256="")]
+    index = {"shards": rows}
+    receipt = summarize(index, proof(rows), SHA_A)
+    output = tmp_path / "recovery.jsonl"
+    write_recovery_triage(index, receipt, output)
+    verified = verify_recovery_triage(index, receipt, output)
+    assert verified["status"] == "TRIAGE_VERIFIED_NOT_RESTORED"
+    assert verified["candidate_count"] == 2
+    original = output.read_bytes()
+    output.write_bytes(original.replace(b'"PARTIAL"', b'"STALE"'))
+    with pytest.raises(InventoryError, match="candidate mismatch"):
+        verify_recovery_triage(index, receipt, output)
+    output.write_bytes(original.rsplit(b'{"candidate_count"', 1)[0])
+    with pytest.raises(InventoryError, match="footer invalid"):
+        verify_recovery_triage(index, receipt, output)
+
+
+def test_recovery_triage_verification_fails_on_stale_catalog(tmp_path):
+    from tools.preservation_inventory import write_recovery_triage, verify_recovery_triage
+    rows = [row("a", "PARTIAL")]
+    index = {"shards": rows}
+    receipt = summarize(index, proof(rows), SHA_A)
+    output = tmp_path / "old.jsonl"
+    write_recovery_triage(index, receipt, output)
+    newer = {**receipt, "catalog_index_sha256": SHA_B}
+    with pytest.raises(InventoryError, match="header"):
+        verify_recovery_triage(index, newer, output)

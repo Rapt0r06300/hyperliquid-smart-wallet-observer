@@ -265,11 +265,54 @@ def write_recovery_triage(index: Mapping[str, Any], report: Mapping[str, Any], t
             "candidates_sha256": checksum.hexdigest()}
 
 
+
+def verify_recovery_triage(index: Mapping[str, Any], report: Mapping[str, Any], target: Path) -> dict[str, Any]:
+    """Verify every candidate byte against the current SHA-bound catalog census.
+
+    A valid checksum/footer alone is not enough: a truncated ledger could be
+    rehashed. Demand exact parity with all unresolved rows, in index order.
+    """
+    target = Path(target)
+    if target.is_symlink() or not target.is_file():
+        raise InventoryError("triage ledger missing or symlinked")
+    header = {
+        "kind": "header", "schema": "alina.recovery_triage.v1",
+        "catalog_index_sha256": report["catalog_index_sha256"],
+        "catalog_status": report["status"],
+        "recoverability_certified": False,
+    }
+    checksum = hashlib.sha256()
+    count = 0
+    with target.open("r", encoding="utf-8", newline="") as source:
+        if source.readline() != json.dumps(header, sort_keys=True) + "\n":
+            raise InventoryError("triage header does not match the current catalog")
+        for candidate in iter_recovery_triage(index):
+            expected_line = json.dumps({"kind": "candidate", **candidate}, sort_keys=True) + "\n"
+            observed = source.readline()
+            if observed != expected_line:
+                raise InventoryError("triage candidate mismatch, truncation or reordering")
+            checksum.update(observed.encode("utf-8"))
+            count += 1
+        expected_count = report["unresolved_unsafe_shards"] + report["safe_non_replayable_shards"]
+        if count != expected_count:
+            raise InventoryError("triage coverage differs from canonical index")
+        footer = {
+            "kind": "footer", "candidate_count": count,
+            "candidates_sha256": checksum.hexdigest(),
+        }
+        if source.readline() != json.dumps(footer, sort_keys=True) + "\n" or source.read(1):
+            raise InventoryError("triage footer invalid or trailing data found")
+    return {"status": "TRIAGE_VERIFIED_NOT_RESTORED", "candidate_count": count,
+            "candidates_sha256": checksum.hexdigest(), "catalog_index_sha256": report["catalog_index_sha256"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", type=Path, default=REPO / "catalog/DATA_INDEX.json")
     parser.add_argument("--metrics", type=Path, default=REPO / "catalog/DATA_METRICS.json")
-    parser.add_argument("--triage-jsonl", type=Path, help="Create a non-destructive, SHA-bound repair candidate ledger")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--triage-jsonl", type=Path, help="Create a non-destructive, SHA-bound repair candidate ledger")
+    group.add_argument("--verify-triage-jsonl", type=Path, help="Verify exact candidate parity against the present catalog")
     args = parser.parse_args(argv)
     try:
         raw = args.index.read_bytes()
@@ -278,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         report = summarize(index, metrics, hashlib.sha256(raw).hexdigest())
         if args.triage_jsonl is not None:
             report["triage"] = write_recovery_triage(index, report, args.triage_jsonl)
+        elif args.verify_triage_jsonl is not None:
+            report["triage"] = verify_recovery_triage(index, report, args.verify_triage_jsonl)
     except (OSError, ValueError, TypeError) as exc:
         print(json.dumps({"status": "INVENTORY_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2
