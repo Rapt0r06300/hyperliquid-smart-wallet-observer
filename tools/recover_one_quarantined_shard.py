@@ -230,7 +230,6 @@ def hydrate_candidate(
                 temp.unlink(missing_ok=True)
     receipt = {**report,
                "status": "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED",
-               "source_cached_before_run": was_cached,
                "quarantine_file": str(target.relative_to(root)),
                "recovered_bytes": logical_bytes}
     receipt_path = shards / (name + ".receipt.json")
@@ -255,7 +254,7 @@ def hydrate_candidate(
         finally:
             if tmp_receipt is not None:
                 tmp_receipt.unlink(missing_ok=True)
-    return receipt
+    return {**receipt, "source_cached_before_run": was_cached}
 
 
 def main(argv: list[str] | None = None) -> int:

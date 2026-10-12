@@ -77,3 +77,16 @@ def test_no_automatic_safe_replay_reclassification(tmp_path):
     index["shards"][0]["release_repository"] = "foreign/repo"
     with pytest.raises(ValueError, match="NOT_CANONICAL"):
         recovery.candidate_from_index(index, "one")
+
+
+
+def test_preexisting_unverified_target_is_preserved_and_blocks_recovery(tmp_path, monkeypatch):
+    _index, candidate, asset, outer, _logical, root = fixture(tmp_path)
+    directory = root / "releases" / "unit-tag"
+    directory.mkdir(parents=True)
+    (directory / "one.zip").write_bytes(b"never-overwrite")
+    monkeypatch.setattr(recovery, "_download_to_path",
+                        lambda *_a, **_kw: pytest.fail("download must not run"))
+    with pytest.raises(ValueError, match="EXISTING_OUTER_CONFLICT"):
+        recovery.hydrate_candidate(candidate, asset, root, download=True)
+    assert (directory / "one.zip").read_bytes() == b"never-overwrite"

@@ -12905,6 +12905,18 @@ This snapshot may be stale even if it is a verified GitHub Release asset.
 The comparison fails closed on inconsistent inventory totals, duplicate
 Release identities, altered checksums, catalog drift or absent triage entries.
 
+For an explicitly selected non-SAFE dataset ID, use the single bounded
+`tools/recover_one_quarantined_shard.py` companion to the existing restore
+engine. Default mode checks real-time Release asset identity but transfers no
+market payload. An explicit `--download --max-source-bytes N` then hydrates
+ONLY that asset, verifies outer asset SHA-256/size and inner shard SHA-256/size,
+and writes exact bytes to the separate quarantine recovery area. Existing
+conflicting files are never overwritten; the provenance receipt is
+content-stable and a second identical run is safe. It never changes the
+canonical catalog, deletes raw evidence, or treats restored bytes as replay
+quality proof. Run only with GitHub-hosted infrastructure when in the cloud,
+and retain SHA-bound receipts for later replay and data-continuity testing.
+
 Once individual historical Release assets have been downloaded and SHA-verified
 into a *separate* read-only cloud cache (never the user's PC), run
 `python tools/probe_recovery_cache.py --releases-root <cache>/releases --candidate-offset 0 --max-candidates 200`.
