@@ -1,0 +1,79 @@
+"""A chosen non-SAFE shard is restored only to immutable-byte quarantine."""
+import hashlib
+import io
+import zipfile
+
+import pytest
+
+from tools import recover_one_quarantined_shard as recovery
+
+
+def fixture(tmp_path):
+    logical = b"\x1f\x8b" + b"A" * 13
+    f = io.BytesIO()
+    with zipfile.ZipFile(f, "w") as archive:
+        archive.writestr("trades.jsonl.gz", logical)
+    outer = f.getvalue()
+    row = {
+        "dataset_id": "one", "quality_status": "PARTIAL",
+        "replay_compatible": False, "release_tag": "unit-tag",
+        "release_asset": "trades.jsonl.gz",
+        "release_container_asset": "one.zip",
+        "release_remote_size": len(outer),
+        "release_remote_digest": "sha256:" + hashlib.sha256(outer).hexdigest(),
+        "bytes": len(logical), "sha256": hashlib.sha256(logical).hexdigest(),
+    }
+    index = {"release_repository_default": recovery.CANONICAL, "shards": [row]}
+    candidate = recovery.candidate_from_index(index, "one")
+    asset = {"size": len(outer), "digest": "sha256:" + candidate["outer_sha256"],
+             "browser_download_url": "https://github.com/fake/release"}
+    destination = tmp_path / "recovery"
+    destination.mkdir()
+    return index, candidate, asset, outer, logical, destination
+
+
+def test_preflight_is_non_mutating_and_quarantine_bytes_verified(tmp_path, monkeypatch):
+    index, candidate, asset, outer, logical, root = fixture(tmp_path)
+    pre = recovery.hydrate_candidate(candidate, asset, root, download=False)
+    assert pre["status"] == "LIVE_ASSET_IDENTIFIED_NOT_DOWNLOADED"
+    assert not list(root.iterdir())
+    def download(_url, target, **_kw):
+        target.write_bytes(outer)
+        return len(outer), hashlib.sha256(outer).hexdigest()
+    monkeypatch.setattr(recovery, "_download_to_path", download)
+    result = recovery.hydrate_candidate(candidate, asset, root,
+                                        download=True, max_source_bytes=10000)
+    assert result["status"] == "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED"
+    assert result["replay_certified"] is False
+    assert result["validation_allowed"] is False
+    assert (root / result["quarantine_file"]).read_bytes() == logical
+    assert recovery.hydrate_candidate(candidate, asset, root,
+                                      download=True, max_source_bytes=10000)["source_cached_before_run"] is True
+    assert not (root / "usable").exists()
+
+
+def test_hash_mismatch_and_size_budget_fail_without_reclassification(tmp_path, monkeypatch):
+    index, candidate, asset, outer, logical, root = fixture(tmp_path)
+    with pytest.raises(ValueError, match="SIZE_BUDGET"):
+        recovery.hydrate_candidate(candidate, asset, root, download=True, max_source_bytes=1)
+    def corrupt(_url, target, **_kw):
+        target.write_bytes(b"corrupt")
+        return 7, hashlib.sha256(b"corrupt").hexdigest()
+    monkeypatch.setattr(recovery, "_download_to_path", corrupt)
+    with pytest.raises(ValueError, match="REMOTE_BYTES_MISMATCH"):
+        recovery.hydrate_candidate(candidate, asset, root, download=True)
+    assert not list((root / "quarantine" / "source_verified_non_replay").iterdir())
+    assert not (root / "usable").exists()
+
+
+def test_no_automatic_safe_replay_reclassification(tmp_path):
+    index, _, _, _, _, _ = fixture(tmp_path)
+    index["shards"][0]["quality_status"] = "SAFE"
+    index["shards"][0]["replay_compatible"] = True
+    with pytest.raises(ValueError, match="ALREADY_REPLAY_READY"):
+        recovery.candidate_from_index(index, "one")
+    index["shards"][0]["quality_status"] = "REJECT"
+    assert recovery.candidate_from_index(index, "one")["quality_status"] == "REJECT"
+    index["shards"][0]["release_repository"] = "foreign/repo"
+    with pytest.raises(ValueError, match="NOT_CANONICAL"):
+        recovery.candidate_from_index(index, "one")
