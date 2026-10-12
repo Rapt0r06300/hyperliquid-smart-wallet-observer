@@ -25,7 +25,7 @@ def fixture(tmp_path):
     }
     index = {"release_repository_default": recovery.CANONICAL, "shards": [row]}
     candidate = recovery.candidate_from_index(index, "one")
-    asset = {"size": len(outer), "digest": "sha256:" + candidate["outer_sha256"],
+    asset = {"id": 42, "size": len(outer), "digest": "sha256:" + candidate["outer_sha256"],
              "browser_download_url": "https://github.com/fake/release"}
     destination = tmp_path / "recovery"
     destination.mkdir()
@@ -42,26 +42,26 @@ def test_preflight_is_non_mutating_and_quarantine_bytes_verified(tmp_path, monke
         return len(outer), hashlib.sha256(outer).hexdigest()
     monkeypatch.setattr(recovery, "_download_to_path", download)
     result = recovery.hydrate_candidate(candidate, asset, root,
-                                        download=True, max_source_bytes=10000)
+                                        download=True, catalog_index_sha256="e" * 64, max_source_bytes=10000)
     assert result["status"] == "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED"
     assert result["replay_certified"] is False
     assert result["validation_allowed"] is False
     assert (root / result["quarantine_file"]).read_bytes() == logical
     assert recovery.hydrate_candidate(candidate, asset, root,
-                                      download=True, max_source_bytes=10000)["source_cached_before_run"] is True
+                                      download=True, catalog_index_sha256="e" * 64, max_source_bytes=10000)["source_cached_before_run"] is True
     assert not (root / "usable").exists()
 
 
 def test_hash_mismatch_and_size_budget_fail_without_reclassification(tmp_path, monkeypatch):
     index, candidate, asset, outer, logical, root = fixture(tmp_path)
     with pytest.raises(ValueError, match="SIZE_BUDGET"):
-        recovery.hydrate_candidate(candidate, asset, root, download=True, max_source_bytes=1)
+        recovery.hydrate_candidate(candidate, asset, root, download=True, catalog_index_sha256="e" * 64, max_source_bytes=1)
     def corrupt(_url, target, **_kw):
         target.write_bytes(b"corrupt")
         return 7, hashlib.sha256(b"corrupt").hexdigest()
     monkeypatch.setattr(recovery, "_download_to_path", corrupt)
     with pytest.raises(ValueError, match="REMOTE_BYTES_MISMATCH"):
-        recovery.hydrate_candidate(candidate, asset, root, download=True)
+        recovery.hydrate_candidate(candidate, asset, root, download=True, catalog_index_sha256="e" * 64)
     assert not list((root / "quarantine" / "source_verified_non_replay").iterdir())
     assert not (root / "usable").exists()
 
@@ -88,7 +88,7 @@ def test_preexisting_unverified_target_is_preserved_and_blocks_recovery(tmp_path
     monkeypatch.setattr(recovery, "_download_to_path",
                         lambda *_a, **_kw: pytest.fail("download must not run"))
     with pytest.raises(ValueError, match="EXISTING_OUTER_CONFLICT"):
-        recovery.hydrate_candidate(candidate, asset, root, download=True)
+        recovery.hydrate_candidate(candidate, asset, root, download=True, catalog_index_sha256="e" * 64)
     assert (directory / "one.zip").read_bytes() == b"never-overwrite"
 
 
@@ -140,3 +140,24 @@ def test_restorer_network_stream_enforces_byte_cap_before_writing(tmp_path, monk
         "https://example.invalid/asset", path, max_bytes=100)
     assert size == len(b"untrusted-bytes")
     assert digest == hashlib.sha256(b"untrusted-bytes").hexdigest()
+
+
+
+def test_quarantine_receipt_has_canonical_catalog_and_live_release_asset_id(tmp_path, monkeypatch):
+    import json
+    _idx, candidate, asset, outer, _inner, root = fixture(tmp_path)
+    monkeypatch.setattr(recovery, "_download_to_path",
+                        lambda _url, path, **kw:
+                        (path.write_bytes(outer), hashlib.sha256(outer).hexdigest()))
+    result = recovery.hydrate_candidate(
+        candidate, asset, root, download=True, max_source_bytes=10000,
+        catalog_index_sha256="e" * 64)
+    file = root / "quarantine" / "source_verified_non_replay"
+    receipts = list(file.glob("*.receipt.json"))
+    assert len(receipts) == 1
+    stored = json.loads(receipts[0].read_text())
+    assert stored["catalog_index_sha256"] == "e" * 64
+    assert stored["source_asset_id"] == 42
+    assert stored["source_repository"] == recovery.CANONICAL
+    assert stored["validation_allowed"] is False
+    assert result["catalog_index_sha256"] == stored["catalog_index_sha256"]

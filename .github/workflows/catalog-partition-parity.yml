@@ -275,6 +275,9 @@ jobs:
           assert report["validation_allowed"] is False
           assert report["replay_certified"] is False
           assert report["reclassified_safe"] is False
+          assert len(report["catalog_index_sha256"]) == 64
+          assert report["source_repository"] == "Rapt0r06300/hyperliquid-smart-wallet-observer"
+          assert isinstance(report["source_asset_id"], int)
           assert report["original_quality_status"] in {"PARTIAL","REJECT","STALE","SAFE"}
           assert report["outer_bytes"] <= 100000000
           assert report["logical_bytes"] <= 100000000
@@ -282,6 +285,12 @@ jobs:
           digest=hashlib.sha256(path.read_bytes()).hexdigest()
           assert digest == report["logical_sha256"]
           assert path.stat().st_size == report["logical_bytes"]
+          receipts=list((root/"quarantine"/"source_verified_non_replay").glob("*.receipt.json"))
+          assert len(receipts) == 1
+          proof=json.loads(receipts[0].read_text())
+          assert proof["catalog_index_sha256"] == report["catalog_index_sha256"]
+          assert proof["logical_sha256"] == digest
+          assert proof["source_asset_id"] == report["source_asset_id"]
           print("BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED", report["dataset_id"])
           PY
 

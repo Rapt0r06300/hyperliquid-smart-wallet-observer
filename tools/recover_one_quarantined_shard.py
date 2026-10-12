@@ -143,7 +143,13 @@ def hydrate_candidate(
     candidate: Mapping[str, Any], asset: Mapping[str, Any], destination: Path, *,
     download: bool = False, token: str | None = None,
     max_source_bytes: int = SOURCE_MAX,
+    catalog_index_sha256: str | None = None,
 ) -> dict[str, Any]:
+    if download and (not isinstance(catalog_index_sha256, str)
+                     or not SHA.fullmatch(catalog_index_sha256)):
+        raise ValueError("RECOVERY_CATALOG_DIGEST_REQUIRED")
+    if download and (type(asset.get("id")) is not int or asset["id"] <= 0):
+        raise ValueError("RECOVERY_ASSET_ID_REQUIRED")
     if type(max_source_bytes) is not int or max_source_bytes < 1:
         raise ValueError("RECOVERY_INVALID_SIZE_BUDGET")
     outer_bytes = candidate["outer_bytes"]
@@ -155,6 +161,9 @@ def hydrate_candidate(
         raise ValueError("RECOVERY_ASSET_NOT_CATALOG_BOUND")
     report: dict[str, Any] = {
         "schema": "alina.quarantined_candidate_recovery.v1",
+        "catalog_index_sha256": catalog_index_sha256,
+        "source_repository": CANONICAL,
+        "source_asset_id": asset.get("id"),
         "dataset_id": candidate["dataset_id"],
         "original_quality_status": candidate["quality_status"],
         "release_tag": candidate["release_tag"],
@@ -279,8 +288,8 @@ def main(argv: list[str] | None = None) -> int:
         output = hydrate_candidate(
             candidate, asset, args.destination, download=args.download,
             token=token, max_source_bytes=args.max_source_bytes,
+            catalog_index_sha256=hashlib.sha256(raw).hexdigest(),
         )
-        output["catalog_index_sha256"] = hashlib.sha256(raw).hexdigest()
         print(json.dumps(output, indent=2, sort_keys=True))
         return 0
     except (OSError, ValueError, TypeError, RestoreError, zipfile.BadZipFile) as exc:
