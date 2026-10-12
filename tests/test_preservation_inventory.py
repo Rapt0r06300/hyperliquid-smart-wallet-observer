@@ -103,3 +103,57 @@ def test_non_safe_source_traceability_is_not_claimed_recoverable():
     assert report["compressed_logical_bytes_known_by_status"]["STALE"] == 0
     assert report["shards_missing_logical_byte_size_by_status"]["STALE"] == 1
     assert report["definitively_irrecoverable_shards"] is None
+
+
+def test_recovery_triage_receipt_includes_unresolved_only(tmp_path):
+    import hashlib
+    import json
+    from tools.preservation_inventory import write_recovery_triage
+    rows = [
+        row("a", "SAFE"), row("b", "PARTIAL", quality_reasons=["CLOCK_GAP"]),
+        row("c", "REJECT", release_remote_digest=""), row("d", "STALE", bytes=None),
+        row("e", "SAFE", replay=False),
+    ]
+    report = summarize({"shards": rows}, proof(rows), SHA_A)
+    target = tmp_path / "recovery-triage.jsonl"
+    receipt = write_recovery_triage({"shards": rows}, report, target)
+    lines = [json.loads(line) for line in target.read_text().splitlines()]
+    assert lines[0]["catalog_index_sha256"] == SHA_A
+    assert receipt["candidate_count"] == 4
+    assert [line["dataset_id"] for line in lines[1:-1]] == ["b", "c", "d", "e"]
+    assert lines[1]["quality_reasons"] == ["CLOCK_GAP"]
+    assert lines[1]["source_evidence"] == "INDEX_IDENTITY_COMPLETE_NOT_VERIFIED"
+    assert "release_remote_digest" in lines[2]["missing_evidence"]
+    assert "bytes" in lines[3]["missing_evidence"]
+    assert all(item["validation_allowed"] is False for item in lines[1:-1])
+    assert all(item["recovery_status"] == "NOT_ASSESSED" for item in lines[1:-1])
+    rows_digest = hashlib.sha256(
+        "".join(json.dumps({"kind": "candidate", **{k: v for k, v in obj.items() if k != "kind"}}, sort_keys=True) + "\n"
+                for obj in lines[1:-1]).encode("utf-8")
+    ).hexdigest()
+    assert rows_digest == lines[-1]["candidates_sha256"]
+    assert receipt["candidates_sha256"] == rows_digest
+
+
+def test_recovery_triage_never_overwrites(tmp_path):
+    from tools.preservation_inventory import write_recovery_triage
+    rows = [row("a", "PARTIAL")]
+    report = summarize({"shards": rows}, proof(rows), SHA_A)
+    target = tmp_path / "existing.jsonl"
+    target.write_text("DO NOT TOUCH")
+    with pytest.raises(InventoryError, match="already exists"):
+        write_recovery_triage({"shards": rows}, report, target)
+    assert target.read_text() == "DO NOT TOUCH"
+
+
+def test_recovery_triage_reports_incomplete_source_identity(tmp_path):
+    from tools.preservation_inventory import write_recovery_triage
+    import json
+    rows = [row("a", "REJECT", sha256="", release_tag="")]
+    report = summarize({"shards": rows}, proof(rows), SHA_A)
+    target = tmp_path / "triage.jsonl"
+    write_recovery_triage({"shards": rows}, report, target)
+    item = json.loads(target.read_text().splitlines()[1])
+    assert item["source_evidence"] == "INDEX_IDENTITY_INCOMPLETE"
+    assert item["missing_evidence"] == ["release_tag", "sha256"]
+    assert item["recovery_status"] == "NOT_ASSESSED"

@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -158,16 +160,124 @@ def summarize(index: Mapping[str, Any], metrics: Mapping[str, Any], index_digest
     return result
 
 
+
+def iter_recovery_triage(index: Mapping[str, Any]):
+    """Yield indexed repair candidates, without declaring them usable or recoverable.
+
+    This is a planning receipt, not proof that a remote asset still exists.
+    The source requirements match the immutable outer-asset evidence used by
+    replay-ready selection; nothing is downloaded, deleted or reclassified.
+    """
+    default_repository = index.get("release_repository_default")
+    for row in index["shards"]:
+        status = row["quality_status"]
+        if status not in ("PARTIAL", "REJECT", "STALE") and not (
+            status == "SAFE" and row.get("replay_compatible") is not True
+        ):
+            continue
+        missing = []
+        for field in ("release_tag", "release_asset", "sha256"):
+            value = row.get(field)
+            if (not isinstance(value, str) or not value
+                    or (field == "sha256" and not SHA256.fullmatch(value.lower()))):
+                missing.append(field)
+        size = row.get("bytes")
+        if type(size) is not int or size < 0:
+            missing.append("bytes")
+        container = row.get("release_container_asset")
+        if container is not None and container != "":
+            if not isinstance(container, str):
+                missing.append("release_container_asset")
+            remote_size = row.get("release_remote_size")
+            remote_digest = row.get("release_remote_digest")
+            if type(remote_size) is not int or remote_size < 0:
+                missing.append("release_remote_size")
+            if (not isinstance(remote_digest, str)
+                    or not SHA256.fullmatch(remote_digest.removeprefix("sha256:").lower())):
+                missing.append("release_remote_digest")
+        repository = row.get("release_repository") or default_repository
+        if repository not in (None, "Rapt0r06300/hyperliquid-smart-wallet-observer"):
+            missing.append("canonical_release_repository")
+        raw_reasons = row.get("quality_reasons")
+        reasons = sorted({str(x) for x in raw_reasons if str(x)}) if isinstance(raw_reasons, list) else []
+        yield {
+            "dataset_id": row["dataset_id"],
+            "quality_status": status,
+            "family": row["family"],
+            "manifest_path": row.get("manifest_path"),
+            "release_tag": row.get("release_tag"),
+            "release_asset": row.get("release_asset"),
+            "release_container_asset": container,
+            "sha256": row.get("sha256"),
+            "compressed_logical_bytes": size if "bytes" not in missing else None,
+            "quality_reasons": reasons,
+            "replay_compatible": row.get("replay_compatible") is True,
+            "source_evidence": "INDEX_IDENTITY_COMPLETE_NOT_VERIFIED" if not missing else "INDEX_IDENTITY_INCOMPLETE",
+            "missing_evidence": sorted(missing),
+            "recovery_status": "NOT_ASSESSED",
+            "validation_allowed": False,
+        }
+
+
+def write_recovery_triage(index: Mapping[str, Any], report: Mapping[str, Any], target: Path) -> dict[str, Any]:
+    """Write a SHA-bound, self-checksummed JSONL ledger without overwriting evidence."""
+    target = Path(target)
+    if target.is_symlink() or target.exists():
+        raise InventoryError("triage destination already exists; refusing overwrite")
+    if not target.parent.is_dir() or target.parent.is_symlink():
+        raise InventoryError("triage parent must be an existing non-symlink directory")
+    checksum = hashlib.sha256()
+    count = 0
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", newline="\n", dir=target.parent,
+            prefix=".alina-triage-", suffix=".tmp", delete=False,
+        ) as out:
+            temp_path = Path(out.name)
+            header = {
+                "kind": "header", "schema": "alina.recovery_triage.v1",
+                "catalog_index_sha256": report["catalog_index_sha256"],
+                "catalog_status": report["status"],
+                "recoverability_certified": False,
+            }
+            out.write(json.dumps(header, sort_keys=True) + "\n")
+            for candidate in iter_recovery_triage(index):
+                line = json.dumps({"kind": "candidate", **candidate}, sort_keys=True) + "\n"
+                out.write(line)
+                checksum.update(line.encode("utf-8"))
+                count += 1
+            expected = report["unresolved_unsafe_shards"] + report["safe_non_replayable_shards"]
+            if count != expected:
+                raise InventoryError("triage candidate count diverges from indexed census")
+            out.write(json.dumps({
+                "kind": "footer", "candidate_count": count,
+                "candidates_sha256": checksum.hexdigest(),
+            }, sort_keys=True) + "\n")
+            out.flush()
+            os.fsync(out.fileno())
+        # Link atomically without replacing any already-existing user file.
+        os.link(temp_path, target)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+    return {"triage_path": str(target), "candidate_count": count,
+            "candidates_sha256": checksum.hexdigest()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--index", type=Path, default=REPO / "catalog/DATA_INDEX.json")
     parser.add_argument("--metrics", type=Path, default=REPO / "catalog/DATA_METRICS.json")
+    parser.add_argument("--triage-jsonl", type=Path, help="Create a non-destructive, SHA-bound repair candidate ledger")
     args = parser.parse_args(argv)
     try:
         raw = args.index.read_bytes()
         index = read_index(args.index)
         metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
         report = summarize(index, metrics, hashlib.sha256(raw).hexdigest())
+        if args.triage_jsonl is not None:
+            report["triage"] = write_recovery_triage(index, report, args.triage_jsonl)
     except (OSError, ValueError, TypeError) as exc:
         print(json.dumps({"status": "INVENTORY_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2
