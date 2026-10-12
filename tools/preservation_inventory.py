@@ -47,6 +47,10 @@ def summarize(index: Mapping[str, Any], metrics: Mapping[str, Any], index_digest
     replay_logical_bytes = 0
     safe_not_replayable = 0
     recoverable_unknown = 0
+    quality_bytes_known: Counter[str] = Counter()
+    quality_bytes_unknown: Counter[str] = Counter()
+    unresolved_with_source = 0
+    unresolved_without_source = 0
     for row in rows:
         if not isinstance(row, Mapping):
             raise InventoryError("invalid shard row")
@@ -62,9 +66,23 @@ def summarize(index: Mapping[str, Any], metrics: Mapping[str, Any], index_digest
             raise InventoryError(f"missing family for {ident}")
         counts[status] += 1
         by_family[family][status] += 1
+        size = row.get("bytes")
+        if type(size) is int and size >= 0:
+            quality_bytes_known[status] += size
+        else:
+            quality_bytes_unknown[status] += 1
         if status in ("PARTIAL", "REJECT", "STALE"):
-            # These are investigation candidates, NOT proven recoverable bytes.
+            # Source identity is a prerequisite for repair, not proof of recovery.
             recoverable_unknown += 1
+            tag = row.get("release_tag")
+            member = row.get("release_asset")
+            sha = row.get("sha256")
+            if (isinstance(tag, str) and tag
+                    and isinstance(member, str) and member
+                    and isinstance(sha, str) and SHA256.fullmatch(sha.lower())):
+                unresolved_with_source += 1
+            else:
+                unresolved_without_source += 1
         if status != "SAFE":
             continue
         if row.get("replay_compatible") is not True:
@@ -113,6 +131,14 @@ def summarize(index: Mapping[str, Any], metrics: Mapping[str, Any], index_digest
         "replay_required_download_bytes": sum(size for size, _ in outer.values()),
         "replay_shard_compressed_logical_bytes": replay_logical_bytes,
         "unresolved_unsafe_shards": recoverable_unknown,
+        "unresolved_with_source_identity": unresolved_with_source,
+        "unresolved_missing_source_identity": unresolved_without_source,
+        "compressed_logical_bytes_known_by_status": {
+            k: quality_bytes_known[k] for k in sorted(STATUSES)
+        },
+        "shards_missing_logical_byte_size_by_status": {
+            k: quality_bytes_unknown[k] for k in sorted(STATUSES)
+        },
         "by_family": {name: dict(sorted(c.items())) for name, c in sorted(by_family.items())},
         "global_trade_uniqueness_certified": totals.get("GLOBAL_UNIQUE_TRADES_COVERAGE_COMPLETE") is True,
         "all_exploitable_data_restored": False,
@@ -121,6 +147,8 @@ def summarize(index: Mapping[str, Any], metrics: Mapping[str, Any], index_digest
         "notes": [
             "Catalog classification is not byte-level restoration certification.",
             "PARTIAL, STALE and REJECT remain preserved for evidence-based review; never delete on this report.",
+            "Known logical compressed bytes are per-shard, not deduplicated outer Release download size.",
+            "A traceable non-SAFE source is not yet certified repairable; missing byte size is never imputed as zero.",
             "Ancillary SAFE market data (L2/BBO/capacity/tickers) is included even if it has zero trades.",
             "Never promote an unsafe shard without a new immutable manifest and strict validation.",
         ],

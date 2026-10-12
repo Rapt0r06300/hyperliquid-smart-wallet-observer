@@ -91,3 +91,15 @@ def test_replay_ready_preflight_keeps_verified_cache(monkeypatch, tmp_path):
     ])
     assert code == 0
     assert actual["prune_unselected"] is False
+
+def test_non_safe_source_traceability_is_not_claimed_recoverable():
+    rows = [row("a", "PARTIAL"), row("b", "REJECT", sha256=""),
+            row("c", "STALE", bytes=None)]
+    report = summarize({"shards": rows}, proof(rows), SHA_A)
+    assert report["unresolved_unsafe_shards"] == 3
+    assert report["unresolved_with_source_identity"] == 2
+    assert report["unresolved_missing_source_identity"] == 1
+    assert report["compressed_logical_bytes_known_by_status"]["PARTIAL"] == 100
+    assert report["compressed_logical_bytes_known_by_status"]["STALE"] == 0
+    assert report["shards_missing_logical_byte_size_by_status"]["STALE"] == 1
+    assert report["definitively_irrecoverable_shards"] is None
