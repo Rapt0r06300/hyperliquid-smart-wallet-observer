@@ -12892,6 +12892,19 @@ context, fills/trades, and replay/backtest provenance. A zero trade count
 in an ancillary family is not a reason to discard it. Data minimization
 must not discard market context necessary to reproduce executable fills.
 
+The manual `catalog-partition-parity` export additionally downloads only the
+latest published `RESTORE_INVENTORY.json.gz` from the canonical repository,
+after GitHub SHA-256/size verification and a bounded search of the newest
+Release metadata. It NEVER downloads raw trading payloads for this audit.
+`tools/audit_recovery_sources.py` verifies the complete triage against
+the snapshot, compares each outer Release asset identity and emits a
+per-shard source-comparison JSONL plus a count/byte receipt. Matching outer
+ZIP metadata does NOT prove its inner shard exists, can be recovered or is
+replay-grade; missing snapshot references do NOT prove irrevocable loss.
+This snapshot may be stale even if it is a verified GitHub Release asset.
+The comparison fails closed on inconsistent inventory totals, duplicate
+Release identities, altered checksums, catalog drift or absent triage entries.
+
 For Work/Codex, the existing `catalog-partition-parity` GitHub-hosted
 workflow can be run manually with `emit_recovery_triage=true`. It writes a
 SHA-bound per-shard recovery ledger, verifies full candidate parity, and exports

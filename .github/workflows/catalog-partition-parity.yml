@@ -12,11 +12,13 @@ on:
       - 'tools/repair_stale_safe_classifications.py'
       - 'tools/preservation_inventory.py'
       - 'tools/audit_recovery_sources.py'
+      - 'tools/fetch_published_restore_inventory.py'
       - 'tools/check_dataset_quality.py'
       - 'tools/restore_alina.py'
       - 'tests/test_partitioned_data_index.py'
       - 'tests/test_preservation_inventory.py'
       - 'tests/test_recovery_source_audit.py'
+      - 'tests/test_fetch_published_restore_inventory.py'
       - 'tests/test_reclassification_history_preservation.py'
       - 'tests/test_run_indexing.py'
       - 'tests/test_workflow_bounds.py'
@@ -57,7 +59,7 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_recovery_source_audit.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_recovery_source_audit.py tests/test_fetch_published_restore_inventory.py
 
       - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash
@@ -113,6 +115,39 @@ jobs:
           assert census["catalog_index_sha256"] == verified["catalog_index_sha256"]
           assert census["all_exploitable_data_restored"] is False
           print("TRIAGE_LEDGER_VERIFIED_NOT_RESTORED", verified["candidate_count"])
+          PY
+
+      - name: Verify published Release source snapshot against unresolved shards
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/alina-preservation-evidence"
+          python tools/fetch_published_restore_inventory.py \
+            --output "$OUT/RESTORE_INVENTORY.json.gz" \
+            > "$OUT/published-inventory-source.json"
+          python tools/audit_recovery_sources.py \
+            --triage-jsonl "$OUT/recovery-triage.jsonl" \
+            --source-inventory "$OUT/RESTORE_INVENTORY.json.gz" \
+            --details-jsonl "$OUT/source-comparison.jsonl" \
+            > "$OUT/source-comparison-report.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path(os.environ["RUNNER_TEMP"])/"alina-preservation-evidence"
+          source=json.loads((root/"published-inventory-source.json").read_text())
+          comparison=json.loads((root/"source-comparison-report.json").read_text())
+          triage=json.loads((root/"triage-verification.json").read_text())["triage"]
+          assert source["status"] == "PUBLISHED_INVENTORY_ASSET_SHA256_VERIFIED_NOT_RESTORED"
+          assert source["raw_market_payloads_downloaded"] == 0
+          assert comparison["status"] == "SOURCE_SNAPSHOT_COMPARED_NOT_RESTORED"
+          assert comparison["catalog_index_sha256"] == triage["catalog_index_sha256"]
+          assert comparison["candidate_count"] == triage["candidate_count"]
+          assert comparison["all_exploitable_data_restored"] is False
+          assert comparison["recovered_shards"] is None
+          print("UNRESOLVED_SOURCE_LOCATORS_COMPARED", comparison["candidate_count"])
           PY
 
       - name: Publish verified recovery triage as short-lived Actions artifact
