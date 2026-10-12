@@ -12905,6 +12905,19 @@ This snapshot may be stale even if it is a verified GitHub Release asset.
 The comparison fails closed on inconsistent inventory totals, duplicate
 Release identities, altered checksums, catalog drift or absent triage entries.
 
+Once individual historical Release assets have been downloaded and SHA-verified
+into a *separate* read-only cloud cache (never the user's PC), run
+`python tools/probe_recovery_cache.py --releases-root <cache>/releases --candidate-offset 0 --max-candidates 200`.
+For complete coverage, repeat over successive offsets, preserving the
+catalog version and checking that all candidate offsets are covered exactly once.
+The probe checks outer Release SHA-256 and size before opening an inner ZIP
+member and checking its logical compressed SHA-256 and size. The byte budget
+prevents unbounded work. A verified cached fragment remains strictly
+NON-REPLAY-CERTIFIED until independent chronology, schema, provenance, gaps,
+deduplication, and replay gates succeed. Missing cached files are NOT proof of
+irrecoverability. This tool does not download anything and does not change
+quarantine or SAFE classification.
+
 For Work/Codex, the existing `catalog-partition-parity` GitHub-hosted
 workflow can be run manually with `emit_recovery_triage=true`. It writes a
 SHA-bound per-shard recovery ledger, verifies full candidate parity, and exports

@@ -32,9 +32,12 @@ SHA = re.compile(r"[0-9a-f]{64}\Z")
 def probe_cache(
     index: Mapping[str, Any], releases_root: Path, *,
     max_candidates: int = 200, max_verify_bytes: int = 1_000_000_000,
+    candidate_offset: int = 0,
 ) -> dict[str, Any]:
     if type(max_candidates) is not int or max_candidates < 1:
         raise InventoryError("CACHE_PROBE_INVALID_CANDIDATE_LIMIT")
+    if type(candidate_offset) is not int or candidate_offset < 0:
+        raise InventoryError("CACHE_PROBE_INVALID_CANDIDATE_OFFSET")
     if type(max_verify_bytes) is not int or max_verify_bytes < 1:
         raise InventoryError("CACHE_PROBE_INVALID_BYTE_BUDGET")
     root = Path(releases_root)
@@ -48,7 +51,11 @@ def probe_cache(
     checked: dict[tuple[str, str], str] = {}
     used = 0
     seen = 0
+    offset_skipped = 0
     for candidate in iter_recovery_triage(index):
+        if offset_skipped < candidate_offset:
+            offset_skipped += 1
+            continue
         if seen >= max_candidates:
             break
         seen += 1
@@ -144,6 +151,7 @@ def probe_cache(
         "schema": "alina.recovery_cache_probe.v1",
         "status": "CACHED_BYTES_PROBED_NOT_REPLAY_CERTIFIED",
         "candidates_total": total,
+        "candidate_offset": candidate_offset,
         "candidates_checked": seen,
         "candidates_not_checked": total - seen,
         "byte_budget": max_verify_bytes,
@@ -164,6 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--releases-root", type=Path, required=True,
                         help="Existing local cache, e.g. runtime/recovery/full/releases")
     parser.add_argument("--max-candidates", type=int, default=200)
+    parser.add_argument("--candidate-offset", type=int, default=0)
     parser.add_argument("--max-verify-bytes", type=int, default=1_000_000_000)
     args = parser.parse_args(argv)
     try:
@@ -173,7 +182,8 @@ def main(argv: list[str] | None = None) -> int:
         summarize(index, metrics, hashlib.sha256(raw).hexdigest())
         result = probe_cache(index, args.releases_root,
                              max_candidates=args.max_candidates,
-                             max_verify_bytes=args.max_verify_bytes)
+                             max_verify_bytes=args.max_verify_bytes,
+                             candidate_offset=args.candidate_offset)
     except (OSError, ValueError, TypeError) as exc:
         print(json.dumps({"status": "CACHE_PROBE_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2

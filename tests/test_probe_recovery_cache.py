@@ -76,3 +76,20 @@ def test_probe_budget_and_absence_never_imply_irrecoverable(tmp_path):
     report = probe_cache({"shards": [row]}, root, max_verify_bytes=100000)
     assert report["results"][0]["source_check"] == "SOURCE_NOT_CACHED"
     assert report["all_exploitable_data_restored"] is False
+
+
+def test_probe_candidate_offset_processes_next_batch_without_promoting(tmp_path):
+    inner = b"123456789012345"
+    root, blob = _zip_fixture(tmp_path, inner)
+    row = _row(hashlib.sha256(inner).hexdigest(),
+               outer_digest=hashlib.sha256(blob).hexdigest(),
+               outer_size=len(blob))
+    first = dict(row, dataset_id="one")
+    second = dict(row, dataset_id="two")
+    result = probe_cache({"shards": [first, second]}, root,
+                         max_candidates=1, candidate_offset=1, max_verify_bytes=100000)
+    assert result["candidate_offset"] == 1
+    assert result["candidates_total"] == 2
+    assert result["candidates_checked"] == 1
+    assert result["results"][0]["dataset_id"] == "two"
+    assert result["cached_shards_byte_verified"] == 1
