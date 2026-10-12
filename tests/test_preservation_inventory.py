@@ -73,3 +73,21 @@ def test_safe_non_replayable_is_explicitly_incomplete():
     assert report["status"] == "INCOMPLETE_SAFE_REPLAY_COVERAGE"
     assert report["safe_non_replayable_shards"] == 1
     assert report["replay_required_download_bytes"] == 0
+
+
+def test_replay_ready_preflight_keeps_verified_cache(monkeypatch, tmp_path):
+    from tools import restore_alina
+
+    actual = {}
+
+    def fake_restore(repository, destination, **options):
+        actual["prune_unselected"] = options["prune_unselected"]
+        return {"enough_disk_for_release_assets": True,
+                "unverified_source_asset_count": 0}
+
+    monkeypatch.setattr(restore_alina, "restore_everything", fake_restore)
+    code = restore_alina.main([
+        "--replay-ready", "--preflight-only", "--destination", str(tmp_path),
+    ])
+    assert code == 0
+    assert actual["prune_unselected"] is False

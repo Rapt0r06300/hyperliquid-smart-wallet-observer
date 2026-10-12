@@ -10,7 +10,6 @@ import argparse
 import hashlib
 import json
 import re
-import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Mapping
@@ -141,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         index = read_index(args.index)
         metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
         report = summarize(index, metrics, hashlib.sha256(raw).hexdigest())
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, TypeError) as exc:
         print(json.dumps({"status": "INVENTORY_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2
     print(json.dumps(report, indent=2, sort_keys=True))
