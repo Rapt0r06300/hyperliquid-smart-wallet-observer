@@ -116,10 +116,11 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert module.restore_published(tmp_path, snapshot=True) == 3
     assert len(calls) == 1
     command, kwargs = calls[0]
-    assert "--everything" in command
+    assert "--replay-ready" in command
+    assert "--everything" not in command
     assert "--clone-root" not in command  # Legacy LFS reuse is disabled.
     assert "--recover-verifiable" in command
-    assert "--materialize-available-local-snapshot" in command
+    assert "--materialize-available-local-snapshot" not in command
     assert "--preflight-only" not in command
     assert kwargs["cwd"] == tmp_path.resolve()
     assert kwargs["env"]["GIT_LFS_SKIP_SMUDGE"] == "1"
@@ -161,7 +162,7 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     report_dir = tmp_path / "runtime" / "recovery" / "full"
     report_dir.mkdir(parents=True)
     (report_dir / "RESTORE_REPORT.json").write_text(json.dumps({
-        "status": "RESTORE_COMPLETE",
+        "status": "REPLAY_READY_COMPLETE",
         "repository": module.REPOSITORY,
         "source_inventory_sha256": "c" * 64,
     }), encoding="utf-8")
@@ -170,7 +171,7 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
     result = json.loads(path.read_text(encoding="utf-8"))
     assert result["git_head"] == "a" * 40
-    assert result["status"] == "RESTORE_COMPLETE"
+    assert result["status"] == "REPLAY_READY_COMPLETE"
     assert result["restore_exit_code"] == 0
     assert result["restore_report"] == "RESTORE_REPORT.json"
     assert result["source_inventory_sha256"] == "c" * 64

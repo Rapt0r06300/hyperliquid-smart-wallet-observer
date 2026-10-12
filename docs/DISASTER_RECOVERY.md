@@ -34,29 +34,32 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com
 **Dossier existant déjà cloné du dépôt canonique :** lancer
 `ALINA_SYNC_COMPLETE.cmd` (Windows CMD) ou `bash ALINA_SYNC_COMPLETE.sh`
 (Linux/macOS) depuis la racine. Cela synchronise **les deux** couches dans
-la même opération : les fichiers Git depuis `main`, puis les assets de
-toutes les Releases publiées dans **ce même dépôt**. Les données déjà
-vérifiées sont réutilisées, les téléchargements partiels sont repris.
+la même opération : les fichiers Git depuis `main`, puis le corpus
+`replay-ready` du même dépôt. Celui-ci contient exactement les assets requis
+par toutes les lignes `SAFE` + `replay_compatible` du catalogue courant.
+Les données déjà vérifiées sont réutilisées et les téléchargements partiels
+sont repris.
 
 Le synchroniseur existant `tools/sync_complete_clone.py` contrôle :
 - racine Git, `origin` exact, branche `main` et arbre suivi propre ;
 - `fetch` + `merge --ff-only`, sans reset/rebase/écrasement des changements ;
 - restauration via le **seul** `tools/restore_alina.py`, sans Git LFS ;
 - source vérifiée par taille/SHA-256, manifests et catalogue SAFE ;
-- snapshot de fichiers locaux ignorés lorsqu'il a réellement été publié ;
+- exclusion du corpus actif des capsules historiques et lignes PARTIAL/REJECT ;
 - vrai code de sortie en échec si inventaire/source/catalogue non certifiables.
 
 Options : `--preflight-only` inventorie sans télécharger ;
 `--skip-update` évite le fetch après un clone déjà à jour ;
-`--no-snapshot-materialization` conserve les fichiers locaux existants
-(sans empêcher de télécharger les assets du snapshot).
+`--no-snapshot-materialization` est conservé pour compatibilité. Les snapshots
+locaux appartiennent au profil d'archive explicite, pas au corpus replay.
 
 Rapports locaux : `runtime/recovery/full/SYNC_REPORT.json` (HEAD du
 code + résultat du restaurateur) et `RESTORE_REPORT.json` (preuves des
 assets, volumes, manquants et quarantaines), ou
-`RESTORE_PREFLIGHT.json` en préflight. `RESTORE_COMPLETE` et exit 0
-restent indispensables pour revendiquer une récupération totale de
-l'inventaire initial. Une nouvelle exécution récupère les nouveaux
+`RESTORE_PREFLIGHT.json` en préflight. `REPLAY_READY_COMPLETE` et exit 0
+certifient 100 % du catalogue SAFE/replayable ; `RESTORE_COMPLETE` reste
+réservé au mode d'archive intégrale `tools/restore_alina.py --everything`.
+Une nouvelle exécution récupère les nouveaux
 assets publiés pendant ou après la précédente synchronisation.
 Le checkpoint de synchronisation ne déduit jamais ce statut du seul code
 de sortie : il relit le rapport, vérifie le dépôt et le SHA-256 de
@@ -80,9 +83,10 @@ live ; son absence, sa corruption ou un conflit d'identité fait échouer la
 restauration. Le fichier de contrôle vérifié est conservé dans le cache de
 restauration et n'est pas retéléchargé lors d'une synchronisation identique.
 Il vérifie ID, nom, tag, taille, état `uploaded`, SHA-256 puis la totalité
-des octets téléchargés. Il conserve dans `runtime/recovery/full/releases/`
-les collectes, historiques, carnets, capsules, manifests, replays, backtests,
-OOS/forward, résultats, scoreboards et checkpoints **publiés sur GitHub**.
+des octets téléchargés. Le profil normal conserve dans
+`runtime/recovery/full/releases/` uniquement les conteneurs nécessaires au
+catalogue SAFE courant. Le profil `--everything` conserve toutes les
+collectes, capsules et preuves publiées.
 Chaque ligne d'asset du rapport conserve aussi le dépôt source, l'identité
 Release, les tailles annoncée/restaurée, les SHA-256 attendu/calculé, le
 statut de vérification et la destination. Les totaux distinguent octets
@@ -96,8 +100,9 @@ synchronisation les récupère ensuite. Les fichiers Git suivis sont liés au
 commit `main` cloné ; l'identité physique des packfiles `.git` n'est pas
 l'identité des octets applicatifs.
 
-Les shards ne deviennent `usable/` qu'après accord des manifests Release
-ET du catalogue SAFE courant lié à son SHA-256. L'inventaire incomplet,
+Les shards ne deviennent `usable/` qu'après accord du catalogue SAFE courant
+lié à son SHA-256, du SHA/taille du conteneur Release et du SHA/taille du
+membre extrait. L'inventaire incomplet,
 les erreurs de téléchargement, un ZIP ambigu, les pertes de données, une
 qualification révoquée ou des SHA contradictoires échouent de façon fermée.
 
@@ -112,9 +117,9 @@ succès à 100 %.
 et estime la capacité disque sans télécharger d'assets.
 Les téléchargements utilisent un cache et reprennent les transferts partiels
 lorsque les en-têtes HTTP sont cohérents ; un fichier n'est complet qu'après
-contrôle SHA-256. Un `RESTORE_COMPLETE` de code 0 prouve **uniquement**
-la disponibilité de tous les actifs de l'inventaire initial et les contrôles
-catalogue/manifest associés, pas la profitabilité économique.
+contrôle SHA-256. Un `REPLAY_READY_COMPLETE` de code 0 prouve uniquement la
+disponibilité du corpus de replay courant ; un `RESTORE_COMPLETE` prouve
+l'archive intégrale publiée. Aucun des deux ne prouve la profitabilité.
 
 ## Fichiers locaux ignorés et preuve de disponibilité
 
@@ -139,13 +144,13 @@ capsule exacte sans recollecter une autre fenêtre temporelle.
 ## Critères stricts de réussite
 
 - clone des fichiers Git du HEAD canonique sur `main` ;
-- 100 % des assets GitHub Releases **publiés et inventoriés** copiés, pas
-  seulement les shards qualifiés ; totaux comptes/octets vérifiés ;
+- 100 % des shards `SAFE` + `replay_compatible` du catalogue courant
+  matérialisés et vérifiés pour le profil normal ;
+- 100 % des assets publiés seulement pour le profil explicite `--everything` ;
 - chaque asset a sa taille attendue et un SHA-256 source égal au SHA-256 local ;
 - aucune archive `starter`, absente ou non vérifiable déguisée en succès ;
 - preuves SAFE, manifests et catalogues concordants ;
-- snapshot local explicitement requis disponible et restauré à l'octet près ;
-- `RESTORE_REPORT.json` durable, `RESTORE_COMPLETE` et code de sortie 0.
+- `RESTORE_REPORT.json` durable, statut correspondant au profil et code 0.
 
 Si un point manque : récupérer au maximum mais **ne pas certifier 100 %**.
 La collecte reste `COLLECT`, GitHub-hosted, paper/read-only, sans clés privées,

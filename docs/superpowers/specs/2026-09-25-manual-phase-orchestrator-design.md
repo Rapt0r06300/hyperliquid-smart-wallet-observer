@@ -12850,8 +12850,9 @@ GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com
 
 This is ONE operator command containing **two** distinct operations:
 clone the exact committed code/catalog/control plane from `main`, then
-stream all currently enumerated GitHub Release assets from the **same**
-repository. `GIT_LFS_SKIP_SMUDGE` guarantees no accidental LFS download.
+stream the exact assets required by the current SAFE/replay-compatible
+catalog from the **same** repository. `GIT_LFS_SKIP_SMUDGE` guarantees no
+accidental LFS download.
 Both wrappers call `tools/sync_complete_clone.py`, which delegates to the
 single `tools/restore_alina.py` data plane; no duplicate restorer is permitted.
 
@@ -12864,11 +12865,20 @@ beyond the newest 1,000 Releases, so the GitHub-hosted
 restorer MUST merge that complete historical inventory with the live paginated
 window and fail closed if the inventory is absent, corrupt or conflicts with a
 live identity. It MUST enumerate every asset in the merged inventory, support
-resumable downloads and disk
-preflight, archive *all* verified raw trades/L2/evidence and
-replay/backtest/OOS/forward/scoreboard/checkpoint outputs, and classify
-replay-usable shards using the current SHA-bound SAFE catalog. Unqualified
-assets remain archived, not silently discarded or promoted to SAFE.
+resumable downloads and disk preflight, and bind replay-usable shards to the
+current SHA-bound SAFE catalog. The canonical wrappers use the `replay-ready`
+profile: only immutable outer assets required by `SAFE` +
+`replay_compatible` rows are downloaded, and only their size/SHA-verified
+members enter `usable/`. `PARTIAL`/`REJECT` rows, historical recovery capsules
+and superseded full bundles remain durably published but do not pollute the
+replay corpus.
+
+The separate explicit `--everything` profile remains available for complete
+historical disaster-recovery archiving. It downloads every published asset
+and retains the stronger `RESTORE_COMPLETE` meaning. The profiles and their
+certificates MUST never be conflated: `REPLAY_READY_COMPLETE` means 100% of
+the current SAFE/replayable catalog; `RESTORE_COMPLETE` means 100% of the
+fixed full Release inventory.
 
 `--materialize-local-snapshot` additionally restores Git-ignored
 workspace evidence **only if** a previously published and verified
@@ -12878,15 +12888,14 @@ requires the cloud runner to access, start, or wake the user's PC.
 
 ### Exactness and completion certificate
 
-A successful exit (`RESTORE_COMPLETE`, exit code 0) requires, for a fixed
-source inventory enumerated at the start:
+A successful canonical replay exit (`REPLAY_READY_COMPLETE`, exit code 0)
+requires, for a fixed source inventory enumerated at the start:
 
 - identical Git-tracked bot/config/catalog bytes at the checked-out commit
   (the Git tree determines identity; `.git` pack compression/layout need
   not be physically identical);
-- all published Release assets (raw collection, archive, recovery capsules,
-  economic results and checkpoints) enumerated and accounted for, none
-  skipped because the name is unfamiliar;
+- every Release asset required by every current SAFE/replayable catalog row
+  enumerated and accounted for;
 - every restored asset byte count and SHA-256 identical to the authoritative
   source digest, with zero missing, corrupt or unverified assets;
 - no contradictory, missing or corrupt run manifest; current catalog and
@@ -12896,8 +12905,12 @@ source inventory enumerated at the start:
 - durable `runtime/recovery/full/RESTORE_REPORT.json`, including the exact
   source inventory SHA-256, counters, failures, classifications and status.
 - `SYNC_REPORT.json` must relink the Git HEAD to that actual certificate;
-  exit zero without a readable same-repository `RESTORE_COMPLETE` report and
+  exit zero without a readable same-repository `REPLAY_READY_COMPLETE` report and
   valid source-inventory SHA-256 remains `RESTORE_INCOMPLETE`.
+
+For `--everything`, the existing full-inventory requirements still apply to
+all published Release assets, capsules, results, checkpoints and any requested
+published local snapshot; only then may it emit `RESTORE_COMPLETE`.
 
 The optional `--preflight-only --recover-verifiable` measures disk space and
 reports source gaps **without** claiming restored files.

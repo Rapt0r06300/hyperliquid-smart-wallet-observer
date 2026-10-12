@@ -34,7 +34,7 @@ Git. Cela ne sauvegarde pas rétroactivement les artifacts Actions expirés.
 
 Après publication, **`ALINA_SYNC_COMPLETE.cmd`** (ou
 **`ALINA_SYNC_COMPLETE.sh`**) met à jour la branche `main` locale par
-avance rapide et restaure tous les assets GitHub Releases avec contrôle SHA-256.
+avance rapide et restaure le corpus `replay-ready` avec contrôle SHA-256.
 C'est aussi l'unique commande à relancer dans un dossier déjà cloné.
 Un checkpoint `runtime/recovery/full/SYNC_REPORT.json` lie le HEAD Git
 au résultat exact de `RESTORE_REPORT.json`.
@@ -44,7 +44,7 @@ données publiées est intégralement vérifié ; sinon, le résultat est INCOMP
 
 ---
 
-## Clone principal + récupération de toutes les données publiées (sans Git LFS)
+## Clone principal + corpus replay/backtest propre (sans Git LFS)
 
 **Un simple `git clone` ne télécharge pas les GitHub Releases.** Un clone
 véritablement complet exige donc un second téléchargement **du même dépôt**,
@@ -64,15 +64,20 @@ Linux/macOS :
 GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
 ```
 
-La commande récupère le code, tous les catalogues et workflows suivis par
-`main`, puis **toutes** les archives publiées dans les Releases du dépôt :
-trades, carnets L2, données historiques, capsules de récupération,
-replays, backtests, OOS, forward paper, résultats économiques, scoreboards
-et checkpoints. Les octets sont vérifiés par taille et SHA-256 ; les transferts
-interrompus sont repris. Les preuves non SAFE restent conservées sans être
-qualifiées pour le replay. Le snapshot de fichiers locaux ignorés est restauré
-seulement s'il a été préalablement publié et vérifié ; sinon la demande
-de restauration intégrale échoue explicitement.
+La commande récupère le code, les catalogues et workflows de `main`, puis
+**uniquement les assets nécessaires à toutes les lignes `SAFE` et
+`replay_compatible` du catalogue courant**. Elle vérifie d'abord le SHA-256 et
+la taille du conteneur Release, puis ceux de chaque shard extrait. Les lignes
+`PARTIAL`/`REJECT`, les anciennes capsules `alina-recovery-*` et l'ancien
+bundle complet ne polluent plus le corpus de backtest. Elles restent publiées
+et récupérables volontairement avec `python tools/restore_alina.py
+--everything ...`; rien n'est supprimé à l'aveugle.
+
+Le certificat normal est `REPLAY_READY_COMPLETE` : il signifie 100 % du
+catalogue SAFE/replayable courant, pas 100 % de l'archive historique. Le mode
+`--everything` conserve le certificat distinct `RESTORE_COMPLETE` et exige la
+capacité nécessaire à tous les assets publiés. Les transferts sont reprenables
+et les fichiers SAFE déjà vérifiés sont conservés.
 
 Comme GitHub limite son endpoint REST `list releases` aux 1 000 résultats les
 plus récents, le workflow GitHub-hosted `publish-restore-inventory` publie
@@ -80,10 +85,11 @@ toutes les six heures un `RESTORE_INVENTORY.json.gz` vérifié. Le restaurateur
 fusionne cet inventaire historique avec la fenêtre live afin que le clone ne
 perde aucune Release ancienne et reste utilisable sans Git LFS.
 
-**100 % = succès de `RESTORE_COMPLETE` et code de sortie zéro**, sans un seul
-asset manquant, corrompu ou sans empreinte vérifiable, pour l'inventaire
-GitHub observé au début. Les archives historiques `starter` ou privées
-d'empreinte SHA-256 ne sont pas magiquement récupérables.
+**100 % replay = `REPLAY_READY_COMPLETE` et code de sortie zéro**, sans un seul
+shard SAFE/replayable manquant ou corrompu. **100 % archive =
+`RESTORE_COMPLETE` en mode `--everything`**. Les deux preuves ne sont jamais
+confondues. Les archives historiques `starter` ou privées d'empreinte SHA-256
+ne sont pas magiquement récupérables.
 `--recover-verifiable` sauvegarde tout ce qui est prouvable, mais retourne un
 code non nul tant que des éléments manquent : ne jamais l'appeler « 100 % ».
 Le rapport détaillé est `runtime/recovery/full/RESTORE_REPORT.json`.
@@ -796,16 +802,15 @@ Cette surface est une **fondation de contrôle**. Le statut cloud final doit ref
 
 ---
 
-## 20.1 Restauration intégrale sur une nouvelle machine
+## 20.1 Restauration replay-ready sur une nouvelle machine
 
 La procédure canonique de clone et restauration des archives, sans LFS, est
 définie au début du README et dans `docs/DISASTER_RECOVERY.md`.
-Elle récupère les fichiers suivis par `main` puis chaque asset publié dans
-les GitHub Releases du même dépôt, avec vérification taille/SHA-256 et
-restauration facultative des snapshots locaux **publiés**. Un simple clone Git
-ne suffit pas. Seul `RESTORE_COMPLETE` + code de sortie 0 est une preuve
-de réussite pour l'inventaire figé. Toute archive incomplète ou non vérifiable
-entraîne un verdict non complet, sans masquer les octets récupérables.
+Elle récupère les fichiers suivis par `main` puis chaque asset exigé par le
+catalogue SAFE/replayable, avec vérification taille/SHA-256 du conteneur et du
+shard. Un simple clone Git ne suffit pas. Seul `REPLAY_READY_COMPLETE` + code
+de sortie 0 certifie ce corpus. L'archive publiée intégrale reste disponible
+avec `--everything` et son certificat distinct `RESTORE_COMPLETE`.
 
 
 ## 21. Tests et CI

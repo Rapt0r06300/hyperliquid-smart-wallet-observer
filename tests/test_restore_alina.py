@@ -2192,3 +2192,133 @@ def test_snapshot_cli_options_are_mutually_exclusive(tmp_path):
             "--materialize-available-local-snapshot",
         ])
     assert ex.value.code == 2
+
+
+def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkeypatch):
+    module = _module()
+    safe_bytes = b'{"trade_id":"safe"}\n'
+    rejected_bytes = b'{"trade_id":"rejected"}\n'
+    safe_sha = hashlib.sha256(safe_bytes).hexdigest()
+    rejected_sha = hashlib.sha256(rejected_bytes).hexdigest()
+    releases = [{
+        "tag_name": "data-v2-profile-test",
+        "assets": [
+            _asset("safe.jsonl.gz", "https://example.invalid/safe", safe_bytes),
+            _asset("rejected.jsonl.gz", "https://example.invalid/rejected", rejected_bytes),
+        ],
+    }]
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter(releases))
+    downloaded = []
+
+    def fake_download(url, target, **_kw):
+        downloaded.append(url)
+        payload = safe_bytes if url.endswith("/safe") else rejected_bytes
+        target.write_bytes(payload)
+        return len(payload), hashlib.sha256(payload).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": [
+        {
+            "dataset_id": "safe-one", "quality_status": "SAFE",
+            "replay_compatible": True, "release_tag": "data-v2-profile-test",
+            "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
+            "sha256": safe_sha,
+        },
+        {
+            "dataset_id": "bad-one", "quality_status": "REJECT",
+            "replay_compatible": False, "release_tag": "data-v2-profile-test",
+            "release_asset": "rejected.jsonl.gz", "bytes": len(rejected_bytes),
+            "sha256": rejected_sha,
+        },
+    ]}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 2},
+    }), encoding="utf-8")
+
+    report = module.restore_everything(
+        "owner/repo", tmp_path / "restored", catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready",
+    )
+
+    assert downloaded == ["https://example.invalid/safe"]
+    assert report["status"] == "REPLAY_READY_COMPLETE"
+    assert report["profile"] == "replay-ready"
+    assert report["asset_count"] == 1
+    assert report["full_archive_asset_count"] == 2
+    assert report["excluded_full_archive_bytes"] == len(rejected_bytes)
+    assert report["classification"]["usable_shards"] == 1
+    assert report["classification"]["quarantined_shards"] == 0
+    restored = (tmp_path / "restored" / "usable" / "shards" /
+                "data-v2-profile-test" / "safe-one.jsonl.gz")
+    assert restored.read_bytes() == safe_bytes
+
+
+def test_replay_ready_preflight_counts_zip_extraction_space(tmp_path, monkeypatch):
+    module = _module()
+    member = b"compressed-safe-shard"
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("safe.jsonl.gz", member)
+    outer = stream.getvalue()
+    release = {"tag_name": "data-v2-packed", "assets": [
+        _asset("packed.zip", "https://example.invalid/packed", outer),
+    ]}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": [{
+        "dataset_id": "safe-packed", "quality_status": "SAFE",
+        "replay_compatible": True, "release_tag": "data-v2-packed",
+        "release_asset": "safe.jsonl.gz",
+        "release_container_asset": "packed.zip",
+        "release_remote_size": len(outer),
+        "release_remote_digest": "sha256:" + hashlib.sha256(outer).hexdigest(),
+        "bytes": len(member), "sha256": hashlib.sha256(member).hexdigest(),
+    }]}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+
+    report = module.restore_everything(
+        "owner/repo", tmp_path / "restored", catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready", preflight_only=True,
+    )
+
+    assert report["pending_download_bytes"] == len(outer)
+    assert report["pending_materialization_bytes"] == len(member)
+    assert report["required_free_destination_bytes"] == (
+        len(outer) + len(member) + report["safety_margin_bytes"]
+    )
+
+
+def test_replay_ready_materialization_refuses_symlinked_usable_tree(tmp_path):
+    module = _module()
+    payload = b"safe"
+    releases = tmp_path / "releases"
+    source = releases / "data-v2-safe"
+    source.mkdir(parents=True)
+    (source / "safe.jsonl.gz").write_bytes(payload)
+    destination = tmp_path / "restore"
+    destination.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (destination / "usable").symlink_to(outside, target_is_directory=True)
+    row = {
+        "dataset_id": "safe-one", "release_tag": "data-v2-safe",
+        "release_asset": "safe.jsonl.gz", "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+
+    report = module._materialize_catalog_safe_shards(
+        [row], releases, destination,
+    )
+
+    assert report["usable_shards"] == 0
+    assert report["failures"][0]["error"] == "SYMLINKED_SHARD_DIRECTORY"
+    assert not list(outside.rglob("*.jsonl.gz"))

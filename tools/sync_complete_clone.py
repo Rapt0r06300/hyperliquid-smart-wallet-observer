@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed one-step local main update + all published Alina Release evidence.
+"""Fail-closed one-step local main update + certified replay-ready corpus.
 
 This CLI only runs when explicitly invoked in a local checkout. It cannot wake
 or depend on a user's PC from cloud GitHub Actions. No trading or uploads.
@@ -81,17 +81,15 @@ def restore_published(root: Path, *, preflight: bool = False,
     root = root.resolve()
     cmd = [
         sys.executable, "-u", str(root / "tools" / "restore_alina.py"),
-        "--everything", "--recover-verifiable",
+        "--replay-ready", "--recover-verifiable",
         "--destination", str(root / "runtime" / "recovery" / "full"),
         "--catalog", str(root / "catalog" / "DATA_INDEX.json"),
         "--metrics", str(root / "catalog" / "DATA_METRICS.json"),
     ]
     if preflight:
         cmd.append("--preflight-only")
-    elif snapshot:
-        # Missing optional snapshots are explicit NOT_PUBLISHED, not a false
-        # 100% proof of unpublished bytes. Corrupt snapshots fail closed.
-        cmd.extend(["--workspace", str(root), "--materialize-available-local-snapshot"])
+    # Workspace snapshots and historical recovery capsules belong to the
+    # explicit full-archive profile, not the clean replay/backtest corpus.
     env = os.environ.copy()
     env["GIT_LFS_SKIP_SMUDGE"] = "1"
     env["PYTHONUTF8"] = "1"
@@ -130,8 +128,8 @@ def _read_restore_status(report_path: Path) -> tuple[str, str | None, str | None
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Update canonical main safely and hydrate every published "
-                    "GitHub Release byte with SHA-256 verification."
+        description="Update canonical main safely and hydrate every current "
+                    "SAFE/replayable shard with SHA-256 verification."
     )
     parser.add_argument(
         "--skip-update", action="store_true",
@@ -173,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
         certified = (
             not args.preflight_only
             and code == 0
-            and restore_status == "RESTORE_COMPLETE"
+            and restore_status == "REPLAY_READY_COMPLETE"
             and report_error is None
         )
         effective_code = code
@@ -185,7 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             "branch": "main",
             "git_head": head,
             "restore_exit_code": code,
-            "status": "RESTORE_COMPLETE" if certified else "RESTORE_INCOMPLETE",
+            "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
             "restore_report_status": restore_status,
             "source_inventory_sha256": inventory_sha,

@@ -770,6 +770,173 @@ def _load_current_safe_catalog(
     }
 
 
+def _load_replay_ready_plan(
+    index_path: Path,
+    metrics_path: Path,
+) -> tuple[dict[str, tuple[str, str]], dict[str, Any], list[Mapping[str, Any]], dict[tuple[str, str], tuple[int, str]]]:
+    """Return the exact SAFE/replayable rows and their immutable outer assets."""
+    safe, proof = _load_current_safe_catalog(index_path, metrics_path)
+    try:
+        index = read_index(index_path)
+    except (OSError, ValueError) as exc:
+        raise RestoreError(f"invalid canonical DATA_INDEX integrity: {exc}") from exc
+    rows: list[Mapping[str, Any]] = []
+    required: dict[tuple[str, str], tuple[int, str]] = {}
+    logical_bytes = 0
+    for row in index["shards"]:
+        if str(row.get("dataset_id") or "") not in safe:
+            continue
+        tag = str(row.get("release_tag") or "")
+        member = str(row.get("release_asset") or "")
+        outer = str(row.get("release_container_asset") or member)
+        if not tag or not member or not outer:
+            raise RestoreError("SAFE catalog row has no immutable Release asset")
+        zipped = bool(row.get("release_container_asset"))
+        expected_size = row.get("release_remote_size") if zipped else row.get("bytes")
+        expected_digest = (
+            str(row.get("release_remote_digest") or "").removeprefix("sha256:")
+            if zipped else str(row.get("sha256") or "")
+        ).lower()
+        if (
+            type(expected_size) is not int or expected_size < 0
+            or re.fullmatch(r"[0-9a-f]{64}", expected_digest) is None
+        ):
+            raise RestoreError("SAFE catalog row has invalid outer asset evidence")
+        key = (tag, outer)
+        evidence = (expected_size, expected_digest)
+        if key in required and required[key] != evidence:
+            raise RestoreError("conflicting SAFE catalog evidence for Release asset")
+        required[key] = evidence
+        rows.append(row)
+        logical_bytes += int(row["bytes"])
+    proof = dict(proof)
+    proof.update({
+        "profile": "replay-ready",
+        "required_release_assets": len(required),
+        "safe_logical_bytes": logical_bytes,
+    })
+    return safe, proof, rows, required
+
+
+def _select_replay_ready_releases(
+    releases: list[Mapping[str, Any]],
+    required: Mapping[tuple[str, str], tuple[int, str]],
+) -> list[dict[str, Any]]:
+    lookup: dict[tuple[str, str], tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        for asset in release.get("assets", []):
+            if isinstance(asset, Mapping):
+                lookup[(tag, str(asset.get("name") or ""))] = (release, asset)
+    selected: dict[str, dict[str, Any]] = {}
+    for key, (expected_size, expected_digest) in required.items():
+        found = lookup.get(key)
+        if found is None:
+            raise RestoreError(f"SAFE catalog Release asset is missing: {key[0]}/{key[1]}")
+        release, asset = found
+        if asset.get("size") != expected_size or _expected_digest(asset) != expected_digest:
+            raise RestoreError(f"SAFE catalog Release evidence mismatch: {key[0]}/{key[1]}")
+        target = selected.setdefault(key[0], {**release, "assets": []})
+        target["assets"].append(asset)
+    return list(selected.values())
+
+
+def _materialize_catalog_safe_shards(
+    rows: list[Mapping[str, Any]], releases_root: Path, destination: Path,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "usable_shards": 0, "usable_bytes": 0, "quarantined_shards": 0,
+        "quarantined_bytes": 0, "excluded_rows": 0,
+        "missing_or_corrupt_rows": 0, "verified_zip_members": 0,
+        "skipped_verified_shards": 0, "stale_usable_quarantined": 0,
+        "stale_usable_quarantined_bytes": 0,
+        "ignored_stale_release_manifests": 0, "failures": [],
+    }
+    expected: set[Path] = set()
+    for row in rows:
+        dataset_id = str(row["dataset_id"])
+        tag = str(row["release_tag"])
+        member = str(row["release_asset"])
+        outer = str(row.get("release_container_asset") or member)
+        source = releases_root / _safe_component(tag) / _safe_component(outer)
+        target_root = destination / "usable" / "shards" / _safe_component(tag)
+        if any(path.is_symlink() for path in (
+            destination / "usable",
+            destination / "usable" / "shards",
+            target_root,
+        )):
+            report["failures"].append({
+                "dataset_id": dataset_id,
+                "error": "SYMLINKED_SHARD_DIRECTORY",
+            })
+            continue
+        target_root.mkdir(parents=True, exist_ok=True)
+        target = target_root / f"{_safe_component(dataset_id)}.jsonl.gz"
+        if target.is_symlink():
+            report["failures"].append({
+                "dataset_id": dataset_id,
+                "error": "SYMLINKED_MATERIALIZED_SHARD",
+            })
+            continue
+        expected.add(target)
+        if _verified_row_bytes(target, row):
+            report["usable_shards"] += 1
+            report["usable_bytes"] += int(row["bytes"])
+            report["skipped_verified_shards"] += 1
+            continue
+        tmp = target.with_suffix(target.suffix + ".partial")
+        tmp.unlink(missing_ok=True)
+        try:
+            if row.get("release_container_asset"):
+                if Path(member).name != member or not source.is_file():
+                    raise RestoreError("unsafe or missing ZIP member")
+                with zipfile.ZipFile(source) as archive:
+                    matches = [info for info in archive.infolist() if info.filename == member]
+                    if len(matches) != 1 or matches[0].file_size != row["bytes"]:
+                        raise RestoreError("ZIP member identity/size does not match catalog")
+                    with archive.open(matches[0]) as inp, tmp.open("wb") as out:
+                        shutil.copyfileobj(inp, out, length=8 * 1024 * 1024)
+                report["verified_zip_members"] += 1
+            else:
+                if not source.is_file():
+                    raise RestoreError("Release asset missing")
+                try:
+                    os.link(source, tmp)
+                except OSError:
+                    shutil.copy2(source, tmp)
+            if not _verified_row_bytes(tmp, row):
+                raise RestoreError("shard size/SHA-256 mismatch")
+            tmp.replace(target)
+            report["usable_shards"] += 1
+            report["usable_bytes"] += int(row["bytes"])
+        except (OSError, KeyError, zipfile.BadZipFile, RestoreError) as exc:
+            tmp.unlink(missing_ok=True)
+            report["missing_or_corrupt_rows"] += 1
+            report["failures"].append({"dataset_id": dataset_id, "error": str(exc)})
+    usable_root = destination / "usable" / "shards"
+    if usable_root.is_dir():
+        for previous in sorted(usable_root.glob("*/*.jsonl.gz")):
+            if previous in expected:
+                continue
+            try:
+                old_size = previous.stat().st_size
+                old_digest = _sha256(previous)
+                stale_root = destination / "quarantine" / "stale_usable" / previous.parent.name
+                stale_root.mkdir(parents=True, exist_ok=True)
+                stale = stale_root / f"{previous.name}.{old_digest[:20]}.stale"
+                if stale.exists():
+                    if _sha256(stale) != old_digest:
+                        raise RestoreError("stale quarantine destination collision")
+                    previous.unlink()
+                else:
+                    previous.replace(stale)
+                report["stale_usable_quarantined"] += 1
+                report["stale_usable_quarantined_bytes"] += old_size
+            except (OSError, RestoreError) as exc:
+                report["failures"].append({"path": str(previous), "error": str(exc)})
+    return report
+
+
 def _safe_replay_row(
     row: Mapping[str, Any],
     *,
@@ -1419,15 +1586,26 @@ def restore_everything(
     preflight_only: bool = False,
     recover_verifiable: bool = False,
     optional_local_snapshot: bool = False,
+    profile: str = "full-archive",
 ) -> dict[str, Any]:
+    if profile not in {"full-archive", "replay-ready"}:
+        raise RestoreError(f"unknown restore profile: {profile}")
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
+    replay_rows: list[Mapping[str, Any]] = []
+    replay_required: dict[tuple[str, str], tuple[int, str]] = {}
     if catalog_path is not None:
         if metrics_path is None:
             raise RestoreError("canonical DATA_METRICS is required with DATA_INDEX")
-        catalog_safe, catalog_verification = _load_current_safe_catalog(
-            catalog_path, metrics_path
-        )
+        if profile == "replay-ready":
+            (catalog_safe, catalog_verification, replay_rows,
+             replay_required) = _load_replay_ready_plan(catalog_path, metrics_path)
+        else:
+            catalog_safe, catalog_verification = _load_current_safe_catalog(
+                catalog_path, metrics_path
+            )
+    elif profile == "replay-ready":
+        raise RestoreError("replay-ready profile requires the canonical catalog")
     releases_root = destination / "releases"
     if releases_root.is_symlink():
         raise RestoreError("symlinked Release storage directory")
@@ -1511,6 +1689,21 @@ def restore_everything(
     ).hexdigest()
     # Every published byte has an explicit, immutable source identity and size.
     # Prove parity at byte level as well as asset count. No floating estimates.
+    full_archive_release_count = len(releases)
+    full_archive_asset_count = sum(len(release["assets"]) for release in releases)
+    full_archive_asset_bytes = sum(
+        int(asset["size"]) for release in releases for asset in release["assets"]
+    )
+    if profile == "replay-ready":
+        releases = _select_replay_ready_releases(releases, replay_required)
+        selected_keys = {
+            (str(release["tag_name"]), str(asset["name"]))
+            for release in releases for asset in release["assets"]
+        }
+        unverified_source_assets = [
+            row for row in unverified_source_assets
+            if (str(row["release_tag"]), str(row["name"])) in selected_keys
+        ]
     source_asset_bytes = sum(
         int(asset["size"]) for release in releases for asset in release["assets"]
     )
@@ -1559,9 +1752,25 @@ def restore_everything(
                 partial_size = partial.stat().st_size if partial.is_file() else 0
                 pending_download_bytes += max(0, expected_size - partial_size)
 
+    pending_materialization_bytes = 0
+    if profile == "replay-ready":
+        for row in replay_rows:
+            if not row.get("release_container_asset"):
+                continue
+            target = (
+                destination / "usable" / "shards"
+                / _safe_component(str(row["release_tag"]))
+                / f"{_safe_component(str(row['dataset_id']))}.jsonl.gz"
+            )
+            if not _verified_row_bytes(target, row):
+                pending_materialization_bytes += int(row["bytes"])
+
     free_destination = shutil.disk_usage(destination).free
     safety_margin = 1024 * 1024 * 1024
-    enough_disk = pending_download_bytes + safety_margin <= free_destination
+    required_free_destination_bytes = (
+        pending_download_bytes + pending_materialization_bytes + safety_margin
+    )
+    enough_disk = required_free_destination_bytes <= free_destination
     if preflight_only:
         # Planning never downloads assets and is not a recovery certificate.
         plan = {
@@ -1572,14 +1781,21 @@ def restore_everything(
                 else "PREFLIGHT_READY_NOT_RESTORED"
             ),
             "repository": repository,
+            "profile": profile,
             "source_inventory_sha256": source_inventory_sha256,
             "release_count": len(releases),
             "asset_count": sum(len(release["assets"]) for release in releases),
             "source_asset_bytes": source_asset_bytes,
+            "full_archive_release_count": full_archive_release_count,
+            "full_archive_asset_count": full_archive_asset_count,
+            "full_archive_asset_bytes": full_archive_asset_bytes,
+            "excluded_full_archive_bytes": full_archive_asset_bytes - source_asset_bytes,
             "unverified_source_bytes": unverified_source_bytes,
             "unverified_source_asset_count": len(unverified_source_assets),
             "unverified_source_assets_sample": unverified_source_assets[:50],
             "pending_download_bytes": pending_download_bytes,
+            "pending_materialization_bytes": pending_materialization_bytes,
+            "required_free_destination_bytes": required_free_destination_bytes,
             "free_destination_bytes": free_destination,
             "safety_margin_bytes": safety_margin,
             "enough_disk_for_release_assets": enough_disk,
@@ -1599,18 +1815,23 @@ def restore_everything(
     if not enough_disk:
         raise RestoreError(
             "insufficient disk space for complete GitHub Release restore: "
-            f"need_at_least={pending_download_bytes + safety_margin} "
+            f"need_at_least={required_free_destination_bytes} "
             f"free={free_destination}"
         )
 
     report: dict[str, Any] = {
         "schema": "alina.full_restore_report.v1",
         "repository": repository,
+        "profile": profile,
         "source_inventory_sha256": source_inventory_sha256,
         "destination": str(destination),
         "release_count": 0,
         "asset_count": 0,
         "source_asset_bytes": source_asset_bytes,
+        "full_archive_release_count": full_archive_release_count,
+        "full_archive_asset_count": full_archive_asset_count,
+        "full_archive_asset_bytes": full_archive_asset_bytes,
+        "excluded_full_archive_bytes": full_archive_asset_bytes - source_asset_bytes,
         "unverified_source_bytes": unverified_source_bytes,
         "verified_asset_bytes": 0,
         "verified_asset_count": 0,
@@ -1621,6 +1842,8 @@ def restore_everything(
         "skipped_verified": 0,
         "lfs_reused_verified": 0,
         "pending_download_bytes_at_start": pending_download_bytes,
+        "pending_materialization_bytes_at_start": pending_materialization_bytes,
+        "required_free_destination_bytes_at_start": required_free_destination_bytes,
         "free_destination_bytes_at_start": free_destination,
         "failures": [],
         "releases": [],
@@ -1720,7 +1943,7 @@ def restore_everything(
     # Interrupted publications remain archived, but cannot claim a fully
     # qualified restore without a canonical manifest naming their data part.
     claimed_tags = _claimed_data_release_tags(releases_root, allowed_release_dirs)
-    unclaimed = sorted(
+    unclaimed = [] if profile == "replay-ready" else sorted(
         str(release["tag_name"])
         for release in releases
         if str(release["tag_name"]).lower().startswith(
@@ -1734,16 +1957,22 @@ def restore_everything(
     )
     report["unclaimed_dataset_release_count"] = len(unclaimed)
     report["unclaimed_dataset_releases_sample"] = unclaimed[:50]
-    report["run_manifest_checks"] = _verify_run_manifests(
-        releases_root,
-        allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
+    report["run_manifest_checks"] = (
+        [] if profile == "replay-ready" else _verify_run_manifests(
+            releases_root,
+            allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
+        )
     )
     report["verification_failures"] = sum(
         1 for row in report["run_manifest_checks"] if row.get("status") != "OK"
     )
-    report["classification"] = _materialize_classified_shards(
-        repository, releases_root, destination, catalog_safe=catalog_safe,
-        allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
+    report["classification"] = (
+        _materialize_catalog_safe_shards(replay_rows, releases_root, destination)
+        if profile == "replay-ready"
+        else _materialize_classified_shards(
+            repository, releases_root, destination, catalog_safe=catalog_safe,
+            allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
+        )
     )
     report["expected_assets"] = sum(len(release["assets"]) for release in releases)
     report["all_source_assets_accounted_for"] = (
@@ -1798,7 +2027,8 @@ def restore_everything(
         and not report["unclaimed_dataset_release_count"]
     )
     report["status"] = (
-        "RESTORE_COMPLETE" if complete and catalog_verification is not None
+        "REPLAY_READY_COMPLETE" if complete and profile == "replay-ready"
+        else "RESTORE_COMPLETE" if complete and catalog_verification is not None
         else "ASSETS_VERIFIED_ONLY" if complete
         else "RESTORE_INCOMPLETE"
     )
@@ -1810,7 +2040,9 @@ def restore_everything(
     )
     report.update({
         "assets_verified": bool(report["source_byte_parity"]),
-        "restore_complete": report["status"] == "RESTORE_COMPLETE",
+        "restore_complete": report["status"] in {"RESTORE_COMPLETE", "REPLAY_READY_COMPLETE"},
+        "replay_ready_complete": report["status"] == "REPLAY_READY_COMPLETE",
+        "full_archive_complete": report["status"] == "RESTORE_COMPLETE",
         "published_volume_bytes": report["source_asset_bytes"],
         "restored_volume_bytes": report["verified_asset_bytes"],
         "verified_volume_bytes": report["verified_asset_bytes"],
@@ -1845,7 +2077,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Restore every canonical Alina GitHub Release asset after cloning the repository."
     )
-    parser.add_argument("--everything", action="store_true", help="restore all canonical release evidence")
+    profile_group = parser.add_mutually_exclusive_group(required=True)
+    profile_group.add_argument(
+        "--replay-ready", action="store_true",
+        help="restore only catalog-bound SAFE/replayable data",
+    )
+    profile_group.add_argument(
+        "--everything", action="store_true",
+        help="restore the complete historical Release archive",
+    )
     parser.add_argument(
         "--recover-verifiable", action="store_true",
         help="salvage valid SHA-256 assets despite incomplete Releases; never claim success",
@@ -1880,9 +2120,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.everything:
-        parser.error("--everything is required to make the destructive-looking intent explicit")
-
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     destination = Path(args.destination).resolve()
     try:
@@ -1896,6 +2133,7 @@ def main(argv: list[str] | None = None) -> int:
             preflight_only=args.preflight_only,
             recover_verifiable=args.recover_verifiable,
             optional_local_snapshot=args.materialize_available_local_snapshot,
+            profile="replay-ready" if args.replay_ready else "full-archive",
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
@@ -1925,7 +2163,10 @@ def main(argv: list[str] | None = None) -> int:
         failures += 1
     # Downloading every Release asset does not certify a SAFE restore.
     # No invocation may exit zero unless catalog-bound restore is complete.
-    if report.get("status") != "RESTORE_COMPLETE":
+    expected_status = (
+        "REPLAY_READY_COMPLETE" if args.replay_ready else "RESTORE_COMPLETE"
+    )
+    if report.get("status") != expected_status:
         failures += 1
     print(
         json.dumps(
