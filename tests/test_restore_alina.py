@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import gzip
 import zipfile
 from pathlib import Path
 
@@ -450,6 +451,43 @@ def test_iter_releases_uses_published_inventory_beyond_github_1000_cap(monkeypat
     rows = list(module.iter_releases("owner/repo"))
     assert len(rows) == 1001
     assert rows[-1]["tag_name"] == "historical-2001"
+
+
+def test_published_inventory_cache_is_sha_verified_and_reused(tmp_path, monkeypatch):
+    module = _module()
+    payload = {
+        "schema": "alina.restore_inventory.v1",
+        "repository": "owner/repo",
+        "releases": [],
+    }
+    compressed = gzip.compress(
+        json.dumps(payload).encode("utf-8"), mtime=0,
+    )
+    asset = {
+        **_asset(
+            "RESTORE_INVENTORY.json.gz",
+            "https://example.invalid/inventory",
+            compressed,
+        ),
+        "id": 99,
+        "state": "uploaded",
+    }
+    calls = []
+
+    def download(_url, target, **_kwargs):
+        calls.append(target)
+        target.write_bytes(compressed)
+        return len(compressed), hashlib.sha256(compressed).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", download)
+    cache = tmp_path / "RESTORE_INVENTORY.json.gz"
+    assert module._read_restore_inventory_asset(
+        asset, "owner/repo", cache_path=cache,
+    ) == []
+    assert module._read_restore_inventory_asset(
+        asset, "owner/repo", cache_path=cache,
+    ) == []
+    assert len(calls) == 1
 
 
 

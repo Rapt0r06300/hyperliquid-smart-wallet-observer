@@ -251,6 +251,7 @@ def _list_release_assets(
 def _read_restore_inventory_asset(
     asset: Mapping[str, Any], repository: str, *, token: str | None = None,
     allow_incomplete: bool = False,
+    cache_path: Path | None = None,
 ) -> list[Mapping[str, Any]]:
     """Download and validate the GitHub-hosted inventory spanning the REST cap."""
     expected_size = asset.get("size")
@@ -260,16 +261,34 @@ def _read_restore_inventory_asset(
         raise RestoreError("invalid published restore inventory identity")
     if not isinstance(url, str) or not url.startswith("https://"):
         raise RestoreError("invalid published restore inventory URL")
-    with tempfile.TemporaryDirectory(prefix="alina-restore-inventory-") as directory:
-        path = Path(directory) / "RESTORE_INVENTORY.json.gz"
-        actual_size, actual_sha = _download_to_path(url, path, token=token)
-        if actual_size != expected_size or actual_sha != expected_sha:
-            raise RestoreError("published restore inventory failed size/SHA-256 verification")
+    temporary = None
+    if cache_path is None:
+        temporary = tempfile.TemporaryDirectory(prefix="alina-restore-inventory-")
+        path = Path(temporary.name) / "RESTORE_INVENTORY.json.gz"
+    else:
+        path = cache_path
+        if path.parent.is_symlink() or path.is_symlink():
+            raise RestoreError("symlinked published restore inventory cache")
+        path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if not _asset_ok(path, asset):
+            partial = path.with_suffix(path.suffix + ".partial")
+            if partial.is_symlink():
+                raise RestoreError("symlinked partial restore inventory cache")
+            actual_size, actual_sha = _download_to_path(url, partial, token=token)
+            if actual_size != expected_size or actual_sha != expected_sha:
+                raise RestoreError(
+                    "published restore inventory failed size/SHA-256 verification"
+                )
+            partial.replace(path)
         try:
             with gzip.open(path, "rt", encoding="utf-8") as handle:
                 payload = json.load(handle)
         except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeError) as exc:
             raise RestoreError("published restore inventory is malformed") from exc
+    finally:
+        if temporary is not None:
+            temporary.cleanup()
     if not isinstance(payload, Mapping):
         raise RestoreError("published restore inventory root is invalid")
     if payload.get("schema") != "alina.restore_inventory.v1":
@@ -309,6 +328,7 @@ def _read_restore_inventory_asset(
 def iter_releases(
     repository: str, *, token: str | None = None,
     allow_incomplete: bool = False,
+    inventory_cache_root: Path | None = None,
 ) -> Iterable[Mapping[str, Any]]:
     """Read every Release and its documented embedded asset inventory."""
     # The list-Releases response contains each Release's asset array.  Reading
@@ -318,7 +338,7 @@ def iter_releases(
     offset = 0
     seen_ids: dict[int, str] = {}
     seen_tags: set[str] = set()
-    inventory_asset: Mapping[str, Any] | None = None
+    inventory_source: tuple[str, Mapping[str, Any]] | None = None
     while True:
         page = offset // page_size + 1
         url = f"https://api.github.com/repos/{repository}/releases?per_page={page_size}&page={page}"
@@ -326,13 +346,19 @@ def iter_releases(
             payload = _json(url, token=token)
         except RestoreError as exc:
             if "only the first 1000 results are available" in str(exc).lower():
-                if inventory_asset is None:
+                if inventory_source is None:
                     raise RestoreError(
                         "GitHub caps Release listing at 1000 and no published "
                         "RESTORE_INVENTORY.json.gz was found in the live window"
                     ) from exc
+                inventory_tag, inventory_asset = inventory_source
+                cache_path = (
+                    inventory_cache_root / _safe_component(inventory_tag)
+                    / _safe_component(str(inventory_asset["name"]))
+                    if inventory_cache_root is not None else None
+                )
                 historical = _read_restore_inventory_asset(
-                    inventory_asset, repository, token=token,
+                    inventory_asset, repository, token=token, cache_path=cache_path,
                     allow_incomplete=allow_incomplete,
                 )
                 for release in historical:
@@ -398,11 +424,11 @@ def iter_releases(
                     allow_incomplete=allow_incomplete,
                 )
                 if (
-                    inventory_asset is None
+                    inventory_source is None
                     and tag.startswith("alina-restore-inventory-")
                     and asset.get("name") == "RESTORE_INVENTORY.json.gz"
                 ):
-                    inventory_asset = asset
+                    inventory_source = (tag, asset)
             complete_release["assets"] = embedded
             yield complete_release
         if len(payload) < page_size:
@@ -1408,6 +1434,7 @@ def restore_everything(
     releases_root.mkdir(parents=True, exist_ok=True)
     releases = list(iter_releases(
         repository, token=token, allow_incomplete=recover_verifiable,
+        inventory_cache_root=releases_root,
     ))
     # Never start transferring data with a partial/malformed source inventory.
     seen_tags: set[str] = set()
@@ -1557,8 +1584,10 @@ def restore_everything(
             "safety_margin_bytes": safety_margin,
             "enough_disk_for_release_assets": enough_disk,
             "note": (
-                "No Release assets downloaded. SAFE shard materialization and "
-                "optional local snapshots require additional disk space."
+                "No payload assets downloaded; the SHA-256-verified restore "
+                "inventory control asset is cached and reusable. SAFE shard "
+                "materialization and optional local snapshots require additional "
+                "disk space."
             ),
             "read_only": True,
             "real_execution": False,

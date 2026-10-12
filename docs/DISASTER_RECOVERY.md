@@ -77,7 +77,8 @@ inventaires d'assets documentés. Comme GitHub refuse les résultats au-delà de
 `RESTORE_INVENTORY.json.gz` couvrant l'historique complet. Cet inventaire est
 lui-même contrôlé par taille et SHA-256 avant d'être fusionné avec la fenêtre
 live ; son absence, sa corruption ou un conflit d'identité fait échouer la
-restauration.
+restauration. Le fichier de contrôle vérifié est conservé dans le cache de
+restauration et n'est pas retéléchargé lors d'une synchronisation identique.
 Il vérifie ID, nom, tag, taille, état `uploaded`, SHA-256 puis la totalité
 des octets téléchargés. Il conserve dans `runtime/recovery/full/releases/`
 les collectes, historiques, carnets, capsules, manifests, replays, backtests,
