@@ -112,7 +112,7 @@ def _download_to_path(
     max_bytes: int | None = None,
 ) -> tuple[int, str]:
     """Stream one Release asset; optional hard cap protects bounded recovery."""
-    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 1):
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
         raise RestoreError("invalid bounded download byte limit")
     if max_bytes is not None and target.is_file() and target.stat().st_size > max_bytes:
         raise RestoreError("existing partial exceeds bounded download limit")
@@ -688,7 +688,9 @@ def download_asset(
         _verify_zip_archive(tmp, name)
         tmp.replace(target)
         return verified_result("RESUMED_VERIFIED", str(_expected_digest(asset)))
-    actual_size, actual_sha = _download_to_path(url, tmp, token=token)
+    actual_size, actual_sha = _download_to_path(
+        url, tmp, token=token, max_bytes=asset["size"]
+    )
     expected_size = asset["size"]
     if actual_size != expected_size:
         # A short file is a resumable prefix; an oversized file is unusable.
