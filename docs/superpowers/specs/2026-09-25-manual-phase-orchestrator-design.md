@@ -12918,6 +12918,24 @@ deduplication, and replay gates succeed. Missing cached files are NOT proof of
 irrecoverability. This tool does not download anything and does not change
 quarantine or SAFE classification.
 
+The manually exported recovery evidence bundle MUST include
+`WORK_RECOVERY_BUNDLE.json`, generated and verified by
+`python tools/verify_recovery_bundle.py --root <artifact-directory> --write`
+and `--verify`. The receipt binds the exact HEAD, canonical index SHA-256,
+candidate count, triage ordering/digest, full Release inventory digest,
+per-shard source comparison digest, and every included artifact byte.
+An altered/missing file, mismatched row identity, non-fail-closed candidate,
+symlinked source or attempted overwrite MUST fail. The only successful
+receipt status is `EVIDENCE_COMPLETE_NOT_RESTORED`; it is NEVER a
+REPLAY_READY_COMPLETE receipt or proof of recovered records.
+
+The one-way legacy `tools/enforce_safe_replay_invariant.py` demotion path
+must likewise archive original SAFE manifests under
+`datasets/quarantine/reclassification-history/<sha256>.original`
+before updating the index, and may only retire active old receipts after
+successful catalogue/registry publication and archive re-verification.
+Its `--dry-run` mode performs no writes, removals or downloads.
+
 For Work/Codex, the existing `catalog-partition-parity` GitHub-hosted
 workflow can be run manually with `emit_recovery_triage=true`. It writes a
 SHA-bound per-shard recovery ledger, verifies full candidate parity, and exports

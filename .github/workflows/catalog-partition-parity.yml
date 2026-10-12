@@ -13,6 +13,7 @@ on:
       - 'tools/enforce_safe_replay_invariant.py'
       - 'tools/preservation_inventory.py'
       - 'tools/audit_recovery_sources.py'
+      - 'tools/verify_recovery_bundle.py'
       - 'tools/probe_recovery_cache.py'
       - 'tools/fetch_published_restore_inventory.py'
       - 'tools/check_dataset_quality.py'
@@ -20,6 +21,7 @@ on:
       - 'tests/test_partitioned_data_index.py'
       - 'tests/test_preservation_inventory.py'
       - 'tests/test_recovery_source_audit.py'
+      - 'tests/test_verify_recovery_bundle.py'
       - 'tests/test_probe_recovery_cache.py'
       - 'tests/test_fetch_published_restore_inventory.py'
       - 'tests/test_reclassification_history_preservation.py'
@@ -63,7 +65,7 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py
 
       - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash
@@ -156,6 +158,15 @@ jobs:
           assert hashlib.sha256(payload).hexdigest() == comparison["source_comparison_jsonl_sha256"]
           print("UNRESOLVED_SOURCE_LOCATORS_COMPARED", comparison["candidate_count"])
           PY
+
+      - name: Seal and verify Work recovery transfer receipt
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/alina-preservation-evidence"
+          python tools/verify_recovery_bundle.py --root "$OUT" --write
+          python tools/verify_recovery_bundle.py --root "$OUT" --verify
 
       - name: Publish verified recovery triage as short-lived Actions artifact
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
