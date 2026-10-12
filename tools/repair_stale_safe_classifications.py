@@ -116,6 +116,39 @@ def _archive_prior_manifest(base: Path, old_path: Path) -> tuple[Path, str]:
     return archive_path, digest
 
 
+
+def _assert_shard_identity_preserved(previous_rows: list, new_rows: list) -> None:
+    """Fail before writes if a requalification alters the logical shard corpus."""
+    def by_id(rows: list) -> dict[str, tuple[object, str]]:
+        result = {}
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise ValueError("RECLASSIFICATION_INVALID_ROW")
+            ident = row.get("dataset_id")
+            if not isinstance(ident, str) or not ident or ident in result:
+                raise ValueError("RECLASSIFICATION_DUPLICATE_OR_MISSING_SHARD")
+            digest = row.get("sha256")
+            if digest is not None and not isinstance(digest, str):
+                raise ValueError("RECLASSIFICATION_INVALID_SHA")
+            result[ident] = (
+                digest.lower() if isinstance(digest, str) else None,
+                str(row.get("quality_status") or ""),
+            )
+        return result
+
+    prior = by_id(previous_rows)
+    after = by_id(new_rows)
+    if prior.keys() != after.keys():
+        raise ValueError("RECLASSIFICATION_LOST_OR_ADDED_SHARD")
+    for ident, (digest, status) in prior.items():
+        final_digest, final_status = after[ident]
+        if final_digest != digest:
+            raise ValueError("RECLASSIFICATION_CHANGED_SHARD_SHA")
+        if status == "SAFE" and final_status != "SAFE":
+            raise ValueError("RECLASSIFICATION_DEMOTED_SAFE_SHARD")
+
+
+
 def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
     base = Path(root).resolve()
     index_path = base / INDEX_PATH
@@ -208,6 +241,7 @@ def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
             "record_count": int(row.get("record_count") or row.get("event_count") or 0),
         })
 
+    _assert_shard_identity_preserved(shards, new_rows)
     new_rows.sort(
         key=lambda row: (
             int(row.get("start_ts_ms") or 0),

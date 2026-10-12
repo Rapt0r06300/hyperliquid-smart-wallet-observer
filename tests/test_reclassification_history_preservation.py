@@ -95,3 +95,19 @@ def test_quarantine_publisher_stages_exact_original_before_commit():
     assert workflow.index("git add -A -- datasets/quarantine") < workflow.index(
         'git commit -m "fix(dataset): repair stale classifications with provenance"'
     )
+
+
+def test_reclassification_prevents_loss_of_indexed_shards():
+    from tools.repair_stale_safe_classifications import _assert_shard_identity_preserved
+    prior = [{"dataset_id": "a", "sha256": "a" * 64, "quality_status": "SAFE"},
+             {"dataset_id": "b", "sha256": "b" * 64, "quality_status": "PARTIAL"}]
+    good = [dict(prior[1], quality_status="SAFE"), dict(prior[0])]
+    _assert_shard_identity_preserved(prior, good)
+    with pytest.raises(ValueError, match="LOST_OR_ADDED_SHARD"):
+        _assert_shard_identity_preserved(prior, good[:1])
+    with pytest.raises(ValueError, match="CHANGED_SHARD_SHA"):
+        _assert_shard_identity_preserved(prior, [dict(good[0], sha256="c" * 64), good[1]])
+    with pytest.raises(ValueError, match="DUPLICATE_OR_MISSING_SHARD"):
+        _assert_shard_identity_preserved(prior, [good[0], good[0]])
+    with pytest.raises(ValueError, match="DEMOTED_SAFE_SHARD"):
+        _assert_shard_identity_preserved(prior, [good[0], dict(good[1], quality_status="PARTIAL")])
