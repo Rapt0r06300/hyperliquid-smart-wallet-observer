@@ -301,7 +301,7 @@ def test_restore_fails_before_download_when_disk_is_insufficient(tmp_path, monke
 
 
 
-def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkeypatch):
+def test_iter_releases_uses_documented_embedded_assets_without_per_release_calls(monkeypatch):
     module = _module()
     def a(index):
         return {
@@ -309,23 +309,19 @@ def test_iter_releases_enumerates_asset_pages_not_truncated_embedded_list(monkey
             "id": index + 1,
             "state": "uploaded",
         }
-    releases = [{"id": 123, "tag_name": "data-v2-many", "assets": [a(i) for i in range(30)]}]
+    releases = [{"id": 123, "tag_name": "data-v2-many", "assets": [a(i) for i in range(151)]}]
     calls = []
     def fake_json(url, **_kwargs):
         calls.append(url)
         if "/releases?" in url:
             return releases
-        if "123/assets?" in url and url.endswith("&page=1"):
-            return [a(i) for i in range(100)]
-        if "123/assets?" in url and url.endswith("&page=2"):
-            return [a(i) for i in range(100, 105)]
         raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
     rows = list(module.iter_releases("owner/repo"))
     assert len(rows) == 1
-    assert len(rows[0]["assets"]) == 105
-    assert rows[0]["assets"][-1]["name"] == "part-104.bin"
-    assert len([url for url in calls if "/assets?" in url]) == 2
+    assert len(rows[0]["assets"]) == 151
+    assert rows[0]["assets"][-1]["name"] == "part-150.bin"
+    assert len(calls) == 1
 
 
 
@@ -339,16 +335,16 @@ def test_iter_releases_handles_overlapping_pages_from_live_publication(monkeypat
             return []
         page = int(url.split("&page=")[1])
         ids = {
-            1: list(range(20, 10, -1)),
-            2: list(range(11, 1, -1)),  # id=11 repeats from page 1
+            1: list(range(200, 100, -1)),
+            2: list(range(101, 1, -1)),  # id=101 repeats from page 1
             3: [1],
         }.get(page, [])
         return [{"id": i, "tag_name": f"data-v2-{i}", "assets": []}
                 for i in ids]
     monkeypatch.setattr(module, "_json", fake_json)
     found = list(module.iter_releases("owner/repo"))
-    assert [r["id"] for r in found] == list(range(20, 0, -1))
-    assert len([url for url in calls if "/assets?" in url]) == 20
+    assert [r["id"] for r in found] == list(range(200, 0, -1))
+    assert len(calls) == 3
 
 
 def test_iter_releases_rejects_conflicting_overlap(monkeypatch):
@@ -360,9 +356,9 @@ def test_iter_releases_rejects_conflicting_overlap(monkeypatch):
         page = int(url.split("&page=")[1])
         if page == 1:
             return [{"id": i, "tag_name": f"data-v2-{i}", "assets": []}
-                    for i in range(1, 11)]
+                    for i in range(1, 101)]
         if page == 2:
-            return [{"id": 9, "tag_name": "changed-tag", "assets": []}]
+            return [{"id": 99, "tag_name": "changed-tag", "assets": []}]
         return []
     monkeypatch.setattr(module, "_json", fake_json)
     with pytest.raises(module.RestoreError, match="changed tag"):
@@ -383,7 +379,7 @@ def test_iter_releases_504_retries_same_absolute_offset(monkeypatch):
                 "browser_download_url": f"https://example.invalid/{i}",
                 "state": "uploaded",
             }]
-        if "per_page=10&page=2" in url:
+        if "per_page=100&page=2" in url:
             raise module.RestoreError("HTTP 504 for deep Release page")
         size = int(url.split("per_page=")[1].split("&")[0])
         page = int(url.split("&page=")[1])
@@ -398,14 +394,62 @@ def test_iter_releases_504_retries_same_absolute_offset(monkeypatch):
                  "browser_download_url": f"https://example.invalid/{i}",
                  "state": "uploaded",
              }]}
-            for i in range(offset, min(12, offset + size))
+            for i in range(offset, min(112, offset + size))
         ]
 
     monkeypatch.setattr(module, "_json", fake_json)
     rows = list(module.iter_releases("owner/repo"))
-    assert len(rows) == 12
-    assert len({row["id"] for row in rows}) == 12
-    assert any("per_page=5&page=3" in url for url in calls)
+    assert len(rows) == 112
+    assert len({row["id"] for row in rows}) == 112
+    assert any("per_page=50&page=3" in url for url in calls)
+
+
+def test_iter_releases_uses_published_inventory_beyond_github_1000_cap(monkeypatch):
+    module = _module()
+    inventory_asset = {
+        **_asset(
+            "RESTORE_INVENTORY.json.gz",
+            "https://example.invalid/restore-inventory",
+            b"inventory",
+        ),
+        "id": 9001,
+        "state": "uploaded",
+    }
+
+    def fake_json(url, **_kwargs):
+        page = int(url.split("&page=")[1])
+        if page == 11:
+            raise module.RestoreError(
+                'HTTP 422: {"message":"Only the first 1000 results are available."}'
+            )
+        start = (page - 1) * 100
+        rows = [
+            {"id": i + 1, "tag_name": f"release-{i + 1}", "assets": []}
+            for i in range(start, start + 100)
+        ]
+        if page == 1:
+            rows[0] = {
+                "id": 9999,
+                "tag_name": "alina-restore-inventory-42",
+                "assets": [inventory_asset],
+            }
+        return rows
+
+    historical = [
+        {"id": 2, "tag_name": "release-2", "assets": []},
+        {"id": 2001, "tag_name": "historical-2001", "assets": []},
+    ]
+    monkeypatch.setattr(module, "_json", fake_json)
+    monkeypatch.setattr(
+        module,
+        "_read_restore_inventory_asset",
+        lambda *_args, **_kwargs: historical,
+        raising=False,
+    )
+
+    rows = list(module.iter_releases("owner/repo"))
+    assert len(rows) == 1001
+    assert rows[-1]["tag_name"] == "historical-2001"
 
 
 
@@ -414,10 +458,8 @@ def test_iter_releases_rejects_malformed_or_duplicate_asset_pages(monkeypatch):
     asset = {**_asset("one.bin", "https://example.invalid/one", b"a"), "id": 7, "state": "uploaded"}
     def fake_json(url, **_kwargs):
         if "/releases?" in url:
-            return [{"id": 1, "tag_name": "one", "assets": []}]
-        if url.endswith("&page=1"):
-            return [asset] * 100
-        return []
+            return [{"id": 1, "tag_name": "one", "assets": [asset, asset]}]
+        raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
     import pytest
     with pytest.raises(module.RestoreError, match="duplicated asset id"):
@@ -428,9 +470,11 @@ def test_iter_releases_rejects_asset_without_provable_hash(monkeypatch):
     module = _module()
     def fake_json(url, **_kwargs):
         if "/releases?" in url:
-            return [{"id": 1, "tag_name": "one", "assets": []}]
-        return [{**_asset("one.bin", "https://example.invalid/one", b"a"),
-                 "id": 7, "state": "uploaded", "digest": None}]
+            return [{"id": 1, "tag_name": "one", "assets": [
+                {**_asset("one.bin", "https://example.invalid/one", b"a"),
+                 "id": 7, "state": "uploaded", "digest": None},
+            ]}]
+        raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
     import pytest
     with pytest.raises(module.RestoreError, match="SHA-256"):
@@ -1274,25 +1318,26 @@ def test_restore_verified_overflow_via_canonical_manifest(tmp_path, monkeypatch)
             data_tag / "overflow-trade-1.jsonl.gz").read_bytes() == shard
 
 
-def test_release_pagination_uses_small_pages_and_enumerates_every_release(monkeypatch):
+def test_release_pagination_uses_max_pages_and_enumerates_every_release(monkeypatch):
     module = _module()
     urls = []
     def fetch_json(url, **_kwargs):
         urls.append(url)
         if "releases?" not in url:
             raise AssertionError(url)
+        size = int(url.split("per_page=")[1].split("&")[0])
         page = int(url.rsplit("page=", 1)[1])
         return [
             {"id": n + 1, "tag_name": f"release-{n + 1}", "assets": []}
-            for n in range((page - 1) * 10, min(page * 10, 23))
+            for n in range((page - 1) * size, min(page * size, 203))
         ]
     monkeypatch.setattr(module, "_json", fetch_json)
     monkeypatch.setattr(module, "_list_release_assets", lambda *_a, **_k: [])
     result = list(module.iter_releases("owner/repo"))
-    assert len(result) == 23
-    assert len({x["id"] for x in result}) == 23
+    assert len(result) == 203
+    assert len({x["id"] for x in result}) == 203
     assert len(urls) == 3
-    assert all("per_page=10" in url for url in urls)
+    assert all("per_page=100" in url for url in urls)
 
 
 def test_snapshot_segment_copy_is_exact_and_bounded():
@@ -1322,7 +1367,7 @@ def test_snapshot_segment_copy_refuses_short_source_without_padding():
     assert output.getvalue() == b"abc"
 
 
-def test_restore_checks_independent_assets_for_short_embedded_inventory(monkeypatch):
+def test_restore_uses_exact_embedded_asset_inventory(monkeypatch):
     module = _module()
     one = {**_asset("one.bin", "https://example.invalid/one", b"one"),
            "id": 77, "state": "uploaded"}
@@ -1332,27 +1377,25 @@ def test_restore_checks_independent_assets_for_short_embedded_inventory(monkeypa
     def fake_json(url, **_kwargs):
         urls.append(url)
         if "/releases?" in url:
-            return [{"id": 3, "tag_name": "archive-3", "assets": [one]}]
-        if "/releases/3/assets?" in url:
-            return [one, two]
+            return [{"id": 3, "tag_name": "archive-3", "assets": [one, two]}]
         raise AssertionError(url)
     monkeypatch.setattr(module, "_json", fake_json)
     rows = list(module.iter_releases("owner/repo"))
     assert len(rows) == 1
     assert rows[0]["assets"] == [one, two]
-    assert len(urls) == 2
+    assert len(urls) == 1
 
 
-def test_restore_rejects_disappearing_embedded_asset(monkeypatch):
+def test_restore_rejects_duplicate_embedded_asset_name(monkeypatch):
     import pytest
     module = _module()
     one = {**_asset("one.bin", "https://example.invalid/one", b"one"),
            "id": 77, "state": "uploaded"}
+    duplicate = dict(one, id=78)
     monkeypatch.setattr(module, "_json", lambda *_a, **_k: [
-        {"id": 3, "tag_name": "archive-3", "assets": [one]}
+        {"id": 3, "tag_name": "archive-3", "assets": [one, duplicate]}
     ])
-    monkeypatch.setattr(module, "_list_release_assets", lambda *_a, **_k: [])
-    with pytest.raises(module.RestoreError, match="inventory changed"):
+    with pytest.raises(module.RestoreError, match="duplicated asset name"):
         list(module.iter_releases("owner/repo"))
 
 

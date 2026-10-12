@@ -10,6 +10,7 @@ The tool is read-only against GitHub. It uses only Python's standard library.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import http.client
 import json
@@ -19,6 +20,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -246,23 +248,110 @@ def _list_release_assets(
         page += 1
 
 
+def _read_restore_inventory_asset(
+    asset: Mapping[str, Any], repository: str, *, token: str | None = None,
+    allow_incomplete: bool = False,
+) -> list[Mapping[str, Any]]:
+    """Download and validate the GitHub-hosted inventory spanning the REST cap."""
+    expected_size = asset.get("size")
+    expected_sha = _expected_digest(asset)
+    url = asset.get("browser_download_url")
+    if type(expected_size) is not int or expected_size < 0 or expected_sha is None:
+        raise RestoreError("invalid published restore inventory identity")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise RestoreError("invalid published restore inventory URL")
+    with tempfile.TemporaryDirectory(prefix="alina-restore-inventory-") as directory:
+        path = Path(directory) / "RESTORE_INVENTORY.json.gz"
+        actual_size, actual_sha = _download_to_path(url, path, token=token)
+        if actual_size != expected_size or actual_sha != expected_sha:
+            raise RestoreError("published restore inventory failed size/SHA-256 verification")
+        try:
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeError) as exc:
+            raise RestoreError("published restore inventory is malformed") from exc
+    if not isinstance(payload, Mapping):
+        raise RestoreError("published restore inventory root is invalid")
+    if payload.get("schema") != "alina.restore_inventory.v1":
+        raise RestoreError("unsupported published restore inventory schema")
+    if payload.get("repository") != repository:
+        raise RestoreError("published restore inventory repository mismatch")
+    releases = payload.get("releases")
+    if not isinstance(releases, list):
+        raise RestoreError("published restore inventory has no Release list")
+    seen_release_ids: set[int] = set()
+    seen_tags: set[str] = set()
+    for release in releases:
+        if not isinstance(release, Mapping):
+            raise RestoreError("malformed Release in published restore inventory")
+        release_id = release.get("id")
+        tag = release.get("tag_name")
+        assets = release.get("assets")
+        if (
+            type(release_id) is not int or release_id <= 0
+            or release_id in seen_release_ids
+            or not isinstance(tag, str) or not tag or tag in seen_tags
+            or not isinstance(assets, list)
+        ):
+            raise RestoreError("duplicate or malformed published restore inventory Release")
+        asset_ids: set[int] = set()
+        asset_names: set[str] = set()
+        for row in assets:
+            _validate_release_asset(
+                row, release_id, asset_ids, asset_names,
+                allow_incomplete=allow_incomplete,
+            )
+        seen_release_ids.add(release_id)
+        seen_tags.add(tag)
+    return releases
+
+
 def iter_releases(
     repository: str, *, token: str | None = None,
     allow_incomplete: bool = False,
 ) -> Iterable[Mapping[str, Any]]:
-    """Read complete historical Releases and their independently paged asset lists."""
-    # Ten full Release objects per call avoids 504s when releases carry many assets.
-    # Asset lists remain independently paginated and SHA-verified.
-    page_size = 10
+    """Read every Release and its documented embedded asset inventory."""
+    # The list-Releases response contains each Release's asset array.  Reading
+    # 100 Releases per page keeps large public repositories inside GitHub's
+    # anonymous API allowance instead of issuing one extra request per Release.
+    page_size = 100
     offset = 0
     seen_ids: dict[int, str] = {}
     seen_tags: set[str] = set()
+    inventory_asset: Mapping[str, Any] | None = None
     while True:
         page = offset // page_size + 1
         url = f"https://api.github.com/repos/{repository}/releases?per_page={page_size}&page={page}"
         try:
             payload = _json(url, token=token)
         except RestoreError as exc:
+            if "only the first 1000 results are available" in str(exc).lower():
+                if inventory_asset is None:
+                    raise RestoreError(
+                        "GitHub caps Release listing at 1000 and no published "
+                        "RESTORE_INVENTORY.json.gz was found in the live window"
+                    ) from exc
+                historical = _read_restore_inventory_asset(
+                    inventory_asset, repository, token=token,
+                    allow_incomplete=allow_incomplete,
+                )
+                for release in historical:
+                    release_id = release["id"]
+                    tag = release["tag_name"]
+                    if release_id in seen_ids:
+                        if seen_ids[release_id] != tag:
+                            raise RestoreError(
+                                "published restore inventory conflicts with live Release"
+                            ) from exc
+                        continue
+                    if tag in seen_tags:
+                        raise RestoreError(
+                            "published restore inventory duplicates a live Release tag"
+                        ) from exc
+                    seen_ids[release_id] = tag
+                    seen_tags.add(tag)
+                    yield release
+                return
             if offset and page_size > 1 and any(
                 status in str(exc).lower() for status in ("http 502", "http 504")
             ):
@@ -301,8 +390,6 @@ def iter_releases(
             embedded = release.get("assets")
             if not isinstance(embedded, list):
                 raise RestoreError(f"missing embedded asset array for release {release_id}")
-            # A short embedded asset array is not an independent inventory.
-            # Always page the Release-assets API, even for <30 embedded assets.
             embedded_ids: set[int] = set()
             embedded_names: set[str] = set()
             for asset in embedded:
@@ -310,21 +397,13 @@ def iter_releases(
                     asset, release_id, embedded_ids, embedded_names,
                     allow_incomplete=allow_incomplete,
                 )
-            complete_assets = _list_release_assets(
-                repository, release_id, token=token,
-                allow_incomplete=allow_incomplete,
-            )
-            by_id = {asset["id"]: asset for asset in complete_assets}
-            for asset in embedded:
-                current = by_id.get(asset["id"])
-                if current is None or any(
-                    current.get(key) != asset.get(key)
-                    for key in ("name", "size", "digest", "state")
+                if (
+                    inventory_asset is None
+                    and tag.startswith("alina-restore-inventory-")
+                    and asset.get("name") == "RESTORE_INVENTORY.json.gz"
                 ):
-                    raise RestoreError(
-                        f"Release asset inventory changed during enumeration: {tag}"
-                    )
-            complete_release["assets"] = complete_assets
+                    inventory_asset = asset
+            complete_release["assets"] = embedded
             yield complete_release
         if len(payload) < page_size:
             return

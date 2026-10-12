@@ -74,6 +74,12 @@ qualifiées pour le replay. Le snapshot de fichiers locaux ignorés est restaur�
 seulement s'il a été préalablement publié et vérifié ; sinon la demande
 de restauration intégrale échoue explicitement.
 
+Comme GitHub limite son endpoint REST `list releases` aux 1 000 résultats les
+plus récents, le workflow GitHub-hosted `publish-restore-inventory` publie
+toutes les six heures un `RESTORE_INVENTORY.json.gz` vérifié. Le restaurateur
+fusionne cet inventaire historique avec la fenêtre live afin que le clone ne
+perde aucune Release ancienne et reste utilisable sans Git LFS.
+
 **100 % = succès de `RESTORE_COMPLETE` et code de sortie zéro**, sans un seul
 asset manquant, corrompu ou sans empreinte vérifiable, pour l'inventaire
 GitHub observé au début. Les archives historiques `starter` ou privées

@@ -70,8 +70,14 @@ aucun ordre n'est exécuté.
 
 ## Inventaire exact et preuve d'identité des données
 
-Le restaurateur énumère les Releases et leurs assets via API paginée
-**indépendante**, sans faire confiance aux listes embarquées tronquées.
+Le restaurateur énumère la fenêtre live via les pages `list releases` et leurs
+inventaires d'assets documentés. Comme GitHub refuse les résultats au-delà des
+1 000 Releases les plus récentes, le workflow GitHub-hosted
+`publish-restore-inventory` publie toutes les six heures un
+`RESTORE_INVENTORY.json.gz` couvrant l'historique complet. Cet inventaire est
+lui-même contrôlé par taille et SHA-256 avant d'être fusionné avec la fenêtre
+live ; son absence, sa corruption ou un conflit d'identité fait échouer la
+restauration.
 Il vérifie ID, nom, tag, taille, état `uploaded`, SHA-256 puis la totalité
 des octets téléchargés. Il conserve dans `runtime/recovery/full/releases/`
 les collectes, historiques, carnets, capsules, manifests, replays, backtests,

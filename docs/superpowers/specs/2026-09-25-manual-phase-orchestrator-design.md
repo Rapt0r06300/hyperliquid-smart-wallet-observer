@@ -12857,8 +12857,14 @@ single `tools/restore_alina.py` data plane; no duplicate restorer is permitted.
 
 The restore MUST verify each published asset's immutable GitHub asset ID,
 source Release identity, reported size and authoritative SHA-256 against
-the actual downloaded bytes. It MUST enumerate every paginated Release and
-every Release asset independently, support resumable downloads and disk
+the actual downloaded bytes. GitHub's `list releases` endpoint refuses results
+beyond the newest 1,000 Releases, so the GitHub-hosted
+`publish-restore-inventory` workflow MUST publish a SHA-256-verifiable
+`RESTORE_INVENTORY.json.gz` control asset at least every six hours. The
+restorer MUST merge that complete historical inventory with the live paginated
+window and fail closed if the inventory is absent, corrupt or conflicts with a
+live identity. It MUST enumerate every asset in the merged inventory, support
+resumable downloads and disk
 preflight, archive *all* verified raw trades/L2/evidence and
 replay/backtest/OOS/forward/scoreboard/checkpoint outputs, and classify
 replay-usable shards using the current SHA-bound SAFE catalog. Unqualified
