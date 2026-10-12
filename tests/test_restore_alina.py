@@ -83,6 +83,17 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     assert report["verified_asset_bytes"] == report["source_asset_bytes"]
     assert report["missing_asset_bytes"] == 0
     assert report["source_byte_parity"] is True
+    assert report["assets_verified"] is True
+    assert report["restore_complete"] is False
+    assert report["published_volume_bytes"] == len(shard) + len(manifest_bytes)
+    assert report["restored_volume_bytes"] == report["published_volume_bytes"]
+    assert report["verified_volume_bytes"] == report["published_volume_bytes"]
+    assert report["missing_volume_bytes"] == 0
+    assert report["corrupt_volume_bytes"] == 0
+    assert report["non_verifiable_volume_bytes"] == 0
+    assert report["quarantine_volume_bytes"] == len(shard)
+    assert report["snapshots_reconstructed"] == 0
+    assert report["snapshot_files_reconstructed"] == 0
     assert report["failures"] == []
     assert report["verification_failures"] == 0
     assert report["run_manifest_checks"][0]["status"] == "OK"
@@ -91,6 +102,13 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     identities = report["releases"][0]["assets"]
     assert identities[0]["sha256"] == shard_sha
     assert identities[0]["size_bytes"] == len(shard)
+    assert identities[0]["source_repository"] == "owner/repo"
+    assert identities[0]["release_tag"] == "data-v2-test"
+    assert identities[0]["expected_sha256"] == shard_sha
+    assert identities[0]["calculated_sha256"] == shard_sha
+    assert identities[0]["downloaded_size_bytes"] == len(shard)
+    assert identities[0]["verification_status"] == "VERIFIED"
+    assert identities[0]["destination"].endswith("/data-v2-test/trades.jsonl.gz")
     assert (tmp_path / "releases" / "data-v2-test" / "trades.jsonl.gz").read_bytes() == shard
 
 
@@ -519,6 +537,8 @@ def test_restore_materializes_only_proven_safe_replay_assets(tmp_path, monkeypat
     assert (quarantine / "partial-trades.jsonl.gz").read_bytes() == partial
     assert report["classification"]["usable_shards"] == 1
     assert report["classification"]["quarantined_shards"] == 1
+    assert report["classification"]["usable_bytes"] == len(safe)
+    assert report["classification"]["quarantined_bytes"] == len(partial)
 
     repeat = module.restore_everything("owner/repo", tmp_path)
     assert repeat["all_source_assets_accounted_for"]
@@ -831,6 +851,8 @@ def test_restore_revoked_safe_shard_is_quarantined_on_next_run(tmp_path):
     assert second["usable_shards"] == 0
     assert second["quarantined_shards"] == 1
     assert second["stale_usable_quarantined"] == 1
+    assert second["stale_usable_quarantined_bytes"] == len(shard)
+    assert second["failures"] == []
     assert not usable.exists()
     assert (release / "shard.jsonl.gz").read_bytes() == shard
     assert (tmp_path / "quarantine" / "shards" /
@@ -1390,6 +1412,8 @@ def test_failed_release_asset_never_reports_all_bytes_accounted_for(tmp_path, mo
     assert report["source_asset_bytes"] == len(expected)
     assert report["verified_asset_bytes"] == 0
     assert report["missing_asset_bytes"] == len(expected)
+    assert report["corrupt_volume_bytes"] == 6
+    assert report["failed_verification_source_bytes"] == len(expected)
     assert report["source_byte_parity"] is False
     assert not (tmp_path / "releases" / "evidence-incomplete" / "evidence.bin").exists()
 

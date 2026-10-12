@@ -533,11 +533,24 @@ def download_asset(
         raise RestoreError(f"invalid size for {name}")
     target = destination / _safe_component(name)
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    def verified_result(status: str, calculated_sha256: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "path": str(target),
+            "destination": str(target),
+            "status": status,
+            "verification_status": "VERIFIED",
+            "downloaded_size_bytes": target.stat().st_size,
+            "expected_sha256": _expected_digest(asset),
+            "calculated_sha256": calculated_sha256,
+        }
+
     if target.is_symlink():
         raise RestoreError(f"symlinked Release asset target: {name}")
     if _asset_ok(target, asset):
         _verify_zip_archive(target, name)
-        return {"name": name, "path": str(target), "status": "SKIPPED_VERIFIED"}
+        return verified_result("SKIPPED_VERIFIED", str(_expected_digest(asset)))
 
     tmp = target.with_suffix(target.suffix + ".partial")
     if tmp.is_symlink():
@@ -555,15 +568,14 @@ def download_asset(
                 raise RestoreError(f"Git LFS restored bytes changed: {name}")
             _verify_zip_archive(tmp, name)
             tmp.replace(target)
-            return {"name": name, "path": str(target),
-                    "status": "LFS_REUSED_VERIFIED"}
+            return verified_result("LFS_REUSED_VERIFIED", str(_expected_digest(asset)))
         except (OSError, RestoreError):
             tmp.unlink(missing_ok=True)
             raise
     if _asset_ok(tmp, asset):
         _verify_zip_archive(tmp, name)
         tmp.replace(target)
-        return {"name": name, "path": str(target), "status": "RESUMED_VERIFIED"}
+        return verified_result("RESUMED_VERIFIED", str(_expected_digest(asset)))
     actual_size, actual_sha = _download_to_path(url, tmp, token=token)
     expected_size = asset["size"]
     if actual_size != expected_size:
@@ -577,7 +589,7 @@ def download_asset(
         raise RestoreError(f"sha256 mismatch for {name}")
     _verify_zip_archive(tmp, name)
     tmp.replace(target)
-    return {"name": name, "path": str(target), "status": "DOWNLOADED_VERIFIED"}
+    return verified_result("DOWNLOADED_VERIFIED", actual_sha)
 
 
 def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
@@ -690,12 +702,15 @@ def _materialize_classified_shards(
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "usable_shards": 0,
+        "usable_bytes": 0,
         "quarantined_shards": 0,
+        "quarantined_bytes": 0,
         "excluded_rows": 0,
         "missing_or_corrupt_rows": 0,
         "verified_zip_members": 0,
         "skipped_verified_shards": 0,
         "stale_usable_quarantined": 0,
+        "stale_usable_quarantined_bytes": 0,
         "ignored_stale_release_manifests": 0,
         "failures": [],
     }
@@ -828,8 +843,10 @@ def _materialize_classified_shards(
                     expected_usable.add(target)
                     restored_safe_ids.add(dataset_id)
                     report["usable_shards"] += 1
+                    report["usable_bytes"] += int(row["bytes"])
                 else:
                     report["quarantined_shards"] += 1
+                    report["quarantined_bytes"] += int(row["bytes"])
                 report["skipped_verified_shards"] += 1
                 continue
             tmp = target.with_suffix(target.suffix + ".partial")
@@ -877,8 +894,10 @@ def _materialize_classified_shards(
                 expected_usable.add(target)
                 restored_safe_ids.add(dataset_id)
                 report["usable_shards"] += 1
+                report["usable_bytes"] += int(row["bytes"])
             else:
                 report["quarantined_shards"] += 1
+                report["quarantined_bytes"] += int(row["bytes"])
 
     # Restores are repeatable: a previously SAFE shard must not remain under
     # usable/ after its latest manifest is downgraded, removed, or ambiguous.
@@ -896,6 +915,7 @@ def _materialize_classified_shards(
                 })
                 continue
             try:
+                old_size = previous.stat().st_size
                 old_digest = _sha256(previous)
                 stale_root = destination / "quarantine" / "stale_usable" / previous.parent.name
                 stale_root.mkdir(parents=True, exist_ok=True)
@@ -907,6 +927,7 @@ def _materialize_classified_shards(
                 else:
                     previous.replace(stale_path)
                 report["stale_usable_quarantined"] += 1
+                report["stale_usable_quarantined_bytes"] += old_size
             except (OSError, RestoreError) as exc:
                 report["failures"].append({
                     "path": str(previous),
@@ -1485,6 +1506,8 @@ def restore_everything(
         "unverified_source_bytes": unverified_source_bytes,
         "verified_asset_bytes": 0,
         "verified_asset_count": 0,
+        "failed_verification_source_bytes": 0,
+        "retained_unverified_local_bytes": 0,
         "downloaded": 0,
         "resumed_verified": 0,
         "skipped_verified": 0,
@@ -1522,9 +1545,13 @@ def restore_everything(
                 continue
             report["asset_count"] += 1
             identity = {
+                "source_repository": repository,
+                "release_tag": tag,
+                "release_id": release.get("id"),
                 "asset_id": asset.get("id"),
                 "size_bytes": asset.get("size"),
                 "sha256": _expected_digest(asset),
+                "expected_sha256": _expected_digest(asset),
             }
             if recover_verifiable and (
                 not _source_asset_eligible(asset, salvage=recover_verifiable)
@@ -1535,7 +1562,9 @@ def restore_everything(
                 })
                 row["assets"].append({
                     **identity, "name": asset.get("name"),
-                    "status": "FAIL", "error": reason,
+                    "status": "FAIL", "verification_status": "UNVERIFIABLE",
+                    "downloaded_size_bytes": 0, "calculated_sha256": None,
+                    "destination": None, "error": reason,
                 })
                 continue
             try:
@@ -1555,11 +1584,28 @@ def restore_everything(
                 else:
                     report["skipped_verified"] += 1
             except RestoreError as exc:
+                failed_target = release_dir / _safe_component(
+                    str(asset.get("name") or "")
+                )
+                failed_partial = failed_target.with_suffix(
+                    failed_target.suffix + ".partial"
+                )
+                retained_unverified_bytes = sum(
+                    candidate.stat().st_size
+                    for candidate in (failed_target, failed_partial)
+                    if candidate.is_file() and not candidate.is_symlink()
+                )
+                report["failed_verification_source_bytes"] += int(asset["size"])
+                report["retained_unverified_local_bytes"] += retained_unverified_bytes
                 failure = {"tag": tag, "asset": asset.get("name"), "error": str(exc)}
                 report["failures"].append(failure)
                 row["assets"].append({
                     **identity, "name": asset.get("name"),
-                    "status": "FAIL", "error": str(exc),
+                    "status": "FAIL", "verification_status": "FAILED",
+                    "downloaded_size_bytes": retained_unverified_bytes,
+                    "calculated_sha256": None,
+                    "destination": str(failed_target),
+                    "error": str(exc),
                 })
         report["releases"].append(row)
 
@@ -1648,6 +1694,36 @@ def restore_everything(
         else "ASSETS_VERIFIED_ONLY" if complete
         else "RESTORE_INCOMPLETE"
     )
+    snapshot = report.get("local_snapshot")
+    snapshot_reconstructed = (
+        isinstance(snapshot, Mapping)
+        and "file_count" in snapshot
+        and snapshot.get("status") not in {"FAIL", "NOT_PUBLISHED"}
+    )
+    report.update({
+        "assets_verified": bool(report["source_byte_parity"]),
+        "restore_complete": report["status"] == "RESTORE_COMPLETE",
+        "published_volume_bytes": report["source_asset_bytes"],
+        "restored_volume_bytes": report["verified_asset_bytes"],
+        "verified_volume_bytes": report["verified_asset_bytes"],
+        "missing_volume_bytes": report["missing_asset_bytes"],
+        "corrupt_volume_bytes": report["retained_unverified_local_bytes"],
+        "non_verifiable_volume_bytes": report["unverified_source_bytes"],
+        "quarantine_volume_bytes": (
+            report["classification"]["quarantined_bytes"]
+            + report["classification"]["stale_usable_quarantined_bytes"]
+        ),
+        "snapshots_reconstructed": 1 if snapshot_reconstructed else 0,
+        "snapshot_files_reconstructed": (
+            int(snapshot.get("restored_files", 0)) if snapshot_reconstructed else 0
+        ),
+        "snapshot_files_verified": (
+            int(snapshot.get("restored_files", 0))
+            + int(snapshot.get("skipped_verified_files", 0))
+            if snapshot_reconstructed else 0
+        ),
+        "source_destination_match": bool(complete),
+    })
     report_path = destination / "RESTORE_REPORT.json"
     report_partial = report_path.with_name(report_path.name + ".partial")
     report_partial.write_text(

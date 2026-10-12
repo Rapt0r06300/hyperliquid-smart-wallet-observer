@@ -58,6 +58,10 @@ assets, volumes, manquants et quarantaines), ou
 restent indispensables pour revendiquer une récupération totale de
 l'inventaire initial. Une nouvelle exécution récupère les nouveaux
 assets publiés pendant ou après la précédente synchronisation.
+Le checkpoint de synchronisation ne déduit jamais ce statut du seul code
+de sortie : il relit le rapport, vérifie le dépôt et le SHA-256 de
+l'inventaire, puis reste `RESTORE_INCOMPLETE` si le certificat est absent,
+invalide ou seulement `ASSETS_VERIFIED_ONLY`.
 
 Aucun processus GitHub ne peut démarrer cette commande sur le PC ;
 elle n'est exécutée que lorsque l'opérateur la lance. Aucun collecteur
@@ -72,6 +76,11 @@ Il vérifie ID, nom, tag, taille, état `uploaded`, SHA-256 puis la totalité
 des octets téléchargés. Il conserve dans `runtime/recovery/full/releases/`
 les collectes, historiques, carnets, capsules, manifests, replays, backtests,
 OOS/forward, résultats, scoreboards et checkpoints **publiés sur GitHub**.
+Chaque ligne d'asset du rapport conserve aussi le dépôt source, l'identité
+Release, les tailles annoncée/restaurée, les SHA-256 attendu/calculé, le
+statut de vérification et la destination. Les totaux distinguent octets
+publiés, restaurés/vérifiés, manquants, non vérifiables et matérialisés en
+quarantaine, ainsi que les snapshots et fichiers reconstruits.
 
 Chaque reprise est liée au SHA-256 déterministe de son inventaire initial ;
 les collecteurs continuent et peuvent publier de nouveaux actifs pendant

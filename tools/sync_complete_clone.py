@@ -9,9 +9,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
+import re
 import subprocess
 import sys
+from pathlib import Path
 
 REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 TRUSTED_ORIGINS = {
@@ -110,6 +111,23 @@ def restore_published(root: Path, *, preflight: bool = False,
         raise SyncError("Python restore could not be launched") from exc
 
 
+def _read_restore_status(report_path: Path) -> tuple[str, str | None, str | None]:
+    """Read the byte-level certificate; a process exit code alone is not proof."""
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return "RESTORE_INCOMPLETE", None, "missing or invalid restore report"
+    if not isinstance(payload, dict):
+        return "RESTORE_INCOMPLETE", None, "restore report is not an object"
+    status = str(payload.get("status") or "RESTORE_INCOMPLETE")
+    inventory_sha = payload.get("source_inventory_sha256")
+    if not isinstance(inventory_sha, str) or re.fullmatch(r"[0-9a-f]{64}", inventory_sha) is None:
+        return "RESTORE_INCOMPLETE", None, "restore report has no valid inventory SHA-256"
+    if payload.get("repository") != REPOSITORY:
+        return "RESTORE_INCOMPLETE", inventory_sha, "restore report repository mismatch"
+    return status, inventory_sha, None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Update canonical main safely and hydrate every published "
@@ -146,16 +164,32 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report_dir = root / "runtime" / "recovery" / "full"
         report_dir.mkdir(parents=True, exist_ok=True)
+        report_name = (
+            "RESTORE_PREFLIGHT.json" if args.preflight_only else "RESTORE_REPORT.json"
+        )
+        restore_status, inventory_sha, report_error = _read_restore_status(
+            report_dir / report_name
+        )
+        certified = (
+            not args.preflight_only
+            and code == 0
+            and restore_status == "RESTORE_COMPLETE"
+            and report_error is None
+        )
+        effective_code = code
+        if not args.preflight_only and code == 0 and not certified:
+            effective_code = 2
         checkpoint = {
             "schema": "alina.main_sync.v1",
             "repository": REPOSITORY,
             "branch": "main",
             "git_head": head,
             "restore_exit_code": code,
-            "status": "RESTORE_EXIT_ZERO" if code == 0 else "RESTORE_INCOMPLETE",
-            "restore_report": (
-                "RESTORE_PREFLIGHT.json" if args.preflight_only else "RESTORE_REPORT.json"
-            ),
+            "status": "RESTORE_COMPLETE" if certified else "RESTORE_INCOMPLETE",
+            "restore_report": report_name,
+            "restore_report_status": restore_status,
+            "source_inventory_sha256": inventory_sha,
+            "report_validation_error": report_error,
         }
         path = report_dir / "SYNC_REPORT.json"
         temporary = path.with_suffix(".json.partial")
@@ -165,14 +199,14 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         print(f"ALINA_SYNC_FAIL: cannot persist sync checkpoint: {exc}", file=sys.stderr)
         return 2
-    if code:
+    if effective_code:
         print(
             "ALINA_SYNC_INCOMPLETE: code is synchronized but published evidence "
             "is not proven byte-complete; see "
             "runtime/recovery/full/RESTORE_REPORT.json or RESTORE_PREFLIGHT.json",
             file=sys.stderr,
         )
-    return code
+    return effective_code
 
 
 if __name__ == "__main__":

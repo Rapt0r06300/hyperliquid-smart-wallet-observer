@@ -13,7 +13,7 @@ def test_restore_alina_cmd_selects_portable_then_python_and_keeps_fail_closed():
     assert "&& goto :system" in script
     assert script.count("sys.version_info[:2] < (3, 10)") == 3
     assert script.count("tools\\restore_alina.py --everything") == 3
-    assert script.count("--clone-root") == 3
+    assert "--clone-root" not in script
     assert script.count("--destination") == 3
     assert script.count("%*") == 3
     assert "gh auth token" in script

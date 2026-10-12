@@ -12839,21 +12839,21 @@ and never bloat Git history with huge data blobs to disguise that limitation.
 Windows CMD, with Git and Python 3.10+:
 
 ```cmd
-set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && Alina-restore.cmd --recover-verifiable --materialize-local-snapshot
+set "GIT_LFS_SKIP_SMUDGE=1" && git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && ALINA_SYNC_COMPLETE.cmd
 ```
 
 Linux/macOS:
 
 ```bash
-GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash RESTORE_ALINA.sh --recover-verifiable --materialize-local-snapshot
+GIT_LFS_SKIP_SMUDGE=1 git clone --branch main --single-branch https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer.git && cd hyperliquid-smart-wallet-observer && bash ALINA_SYNC_COMPLETE.sh
 ```
 
 This is ONE operator command containing **two** distinct operations:
 clone the exact committed code/catalog/control plane from `main`, then
 stream all currently enumerated GitHub Release assets from the **same**
 repository. `GIT_LFS_SKIP_SMUDGE` guarantees no accidental LFS download.
-`Alina-restore.cmd` is only an alias for `RESTORE_ALINA.cmd` and
-`tools/restore_alina.py`; no duplicate data plane is permitted.
+Both wrappers call `tools/sync_complete_clone.py`, which delegates to the
+single `tools/restore_alina.py` data plane; no duplicate restorer is permitted.
 
 The restore MUST verify each published asset's immutable GitHub asset ID,
 source Release identity, reported size and authoritative SHA-256 against
@@ -12889,6 +12889,9 @@ source inventory enumerated at the start:
 - any explicitly requested local-only snapshot fully verified and restored;
 - durable `runtime/recovery/full/RESTORE_REPORT.json`, including the exact
   source inventory SHA-256, counters, failures, classifications and status.
+- `SYNC_REPORT.json` must relink the Git HEAD to that actual certificate;
+  exit zero without a readable same-repository `RESTORE_COMPLETE` report and
+  valid source-inventory SHA-256 remains `RESTORE_INCOMPLETE`.
 
 The optional `--preflight-only --recover-verifiable` measures disk space and
 reports source gaps **without** claiming restored files.
