@@ -109,7 +109,7 @@ def test_restore_everything_downloads_and_verifies_run_manifest(tmp_path, monkey
     assert identities[0]["calculated_sha256"] == shard_sha
     assert identities[0]["downloaded_size_bytes"] == len(shard)
     assert identities[0]["verification_status"] == "VERIFIED"
-    assert identities[0]["destination"].endswith("/data-v2-test/trades.jsonl.gz")
+    assert Path(identities[0]["destination"]) == (tmp_path / "releases" / "data-v2-test" / "trades.jsonl.gz")
     assert (tmp_path / "releases" / "data-v2-test" / "trades.jsonl.gz").read_bytes() == shard
 
 
