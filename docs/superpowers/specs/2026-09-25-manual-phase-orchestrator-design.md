@@ -12902,6 +12902,21 @@ Work/Codex distinguish a complete, unchanged triage from an incomplete or
 stale one. This ledger is a repair queue, not a list of proven recoverable
 bytes or validated replay inputs. It makes no remote asset-availability claim.
 
+Before using this queue for repairs, execute
+`python tools/preservation_inventory.py --verify-triage-jsonl <same-path>`
+against the identical DATA_INDEX and DATA_METRICS snapshot. Verification must
+match every candidate in order, reject missing or extra lines, and bind the
+footer digest/count to the canonical source. A valid triage remains
+`TRIAGE_VERIFIED_NOT_RESTORED`, never SAFE or restored proof.
+
+When existing PARTIAL/REJECT/STALE manifest labels are legitimately promoted,
+the original receipt MUST first be copied byte-for-byte to
+`catalog/reclassification-history/<sha256>.json`. Archive collisions,
+symlinks and digest mismatch are fatal; no old receipt may be retired
+before exact archival evidence, index, SAFE manifest, and catalog updates
+succeed. The history is part of the same Git commit (catalog plus datasets)
+as the promotion, not an untracked local side effect.
+
 Run `python tools/preservation_inventory.py` locally or on an explicitly
 requested GitHub-hosted validation to obtain a read-only, SHA-bound census
 of SAFE, PARTIAL, REJECT and STALE rows by family, the number and exact
