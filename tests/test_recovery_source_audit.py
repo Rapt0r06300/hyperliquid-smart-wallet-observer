@@ -125,3 +125,17 @@ def test_matched_zip_cannot_certify_missing_inner_shard_identity(tmp_path):
     summary, detail = assess_sources(index, report, assets, {})
     assert detail[0]["source_comparison"] == "SNAPSHOT_LISTED_IDENTITY_UNBOUND"
     assert summary["unique_matched_outer_assets"] == 0
+
+
+def test_source_audit_bound_decompression_and_result_checksum(tmp_path, monkeypatch):
+    from tools.audit_recovery_sources import MAX_INVENTORY_UNCOMPRESSED_JSON_BYTES
+    index = {"shards": [_row("a", "PARTIAL")]}
+    report = _fixture(tmp_path, index)
+    assets = {("r1", "bundle.zip"): (400, SHA_B)}
+    summary, details = assess_sources(index, report, assets, {})
+    payload = "".join(json.dumps(item, sort_keys=True) + "\n" for item in details).encode()
+    assert hashlib.sha256(payload).hexdigest() == summary["source_comparison_jsonl_sha256"]
+    assert summary["by_family"]["l2book"]["SNAPSHOT_ASSET_IDENTITY_MATCHED_NOT_DOWNLOADED"] == 1
+    assert summary["known_logical_compressed_bytes_by_result"][
+        "SNAPSHOT_ASSET_IDENTITY_MATCHED_NOT_DOWNLOADED"] == 100
+    assert MAX_INVENTORY_UNCOMPRESSED_JSON_BYTES > len(payload)

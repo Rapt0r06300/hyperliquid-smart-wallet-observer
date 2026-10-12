@@ -147,6 +147,9 @@ jobs:
           assert comparison["candidate_count"] == triage["candidate_count"]
           assert comparison["all_exploitable_data_restored"] is False
           assert comparison["recovered_shards"] is None
+          import hashlib
+          payload=(root/"source-comparison.jsonl").read_bytes()
+          assert hashlib.sha256(payload).hexdigest() == comparison["source_comparison_jsonl_sha256"]
           print("UNRESOLVED_SOURCE_LOCATORS_COMPARED", comparison["candidate_count"])
           PY
 

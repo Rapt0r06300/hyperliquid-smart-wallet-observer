@@ -29,6 +29,7 @@ except ModuleNotFoundError:
 
 REPO = Path(__file__).resolve().parents[1]
 CANONICAL = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+MAX_INVENTORY_UNCOMPRESSED_JSON_BYTES = 256 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -37,8 +38,12 @@ def read_source_inventory(path: Path) -> tuple[dict[tuple[str, str], tuple[int, 
     if path.is_symlink() or not path.is_file():
         raise InventoryError("SOURCE_INVENTORY_UNSAFE_OR_MISSING")
     opener = gzip.open if path.suffix == ".gz" else open
-    with opener(path, "rt", encoding="utf-8") as source:
-        inventory = json.load(source)
+    # Bound decompression before parsing to avoid unbounded gzip expansion.
+    with opener(path, "rb") as source:
+        payload = source.read(MAX_INVENTORY_UNCOMPRESSED_JSON_BYTES + 1)
+    if len(payload) > MAX_INVENTORY_UNCOMPRESSED_JSON_BYTES:
+        raise InventoryError("SOURCE_INVENTORY_EXCEEDS_MEMORY_BOUND")
+    inventory = json.loads(payload.decode("utf-8"))
     if (not isinstance(inventory, dict)
             or inventory.get("schema") != "alina.restore_inventory.v1"
             or inventory.get("repository") != CANONICAL
@@ -110,7 +115,11 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
     results: list[dict[str, Any]] = []
     counts: Counter[str] = Counter()
     by_status: dict[str, Counter[str]] = {}
+    by_family: dict[str, Counter[str]] = {}
     matched_outer: dict[tuple[str, str], int] = {}
+    logical_bytes_known_by_result: Counter[str] = Counter()
+    logical_bytes_missing_by_result: Counter[str] = Counter()
+    details_hash = hashlib.sha256()
     rows_by_id = {row["dataset_id"]: row for row in index["shards"]}
     if len(rows_by_id) != len(index["shards"]):
         raise InventoryError("SOURCE_AUDIT_DUPLICATE_CATALOG_ID")
@@ -157,13 +166,26 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
         counts[decision] += 1
         quality = row["quality_status"]
         by_status.setdefault(quality, Counter())[decision] += 1
-        results.append({
+        by_family.setdefault(row["family"], Counter())[decision] += 1
+        known_size = row.get("compressed_logical_bytes")
+        if type(known_size) is int and known_size >= 0:
+            logical_bytes_known_by_result[decision] += known_size
+        else:
+            logical_bytes_missing_by_result[decision] += 1
+        original = rows_by_id[row["dataset_id"]]
+        result_row = {
             "dataset_id": row["dataset_id"],
             "quality_status": quality, "family": row["family"],
+            "venue": original.get("venue"), "symbol": original.get("symbol"),
+            "manifest_path": row.get("manifest_path"),
+            "shard_sha256": row.get("sha256"),
             "source_tag": tag, "source_asset": name,
             "source_comparison": decision, "missing_evidence": missing,
+            "quality_reasons": row.get("quality_reasons") or [],
             "recovery_status": "NOT_ASSESSED", "validation_allowed": False,
-        })
+        }
+        details_hash.update((json.dumps(result_row, sort_keys=True) + "\n").encode("utf-8"))
+        results.append(result_row)
     expected = report["unresolved_unsafe_shards"] + report["safe_non_replayable_shards"]
     if len(results) != expected:
         raise InventoryError("SOURCE_AUDIT_CANDIDATE_COUNT_MISMATCH")
@@ -175,6 +197,10 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
         "candidate_count": len(results),
         "source_classification_counts": dict(sorted(counts.items())),
         "by_quality_status": {k: dict(sorted(v.items())) for k, v in sorted(by_status.items())},
+        "by_family": {k: dict(sorted(v.items())) for k, v in sorted(by_family.items())},
+        "known_logical_compressed_bytes_by_result": dict(sorted(logical_bytes_known_by_result.items())),
+        "unknown_logical_byte_size_shards_by_result": dict(sorted(logical_bytes_missing_by_result.items())),
+        "source_comparison_jsonl_sha256": details_hash.hexdigest(),
         "unique_matched_outer_assets": len(matched_outer),
         "unique_matched_outer_asset_bytes": sum(matched_outer.values()),
         "recovered_shards": None, "irrecoverable_shards": None,
@@ -223,13 +249,15 @@ def main(argv: list[str] | None = None) -> int:
                         stream.write(json.dumps(row, sort_keys=True) + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
+                if hashlib.sha256(temp.read_bytes()).hexdigest() != outcome["source_comparison_jsonl_sha256"]:
+                    raise InventoryError("SOURCE_AUDIT_DETAILS_DIGEST_MISMATCH")
                 os.link(temp, path)
             finally:
                 if temp is not None:
                     temp.unlink(missing_ok=True)
         print(json.dumps(outcome, indent=2, sort_keys=True))
         return 0
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, EOFError, UnicodeError) as exc:
         print(json.dumps({"status": "SOURCE_AUDIT_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2
 
