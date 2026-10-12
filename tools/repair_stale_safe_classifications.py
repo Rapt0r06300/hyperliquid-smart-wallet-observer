@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -64,6 +66,54 @@ def _load(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain one JSON object")
     return value
+
+
+
+def _archive_prior_manifest(base: Path, old_path: Path) -> tuple[Path, str]:
+    """Preserve exact pre-repair bytes outside active manifest scanners.
+
+    Archive names are content-addressed. Existing evidence is never overwritten,
+    and a corrupted/changed archive blocks retirement of the source.
+    """
+    base = Path(base).resolve()
+    old_path = Path(old_path)
+    if (old_path.is_symlink() or not old_path.is_file()
+            or not old_path.resolve().is_relative_to(base)):
+        raise ValueError("RECLASSIFICATION_UNSAFE_OR_MISSING_SOURCE")
+    original = old_path.read_bytes()
+    digest = hashlib.sha256(original).hexdigest()
+    archive_dir = base / "catalog" / "reclassification-history"
+    if archive_dir.is_symlink() or not archive_dir.resolve().is_relative_to(base):
+        raise ValueError("RECLASSIFICATION_UNSAFE_ARCHIVE_DIRECTORY")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = archive_dir / f"{digest}.json"
+    if archive_path.is_symlink():
+        raise ValueError("RECLASSIFICATION_UNSAFE_ARCHIVE_TARGET")
+    if archive_path.is_file():
+        if archive_path.read_bytes() != original:
+            raise ValueError("RECLASSIFICATION_ARCHIVE_DIGEST_CONFLICT")
+        return archive_path, digest
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=archive_dir, prefix=".manifest-",
+            suffix=".tmp", delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            output.write(original)
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            os.link(temporary, archive_path)
+        except FileExistsError:
+            if archive_path.is_symlink() or archive_path.read_bytes() != original:
+                raise ValueError("RECLASSIFICATION_ARCHIVE_DIGEST_CONFLICT")
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    if archive_path.read_bytes() != original:
+        raise ValueError("RECLASSIFICATION_ARCHIVE_VERIFY_FAILED")
+    return archive_path, digest
 
 
 def repair(root: str | Path = ROOT) -> dict[str, Any]:
@@ -207,8 +257,19 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
                     != str(manifest.get("sha256") or "").lower()
                 ):
                     raise ValueError(f"SAFE_MANIFEST_DESTINATION_CONFLICT: {destination}")
-        # Publish the SHA-verified index first. A failed partition/index write
-        # must never create a SAFE manifest or retire quarantine evidence.
+        # Copy and verify the exact pre-repair receipts BEFORE changing the
+        # canonical index. Old labels remain auditable even after promotion.
+        archived: dict[Path, str] = {}
+        for destination, _manifest, old_path in pending_manifests:
+            if old_path.resolve() != destination.resolve():
+                archive_path, old_digest = _archive_prior_manifest(base, old_path)
+                archived[old_path] = old_digest
+                for repaired_row in repaired:
+                    if repaired_row["old_manifest_path"] == str(old_path.relative_to(base)).replace("\\\\", "/"):
+                        repaired_row["prior_manifest_archive"] = str(archive_path.relative_to(base)).replace("\\\\", "/")
+                        repaired_row["prior_manifest_sha256"] = old_digest
+        # Publish the SHA-verified index only after archiving the old evidence.
+        # Failed writes must never retire the original quarantine receipt.
         save_index(index_path, index, max_inline_bytes=INDEX_WRITE_LIMIT_BYTES)
         for destination, manifest, _old_path in pending_manifests:
             _atomic_json(destination, manifest)
@@ -232,9 +293,16 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
     catalog["stale_shard_count"] = stale_count
     catalog["reject_shard_count"] = reject_count
     _atomic_json(catalog_path, catalog)
-    # Preserve the original on size/publication errors; retire pointers last.
+    # Retire active pointers only after content-addressed archival, new SAFE
+    # manifests, index, registry and catalog were successfully written.
     for destination, _manifest, old_path in pending_manifests:
         if old_path.resolve() != destination.resolve() and old_path.is_file():
+            digest = archived.get(old_path)
+            if digest is None or hashlib.sha256(old_path.read_bytes()).hexdigest() != digest:
+                raise ValueError("RECLASSIFICATION_SOURCE_CHANGED_BEFORE_RETIREMENT")
+            archived_path = base / "catalog" / "reclassification-history" / f"{digest}.json"
+            if hashlib.sha256(archived_path.read_bytes()).hexdigest() != digest:
+                raise ValueError("RECLASSIFICATION_ARCHIVE_CHANGED_BEFORE_RETIREMENT")
             old_path.unlink()
 
     return {
