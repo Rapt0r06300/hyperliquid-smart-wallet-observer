@@ -189,3 +189,17 @@ def test_recovery_triage_verification_fails_on_stale_catalog(tmp_path):
     newer = {**receipt, "catalog_index_sha256": SHA_B}
     with pytest.raises(InventoryError, match="header"):
         verify_recovery_triage(index, newer, output)
+
+
+def test_partition_workflow_manual_verified_triage_export():
+    from pathlib import Path
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github" / "workflows" / "catalog-partition-parity.yml").read_text()
+    assert "emit_recovery_triage:" in workflow
+    assert "workflow_dispatch" in workflow
+    assert "--triage-jsonl" in workflow
+    assert "--verify-triage-jsonl" in workflow
+    assert "TRIAGE_VERIFIED_NOT_RESTORED" in workflow
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
+    assert "retention-days: 30" in workflow
+    assert workflow.index("--verify-triage-jsonl") < workflow.index("Publish verified recovery triage")

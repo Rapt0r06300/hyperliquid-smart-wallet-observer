@@ -19,7 +19,13 @@ on:
       - 'tests/test_dataset_policy.py'
       - 'tests/test_quarantine_audit.py'
       - 'tests/test_restore_alina.py'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      emit_recovery_triage:
+        description: "Export a read-only, SHA-bound repair triage for Work/Codex"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -67,6 +73,51 @@ jobs:
           assert receipt["partition_count"] >= 1
           print("FULL_CATALOG_PARTITION_PARITY_PROVED", receipt["original_shards"])
           PY
+
+      # Optional, explicitly requested read-only export. Do not produce a large
+      # artifact on every push; collection and publication remain untouched.
+      - name: Build and verify exact recovery triage for Work
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/alina-preservation-evidence"
+          mkdir -p "$OUT"
+          test ! -e "$OUT/recovery-triage.jsonl"
+          git rev-parse HEAD > "$OUT/git-head.txt"
+          python tools/preservation_inventory.py \
+            --triage-jsonl "$OUT/recovery-triage.jsonl" \
+            > "$OUT/preservation-census.json"
+          python tools/preservation_inventory.py \
+            --verify-triage-jsonl "$OUT/recovery-triage.jsonl" \
+            > "$OUT/triage-verification.json"
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import os
+          root=Path(os.environ["RUNNER_TEMP"])/"alina-preservation-evidence"
+          census=json.loads((root/"preservation-census.json").read_text())
+          proof=json.loads((root/"triage-verification.json").read_text())
+          verified=proof.get("triage") or {}
+          initial=census.get("triage") or {}
+          assert census["status"] == "CATALOG_CLASSIFIED_NOT_RESTORED"
+          assert proof["status"] == census["status"]
+          assert verified.get("status") == "TRIAGE_VERIFIED_NOT_RESTORED"
+          assert initial["candidate_count"] == verified["candidate_count"]
+          assert initial["candidates_sha256"] == verified["candidates_sha256"]
+          assert census["catalog_index_sha256"] == verified["catalog_index_sha256"]
+          assert census["all_exploitable_data_restored"] is False
+          print("TRIAGE_LEDGER_VERIFIED_NOT_RESTORED", verified["candidate_count"])
+          PY
+
+      - name: Publish verified recovery triage as short-lived Actions artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.emit_recovery_triage }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: alina-recovery-triage-${{ github.run_id }}
+          path: ${{ runner.temp }}/alina-preservation-evidence/
+          retention-days: 30
+          if-no-files-found: error
 
       - name: Dry-run all critical SAFE consumers on partitioned index (never push)
         shell: bash
