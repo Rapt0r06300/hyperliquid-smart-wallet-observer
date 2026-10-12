@@ -93,3 +93,18 @@ def test_probe_candidate_offset_processes_next_batch_without_promoting(tmp_path)
     assert result["candidates_checked"] == 1
     assert result["results"][0]["dataset_id"] == "two"
     assert result["cached_shards_byte_verified"] == 1
+
+
+def test_probe_is_catalog_bound_and_result_digest_is_recomputable(tmp_path):
+    import json
+    inner = b"123456789012345"
+    root, outer = _zip_fixture(tmp_path, inner)
+    row = _row(hashlib.sha256(inner).hexdigest(),
+               outer_digest=hashlib.sha256(outer).hexdigest(), outer_size=len(outer))
+    result = probe_cache({"shards": [row]}, root,
+                         catalog_index_sha256="d" * 64, max_verify_bytes=100000)
+    assert result["catalog_index_sha256"] == "d" * 64
+    payload = "".join(json.dumps(item, sort_keys=True) + "\n"
+                      for item in result["results"]).encode("utf-8")
+    assert result["probe_results_sha256"] == hashlib.sha256(payload).hexdigest()
+    assert result["replay_certified"] is False
