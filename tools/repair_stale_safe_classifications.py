@@ -116,7 +116,7 @@ def _archive_prior_manifest(base: Path, old_path: Path) -> tuple[Path, str]:
     return archive_path, digest
 
 
-def repair(root: str | Path = ROOT) -> dict[str, Any]:
+def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
     base = Path(root).resolve()
     index_path = base / INDEX_PATH
     registry_path = base / REGISTRY_PATH
@@ -227,6 +227,25 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
     stale_count = sum(row.get("quality_status") == "STALE" for row in new_rows)
     reject_count = sum(row.get("quality_status") in {"REJECT", "REJECTED"} for row in new_rows)
 
+    if dry_run:
+        # Analyze only: no index/registry rewrites, no manifest archival,
+        # no quarantine cleanup, and no model-based SAFE promotion.
+        return {
+            "status": "DRY_RUN_NOT_RECLASSIFIED",
+            "candidate_count": len(repaired),
+            "candidate_record_count": sum(item["record_count"] for item in repaired),
+            "candidate_sample": repaired[:50],
+            "indexed_shards": len(new_rows),
+            "safe_count_if_applied": safe_count,
+            "partial_count_if_applied": partial_count,
+            "stale_count_if_applied": stale_count,
+            "reject_count_if_applied": reject_count,
+            "quarantine_unchanged": True,
+            "paper_only": True,
+            "read_only": True,
+            "real_execution": False,
+        }
+
     # The canonical index can already be close to GitHub's 100 MiB cap.
     # A no-op audit must not rewrite/expand that blob or trip the 85 MiB
     # *write* guard. Only actual SHA-verified SAFE repairs mutate index bytes.
@@ -323,8 +342,10 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=str(ROOT))
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Count evidence-based SAFE candidates without changing any files")
     args = parser.parse_args()
-    result = repair(args.root)
+    result = repair(args.root, dry_run=args.dry_run)
     print(json.dumps(result, sort_keys=True))
     return 0
 

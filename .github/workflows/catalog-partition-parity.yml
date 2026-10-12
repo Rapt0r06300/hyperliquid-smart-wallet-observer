@@ -46,7 +46,7 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_partitioned_data_index.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py
 
       - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash

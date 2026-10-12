@@ -38,3 +38,45 @@ def test_refuses_source_outside_repo(tmp_path):
     outside.write_bytes(b"data")
     with pytest.raises(ValueError, match="UNSAFE_OR_MISSING_SOURCE"):
         _archive_prior_manifest(base, outside)
+
+
+
+def test_dry_run_reclassification_preserves_original_manifest_and_catalog(tmp_path, monkeypatch):
+    import json
+    from tools import repair_stale_safe_classifications as repair_module
+
+    index_file = tmp_path / "catalog" / "DATA_INDEX.json"
+    index_file.parent.mkdir()
+    manifest_path = tmp_path / "datasets" / "quarantine" / "a.manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    sha = "a" * 64
+    manifest_path.write_text(json.dumps({
+        "dataset_id": "a", "quality_status": "PARTIAL",
+        "sha256": sha, "record_count": 4,
+    }))
+    index_file.write_text(json.dumps({
+        "schema": "alina.data_index.v2",
+        "shards": [{"dataset_id": "a", "sha256": sha,
+                    "quality_status": "PARTIAL",
+                    "manifest_path": "datasets/quarantine/a.manifest.json",
+                    "record_count": 4}],
+    }))
+    registry_file = tmp_path / "catalog" / "DATA_QUALITY_REGISTRY.json"
+    catalog_file = tmp_path / "catalog" / "DATA_CATALOG.json"
+    registry_file.write_text("{}")
+    catalog_file.write_text("{}")
+    originals = {p: p.read_bytes() for p in (
+        index_file, manifest_path, registry_file, catalog_file,
+    )}
+    monkeypatch.setattr(repair_module, "_normalize_manifest", dict)
+    monkeypatch.setattr(repair_module, "_compact_index_row", dict)
+    monkeypatch.setattr(repair_module, "classify_manifest", lambda _: ("SAFE", []))
+    monkeypatch.setattr(repair_module, "_valid_release_locator", lambda _: True)
+    result = repair_module.repair(tmp_path, dry_run=True)
+    assert result["status"] == "DRY_RUN_NOT_RECLASSIFIED"
+    assert result["candidate_count"] == 1
+    assert result["candidate_record_count"] == 4
+    assert result["quarantine_unchanged"] is True
+    assert all(p.read_bytes() == content for p, content in originals.items())
+    assert not (tmp_path / "datasets" / "safe").exists()
+    assert not (tmp_path / "catalog" / "reclassification-history").exists()
