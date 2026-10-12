@@ -12917,6 +12917,20 @@ canonical catalog, deletes raw evidence, or treats restored bytes as replay
 quality proof. Run only with GitHub-hosted infrastructure when in the cloud,
 and retain SHA-bound receipts for later replay and data-continuity testing.
 
+An optional batch SOURCE hydration planner is implemented in
+`tools/hydrate_recovery_assets.py`: it accepts the verified canonical triage
+and complete Release inventory, selects immutable outer assets with
+`--asset-offset`, `--max-assets` and `--max-bytes`, and defaults to dry-run.
+Only an explicit `--execute` downloads the selected SHA-256/size-bound outer
+Release assets into an existing cache using the canonical restore downloader.
+Existing corrupt/partial cache evidence is preserved without overwriting.
+Run the independent `recover_one_quarantined_shard.py` for per-fragment
+quarantine hydration, or `probe_recovery_cache.py` for read-only cached-byte
+checks. None of these actions establishes replay compatibility, changes
+quality labels, starts trading, touches live collectors or relies on the
+user's PC. All Work cloud batch results must remain SHA-bound to the same
+DATA_INDEX snapshot.
+
 Once individual historical Release assets have been downloaded and SHA-verified
 into a *separate* read-only cloud cache (never the user's PC), run
 `python tools/probe_recovery_cache.py --releases-root <cache>/releases --candidate-offset 0 --max-candidates 200`.
