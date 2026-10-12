@@ -12905,6 +12905,17 @@ This snapshot may be stale even if it is a verified GitHub Release asset.
 The comparison fails closed on inconsistent inventory totals, duplicate
 Release identities, altered checksums, catalog drift or absent triage entries.
 
+The bounded recovery handoff now has a separate deterministic completeness
+meter: `python tools/verify_quarantine_recovery.py --destination <recovery-root>`
+rechecks the original Release SHA-256/size and each quarantined logical
+member's SHA-256/size against the identical catalog HEAD, verifying receipts
+and counting all unresolved shards still without physical byte proof.
+Stale catalog receipts, tampered bytes, missing assets, duplicate IDs and
+symlinks fail closed, without touching evidence. It measures ONLY recovered
+quarantined bytes, never replay compatibility, backtestability or economic
+value. A new COLLECT-era catalog SHA requires explicit revalidation; stale
+proofs must be kept, not silently discarded.
+
 A GitHub-hosted manual entry point is also available in the existing
 `catalog-partition-parity` workflow: set the optional `hydrate_candidate_id`
 to one exact dataset ID. A separate GitHub-hosted job (disabled on pushes)
