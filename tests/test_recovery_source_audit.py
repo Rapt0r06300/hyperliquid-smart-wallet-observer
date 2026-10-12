@@ -114,3 +114,14 @@ def test_source_audit_rejects_duplicate_catalog_id():
         assess_sources({"shards": rows},
                        {"unresolved_unsafe_shards": 2, "safe_non_replayable_shards": 0},
                        {}, {})
+
+
+def test_matched_zip_cannot_certify_missing_inner_shard_identity(tmp_path):
+    index = {"shards": [
+        _row("unbound", "PARTIAL", sha256="", release_asset=""),
+    ]}
+    report = _fixture(tmp_path, index)
+    assets = {("r1", "bundle.zip"): (400, SHA_B)}
+    summary, detail = assess_sources(index, report, assets, {})
+    assert detail[0]["source_comparison"] == "SNAPSHOT_LISTED_IDENTITY_UNBOUND"
+    assert summary["unique_matched_outer_assets"] == 0

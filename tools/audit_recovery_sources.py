@@ -148,6 +148,9 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
                 decision = "SNAPSHOT_LISTED_IDENTITY_UNBOUND"
             elif expected_size != size or expected_digest != digest:
                 decision = "SNAPSHOT_METADATA_CONFLICT"
+            elif any(field in missing for field in ("release_asset", "sha256", "bytes")):
+                # A matched ZIP does not identify an unverified inner member.
+                decision = "SNAPSHOT_LISTED_IDENTITY_UNBOUND"
             else:
                 decision = "SNAPSHOT_ASSET_IDENTITY_MATCHED_NOT_DOWNLOADED"
                 matched_outer[key] = size
