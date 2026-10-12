@@ -73,6 +73,12 @@ bundle complet ne polluent plus le corpus de backtest. Elles restent publiées
 et récupérables volontairement avec `python tools/restore_alina.py
 --everything ...`; rien n'est supprimé à l'aveugle.
 
+Dans un ancien dossier déjà hydraté, la commande canonique libère aussi les
+copies locales devenues hors profil, mais seulement si elles correspondent
+encore exactement (taille + SHA-256) à un asset publié. Les fichiers inconnus,
+partiels, corrompus, liés symboliquement ou appartenant à l'utilisateur ne
+sont jamais supprimés. Le rapport compte les assets et octets ainsi libérés.
+
 Le certificat normal est `REPLAY_READY_COMPLETE` : il signifie 100 % du
 catalogue SAFE/replayable courant, pas 100 % de l'archive historique. Le mode
 `--everything` conserve le certificat distinct `RESTORE_COMPLETE` et exige la

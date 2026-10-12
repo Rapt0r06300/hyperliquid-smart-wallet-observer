@@ -40,6 +40,12 @@ par toutes les lignes `SAFE` + `replay_compatible` du catalogue courant.
 Les données déjà vérifiées sont réutilisées et les téléchargements partiels
 sont repris.
 
+Sur un dossier ancien, le profil normal supprime du cache uniquement les
+assets hors profil encore publiés dont la copie locale passe de nouveau les
+contrôles taille + SHA-256. Les fichiers inconnus, partiels, corrompus ou
+symboliques sont laissés intacts. Cette purge libère les anciennes capsules
+locales sans effacer leur source distante récupérable par `--everything`.
+
 Le synchroniseur existant `tools/sync_complete_clone.py` contrôle :
 - racine Git, `origin` exact, branche `main` et arbre suivi propre ;
 - `fetch` + `merge --ff-only`, sans reset/rebase/écrasement des changements ;

@@ -2238,10 +2238,14 @@ def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkey
         "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
         "totals": {"TOTAL_SHARDS": 2},
     }), encoding="utf-8")
+    cached_rejected = (tmp_path / "restored" / "releases" /
+                       "data-v2-profile-test" / "rejected.jsonl.gz")
+    cached_rejected.parent.mkdir(parents=True)
+    cached_rejected.write_bytes(rejected_bytes)
 
     report = module.restore_everything(
         "owner/repo", tmp_path / "restored", catalog_path=index_path,
-        metrics_path=metrics_path, profile="replay-ready",
+        metrics_path=metrics_path, profile="replay-ready", prune_unselected=True,
     )
 
     assert downloaded == ["https://example.invalid/safe"]
@@ -2252,6 +2256,9 @@ def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkey
     assert report["excluded_full_archive_bytes"] == len(rejected_bytes)
     assert report["classification"]["usable_shards"] == 1
     assert report["classification"]["quarantined_shards"] == 0
+    assert report["pruned_unselected_assets"] == 1
+    assert report["pruned_unselected_bytes"] == len(rejected_bytes)
+    assert not cached_rejected.exists()
     restored = (tmp_path / "restored" / "usable" / "shards" /
                 "data-v2-profile-test" / "safe-one.jsonl.gz")
     assert restored.read_bytes() == safe_bytes
@@ -2322,3 +2329,32 @@ def test_replay_ready_materialization_refuses_symlinked_usable_tree(tmp_path):
     assert report["usable_shards"] == 0
     assert report["failures"][0]["error"] == "SYMLINKED_SHARD_DIRECTORY"
     assert not list(outside.rglob("*.jsonl.gz"))
+
+
+def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_path):
+    module = _module()
+    expected = b"published"
+    release_dir = tmp_path / "releases" / "old-release"
+    release_dir.mkdir(parents=True)
+    corrupt = release_dir / "asset.bin"
+    corrupt.write_bytes(b"not-the-published-bytes")
+    unknown = release_dir / "my-local-note.txt"
+    unknown.write_text("keep me", encoding="utf-8")
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(expected)
+    linked = release_dir / "linked.bin"
+    linked.symlink_to(outside)
+    releases = [{"tag_name": "old-release", "assets": [
+        _asset("asset.bin", "https://example.invalid/asset", expected),
+        _asset("linked.bin", "https://example.invalid/linked", expected),
+    ]}]
+
+    result = module._prune_verified_unselected_assets(
+        releases, set(), tmp_path / "releases",
+    )
+
+    assert result["assets"] == 0
+    assert corrupt.read_bytes() == b"not-the-published-bytes"
+    assert unknown.read_text(encoding="utf-8") == "keep me"
+    assert linked.is_symlink()
+    assert outside.read_bytes() == expected

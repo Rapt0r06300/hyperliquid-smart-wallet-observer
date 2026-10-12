@@ -841,6 +841,49 @@ def _select_replay_ready_releases(
     return list(selected.values())
 
 
+def _prune_verified_unselected_assets(
+    releases: list[Mapping[str, Any]],
+    selected: set[tuple[str, str]],
+    releases_root: Path,
+) -> dict[str, Any]:
+    """Delete only recoverable cache copies proven identical to GitHub."""
+    result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
+    for release in releases:
+        tag = str(release.get("tag_name") or "")
+        release_dir = releases_root / _safe_component(tag)
+        for asset in release.get("assets", []):
+            if not isinstance(asset, Mapping):
+                continue
+            name = str(asset.get("name") or "")
+            key = (tag, name)
+            # Keep the verified historical inventory: it avoids repeating the
+            # 1,000-Release-cap control download on every synchronization.
+            if key in selected or name == "RESTORE_INVENTORY.json.gz":
+                continue
+            target = release_dir / _safe_component(name)
+            if target.is_symlink():
+                result["failures"].append({
+                    "tag": tag, "asset": name, "error": "SYMLINK_NOT_PRUNED",
+                })
+                continue
+            try:
+                if _asset_ok(target, asset):
+                    size = target.stat().st_size
+                    target.unlink()
+                    result["assets"] += 1
+                    result["bytes"] += size
+            except OSError as exc:
+                result["failures"].append({
+                    "tag": tag, "asset": name, "error": str(exc),
+                })
+        try:
+            if release_dir.is_dir() and not any(release_dir.iterdir()):
+                release_dir.rmdir()
+        except OSError:
+            pass
+    return result
+
+
 def _materialize_catalog_safe_shards(
     rows: list[Mapping[str, Any]], releases_root: Path, destination: Path,
 ) -> dict[str, Any]:
@@ -1587,6 +1630,7 @@ def restore_everything(
     recover_verifiable: bool = False,
     optional_local_snapshot: bool = False,
     profile: str = "full-archive",
+    prune_unselected: bool = False,
 ) -> dict[str, Any]:
     if profile not in {"full-archive", "replay-ready"}:
         raise RestoreError(f"unknown restore profile: {profile}")
@@ -1689,13 +1733,15 @@ def restore_everything(
     ).hexdigest()
     # Every published byte has an explicit, immutable source identity and size.
     # Prove parity at byte level as well as asset count. No floating estimates.
-    full_archive_release_count = len(releases)
+    full_releases = releases
+    full_archive_release_count = len(full_releases)
     full_archive_asset_count = sum(len(release["assets"]) for release in releases)
     full_archive_asset_bytes = sum(
-        int(asset["size"]) for release in releases for asset in release["assets"]
+        int(asset["size"]) for release in full_releases for asset in release["assets"]
     )
+    selected_keys: set[tuple[str, str]] = set()
     if profile == "replay-ready":
-        releases = _select_replay_ready_releases(releases, replay_required)
+        releases = _select_replay_ready_releases(full_releases, replay_required)
         selected_keys = {
             (str(release["tag_name"]), str(asset["name"]))
             for release in releases for asset in release["assets"]
@@ -1710,6 +1756,11 @@ def restore_everything(
     unverified_source_bytes = sum(
         int(row["size_bytes"]) for row in unverified_source_assets
     )
+    prune_result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
+    if profile == "replay-ready" and prune_unselected and not preflight_only:
+        prune_result = _prune_verified_unselected_assets(
+            full_releases, selected_keys, releases_root,
+        )
     clone_sources = _clone_lfs_sources(clone_root, repository, releases)
 
     # Old cached Releases must never be treated as part of the current GitHub
@@ -1790,6 +1841,9 @@ def restore_everything(
             "full_archive_asset_count": full_archive_asset_count,
             "full_archive_asset_bytes": full_archive_asset_bytes,
             "excluded_full_archive_bytes": full_archive_asset_bytes - source_asset_bytes,
+            "prune_unselected_enabled": bool(prune_unselected),
+            "pruned_unselected_assets": 0,
+            "pruned_unselected_bytes": 0,
             "unverified_source_bytes": unverified_source_bytes,
             "unverified_source_asset_count": len(unverified_source_assets),
             "unverified_source_assets_sample": unverified_source_assets[:50],
@@ -1832,6 +1886,10 @@ def restore_everything(
         "full_archive_asset_count": full_archive_asset_count,
         "full_archive_asset_bytes": full_archive_asset_bytes,
         "excluded_full_archive_bytes": full_archive_asset_bytes - source_asset_bytes,
+        "prune_unselected_enabled": bool(prune_unselected),
+        "pruned_unselected_assets": prune_result["assets"],
+        "pruned_unselected_bytes": prune_result["bytes"],
+        "prune_failures": prune_result["failures"],
         "unverified_source_bytes": unverified_source_bytes,
         "verified_asset_bytes": 0,
         "verified_asset_count": 0,
@@ -2134,6 +2192,7 @@ def main(argv: list[str] | None = None) -> int:
             recover_verifiable=args.recover_verifiable,
             optional_local_snapshot=args.materialize_available_local_snapshot,
             profile="replay-ready" if args.replay_ready else "full-archive",
+            prune_unselected=args.replay_ready,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
@@ -2188,6 +2247,8 @@ def main(argv: list[str] | None = None) -> int:
                 "usable_shards": report["classification"]["usable_shards"],
                 "quarantined_shards": report["classification"]["quarantined_shards"],
                 "missing_or_corrupt_rows": report["classification"]["missing_or_corrupt_rows"],
+                "pruned_unselected_assets": report.get("pruned_unselected_assets", 0),
+                "pruned_unselected_bytes": report.get("pruned_unselected_bytes", 0),
                 "unclaimed_dataset_release_count": report["unclaimed_dataset_release_count"],
                 "failures": failures,
                 "report": str(destination / "RESTORE_REPORT.json"),

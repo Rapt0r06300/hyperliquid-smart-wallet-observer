@@ -12873,6 +12873,12 @@ members enter `usable/`. `PARTIAL`/`REJECT` rows, historical recovery capsules
 and superseded full bundles remain durably published but do not pollute the
 replay corpus.
 
+For an existing hydrated checkout, the canonical replay-ready sync MAY prune
+an unselected local cache copy only after re-verifying that its size and
+SHA-256 equal the still-published inventory asset. It MUST preserve unknown,
+partial, corrupt and symlinked paths, report pruned counts/bytes, and keep the
+remote `--everything` source recoverable.
+
 The separate explicit `--everything` profile remains available for complete
 historical disaster-recovery archiving. It downloads every published asset
 and retains the stronger `RESTORE_COMPLETE` meaning. The profiles and their
