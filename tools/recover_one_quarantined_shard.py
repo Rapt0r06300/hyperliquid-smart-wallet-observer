@@ -186,7 +186,8 @@ def hydrate_candidate(
                                              suffix=".partial", delete=False) as stream:
                 temporary = Path(stream.name)
             size, digest = _download_to_path(
-                asset["browser_download_url"], temporary, token=token)
+                asset["browser_download_url"], temporary, token=token,
+                max_bytes=max_source_bytes)
             if size != outer_bytes or digest != candidate["outer_sha256"]:
                 raise ValueError("RECOVERY_REMOTE_BYTES_MISMATCH")
             _publish_verified_bytes(temporary, outer, outer_bytes, candidate["outer_sha256"])

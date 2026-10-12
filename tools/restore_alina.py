@@ -109,8 +109,13 @@ def _download_to_path(
     *,
     token: str | None = None,
     retries: int = 8,
+    max_bytes: int | None = None,
 ) -> tuple[int, str]:
-    """Stream one potentially multi-GB Release asset without loading it into RAM."""
+    """Stream one Release asset; optional hard cap protects bounded recovery."""
+    if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 1):
+        raise RestoreError("invalid bounded download byte limit")
+    if max_bytes is not None and target.is_file() and target.stat().st_size > max_bytes:
+        raise RestoreError("existing partial exceeds bounded download limit")
     headers = {"Accept": "application/octet-stream", "User-Agent": USER_AGENT}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -156,6 +161,8 @@ def _download_to_path(
                         chunk = response.read(8 * 1024 * 1024)
                         if not chunk:
                             break
+                        if max_bytes is not None and size + len(chunk) > max_bytes:
+                            raise RestoreError("download exceeds bounded byte limit")
                         output.write(chunk)
                         digest.update(chunk)
                         size += len(chunk)

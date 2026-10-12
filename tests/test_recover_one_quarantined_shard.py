@@ -109,3 +109,34 @@ def test_github_hosted_manual_recovery_is_one_shard_paper_and_bounded():
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "contents: read" in workflow
     assert "self-hosted" not in workflow
+
+
+
+def test_restorer_network_stream_enforces_byte_cap_before_writing(tmp_path, monkeypatch):
+    from tools import restore_alina
+    import hashlib
+
+    class Response:
+        status = 200
+        headers = {}
+        def __enter__(self):
+            return self
+        def __exit__(self, *_args):
+            return False
+        def read(self, _n):
+            if not hasattr(self, "sent"):
+                self.sent = True
+                return b"untrusted-bytes"
+            return b""
+
+    monkeypatch.setattr(restore_alina.urllib.request, "urlopen",
+                        lambda *_a, **_kw: Response())
+    path = tmp_path / "limited.partial"
+    with pytest.raises(restore_alina.RestoreError, match="bounded byte limit"):
+        restore_alina._download_to_path("https://example.invalid/asset", path,
+                                       max_bytes=4)
+    assert path.read_bytes() == b""
+    size, digest = restore_alina._download_to_path(
+        "https://example.invalid/asset", path, max_bytes=100)
+    assert size == len(b"untrusted-bytes")
+    assert digest == hashlib.sha256(b"untrusted-bytes").hexdigest()
