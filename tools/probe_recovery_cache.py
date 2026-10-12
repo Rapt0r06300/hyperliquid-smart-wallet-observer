@@ -32,7 +32,7 @@ SHA = re.compile(r"[0-9a-f]{64}\Z")
 def probe_cache(
     index: Mapping[str, Any], releases_root: Path, *,
     max_candidates: int = 200, max_verify_bytes: int = 1_000_000_000,
-    candidate_offset: int = 0,
+    candidate_offset: int = 0, catalog_index_sha256: str | None = None,
 ) -> dict[str, Any]:
     if type(max_candidates) is not int or max_candidates < 1:
         raise InventoryError("CACHE_PROBE_INVALID_CANDIDATE_LIMIT")
@@ -40,6 +40,8 @@ def probe_cache(
         raise InventoryError("CACHE_PROBE_INVALID_CANDIDATE_OFFSET")
     if type(max_verify_bytes) is not int or max_verify_bytes < 1:
         raise InventoryError("CACHE_PROBE_INVALID_BYTE_BUDGET")
+    if catalog_index_sha256 is not None and not SHA.fullmatch(catalog_index_sha256):
+        raise InventoryError("CACHE_PROBE_INVALID_CATALOG_DIGEST")
     root = Path(releases_root)
     if root.is_symlink() or not root.is_dir():
         raise InventoryError("CACHE_PROBE_MISSING_OR_SYMLINKED_ROOT")
@@ -147,9 +149,14 @@ def probe_cache(
         })
     total = sum(1 for _ in iter_recovery_triage(index))
     success = stats["BYTE_VERIFIED_NON_SAFE_NOT_REPLAY_CERTIFIED"]
+    result_sha256 = hashlib.sha256(
+        "".join(json.dumps(item, sort_keys=True) + "\n" for item in found).encode("utf-8")
+    ).hexdigest()
     return {
         "schema": "alina.recovery_cache_probe.v1",
         "status": "CACHED_BYTES_PROBED_NOT_REPLAY_CERTIFIED",
+        "catalog_index_sha256": catalog_index_sha256,
+        "probe_results_sha256": result_sha256,
         "candidates_total": total,
         "candidate_offset": candidate_offset,
         "candidates_checked": seen,
@@ -183,7 +190,8 @@ def main(argv: list[str] | None = None) -> int:
         result = probe_cache(index, args.releases_root,
                              max_candidates=args.max_candidates,
                              max_verify_bytes=args.max_verify_bytes,
-                             candidate_offset=args.candidate_offset)
+                             candidate_offset=args.candidate_offset,
+                             catalog_index_sha256=hashlib.sha256(raw).hexdigest())
     except (OSError, ValueError, TypeError) as exc:
         print(json.dumps({"status": "CACHE_PROBE_INCOMPLETE", "reason": str(exc)}, sort_keys=True))
         return 2
