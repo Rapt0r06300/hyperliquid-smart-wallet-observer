@@ -54,6 +54,7 @@ def _json(root: Path, name: str) -> dict[str, Any]:
 def _inspect_jsonl(root: Path, name: str, *, triage: bool,
                    expected_catalog: str, expected_count: int) -> str:
     digest = hashlib.sha256()
+    identities_digest = hashlib.sha256()
     count = 0
     known_ids: set[str] = set()
     with (root / name).open("rb") as source:
@@ -76,7 +77,7 @@ def _inspect_jsonl(root: Path, name: str, *, triage: bool,
                     raise BundleError("BUNDLE_TRIAGE_FOOTER_MISMATCH")
                 if count != expected_count:
                     raise BundleError("BUNDLE_TRIAGE_COUNT_MISMATCH")
-                return digest.hexdigest()
+                return digest.hexdigest(), identities_digest.hexdigest()
             if triage and item.get("kind") != "candidate":
                 raise BundleError("BUNDLE_INVALID_TRIAGE_ENTRY")
             identity = item.get("dataset_id")
@@ -86,13 +87,14 @@ def _inspect_jsonl(root: Path, name: str, *, triage: bool,
                     or item.get("recovery_status") != "NOT_ASSESSED"):
                 raise BundleError("BUNDLE_UNSAFE_OR_DUPLICATE_CANDIDATE")
             known_ids.add(identity)
+            identities_digest.update((identity + "\n").encode("utf-8"))
             count += 1
             digest.update(line)
     if triage:
         raise BundleError("BUNDLE_MISSING_TRIAGE_FOOTER")
     if count != expected_count:
         raise BundleError("BUNDLE_SOURCE_COMPARISON_COUNT_MISMATCH")
-    return digest.hexdigest()
+    return digest.hexdigest(), identities_digest.hexdigest()
 
 
 def inspect_bundle(root: Path) -> dict[str, Any]:
@@ -130,7 +132,7 @@ def inspect_bundle(root: Path) -> dict[str, Any]:
     count = verification["candidate_count"]
     if type(count) is not int or count < 0:
         raise BundleError("BUNDLE_INVALID_CANDIDATE_COUNT")
-    triage_sha = _inspect_jsonl(
+    triage_sha, triage_ids_sha = _inspect_jsonl(
         root, "recovery-triage.jsonl", triage=True,
         expected_catalog=index_sha, expected_count=count,
     )
@@ -142,10 +144,12 @@ def inspect_bundle(root: Path) -> dict[str, Any]:
             or published.get("asset_size_bytes") != inventory_file["bytes"]
             or published.get("raw_market_payloads_downloaded") != 0):
         raise BundleError("BUNDLE_PUBLISHED_INVENTORY_PARITY_FAILED")
-    source_sha = _inspect_jsonl(
+    source_sha, source_ids_sha = _inspect_jsonl(
         root, "source-comparison.jsonl", triage=False,
         expected_catalog=index_sha, expected_count=count,
     )
+    if triage_ids_sha != source_ids_sha:
+        raise BundleError("BUNDLE_SOURCE_TRIAGE_ORDERED_IDENTITIES_DIFFER")
     if (source.get("status") != "SOURCE_SNAPSHOT_COMPARED_NOT_RESTORED"
             or source.get("catalog_index_sha256") != index_sha
             or source.get("source_inventory_file_sha256") != inventory_file["sha256"]
