@@ -12892,6 +12892,15 @@ context, fills/trades, and replay/backtest provenance. A zero trade count
 in an ancillary family is not a reason to discard it. Data minimization
 must not discard market context necessary to reproduce executable fills.
 
+For Work/Codex, the existing `catalog-partition-parity` GitHub-hosted
+workflow can be run manually with `emit_recovery_triage=true`. It writes a
+SHA-bound per-shard recovery ledger, verifies full candidate parity, and exports
+the census, JSONL, verification receipt and checkout HEAD as a 30-day Actions
+artifact. This evidence is read-only: an absent, pending or failed export is
+NOT a restoration certificate. SAFE reclassification must also preserve the
+entire set of dataset IDs and immutable shard SHA-256s, never silently dropping
+a row or demoting a previously SAFE shard.
+
 The optional `--triage-jsonl <new-path>` switch creates an append-free,
 non-destructive candidate ledger for every PARTIAL/REJECT/STALE shard and every
 SAFE shard with unproven replay compatibility. It never overwrites an existing
