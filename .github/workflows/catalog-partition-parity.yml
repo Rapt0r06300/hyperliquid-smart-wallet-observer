@@ -53,11 +53,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: catalog-partition-parity
+  # Explicit one-shard recovery must not wait for heavy catalog parity jobs.
+  # Push-time parity remains serialized; manually requested recovery is isolated.
+  group: catalog-partition-parity-${{ github.event_name == 'workflow_dispatch' && inputs.hydrate_candidate_id != '' && github.run_id || 'catalog' }}
   cancel-in-progress: false
 
 jobs:
   prove:
+    # A recovery-only dispatch should not also run the expensive full-catalog proof.
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.emit_recovery_triage || inputs.hydrate_candidate_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
