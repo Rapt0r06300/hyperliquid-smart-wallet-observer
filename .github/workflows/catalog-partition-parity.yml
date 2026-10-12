@@ -17,6 +17,7 @@ on:
       - 'tools/probe_recovery_cache.py'
       - 'tools/hydrate_recovery_assets.py'
       - 'tools/recover_one_quarantined_shard.py'
+      - 'tools/verify_quarantine_recovery.py'
       - 'tools/fetch_published_restore_inventory.py'
       - 'tools/check_dataset_quality.py'
       - 'tools/restore_alina.py'
@@ -27,6 +28,7 @@ on:
       - 'tests/test_probe_recovery_cache.py'
       - 'tests/test_hydrate_recovery_assets.py'
       - 'tests/test_recover_one_quarantined_shard.py'
+      - 'tests/test_verify_quarantine_recovery.py'
       - 'tests/test_fetch_published_restore_inventory.py'
       - 'tests/test_reclassification_history_preservation.py'
       - 'tests/test_enforce_safe_replay_preservation.py'
@@ -78,7 +80,7 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py tests/test_verify_quarantine_recovery.py
 
       - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash
@@ -292,6 +294,24 @@ jobs:
           assert proof["logical_sha256"] == digest
           assert proof["source_asset_id"] == report["source_asset_id"]
           print("BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED", report["dataset_id"])
+          PY
+
+      - name: Verify SHA-bound recovered byte coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
+          python tools/verify_quarantine_recovery.py \
+            --destination "$OUTPUT" > "$OUTPUT/QUARANTINE_COVERAGE.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          result=json.loads((Path(os.environ["RUNNER_TEMP"])/"alina-selected-quarantine"/"QUARANTINE_COVERAGE.json").read_text())
+          assert result["invalid_or_stale_receipts"] == 0
+          assert result["byte_verified_non_safe_shards"] == 1
+          assert result["replay_certified"] is False
+          assert result["all_exploitable_data_restored"] is False
+          print("QUARANTINE_BYTES_VERIFIED_NOT_REPLAY_CERTIFIED")
           PY
 
       - name: Export verified quarantine proof for Work

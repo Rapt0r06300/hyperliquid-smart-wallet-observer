@@ -1,0 +1,60 @@
+"""Verify exact quarantined byte receipts, catalog drift, and corruption."""
+import hashlib
+import io
+import json
+import zipfile
+
+from tools import recover_one_quarantined_shard as recovery
+from tools import verify_quarantine_recovery as audit
+
+
+def sample(tmp_path, monkeypatch):
+    logical = b"0123456789ABCDEF"
+    f = io.BytesIO()
+    with zipfile.ZipFile(f, "w") as z:
+        z.writestr("one.jsonl.gz", logical)
+    outer = f.getvalue()
+    row = {"dataset_id": "one", "family": "trades",
+           "quality_status": "PARTIAL", "replay_compatible": False,
+           "release_tag": "tag", "release_asset": "one.jsonl.gz",
+           "release_container_asset": "bundle.zip",
+           "release_remote_size": len(outer),
+           "release_remote_digest": "sha256:" + hashlib.sha256(outer).hexdigest(),
+           "bytes": len(logical), "sha256": hashlib.sha256(logical).hexdigest()}
+    index = {"release_repository_default": recovery.CANONICAL, "shards": [row]}
+    asset = {"id": 21, "size": len(outer),
+             "digest": "sha256:" + hashlib.sha256(outer).hexdigest(),
+             "browser_download_url": "https://example.invalid/test"}
+    root = tmp_path / "quarantine-root"
+    root.mkdir()
+    monkeypatch.setattr(recovery, "_download_to_path",
+                        lambda _u, path, **k:
+                        (path.write_bytes(outer), hashlib.sha256(outer).hexdigest()))
+    recovery.hydrate_candidate(
+        recovery.candidate_from_index(index, "one"), asset, root,
+        download=True, max_source_bytes=10000, catalog_index_sha256="a"*64)
+    return index, root
+
+
+def test_actual_byte_coverage_is_separate_from_replay(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    checked = audit.verify_quarantine(root, index, "a"*64)
+    assert checked["byte_verified_non_safe_shards"] == 1
+    assert checked["byte_coverage_complete"] is True
+    assert checked["unresolved_without_current_byte_proof"] == 0
+    assert checked["unique_source_assets_verified"] == 1
+    assert checked["replay_certified"] is False
+    assert checked["all_exploitable_data_restored"] is False
+
+
+def test_corrupt_bytes_and_drift_fail_without_erasing_evidence(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    stale = audit.verify_quarantine(root, index, "b"*64)
+    assert stale["invalid_or_stale_receipts"] == 1
+    assert stale["byte_coverage_complete"] is False
+    original = next((root/"quarantine"/"source_verified_non_replay").glob("*.jsonl.gz"))
+    original.write_bytes(b"tampered")
+    report = audit.verify_quarantine(root, index, "a"*64)
+    assert report["invalid_or_stale_receipts"] == 1
+    assert report["unresolved_without_current_byte_proof"] == 1
+    assert original.read_bytes() == b"tampered"
