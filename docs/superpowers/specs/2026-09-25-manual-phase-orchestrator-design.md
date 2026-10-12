@@ -12892,6 +12892,16 @@ context, fills/trades, and replay/backtest provenance. A zero trade count
 in an ancillary family is not a reason to discard it. Data minimization
 must not discard market context necessary to reproduce executable fills.
 
+The optional `--triage-jsonl <new-path>` switch creates an append-free,
+non-destructive candidate ledger for every PARTIAL/REJECT/STALE shard and every
+SAFE shard with unproven replay compatibility. It never overwrites an existing
+file. Each entry records missing immutable Release identity/digest/size,
+quality reasons, original manifest locator, and a strictly NOT_ASSESSED recovery
+status. A catalogue SHA-256 header and candidate-count/SHA-256 footer let
+Work/Codex distinguish a complete, unchanged triage from an incomplete or
+stale one. This ledger is a repair queue, not a list of proven recoverable
+bytes or validated replay inputs. It makes no remote asset-availability claim.
+
 Run `python tools/preservation_inventory.py` locally or on an explicitly
 requested GitHub-hosted validation to obtain a read-only, SHA-bound census
 of SAFE, PARTIAL, REJECT and STALE rows by family, the number and exact
