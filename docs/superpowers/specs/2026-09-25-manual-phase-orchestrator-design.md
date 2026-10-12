@@ -12873,11 +12873,42 @@ members enter `usable/`. `PARTIAL`/`REJECT` rows, historical recovery capsules
 and superseded full bundles remain durably published but do not pollute the
 replay corpus.
 
-For an existing hydrated checkout, the canonical replay-ready sync MAY prune
-an unselected local cache copy only after re-verifying that its size and
-SHA-256 equal the still-published inventory asset. It MUST preserve unknown,
-partial, corrupt and symlinked paths, report pruned counts/bytes, and keep the
-remote `--everything` source recoverable.
+For an existing hydrated checkout, the canonical replay-ready sync MUST NOT
+automatically prune any unselected local cache copy. In particular, non-SAFE,
+partial, rejected, stale, previously downloaded historical, and unclassified
+evidence MUST NOT be removed as a side effect of `ALINA_SYNC_COMPLETE`.
+A separately requested maintenance operation, if ever implemented, MUST
+prove a verified remote copy and explicit operator intent before removing
+an otherwise recoverable local cache copy. The remote `--everything` source
+must remain recoverable. This prioritizes preservation over automatic
+space reclamation and must never affect the running COLLECT phase.
+
+#### Current priority: preserve 100% of truly exploitable evidence
+
+The economic target is explicitly deferred; no +5 USD/day goal is a
+precondition for collection, restoration or data-quality work. All SAFE
+families are in scope, including L2, BBO, capacity, tickers, clock/funding
+context, fills/trades, and replay/backtest provenance. A zero trade count
+in an ancillary family is not a reason to discard it. Data minimization
+must not discard market context necessary to reproduce executable fills.
+
+Run `python tools/preservation_inventory.py` locally or on an explicitly
+requested GitHub-hosted validation to obtain a read-only, SHA-bound census
+of SAFE, PARTIAL, REJECT and STALE rows by family, the number and exact
+compressed bytes of distinct outer Release assets required for SAFE replay,
+and explicit unresolved coverage. The report never claims a completed
+restore; only `RESTORE_REPORT.json` and `SYNC_REPORT.json` may certify it.
+Do not use raw counts as global trade-uniqueness proof. A missing or stale
+index, conflicting packed-asset digest, unknown status or SAFE row without
+immutable identity is a failure, not an inferred zero.
+
+`PARTIAL`, `REJECT` and `STALE` assets remain durably published and
+individually traceable for future evidence-based repair. Their recoverable
+and irrecoverable volumes remain UNKNOWN until measured. No automatic
+reclassification to SAFE, no irreversible purge, and no false 100% success.
+Repair must prove the immutable shard identity, continuity, timestamps,
+gap/duplicate checks and replay compatibility before promotion. The
+current collectors must never be stopped or reconfigured by this audit.
 
 The separate explicit `--everything` profile remains available for complete
 historical disaster-recovery archiving. It downloads every published asset

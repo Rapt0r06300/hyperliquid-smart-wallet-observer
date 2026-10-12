@@ -2192,7 +2192,9 @@ def main(argv: list[str] | None = None) -> int:
             recover_verifiable=args.recover_verifiable,
             optional_local_snapshot=args.materialize_available_local_snapshot,
             profile="replay-ready" if args.replay_ready else "full-archive",
-            prune_unselected=args.replay_ready,
+            # Preserve every existing cached source by default; never delete
+            # local recovery evidence as a side effect of SAFE synchronization.
+            prune_unselected=False,
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
