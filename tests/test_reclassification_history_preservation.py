@@ -80,3 +80,17 @@ def test_dry_run_reclassification_preserves_original_manifest_and_catalog(tmp_pa
     assert all(p.read_bytes() == content for p, content in originals.items())
     assert not (tmp_path / "datasets" / "safe").exists()
     assert not (tmp_path / "catalog" / "reclassification-history").exists()
+
+
+
+def test_quarantine_publisher_stages_exact_original_before_commit():
+    from pathlib import Path
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github" / "workflows" / "quarantine-audit.yml"
+    ).read_text(encoding="utf-8")
+    assert "git add -A -- catalog/reclassification-history" in workflow
+    assert "RECLASSIFICATION_ARCHIVE_NOT_STAGED" in workflow
+    assert workflow.index("git add -A -- catalog/reclassification-history") < workflow.index(
+        'git commit -m "fix(dataset): repair stale classifications with provenance"'
+    )

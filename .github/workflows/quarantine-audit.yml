@@ -83,7 +83,7 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             python tools/index_run_manifest.py --compact-existing
-            python tools/repair_stale_safe_classifications.py
+            python tools/repair_stale_safe_classifications.py > "$RUNNER_TEMP/alina-reclassification-result.json"
             python tools/build_catalog_metrics.py
             python tools/build_quarantine_audit.py
             python tools/check_dataset_quality.py
@@ -109,6 +109,37 @@ jobs:
               datasets/rejected
             # Never publish a partition root without its matching Git blobs.
             if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
+            # A retired PARTIAL/REJECT manifest must have its exact original
+            # SHA-256 bytes in the SAME Git commit as its SAFE replacement.
+            if [ -d catalog/reclassification-history ]; then
+              git add -A -- catalog/reclassification-history
+            fi
+            python - <<'PY'
+          import hashlib
+          import json
+          import re
+          import subprocess
+          from pathlib import Path
+          receipt = json.loads(
+              Path(__import__("os").environ["RUNNER_TEMP"])
+              .joinpath("alina-reclassification-result.json").read_text()
+          )
+          for item in receipt.get("repaired", []):
+              rel = item.get("prior_manifest_archive")
+              sha = item.get("prior_manifest_sha256")
+              if (not isinstance(rel, str)
+                      or not re.fullmatch(r"catalog/reclassification-history/[0-9a-f]{64}\.json", rel)
+                      or not isinstance(sha, str)
+                      or sha != rel.rsplit("/", 1)[-1][:-5]):
+                  raise SystemExit("RECLASSIFICATION_ARCHIVE_RECEIPT_MISSING")
+              disk = Path(rel).read_bytes()
+              staged = subprocess.run(
+                  ["git", "show", ":" + rel], capture_output=True, check=True
+              ).stdout
+              if (hashlib.sha256(disk).hexdigest() != sha
+                      or hashlib.sha256(staged).hexdigest() != sha):
+                  raise SystemExit("RECLASSIFICATION_ARCHIVE_NOT_STAGED")
+          PY
             if git diff --cached --quiet; then
               echo "Quarantine audit and repaired catalog already current."
               published=true
