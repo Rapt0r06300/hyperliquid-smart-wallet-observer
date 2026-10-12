@@ -2358,3 +2358,29 @@ def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_pa
     assert unknown.read_text(encoding="utf-8") == "keep me"
     assert linked.is_symlink()
     assert outside.read_bytes() == expected
+
+
+def test_release_asset_download_passes_exact_sha_bound_network_limit(monkeypatch, tmp_path):
+    import hashlib
+    from tools import restore_alina as module
+
+    checked = []
+    def fake_download(url, target, *, token=None, max_bytes=None, **kwargs):
+        checked.append(max_bytes)
+        data = b"exact" if max_bytes else b""
+        target.write_bytes(data)
+        return len(data), hashlib.sha256(data).hexdigest()
+
+    monkeypatch.setattr(module, "_download_to_path", fake_download)
+    monkeypatch.setattr(module, "_verify_zip_archive", lambda path, name: None)
+    for payload in (b"exact", b""):
+        asset = {
+            "name": f"asset-{len(payload)}.bin",
+            "size": len(payload),
+            "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+            "browser_download_url": "https://example.invalid/asset",
+        }
+        receipt = module.download_asset(asset, tmp_path)
+        assert receipt["verification_status"] == "VERIFIED"
+        assert (tmp_path / asset["name"]).read_bytes() == payload
+    assert checked == [5, 0]
