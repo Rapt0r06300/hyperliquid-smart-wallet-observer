@@ -282,7 +282,9 @@ def prove_partitioned_index(
     if output_directory.exists():
         raise ValueError("PARTITION_PARITY_OUTPUT_ALREADY_EXISTS")
     source = index_path.read_bytes()
-    original = json.loads(source)
+    source_layout = "PARTITIONED" if json.loads(source).get("schema") == SCHEMA else "INLINE"
+    # Verify every original SHA-bound part; do not assume an inline index.
+    original = read_index(index_path)
     root, parts = partition_index(original)
     output_directory.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".partition-proof-", dir=output_directory.parent) as tmp:
@@ -300,6 +302,7 @@ def prove_partitioned_index(
             "schema": "alina.partition_parity_proof.v1",
             "status": "VERIFIED",
             "source_sha256": hashlib.sha256(source).hexdigest(),
+            "source_layout": source_layout,
             "original_shards": len(original["shards"]),
             "partitioned_shards": len(reconstructed["shards"]),
             "partition_count": len(parts),
@@ -308,7 +311,7 @@ def prove_partitioned_index(
                 == hashlib.sha256(source).digest(),
             "paper_read_only": True,
         }
-        if not report["source_unchanged"]:
+        if not report["source_unchanged"] or read_index(index_path) != original:
             raise ValueError("PARTITION_PARITY_SOURCE_CHANGED")
         (stage / "PARTITION_PROOF.json").write_bytes(_json_bytes(report))
         os.replace(stage, output_directory)

@@ -234,3 +234,34 @@ def test_save_index_refuses_unknown_existing_layout_without_mutation(tmp_path):
             save_index(path, _index(), max_inline_bytes=100000)
         assert path.read_bytes() == original
         assert not (path.parent / "data-index-parts").exists()
+
+
+def test_snapshot_cli_helper_accepts_prepartitioned_canonical_source(tmp_path):
+    from tools.partitioned_data_index import prove_partitioned_index
+    logical = _index()
+    root, parts = partition_index(logical, max_partition_bytes=240)
+    source = _stage(tmp_path, root, parts)
+    original_bytes = source.read_bytes()
+    first_part = source.parent / next(iter(parts))
+    part_bytes = first_part.read_bytes()
+    output = tmp_path.parent / (tmp_path.name + "-partitioned-proof")
+    result = prove_partitioned_index(source, output)
+    assert result["status"] == "VERIFIED"
+    assert result["source_layout"] == "PARTITIONED"
+    assert result["source_unchanged"] is True
+    assert result["original_shards"] == len(logical["shards"])
+    assert load_partitioned_index(output / "DATA_INDEX.json") == logical
+    assert source.read_bytes() == original_bytes
+    assert first_part.read_bytes() == part_bytes
+
+
+def test_snapshot_cli_helper_rejects_tampered_prepartitioned_canonical_source(tmp_path):
+    from tools.partitioned_data_index import prove_partitioned_index
+    root, parts = partition_index(_index(), max_partition_bytes=240)
+    source = _stage(tmp_path, root, parts)
+    file = source.parent / next(iter(parts))
+    file.write_bytes(b"corrupted")
+    output = tmp_path.parent / (tmp_path.name + "-invalid-proof")
+    with pytest.raises(ValueError, match="PARTITION_PARITY_(SIZE|DIGEST)_MISMATCH"):
+        prove_partitioned_index(source, output)
+    assert not output.exists()

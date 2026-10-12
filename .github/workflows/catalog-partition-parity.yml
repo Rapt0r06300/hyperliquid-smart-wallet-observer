@@ -75,8 +75,11 @@ jobs:
           # This job owns a disposable checkout. The canonical GitHub main is
           # never altered; a failure blocks any production partition migration.
           cp catalog/DATA_METRICS.json "$RUNNER_TEMP/legacy-data-metrics.json"
-          test ! -e catalog/data-index-parts
-          cp -a "$RUNNER_TEMP/alina-partition-proof/data-index-parts" catalog/
+          test ! -L catalog/data-index-parts
+          # The source may already be partitioned: preserve originals in the
+          # disposable hosted checkout, and layer the proven parts over them.
+          mkdir -p catalog/data-index-parts
+          cp -a "$RUNNER_TEMP/alina-partition-proof/data-index-parts/." catalog/data-index-parts/
           cp "$RUNNER_TEMP/alina-partition-proof/DATA_INDEX.json" catalog/DATA_INDEX.json
           python tools/build_catalog_metrics.py
           python tools/build_quarantine_audit.py
