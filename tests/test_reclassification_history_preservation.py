@@ -13,7 +13,7 @@ def test_archives_identical_original_bytes_without_overwriting(tmp_path):
     source.parent.mkdir(parents=True)
     source.write_bytes(b'{"quality_status":"PARTIAL","evidence":"original"}\\n')
     archive, digest = _archive_prior_manifest(tmp_path, source)
-    assert archive == tmp_path / "catalog" / "reclassification-history" / f"{digest}.json"
+    assert archive == tmp_path / "datasets" / "quarantine" / "reclassification-history" / f"{digest}.original"
     assert archive.read_bytes() == source.read_bytes()
     assert digest == hashlib.sha256(source.read_bytes()).hexdigest()
     assert _archive_prior_manifest(tmp_path, source) == (archive, digest)
@@ -79,7 +79,7 @@ def test_dry_run_reclassification_preserves_original_manifest_and_catalog(tmp_pa
     assert result["quarantine_unchanged"] is True
     assert all(p.read_bytes() == content for p, content in originals.items())
     assert not (tmp_path / "datasets" / "safe").exists()
-    assert not (tmp_path / "catalog" / "reclassification-history").exists()
+    assert not (tmp_path / "datasets" / "quarantine" / "reclassification-history").exists()
 
 
 
@@ -89,8 +89,9 @@ def test_quarantine_publisher_stages_exact_original_before_commit():
         Path(__file__).resolve().parents[1]
         / ".github" / "workflows" / "quarantine-audit.yml"
     ).read_text(encoding="utf-8")
-    assert "git add -A -- catalog/reclassification-history" in workflow
+    assert "git add -A -- datasets/quarantine" in workflow
     assert "RECLASSIFICATION_ARCHIVE_NOT_STAGED" in workflow
-    assert workflow.index("git add -A -- catalog/reclassification-history") < workflow.index(
+    assert "RECLASSIFICATION_ARCHIVE_NOT_STAGED" in workflow
+    assert workflow.index("git add -A -- datasets/quarantine") < workflow.index(
         'git commit -m "fix(dataset): repair stale classifications with provenance"'
     )

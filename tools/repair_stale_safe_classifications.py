@@ -82,11 +82,11 @@ def _archive_prior_manifest(base: Path, old_path: Path) -> tuple[Path, str]:
         raise ValueError("RECLASSIFICATION_UNSAFE_OR_MISSING_SOURCE")
     original = old_path.read_bytes()
     digest = hashlib.sha256(original).hexdigest()
-    archive_dir = base / "catalog" / "reclassification-history"
+    archive_dir = base / "datasets" / "quarantine" / "reclassification-history"
     if archive_dir.is_symlink() or not archive_dir.resolve().is_relative_to(base):
         raise ValueError("RECLASSIFICATION_UNSAFE_ARCHIVE_DIRECTORY")
     archive_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = archive_dir / f"{digest}.json"
+    archive_path = archive_dir / f"{digest}.original"
     if archive_path.is_symlink():
         raise ValueError("RECLASSIFICATION_UNSAFE_ARCHIVE_TARGET")
     if archive_path.is_file():
@@ -319,7 +319,7 @@ def repair(root: str | Path = ROOT, *, dry_run: bool = False) -> dict[str, Any]:
             digest = archived.get(old_path)
             if digest is None or hashlib.sha256(old_path.read_bytes()).hexdigest() != digest:
                 raise ValueError("RECLASSIFICATION_SOURCE_CHANGED_BEFORE_RETIREMENT")
-            archived_path = base / "catalog" / "reclassification-history" / f"{digest}.json"
+            archived_path = base / "datasets" / "quarantine" / "reclassification-history" / f"{digest}.original"
             if hashlib.sha256(archived_path.read_bytes()).hexdigest() != digest:
                 raise ValueError("RECLASSIFICATION_ARCHIVE_CHANGED_BEFORE_RETIREMENT")
             old_path.unlink()

@@ -12911,11 +12911,14 @@ footer digest/count to the canonical source. A valid triage remains
 
 When existing PARTIAL/REJECT/STALE manifest labels are legitimately promoted,
 the original receipt MUST first be copied byte-for-byte to
-`catalog/reclassification-history/<sha256>.json`. Archive collisions,
+`datasets/quarantine/reclassification-history/<sha256>.original`. Archive collisions,
 symlinks and digest mismatch are fatal; no old receipt may be retired
 before exact archival evidence, index, SAFE manifest, and catalog updates
 succeed. The history is part of the same Git commit (catalog plus datasets)
-as the promotion, not an untracked local side effect.
+as the promotion, not an untracked local side effect. The `.original`
+extension prevents recovered historical receipts from being mistaken for
+active `.manifest.json` files. This path is already staged by the legacy
+quarantine publisher, including in-flight older workflow runs.
 
 Run `python tools/preservation_inventory.py` locally or on an explicitly
 requested GitHub-hosted validation to obtain a read-only, SHA-bound census

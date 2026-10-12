@@ -111,8 +111,10 @@ jobs:
             if [ -d catalog/data-index-parts ]; then git add -A -- catalog/data-index-parts; fi
             # A retired PARTIAL/REJECT manifest must have its exact original
             # SHA-256 bytes in the SAME Git commit as its SAFE replacement.
-            if [ -d catalog/reclassification-history ]; then
-              git add -A -- catalog/reclassification-history
+            # Historical originals use the already-staged quarantine tree,
+            # including for in-flight jobs started before this guard existed.
+            if [ -d datasets/quarantine/reclassification-history ]; then
+              git add -A -- datasets/quarantine/reclassification-history
             fi
             python - <<'PY'
           import hashlib
@@ -128,9 +130,9 @@ jobs:
               rel = item.get("prior_manifest_archive")
               sha = item.get("prior_manifest_sha256")
               if (not isinstance(rel, str)
-                      or not re.fullmatch(r"catalog/reclassification-history/[0-9a-f]{64}\.json", rel)
+                      or not re.fullmatch(r"datasets/quarantine/reclassification-history/[0-9a-f]{64}\.original", rel)
                       or not isinstance(sha, str)
-                      or sha != rel.rsplit("/", 1)[-1][:-5]):
+                      or sha != rel.rsplit("/", 1)[-1][:-9]):
                   raise SystemExit("RECLASSIFICATION_ARCHIVE_RECEIPT_MISSING")
               disk = Path(rel).read_bytes()
               staged = subprocess.run(
