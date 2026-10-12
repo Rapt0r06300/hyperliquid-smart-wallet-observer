@@ -51,6 +51,7 @@ def read_source_inventory(path: Path) -> tuple[dict[tuple[str, str], tuple[int, 
         raise InventoryError("SOURCE_INVENTORY_INVALID_TOTALS")
     seen_tags: set[str] = set()
     seen_release_ids: set[int] = set()
+    seen_asset_ids: set[int] = set()
     assets: dict[tuple[str, str], tuple[int, str]] = {}
     total_bytes = 0
     total_assets = 0
@@ -83,8 +84,9 @@ def read_source_inventory(path: Path) -> tuple[dict[tuple[str, str], tuple[int, 
                     or state != "uploaded"):
                 raise InventoryError("SOURCE_INVENTORY_INVALID_ASSET")
             key = (tag, name)
-            if key in assets:
+            if key in assets or asset_id in seen_asset_ids:
                 raise InventoryError("SOURCE_INVENTORY_DUPLICATE_ASSET")
+            seen_asset_ids.add(asset_id)
             assets[key] = (size, digest[7:].lower())
             total_assets += 1
             total_bytes += size
@@ -109,6 +111,9 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
     counts: Counter[str] = Counter()
     by_status: dict[str, Counter[str]] = {}
     matched_outer: dict[tuple[str, str], int] = {}
+    rows_by_id = {row["dataset_id"]: row for row in index["shards"]}
+    if len(rows_by_id) != len(index["shards"]):
+        raise InventoryError("SOURCE_AUDIT_DUPLICATE_CATALOG_ID")
     for row in iter_recovery_triage(index):
         tag = row.get("release_tag")
         inner = row.get("release_asset")
@@ -126,8 +131,7 @@ def assess_sources(index: Mapping[str, Any], report: Mapping[str, Any],
         else:
             size, digest = assets[key]
             # Packed sharded assets are validated at the outer ZIP identity.
-            original = next((item for item in index["shards"]
-                             if item["dataset_id"] == row["dataset_id"]), None)
+            original = rows_by_id.get(row["dataset_id"])
             if original is None:
                 raise InventoryError("SOURCE_AUDIT_MISSING_CATALOG_ROW")
             if container:
