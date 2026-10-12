@@ -1,22 +1,54 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "copy-vault-e8-broad-2026101121-v8",
-  "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "checkpoint_lineage": [
+    {
+      "at": "2026-10-12T03:14:41.649323Z",
+      "digest": "3e7242840b3ee7a679d13cf00b9d459da7e27fa6d258de63c9e51cea3012e669",
+      "phase_epoch": 8,
+      "result_sha256": "794368fe79bf22eb4bddba3ad95cdfe5ff0eeb3b163c761baa084d0b78b84d6e",
+      "source_collection_epoch": null,
+      "unit_id": "0"
+    }
+  ],
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "6d9c112fecaaed3f1a39429f1ce06a82bcdd3c07",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "command": [
+          "/opt/hostedtoolcache/Python/3.12.15/x64/bin/python",
+          "/home/runner/work/hyperliquid-smart-wallet-observer/hyperliquid-smart-wallet-observer/alina/tools/collect_cloud_copy_vault.py",
+          "--output",
+          "/home/runner/work/_temp/campaign-output/copy-vault-e8-broad-2026101121-v8/0"
+        ],
+        "phase": "unit",
+        "phases": [],
+        "reason": "adapter_timeout",
+        "status": "CONTINUATION_REQUIRED"
+      },
+      "sha256": "794368fe79bf22eb4bddba3ad95cdfe5ff0eeb3b163c761baa084d0b78b84d6e"
+    }
+  },
   "config_sha256": "12b4c6453c606be609f2affa3cd54f2d28ade9f186d2bba9e032819f9e6a0c81",
   "consecutive_failures": 0,
   "created_at": "2026-10-11T21:51:34.264223+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "794368fe79bf22eb4bddba3ad95cdfe5ff0eeb3b163c761baa084d0b78b84d6e",
     "copy_vault_mode": "two_speed_broad_rest_priority_ws",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "38178141568",
     "max_vaults": 3081,
     "max_ws_vaults": 10,
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "rotate_mb": 64,
     "selection_file": "catalog/copy_vault_selections/e8/2026101121.json",
     "selection_sha256": "3e2d947c4bd93e0b5dc9d1a00fd71f8f30c804ee95a802dc5b0da82f12a360ad",
@@ -37,15 +69,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-12T03:14:41.649323Z",
+      "from": "RUNNING",
+      "reason": "adapter_timeout",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "copy_vault_collection",
-  "lease": {
-    "acquired_at": "2026-10-11T21:58:28.569976Z",
-    "expires_at": "2026-10-12T03:43:28.569976Z",
-    "lease_token_sha256": "5272a750e751786fce06370ec6da844f43a36b9269b4e577f0f2e11a3682b5a5",
-    "owner_run_id": "38178141568"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -54,7 +87,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -63,9 +96,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "adapter_timeout",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-11T21:58:28.570047Z",
+  "updated_at": "2026-10-12T03:14:41.649323Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
