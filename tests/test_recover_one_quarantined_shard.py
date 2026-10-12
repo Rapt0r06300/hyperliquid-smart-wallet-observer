@@ -90,3 +90,22 @@ def test_preexisting_unverified_target_is_preserved_and_blocks_recovery(tmp_path
     with pytest.raises(ValueError, match="EXISTING_OUTER_CONFLICT"):
         recovery.hydrate_candidate(candidate, asset, root, download=True)
     assert (directory / "one.zip").read_bytes() == b"never-overwrite"
+
+
+
+def test_github_hosted_manual_recovery_is_one_shard_paper_and_bounded():
+    from pathlib import Path
+    workflow = (Path(__file__).resolve().parents[1] / ".github"
+                / "workflows" / "catalog-partition-parity.yml").read_text()
+    assert "hydrate_candidate_id:" in workflow
+    assert "recover-one:" in workflow
+    assert "github.event_name == 'workflow_dispatch'" in workflow
+    assert "inputs.hydrate_candidate_id != ''" in workflow
+    assert "--dataset-id" in workflow
+    assert "--max-source-bytes 100000000" in workflow
+    assert "--download" in workflow
+    assert "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED" in workflow
+    assert "assert report[\"validation_allowed\"] is False" in workflow
+    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
+    assert "contents: read" in workflow
+    assert "self-hosted" not in workflow

@@ -12905,6 +12905,16 @@ This snapshot may be stale even if it is a verified GitHub Release asset.
 The comparison fails closed on inconsistent inventory totals, duplicate
 Release identities, altered checksums, catalog drift or absent triage entries.
 
+A GitHub-hosted manual entry point is also available in the existing
+`catalog-partition-parity` workflow: set the optional `hydrate_candidate_id`
+to one exact dataset ID. A separate GitHub-hosted job (disabled on pushes)
+checks the live Release and downloads at most 100,000,000 bytes of one
+immutable source. It verifies the exact inner shard, saves both outer source
+and quarantined payload, and exports a 30-day Actions artifact with the
+fail-closed receipt. It never modifies the catalog or safe/usable datasets.
+The artifact is temporary transfer evidence, not durable Git archival and
+not a replay certificate. No automated bulk recovery is implied.
+
 For an explicitly selected non-SAFE dataset ID, use the single bounded
 `tools/recover_one_quarantined_shard.py` companion to the existing restore
 engine. Default mode checks real-time Release asset identity but transfers no
