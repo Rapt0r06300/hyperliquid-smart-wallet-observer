@@ -117,7 +117,7 @@ def _archive_prior_manifest(base: Path, old_path: Path) -> tuple[Path, str]:
 
 
 def repair(root: str | Path = ROOT) -> dict[str, Any]:
-    base = Path(root)
+    base = Path(root).resolve()
     index_path = base / INDEX_PATH
     registry_path = base / REGISTRY_PATH
     catalog_path = base / CATALOG_PATH
@@ -265,8 +265,8 @@ def repair(root: str | Path = ROOT) -> dict[str, Any]:
                 archive_path, old_digest = _archive_prior_manifest(base, old_path)
                 archived[old_path] = old_digest
                 for repaired_row in repaired:
-                    if repaired_row["old_manifest_path"] == str(old_path.relative_to(base)).replace("\\\\", "/"):
-                        repaired_row["prior_manifest_archive"] = str(archive_path.relative_to(base)).replace("\\\\", "/")
+                    if repaired_row["old_manifest_path"] == str(old_path.relative_to(base)).replace("\\", "/"):
+                        repaired_row["prior_manifest_archive"] = str(archive_path.relative_to(base)).replace("\\", "/")
                         repaired_row["prior_manifest_sha256"] = old_digest
         # Publish the SHA-verified index only after archiving the old evidence.
         # Failed writes must never retire the original quarantine receipt.
