@@ -33,9 +33,14 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
     by_id = {row["dataset_id"]: row for row in rows}
     if len(by_id) != len(rows):
         raise InventoryError("RECOVERY_COVERAGE_DUPLICATE_INDEX_ID")
-    unresolved = {c["dataset_id"] for c in iter_recovery_triage(index)}
-    if len(unresolved) != sum(1 for _ in iter_recovery_triage(index)):
-        raise InventoryError("RECOVERY_COVERAGE_DUPLICATE_CANDIDATE")
+    unresolved_by_family: Counter[str] = Counter()
+    unresolved = set()
+    for candidate in iter_recovery_triage(index):
+        ident = candidate["dataset_id"]
+        if ident in unresolved:
+            raise InventoryError("RECOVERY_COVERAGE_DUPLICATE_CANDIDATE")
+        unresolved.add(ident)
+        unresolved_by_family[str(candidate.get("family") or "unknown")] += 1
     directory = root / "quarantine" / "source_verified_non_replay"
     if directory.is_symlink():
         raise InventoryError("RECOVERY_COVERAGE_UNSAFE_QUARANTINE")
@@ -45,6 +50,8 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
     verified_outer_assets: set[tuple[str, str]] = set()
     verified = 0
     verified_bytes = 0
+    verified_by_family: Counter[str] = Counter()
+    verified_bytes_by_family: Counter[str] = Counter()
     unchanged_shards_across_catalog_updates = 0
     invalid = Counter()
     samples = []
@@ -121,6 +128,9 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
             verified_outer_assets.add(key)
             verified += 1
             verified_bytes += logical_bytes
+            family = str(row.get("family") or "unknown")
+            verified_by_family[family] += 1
+            verified_bytes_by_family[family] += logical_bytes
             if snapshot_sha != index_sha:
                 unchanged_shards_across_catalog_updates += 1
         except (OSError, ValueError, TypeError, KeyError, UnicodeError) as error:
@@ -128,6 +138,12 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
             if len(samples) < 20:
                 samples.append({"dataset_id": str(ident), "reason": str(error)})
     complete = verified == len(unresolved) and not invalid
+    family_unverified = {
+        family: count - verified_by_family[family]
+        for family, count in sorted(unresolved_by_family.items())
+    }
+    if any(value < 0 for value in family_unverified.values()):
+        raise InventoryError("RECOVERY_COVERAGE_FAMILY_COUNT_MISMATCH")
     return {
         "schema": "alina.quarantine_byte_coverage.v1",
         "status": "BYTE_COVERAGE_COMPLETE_NOT_REPLAY_CERTIFIED" if complete
@@ -139,6 +155,11 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
         "byte_verified_after_unrelated_catalog_updates": unchanged_shards_across_catalog_updates,
         "unresolved_without_current_byte_proof": len(unresolved) - verified,
         "quarantined_logical_compressed_bytes_verified": verified_bytes,
+        "unresolved_candidates_by_family": dict(sorted(unresolved_by_family.items())),
+        "byte_verified_shards_by_family": dict(sorted(verified_by_family.items())),
+        "byte_verified_compressed_bytes_by_family": dict(sorted(verified_bytes_by_family.items())),
+        "candidates_without_current_byte_proof_by_family": family_unverified,
+        "unknown_unverified_compressed_bytes": True,
         "unique_source_assets_verified": len(verified_outer_assets),
         "unique_source_assets_checked": len(outer_cache),
         "invalid_or_stale_receipts": sum(invalid.values()),
