@@ -2373,6 +2373,89 @@ def test_replay_ready_prune_preserves_unknown_corrupt_and_symlinked_files(tmp_pa
     assert outside.read_bytes() == expected
 
 
+def test_prune_only_removes_verified_local_non_safe_cache_without_payload_download(
+    tmp_path, monkeypatch,
+):
+    module = _module()
+    safe_bytes = b'{"safe":true}\n'
+    rejected_bytes = b'{"rejected":true}\n'
+    tag = "data-v2-cache-prune"
+    releases = [{"tag_name": tag, "assets": [
+        _asset("safe.jsonl.gz", "https://example.invalid/safe", safe_bytes),
+        _asset("bad.jsonl.gz", "https://example.invalid/reject", rejected_bytes),
+    ]}]
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter(releases))
+    monkeypatch.setattr(
+        module, "_download_to_path",
+        lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("cache prune must never download market payloads")
+        ),
+    )
+    index_path = tmp_path / "DATA_INDEX.json"
+    index_path.write_text(json.dumps({"shards": [
+        {"dataset_id": "safe-cache", "quality_status": "SAFE",
+         "replay_compatible": True, "release_tag": tag,
+         "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
+         "sha256": hashlib.sha256(safe_bytes).hexdigest()},
+        {"dataset_id": "bad-cache", "quality_status": "REJECT",
+         "replay_compatible": False, "release_tag": tag,
+         "release_asset": "bad.jsonl.gz", "bytes": len(rejected_bytes),
+         "sha256": hashlib.sha256(rejected_bytes).hexdigest()},
+    ]}), encoding="utf-8")
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": 2},
+    }), encoding="utf-8")
+    destination = tmp_path / "restore"
+    local_assets = destination / "releases" / tag
+    local_assets.mkdir(parents=True)
+    safe = local_assets / "safe.jsonl.gz"
+    bad = local_assets / "bad.jsonl.gz"
+    unknown = local_assets / "my-unpublished-note.txt"
+    safe.write_bytes(safe_bytes)
+    bad.write_bytes(rejected_bytes)
+    unknown.write_text("preserve locally owned file", encoding="utf-8")
+
+    report = module.restore_everything(
+        "owner/repo", destination, catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready",
+        prune_only=True, max_download_bytes=0,
+    )
+    assert report["status"] == "CACHE_PRUNED_NOT_RESTORED"
+    assert report["pruned_unselected_assets"] == 1
+    assert report["pruned_unselected_bytes"] == len(rejected_bytes)
+    assert report["market_payloads_downloaded"] is False
+    assert report["github_release_payloads_deleted"] is False
+    assert report["replay_ready_complete"] is False
+    assert safe.read_bytes() == safe_bytes
+    assert not bad.exists()
+    assert unknown.read_text(encoding="utf-8") == "preserve locally owned file"
+    assert not (destination / "RESTORE_REPORT.json").exists()
+    assert (destination / "CACHE_PRUNE_REPORT.json").exists()
+
+
+def test_prune_never_follows_symlinked_release_directory(tmp_path):
+    module = _module()
+    payload = b"important original outside cache"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "asset.bin").write_bytes(payload)
+    releases_root = tmp_path / "releases"
+    releases_root.mkdir()
+    (releases_root / "old-release").symlink_to(outside, target_is_directory=True)
+    release = {"tag_name": "old-release", "assets": [
+        _asset("asset.bin", "https://example.invalid/asset", payload),
+    ]}
+    report = module._prune_verified_unselected_assets(
+        [release], set(), releases_root,
+    )
+    assert report["assets"] == 0
+    assert report["failures"][0]["error"] == "SYMLINKED_RELEASE_DIRECTORY_NOT_PRUNED"
+    assert (outside / "asset.bin").read_bytes() == payload
+
+
 def test_release_asset_download_passes_exact_sha_bound_network_limit(monkeypatch, tmp_path):
     import hashlib
     from tools import restore_alina as module

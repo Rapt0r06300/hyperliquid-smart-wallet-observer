@@ -64,6 +64,8 @@ local cache copies may be pruned without deleting GitHub sources or uncertain
 repair evidence. None of these commands are remotely invoked on the user's PC.
 
 
+Local cache-only maintenance is explicit: `ALINA_SYNC_COMPLETE.cmd --prune-cache-only` / `ALINA_SYNC_COMPLETE.sh --prune-cache-only` invokes the existing replay-ready restore engine with a **zero-byte market payload transfer budget**. It uses the current SHA-bound catalog and GitHub Release inventory to delete only *local cached copies* of unselected assets that are byte-identical to immutable GitHub originals. It never deletes remote GitHub Releases, follows symlinked release directories, removes unknown/corrupt/unpublished local files, stops cloud collection, or claims a completed restore. A separate `CACHE_PRUNE_REPORT.json` records source inventory SHA, bytes removed and failures; a partial cleanup fails closed.
+
 For local `--preflight-only`, distinguish the **full historical archive**
 (`full_archive_asset_bytes`) from the **SHA-bound SAFE/replay-ready working set**
 (`source_asset_bytes`) and the archive bytes excluded from that working set.

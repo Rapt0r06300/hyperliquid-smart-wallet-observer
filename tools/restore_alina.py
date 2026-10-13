@@ -1157,6 +1157,12 @@ def _prune_verified_unselected_assets(
     for release in releases:
         tag = str(release.get("tag_name") or "")
         release_dir = releases_root / _safe_component(tag)
+        # Never hash or unlink through an attacker-controlled directory link.
+        if release_dir.is_symlink():
+            result["failures"].append({
+                "tag": tag, "asset": None, "error": "SYMLINKED_RELEASE_DIRECTORY_NOT_PRUNED",
+            })
+            continue
         for asset in release.get("assets", []):
             if not isinstance(asset, Mapping):
                 continue
@@ -2031,8 +2037,11 @@ def restore_everything(
     optional_local_snapshot: bool = False,
     profile: str = "full-archive",
     prune_unselected: bool = False,
+    prune_only: bool = False,
     max_download_bytes: int | None = None,
 ) -> dict[str, Any]:
+    if prune_only and (profile != "replay-ready" or preflight_only or workspace is not None):
+        raise RestoreError("cache pruning requires replay-ready without restore, preflight or snapshots")
     if profile not in {"full-archive", "replay-ready"}:
         raise RestoreError(f"unknown restore profile: {profile}")
     if max_download_bytes is not None and (
@@ -2165,6 +2174,50 @@ def restore_everything(
             row for row in unverified_source_assets
             if (str(row["release_tag"]), str(row["name"])) in selected_keys
         ]
+    if prune_only:
+        # Separate, explicit maintenance mode: never download, materialize or
+        # certify any Release payload. SHA-identical cached copies can be
+        # rehydrated later from the same immutable GitHub Release identity.
+        prune_result = _prune_verified_unselected_assets(
+            full_releases, selected_keys, releases_root,
+        )
+        report = {
+            "schema": "alina.safe_cache_prune.v1",
+            "status": (
+                "CACHE_PRUNED_NOT_RESTORED" if not prune_result["failures"]
+                else "CACHE_PRUNE_INCOMPLETE_NOT_RESTORED"
+            ),
+            "repository": repository,
+            "source_inventory_sha256": source_inventory_sha256,
+            "catalog_verification": catalog_verification,
+            "selected_replay_release_asset_count": len(selected_keys),
+            "full_archive_release_count": full_archive_release_count,
+            "full_archive_asset_count": full_archive_asset_count,
+            "full_archive_asset_bytes": full_archive_asset_bytes,
+            "pruned_unselected_assets": prune_result["assets"],
+            "pruned_unselected_bytes": prune_result["bytes"],
+            "prune_failures": prune_result["failures"],
+            "market_payloads_downloaded": False,
+            "github_release_payloads_deleted": False,
+            "replay_ready_complete": False,
+            "paper_only": True,
+            "read_only": True,
+            "real_execution": False,
+        }
+        report_path = destination / "CACHE_PRUNE_REPORT.json"
+        if report_path.is_symlink():
+            raise RestoreError("symlinked cache pruning report")
+        temporary = report_path.with_suffix(".json.partial")
+        if temporary.is_symlink():
+            raise RestoreError("symlinked partial cache pruning report")
+        temporary.write_text(
+            json.dumps(report, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(report_path)
+        report["report"] = str(report_path)
+        return report
+
     raw_rows_by_asset: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     if profile == "replay-ready":
         for row in replay_rows:
@@ -2731,9 +2784,14 @@ def main(argv: list[str] | None = None) -> int:
         help="inventory Releases and check space without downloading assets",
     )
     parser.add_argument(
-        "--max-download-gib", type=int, default=64,
-        help="hard cap in GiB on missing Release bytes transferred; default 64 GiB; "
+        "--max-download-gib", type=int, default=8,
+        help="hard cap in GiB on missing Release bytes transferred; default 8 GiB; "
              "0 means no new payload transfer",
+    )
+    parser.add_argument(
+        "--prune-cache-only", action="store_true",
+        help="remove only locally SHA-verified, unselected Release cache copies; "
+             "never download market payloads or claim a completed restoration",
     )
     parser.add_argument(
         "--retain-unselected-cache", action="store_true",
@@ -2767,6 +2825,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.max_download_gib < 0:
         parser.error("--max-download-gib must be non-negative")
+    if args.prune_cache_only and (
+        not args.replay_ready or args.preflight_only
+        or args.retain_unselected_cache
+        or args.materialize_local_snapshot
+        or args.materialize_available_local_snapshot
+    ):
+        parser.error("--prune-cache-only requires --replay-ready with no other restore mode")
 
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     destination = Path(args.destination).resolve()
@@ -2786,7 +2851,8 @@ def main(argv: list[str] | None = None) -> int:
             # SHA-matched copies still available in immutable GitHub Releases;
             # never delete GitHub sources or unverified local recovery files.
             prune_unselected=args.replay_ready and not args.retain_unselected_cache,
-            max_download_bytes=args.max_download_gib * (1024 ** 3),
+            prune_only=args.prune_cache_only,
+            max_download_bytes=0 if args.prune_cache_only else args.max_download_gib * (1024 ** 3),
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
@@ -2798,6 +2864,20 @@ def main(argv: list[str] | None = None) -> int:
         # a misleading success code or an unhandled Windows traceback.
         print(f"ALINA_RESTORE_FAIL: {exc}", file=sys.stderr)
         return 2
+
+    if args.prune_cache_only:
+        print(json.dumps({
+            "status": report.get("status"),
+            "report": report.get("report"),
+            "source_inventory_sha256": report.get("source_inventory_sha256"),
+            "selected_replay_release_asset_count": report.get("selected_replay_release_asset_count"),
+            "pruned_unselected_assets": report.get("pruned_unselected_assets"),
+            "pruned_unselected_bytes": report.get("pruned_unselected_bytes"),
+            "prune_failures": report.get("prune_failures"),
+            "market_payloads_downloaded": False,
+            "github_release_payloads_deleted": False,
+        }, indent=2, sort_keys=True))
+        return 0 if report.get("status") == "CACHE_PRUNED_NOT_RESTORED" else 3
 
     if args.preflight_only:
         # The full, SHA-bound asset plan remains in RESTORE_PREFLIGHT.json.

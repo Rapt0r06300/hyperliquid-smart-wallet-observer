@@ -128,6 +128,43 @@ def test_restore_delegates_to_existing_engine_and_propagates_failure(monkeypatch
     assert kwargs["env"]["GH_TOKEN"] == "token-for-test"
 
 
+def test_cache_prune_only_passes_zero_byte_budget_to_existing_engine(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    monkeypatch.setenv("GH_TOKEN", "token-for-test")
+    commands = []
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    assert module.restore_published(tmp_path, prune_only=True) == 0
+    assert len(commands) == 1
+    command = commands[0]
+    assert "--replay-ready" in command
+    assert "--prune-cache-only" in command
+    assert command[command.index("--max-download-gib") + 1] == "0"
+    assert "--preflight-only" not in command
+
+
+def test_prune_only_does_not_claim_restoration_or_start_payload_download(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_kw: "a" * 40)
+    called = []
+    def fake_restore(*_a, **kwargs):
+        called.append(kwargs)
+        return 0
+    monkeypatch.setattr(module, "restore_published", fake_restore)
+    assert module.main(["--prune-cache-only", "--skip-update"]) == 0
+    assert called[0]["prune_only"] is True
+    assert called[0]["preflight"] is False
+    assert called[0]["max_download_gib"] is None
+    assert not (tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json").exists()
+
+
 def test_preflight_never_downloads_and_avoids_snapshot_mutation(monkeypatch, tmp_path):
     module = _module()
     monkeypatch.setenv("GH_TOKEN", "token-for-test")

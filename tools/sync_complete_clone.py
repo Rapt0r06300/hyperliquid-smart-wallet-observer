@@ -78,7 +78,8 @@ def synchronize_main(root: Path, *, update: bool = True) -> str:
 
 def restore_published(root: Path, *, preflight: bool = False,
                       snapshot: bool = True,
-                      max_download_gib: int | None = None) -> int:
+                      max_download_gib: int | None = None,
+                      prune_only: bool = False) -> int:
     """Delegate all byte-verification and SAFE gates to the ONE restore engine."""
     root = root.resolve()
     cmd = [
@@ -88,7 +89,13 @@ def restore_published(root: Path, *, preflight: bool = False,
         "--catalog", str(root / "catalog" / "DATA_INDEX.json"),
         "--metrics", str(root / "catalog" / "DATA_METRICS.json"),
     ]
-    if preflight:
+    if preflight and prune_only:
+        raise SyncError("cannot combine cache pruning with restoration preflight")
+    if prune_only:
+        # Metadata/SHA checks and local cache deletion only: hard zero-byte
+        # network payload cap is a second independent safety barrier.
+        cmd.extend(("--prune-cache-only", "--max-download-gib", "0"))
+    elif preflight:
         cmd.append("--preflight-only")
     elif max_download_gib is not None:
         if type(max_download_gib) is not int or max_download_gib <= 0:
@@ -249,6 +256,11 @@ def main(argv: list[str] | None = None) -> int:
         help="keep ignored workspace files intact; still download snapshot assets",
     )
     parser.add_argument(
+        "--prune-cache-only", action="store_true",
+        help="remove only locally SHA-verified, unselected Release cache copies; "
+             "no market payload downloads or remote deletions",
+    )
+    parser.add_argument(
         "--download-safe", action="store_true",
         help="explicit opt-in to download SAFE/replay-compatible assets; "
              "by default only inventory and preflight run",
@@ -279,10 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_download_gib <= 0:
         print("ALINA_SYNC_FAIL: --max-download-gib must be positive", file=sys.stderr)
         return 2
-    if args.download_safe and args.preflight_only:
-        print("ALINA_SYNC_FAIL: choose --download-safe OR --preflight-only", file=sys.stderr)
+    if sum((args.download_safe, args.preflight_only, args.prune_cache_only)) > 1:
+        print("ALINA_SYNC_FAIL: choose exactly one of --download-safe, "
+              "--preflight-only or --prune-cache-only", file=sys.stderr)
         return 2
-    effective_preflight = not args.download_safe
+    effective_preflight = not (args.download_safe or args.prune_cache_only)
     if sys.version_info < (3, 10):
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
@@ -293,11 +306,18 @@ def main(argv: list[str] | None = None) -> int:
         if effective_preflight:
             print("ALINA_PREVIEW_ONLY: no market payload download. "
                   "Use --download-safe for bounded SAFE-only restoration.", flush=True)
+        if args.prune_cache_only:
+            print("ALINA_LOCAL_CACHE_PRUNE_ONLY: no market downloads and no GitHub asset deletions.", flush=True)
         code = restore_published(
             root, preflight=effective_preflight,
             snapshot=not args.no_snapshot_materialization,
             max_download_gib=args.max_download_gib if args.download_safe else None,
+            prune_only=args.prune_cache_only,
         )
+        if args.prune_cache_only:
+            # The restore engine writes CACHE_PRUNE_REPORT.json; never turn a
+            # maintenance success into a certified SYNC_REPORT.
+            return code
     except SyncError as exc:
         print(f"ALINA_SYNC_FAIL: {exc}", file=sys.stderr)
         return 2
