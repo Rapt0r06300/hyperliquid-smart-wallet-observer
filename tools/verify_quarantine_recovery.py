@@ -42,6 +42,7 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
     receipts = sorted(directory.glob("*.receipt.json")) if directory.is_dir() else []
     seen = set()
     outer_cache: dict[tuple[str, str], tuple[int, str]] = {}
+    verified_outer_assets: set[tuple[str, str]] = set()
     verified = 0
     verified_bytes = 0
     unchanged_shards_across_catalog_updates = 0
@@ -117,6 +118,7 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
                 outer_cache[key] = (outer.stat().st_size, _sha256(outer))
             if outer_cache[key] != (remote_size, remote_digest):
                 raise ValueError("SOURCE_ASSET_BYTES_CORRUPT")
+            verified_outer_assets.add(key)
             verified += 1
             verified_bytes += logical_bytes
             if snapshot_sha != index_sha:
@@ -137,7 +139,8 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
         "byte_verified_after_unrelated_catalog_updates": unchanged_shards_across_catalog_updates,
         "unresolved_without_current_byte_proof": len(unresolved) - verified,
         "quarantined_logical_compressed_bytes_verified": verified_bytes,
-        "unique_source_assets_verified": len(outer_cache),
+        "unique_source_assets_verified": len(verified_outer_assets),
+        "unique_source_assets_checked": len(outer_cache),
         "invalid_or_stale_receipts": sum(invalid.values()),
         "invalid_reason_counts": dict(sorted(invalid.items())),
         "invalid_sample": samples,

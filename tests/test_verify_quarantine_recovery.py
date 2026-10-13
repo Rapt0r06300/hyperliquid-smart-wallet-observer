@@ -65,6 +65,9 @@ def test_corrupt_bytes_and_drift_fail_without_erasing_evidence(tmp_path, monkeyp
     report = audit.verify_quarantine(root, index, "a"*64)
     assert report["invalid_or_stale_receipts"] == 1
     assert report["unresolved_without_current_byte_proof"] == 1
+    # Verification failure must never inflate the count of proven sources.
+    assert report["unique_source_assets_checked"] == 0
+    assert report["unique_source_assets_verified"] == 0
     assert original.read_bytes() == b"tampered"
 
 
@@ -78,3 +81,17 @@ def test_legacy_quarantine_receipt_does_not_bypass_changed_index(tmp_path, monke
     fail = audit.verify_quarantine(root, index, "b"*64)
     assert fail["invalid_or_stale_receipts"] == 1
     assert "STALE_CATALOG_PROOF_MISSING_ROW_BINDING" in str(fail["invalid_reason_counts"])
+
+
+def test_corrupt_outer_cache_does_not_inflate_verified_source_count(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    outer = root / "releases" / "tag" / "bundle.zip"
+    original = outer.read_bytes()
+    outer.write_bytes(b"unverified-asset")
+    report = audit.verify_quarantine(root, index, "a" * 64)
+    assert report["invalid_or_stale_receipts"] == 1
+    assert report["byte_verified_non_safe_shards"] == 0
+    assert report["unique_source_assets_checked"] == 1
+    assert report["unique_source_assets_verified"] == 0
+    assert report["replay_certified"] is False
+    assert outer.read_bytes() == b"unverified-asset"
