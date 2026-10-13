@@ -13301,3 +13301,57 @@ these code-quality changes. All trades and derived data remain paper/read-only.
   verifies immutable Release bytes and fails on semantic Git conflicts.
   Successful tests and replay receipts are not a valid claim of zero
   remaining PARTIAL/REJECT shards or profitable OOS/forward results.
+
+
+## Passation Work → ChatGPT — récupération des données (13 octobre 2026)
+
+Ce checkpoint est un repère de **reprise**, non un certificat de restauration.
+Il ne remplace ni la spec canonique ni les catalogues SHA-bound.
+
+- **Travail Work antérieur** (12 octobre 2026) : commit GitHub vérifié
+  `e48c9944dcc4b5433a6749b0bc43475c334ee2d5`. Le dernier compte
+  rendu Work déclarait 98 tests ciblés réussis et un périmètre SAFE de
+  6 643 assets sur 217 Releases, dont 48,47 Go téléchargés et 30,58 Go
+  matérialisés ; un besoin temporaire de 80,12 Go empêchait de terminer.
+  Ces chiffres sont **rapportés par Work**, à revalider sur les reçus
+  immuables et sur le catalogue actuel : état annoncé
+  `PREFLIGHT_INSUFFICIENT_DISK` / `RESTORE_INCOMPLETE`, et **jamais**
+  `RESTORE_COMPLETE`.
+- **Continuation sur `main`** : inventaire des familles SAFE/PARTIAL/REJECT/STALE,
+  journal de triage par shard, audit des Release sources, vérification
+  des octets SHA-256 des ZIP et membres en cache, archivage des manifestes
+  avant reclassification, dry-runs fail-closed, preuve de parité du
+  DATA_INDEX partitionné, tests Linux/Windows, scellage d'un bundle
+  Work/Codex et reçus de sync liés au HEAD. Les commits réels sont dans
+  l'historique `main` ; ne pas considérer cette liste comme une
+  restauration effectivement achevée.
+- **Priorité immédiate à la reprise** : partir du HEAD réel de `main`
+  (qui continue d'évoluer sous GitHub Actions), vérifier CI et reçus,
+  quantifier séparément octets SAFE déjà récupérés, volumes nécessaires
+  encore absents, octets non-SAFE effectivement vérifiés, volumes
+  seulement localisés, corruption authentifiée et inconnus. Poursuivre
+  la récupération et le re-test par étapes bornées, reprise idempotente,
+  preuve complète de restauration SAFE/replay-ready à partir d'un clone
+  Git + Releases avec budget disque réellement suffisant. Un `git clone`
+  seul ne contient PAS les grosses archives GitHub Releases.
+- **Critère de fin** : réconciliation par identifiants et SHA-256 des
+  shards, transactions/fills et carnets L2/BBO/capacité, coûts et contexte,
+  replay/backtest OOS et forward PAPER reproductibles, receipts et
+  scoreboards exploitables, absence de perte silencieuse ; statut
+  `UNMEASURABLE` / `RESTORE_INCOMPLETE` si preuve absente.
+  Ne jamais transformer une localisation d'asset, un test synthétique
+  ou une réussite CI en preuve de restauration intégrale, de replay
+  correct ou de rentabilité.
+- **Contraintes absolues** : `COLLECT` maintenu sans interruption,
+  aucun ordre réel, aucun secret de trading, PC privé non utilisé,
+  GitHub-hosted uniquement, dépôt et branche `main` uniques,
+  aucune suppression automatique de preuves historiques intactes,
+  aucune nouvelle spec parallèle, aucune promotion non-SAFE sans preuve.
+  Les gains économiques +5 USD/jour/module et l'optimisation future des
+  collecteurs viennent **après** la stabilité, la récupération et la
+  certification du corpus existant.
+
+Le passage vers une nouvelle conversation ne constitue ni une approbation
+de purge ni une autorisation d'arrêter les collecteurs. Avant toute
+intervention suivante, relire la phase, le HEAD, le diff réel, les workflows
+et les artefacts de preuve ; ne pas créer de commit vide.
