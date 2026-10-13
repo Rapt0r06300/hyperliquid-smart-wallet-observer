@@ -18,6 +18,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from tools.partitioned_data_index import read_index
+except ModuleNotFoundError:
+    from partitioned_data_index import read_index
+
 REPOSITORY = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 SHA64 = re.compile(r"[0-9a-f]{64}\Z")
 TAG = re.compile(r"[A-Za-z0-9._-]{1,180}\Z")
@@ -149,6 +154,7 @@ def verify_capsule(tag: str, *, max_bytes: int) -> dict[str, Any]:
                 or run.get("partial_count") != 0 or run.get("reject_count") != 0):
             raise Refuse("CANONICAL_NOT_SAFE_ONLY")
         expected: dict[str, tuple[str, int, str]] = {}
+        catalog_bindings: list[dict[str, Any]] = []
         release_cache: dict[str, dict] = {}
         for row in manifests:
             if (not isinstance(row, dict) or row.get("quality_status") != "SAFE"
@@ -178,6 +184,11 @@ def verify_capsule(tag: str, *, max_bytes: int) -> dict[str, Any]:
                     or locator.get("remote_digest") != remote["digest"]):
                 raise Refuse("CANONICAL_ASSET_NOT_VERIFIED")
             expected[member] = (digest, count, dataset_id)
+            catalog_bindings.append({
+                "dataset_id": dataset_id, "sha256": digest, "bytes": count,
+                "release_tag": rel_tag, "release_asset": member,
+                "outer_asset": rel_asset,
+            })
 
         parts = idx.get("parts")
         if not isinstance(parts, list) or not parts:
@@ -261,11 +272,78 @@ def verify_capsule(tag: str, *, max_bytes: int) -> dict[str, Any]:
             "canonical_tag": canonical_tag,
             "canonical_sha256": main_asset["digest"].removeprefix("sha256:"),
             "safe_shards_verified": len(expected),
+            "safe_catalog_bindings": catalog_bindings,
             "recovery_bytes_verified": sum(a["size"] for a in rec_assets.values()),
             "recovery_asset_identities": sorted(
                 (a["name"], a["size"], a["digest"]) for a in rec_assets.values()
             ),
         }
+
+
+
+def verify_current_safe_catalog(
+    report: Mapping[str, Any],
+    *,
+    index_path: Path = Path("catalog/DATA_INDEX.json"),
+    metrics_path: Path = Path("catalog/DATA_METRICS.json"),
+) -> str:
+    """Refuse deletion if ANY capsule shard was downgraded or lost from main.
+
+    A historical RUN_MANIFEST is immutable, but the latest canonical catalog
+    can revoke SAFE after later reconciliation. The capsule then remains
+    recoverable evidence and must NOT be deleted.
+    """
+    try:
+        raw = index_path.read_bytes()
+        index = read_index(index_path)
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise Refuse("CURRENT_CATALOG_NOT_VERIFIABLE") from exc
+    digest = sha(raw)
+    rows = index.get("shards") if isinstance(index, Mapping) else None
+    totals = metrics.get("totals") if isinstance(metrics, Mapping) else None
+    if (
+        not isinstance(rows, list) or not isinstance(totals, Mapping)
+        or metrics.get("schema_version") != "alina.data_metrics.v4"
+        or metrics.get("source_index_sha256") != digest
+        or type(totals.get("TOTAL_SHARDS")) is not int
+        or totals["TOTAL_SHARDS"] != len(rows)
+    ):
+        raise Refuse("CURRENT_CATALOG_METRICS_NOT_SHA_BOUND")
+    bindings = report.get("safe_catalog_bindings")
+    if not isinstance(bindings, list) or len(bindings) != report.get("safe_shards_verified"):
+        raise Refuse("MISSING_CAPSULE_CATALOG_BINDINGS")
+    wanted = {r.get("dataset_id") for r in bindings if isinstance(r, Mapping)}
+    if len(wanted) != len(bindings) or None in wanted:
+        raise Refuse("DUPLICATE_CAPSULE_DATASET_IDENTITIES")
+    observed: dict[str, Mapping[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise Refuse("CURRENT_CATALOG_MALFORMED_ROW")
+        identity = row.get("dataset_id")
+        if identity in wanted:
+            if identity in observed:
+                raise Refuse("CURRENT_CATALOG_DUPLICATE_IDENTITY")
+            observed[identity] = row
+    if len(observed) != len(bindings):
+        raise Refuse("CURRENT_CATALOG_MISSING_CAPSULE_SHARD")
+    canonical_repo = "Rapt0r06300/hyperliquid-smart-wallet-observer"
+    for binding in bindings:
+        row = observed[binding["dataset_id"]]
+        if (
+            row.get("quality_status") != "SAFE"
+            or row.get("replay_compatible") is not True
+            or row.get("sha256") != binding["sha256"]
+            or row.get("bytes") != binding["bytes"]
+            or row.get("release_tag") != binding["release_tag"]
+            or row.get("release_asset") != binding["release_asset"]
+            or (row.get("release_container_asset") or row.get("release_asset"))
+                != binding["outer_asset"]
+            or (row.get("release_repository")
+                or index.get("release_repository_default")) != canonical_repo
+        ):
+            raise Refuse("CAPSULE_SHARD_NOT_CURRENTLY_SAFE_KEEP_RECOVERY")
+    return digest
 
 
 def main() -> int:
@@ -289,6 +367,7 @@ def main() -> int:
             if (report["recovery_release_id"] != args.expected_release_id
                     or report["canonical_sha256"] != args.expected_canonical_sha256):
                 raise Refuse("DELETE_EXPECTED_ID_AND_SHA_MUST_MATCH")
+            report["current_catalog_sha256"] = verify_current_safe_catalog(report)
             current = release(args.recovery_tag)
             current_assets = sorted(
                 (a["name"], a["size"], a["digest"]) for a in assets(current).values()
