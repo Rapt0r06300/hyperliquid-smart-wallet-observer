@@ -28,7 +28,10 @@ def _fixture(tmp_path, *, live_count=53, extra_reference=6, corrupt_symbol=False
     # Keep the last reference trade in the live tape so the comparison
     # cannot legitimately clip all six gaps out of its end boundary.
     missing_start = live_count - 1
-    observed = references[:missing_start] + references[missing_start + extra_reference:]
+    observed = (
+        references[:live_count] if reference_outside_live_window
+        else references[:missing_start] + references[missing_start + extra_reference:]
+    )
     live = [
         {"raw_payload": {"data": [reference]},
          "source_id": "bitget_public_ws", "channel": "trades"}
