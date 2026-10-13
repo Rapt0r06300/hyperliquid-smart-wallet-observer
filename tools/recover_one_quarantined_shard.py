@@ -38,6 +38,25 @@ CANONICAL = "Rapt0r06300/hyperliquid-smart-wallet-observer"
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 SOURCE_MAX = 256 * 1024 * 1024
 
+# Stable receipt identity. Canonical index SHA still records the snapshot
+# inspected, but must not invalidate unchanged individual shards when main
+# advances due to active collection.
+IMMUTABLE_FIELDS = (
+    "dataset_id", "quality_status", "release_tag", "release_asset",
+    "release_container_asset", "outer_asset", "logical_bytes",
+    "logical_sha256", "outer_bytes", "outer_sha256",
+)
+
+
+def immutable_candidate_sha256(candidate: Mapping[str, Any]) -> str:
+    if any(field not in candidate for field in IMMUTABLE_FIELDS):
+        raise ValueError("RECOVERY_IMMUTABLE_CANDIDATE_FIELDS_MISSING")
+    evidence = {field: candidate[field] for field in IMMUTABLE_FIELDS}
+    return hashlib.sha256(
+        json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                   ).encode("utf-8")
+    ).hexdigest()
+
 
 def candidate_from_index(index: Mapping[str, Any], dataset_id: str) -> dict[str, Any]:
     matches = [row for row in index["shards"] if row.get("dataset_id") == dataset_id]
@@ -68,7 +87,7 @@ def candidate_from_index(index: Mapping[str, Any], dataset_id: str) -> dict[str,
             or not isinstance(logical_sha, str) or not SHA.fullmatch(logical_sha.lower())
             or not isinstance(remote_sha, str) or not SHA.fullmatch(remote_sha)):
         raise ValueError("RECOVERY_INCOMPLETE_IMMUTABLE_IDENTITY")
-    return {
+    candidate = {
         "dataset_id": dataset_id, "quality_status": row["quality_status"],
         "release_tag": tag, "release_asset": member,
         "release_container_asset": container or None,
@@ -76,6 +95,8 @@ def candidate_from_index(index: Mapping[str, Any], dataset_id: str) -> dict[str,
         "logical_sha256": logical_sha.lower(), "outer_bytes": remote_size,
         "outer_sha256": remote_sha,
     }
+    candidate["immutable_candidate_sha256"] = immutable_candidate_sha256(candidate)
+    return candidate
 
 
 def live_asset(candidate: Mapping[str, Any], *, token: str | None = None) -> dict[str, Any]:
@@ -159,9 +180,14 @@ def hydrate_candidate(
     if (asset.get("size") != outer_bytes
             or asset.get("digest", "").lower() != "sha256:" + candidate["outer_sha256"]):
         raise ValueError("RECOVERY_ASSET_NOT_CATALOG_BOUND")
+    identity_sha = immutable_candidate_sha256(candidate)
+    if (candidate.get("immutable_candidate_sha256") is not None
+            and candidate["immutable_candidate_sha256"] != identity_sha):
+        raise ValueError("RECOVERY_IMMUTABLE_CANDIDATE_DIGEST_MISMATCH")
     report: dict[str, Any] = {
         "schema": "alina.quarantined_candidate_recovery.v1",
         "catalog_index_sha256": catalog_index_sha256,
+        "immutable_candidate_sha256": identity_sha,
         "source_repository": CANONICAL,
         "source_asset_id": asset.get("id"),
         "dataset_id": candidate["dataset_id"],

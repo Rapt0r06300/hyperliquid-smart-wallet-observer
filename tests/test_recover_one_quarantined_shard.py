@@ -158,6 +158,7 @@ def test_quarantine_receipt_has_canonical_catalog_and_live_release_asset_id(tmp_
     assert len(receipts) == 1
     stored = json.loads(receipts[0].read_text())
     assert stored["catalog_index_sha256"] == "e" * 64
+    assert stored["immutable_candidate_sha256"] == recovery.immutable_candidate_sha256(candidate)
     assert stored["source_asset_id"] == 42
     assert stored["source_repository"] == recovery.CANONICAL
     assert stored["validation_allowed"] is False

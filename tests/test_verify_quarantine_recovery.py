@@ -49,12 +49,32 @@ def test_actual_byte_coverage_is_separate_from_replay(tmp_path, monkeypatch):
 
 def test_corrupt_bytes_and_drift_fail_without_erasing_evidence(tmp_path, monkeypatch):
     index, root = sample(tmp_path, monkeypatch)
-    stale = audit.verify_quarantine(root, index, "b"*64)
-    assert stale["invalid_or_stale_receipts"] == 1
-    assert stale["byte_coverage_complete"] is False
+    # A separate collector can append unrelated rows: this unchanged shard
+    # remains byte verified after the index root SHA changes.
+    fresh = audit.verify_quarantine(root, index, "b"*64)
+    assert fresh["invalid_or_stale_receipts"] == 0
+    assert fresh["byte_verified_after_unrelated_catalog_updates"] == 1
+    assert fresh["replay_certified"] is False
+    changed = {**index, "shards": [
+        {**index["shards"][0], "release_tag": "new-source-tag"},
+    ]}
+    invalid = audit.verify_quarantine(root, changed, "b"*64)
+    assert invalid["invalid_or_stale_receipts"] == 1
     original = next((root/"quarantine"/"source_verified_non_replay").glob("*.jsonl.gz"))
     original.write_bytes(b"tampered")
     report = audit.verify_quarantine(root, index, "a"*64)
     assert report["invalid_or_stale_receipts"] == 1
     assert report["unresolved_without_current_byte_proof"] == 1
     assert original.read_bytes() == b"tampered"
+
+
+def test_legacy_quarantine_receipt_does_not_bypass_changed_index(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    receipt = next((root/"quarantine"/"source_verified_non_replay").glob("*.receipt.json"))
+    data = json.loads(receipt.read_text())
+    data.pop("immutable_candidate_sha256")
+    receipt.write_text(json.dumps(data))
+    assert audit.verify_quarantine(root, index, "a"*64)["invalid_or_stale_receipts"] == 0
+    fail = audit.verify_quarantine(root, index, "b"*64)
+    assert fail["invalid_or_stale_receipts"] == 1
+    assert "STALE_CATALOG_PROOF_MISSING_ROW_BINDING" in str(fail["invalid_reason_counts"])

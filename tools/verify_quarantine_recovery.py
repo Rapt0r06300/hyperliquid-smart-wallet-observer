@@ -14,10 +14,12 @@ try:
     from tools.partitioned_data_index import read_index
     from tools.preservation_inventory import InventoryError, iter_recovery_triage, summarize
     from tools.restore_alina import _safe_component, _sha256
+    from tools.recover_one_quarantined_shard import candidate_from_index, immutable_candidate_sha256
 except ModuleNotFoundError:
     from partitioned_data_index import read_index
     from preservation_inventory import InventoryError, iter_recovery_triage, summarize
     from restore_alina import _safe_component, _sha256
+    from recover_one_quarantined_shard import candidate_from_index, immutable_candidate_sha256
 
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 CANONICAL = "Rapt0r06300/hyperliquid-smart-wallet-observer"
@@ -42,6 +44,7 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
     outer_cache: dict[tuple[str, str], tuple[int, str]] = {}
     verified = 0
     verified_bytes = 0
+    unchanged_shards_across_catalog_updates = 0
     invalid = Counter()
     samples = []
     for receipt_path in receipts:
@@ -57,9 +60,21 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
             row = by_id.get(ident)
             if row is None or ident not in unresolved:
                 raise ValueError("UNKNOWN_OR_ALREADY_REPLAY_READY_SHARD")
-            if (receipt.get("catalog_index_sha256") != index_sha
-                    or receipt.get("original_quality_status") != row.get("quality_status")):
-                raise ValueError("STALE_CATALOG_PROOF")
+            snapshot_sha = receipt.get("catalog_index_sha256")
+            if not isinstance(snapshot_sha, str) or not SHA.fullmatch(snapshot_sha):
+                raise ValueError("INVALID_OR_MISSING_ORIGINAL_CATALOG_SHA")
+            binding = receipt.get("immutable_candidate_sha256")
+            if binding is not None:
+                expected_candidate = candidate_from_index(index, ident)
+                expected_binding = immutable_candidate_sha256(expected_candidate)
+                if not isinstance(binding, str) or binding != expected_binding:
+                    raise ValueError("IMMUTABLE_CANDIDATE_PROVENANCE_CHANGED")
+            elif snapshot_sha != index_sha:
+                # Legacy receipts have only the original whole-catalog SHA.
+                # They cannot be safely rebound when that catalog changes.
+                raise ValueError("STALE_CATALOG_PROOF_MISSING_ROW_BINDING")
+            if receipt.get("original_quality_status") != row.get("quality_status"):
+                raise ValueError("STALE_CATALOG_QUALITY_CHANGED")
             if (receipt.get("status") != "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED"
                     or receipt.get("validation_allowed") is not False
                     or receipt.get("replay_certified") is not False
@@ -104,6 +119,8 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
                 raise ValueError("SOURCE_ASSET_BYTES_CORRUPT")
             verified += 1
             verified_bytes += logical_bytes
+            if snapshot_sha != index_sha:
+                unchanged_shards_across_catalog_updates += 1
         except (OSError, ValueError, TypeError, KeyError, UnicodeError) as error:
             invalid[type(error).__name__ + ":" + str(error)[:120]] += 1
             if len(samples) < 20:
@@ -117,6 +134,7 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
         "unresolved_catalog_shards": len(unresolved),
         "receipts_found": len(receipts),
         "byte_verified_non_safe_shards": verified,
+        "byte_verified_after_unrelated_catalog_updates": unchanged_shards_across_catalog_updates,
         "unresolved_without_current_byte_proof": len(unresolved) - verified,
         "quarantined_logical_compressed_bytes_verified": verified_bytes,
         "unique_source_assets_verified": len(outer_cache),
