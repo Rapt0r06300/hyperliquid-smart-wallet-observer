@@ -1937,9 +1937,9 @@
     "market-e8-9-2026101316-v7"
   ],
   "campaign_resilience_status": "READY",
-  "canonical_spec_blob": "a890bc7f62b0be4e4c4551a1ef2bb512eb6f850b",
+  "canonical_spec_blob": "b8677cef8f88b279beece797d732b34ecc9d7027",
   "copy_vault_coverage_receipt": {
-    "digest": "e55cd99c511ad237393bf8ac3e85e9dc41b5aa351ec1cbdf5b686c3cc5df7651",
+    "digest": "9359bec2e18a087bb52e66d455788307501397d38baa60e1a001ce5efb11cfdc",
     "reconciliation": {
       "all_lane_indices_accounted": true,
       "no_silent_loss": true,
@@ -1947,9 +1947,9 @@
       "selection_present": true,
       "selection_verified": true,
       "sharding_present": true,
-      "ten_user_limit_respected": false
+      "ten_user_limit_respected": true
     },
-    "status": "BLOCKED"
+    "status": "MORE_DATA"
   },
   "copy_vault_status": "UNMEASURABLE",
   "cross_shard_overlap_trade_count": 0,
@@ -1991,9 +1991,9 @@
     "valid_record_count": 227781935,
     "valid_record_ratio": 0.55668996
   },
-  "dataset_health_digest": "1cd2a3d88f944bbbfd44f919bed998139fb73bc0510d019497dab2295d97d52d",
+  "dataset_health_digest": "45ed2fe0e4506aabc77db7e4345d47de009823c0b02d811b4265632f0344f9df",
   "dataset_selection_id": null,
-  "dataset_v2_head": "beea8f979cb81f309465904ca342c973d14ec568",
+  "dataset_v2_head": "4ed9b5dda24306e89d276b13bae4bb917584f67d",
   "declared_spec_requirements": [],
   "environment_provenance": null,
   "event_intelligence_registry_digest": "d4cee71dff9eac5bc94c51de0aec213b770c90c399401d8cc9b9cd2b46182973",
@@ -2016,17 +2016,17 @@
     },
     {
       "id": "two-segment-resume-proof",
-      "reason": "fresh-runner two-segment resume proof is durable",
-      "state": "DONE"
+      "reason": "fresh-runner two-segment resume proof is not durable yet",
+      "state": "BLOCKED"
     },
     {
       "id": "final-single-repository-closure",
-      "reason": "4 canonical closure blocker(s) remain",
+      "reason": "5 canonical closure blocker(s) remain",
       "state": "TODO"
     }
   ],
   "forward_status": "MORE_DATA",
-  "generated_at_utc": "2026-10-13T16:36:22.409802Z",
+  "generated_at_utc": "2026-10-13T17:53:30.455121Z",
   "global_closure_provenance": {
     "coverage": {},
     "dataset_v2_head": null,
@@ -2053,12 +2053,17 @@
     },
     {
       "id": "BLOCKER-04",
+      "reason": "fresh-runner two-segment resume proof is unavailable",
+      "status": "UNRESOLVED"
+    },
+    {
+      "id": "BLOCKER-05",
       "reason": "analysis campaigns are not all terminal COMPLETE",
       "status": "UNRESOLVED"
     }
   ],
   "lead_lag_status": "UNMEASURABLE",
-  "main_alina_head": "beea8f979cb81f309465904ca342c973d14ec568",
+  "main_alina_head": "4ed9b5dda24306e89d276b13bae4bb917584f67d",
   "modules": {
     "copy_vault": {
       "certificate_digest": null,
@@ -2093,12 +2098,13 @@
   "raw_record_count": 409171985,
   "raw_trade_count": 26909884,
   "real_execution_reachable": false,
-  "receipt_digest": "023d5fb82803642d377f33bc7457106a81fbee522bcc13719422a6b07e4fa79b",
+  "receipt_digest": "32e917d642a268b584866332d02a02d4615c22c0e4a29d8fa38a9d1686d40d7a",
   "rejected_count": 67410,
   "remaining_blockers": [
     "current-epoch economic scoreboard evidence is invalid: CURRENT_SCOREBOARD_CAMPAIGN_NOT_COMPLETE",
     "dataset global closure evidence is invalid: GLOBAL_CLOSURE_RECEIPT_MISSING",
     "global unique trade count coverage is incomplete",
+    "fresh-runner two-segment resume proof is unavailable",
     "analysis campaigns are not all terminal COMPLETE"
   ],
   "replay_compatible_count": 332039,
@@ -2125,8 +2131,8 @@
   "source_unvalidated_capability_count": 0,
   "trade_count_exact": true,
   "trade_count_failure_reason_count": 0,
-  "two_segment_resume_reason": "CURRENT_RESUME_STRUCTURAL_RECEIPT_VALID",
-  "two_segment_resume_status": "PROVEN",
+  "two_segment_resume_reason": "CURRENT_RESUME_CAMPAIGN_MISMATCH",
+  "two_segment_resume_status": "UNMEASURABLE",
   "uncompressed_size_coverage": true,
   "uncompressed_size_exact": true,
   "uncompressed_size_exact_assets": 444983,
@@ -2317,7 +2323,8 @@
     "38386690918",
     "38389189115",
     "38389353930",
-    "38410849135",
-    "38418465512"
+    "38418465512",
+    "38423065279",
+    "38430529200"
   ]
 }
