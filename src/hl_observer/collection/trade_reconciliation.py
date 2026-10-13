@@ -545,7 +545,13 @@ async def reconcile_bitget_trade_shard(
     client: httpx.AsyncClient | None = None,
     limit: int = 1000,
     max_pages: int = 100,
+    missing_reference_rows_limit: int = 0,
 ) -> dict[str, Any]:
+    # This opt-in NEVER changes live capture, classification, or the
+    # collector's default reconciliation result.
+    if (type(missing_reference_rows_limit) is not int
+            or not 0 <= missing_reference_rows_limit <= 128):
+        raise ValueError("BITGET_MISSING_REFERENCE_INVALID_LIMIT")
     own_client = client is None
     http = client or httpx.AsyncClient(base_url="https://api.bitget.com", timeout=10.0)
     live_ids, live_events, live_start_ms, live_end_ms = _live_trade_evidence(
@@ -635,6 +641,59 @@ async def reconcile_bitget_trade_shard(
         reference_event_count=len(reference),
         reference_coverage="BOUNDED_HISTORY_PAGINATION",
     )
+
+    if missing_reference_rows_limit:
+        import hashlib
+        missing_ids = set(reference) - live_ids
+        if len(missing_ids) > missing_reference_rows_limit:
+            report["missing_reference_evidence"] = {
+                "status": "REFERENCE_GAP_EXCEEDS_BOUND_NOT_EXPORTED",
+                "observed_missing_count": len(missing_ids),
+                "validation_allowed": False, "replay_certified": False,
+            }
+        else:
+            source_rows = []
+            invalid = False
+            for trade_id in missing_ids:
+                row = reference[trade_id]
+                ts = _int(row.get("ts") or row.get("timestamp"))
+                instrument = str(row.get("symbol") or "").upper()
+                if (ts is None or not comparison_start_ms <= ts <= comparison_end_ms
+                        or instrument != str(symbol).upper()
+                        or str(row.get("tradeId") or row.get("id") or "") != trade_id):
+                    invalid = True
+                    break
+                source_rows.append({
+                    "trade_id": trade_id, "exchange_ts_ms": ts,
+                    "source": "BITGET_PUBLIC_REST_REFERENCE_ONLY",
+                    "raw_rest_row": dict(row),
+                })
+            if invalid:
+                report["missing_reference_evidence"] = {
+                    "status": "REFERENCE_GAP_INVALID_SOURCE_FIELDS_NOT_EXPORTED",
+                    "observed_missing_count": len(missing_ids),
+                    "validation_allowed": False, "replay_certified": False,
+                }
+            else:
+                source_rows.sort(key=lambda x: (x["exchange_ts_ms"], x["trade_id"]))
+                serialized = json.dumps(
+                    source_rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ).encode("utf-8")
+                report["missing_reference_evidence"] = {
+                    "schema": "alina.bitget_missing_reference.v1",
+                    "status": "REFERENCE_ONLY_NOT_MERGED_OR_REPLAY_CERTIFIED",
+                    "endpoint": "/api/v2/mix/market/fills-history",
+                    "product_type": "USDT-FUTURES",
+                    "symbol": str(symbol).upper(),
+                    "comparison_start_ts_ms": comparison_start_ms,
+                    "comparison_end_ts_ms": comparison_end_ms,
+                    "original_live_trade_count": len(live_ids),
+                    "missing_trade_count": len(source_rows),
+                    "rows_sha256": hashlib.sha256(serialized).hexdigest(),
+                    "rows": source_rows,
+                    "validation_allowed": False, "replay_certified": False,
+                    "reclassified_safe": False,
+                }
     return _with_comparison_window(report, comparison_start_ms, comparison_end_ms)
 
 async def reconcile_binance_aggtrade_shard(
