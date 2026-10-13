@@ -12,13 +12,14 @@ import pytest
 from hl_observer.collection.trade_reconciliation import reconcile_bitget_trade_shard
 
 
-def _fixture(tmp_path, *, live_count=53, extra_reference=6, corrupt_symbol=False):
+def _fixture(tmp_path, *, live_count=53, extra_reference=6, corrupt_symbol=False,
+             reference_outside_live_window=False):
     base = 1791682957977
     ids = [str(100000 + i) for i in range(live_count + extra_reference)]
     def row(trade_id, i):
         return {
             "tradeId": trade_id,
-            "ts": str(base + i),
+            "ts": str(base + (i if reference_outside_live_window else min(i, live_count - 1))),
             "symbol": "BTCUSDT" if corrupt_symbol and i == live_count else "UMAUSDT",
             "price": "1.25", "size": "0.30", "side": "buy",
         }
@@ -108,3 +109,19 @@ def test_invalid_export_limit_rejected_before_network(tmp_path):
         with pytest.raises(ValueError, match="BITGET_MISSING_REFERENCE_INVALID_LIMIT"):
             _compare(path, client, missing_reference_rows_limit=value)
     assert not requests
+
+
+def test_official_reference_after_last_websocket_event_is_not_a_false_gap(tmp_path):
+    path, client, _requests, reference = _fixture(
+        tmp_path, reference_outside_live_window=True
+    )
+    # The six reference-only rows have timestamps strictly after the last
+    # observed WS event; the bounded public REST reconciler must not treat
+    # them as missing *within* the captured interval.
+    result = _compare(path, client, missing_reference_rows_limit=8)
+    assert result["status"] == "MATCHED"
+    assert result["reference_count"] == 53
+    assert result["missing_from_live"] == 0
+    assert result["missing_reference_evidence"]["missing_trade_count"] == 0
+    assert result["missing_reference_evidence"]["rows"] == []
+    assert len(reference) == 59
