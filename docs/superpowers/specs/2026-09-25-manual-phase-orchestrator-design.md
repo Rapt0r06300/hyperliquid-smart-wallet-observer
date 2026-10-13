@@ -13014,6 +13014,16 @@ never reclassifies data as SAFE, enables a backtest or certifies gaps,
 cross-shard market continuity, OOS, slippage, or economic results.
 Absent immutable provenance and oversized/corrupt gzip always fail closed.
 
+Quarantined byte-recovery receipts also bind a per-candidate immutable
+SHA-256 (dataset identity, original quality class, Release tag/asset,
+inner and outer digests and sizes). An unrelated collector append changes
+the global catalogue SHA but MUST NOT discard valid already-verified bytes.
+A repeated recovery reuses its original byte-for-byte receipt after checking
+that every field except the global catalogue SHA still matches. A changed
+immutable identity, changed quality status or unbound legacy receipt
+fails closed; none of these checks permits SAFE promotion, backtest use
+or proof of cross-shard continuity.
+
 The one-way legacy `tools/enforce_safe_replay_invariant.py` demotion path
 must likewise archive original SAFE manifests under
 `datasets/quarantine/reclassification-history/<sha256>.original`

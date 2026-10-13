@@ -271,8 +271,23 @@ def hydrate_candidate(
     receipt_path = shards / (name + ".receipt.json")
     receipt_bytes = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode()
     if receipt_path.exists() or receipt_path.is_symlink():
-        if receipt_path.is_symlink() or receipt_path.read_bytes() != receipt_bytes:
-            raise ValueError("RECOVERY_RECEIPT_CONFLICT")
+        if receipt_path.is_symlink():
+            raise ValueError("RECOVERY_RECEIPT_SYMLINK")
+        if receipt_path.read_bytes() != receipt_bytes:
+            # A collector append may change only the *whole-catalog* SHA.
+            # Reuse the original immutable receipt; never overwrite it or
+            # relabel previously proven quarantined bytes.
+            original = json.loads(receipt_path.read_text(encoding="utf-8"))
+            if (not isinstance(original, dict)
+                    or not isinstance(original.get("catalog_index_sha256"), str)
+                    or not SHA.fullmatch(original["catalog_index_sha256"])
+                    or original.get("immutable_candidate_sha256") != identity_sha
+                    or {k: v for k, v in original.items()
+                        if k != "catalog_index_sha256"} !=
+                       {k: v for k, v in receipt.items()
+                        if k != "catalog_index_sha256"}):
+                raise ValueError("RECOVERY_RECEIPT_CONFLICT")
+            receipt = original
     else:
         tmp_receipt = None
         try:

@@ -262,3 +262,29 @@ def test_pilot_history_skips_previously_proven_fragment(monkeypatch, tmp_path):
 def test_pilot_history_requires_immutable_source_metadata(tmp_path):
     with pytest.raises(ValueError, match="HISTORY_MISSING_OR_UNSAFE"):
         recovery.load_pilot_history(tmp_path / "absent.json", {"shards": []})
+
+
+def test_recovery_resume_across_unrelated_catalog_changes_keeps_old_proof(tmp_path, monkeypatch):
+    import json
+    _index, candidate, asset, outer, _inner, root = fixture(tmp_path)
+    monkeypatch.setattr(recovery, "_download_to_path",
+                        lambda _url, path, **kw:
+                        (path.write_bytes(outer), hashlib.sha256(outer).hexdigest()))
+    first = recovery.hydrate_candidate(
+        candidate, asset, root, download=True,
+        max_source_bytes=10000, catalog_index_sha256="a"*64)
+    evidence = next((root/"quarantine"/"source_verified_non_replay").glob("*.receipt.json"))
+    original_bytes = evidence.read_bytes()
+    second = recovery.hydrate_candidate(
+        candidate, asset, root, download=True,
+        max_source_bytes=10000, catalog_index_sha256="b"*64)
+    assert evidence.read_bytes() == original_bytes
+    assert second["catalog_index_sha256"] == "a"*64
+    assert second["immutable_candidate_sha256"] == first["immutable_candidate_sha256"]
+    assert second["source_cached_before_run"] is True
+    replaced = dict(candidate, quality_status="REJECT")
+    with pytest.raises(ValueError, match="RECEIPT_CONFLICT"):
+        recovery.hydrate_candidate(
+            replaced, asset, root, download=True,
+            max_source_bytes=10000, catalog_index_sha256="b"*64)
+    assert evidence.read_bytes() == original_bytes
