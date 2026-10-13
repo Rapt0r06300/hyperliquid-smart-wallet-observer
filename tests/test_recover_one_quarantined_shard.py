@@ -102,7 +102,8 @@ def test_github_hosted_manual_recovery_is_one_shard_paper_and_bounded():
     assert "github.event_name == 'workflow_dispatch'" in workflow
     assert "inputs.hydrate_candidate_id != ''" in workflow
     assert "--dataset-id" in workflow
-    assert "--max-source-bytes 100000000" in workflow
+    assert "LIMIT=100000000" in workflow
+    assert '--max-source-bytes "$LIMIT"' in workflow
     assert "--download" in workflow
     assert "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED" in workflow
     assert "assert report[\"validation_allowed\"] is False" in workflow
@@ -199,3 +200,19 @@ def test_pilot_prioritizes_partial_over_newer_reject(monkeypatch, tmp_path):
     report = recovery.select_pilot_candidate(index, max_source_bytes=10_000)
     assert report["dataset_id"] == "older-partial"
     assert report["validation_allowed"] is False
+
+
+def test_recovery_pilot_has_one_worker_and_bounded_identified_candidate():
+    from pathlib import Path
+    workflow = (Path(__file__).resolve().parents[1] /
+                ".github" / "workflows" / "catalog-partition-parity.yml").read_text()
+    assert workflow.count("\n  recover-one:") == 1
+    assert "\n  recovery-pilot:" not in workflow
+    assert "startsWith(github.event.head_commit.message, 'recovery-pilot:')" in workflow
+    assert "LIMIT=4000000" in workflow
+    assert "--select-pilot" in workflow
+    assert "--max-live-attempts 12" in workflow
+    assert 're.fullmatch(r"[A-Za-z0-9._-]{1,200}",ident)' in workflow
+    assert "printf 'SELECTED_DATASET_ID=%s" in workflow
+    assert "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE" in workflow
+    assert "replay_certified" in workflow
