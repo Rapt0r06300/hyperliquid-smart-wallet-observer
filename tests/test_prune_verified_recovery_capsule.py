@@ -159,3 +159,99 @@ def test_execution_requires_explicit_frozen_identity(monkeypatch):
         "--expected-canonical-sha256", "0" * 64,
     ])
     assert gc.main() == 2
+
+
+def _current_catalog_fixture(tmp_path, receipt, *, status="SAFE"):
+    binding = receipt["safe_catalog_bindings"][0]
+    row = {
+        "dataset_id": binding["dataset_id"],
+        "quality_status": status,
+        "replay_compatible": status == "SAFE",
+        "release_tag": binding["release_tag"],
+        "release_asset": binding["release_asset"],
+        "sha256": binding["sha256"],
+        "bytes": binding["bytes"],
+        "release_repository": gc.REPOSITORY,
+    }
+    if binding["outer_asset"] != binding["release_asset"]:
+        row["release_container_asset"] = binding["outer_asset"]
+    index_path = tmp_path / "DATA_INDEX.json"
+    metrics_path = tmp_path / "DATA_METRICS.json"
+    index_path.write_text(json.dumps({"shards": [row]}), encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": digest(index_path.read_bytes()),
+        "totals": {"TOTAL_SHARDS": 1},
+    }), encoding="utf-8")
+    return index_path, metrics_path
+
+
+def test_cleanup_requires_shabound_current_safe_catalog(monkeypatch, tmp_path):
+    fixture(monkeypatch)
+    receipt = gc.verify_capsule("alina-recovery-test", max_bytes=1024**3)
+    index_path, metrics_path = _current_catalog_fixture(tmp_path, receipt)
+    assert gc.verify_current_safe_catalog(
+        receipt, index_path=index_path, metrics_path=metrics_path
+    ) == digest(index_path.read_bytes())
+
+
+def test_cleanup_retains_capsule_after_current_quality_downgrade(monkeypatch, tmp_path):
+    fixture(monkeypatch)
+    receipt = gc.verify_capsule("alina-recovery-test", max_bytes=1024**3)
+    index_path, metrics_path = _current_catalog_fixture(
+        tmp_path, receipt, status="REJECT"
+    )
+    with pytest.raises(gc.Refuse, match="NOT_CURRENTLY_SAFE_KEEP_RECOVERY"):
+        gc.verify_current_safe_catalog(
+            receipt, index_path=index_path, metrics_path=metrics_path
+        )
+
+
+def test_cleanup_retains_capsule_when_catalog_metrics_stale(monkeypatch, tmp_path):
+    fixture(monkeypatch)
+    receipt = gc.verify_capsule("alina-recovery-test", max_bytes=1024**3)
+    index_path, metrics_path = _current_catalog_fixture(tmp_path, receipt)
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics["source_index_sha256"] = "0" * 64
+    metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+    with pytest.raises(gc.Refuse, match="CURRENT_CATALOG_METRICS_NOT_SHA_BOUND"):
+        gc.verify_current_safe_catalog(
+            receipt, index_path=index_path, metrics_path=metrics_path
+        )
+
+
+def test_cleanup_retains_capsule_when_index_source_is_missing(monkeypatch, tmp_path):
+    fixture(monkeypatch)
+    receipt = gc.verify_capsule("alina-recovery-test", max_bytes=1024**3)
+    index_path, metrics_path = _current_catalog_fixture(tmp_path, receipt)
+    index_path.write_text(json.dumps({"shards": []}), encoding="utf-8")
+    metrics_path.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": digest(index_path.read_bytes()),
+        "totals": {"TOTAL_SHARDS": 0},
+    }), encoding="utf-8")
+    with pytest.raises(gc.Refuse, match="CURRENT_CATALOG_MISSING_CAPSULE_SHARD"):
+        gc.verify_current_safe_catalog(
+            receipt, index_path=index_path, metrics_path=metrics_path
+        )
+
+
+def test_valid_deletion_lease_also_requires_live_catalog_check(monkeypatch):
+    _, blobs = fixture(monkeypatch)
+    called = []
+    def block_catalog(_report):
+        called.append(True)
+        raise gc.Refuse("CURRENT_CATALOG_NOT_VERIFIABLE")
+    monkeypatch.setattr(gc, "verify_current_safe_catalog", block_catalog)
+    monkeypatch.setattr(
+        gc, "request", lambda *_a, **_kw: (_ for _ in ()).throw(
+            AssertionError("DELETE bypassed current catalog SAFE proof")
+        ),
+    )
+    monkeypatch.setattr("sys.argv", [
+        "gc", "--recovery-tag", "alina-recovery-test", "--execute",
+        "--expected-release-id", "123",
+        "--expected-canonical-sha256", digest(blobs["RUN_MANIFEST.json"]),
+    ])
+    assert gc.main() == 2
+    assert called == [True]
