@@ -209,6 +209,7 @@ def test_source_admission_counts_no_viable_checkpoint_without_inventing_shards(
     assert out["totals"]["durable_units"] == 0
     assert out["totals"]["shards"] == 0
     assert out["source_admission"]["status"] == "COMPLETE"
+    assert out["source_admission"]["excluded_data_published"] is False
     assert out["source_admission"]["known_excluded_shards"] == 2
     assert out["source_admission"]["known_excluded_compressed_bytes"] == 8192
     assert out["source_admission"]["zero_viable_units"] == 1

@@ -210,6 +210,7 @@ def build() -> dict[str, Any]:
                     type(excluded) is int and excluded >= 0
                     and type(excluded_bytes) is int and excluded_bytes >= 0
                     and isinstance(reasons, Mapping)
+                    and source.get("no_rejected_payload_published") is True
                     and all(
                         isinstance(reason, str) and reason
                         and type(count) is int and count >= 0
@@ -332,7 +333,11 @@ def build() -> dict[str, Any]:
             "zero_viable_units": totals["zero_viable_units"],
             "blocking_reason_occurrences": dict(sorted(admission_reasons.items())),
             "reason_counts_may_overlap": True,
-            "excluded_data_published": False,
+            "excluded_data_published": (
+                False if admission_seen_units > 0
+                and admission_seen_units == admission_covered_units
+                else None
+            ),
         },
 
         "indexed_dataset": indexed,
