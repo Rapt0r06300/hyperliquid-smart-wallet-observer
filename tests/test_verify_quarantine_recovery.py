@@ -95,3 +95,28 @@ def test_corrupt_outer_cache_does_not_inflate_verified_source_count(tmp_path, mo
     assert report["unique_source_assets_verified"] == 0
     assert report["replay_certified"] is False
     assert outer.read_bytes() == b"unverified-asset"
+
+
+def test_quarantine_coverage_tracks_verified_bytes_by_family_without_loss_claim(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    # Include a second, independent missing book shard: absence from this
+    # small isolated cache is NOT proof that its Release was lost.
+    extra = {
+        **index["shards"][0],
+        "dataset_id": "missing-l2",
+        "family": "l2book",
+        "release_asset": "missing-l2.jsonl.gz",
+        "sha256": "b" * 64,
+    }
+    mixed = {**index, "shards": [*index["shards"], extra]}
+    report = audit.verify_quarantine(root, mixed, "b" * 64)
+    assert report["unresolved_catalog_shards"] == 2
+    assert report["byte_verified_non_safe_shards"] == 1
+    assert report["unresolved_candidates_by_family"] == {"l2book": 1, "trades": 1}
+    assert report["byte_verified_shards_by_family"] == {"trades": 1}
+    assert report["byte_verified_compressed_bytes_by_family"] == {"trades": 16}
+    assert report["candidates_without_current_byte_proof_by_family"] == {
+        "l2book": 1, "trades": 0,
+    }
+    assert report["unknown_unverified_compressed_bytes"] is True
+    assert report["all_exploitable_data_restored"] is False
