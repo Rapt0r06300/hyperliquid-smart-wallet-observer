@@ -212,8 +212,20 @@ jobs:
           set -euo pipefail
           tags=()
           for COLLECTOR in bbo native-bybit-0 native-bybit-1 native-okx-0 native-okx-1; do
-            tags+=("data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${COLLECTOR}")
+            TAG="data-v2-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${COLLECTOR}"
+            if gh release view "${TAG}-manifest" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              tags+=("${TAG}-manifest")
+            elif gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              tags+=("$TAG")
+            else
+              echo "No published SAFE manifest for ${COLLECTOR} (zero eligible or failed unit)"
+            fi
           done
+          if [ "${#tags[@]}" -eq 0 ]; then
+            echo "RUN_MANIFEST_COUNT=0" >> "$GITHUB_ENV"
+            echo "No viable Release to index; refusing to synthesize catalog rows."
+            exit 0
+          fi
           python tools/download_release_manifests.py \
             --repository "$GITHUB_REPOSITORY" \
             --destination "$RUNNER_TEMP/v2-run-manifests" \
