@@ -12,6 +12,8 @@ on:
       - 'tools/build_catalog_metrics.py'
       - 'tools/build_quarantine_audit.py'
       - 'tools/build_collection_metrics.py'
+      - 'tools/build_replay_compatibility_reasons.py'
+      - 'tests/test_build_replay_compatibility_reasons.py'
       - 'tests/test_collection_metrics.py'
       - '.github/workflows/dataset-metrics-v2.yml'
   schedule:
@@ -47,7 +49,7 @@ jobs:
         run: |
           python tools/check_dataset_quality.py
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py
+          python -m pytest -q tests/test_dataset_metrics.py tests/test_dataset_policy.py tests/test_collection_metrics.py tests/test_build_replay_compatibility_reasons.py
       - name: Publish metrics
         shell: bash
         run: |
@@ -62,6 +64,12 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             python tools/build_replay_compatibility_reasons.py
+            python - <<'PY'
+          from pathlib import Path
+          path = Path('catalog/REPLAY_COMPATIBILITY_REASONS.json')
+          if path.stat().st_size >= 8 * 1024 * 1024:
+              raise SystemExit('REPLAY_REASONS_OVER_BUDGET_FAIL_CLOSED')
+          PY
             python tools/build_catalog_metrics.py
             python tools/build_collection_metrics.py
             python tools/build_quarantine_audit.py
@@ -76,7 +84,7 @@ jobs:
               published=true
               break
             fi
-            git commit -m "data: refresh exact dataset metrics"
+            git commit -q -m "data: refresh exact dataset metrics"
             if git push origin HEAD:main; then
               published=true
               break
