@@ -90,12 +90,21 @@ async def recheck_one(index: Mapping[str, Any], index_digest: str,
     state = str(report.get("status") or "").upper()
     if state not in ("MATCHED", "PARTIAL", "UNAVAILABLE", "MISMATCH", "ERROR"):
         raise ValueError("REFERENCE_RECHECK_UNRECOGNIZED_SOURCE_STATUS")
+    gap_evidence_status = "NOT_REQUESTED"
     if reference_gap_export_limit:
         evidence = report.get("missing_reference_evidence")
         if not isinstance(evidence, dict):
-            raise ValueError("REFERENCE_RECHECK_MISSING_EXPLICIT_GAP_RECEIPT")
-        gap_status = evidence.get("status")
-        if gap_status == "REFERENCE_ONLY_NOT_MERGED_OR_REPLAY_CERTIFIED":
+            if (state in ("UNAVAILABLE", "ERROR")
+                    or (state == "PARTIAL"
+                        and report.get("missing_from_live") is None)):
+                # The REST source is absent/incomplete. Preserve physically
+                # recovered WS evidence but make no missing-trade claim.
+                gap_evidence_status = "REFERENCE_NOT_COVERED_NO_ROWS_EXPORTED"
+            else:
+                raise ValueError("REFERENCE_RECHECK_MISSING_EXPLICIT_GAP_RECEIPT")
+        else:
+            gap_evidence_status = evidence.get("status")
+        if isinstance(evidence, dict) and gap_evidence_status == "REFERENCE_ONLY_NOT_MERGED_OR_REPLAY_CERTIFIED":
             rows = evidence.get("rows")
             gap_count = evidence.get("missing_trade_count")
             if (not isinstance(rows, list) or type(gap_count) is not int
@@ -112,13 +121,13 @@ async def recheck_one(index: Mapping[str, Any], index_digest: str,
             ).encode("utf-8")
             if hashlib.sha256(payload).hexdigest() != evidence.get("rows_sha256"):
                 raise ValueError("REFERENCE_RECHECK_GAP_DIGEST_MISMATCH")
-        elif gap_status in (
+        elif isinstance(evidence, dict) and gap_evidence_status in (
             "REFERENCE_GAP_EXCEEDS_BOUND_NOT_EXPORTED",
             "REFERENCE_GAP_INVALID_SOURCE_FIELDS_NOT_EXPORTED",
         ):
             if "rows" in evidence:
                 raise ValueError("REFERENCE_RECHECK_UNSAFE_GAP_ROWS")
-        else:
+        elif isinstance(evidence, dict):
             raise ValueError("REFERENCE_RECHECK_UNKNOWN_GAP_STATUS")
     if state == "MATCHED":
         conclusion = "OFFICIAL_REFERENCE_MATCHED_NOT_SAFE"
@@ -131,6 +140,7 @@ async def recheck_one(index: Mapping[str, Any], index_digest: str,
         "venue": "bitget", "symbol": symbol,
         "max_reference_pages": max_pages,
         "reference_gap_export_limit": reference_gap_export_limit,
+        "missing_reference_evidence_status": gap_evidence_status,
         "rest_only_missing_trades_not_merged": True,
         "original_manifest_missing_reference_trades": inspection.get(
             "manifest_reference_trades_missing_from_live"),

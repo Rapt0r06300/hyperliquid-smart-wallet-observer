@@ -164,3 +164,34 @@ def test_recovery_hosted_manual_bitget_reference_gap_export_is_bounded():
     assert "REFERENCE_GAP_EXPORT_LIMIT: ${{ inputs.reference_gap_export_limit || 0 }}" in workflow
     assert '--reference-gap-export-limit "$REFERENCE_GAP_EXPORT_LIMIT"' in workflow
     assert 'result.get("missing_trade_events_reconstructed", 0) == 0' in workflow
+
+
+def test_missing_official_reference_does_not_discard_verified_shard(monkeypatch, tmp_path):
+    monkeypatch.setattr(subject, "reinspect",
+                        lambda *_a, **_kw: {"byte_coverage_verified": True})
+    async def unavailable(_file, **kwargs):
+        assert kwargs["missing_reference_rows_limit"] == 8
+        return {"status": "UNAVAILABLE", "reason": "OFFICIAL_ENDPOINT_TIMEOUT"}
+    result = asyncio.run(subject.recheck_one(
+        _index(), "b" * 64, tmp_path, "candidate",
+        reference_gap_export_limit=8, reconciliation_function=unavailable,
+    ))
+    assert result["status"] == "OFFICIAL_REFERENCE_UNAVAILABLE_NOT_SAFE"
+    assert result["missing_reference_evidence_status"] == "REFERENCE_NOT_COVERED_NO_ROWS_EXPORTED"
+    assert result["reference_recheck_repair_count"] == 0
+    assert result["replay_certified"] is False
+    assert result["validation_allowed"] is False
+    async def early_partial(_file, **kwargs):
+        return {"status": "PARTIAL", "reason": "REFERENCE_DOES_NOT_COVER_WINDOW_START"}
+    result = asyncio.run(subject.recheck_one(
+        _index(), "b" * 64, tmp_path, "candidate",
+        reference_gap_export_limit=8, reconciliation_function=early_partial,
+    ))
+    assert result["missing_reference_evidence_status"] == "REFERENCE_NOT_COVERED_NO_ROWS_EXPORTED"
+    async def contradictory(_file, **kwargs):
+        return {"status": "PARTIAL", "missing_from_live": 1}
+    with pytest.raises(ValueError, match="MISSING_EXPLICIT_GAP_RECEIPT"):
+        asyncio.run(subject.recheck_one(
+            _index(), "b" * 64, tmp_path, "candidate",
+            reference_gap_export_limit=8, reconciliation_function=contradictory,
+        ))

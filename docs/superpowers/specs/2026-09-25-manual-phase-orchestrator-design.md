@@ -12965,6 +12965,24 @@ deduplication, and replay gates succeed. Missing cached files are NOT proof of
 irrecoverability. This tool does not download anything and does not change
 quarantine or SAFE classification.
 
+A third real GitHub-hosted pilot (run `38389286177`, artifact
+`11808385807`) recovered Bitget WALUSDT shard
+`bitget-public-ws-trades-walusdt-1791682957977-1791682981601-d50ae8dbb130`.
+Its compressed 4,935-byte source has 53 trades, zero local gaps,
+isolated `STRICT_PARSE_CHRONOLOGY_OK`, but 54 official reference trades
+with one missing from live. It remains PARTIAL; physical recovery and
+isolated parsing are not a SAFE/replay or economic proof. The SHA,
+run/artifact identity and non-SAFE status are preserved in
+`catalog/RECOVERY_PILOT_HISTORY.json` so later pilots can skip it.
+
+Opt-in official Bitget REST-only missing-trade exports remain bounded by
+`--reference-gap-export-limit` (maximum 128, ordinarily at most eight
+rows) and SHA-verified. A REST outage or incomplete historical coverage
+must yield `REFERENCE_NOT_COVERED_NO_ROWS_EXPORTED`; it must not destroy
+already verified quarantine bytes or claim successful reconciliation.
+Exact REST-only evidence must never be merged into the original websocket
+tape, nor turn PARTIAL into SAFE without full independent proofs.
+
 A second real GitHub-hosted SHA-bound pilot (run `38388003167`, artifact
 `11806798303`) recovered `bitget-public-ws-trades-umausdt-1791682957977-1791682982437-7e29cdcae947`,
 a 5,089-byte compressed PARTIAL trade shard containing 53 distinct trades.
