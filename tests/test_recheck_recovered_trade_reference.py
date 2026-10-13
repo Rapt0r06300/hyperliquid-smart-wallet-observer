@@ -140,3 +140,14 @@ def test_unbounded_or_unsafe_rest_only_export_is_fail_closed(monkeypatch, tmp_pa
             _index(), "b" * 64, tmp_path, "candidate",
             reference_gap_export_limit=5, reconciliation_function=malicious,
         ))
+
+
+def test_hosted_recheck_installs_declared_collection_dependencies():
+    from pathlib import Path
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" /
+        "catalog-partition-parity.yml"
+    ).read_text(encoding="utf-8")
+    assert "python -m pip install --disable-pip-version-check pytest -e ." in workflow
+    assert "python -m pip install --disable-pip-version-check -e . httpx==0.28.1" in workflow
+    assert "            pyproject.toml\n            README.md" in workflow
