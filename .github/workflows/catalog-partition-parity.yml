@@ -234,11 +234,12 @@ jobs:
           # Git commit containing both the root and all referenced parts.
 
   recovery-pilot:
-    # Deliberately one-time, on the dedicated commit message only. This
-    # cannot run on scheduled collection or on later catalog checkpoints.
+    # Deliberately one-time, on the dedicated commit message only.
     if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'recovery-pilot:') }}
     runs-on: ubuntu-latest
     timeout-minutes: 18
+    env:
+      PYTHONPATH: src
     permissions:
       contents: read
     steps:
@@ -250,6 +251,7 @@ jobs:
             catalog
             tools
             tests
+            src
             src
 
       - name: Python
