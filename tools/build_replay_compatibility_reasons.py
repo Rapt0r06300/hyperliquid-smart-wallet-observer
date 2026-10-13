@@ -37,6 +37,9 @@ def _exact_trade_count(row: Mapping[str, Any]) -> int:
 
 
 def _blocking_reasons(row: Mapping[str, Any]) -> list[str]:
+    # Most SAFE/replayable shards do not need a per-shard manifest read.
+    if row.get("replay_compatible") is True:
+        return []
     reasons = row.get("quality_reasons")
     if not isinstance(reasons, list):
         reasons = None
@@ -49,8 +52,6 @@ def _blocking_reasons(row: Mapping[str, Any]) -> list[str]:
         candidate = manifest.get("quality_reasons") if isinstance(manifest, Mapping) else None
         reasons = candidate if isinstance(candidate, list) else []
     normalized = sorted({str(x) for x in reasons if str(x)})
-    if row.get("replay_compatible") is True:
-        return []
     if normalized:
         return normalized
     replay_reason = str(row.get("replay_reason") or "").strip()
@@ -67,13 +68,20 @@ def main() -> int:
     primary_counts: Counter[str] = Counter()
     blocker_shards: Counter[str] = Counter()
     blocker_trades: Counter[str] = Counter()
-    classifications = []
+    # Repeating every classification in a second Git-tracked JSON file grows
+    # beyond GitHub\u0027s 100 MiB blob limit while adding no unique evidence.
+    # Original per-shard identities and reasons remain in the SHA-bound index
+    # and immutable manifest receipts; this report contains exact aggregates.
+    row_count = 0
+    safe_not_replayable = 0
+    replayable_not_safe = 0
     non_replayable_trades = 0
     replayable_trades = 0
 
     for row in rows:
         if not isinstance(row, Mapping):
-            continue
+            raise ValueError("REPLAY_REASONS_INVALID_CANONICAL_SHARD_ROW")
+        row_count += 1
         status = str(row.get("quality_status") or "UNKNOWN")
         replay = row.get("replay_compatible") is True
         trades = _exact_trade_count(row)
@@ -91,6 +99,10 @@ def main() -> int:
             primary = f"NOT_SAFE_OR_REPLAYABLE:{status}"
 
         primary_counts[primary] += 1
+        if status == "SAFE" and not replay:
+            safe_not_replayable += 1
+        if status != "SAFE" and replay:
+            replayable_not_safe += 1
         if replay:
             replayable_trades += trades
         else:
@@ -99,44 +111,30 @@ def main() -> int:
                 blocker_shards[reason] += 1
                 blocker_trades[reason] += trades
 
-        classifications.append({
-            "dataset_id": row.get("dataset_id"),
-            "venue": row.get("venue"),
-            "family": row.get("family"),
-            "quality_status": status,
-            "replay_compatible": replay,
-            "reason_code": primary,
-            "blocking_reasons": blockers,
-            "trade_count": trades,
-            "trade_count_exact": row.get("trade_count_exact") is True,
-            "replay_schema_version": row.get("replay_schema_version"),
-        })
-
     body = {
-        "schema": "alina.replay_compatibility_reasons.v2",
+        "schema": "alina.replay_compatibility_reasons.v3",
+        "classification_source": "SHA_BOUND_CANONICAL_DATA_INDEX_AND_IMMUTABLE_MANIFESTS",
+        "classifications_materialized": False,
         "source_index_sha256": hashlib.sha256(INDEX.read_bytes()).hexdigest(),
-        "row_count": len(classifications),
+        "row_count": row_count,
         "reason_counts": dict(sorted(primary_counts.items())),
         "blocking_reason_shard_counts": dict(sorted(blocker_shards.items())),
         "blocking_reason_trade_counts": dict(sorted(blocker_trades.items())),
         "blocking_reason_trade_counts_overlap": True,
         "replayable_trade_count_exact": replayable_trades,
         "non_replayable_trade_count_exact": non_replayable_trades,
-        "classifications": sorted(classifications, key=lambda x: str(x.get("dataset_id") or "")),
-        "safe_not_replayable_count": sum(
-            1 for x in classifications
-            if x["quality_status"] == "SAFE" and not x["replay_compatible"]
-        ),
-        "replayable_not_safe_count": sum(
-            1 for x in classifications
-            if x["quality_status"] != "SAFE" and x["replay_compatible"]
-        ),
+        "safe_not_replayable_count": safe_not_replayable,
+        "replayable_not_safe_count": replayable_not_safe,
     }
     body["receipt_digest"] = hashlib.sha256(canonical(body).encode()).hexdigest()
-    Path(args.output).write_text(
-        json.dumps(body, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    encoded = (json.dumps(body, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    # Fail closed rather than retry five GitHub pushes of a >100 MiB blob.
+    if len(encoded) >= 8 * 1024 * 1024:
+        raise ValueError("REPLAY_REASONS_AGGREGATES_EXCEED_8MIB")
+    target = Path(args.output)
+    tmp = target.with_name(target.name + ".partial")
+    tmp.write_bytes(encoded)
+    tmp.replace(target)
     print(json.dumps({
         "row_count": body["row_count"],
         "replayable_trade_count_exact": replayable_trades,
