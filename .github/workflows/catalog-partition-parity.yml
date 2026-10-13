@@ -377,7 +377,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          REFERENCE_GAP_EXPORT_LIMIT: ${{ inputs.reference_gap_export_limit || 0 }}
+          # The explicitly requested one-time pilot captures up to 8 exact
+          # REST-only missing rows, even without manual dispatch inputs.
+          # Ordinary pushes never execute recover-one and manual zero disables it.
+          REFERENCE_GAP_EXPORT_LIMIT: ${{ (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'recovery-pilot:')) && 8 || inputs.reference_gap_export_limit || 0 }}
         run: |
           set -euo pipefail
           OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
