@@ -227,3 +227,87 @@ def test_lfs_filters_disabled_in_attributes():
         "filter=lfs" in line and not line.lstrip().startswith("#")
         for line in text.splitlines()
     )
+
+
+def _write_catalog_budget_fixture(tmp_path, rows):
+    index = tmp_path / "catalog" / "DATA_INDEX.json"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(json.dumps({"schema": "alina.index.v1", "shards": rows}), encoding="utf-8")
+    metrics = index.with_name("DATA_METRICS.json")
+    metrics.write_text(json.dumps({
+        "schema_version": "alina.data_metrics.v4",
+        "source_index_sha256": hashlib.sha256(index.read_bytes()).hexdigest(),
+        "totals": {"TOTAL_SHARDS": len(rows)},
+    }), encoding="utf-8")
+    return index, metrics
+
+
+def test_catalog_budget_deduplicates_shared_release_zip_and_preserves_quarantine(tmp_path):
+    module = _module()
+    asset = {
+        "release_tag": "dataset-release",
+        "release_container_asset": "bundle.zip",
+        "release_remote_size": 300,
+        "release_remote_digest": "sha256:" + "e" * 64,
+    }
+    rows = [
+        {
+            "dataset_id": "safe1", "quality_status": "SAFE", "replay_compatible": True,
+            "sha256": "a" * 64, "bytes": 20, "release_asset": "safe1.jsonl.gz",
+            "venue": "okx", "family": "trades", **asset,
+        },
+        {
+            "dataset_id": "safe2", "quality_status": "SAFE", "replay_compatible": True,
+            "sha256": "b" * 64, "bytes": 30, "release_asset": "safe2.jsonl.gz",
+            "venue": "okx", "family": "l2book", **asset,
+        },
+        {
+            "dataset_id": "repair", "quality_status": "PARTIAL",
+            "replay_compatible": False, "sha256": "c" * 64, "bytes": 40,
+            "venue": "okx", "family": "trades", **asset,
+        },
+        {
+            "dataset_id": "reject", "quality_status": "REJECT",
+            "replay_compatible": False, "sha256": "d" * 64, "bytes": 90,
+            "venue": "gate", "family": "trades",
+        },
+    ]
+    index, metrics = _write_catalog_budget_fixture(tmp_path, rows)
+    report = module.calculate_catalog_budget(index, metrics)
+    assert report["status"] == "CATALOG_ONLY_NOT_RESTORED"
+    assert report["indexed_shards"] == 4
+    assert report["replay_selected_shards"] == 2
+    assert report["replay_selected_logical_bytes"] == 50
+    assert report["replay_selected_release_assets"] == 1
+    assert report["replay_selected_release_download_bytes"] == 300
+    assert report["logical_shard_bytes_all_qualities"] == 180
+    assert report["by_quality"]["PARTIAL"] == {"shards": 1, "logical_bytes": 40}
+    assert report["by_quality"]["REJECT"] == {"shards": 1, "logical_bytes": 90}
+    assert report["historical_release_total_bytes"] is None
+    assert report["unselected_assets_proven_unrecoverable"] is False
+    assert report["unselected_payloads_deleted"] is False
+
+
+def test_catalog_budget_rejects_stale_metrics_and_unknown_bytes(tmp_path):
+    module = _module()
+    rows = [{"dataset_id": "quarantine", "quality_status": "PARTIAL", "bytes": 12}]
+    index, metrics = _write_catalog_budget_fixture(tmp_path, rows)
+    assert module.calculate_catalog_budget(index, metrics)["replay_selected_shards"] == 0
+    index.write_text(json.dumps({"schema": "alina.index.v1", "shards": []}), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="canonical DATA_METRICS does not match"):
+        module.calculate_catalog_budget(index, metrics)
+    rows[0]["bytes"] = None
+    index, metrics = _write_catalog_budget_fixture(tmp_path, rows)
+    with pytest.raises(ValueError, match="BUDGET_UNKNOWN_SHARD_SIZE"):
+        module.calculate_catalog_budget(index, metrics)
+
+
+def test_catalog_budget_cli_does_not_touch_git_or_network(monkeypatch, tmp_path, capsys):
+    module = _module()
+    monkeypatch.setattr(module, "__file__", str(tmp_path / "tools" / "sync_complete_clone.py"))
+    monkeypatch.setattr(module, "synchronize_main",
+                        lambda *_a, **_k: pytest.fail("catalog budget must not touch git"))
+    monkeypatch.setattr(module, "calculate_catalog_budget",
+                        lambda *_a, **_k: {"status": "CATALOG_ONLY_NOT_RESTORED"})
+    assert module.main(["--catalog-budget"]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "CATALOG_ONLY_NOT_RESTORED"

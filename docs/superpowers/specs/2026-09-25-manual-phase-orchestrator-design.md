@@ -1128,6 +1128,20 @@ When resources are constrained, protect data in this order:
 
 The objective is maximum **usable** information, not maximum compressed bytes.
 
+Operators must not equate the full historical GitHub Release inventory with the
+required replay/backtest corpus. The canonical `ALINA_SYNC_COMPLETE` entrypoint
+accepts `--catalog-budget` for deterministic offline, index/metrics-SHA-bound
+logical-byte accounting by quality, venue and family, and for de-duplicated
+outer Release asset bytes required by catalog-qualified SAFE/replay-compatible
+shards. This is **not** a byte-download verification, a disk-space guarantee or
+a proof of net replay economics. `--preflight-only` additionally verifies the
+published inventory, required evidence and actual destination disk budget without
+downloading market payloads. PARTIAL and REJECT evidence must be preserved for
+independent recovery analysis; an unselected asset is not automatically proven
+irrecoverable. No automatic purge, phase change or interruption of COLLECT is
+permitted by either command.
+
+
 A larger dataset with unknown holes is inferior to a smaller dataset whose certified intervals and limitations are explicit.
 
 ## Copy-Vault behavior

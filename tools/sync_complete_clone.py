@@ -110,6 +110,93 @@ def restore_published(root: Path, *, preflight: bool = False,
         raise SyncError("Python restore could not be launched") from exc
 
 
+
+def calculate_catalog_budget(index_path: Path, metrics_path: Path) -> dict:
+    """Offline, SHA-bound storage budget; never equate archive size with replay data.
+
+    These are manifest bytes, NOT downloaded/verified bytes or economic proof.
+    """
+    try:
+        from tools.partitioned_data_index import read_index
+        from tools.restore_alina import _load_replay_ready_plan
+    except ModuleNotFoundError:
+        from partitioned_data_index import read_index
+        from restore_alina import _load_replay_ready_plan
+
+    # This existing canonical verifier rejects stale metrics, malformed SAFE
+    # asset identities, and incompletely reconstructed index partitions.
+    _safe, proof, replay_rows, required = _load_replay_ready_plan(
+        index_path, metrics_path
+    )
+    index = read_index(index_path)
+    by_quality: dict[str, dict[str, int]] = {}
+    by_venue: dict[str, dict[str, int]] = {}
+    by_family: dict[str, dict[str, int]] = {}
+    total_logical_bytes = 0
+
+    def accumulate(buckets: dict[str, dict[str, int]], key: str, size: int) -> None:
+        bucket = buckets.setdefault(key, {"shards": 0, "logical_bytes": 0})
+        bucket["shards"] += 1
+        bucket["logical_bytes"] += size
+
+    for row in index["shards"]:
+        if not isinstance(row, dict):
+            raise ValueError("BUDGET_INVALID_INDEX_ROW")
+        status = row.get("quality_status")
+        if status not in {"SAFE", "PARTIAL", "REJECT", "STALE"}:
+            raise ValueError("BUDGET_UNKNOWN_QUALITY_STATUS")
+        size = row.get("bytes")
+        if type(size) is not int or size < 0:
+            raise ValueError("BUDGET_UNKNOWN_SHARD_SIZE")
+        quality = (
+            "SAFE_REPLAY" if row.get("replay_compatible") is True
+            else "SAFE_NOT_REPLAY"
+        ) if status == "SAFE" else status
+        accumulate(by_quality, quality, size)
+        accumulate(by_venue, str(row.get("venue") or "unknown").lower(), size)
+        accumulate(by_family, str(row.get("family") or "unknown").lower(), size)
+        total_logical_bytes += size
+
+    replay_logical_bytes = sum(int(row["bytes"]) for row in replay_rows)
+    if replay_logical_bytes != proof["safe_logical_bytes"]:
+        raise ValueError("BUDGET_REPLAY_TOTAL_MISMATCH")
+    if by_quality.get("SAFE_REPLAY", {}).get("shards", 0) != len(replay_rows):
+        raise ValueError("BUDGET_REPLAY_SHARD_COUNT_MISMATCH")
+
+    # One Release ZIP can hold many logical shards: count its network bytes
+    # once, and do not claim that a PARTIAL member makes the whole ZIP waste.
+    selected_outer_bytes = sum(size for size, _digest in required.values())
+    return {
+        "schema": "alina.catalog_storage_budget.v1",
+        "status": "CATALOG_ONLY_NOT_RESTORED",
+        "source_index_sha256": proof["source_index_sha256"],
+        "indexed_shards": proof["indexed_shards"],
+        "logical_shard_bytes_all_qualities": total_logical_bytes,
+        "by_quality": dict(sorted(by_quality.items())),
+        "by_venue": dict(sorted(by_venue.items())),
+        "by_family": dict(sorted(by_family.items())),
+        "replay_selected_shards": len(replay_rows),
+        "replay_selected_logical_bytes": replay_logical_bytes,
+        "replay_selected_release_assets": len(required),
+        "replay_selected_release_download_bytes": selected_outer_bytes,
+        "selected_release_asset_sizes_sha_bound": True,
+        "historical_release_total_bytes": None,
+        "local_disk_requirement_bytes": None,
+        "unselected_assets_proven_unrecoverable": False,
+        "unselected_payloads_deleted": False,
+        "note": (
+            "Catalog accounting only. SAFE+replay-compatibility does not prove "
+            "time synchronization, cross-venue continuity, net PnL, downloaded "
+            "SHA-256 parity, or total disk space. To measure disk capacity and "
+            "analysis receipts, use --preflight-only; it does not download "
+            "market payloads. PARTIAL/REJECT data must be preserved for repair."
+        ),
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+
+
 def _read_restore_status(
     report_path: Path, *, expected_catalog_sha256: str | None = None
 ) -> tuple[str, str | None, str | None]:
@@ -156,7 +243,24 @@ def main(argv: list[str] | None = None) -> int:
         "--no-snapshot-materialization", action="store_true",
         help="keep ignored workspace files intact; still download snapshot assets",
     )
+    parser.add_argument(
+        "--catalog-budget", action="store_true",
+        help="offline SAFE/PARTIAL/REJECT and replay-ready byte accounting; "
+             "no git fetch, GitHub API, payload download or local mutations",
+    )
     args = parser.parse_args(argv)
+    if args.catalog_budget:
+        root = Path(__file__).resolve().parents[1]
+        try:
+            report = calculate_catalog_budget(
+                root / "catalog" / "DATA_INDEX.json",
+                root / "catalog" / "DATA_METRICS.json",
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            print(f"ALINA_BUDGET_FAIL: {exc}", file=sys.stderr)
+            return 2
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
     if sys.version_info < (3, 10):
         print("ALINA_SYNC_FAIL: Python 3.10 or newer is required", file=sys.stderr)
         return 2
