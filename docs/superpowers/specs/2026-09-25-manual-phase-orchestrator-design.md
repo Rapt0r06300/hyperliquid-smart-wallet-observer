@@ -12976,6 +12976,22 @@ symlinked source or attempted overwrite MUST fail. The only successful
 receipt status is `EVIDENCE_COMPLETE_NOT_RESTORED`; it is NEVER a
 REPLAY_READY_COMPLETE receipt or proof of recovered records.
 
+After any operator-selected non-SAFE shard has been downloaded and
+verified into the isolated GitHub-hosted quarantine, the existing
+`catalog-partition-parity` recovery job MUST call
+`tools/reinspect_recovered_quarantine.py`. The reinspector verifies the
+current canonical catalog/metrics snapshot, original manifest identity
+(from an immutable `HEAD:` Git blob even with sparse checkout), original
+Release ZIP SHA-256, logical member SHA-256, bounded gzip decompression,
+and invokes the single existing `replay_compatibility.inspect_asset` parser.
+Its metrics cover parse/chronology errors, exact trade identities,
+duplicates and replay reasons. The *only* successful report states are
+`CONTENT_REPLAY_CHECK_PASSED_NOT_SAFE` or
+`CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE`: a passing isolated content check
+never reclassifies data as SAFE, enables a backtest or certifies gaps,
+cross-shard market continuity, OOS, slippage, or economic results.
+Absent immutable provenance and oversized/corrupt gzip always fail closed.
+
 The one-way legacy `tools/enforce_safe_replay_invariant.py` demotion path
 must likewise archive original SAFE manifests under
 `datasets/quarantine/reclassification-history/<sha256>.original`
