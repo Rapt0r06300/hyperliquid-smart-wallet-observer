@@ -551,6 +551,7 @@ async def _run(
             collection_queue_drops=dropped,
             collection_run_id=collection_run_id,
             compact_target_bytes=64 * 1024 * 1024,
+            replay_admission_only=True,
         )
         final_health = coordinator.health(now_ms=int(time.time() * 1000))
         final = {
