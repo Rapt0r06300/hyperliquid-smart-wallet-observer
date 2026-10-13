@@ -37,11 +37,11 @@ def select_assets(index: Mapping[str, Any],
                   *, max_assets: int = 10,
                   max_bytes: int = 2_000_000_000,
                   asset_offset: int = 0) -> dict[str, Any]:
-    if type(max_assets) is not int or max_assets < 1:
+    if type(max_assets) is not int or not 1 <= max_assets <= 1000:
         raise InventoryError("HYDRATE_INVALID_ASSET_LIMIT")
     if type(asset_offset) is not int or asset_offset < 0:
         raise InventoryError("HYDRATE_INVALID_ASSET_OFFSET")
-    if type(max_bytes) is not int or max_bytes < 1:
+    if type(max_bytes) is not int or not 1 <= max_bytes <= 10_000_000_000:
         raise InventoryError("HYDRATE_INVALID_BYTE_LIMIT")
     rows = index.get("shards")
     if not isinstance(rows, list):
@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         output = {"catalog_index_sha256": proof["catalog_index_sha256"],
                   "source_inventory_file_sha256": inventory_metadata["source_inventory_file_sha256"],
-                  "selection": {k: v for k, v in plan.items() if k != "selection"},
+                  "selection": plan,
                   "hydration": hydration}
     except (OSError, ValueError, TypeError, RestoreError) as exc:
         print(json.dumps({"status": "HYDRATION_INCOMPLETE", "reason": str(exc)}, sort_keys=True))

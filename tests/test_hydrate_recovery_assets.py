@@ -85,3 +85,24 @@ def test_pagination_advances_unique_outer_assets_without_quadratic_lookup():
     assert first["selection"][0]["release_tag"]=="tag"
     assert second["selection"][0]["release_tag"]=="tag2"
     assert second["asset_offset"]==1
+
+
+def test_hydration_plan_has_exact_bounded_asset_identities_and_fails_closed():
+    from tools.preservation_inventory import InventoryError
+    plan=h.select_assets(rows(), {("tag","pack.zip"): (100,SHA_B)}, max_assets=10)
+    assert plan["selection"] == [{
+        "release_tag": "tag",
+        "asset_name": "pack.zip",
+        "size_bytes": 100,
+        "sha256": SHA_B,
+        "source_url": (
+            "https://github.com/Rapt0r06300/hyperliquid-smart-wallet-observer"
+            "/releases/download/tag/pack.zip"
+        ),
+    }]
+    assert len(plan["selection"]) == plan["selected_unique_outer_assets"]
+    assert sum(item["size_bytes"] for item in plan["selection"]) == plan["selected_source_asset_bytes"]
+    with __import__("pytest").raises(InventoryError, match="HYDRATE_INVALID_ASSET_LIMIT"):
+        h.select_assets(rows(), {}, max_assets=1001)
+    with __import__("pytest").raises(InventoryError, match="HYDRATE_INVALID_BYTE_LIMIT"):
+        h.select_assets(rows(), {}, max_bytes=10_000_000_001)
