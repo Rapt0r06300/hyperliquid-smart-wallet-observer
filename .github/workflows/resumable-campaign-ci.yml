@@ -8,6 +8,9 @@ on:
       - 'src/hl_observer/control_plane/module_pnl_proof.py'
       - 'tools/resumable_campaign.py'
       - 'tools/run_resumable_campaign.py'
+      - 'tools/augment_campaign_result.py'
+      - 'tests/test_augment_campaign_result.py'
+      - '.github/workflows/resumable-campaign-worker.yml'
       - 'tests/test_resumable_campaign.py'
       - 'tests/test_resumable_campaign_adapters.py'
       - 'tests/test_module_pnl_proof_campaign.py'
@@ -36,4 +39,4 @@ jobs:
           python -m py_compile             src/hl_observer/control_plane/resumable_campaign.py             src/hl_observer/control_plane/campaign_adapters.py             src/hl_observer/control_plane/module_pnl_proof.py             tools/resumable_campaign.py             tools/run_resumable_campaign.py
       - name: Run campaign tests
         run: |
-          python -m pytest -q             tests/test_resumable_campaign.py             tests/test_resumable_campaign_adapters.py             tests/test_module_pnl_proof_campaign.py
+          python -m pytest -q             tests/test_resumable_campaign.py             tests/test_resumable_campaign_adapters.py             tests/test_module_pnl_proof_campaign.py             tests/test_augment_campaign_result.py
