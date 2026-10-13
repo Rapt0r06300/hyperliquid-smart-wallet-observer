@@ -24,10 +24,15 @@ def _fixture(tmp_path, *, live_count=53, extra_reference=6, corrupt_symbol=False
             "price": "1.25", "size": "0.30", "side": "buy",
         }
     references = [row(v, i) for i, v in enumerate(ids)]
+    # The missing REST rows must be WITHIN the captured WS time window.
+    # Keep the last reference trade in the live tape so the comparison
+    # cannot legitimately clip all six gaps out of its end boundary.
+    missing_start = live_count - 1
+    observed = references[:missing_start] + references[missing_start + extra_reference:]
     live = [
         {"raw_payload": {"data": [reference]},
          "source_id": "bitget_public_ws", "channel": "trades"}
-        for reference in references[:live_count]
+        for reference in observed
     ]
     path = tmp_path / "original-live.jsonl.gz"
     with gzip.open(path, "wt", encoding="utf-8") as out:
@@ -65,7 +70,7 @@ def test_missing_six_real_reference_rows_are_distinct_sha_bound_and_not_merged(t
     assert evidence["status"] == "REFERENCE_ONLY_NOT_MERGED_OR_REPLAY_CERTIFIED"
     assert evidence["missing_trade_count"] == 6
     assert [x["trade_id"] for x in evidence["rows"]] == [
-        str(100000 + i) for i in range(53, 59)
+        str(100000 + i) for i in range(52, 58)
     ]
     for item in evidence["rows"]:
         assert item["source"] == "BITGET_PUBLIC_REST_REFERENCE_ONLY"
