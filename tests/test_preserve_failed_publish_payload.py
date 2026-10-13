@@ -86,6 +86,41 @@ def test_failed_publish_fallback_keeps_only_publisher_admissible_shards(tmp_path
     assert (root / "assets" / "bad.jsonl.gz").is_file()
 
 
+def test_oversized_failed_market_bundle_preserves_bounded_subset_in_quarantine(tmp_path):
+    root, result = make_bundle(tmp_path)
+    first_manifest = root / "manifests" / "safe.json"
+    second_manifest = root / "manifests" / "safe-second.json"
+    other = json.loads(first_manifest.read_text(encoding="utf-8"))
+    other["dataset_id"] = "pending-remote-2"
+    other["release_asset"] = "safe-second.jsonl.gz"
+    second_manifest.write_text(json.dumps(other), encoding="utf-8")
+    (root / "assets" / "safe-second.jsonl.gz").write_bytes(
+        (root / "assets" / "safe.jsonl.gz").read_bytes()
+    )
+    index_file = root / "BUNDLE_INDEX.json"
+    index = json.loads(index_file.read_text(encoding="utf-8"))
+    index["manifests"].append("manifests/safe-second.json")
+    index["assets"].append("assets/safe-second.jsonl.gz")
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+    first_bytes = first_manifest.stat().st_size + (root / "assets" / "safe.jsonl.gz").stat().st_size
+    second_bytes = second_manifest.stat().st_size + (root / "assets" / "safe-second.jsonl.gz").stat().st_size
+
+    archive = tmp_path / "partial-quarantine.tgz"
+    report = module.preserve(result, archive, max_bytes=first_bytes + second_bytes // 2)
+    assert report["status"] == "QUARANTINE_ARCHIVED"
+    assert report["candidate_shards"] == 1
+    assert report["omitted_due_budget"] == 1
+    assert report["source_coverage_complete"] is False
+    assert report["archive_bytes"] <= first_bytes + second_bytes // 2
+    with tarfile.open(archive, "r:gz") as archived:
+        names = set(archived.getnames())
+        assert "assets/safe.jsonl.gz" in names
+        assert "assets/safe-second.jsonl.gz" not in names
+        intent = json.load(archived.extractfile("QUARANTINE_INTENT.json"))
+        assert intent["source_coverage_complete"] is False
+        assert intent["status"] == "QUARANTINE_NOT_REPLAY_CERTIFIED"
+
+
 def test_failed_publish_fallback_refuses_partial_transfer_when_over_budget(tmp_path):
     _, result = make_bundle(tmp_path)
     archive = tmp_path / "too-small.tgz"

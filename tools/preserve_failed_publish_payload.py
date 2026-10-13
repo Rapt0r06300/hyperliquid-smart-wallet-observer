@@ -75,6 +75,10 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
     assets_seen: dict[str, tuple[int, str]] = {}
     logical_bytes = 0
     preserved_rows: list[dict[str, Any]] = []
+    preserved_manifest_paths: list[Path] = []
+    skipped_budget = 0
+    # Leave bounded room for the archive headers and the quarantine receipt.
+    source_budget = max_bytes - min(2 * 1024 * 1024, max_bytes // 10)
     for manifest_path, row in eligible:
         member = row.get("release_asset")
         expected_sha = str(row.get("sha256") or "").lower()
@@ -83,34 +87,42 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
                 or type(expected_size) is not int or expected_size <= 0
                 or SHA256.fullmatch(expected_sha) is None):
             raise ValueError("QUARANTINE_INVALID_ASSET_IDENTITY")
-        asset = _file(root, "assets/" + member)
-        if asset.stat().st_size != expected_size or _sha256(asset) != expected_sha:
-            raise ValueError("QUARANTINE_ASSET_SHA_MISMATCH")
         identity = (expected_size, expected_sha)
         if member in assets_seen and assets_seen[member] != identity:
             raise ValueError("QUARANTINE_ASSET_IDENTITY_CONFLICT")
+        asset = _file(root, "assets/" + member)
+        manifest_size = manifest_path.stat().st_size
+        new_asset_size = 0 if member in assets_seen else expected_size
+        if logical_bytes + manifest_size + new_asset_size > source_budget:
+            skipped_budget += 1
+            continue
+        if asset.stat().st_size != expected_size or _sha256(asset) != expected_sha:
+            raise ValueError("QUARANTINE_ASSET_SHA_MISMATCH")
         if member not in assets_seen:
             assets_seen[member] = identity
             logical_bytes += expected_size
             originals.append((asset, "assets/" + member))
         manifest_relative = manifest_path.relative_to(root).as_posix()
         originals.append((manifest_path, manifest_relative))
-        logical_bytes += manifest_path.stat().st_size
+        logical_bytes += manifest_size
         preserved_rows.append(row)
+        preserved_manifest_paths.append(manifest_path)
 
-    if logical_bytes > max_bytes:
+    if not preserved_rows:
         return {
             "status": "QUARANTINE_SKIPPED_BUDGET",
-            "candidate_bytes": logical_bytes,
             "max_bytes": max_bytes,
             "candidate_shards": len(eligible),
             "excluded": len(rejected),
+            "omitted_due_budget": skipped_budget,
         }
     filtered_index = {
         **index,
-        "manifests": [p.relative_to(root).as_posix() for p, _ in eligible],
+        "manifests": [p.relative_to(root).as_posix() for p in preserved_manifest_paths],
         "assets": ["assets/" + name for name in sorted(assets_seen)],
-        "shard_count": len(eligible),
+        "shard_count": len(preserved_rows),
+        "quarantine_only": True,
+        "quarantine_source_complete": skipped_budget == 0,
         "safe_count": sum(row.get("quality_status") == "SAFE" for row in preserved_rows),
         "partial_count": sum(row.get("quality_status") == "PARTIAL" for row in preserved_rows),
         "reject_count": 0,
@@ -119,7 +131,10 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
         "schema": "alina.failed_publish_quarantine.v1",
         "status": "QUARANTINE_NOT_REPLAY_CERTIFIED",
         "source_run_status": "COMPLETE",
-        "candidate_shards": len(eligible),
+        "candidate_shards": len(preserved_rows),
+        "source_candidate_shards": len(eligible),
+        "omitted_due_budget": skipped_budget,
+        "source_coverage_complete": skipped_budget == 0,
         "excluded_shards": len(rejected),
         "max_source_bytes": max_bytes,
         "source_bytes": logical_bytes,
@@ -158,7 +173,9 @@ def preserve(result_path: Path, output: Path, *, max_bytes: int = MAX_BYTES) -> 
         temporary.replace(output)
         return {
             "status": "QUARANTINE_ARCHIVED",
-            "candidate_shards": len(eligible),
+            "candidate_shards": len(preserved_rows),
+            "omitted_due_budget": skipped_budget,
+            "source_coverage_complete": skipped_budget == 0,
             "excluded": len(rejected),
             "archive_bytes": size,
             "archive_sha256": digest,
