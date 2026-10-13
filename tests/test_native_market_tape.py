@@ -438,3 +438,11 @@ def test_gate_malformed_full_snapshot_does_not_destroy_previous_causal_book():
     result = state.apply_book({"full": True, "U": 100, "u": 101, "b": [], "a": []})
     assert result != "EXPLOITABLE"
     assert (state.bids, state.asks, state.sequence) == before
+    # The retained book is diagnostic only; invalid re-anchors must not
+    # allow later incremental deltas to become executable.
+    assert state.apply_book({
+        "U": 3, "u": 4,
+        "b": [{"p": "100", "s": "2"}],
+        "a": [{"p": "102", "s": "2"}],
+    }) != "EXPLOITABLE"
+    assert (state.bids, state.asks, state.sequence) == before

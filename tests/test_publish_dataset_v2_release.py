@@ -271,12 +271,10 @@ def test_publish_zero_safe_uploads_only_diagnostics_and_manifest(tmp_path, monke
         title="zero safe",
     )
 
-    assert [path.name for path in uploaded] == [
-        "QUALITY_REJECTIONS.json.gz", "RUN_MANIFEST.json",
-    ]
-    assert result["shard_count"] == 0
-    assert result["quality_register"]["row_count"] == 1
-    assert result["quality_register"]["validation_allowed"] is False
+    assert uploaded == []
+    assert result["status"] == "NO_REPLAY_ADMISSIBLE_SHARDS"
+    assert result["excluded_payload_count"] == 1
+    assert result["real_execution"] is False
 
 
 def test_publish_mixed_bundle_filters_payload_and_capsule_inputs(tmp_path, monkeypatch) -> None:

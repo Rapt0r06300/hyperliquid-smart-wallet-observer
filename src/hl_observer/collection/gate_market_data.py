@@ -126,6 +126,13 @@ class GateMarketState:
                 return self.quality
         if connection:
             self.connection_id = connection
+        if not is_full_snapshot and self.reason in {
+            "INCOMPLETE_FULL_SNAPSHOT", "MISSING_OR_INVALID_SEQUENCE",
+        }:
+            # Keep the last known depth only as diagnostic evidence. Never
+            # advance it after an invalid authoritative re-anchor.
+            self.quality = UNMEASURABLE
+            return self.quality
         if not is_full_snapshot and self.sequence is None:
             # Never reconstruct an executable L2 book from orphan deltas.
             # Retain raw websocket frames separately for later diagnosis.
@@ -138,21 +145,20 @@ class GateMarketState:
             first is not None and last < first
         ):
             self.quality, self.reason = UNMEASURABLE, "MISSING_OR_INVALID_SEQUENCE"
-            self.sequence = None
-            self.rest_anchor_pending = False
-            self.last_ws_delta_signature = None
-            self.bids.clear()
-            self.asks.clear()
+            if not is_full_snapshot:
+                self.sequence = None
+                self.rest_anchor_pending = False
+                self.last_ws_delta_signature = None
+                self.bids.clear()
+                self.asks.clear()
             return self.quality
         if is_full_snapshot:
             bids = payload.get("b") or payload.get("bids")
             asks = payload.get("a") or payload.get("asks")
             if not isinstance(bids, list) or not bids or not isinstance(asks, list) or not asks:
                 self.quality, self.reason = UNMEASURABLE, "INCOMPLETE_FULL_SNAPSHOT"
-                self.sequence = None
-                self.rest_anchor_pending = False
-                self.bids.clear()
-                self.asks.clear()
+                # Invalid full snapshots are never accepted as a re-anchor;
+                # preserve the prior book only for diagnostics, not execution.
                 return self.quality
             self.rest_anchor_pending = payload.get("_alina_rest_anchor") is True
             self.last_ws_delta_signature = None
