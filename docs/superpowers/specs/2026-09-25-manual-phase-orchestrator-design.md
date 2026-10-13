@@ -13444,8 +13444,12 @@ existing checkout update MUST pass the canonical one-command path:
 
 - Git restores the complete tracked code, configuration, workflows, schemas,
   catalogs and documentation from `main`;
-- `ALINA_SYNC_COMPLETE.cmd` or `bash ALINA_SYNC_COMPLETE.sh` hydrates every
-  Release asset/member required by the fixed SAFE/replayable catalog;
+- `ALINA_SYNC_COMPLETE.cmd` or `bash ALINA_SYNC_COMPLETE.sh` performs
+  inventory and safe preflight **without market payload downloads by default**;
+  the explicit `--download-safe` opt-in hydrates SAFE/replayable Release
+  assets/members under an enforced download budget. Whole-corpus recovery
+  acceptance must be validated on a sufficiently provisioned environment,
+  never forced onto the user's PC;
 - interrupted downloads and materialization resume without redownloading
   already verified bytes;
 - local changes and unknown files are preserved, tracked changes block the

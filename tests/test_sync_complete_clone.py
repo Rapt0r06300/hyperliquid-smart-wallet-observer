@@ -354,3 +354,10 @@ def test_download_safe_forwards_hard_limit_and_rejects_invalid_limit(monkeypatch
     assert "--everything" not in commands[0]
     with pytest.raises(module.SyncError, match="download cap"):
         module.restore_published(tmp_path, max_download_gib=0)
+
+def test_sync_refuses_conflicting_preview_download_and_nonpositive_cap(capsys):
+    module = _module()
+    assert module.main(["--download-safe", "--preflight-only"]) == 2
+    assert "choose --download-safe OR --preflight-only" in capsys.readouterr().err
+    assert module.main(["--max-download-gib", "0"]) == 2
+    assert "--max-download-gib must be positive" in capsys.readouterr().err
