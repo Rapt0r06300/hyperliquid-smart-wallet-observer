@@ -993,6 +993,16 @@ Archive replay compatibility proves historical event replay only. It does **not*
 
 The published `TOTAL_TRADES_REPLAYABLE` metric is a qualification total derived from replay-compatible trade shards. A trade counted outside that total is not automatically proven unusable: reports must distinguish a genuinely invalid asset from an asset whose replay proof is still missing. Replay-compatibility diagnostics therefore expose both shard counts and exact trade-weighted blocker counts so remediation prioritizes the largest recoverable populations first.
 
+The derived `catalog/REPLAY_COMPATIBILITY_REASONS.json` receipt must remain a
+compact SHA-index-bound **aggregate**, not a second per-shard copy of the full
+index: GitHub rejects ordinary Git blobs over 100 MiB. Original identities and
+reasons remain in the partitioned canonical DATA_INDEX and immutable manifests.
+All replay-compatibility receipt capture and reapplication code, including
+`tools/replay_receipt_publish.py`, must load the complete, parity-checked index
+through `read_index` rather than expecting a root-level `shards` array. A
+missing partition or conflicting immutable receipt fails closed; no replay
+SAFE promotion or incomplete Git push is considered successful.
+
 ### BBO/L2 versus historical repair
 
 The system must distinguish data families that are historically repairable from those that are not.
