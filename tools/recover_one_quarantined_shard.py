@@ -271,6 +271,7 @@ def hydrate_candidate(
 def select_pilot_candidate(
     index: Mapping[str, Any], *, token: str | None = None,
     max_source_bytes: int = 4_000_000, max_live_attempts: int = 12,
+    excluded_dataset_ids: frozenset[str] | set[str] = frozenset(),
 ) -> dict[str, Any]:
     """Select ONE recent small real source by live Release identity, not by guess.
 
@@ -284,6 +285,8 @@ def select_pilot_candidate(
     for row in index.get("shards", []):
         if not isinstance(row, Mapping):
             raise ValueError("RECOVERY_PILOT_INVALID_CATALOG_ROW")
+        if row.get("dataset_id") in excluded_dataset_ids:
+            continue
         if row.get("quality_status") not in ("PARTIAL", "REJECT", "STALE") and not (
             row.get("quality_status") == "SAFE" and row.get("replay_compatible") is not True
         ):
@@ -342,6 +345,7 @@ def select_pilot_candidate(
             "source_asset_sha256": candidate["outer_sha256"],
             "eligible_candidates_examined": attempted,
             "total_small_index_candidates": len(eligible),
+            "previously_tested_candidates_skipped": len(excluded_dataset_ids),
             "replay_certified": False,
             "validation_allowed": False,
         }
@@ -349,6 +353,52 @@ def select_pilot_candidate(
         "RECOVERY_PILOT_NO_VERIFIABLE_LIVE_SOURCE:checked="
         + str(attempted) + ":reasons=" + json.dumps(reasons, sort_keys=True)
     )
+
+
+
+def load_pilot_history(path: Path, index: Mapping[str, Any]) -> frozenset[str]:
+    """Reject tampered/stale Git-tracked pilot history; never silently repeat runs.
+
+    A previous probe is byte evidence, not proof of replay compatibility.
+    This file only prevents selecting an already-reinspected immutable shard.
+    """
+    path = Path(path)
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("RECOVERY_PILOT_HISTORY_MISSING_OR_UNSAFE")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(data, Mapping)
+            or data.get("schema") != "alina.recovery_pilot_history.v1"
+            or data.get("source_repository") != CANONICAL
+            or not isinstance(data.get("entries"), list)):
+        raise ValueError("RECOVERY_PILOT_HISTORY_INVALID")
+    rows = {str(row.get("dataset_id") or ""): row for row in index["shards"]}
+    if len(rows) != len(index["shards"]):
+        raise ValueError("RECOVERY_PILOT_DUPLICATE_INDEXED_DATASET")
+    tested: set[str] = set()
+    for receipt in data["entries"]:
+        if not isinstance(receipt, Mapping):
+            raise ValueError("RECOVERY_PILOT_HISTORY_ENTRY_INVALID")
+        ident = receipt.get("dataset_id")
+        sha = receipt.get("shard_sha256")
+        row = rows.get(ident) if isinstance(ident, str) else None
+        if (not isinstance(ident, str) or not ident or ident in tested
+                or not isinstance(sha, str) or not SHA.fullmatch(sha.lower())
+                or row is None or str(row.get("sha256") or "").lower() != sha.lower()
+                or receipt.get("original_quality_status") not in
+                    ("PARTIAL", "REJECT", "STALE", "SAFE")
+                or type(receipt.get("github_run_id")) is not int
+                or receipt["github_run_id"] <= 0
+                or type(receipt.get("github_artifact_id")) is not int
+                or receipt["github_artifact_id"] <= 0
+                or receipt.get("byte_recovery_status") !=
+                    "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED"
+                or receipt.get("replay_reason") not in
+                    ("GAP", "STRICT_PARSE_CHRONOLOGY_OK")
+                or receipt.get("replay_certified") is not False
+                or receipt.get("validation_allowed") is not False):
+            raise ValueError("RECOVERY_PILOT_HISTORY_IDENTITY_OR_PROOF_INVALID")
+        tested.add(ident)
+    return frozenset(tested)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -362,6 +412,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--destination", type=Path)
     parser.add_argument("--max-source-bytes", type=int, default=SOURCE_MAX)
     parser.add_argument("--max-live-attempts", type=int, default=12)
+    parser.add_argument("--pilot-history", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "catalog" / "RECOVERY_PILOT_HISTORY.json")
     parser.add_argument("--download", action="store_true",
                         help="Transfer ONE SHA-verified Release asset into quarantine")
     args = parser.parse_args(argv)
@@ -371,10 +423,12 @@ def main(argv: list[str] | None = None) -> int:
         metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
         summarize(index, metrics, hashlib.sha256(raw).hexdigest())
         if args.select_pilot:
+            prior = load_pilot_history(args.pilot_history, index)
             result = select_pilot_candidate(
                 index, token=os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
                 max_source_bytes=args.max_source_bytes,
                 max_live_attempts=args.max_live_attempts,
+                excluded_dataset_ids=prior,
             )
             result["catalog_index_sha256"] = hashlib.sha256(raw).hexdigest()
             print(json.dumps(result, indent=2, sort_keys=True))

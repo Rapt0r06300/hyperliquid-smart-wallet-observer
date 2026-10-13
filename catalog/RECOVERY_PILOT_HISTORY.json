@@ -1,0 +1,39 @@
+{
+  "schema": "alina.recovery_pilot_history.v1",
+  "source_repository": "Rapt0r06300/hyperliquid-smart-wallet-observer",
+  "description": "Immutable GitHub-hosted recovery experiments; source bytes verified, not cross-shard replay certified. Prevents repeated pilots on already checked shard identities.",
+  "entries": [
+    {
+      "dataset_id": "bitget-public-ws-bbo-eurusdusdt-1791482498780-1791482498780-183da827eff3",
+      "shard_sha256": "183da827eff32fd6c352f44f93dbd1bccd36705ccd64d3e60e1f827916d8673d",
+      "original_quality_status": "REJECT",
+      "github_run_id": 38387188689,
+      "github_artifact_id": 11806433016,
+      "original_compressed_bytes": 877,
+      "original_event_count": 1,
+      "byte_recovery_status": "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED",
+      "replay_reason": "GAP",
+      "integrity_gap_count": 961,
+      "reason_remaining": "FATAL_INTEGRITY:gap_count=961;RECONCILIATION_UNVERIFIED",
+      "replay_certified": false,
+      "validation_allowed": false
+    },
+    {
+      "dataset_id": "bitget-public-ws-trades-umausdt-1791682957977-1791682982437-7e29cdcae947",
+      "shard_sha256": "7e29cdcae947ad2d702dcb764fa1522778f45d7e1c930f622fbea7af785f6b6a",
+      "original_quality_status": "PARTIAL",
+      "github_run_id": 38388003167,
+      "github_artifact_id": 11806798303,
+      "original_compressed_bytes": 5089,
+      "original_event_count": 53,
+      "byte_recovery_status": "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED",
+      "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+      "reference_count": 59,
+      "matched_count": 53,
+      "missing_from_live": 6,
+      "reason_remaining": "RECONCILIATION_MATCH_REQUIRED",
+      "replay_certified": false,
+      "validation_allowed": false
+    }
+  ]
+}

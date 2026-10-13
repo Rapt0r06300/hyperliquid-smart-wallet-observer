@@ -12965,6 +12965,18 @@ deduplication, and replay gates succeed. Missing cached files are NOT proof of
 irrecoverability. This tool does not download anything and does not change
 quarantine or SAFE classification.
 
+A second real GitHub-hosted SHA-bound pilot (run `38388003167`, artifact
+`11806798303`) recovered `bitget-public-ws-trades-umausdt-1791682957977-1791682982437-7e29cdcae947`,
+a 5,089-byte compressed PARTIAL trade shard containing 53 distinct trades.
+The independent reinspection returned `STRICT_PARSE_CHRONOLOGY_OK`, but
+the immutable reconciliation receipt says 59 reference trades, 53 matched
+and 6 missing from live; the shard REMAINS PARTIAL and is NOT a validated
+replay/backtest input. The exact trial identities and evidence runs are
+persisted in `catalog/RECOVERY_PILOT_HISTORY.json`. The next explicit
+`recovery-pilot:` run MUST fail closed on that history and skip previously
+byte-probed shard identities rather than rediscover the same candidate.
+This historical evidence is never an authoritative data repair or profitability proof.
+
 An actual GitHub-hosted source-recovery pilot (run
 `38387188689`, job `recover-one`, 2026-10-13) hydrated and SHA-verified
 `bitget-public-ws-bbo-eurusdusdt-1791482498780-1791482498780-183da827eff3`.

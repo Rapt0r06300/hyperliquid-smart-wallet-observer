@@ -216,3 +216,48 @@ def test_recovery_pilot_has_one_worker_and_bounded_identified_candidate():
     assert "printf 'SELECTED_DATASET_ID=%s" in workflow
     assert "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE" in workflow
     assert "replay_certified" in workflow
+
+
+def test_pilot_history_skips_previously_proven_fragment(monkeypatch, tmp_path):
+    import json
+    index, _candidate, _asset, _outer, _logical, _root = fixture(tmp_path)
+    initial = index["shards"][0]
+    new_row = dict(initial, dataset_id="new-fragment", start_ts_ms=5,
+                   quality_status="PARTIAL", family="bbo")
+    index["shards"] = [dict(initial, start_ts_ms=10, family="bbo"), new_row]
+    history = {
+        "schema": "alina.recovery_pilot_history.v1",
+        "source_repository": recovery.CANONICAL,
+        "entries": [{
+            "dataset_id": initial["dataset_id"],
+            "shard_sha256": initial["sha256"],
+            "original_quality_status": "PARTIAL",
+            "github_run_id": 123, "github_artifact_id": 456,
+            "byte_recovery_status": "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED",
+            "replay_reason": "STRICT_PARSE_CHRONOLOGY_OK",
+            "validation_allowed": False, "replay_certified": False,
+        }],
+    }
+    path = tmp_path / "history.json"
+    path.write_text(json.dumps(history))
+    excluded = recovery.load_pilot_history(path, index)
+    monkeypatch.setattr(recovery, "live_asset",
+                        lambda cand, **kw: {"id": 5, "size": cand["outer_bytes"]})
+    selected = recovery.select_pilot_candidate(
+        index, max_source_bytes=10000, excluded_dataset_ids=excluded)
+    assert selected["dataset_id"] == "new-fragment"
+    assert selected["previously_tested_candidates_skipped"] == 1
+    history["entries"][0]["shard_sha256"] = "0" * 64
+    path.write_text(json.dumps(history))
+    with pytest.raises(ValueError, match="HISTORY_IDENTITY_OR_PROOF_INVALID"):
+        recovery.load_pilot_history(path, index)
+    history["entries"][0]["shard_sha256"] = initial["sha256"]
+    history["entries"].append(dict(history["entries"][0]))
+    path.write_text(json.dumps(history))
+    with pytest.raises(ValueError, match="HISTORY_IDENTITY_OR_PROOF_INVALID"):
+        recovery.load_pilot_history(path, index)
+
+
+def test_pilot_history_requires_immutable_source_metadata(tmp_path):
+    with pytest.raises(ValueError, match="HISTORY_MISSING_OR_UNSAFE"):
+        recovery.load_pilot_history(tmp_path / "absent.json", {"shards": []})
