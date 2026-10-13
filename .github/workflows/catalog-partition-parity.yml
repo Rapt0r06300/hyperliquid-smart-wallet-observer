@@ -18,6 +18,7 @@ on:
       - 'tools/hydrate_recovery_assets.py'
       - 'tools/recover_one_quarantined_shard.py'
       - 'tools/verify_quarantine_recovery.py'
+      - 'tools/reinspect_recovered_quarantine.py'
       - 'tools/fetch_published_restore_inventory.py'
       - 'tools/check_dataset_quality.py'
       - 'tools/restore_alina.py'
@@ -29,6 +30,7 @@ on:
       - 'tests/test_hydrate_recovery_assets.py'
       - 'tests/test_recover_one_quarantined_shard.py'
       - 'tests/test_verify_quarantine_recovery.py'
+      - 'tests/test_reinspect_recovered_quarantine.py'
       - 'tests/test_fetch_published_restore_inventory.py'
       - 'tests/test_reclassification_history_preservation.py'
       - 'tests/test_enforce_safe_replay_preservation.py'
@@ -80,7 +82,7 @@ jobs:
       - name: Synthetic parity, tamper and duplicate tests
         run: |
           python -m pip install --disable-pip-version-check pytest
-          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py tests/test_verify_quarantine_recovery.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py tests/test_verify_quarantine_recovery.py tests/test_reinspect_recovered_quarantine.py
 
       - name: Prove exact logical roundtrip of entire DATA_INDEX without publishing partitions
         shell: bash
@@ -312,6 +314,36 @@ jobs:
           assert result["replay_certified"] is False
           assert result["all_exploitable_data_restored"] is False
           print("QUARANTINE_BYTES_VERIFIED_NOT_REPLAY_CERTIFIED")
+          PY
+
+      - name: Reinspect recovered shard content with original replay verifier
+        shell: bash
+        env:
+          SELECTED_DATASET_ID: ${{ inputs.hydrate_candidate_id }}
+        run: |
+          set -euo pipefail
+          OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
+          python tools/reinspect_recovered_quarantine.py \
+            --dataset-id "$SELECTED_DATASET_ID" \
+            --destination "$OUTPUT" \
+            --max-uncompressed-bytes 256000000 \
+            > "$OUTPUT/REPLAY_CONTENT_INSPECTION.json"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          receipt=json.loads((Path(os.environ["RUNNER_TEMP"])/
+                             "alina-selected-quarantine"/
+                             "REPLAY_CONTENT_INSPECTION.json").read_text())
+          assert receipt["status"] in {
+            "CONTENT_REPLAY_CHECK_PASSED_NOT_SAFE",
+            "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE",
+          }
+          assert receipt["byte_coverage_verified"] is True
+          assert receipt["validation_allowed"] is False
+          assert receipt["replay_certified"] is False
+          assert receipt["reclassified_safe"] is False
+          assert receipt["cross_shard_continuity_proven"] is False
+          print("NON_SAFE_REPLAY_CONTENT_INSPECTED", receipt["inspection"]["replay_reason"])
           PY
 
       - name: Export verified quarantine proof for Work

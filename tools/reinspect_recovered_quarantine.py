@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -67,13 +68,41 @@ def reinspect(index: Mapping[str, Any], index_sha: str,
     candidate = candidate_from_index(index, dataset_id)
     row = next(item for item in index["shards"] if item["dataset_id"] == dataset_id)
     relative = row.get("manifest_path")
-    if not isinstance(relative, str) or not relative:
-        raise ValueError("REINSPECTION_MISSING_IMMUTABLE_MANIFEST")
+    if (not isinstance(relative, str) or not relative.startswith("datasets/")
+            or "\\\\" in relative or any(part in ("", ".", "..") for part in relative.split("/"))):
+        raise ValueError("REINSPECTION_INVALID_MANIFEST_PATH")
     manifest_path = repo_root / relative
-    if (manifest_path.is_symlink() or not manifest_path.resolve().is_relative_to(repo_root.resolve())
-            or not manifest_path.is_file()):
-        raise ValueError("REINSPECTION_UNSAFE_OR_MISSING_MANIFEST")
-    raw_manifest = manifest_path.read_bytes()
+    if (manifest_path.is_symlink()
+            or not manifest_path.resolve().is_relative_to(repo_root.resolve())):
+        raise ValueError("REINSPECTION_UNSAFE_MANIFEST")
+    if manifest_path.is_file():
+        if manifest_path.stat().st_size > 2_000_000:
+            raise ValueError("REINSPECTION_MANIFEST_TOO_LARGE")
+        raw_manifest = manifest_path.read_bytes()
+    else:
+        # Hosted recovery uses sparse checkout of catalog + tools. The exact
+        # original manifest blob is still reachable from HEAD without
+        # expanding 400k+ manifest files into the checkout.
+        source = "HEAD:" + relative
+        size_result = subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "-s", source],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+        if size_result.returncode != 0:
+            raise ValueError("REINSPECTION_MANIFEST_GIT_BLOB_MISSING")
+        try:
+            git_bytes = int(size_result.stdout.strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("REINSPECTION_MANIFEST_GIT_SIZE_INVALID") from exc
+        if not 0 < git_bytes <= 2_000_000:
+            raise ValueError("REINSPECTION_MANIFEST_GIT_SIZE_BUDGET")
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "show", source],
+            capture_output=True, timeout=20, check=False,
+        )
+        if result.returncode != 0 or len(result.stdout) != git_bytes:
+            raise ValueError("REINSPECTION_MANIFEST_GIT_BLOB_INCOMPLETE")
+        raw_manifest = result.stdout
     manifest = json.loads(raw_manifest)
     if (not isinstance(manifest, dict)
             or manifest.get("dataset_id") != dataset_id
