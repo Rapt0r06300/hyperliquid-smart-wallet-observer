@@ -24,6 +24,7 @@ on:
       - 'tools/check_dataset_quality.py'
       - 'src/hl_observer/collection/trade_reconciliation.py'
       - 'tools/restore_alina.py'
+      - 'tools/sync_complete_clone.py'
       - 'tests/test_partitioned_data_index.py'
       - 'tests/test_preservation_inventory.py'
       - 'tests/test_recovery_source_audit.py'
@@ -44,6 +45,7 @@ on:
       - 'tests/test_dataset_policy.py'
       - 'tests/test_quarantine_audit.py'
       - 'tests/test_restore_alina.py'
+      - 'tests/test_sync_complete_clone_provenance.py'
   workflow_dispatch:
     inputs:
       emit_recovery_triage:
@@ -94,7 +96,7 @@ jobs:
           # dependencies (including websockets). Install the paper/read-only
           # project's actual dependency contract, not only httpx.
           python -m pip install --disable-pip-version-check pytest -e .
-          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py tests/test_verify_quarantine_recovery.py tests/test_reinspect_recovered_quarantine.py
+          python -m pytest -q tests/test_partitioned_data_index.py tests/test_preservation_inventory.py tests/test_reclassification_history_preservation.py tests/test_enforce_safe_replay_preservation.py tests/test_recovery_source_audit.py tests/test_verify_recovery_bundle.py tests/test_fetch_published_restore_inventory.py tests/test_probe_recovery_cache.py tests/test_hydrate_recovery_assets.py tests/test_recover_one_quarantined_shard.py tests/test_verify_quarantine_recovery.py tests/test_reinspect_recovered_quarantine.py tests/test_sync_complete_clone_provenance.py
           python -m pip install --disable-pip-version-check httpx==0.28.1
           PYTHONPATH=src python -m pytest -q tests/test_bitget_reference_gap_recovery.py tests/test_recheck_recovered_trade_reference.py
 

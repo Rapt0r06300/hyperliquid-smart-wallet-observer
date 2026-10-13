@@ -7,6 +7,7 @@ or depend on a user's PC from cloud GitHub Actions. No trading or uploads.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -109,7 +110,9 @@ def restore_published(root: Path, *, preflight: bool = False,
         raise SyncError("Python restore could not be launched") from exc
 
 
-def _read_restore_status(report_path: Path) -> tuple[str, str | None, str | None]:
+def _read_restore_status(
+    report_path: Path, *, expected_catalog_sha256: str | None = None
+) -> tuple[str, str | None, str | None]:
     """Read the byte-level certificate; a process exit code alone is not proof."""
     try:
         payload = json.loads(report_path.read_text(encoding="utf-8"))
@@ -123,6 +126,16 @@ def _read_restore_status(report_path: Path) -> tuple[str, str | None, str | None
         return "RESTORE_INCOMPLETE", None, "restore report has no valid inventory SHA-256"
     if payload.get("repository") != REPOSITORY:
         return "RESTORE_INCOMPLETE", inventory_sha, "restore report repository mismatch"
+    if expected_catalog_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_catalog_sha256):
+            return "RESTORE_INCOMPLETE", inventory_sha, "invalid canonical index digest"
+        verified = payload.get("catalog_verification")
+        if (not isinstance(verified, dict)
+                or verified.get("source_index_sha256") != expected_catalog_sha256):
+            return (
+                "RESTORE_INCOMPLETE", inventory_sha,
+                "restore report is not bound to the current canonical DATA_INDEX SHA-256",
+            )
     return status, inventory_sha, None
 
 
@@ -165,8 +178,11 @@ def main(argv: list[str] | None = None) -> int:
         report_name = (
             "RESTORE_PREFLIGHT.json" if args.preflight_only else "RESTORE_REPORT.json"
         )
+        index_file = root / "catalog" / "DATA_INDEX.json"
+        catalog_sha256 = hashlib.sha256(index_file.read_bytes()).hexdigest()
         restore_status, inventory_sha, report_error = _read_restore_status(
-            report_dir / report_name
+            report_dir / report_name,
+            expected_catalog_sha256=catalog_sha256 if not args.preflight_only else None,
         )
         certified = (
             not args.preflight_only
@@ -182,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             "repository": REPOSITORY,
             "branch": "main",
             "git_head": head,
+            "catalog_index_sha256": catalog_sha256,
             "restore_exit_code": code,
             "status": "REPLAY_READY_COMPLETE" if certified else "RESTORE_INCOMPLETE",
             "restore_report": report_name,
