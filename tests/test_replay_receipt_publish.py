@@ -108,3 +108,27 @@ def test_cached_receipts_prevalidate_all_before_mutation(tmp_path, monkeypatch):
                         lambda *_args, **_kw: pytest.fail("partial manifest modification"))
     with pytest.raises(replay.BackfillError, match="target absent"):
         publisher.apply(cache)
+
+
+def test_partitioned_catalog_receipts_capture_and_apply(tmp_path, monkeypatch):
+    """Live DATA_INDEX is partitioned; capture/apply must reconstruct it."""
+    from tools.partitioned_data_index import partition_index
+    row, proof, index_path, patch_path = _fixture(tmp_path, monkeypatch)
+    logical = json.loads(index_path.read_text(encoding="utf-8"))
+    root, parts = partition_index(logical, max_partition_bytes=2048)
+    index_path.write_text(json.dumps(root), encoding="utf-8")
+    for relative, payload in parts.items():
+        target = index_path.parent / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    receipt = tmp_path / "partitioned-receipts.json"
+    assert publisher.capture(receipt) == 1
+    assert json.loads(receipt.read_text())["receipts"][row["dataset_id"]]["sha256"] == row["sha256"]
+    patch_path.write_text(json.dumps({"results": {}}), encoding="utf-8")
+    applied = []
+    monkeypatch.setattr(replay, "_apply_result", lambda item, result, **_kw:
+                        applied.append((item["dataset_id"], result)))
+    monkeypatch.setattr(replay, "_refresh_catalog", lambda latest, _root:
+                        applied.append(("complete_rows", len(latest["shards"]))))
+    assert publisher.apply(receipt) == 1
+    assert applied == [(row["dataset_id"], proof), ("complete_rows", 1)]
