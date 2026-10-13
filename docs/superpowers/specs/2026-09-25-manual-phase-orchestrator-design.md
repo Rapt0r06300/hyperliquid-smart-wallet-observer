@@ -13005,6 +13005,18 @@ physical byte recovery, NOT replay-grade eligibility: keep the evidence in
 quarantine. The duplicate pilot-test worker has been removed; follow-up
 single-shard tests prioritize the PARTIAL population before REJECT.
 
+A fresh `git clone` / fast-forward plus `ALINA_SYNC_COMPLETE.cmd`
+or `ALINA_SYNC_COMPLETE.sh` must never reuse a stale certificate:
+`tools/sync_complete_clone.py` binds a `REPLAY_READY_COMPLETE`
+claim to the SHA-256 of the exact checked-out
+`catalog/DATA_INDEX.json`, requiring it to match
+`RESTORE_REPORT.catalog_verification.source_index_sha256`.
+A missing or mismatched catalogue binding is `RESTORE_INCOMPLETE`,
+even if an earlier report claimed success. Rechecking an already
+quarantined ZIP shard must independently verify the named inner member's
+exact bytes and SHA-256, not merely the outer ZIP hash and a separate
+cache file. Neither check changes a shard's SAFE eligibility.
+
 The Work/Codex handoff also includes `hydration-plan.json`: a bounded,
 read-only list of up to 100 deduplicated outer Release assets (at most
 1 GB planned), with exact SHA-256, byte size, and canonical source URL.
