@@ -2600,3 +2600,80 @@ def test_preflight_cli_ready_only_certifies_a_plan_not_a_restore(
     assert output["asset_count"] == 1
     assert output["source_asset_bytes"] == 100
     assert output["excluded_full_archive_bytes"] == 400
+
+def test_replay_restore_default_cli_compacts_sha_verified_cache(monkeypatch, tmp_path):
+    module = _module()
+    seen = {}
+
+    def capture(*_args, **kwargs):
+        seen.update(kwargs)
+        raise module.RestoreError("STOP_BEFORE_NETWORK")
+
+    monkeypatch.setattr(module, "restore_everything", capture)
+    assert module.main(["--replay-ready", "--destination", str(tmp_path)]) == 2
+    assert seen["prune_unselected"] is True
+    assert seen["max_download_bytes"] == 64 * (1024 ** 3)
+
+    seen.clear()
+    assert module.main([
+        "--replay-ready", "--destination", str(tmp_path),
+        "--retain-unselected-cache", "--max-download-gib", "3",
+    ]) == 2
+    assert seen["prune_unselected"] is False
+    assert seen["max_download_bytes"] == 3 * (1024 ** 3)
+
+
+def test_replay_download_budget_is_checked_before_pruning_or_any_payload(
+    monkeypatch, tmp_path,
+):
+    module = _module()
+    safe_bytes = b"valid-safe"
+    rejected_bytes = b"old-rejected"
+    safe_sha = hashlib.sha256(safe_bytes).hexdigest()
+    release = {"tag_name": "data-v2-budget", "assets": [
+        _asset("safe.jsonl.gz", "https://example.invalid/safe", safe_bytes),
+        _asset("rejected.jsonl.gz", "https://example.invalid/reject", rejected_bytes),
+    ]}
+    monkeypatch.setattr(module, "iter_releases", lambda *_a, **_kw: iter([release]))
+    catalog = tmp_path / "DATA_INDEX.json"
+    catalog.write_text("{}", encoding="utf-8")
+    metrics = tmp_path / "DATA_METRICS.json"
+    metrics.write_text("{}", encoding="utf-8")
+    row = {
+        "dataset_id": "safe", "release_tag": "data-v2-budget",
+        "release_asset": "safe.jsonl.gz", "bytes": len(safe_bytes),
+        "sha256": safe_sha,
+    }
+    monkeypatch.setattr(module, "_load_replay_ready_plan", lambda *_a: (
+        {"safe": (safe_sha, "data-v2-budget")},
+        {"source_index_sha256": "a" * 64, "safe_catalog_shards": 1},
+        [row],
+        {("data-v2-budget", "safe.jsonl.gz"): (len(safe_bytes), safe_sha)},
+    ))
+    downloads = []
+    monkeypatch.setattr(
+        module, "_download_to_path",
+        lambda *_a, **_kw: downloads.append("FORBIDDEN"),
+    )
+    dest = tmp_path / "recovery"
+    old = dest / "releases" / "data-v2-budget" / "rejected.jsonl.gz"
+    old.parent.mkdir(parents=True)
+    old.write_bytes(rejected_bytes)
+
+    plan = module.restore_everything(
+        "owner/repo", dest, catalog_path=catalog, metrics_path=metrics,
+        profile="replay-ready", max_download_bytes=5,
+        prune_unselected=True, preflight_only=True,
+    )
+    assert plan["status"] == "PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED"
+    assert plan["pending_download_bytes"] == len(safe_bytes)
+    assert plan["download_budget_ok"] is False
+
+    import pytest
+    with pytest.raises(module.RestoreError, match="download budget exceeded"):
+        module.restore_everything(
+            "owner/repo", dest, catalog_path=catalog, metrics_path=metrics,
+            profile="replay-ready", max_download_bytes=5, prune_unselected=True,
+        )
+    assert downloads == []
+    assert old.read_bytes() == rejected_bytes

@@ -2031,9 +2031,14 @@ def restore_everything(
     optional_local_snapshot: bool = False,
     profile: str = "full-archive",
     prune_unselected: bool = False,
+    max_download_bytes: int | None = None,
 ) -> dict[str, Any]:
     if profile not in {"full-archive", "replay-ready"}:
         raise RestoreError(f"unknown restore profile: {profile}")
+    if max_download_bytes is not None and (
+        type(max_download_bytes) is not int or max_download_bytes < 0
+    ):
+        raise RestoreError("invalid SHA-bound restore download budget")
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
     working_set: dict[str, Any] | None = None
@@ -2175,10 +2180,6 @@ def restore_everything(
         int(row["size_bytes"]) for row in unverified_source_assets
     )
     prune_result: dict[str, Any] = {"assets": 0, "bytes": 0, "failures": []}
-    if profile == "replay-ready" and prune_unselected and not preflight_only:
-        prune_result = _prune_verified_unselected_assets(
-            full_releases, selected_keys, releases_root,
-        )
     clone_sources = _clone_lfs_sources(clone_root, repository, releases)
 
     # Old cached Releases must never be treated as part of the current GitHub
@@ -2252,6 +2253,16 @@ def restore_everything(
             if not _verified_row_bytes(target, row):
                 pending_materialization_bytes += int(row["bytes"])
 
+    download_budget_ok = (
+        max_download_bytes is None or pending_download_bytes <= max_download_bytes
+    )
+    # Fail before a single payload transfer when the planned network volume
+    # exceeds the user's explicit/local default cap. Pruning verified local
+    # cache copies remains safe even if a subsequent disk check fails.
+    if download_budget_ok and profile == "replay-ready" and prune_unselected and not preflight_only:
+        prune_result = _prune_verified_unselected_assets(
+            full_releases, selected_keys, releases_root,
+        )
     free_destination = shutil.disk_usage(destination).free
     safety_margin = 1024 * 1024 * 1024
     required_free_destination_bytes = (
@@ -2266,7 +2277,8 @@ def restore_everything(
         plan = {
             "schema": "alina.restore_preflight.v1",
             "status": (
-                "PREFLIGHT_INSUFFICIENT_DISK" if not enough_disk
+                "PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED" if not download_budget_ok
+                else "PREFLIGHT_INSUFFICIENT_DISK" if not enough_disk
                 else "PREFLIGHT_SOURCE_UNVERIFIABLE" if unverified_source_assets
                 else "PREFLIGHT_WORKING_SET_INCOMPLETE"
                 if working_set is not None and working_set["failures"]
@@ -2289,6 +2301,8 @@ def restore_everything(
             "unverified_source_asset_count": len(unverified_source_assets),
             "unverified_source_assets_sample": unverified_source_assets[:50],
             "pending_download_bytes": pending_download_bytes,
+            "max_download_bytes": max_download_bytes,
+            "download_budget_ok": download_budget_ok,
             "pending_retained_download_bytes": pending_retained_download_bytes,
             "peak_staged_asset_bytes": peak_staged_asset_bytes,
             "pending_materialization_bytes": pending_materialization_bytes,
@@ -2323,6 +2337,12 @@ def restore_everything(
         plan_path.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
         plan["report"] = str(plan_path)
         return plan
+    if not download_budget_ok:
+        raise RestoreError(
+            "SAFE restore download budget exceeded before payload transfer: "
+            f"pending={pending_download_bytes} max={max_download_bytes}; "
+            "use --preflight-only to inspect the verified plan"
+        )
     if not enough_disk:
         raise RestoreError(
             "insufficient disk space for complete GitHub Release restore: "
@@ -2357,6 +2377,8 @@ def restore_everything(
         "skipped_verified": 0,
         "lfs_reused_verified": 0,
         "pending_download_bytes_at_start": pending_download_bytes,
+        "max_download_bytes": max_download_bytes,
+        "download_budget_ok": download_budget_ok,
         "pending_retained_download_bytes_at_start": pending_retained_download_bytes,
         "peak_staged_asset_bytes_at_start": peak_staged_asset_bytes,
         "pending_materialization_bytes_at_start": pending_materialization_bytes,
@@ -2708,6 +2730,16 @@ def main(argv: list[str] | None = None) -> int:
         "--preflight-only", action="store_true",
         help="inventory Releases and check space without downloading assets",
     )
+    parser.add_argument(
+        "--max-download-gib", type=int, default=64,
+        help="hard cap in GiB on missing Release bytes transferred; default 64 GiB; "
+             "0 means no new payload transfer",
+    )
+    parser.add_argument(
+        "--retain-unselected-cache", action="store_true",
+        help="opt out of SAFE-mode removal of old local Release copies that "
+             "are SHA-verified and still published on GitHub",
+    )
     parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
     parser.add_argument("--destination", default="runtime/recovery/full")
     parser.add_argument("--clone-root", default=None,
@@ -2733,6 +2765,8 @@ def main(argv: list[str] | None = None) -> int:
         help="restore the latest published snapshot when available; refuse corrupt snapshots",
     )
     args = parser.parse_args(argv)
+    if args.max_download_gib < 0:
+        parser.error("--max-download-gib must be non-negative")
 
     token = os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
     destination = Path(args.destination).resolve()
@@ -2748,9 +2782,11 @@ def main(argv: list[str] | None = None) -> int:
             recover_verifiable=args.recover_verifiable,
             optional_local_snapshot=args.materialize_available_local_snapshot,
             profile="replay-ready" if args.replay_ready else "full-archive",
-            # Preserve every existing cached source by default; never delete
-            # local recovery evidence as a side effect of SAFE synchronization.
-            prune_unselected=False,
+            # Keep the operational cache compact by default. Only delete local
+            # SHA-matched copies still available in immutable GitHub Releases;
+            # never delete GitHub sources or unverified local recovery files.
+            prune_unselected=args.replay_ready and not args.retain_unselected_cache,
+            max_download_bytes=args.max_download_gib * (1024 ** 3),
             workspace=(
                 Path(args.workspace).resolve()
                 if args.materialize_local_snapshot or args.materialize_available_local_snapshot
@@ -2777,6 +2813,8 @@ def main(argv: list[str] | None = None) -> int:
             "full_archive_asset_bytes": report.get("full_archive_asset_bytes"),
             "excluded_full_archive_bytes": report.get("excluded_full_archive_bytes"),
             "pending_download_bytes": report.get("pending_download_bytes"),
+            "max_download_bytes": report.get("max_download_bytes"),
+            "download_budget_ok": report.get("download_budget_ok"),
             "pending_materialization_bytes": report.get("pending_materialization_bytes"),
             "required_free_destination_bytes": report.get("required_free_destination_bytes"),
             "free_destination_bytes": report.get("free_destination_bytes"),

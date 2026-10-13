@@ -58,8 +58,18 @@ economically certified data. A preflight may exit zero **only** with status
 `PREFLIGHT_READY_NOT_RESTORED`: insufficient disk, unverifiable assets,
 missing analysis evidence, conflicting provenance or any other incomplete
 working-set status must exit nonzero, even when the available disk appears
-sufficient. Never delete unselected Release evidence automatically and never
-claim a restored or profitable corpus from metadata-only checks.
+sufficient. Never delete unselected **GitHub Release** evidence automatically and never
+claim a restored or profitable corpus from metadata-only checks. The ordinary
+replay-ready synchronization compacts **local** Release caches by deleting only
+unselected copies whose size and SHA-256 exactly match still-published GitHub
+assets; unknown, modified, corrupt, symlinked, repairable-only cloud data and
+the published inventory remain untouched. A local operator can explicitly
+retain all cache copies. The default CLI also sets a 64 GiB ceiling on **new**
+Release payload bytes (configurable with `--max-download-gib`): budget checks
+run before transfers and before local pruning; preflight reports
+`PREFLIGHT_DOWNLOAD_BUDGET_EXCEEDED` and does not transfer payloads. Never
+interpret a bounded incomplete restore as a completed replay/backtest or
+permit cloud Release deletion merely from an index quality label.
 
 Git LFS is not part of the operational backup, clone or restoration path:
 no smudge/mirror/migration workflow, no LFS object as a required source.
