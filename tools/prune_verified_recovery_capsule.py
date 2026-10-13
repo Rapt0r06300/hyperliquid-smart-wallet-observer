@@ -80,7 +80,12 @@ def download(asset: Mapping[str, Any], target: Path, *, max_bytes: int) -> str:
         raise Refuse("SOURCE_ASSET_OVER_LIMIT_OR_BAD_URL")
     h = hashlib.sha256()
     total = 0
-    with request(url) as response, target.open("wb") as output:
+    # Release browser links redirect to a different CDN hostname. Never send
+    # the GitHub token through that redirect: the canonical repo is public.
+    source = urllib.request.Request(url, headers={
+        "User-Agent": "alina-recovery-gc/1",
+    })
+    with urllib.request.urlopen(source, timeout=120) as response, target.open("wb") as output:
         while chunk := response.read(8 * 1024 * 1024):
             total += len(chunk)
             if total > size:
@@ -105,6 +110,8 @@ def control_json(asset: Mapping[str, Any], root: Path, name: str) -> dict:
 
 
 def verify_capsule(tag: str, *, max_bytes: int) -> dict[str, Any]:
+    if not isinstance(tag, str) or not tag.startswith("alina-recovery-"):
+        raise Refuse("NOT_A_RECOVERY_CAPSULE_TAG")
     rec = release(tag)
     rec_assets = assets(rec)
     idx_asset = rec_assets.get("ALINA_RECOVERY_INDEX.json")
