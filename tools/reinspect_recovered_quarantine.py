@@ -63,6 +63,12 @@ def _embedded_gap_signals(path: Path, *, max_bytes: int) -> dict[str, Any]:
     snapshot_markers = 0
     rows_without_markers = 0
     unparsable_rows = 0
+    exchange_to_receive_count = 0
+    exchange_to_receive_over_1000ms = 0
+    exchange_to_receive_over_10000ms = 0
+    exchange_to_receive_negative = 0
+    exchange_to_receive_missing = 0
+    exchange_to_receive_max_ms: int | None = None
     scanned = 0
     with gzip.open(path, "rt", encoding="utf-8") as source:
         for line in source:
@@ -86,13 +92,38 @@ def _embedded_gap_signals(path: Path, *, max_bytes: int) -> dict[str, Any]:
             summary = event.get("parsed_summary")
             if isinstance(summary, Mapping) and summary.get("action") == "snapshot":
                 snapshot_markers += 1
+            exchange_ts = event.get("exchange_ts_ms")
+            received_ts = event.get("received_ts_ms")
+            if (type(exchange_ts) is not int or type(received_ts) is not int
+                    or exchange_ts < 0 or received_ts < 0):
+                exchange_to_receive_missing += 1
+            else:
+                delta = received_ts - exchange_ts
+                exchange_to_receive_count += 1
+                if delta < 0:
+                    exchange_to_receive_negative += 1
+                if delta > 1000:
+                    exchange_to_receive_over_1000ms += 1
+                if delta > 10000:
+                    exchange_to_receive_over_10000ms += 1
+                exchange_to_receive_max_ms = (
+                    delta if exchange_to_receive_max_ms is None
+                    else max(delta, exchange_to_receive_max_ms)
+                )
     return {
         "explicit_event_gap_marker_rows": records_with_markers,
         "explicit_event_gap_total": explicit_gap_events,
         "rows_without_explicit_gap_marker": rows_without_markers,
         "unparsed_row_count": unparsable_rows,
         "reported_snapshot_rows": snapshot_markers,
+        "exchange_to_receive_count": exchange_to_receive_count,
+        "exchange_to_receive_over_1000ms": exchange_to_receive_over_1000ms,
+        "exchange_to_receive_over_10000ms": exchange_to_receive_over_10000ms,
+        "exchange_to_receive_negative": exchange_to_receive_negative,
+        "exchange_to_receive_missing": exchange_to_receive_missing,
+        "exchange_to_receive_max_ms": exchange_to_receive_max_ms,
         "absence_of_source_gaps_proven": False,
+        "executable_event_time_freshness_certified": False,
     }
 
 
@@ -172,6 +203,13 @@ def reinspect(index: Mapping[str, Any], index_sha: str,
     manifest_integrity = manifest.get("integrity")
     reported_gap = manifest_integrity.get("gap_count") if isinstance(manifest_integrity, Mapping) else None
     reported_drops = manifest.get("collection_queue_drops")
+    reconciliation = manifest.get("reconciliation")
+    if not isinstance(reconciliation, Mapping):
+        reconciliation = {}
+    missing_reference_trades = reconciliation.get("missing_from_live")
+    if (missing_reference_trades is not None
+            and (type(missing_reference_trades) is not int or missing_reference_trades < 0)):
+        raise ValueError("REINSPECTION_INVALID_REFERENCE_TRADE_DEFICIT")
     if (reported_gap is not None and (type(reported_gap) is not int or reported_gap < 0)):
         raise ValueError("REINSPECTION_INVALID_MANIFEST_GAP_COUNTER")
     if (reported_drops is not None and (type(reported_drops) is not int or reported_drops < 0)):
@@ -211,6 +249,10 @@ def reinspect(index: Mapping[str, Any], index_sha: str,
             if type(reported_gap) is int and event_gap_signals["explicit_event_gap_marker_rows"] else None
         ),
         "gap_provenance_reconciled": False,
+        "manifest_reconciliation_status": reconciliation.get("status"),
+        "manifest_reference_trades_missing_from_live": missing_reference_trades,
+        "reference_trade_deficit_repaired": False,
+        "event_time_freshness_certified": False,
         "replay_certified": False,
         "reclassified_safe": False,
         "validation_allowed": False,

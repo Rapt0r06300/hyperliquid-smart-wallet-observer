@@ -137,11 +137,13 @@ def test_sparse_checkout_reads_original_manifest_from_git_object(tmp_path, monke
 
 def test_manifest_global_drop_counter_does_not_override_event_gap_or_promote(tmp_path, monkeypatch):
     payload = (b'{"timestamp_ms":1000,"source_id":"fixture","gap_count":0,'
+               b'"exchange_ts_ms":1000,"received_ts_ms":4600000,'
                b'"parsed_summary":{"action":"snapshot"}}\n')
     index, cache, repo, manifest_path, _ = _fixture(tmp_path, monkeypatch, payload)
     manifest = json.loads(manifest_path.read_text())
     manifest["integrity"]["gap_count"] = 961
     manifest["collection_queue_drops"] = 961
+    manifest["reconciliation"] = {"status": "PARTIAL", "missing_from_live": 1}
     manifest_path.write_text(json.dumps(manifest))
     receipt = check.reinspect(index, "f" * 64, cache, "demo", repo_root=repo)
     assert receipt["manifest_integrity_gap_count"] == 961
@@ -151,6 +153,15 @@ def test_manifest_global_drop_counter_does_not_override_event_gap_or_promote(tmp
     assert receipt["observed_event_gap_signals"]["reported_snapshot_rows"] == 1
     assert receipt["manifest_gap_exceeds_explicit_event_markers"] is True
     assert receipt["gap_provenance_reconciled"] is False
+    assert receipt["manifest_reference_trades_missing_from_live"] == 1
+    assert receipt["reference_trade_deficit_repaired"] is False
+    ages = receipt["observed_event_gap_signals"]
+    assert ages["exchange_to_receive_count"] == 1
+    assert ages["exchange_to_receive_max_ms"] == 4599000
+    assert ages["exchange_to_receive_over_1000ms"] == 1
+    assert ages["exchange_to_receive_over_10000ms"] == 1
+    assert ages["executable_event_time_freshness_certified"] is False
+    assert receipt["event_time_freshness_certified"] is False
     assert receipt["status"] == "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE"
     assert receipt["reclassified_safe"] is False
     assert receipt["validation_allowed"] is False
