@@ -176,3 +176,43 @@ def test_safe_build_without_previous_uses_unknown_not_zero(tmp_path, monkeypatch
     assert out["stale"] is True
     assert out["instant"]["trades_collected_observed"] is None
     assert out["instant"]["coverage_complete"] is False
+
+
+def test_source_admission_counts_no_viable_checkpoint_without_inventing_shards(
+    tmp_path, monkeypatch,
+):
+    catalog = tmp_path / "catalog"
+    campaigns = catalog / "campaigns"
+    campaigns.mkdir(parents=True)
+    (campaigns / "market.json").write_text(json.dumps({
+        "kind": "market_collection",
+        "status": "PARTIAL",
+        "completed_units": {
+            "0": {"result": {
+                "reason": "NO_REPLAY_ADMISSIBLE_SHARDS",
+                "durable_persisted": False,
+                "release_tag": None,
+                "source_admission": {
+                    "mode": "replay_only", "excluded_shards": 2,
+                    "excluded_compressed_bytes": 8192,
+                    "blocking_reasons": {"SEQUENCE_OR_QUEUE_GAP": 2},
+                    "no_rejected_payload_published": True,
+                },
+            }},
+        },
+    }))
+    (catalog / "DATA_METRICS.json").write_text(json.dumps({"totals": {}}))
+    monkeypatch.setattr(metrics, "CAMPAIGNS", campaigns)
+    monkeypatch.setattr(metrics, "DATA_METRICS", catalog / "DATA_METRICS.json")
+    monkeypatch.setattr(metrics, "OUTPUT", catalog / "COLLECTION_METRICS.json")
+    out = metrics.build()
+    assert out["totals"]["durable_units"] == 0
+    assert out["totals"]["shards"] == 0
+    assert out["source_admission"]["status"] == "COMPLETE"
+    assert out["source_admission"]["known_excluded_shards"] == 2
+    assert out["source_admission"]["known_excluded_compressed_bytes"] == 8192
+    assert out["source_admission"]["zero_viable_units"] == 1
+    assert out["source_admission"]["blocking_reason_occurrences"] == {
+        "SEQUENCE_OR_QUEUE_GAP": 2,
+    }
+    assert out["paper_only"] is True

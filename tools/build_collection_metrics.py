@@ -151,6 +151,9 @@ def _empty_bucket() -> dict[str, int]:
         "safe_shards": 0,
         "partial_shards": 0,
         "rejected_shards": 0,
+        "zero_viable_units": 0,
+        "known_excluded_shards": 0,
+        "known_excluded_compressed_bytes": 0,
         "compressed_bytes": 0,
         "uncompressed_bytes": 0,
         "units_missing_compact_metrics": 0,
@@ -163,6 +166,9 @@ def build() -> dict[str, Any]:
     totals = _empty_bucket()
     by_kind: dict[str, dict[str, int]] = {}
     campaign_statuses: Counter[str] = Counter()
+    admission_reasons: Counter[str] = Counter()
+    admission_seen_units = 0
+    admission_covered_units = 0
     collection_campaigns = 0
     latest_checkpoint_at: str | None = None
 
@@ -194,6 +200,33 @@ def build() -> dict[str, Any]:
             result = unit.get("result")
             if not isinstance(result, Mapping):
                 continue
+            admission_seen_units += 1
+            source = result.get("source_admission")
+            if isinstance(source, Mapping):
+                excluded = source.get("excluded_shards")
+                excluded_bytes = source.get("excluded_compressed_bytes")
+                reasons = source.get("blocking_reasons")
+                if (
+                    type(excluded) is int and excluded >= 0
+                    and type(excluded_bytes) is int and excluded_bytes >= 0
+                    and isinstance(reasons, Mapping)
+                    and all(
+                        isinstance(reason, str) and reason
+                        and type(count) is int and count >= 0
+                        for reason, count in reasons.items()
+                    )
+                ):
+                    admission_covered_units += 1
+                    for target, value in (
+                        ("known_excluded_shards", excluded),
+                        ("known_excluded_compressed_bytes", excluded_bytes),
+                    ):
+                        totals[target] += value
+                        bucket[target] += value
+                    admission_reasons.update(reasons)
+            if result.get("reason") == "NO_REPLAY_ADMISSIBLE_SHARDS":
+                totals["zero_viable_units"] += 1
+                bucket["zero_viable_units"] += 1
             if result.get("durable_persisted") is not True and not result.get("release_tag"):
                 continue
 
@@ -287,6 +320,21 @@ def build() -> dict[str, Any]:
         },
         "totals": totals,
         "by_kind": dict(sorted(by_kind.items())),
+        "source_admission": {
+            "status": (
+                "COMPLETE" if admission_seen_units == admission_covered_units
+                else "INCOMPLETE"
+            ),
+            "units_observed": admission_seen_units,
+            "units_reported": admission_covered_units,
+            "known_excluded_shards": totals["known_excluded_shards"],
+            "known_excluded_compressed_bytes": totals["known_excluded_compressed_bytes"],
+            "zero_viable_units": totals["zero_viable_units"],
+            "blocking_reason_occurrences": dict(sorted(admission_reasons.items())),
+            "reason_counts_may_overlap": True,
+            "excluded_data_published": False,
+        },
+
         "indexed_dataset": indexed,
         "semantics": {
             "trades_collected_observed": (
