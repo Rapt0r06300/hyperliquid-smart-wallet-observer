@@ -53,6 +53,9 @@ from hl_observer.datasets.v2_pipeline import (  # noqa: E402
     V2_SCHEMA,
     infer_reconciliation_status,
     finalize_manifest,
+    locally_replay_admissible,
+    admission_rejection,
+    summarize_admission_rejections,
 )
 from hl_observer.realtime.feed_quality import FeedEventKind  # noqa: E402
 
@@ -1121,6 +1124,7 @@ def build_copy_vault_bundle(
     manifests_dir.mkdir(parents=True, exist_ok=True)
 
     manifests: list[dict[str, Any]] = []
+    rejected_admission: list[dict[str, Any]] = []
     for shard in sorted(raw_root.glob("**/shards/*.jsonl.gz")):
         preliminary = build_manifest_from_tick_shard(
             shard,
@@ -1167,6 +1171,10 @@ def build_copy_vault_bundle(
             "forward_only": True,
         }
         manifest = finalize_manifest(preliminary)
+        if not locally_replay_admissible(manifest):
+            rejected_admission.append(admission_rejection(manifest))
+            # No unreplayable market payload or trade enters the publish bundle.
+            continue
 
         asset_name = f"{manifest['dataset_id']}.jsonl.gz"
         target = assets / asset_name
@@ -1184,6 +1192,10 @@ def build_copy_vault_bundle(
         "collection_kind": "copy_vault_forward",
         "selection": dict(selection),
         "collection_queue_drops": sum(int(v) for v in queue_drops.values()),
+        "source_admission": {
+            "mode": "replay_only",
+            **summarize_admission_rejections(rejected_admission),
+        },
         "shard_count": len(manifests),
         "safe_count": sum(1 for row in manifests if row["quality_status"] == "SAFE"),
         "partial_count": sum(1 for row in manifests if row["quality_status"] == "PARTIAL"),
