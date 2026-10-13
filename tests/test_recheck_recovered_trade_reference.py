@@ -81,3 +81,62 @@ def test_page_budget_refuses_unbounded_calls(monkeypatch, tmp_path):
         asyncio.run(subject.recheck_one(
             _index(), "b" * 64, tmp_path, "candidate", max_pages=100,
             reconciliation_function=fake))
+
+
+def test_opt_in_bounded_rest_only_rows_are_digest_checked_without_safe_promotion(monkeypatch, tmp_path):
+    import hashlib
+    import json
+    monkeypatch.setattr(subject, "reinspect",
+                        lambda *_a, **_kw: {"byte_coverage_verified": True})
+    rest_rows = [{"trade_id": "t54", "source": "BITGET_PUBLIC_REST_REFERENCE_ONLY"}]
+    body = json.dumps(rest_rows, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False).encode("utf-8")
+    evidence = {
+        "status": "REFERENCE_ONLY_NOT_MERGED_OR_REPLAY_CERTIFIED",
+        "symbol": "UMAUSDT",
+        "missing_trade_count": 1,
+        "rows": rest_rows, "rows_sha256": hashlib.sha256(body).hexdigest(),
+        "validation_allowed": False, "replay_certified": False,
+        "reclassified_safe": False,
+    }
+    seen = {}
+    async def fake_reconcile(_file, **kw):
+        seen.update(kw)
+        return {"status": "PARTIAL", "missing_from_live": 1,
+                "missing_reference_evidence": evidence}
+    result = asyncio.run(subject.recheck_one(
+        _index(), "b" * 64, tmp_path, "candidate",
+        reference_gap_export_limit=8, reconciliation_function=fake_reconcile,
+    ))
+    assert seen["missing_reference_rows_limit"] == 8
+    assert result["official_reference"]["missing_reference_evidence"]["rows"] == rest_rows
+    assert result["missing_trade_events_reconstructed"] == 0
+    assert result["rest_only_missing_trades_not_merged"] is True
+    assert result["validation_allowed"] is False
+    assert result["reclassified_safe"] is False
+    evidence["rows_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="GAP_DIGEST_MISMATCH"):
+        asyncio.run(subject.recheck_one(
+            _index(), "b" * 64, tmp_path, "candidate",
+            reference_gap_export_limit=8, reconciliation_function=fake_reconcile,
+        ))
+
+
+def test_unbounded_or_unsafe_rest_only_export_is_fail_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(subject, "reinspect",
+                        lambda *_a, **_kw: {"byte_coverage_verified": True})
+    async def malicious(_file, **_kw):
+        return {"status": "PARTIAL", "missing_from_live": 1,
+                "missing_reference_evidence": {
+                    "status": "REFERENCE_GAP_EXCEEDS_BOUND_NOT_EXPORTED",
+                    "rows": [{"trade_id": "injected"}]}}
+    with pytest.raises(ValueError, match="INVALID_REFERENCE_EXPORT_LIMIT"):
+        asyncio.run(subject.recheck_one(
+            _index(), "b" * 64, tmp_path, "candidate",
+            reference_gap_export_limit=129, reconciliation_function=malicious,
+        ))
+    with pytest.raises(ValueError, match="UNSAFE_GAP_ROWS"):
+        asyncio.run(subject.recheck_one(
+            _index(), "b" * 64, tmp_path, "candidate",
+            reference_gap_export_limit=5, reconciliation_function=malicious,
+        ))
