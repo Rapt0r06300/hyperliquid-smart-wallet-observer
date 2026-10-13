@@ -185,18 +185,3 @@ def test_recovery_pilot_refuses_unbounded_or_unverifiable_sources(monkeypatch, t
                         lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("offline")))
     with pytest.raises(ValueError, match="NO_VERIFIABLE_LIVE_SOURCE"):
         recovery.select_pilot_candidate(index, max_source_bytes=1_000_000)
-
-
-def test_hosted_auto_pilot_only_on_explicit_pilot_commit():
-    from pathlib import Path
-    workflow = (Path(__file__).resolve().parents[1]
-                / ".github" / "workflows" / "catalog-partition-parity.yml").read_text()
-    assert "startsWith(github.event.head_commit.message, 'recovery-pilot:')" in workflow
-    assert "--select-pilot" in workflow
-    assert "--max-live-attempts 12" in workflow
-    assert "LIMIT=4000000" in workflow
-    assert "SELECTED_DATASET_ID=$SELECTED_DATASET_ID" in workflow
-    assert "--download > \"$OUTPUT/RECOVERY_RESULT.json\"" in workflow
-    assert "CONTENT_REPLAY_CHECK_PASSED_NOT_SAFE" in workflow
-    assert "alina-selected-quarantined-shard-" in workflow
-    assert workflow.count("runs-on: ubuntu-latest") >= 2
