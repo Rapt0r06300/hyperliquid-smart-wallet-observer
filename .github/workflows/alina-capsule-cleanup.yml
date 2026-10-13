@@ -67,3 +67,11 @@ jobs:
           python tools/prune_verified_recovery_capsule.py "${ARGS[@]}" |
             tee "$RUNNER_TEMP/alina-capsule-cleanup.json"
           cat "$RUNNER_TEMP/alina-capsule-cleanup.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve SHA-verification report for audit
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: capsule-cleanup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/alina-capsule-cleanup.json
+          if-no-files-found: warn
+          retention-days: 90
