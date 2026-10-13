@@ -13198,10 +13198,13 @@ unpublished local/runner ephemeral bytes cannot be guaranteed retroactively.
 
 ### Durable capture and recovery prerequisites
 
-Every GitHub-hosted Dataset V2 collection unit publishes a deterministic
-`alina-recovery-*` capsule containing exact bundle index, shard
-manifests and content SHA-256 *before* attempting the larger per-shard
-Release publication. If latter steps fail or rate limit, the existing
+Every GitHub-hosted Dataset V2 collection unit that contains at least one
+locally qualified SAFE/replay-compatible shard publishes a deterministic
+`alina-recovery-*` capsule containing the filtered bundle index, eligible
+shard manifests and content SHA-256 *before* attempting the larger per-shard
+Release publication. Non-SAFE payloads are excluded under the SAFE-only source
+publication contract below; their bounded diagnostic register remains outside
+the replay data plane. If latter steps fail or rate limit, the existing
 GitHub-hosted durable-publication workflow resumes idempotently from the
 original capsule; it must never substitute a recollected time window.
 
@@ -13302,7 +13305,6 @@ these code-quality changes. All trades and derived data remain paper/read-only.
   Successful tests and replay receipts are not a valid claim of zero
   remaining PARTIAL/REJECT shards or profitable OOS/forward results.
 
-
 ## Passation Work → ChatGPT — récupération des données (13 octobre 2026)
 
 Ce checkpoint est un repère de **reprise**, non un certificat de restauration.
@@ -13355,3 +13357,210 @@ Le passage vers une nouvelle conversation ne constitue ni une approbation
 de purge ni une autorisation d'arrêter les collecteurs. Avant toute
 intervention suivante, relire la phase, le HEAD, le diff réel, les workflows
 et les artefacts de preuve ; ne pas créer de commit vide.
+
+## 2026-10-12 — SAFE-only source publication and historical compaction
+
+The durable heavy Dataset V2 surface MUST contain only shards that are both
+`quality_status=SAFE` and explicitly `replay_compatible=true`. Technical data
+viability means deterministic replay/backtest usability; it does not imply a
+profitable strategy or authorize any real execution.
+
+### Current priority: stable complete clone/update recovery
+
+The primary acceptance objective is a stable bot and complete recovery of the
+Git-tracked bot plus 100% of the current SAFE/replay-compatible data corpus.
+Before any historical deletion is authorized, both a fresh clone and an
+existing checkout update MUST pass the canonical one-command path:
+
+- Git restores the complete tracked code, configuration, workflows, schemas,
+  catalogs and documentation from `main`;
+- `ALINA_SYNC_COMPLETE.cmd` or `bash ALINA_SYNC_COMPLETE.sh` hydrates every
+  Release asset/member required by the fixed SAFE/replayable catalog;
+- interrupted downloads and materialization resume without redownloading
+  already verified bytes;
+- local changes and unknown files are preserved, tracked changes block the
+  fast-forward update, and no Git file is overwritten by restored data;
+- exact sizes and SHA-256 pass for outer assets and selected members, and the
+  run emits `REPLAY_READY_COMPLETE` only with zero required gaps.
+
+The recovered working set is broader than raw market shards. It MUST also
+include every published, currently authoritative and verifiable artifact needed
+to continue local Codex work without reconstructing state from memory:
+
+- verified collection manifests, catalog partitions, indexes, quality
+  registers, receipts and resumable checkpoints;
+- Copy-Vault, Lead-Lag and Cross-Venue inputs and outputs admitted by their
+  current contracts;
+- completed replays, backtests, OOS and forward-paper outputs bound to an exact
+  SAFE dataset-selection ID, code SHA and configuration digest;
+- economic results, scoreboards and equity curves whose provenance, costs and
+  source run are complete and internally consistent;
+- published local snapshots whose manifests, chunks, offsets, sizes and hashes
+  all verify and that do not overwrite tracked Git files.
+
+Derived artifacts are technically admissible regardless of whether their
+economic result is positive or negative. A losing but correctly measured
+backtest is valid evidence and MUST NOT be deleted merely because of its PnL.
+An artifact is excluded from the working set only when it is incomplete,
+corrupt, superseded without remaining authority, unbound to exact inputs, or
+explicitly non-replayable/non-verifiable. Its lightweight diagnostic identity
+remains available for audit.
+
+`REPLAY_READY_COMPLETE` therefore certifies the complete current working-set
+inventory, not only raw trades: every required input, derived result, control
+record and published snapshot is present and hash-verified. The report MUST
+break completeness down by artifact class and list any missing or excluded
+object without converting it into artificial success.
+
+A plain Git transport does not embed large GitHub Release assets; the accepted
+“clone Git” operation is the cloned repository plus its included canonical
+sync launcher. Historical cleanup MUST remain blocked until deterministic
+tests prove both fresh-clone and incremental-update recovery and a real
+point-in-time inventory preflight accounts for every required SAFE byte.
+
+### Source-publication contract
+
+Collection and qualification continue on the ephemeral GitHub-hosted runner,
+but the publisher MUST partition the resulting manifests before any Release
+payload is uploaded:
+
+- only SAFE/replay-compatible shard bytes may enter canonical data assets;
+  before upload, a locally complete/replay-compatible candidate may have the
+  sole temporary reason `REMOTE_ASSET_NOT_VERIFIED`, but it MUST requalify as
+  SAFE when evaluated with remote verification satisfied and MUST NOT become
+  catalog-consumable until its actual remote size and SHA-256 are verified;
+- `PARTIAL`, `REJECT`, unknown, non-replay-compatible and contradictory rows
+  MUST NOT upload their market-data payloads;
+- their diagnostic evidence is retained only in a bounded lightweight quality
+  register containing identity, status, reasons, provenance, counters, byte
+  size and SHA-256, with no market payload and with validation/replay disabled;
+- a collection unit with zero eligible shards publishes only its lightweight
+  diagnostic register and terminal receipt, never an empty or misleading data
+  Release;
+- the publisher fails closed if an ineligible manifest reaches an upload plan,
+  if the quality register claims replay eligibility, or if remote size/digest
+  verification is unavailable;
+- compacted ZIPs and recovery capsules contain only SAFE rows or those locally
+  qualified candidates whose sole missing proof is remote verification; they
+  become redundant only after their canonical copies have been remotely
+  verified and finalized SAFE.
+
+This filtering MUST NOT stop COLLECT, change the phase epoch, introduce a
+self-hosted runner, query a retired data repository, use Git LFS, or relax the
+paper/read-only contract.
+
+### Historical SAFE-only migration
+
+Historical cleanup is a two-phase, resumable migration. It MUST first freeze a
+complete Release/asset/member inventory containing repository, tag, Release ID,
+asset ID, name, advertised and measured sizes, SHA-256 and catalog disposition.
+The inventory has a canonical SHA-256 and classifies every source object as
+`KEEP_SAFE`, `REPACK_MIXED`, `DELETE_NON_SAFE`,
+`DELETE_REDUNDANT_CAPSULE` or `KEEP_UNIQUE_RECOVERY`.
+
+Mixed containers MUST be rebuilt into deterministic SAFE-only containers.
+Every retained member keeps its original bytes, relative identity, exact size
+and SHA-256. The replacements are uploaded and remotely reverified before the
+SAFE-only catalog is switched to their new immutable Release coordinates.
+
+Deletion is permitted only after a parity gate proves all of the following:
+
+- every formerly cataloged SAFE/replay-compatible shard has exactly one
+  reachable verified canonical replacement or an unchanged verified source;
+- no `PARTIAL`/`REJECT` row is consumable by the primary catalog, replay,
+  backtest, OOS, forward-paper, PnL proof or scoreboard readers;
+- source and destination identities, counts and bytes reconcile exactly for
+  the retained SAFE set;
+- the lightweight rejection register is internally consistent and cannot be
+  treated as a data asset;
+- the deletion plan still matches the frozen inventory SHA-256 and current
+  remote asset identities.
+
+Only then may the maintenance action remove non-SAFE-only assets, superseded
+mixed containers and completed redundant recovery capsules. A recovery capsule
+that can still contain the unique copy of a potentially usable collection is
+kept and recovered/requalified first; it is deleted only after every retained
+SAFE shard has a verified canonical copy. Unknown, changed or unverifiable
+objects are never deleted.
+
+The destructive action is explicit and manual, never scheduled. Dry-run is the
+default; execution requires the exact frozen inventory SHA-256, a bounded batch
+size and GitHub-hosted credentials scoped to the active repository. Each batch
+writes a durable checkpoint so interruption, secondary rate limiting or API
+failure can resume without repeating verified work. It never deletes active
+collector state, campaign control records or current SAFE assets.
+
+### Audit and acceptance
+
+The final migration report records before/after Release and asset counts,
+published bytes, SAFE bytes retained, bytes repacked, bytes deleted, capsules
+deleted/kept, all affected IDs, failures and the final source/destination
+comparison. `SAFE_ONLY_MIGRATION_COMPLETE` is allowed only when the parity gate
+is exact and no planned deletion remains. Otherwise the honest status is
+`SAFE_ONLY_MIGRATION_INCOMPLETE`; no partial run may claim dataset cleanup.
+
+Deterministic tests MUST cover source filtering, zero-SAFE runs, mixed ZIP
+repacking, exact member hashes, catalog cutover, inventory drift, interrupted
+resume, API/rate-limit failure, preservation of unique capsules and refusal to
+delete when any SAFE byte is missing or changed. Existing restore tests must
+also prove that the canonical clone/update path still reaches
+`REPLAY_READY_COMPLETE` from the post-migration SAFE-only inventory.
+
+### Ordered follow-up: improve viable collection yield
+
+Only after SAFE-only source publication and historical cleanup are implemented
+and verified, the next workstream improves the existing collectors so a larger
+share of newly observed market data qualifies as SAFE/replay-compatible at the
+first pass. This is the final item in this migration sequence, not a reason to
+delay or weaken the cleanup gates.
+
+Collector improvements MUST attack measured causes from the lightweight
+quality register: gaps, queue drops, missing authoritative snapshots,
+sequence/checksum failures, clock uncertainty, duplicate/native-identity
+defects, missing trade reconciliation and incomplete venue/family coverage.
+They preserve raw source truth, use bounded backpressure/reconnect/rebootstrap,
+and never fabricate, interpolate or relabel defective data merely to raise the
+SAFE rate.
+
+The resulting replay-grade corpus feeds deterministic replay, backtest, OOS,
+forward-paper and net-PnL proof for Copy-Vault, Lead-Lag and Cross-Venue. The
+research target remains at least **+5 USD net/day per active family** under the
+canonical paper-capital and cost assumptions. More viable data improves the
+ability to test that target but does not prove it: each family retains an
+independent honest verdict (`PROVEN`, `MORE_DATA`, `UNMEASURABLE` or `KILL`),
+and no collector, quality threshold, fee, slippage or scoreboard rule may be
+tuned after observing outcomes to manufacture a positive result.
+
+## 2026-10-13 — verified recovery checkpoint and preservation hold
+
+The current GitHub inventory was enumerated without changing `COLLECT` epoch 8.
+It contains 2,019 Releases, 126,837 assets and 941,975,033,822 published bytes.
+The fixed replay-ready selection contains 6,650 assets across 224 Releases and
+48,466,614,762 source bytes: 6,643 SAFE collection assets
+(48,466,290,537 bytes) plus seven provenance-bound analysis evidence assets
+(324,225 bytes). The source inventory digest is
+`e14505ab513e9c6a260cc2ccfe9452d04c8844c24e7943008137736e21aa79c6`.
+
+Staged outer-asset processing reduces estimated peak free-space need from the
+historical 80,120,046,868 bytes to 31,808,133,629 bytes while retaining exact
+outer and member SHA-256 checks. The execution environment had only
+30,185,238,528 free bytes, so the honest whole-corpus status remains
+`PREFLIGHT_INSUFFICIENT_DISK` / `RESTORE_INCOMPLETE`; no byte-complete claim is
+authorized. Already materialized members are sealed by an outer-asset receipt,
+verified again on restart and not downloaded again.
+
+All seven analysis archives were actually downloaded and their advertised
+sizes and SHA-256 values verified. Safe extraction produced 76 files. Their
+legacy receipts were deterministically rebound by reconstructing the exact
+pre-archive/post-archive annotation ordering; future workflow runs annotate
+before creating the archive and therefore bind directly. This certifies those
+seven archives only, not the 48.47 GB collection corpus and not profitability.
+
+No historical evidence may be deleted during this recovery mission. PARTIAL,
+REJECT, STALE, mixed assets and old recovery capsules remain excluded from the
+primary replay/backtest input but preserved for repair and audit. Any future
+purge is a separate explicitly authorized operation gated by a successful real
+fresh-clone and incremental-update restoration, exact catalog parity and a
+frozen remote inventory. Collector-yield improvements remain the final
+workstream after restoration stability; they must not change phase or fabricate
+missing observations.

@@ -7,7 +7,9 @@ Rapt0r06300/hyperliquid-smart-wallet-observer. The workflow token writes to the 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import os
 import shutil
@@ -38,6 +40,27 @@ COMPACTION_MIN_SHARDS = 10
 COMPACTION_SHARDS_PER_ASSET = 100
 COMPACTION_TARGET_PAYLOAD_BYTES = 512 * 1024 * 1024
 MAX_GITHUB_ASSET_BYTES = 1_900_000_000
+QUALITY_REJECTIONS_NAME = "QUALITY_REJECTIONS.json.gz"
+_QUALITY_REGISTER_FIELDS = (
+    "dataset_id",
+    "family",
+    "venue",
+    "symbol",
+    "start_ts_ms",
+    "end_ts_ms",
+    "event_count",
+    "trade_count",
+    "quality_status",
+    "quality_reasons",
+    "release_asset",
+    "bytes",
+    "sha256",
+    "collector_version",
+    "provenance",
+    "integrity",
+    "synchronization",
+    "reconciliation",
+)
 
 
 def recovery_release_tag(base_tag: str, collection_run_id: object) -> str:
@@ -59,6 +82,114 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def partition_publishable_manifests(
+    manifests: list[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Separate replay-eligible payloads from payload-free diagnostics."""
+    eligible: list[dict[str, Any]] = []
+    diagnostic: list[dict[str, Any]] = []
+    for raw in manifests:
+        row = dict(raw)
+        status = str(row.get("quality_status") or "").upper()
+        reasons = {str(value) for value in row.get("quality_reasons", [])}
+        permitted_status = status == "SAFE" or (
+            status == "PARTIAL" and reasons == {"REMOTE_ASSET_NOT_VERIFIED"}
+        )
+        locally_verified = finalize_manifest({**row, "asset_verified": True})
+        if (
+            permitted_status
+            and row.get("replay_compatible") is True
+            and locally_verified.get("quality_status") == "SAFE"
+            and locally_verified.get("replay_compatible") is True
+        ):
+            eligible.append(row)
+            continue
+        row["validation_allowed"] = False
+        row["replay_compatible"] = False
+        diagnostic.append(row)
+    key = lambda row: (
+        str(row.get("dataset_id") or ""),
+        str(row.get("release_asset") or ""),
+        str(row.get("sha256") or ""),
+    )
+    return sorted(eligible, key=key), sorted(diagnostic, key=key)
+
+
+def partition_manifest_entries(
+    manifest_paths: list[Path],
+    manifests: list[Mapping[str, Any]],
+) -> tuple[list[tuple[Path, dict[str, Any]]], list[tuple[Path, dict[str, Any]]]]:
+    """Partition manifests without ever losing their source-path binding."""
+    if len(manifest_paths) != len(manifests):
+        raise PublishError("manifest path/inventory length mismatch")
+    eligible: list[tuple[Path, dict[str, Any]]] = []
+    diagnostic: list[tuple[Path, dict[str, Any]]] = []
+    for path, row in zip(manifest_paths, manifests, strict=True):
+        accepted, rejected = partition_publishable_manifests([row])
+        if accepted:
+            eligible.append((path, accepted[0]))
+        else:
+            diagnostic.append((path, rejected[0]))
+    key = lambda item: (
+        str(item[1].get("dataset_id") or ""),
+        str(item[1].get("release_asset") or ""),
+        str(item[1].get("sha256") or ""),
+        str(item[0]),
+    )
+    return sorted(eligible, key=key), sorted(diagnostic, key=key)
+
+
+def assert_safe_final_manifests(manifests: list[Mapping[str, Any]]) -> None:
+    """Enforce the canonical consumer boundary after remote verification."""
+    for row in manifests:
+        if (
+            row.get("quality_status") != "SAFE"
+            or row.get("replay_compatible") is not True
+        ):
+            raise PublishError(
+                "final manifest is not SAFE/replayable: "
+                f"{row.get('dataset_id') or row.get('release_asset') or 'unknown'}"
+            )
+
+
+def write_quality_register(
+    root: Path, rejected: list[Mapping[str, Any]],
+) -> Path | None:
+    """Write deterministic rejection metadata without copying market payloads."""
+    path = root / QUALITY_REJECTIONS_NAME
+    if not rejected:
+        path.unlink(missing_ok=True)
+        return None
+    rows: list[dict[str, Any]] = []
+    for raw in rejected:
+        row = {name: raw[name] for name in _QUALITY_REGISTER_FIELDS if name in raw}
+        row["validation_allowed"] = False
+        row["replay_compatible"] = False
+        rows.append(row)
+    rows.sort(key=lambda row: (
+        str(row.get("dataset_id") or ""),
+        str(row.get("release_asset") or ""),
+        str(row.get("sha256") or ""),
+    ))
+    payload = json.dumps(
+        {
+            "schema": "alina.dataset_quality_rejections.v1",
+            "row_count": len(rows),
+            "rows": rows,
+            "validation_allowed": False,
+            "replay_compatible": False,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    buffer = io.BytesIO()
+    with gzip.GzipFile(filename="", mode="wb", fileobj=buffer, mtime=0) as archive:
+        archive.write(payload)
+    path.write_bytes(buffer.getvalue())
+    return path
 
 
 def build_compacted_assets(
@@ -385,6 +516,11 @@ def _build_recovery_capsules(
     if recovery_dir.exists():
         shutil.rmtree(recovery_dir)
     recovery_dir.mkdir(parents=True)
+    filtered_index_path = recovery_dir / "BUNDLE_INDEX.json"
+    filtered_index_path.write_text(
+        json.dumps(dict(index), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
     rows: list[tuple[Path, Path]] = []
     for manifest_path, manifest in zip(manifest_paths, manifests, strict=True):
@@ -412,7 +548,7 @@ def _build_recovery_capsules(
     for part_index, group in enumerate(groups):
         path = recovery_dir / f"ALINA_RECOVERY_BUNDLE.part{part_index:03d}.tar"
         with tarfile.open(path, mode="w") as archive:
-            archive.add(root / "BUNDLE_INDEX.json", arcname="BUNDLE_INDEX.json")
+            archive.add(filtered_index_path, arcname="BUNDLE_INDEX.json")
             for manifest_path, asset_path in group:
                 archive.add(
                     manifest_path,
@@ -433,7 +569,7 @@ def _build_recovery_capsules(
         "target": target,
         "title": title,
         "bundle_index_sha256": hashlib.sha256(
-            (root / "BUNDLE_INDEX.json").read_bytes()
+            filtered_index_path.read_bytes()
         ).hexdigest(),
         "parts": [
             {
@@ -566,6 +702,44 @@ def mark_recovery_capsule_complete(
         return
     upload_file(repository=repository, tag=recovery_tag, path=path)
 
+
+def publish_quality_receipt(
+    root: Path,
+    rejected: list[Mapping[str, Any]],
+    *,
+    repository: str,
+    tag: str,
+    release: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Publish payload-free rejection evidence on the canonical control Release."""
+    path = write_quality_register(root, rejected)
+    if path is None:
+        return None
+    identity = _file_identity(path)
+    existing = release_asset_map(release).get(path.name)
+    if existing is not None:
+        assert_existing_asset_compatible(identity, existing)
+    else:
+        upload_file(repository=repository, tag=tag, path=path)
+    refreshed = _json(["api", f"repos/{repository}/releases/tags/{tag}"])
+    if not isinstance(refreshed, Mapping):
+        raise PublishError("Quality-register Release payload is invalid.")
+    remote = release_asset_map(refreshed).get(path.name)
+    if remote is None:
+        raise PublishError("quality register not visible after upload")
+    assert_existing_asset_compatible(identity, remote)
+    return {
+        "schema": "alina.dataset_quality_rejections.v1",
+        "release_tag": tag,
+        "asset_id": int(remote.get("id") or 0),
+        "asset_name": path.name,
+        "bytes": int(identity["bytes"]),
+        "sha256": str(identity["sha256"]),
+        "row_count": len(rejected),
+        "validation_allowed": False,
+        "replay_compatible": False,
+    }
+
 def publish_bundle(
     bundle_root: str | Path,
     *,
@@ -599,15 +773,39 @@ def publish_bundle(
             raise PublishError(f"Invalid manifest: {path}")
         manifests.append(payload)
 
-    recovery_capsule = publish_recovery_capsule(
-        root,
-        index=index,
-        manifest_paths=manifest_paths,
-        manifests=manifests,
-        repository=repository,
-        requested_release_tag=tag,
-        target=target,
-        title=title,
+    eligible_entries, rejected_entries = partition_manifest_entries(
+        manifest_paths, manifests
+    )
+    eligible_manifest_paths = [path for path, _row in eligible_entries]
+    eligible_manifests = [row for _path, row in eligible_entries]
+    rejected_manifests = [row for _path, row in rejected_entries]
+    manifests = eligible_manifests
+    filtered_index = dict(index)
+    filtered_index["manifests"] = [
+        str(path.relative_to(root)).replace("\\", "/")
+        for path in eligible_manifest_paths
+    ]
+    filtered_index["assets"] = [
+        f"assets/{row['release_asset']}" for row in manifests
+    ]
+    filtered_index["shard_count"] = len(manifests)
+    filtered_index["safe_count"] = len(manifests)
+    filtered_index["partial_count"] = 0
+    filtered_index["reject_count"] = 0
+
+    recovery_capsule = (
+        publish_recovery_capsule(
+            root,
+            index=filtered_index,
+            manifest_paths=eligible_manifest_paths,
+            manifests=manifests,
+            repository=repository,
+            requested_release_tag=tag,
+            target=target,
+            title=title,
+        )
+        if manifests
+        else None
     )
     upload_assets = (
         build_compacted_assets(root, manifests)
@@ -688,7 +886,7 @@ def publish_bundle(
         expected_names = {str(asset["name"]) for asset in chunk}
         existing_assets = release_asset_map(release)
         allowed_control = (
-            {"RUN_MANIFEST.json"}
+            {"RUN_MANIFEST.json", QUALITY_REJECTIONS_NAME}
             if (not large_bundle and part_index == 0)
             else set()
         )
@@ -809,6 +1007,7 @@ def publish_bundle(
 
     if not data_releases:
         raise PublishError("No data release was created.")
+    assert_safe_final_manifests(final_manifests)
 
     canonical_tag = (
         manifest_release_tag(data_base_tag) if large_bundle else data_base_tag
@@ -831,6 +1030,13 @@ def publish_bundle(
     canonical_release_id = int(canonical_release.get("id") or 0)
     if canonical_release_id <= 0:
         raise PublishError("Canonical release id is missing.")
+    quality_register = publish_quality_receipt(
+        root,
+        rejected_manifests,
+        repository=repository,
+        tag=canonical_tag,
+        release=canonical_release,
+    )
 
     starts = [
         value
@@ -851,6 +1057,8 @@ def publish_bundle(
         "data_release_base_tag": data_base_tag,
         "release_parts": release_parts,
         "recovery_capsule": recovery_capsule,
+        "quality_register": quality_register,
+        "excluded_payload_count": len(rejected_manifests),
         "collector_version": index.get("collector_version"),
         "code_sha": index.get("collector_version"),
         "collection_config": index.get("collection_config"),

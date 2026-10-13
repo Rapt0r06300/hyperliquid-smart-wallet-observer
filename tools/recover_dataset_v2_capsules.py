@@ -309,6 +309,28 @@ def _any_canonical_complete(repository: str, tags: list[str]) -> str | None:
     return None
 
 
+def _assert_recovered_run_safe(result: Mapping[str, Any]) -> None:
+    """Fail closed unless the canonical recovery result is SAFE-only."""
+    manifests = result.get("manifests")
+    if not isinstance(manifests, list):
+        raise RecoveryError("recovered publication has no manifest inventory")
+    for row in manifests:
+        if not isinstance(row, Mapping) or (
+            row.get("quality_status") != "SAFE"
+            or row.get("replay_compatible") is not True
+        ):
+            identity = row.get("dataset_id") if isinstance(row, Mapping) else None
+            raise RecoveryError(f"recovered publication contains non-SAFE manifest: {identity}")
+    count = len(manifests)
+    if (
+        result.get("shard_count") != count
+        or result.get("safe_count") != count
+        or result.get("partial_count") != 0
+        or result.get("reject_count") != 0
+    ):
+        raise RecoveryError("recovered publication SAFE counters are inconsistent")
+
+
 def recover_one(repository: str, release: Mapping[str, Any], work_root: Path) -> dict[str, Any]:
     tag = str(release.get("tag_name") or "")
     if not tag.startswith(RECOVERY_PREFIX):
@@ -379,6 +401,7 @@ def recover_one(repository: str, release: Mapping[str, Any], work_root: Path) ->
             target=str(index.get("target") or "main"),
             title=str(index.get("title") or f"Alina dataset V2 {requested_tag}"),
         )
+        _assert_recovered_run_safe(result)
     finally:
         if previous is None:
             os.environ.pop("ALINA_RECOVERY_CAPSULE", None)

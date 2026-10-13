@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -161,10 +162,15 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "a" * 40)
     report_dir = tmp_path / "runtime" / "recovery" / "full"
     report_dir.mkdir(parents=True)
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"shards":[]}', encoding="utf-8")
+    catalog_sha = hashlib.sha256(catalog.read_bytes()).hexdigest()
     (report_dir / "RESTORE_REPORT.json").write_text(json.dumps({
         "status": "REPLAY_READY_COMPLETE",
         "repository": module.REPOSITORY,
         "source_inventory_sha256": "c" * 64,
+        "catalog_verification": {"source_index_sha256": catalog_sha},
     }), encoding="utf-8")
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
     assert module.main([]) == 0
@@ -175,6 +181,7 @@ def test_successful_sync_writes_valid_sha_bound_checkpoint(monkeypatch, tmp_path
     assert result["restore_exit_code"] == 0
     assert result["restore_report"] == "RESTORE_REPORT.json"
     assert result["source_inventory_sha256"] == "c" * 64
+    assert result["catalog_index_sha256"] == catalog_sha
 
 
 def test_zero_restore_exit_without_complete_report_fails_closed(monkeypatch, tmp_path):
@@ -183,6 +190,9 @@ def test_zero_restore_exit_without_complete_report_fails_closed(monkeypatch, tmp
     monkeypatch.setattr(module, "__file__", str(mock_script))
     monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "d" * 40)
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 0)
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"shards":[]}', encoding="utf-8")
 
     assert module.main([]) == 2
     checkpoint = json.loads(
@@ -199,6 +209,9 @@ def test_failed_restore_cannot_write_successful_sync_checkpoint(monkeypatch, tmp
     monkeypatch.setattr(module, "__file__", str(mock_script))
     monkeypatch.setattr(module, "synchronize_main", lambda *_a, **_k: "b" * 40)
     monkeypatch.setattr(module, "restore_published", lambda *_a, **_k: 3)
+    catalog = tmp_path / "catalog" / "DATA_INDEX.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text('{"shards":[]}', encoding="utf-8")
     assert module.main(["--preflight-only"]) == 3
     path = tmp_path / "runtime" / "recovery" / "full" / "SYNC_REPORT.json"
     result = json.loads(path.read_text(encoding="utf-8"))

@@ -20,6 +20,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import urllib.error
@@ -719,6 +720,302 @@ def _verified_row_bytes(path: Path, row: Mapping[str, Any]) -> bool:
     )
 
 
+ANALYSIS_WORKING_SET_CLASSES = {
+    "replay": "replays",
+    "backtest": "backtests",
+    "oos": "oos",
+    "forward_paper": "forward_paper",
+    "module_pnl_proof": "economics",
+    "scoreboard": "scoreboards",
+}
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    raw = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def build_certified_working_set(
+    releases: list[Mapping[str, Any]],
+    *,
+    raw_required: Mapping[tuple[str, str], tuple[int, str]],
+    receipts_root: Path,
+    campaigns_root: Path,
+    repository: str,
+) -> dict[str, Any]:
+    """Build the fixed SAFE inputs + provenance-bound analysis asset plan."""
+    required: dict[tuple[str, str], tuple[int, str]] = dict(raw_required)
+    by_class: dict[str, dict[str, int]] = {
+        "collections": {
+            "asset_count": len(raw_required),
+            "bytes": sum(size for size, _sha in raw_required.values()),
+        }
+    }
+    for name in ANALYSIS_WORKING_SET_CLASSES.values():
+        by_class[name] = {"asset_count": 0, "bytes": 0}
+    release_lookup = {
+        str(release.get("tag_name") or ""): release
+        for release in releases
+        if isinstance(release, Mapping)
+    }
+    evidence: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    excluded = 0
+    sha64 = re.compile(r"[0-9a-f]{64}")
+    sha40 = re.compile(r"[0-9a-f]{40}")
+    for path in sorted(receipts_root.glob("*.json")) if receipts_root.is_dir() else []:
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            excluded += 1
+            failures.append({"receipt": str(path), "reason": "INVALID_RECEIPT_JSON", "error": str(exc)})
+            continue
+        kind = str(receipt.get("kind") or "") if isinstance(receipt, Mapping) else ""
+        if kind not in ANALYSIS_WORKING_SET_CLASSES:
+            continue
+        campaign_id = str(receipt.get("campaign_id") or "")
+        unit_id = str(receipt.get("unit_id") or "")
+        evidence_tag = str(receipt.get("evidence_tag") or "")
+        campaign_path = campaigns_root / f"{campaign_id}.json"
+        valid = (
+            receipt.get("schema") == "alina.publication_receipt.v2"
+            and receipt.get("status") == "COMPLETE"
+            and receipt.get("phase") == "ANALYZE"
+            and receipt.get("publication_state") == "RELEASE_AND_RECEIPT_WRITTEN"
+            and receipt.get("paper_only") is True
+            and receipt.get("read_only") is True
+            and receipt.get("real_execution") is False
+            and type(receipt.get("source_collection_epoch")) is int
+            and bool(receipt.get("collection_cutoff_at_utc"))
+            and sha64.fullmatch(str(receipt.get("dataset_selection_id") or "")) is not None
+            and sha40.fullmatch(str(receipt.get("code_sha") or "")) is not None
+            and receipt.get("alina_head") == receipt.get("code_sha")
+            and all(
+                sha64.fullmatch(str(receipt.get(field) or "")) is not None
+                for field in ("manifest_sha256", "checkpoint_id", "payload_digest", "result_sha256")
+            )
+            and evidence_tag == f"campaign-evidence-{campaign_id}-u{unit_id}"
+            and campaign_path.is_file()
+            and _sha256(campaign_path) == receipt.get("manifest_sha256")
+        )
+        if not valid:
+            excluded += 1
+            failures.append({"receipt": str(path), "reason": "INVALID_ANALYSIS_PROVENANCE"})
+            continue
+        release = release_lookup.get(evidence_tag)
+        assets = release.get("assets") if isinstance(release, Mapping) else None
+        if not isinstance(assets, list) or not assets:
+            failures.append({"receipt": str(path), "reason": "EVIDENCE_RELEASE_MISSING"})
+            continue
+        selected_assets: list[dict[str, Any]] = []
+        for asset in assets:
+            if not isinstance(asset, Mapping):
+                failures.append({"receipt": str(path), "reason": "INVALID_EVIDENCE_ASSET"})
+                continue
+            name = str(asset.get("name") or "")
+            digest = _expected_digest(asset)
+            size = asset.get("size")
+            if not name or type(size) is not int or size < 0 or sha64.fullmatch(digest) is None:
+                failures.append({"receipt": str(path), "reason": "UNVERIFIABLE_EVIDENCE_ASSET"})
+                continue
+            key = (evidence_tag, name)
+            identity = (size, digest)
+            if key in required and required[key] != identity:
+                failures.append({"receipt": str(path), "reason": "CONFLICTING_EVIDENCE_ASSET"})
+                continue
+            required[key] = identity
+            selected_assets.append({"name": name, "bytes": size, "sha256": digest})
+            bucket = by_class[ANALYSIS_WORKING_SET_CLASSES[kind]]
+            bucket["asset_count"] += 1
+            bucket["bytes"] += size
+        if selected_assets:
+            evidence.append({
+                "kind": kind,
+                "class": ANALYSIS_WORKING_SET_CLASSES[kind],
+                "campaign_id": campaign_id,
+                "unit_id": unit_id,
+                "evidence_tag": evidence_tag,
+                "receipt": {**dict(receipt), "_source_repository": repository},
+                "assets": selected_assets,
+            })
+    return {
+        "schema": "alina.certified_working_set.v1",
+        "repository": repository,
+        "status": (
+            "CERTIFIED_WORKING_SET_PLANNED" if not failures
+            else "CERTIFIED_WORKING_SET_INCOMPLETE"
+        ),
+        "required_assets": required,
+        "required_asset_count": len(required),
+        "required_bytes": sum(size for size, _sha in required.values()),
+        "by_class": by_class,
+        "analysis_evidence": evidence,
+        "excluded_receipts": excluded,
+        "failures": failures,
+    }
+
+
+def materialize_analysis_evidence(
+    archive_path: Path,
+    receipt: Mapping[str, Any],
+    destination_root: Path,
+) -> dict[str, Any]:
+    """Safely expand one remotely SHA-verified paper-analysis evidence tar."""
+    tag = _safe_component(str(receipt.get("evidence_tag") or ""))
+    kind = str(receipt.get("kind") or "")
+    if kind not in ANALYSIS_WORKING_SET_CLASSES:
+        raise RestoreError("unsupported analysis evidence kind")
+    destination = destination_root / "artifacts" / _safe_component(kind) / tag
+    if destination.exists():
+        proof_path = destination / "CERTIFIED_EVIDENCE.json"
+        try:
+            proof = json.loads(proof_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RestoreError(
+                f"analysis evidence destination is not certified: {destination}"
+            ) from exc
+        rows = proof.get("members") if isinstance(proof, Mapping) else None
+        valid = (
+            proof.get("schema") == "alina.materialized_analysis_evidence.v1"
+            and proof.get("evidence_tag") == receipt.get("evidence_tag")
+            and proof.get("archive_sha256") == _sha256(archive_path)
+            and isinstance(rows, list)
+        )
+        total = 0
+        for row in rows if isinstance(rows, list) else []:
+            pure = PurePosixPath(str(row.get("path") or "")) if isinstance(row, Mapping) else PurePosixPath()
+            target = destination.joinpath(*pure.parts)
+            if (
+                pure.is_absolute() or ".." in pure.parts or not pure.parts
+                or not isinstance(row, Mapping) or not _verified_row_bytes(target, row)
+            ):
+                valid = False
+                break
+            total += int(row["bytes"])
+        if not valid:
+            raise RestoreError(f"analysis evidence destination verification failed: {destination}")
+        return {
+            "status": "SKIPPED_VERIFIED",
+            "destination": str(destination),
+            "file_count": len(rows),
+            "bytes": total,
+            "economic_result": proof.get("economic_result"),
+        }
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{tag}.", dir=destination.parent))
+    members: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        with tarfile.open(archive_path, "r:*") as archive:
+            for member in archive.getmembers():
+                pure = PurePosixPath(member.name)
+                normalized = str(pure)
+                # GNU tar emits an explicit root directory for `tar -C DIR .`.
+                # It carries no bytes; descendants remain independently checked.
+                if member.isdir() and normalized == ".":
+                    continue
+                if (
+                    pure.is_absolute() or ".." in pure.parts or not pure.parts
+                    or member.issym() or member.islnk()
+                    or not (member.isfile() or member.isdir())
+                    or normalized.casefold() in seen
+                ):
+                    raise RestoreError(f"unsafe analysis evidence member: {member.name}")
+                seen.add(normalized.casefold())
+                target = temporary.joinpath(*pure.parts)
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source = archive.extractfile(member)
+                if source is None:
+                    raise RestoreError(f"unreadable analysis evidence member: {member.name}")
+                with source, target.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                members.append({
+                    "path": normalized,
+                    "bytes": target.stat().st_size,
+                    "sha256": _sha256(target),
+                })
+        result_path = temporary / "result.json"
+        if not result_path.is_file() or result_path.is_symlink():
+            raise RestoreError("analysis evidence has no safe result.json")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        payload = result.get("payload") if isinstance(result, Mapping) else None
+        direct_binding = (
+            isinstance(result, Mapping)
+            and result.get("status") == "COMPLETE"
+            and isinstance(payload, Mapping)
+            and _canonical_json_sha256(result) == receipt.get("result_sha256")
+            and _canonical_json_sha256(payload) == receipt.get("payload_digest")
+        )
+        receipt_binding = "DIRECT"
+        if not direct_binding and isinstance(result, Mapping) and isinstance(payload, Mapping):
+            # Older evidence was archived immediately before annotate_evidence().
+            # Reconstruct that exact deterministic mutation and require both
+            # receipt hashes, rather than accepting an unexplained mismatch.
+            repository = str(receipt.get("_source_repository") or "")
+            legacy = json.loads(json.dumps(result))
+            legacy_payload = legacy.get("payload")
+            internal_ok = (
+                result.get("status") == "COMPLETE"
+                and isinstance(legacy_payload, dict)
+                and result.get("sha256") == _canonical_json_sha256(payload)
+                and bool(repository)
+            )
+            if internal_ok:
+                legacy_payload.update({
+                    "evidence_release_tag": str(receipt.get("evidence_tag") or ""),
+                    "evidence_repository": repository,
+                    "durable_persisted": True,
+                })
+                legacy["sha256"] = _canonical_json_sha256(legacy_payload)
+                direct_binding = (
+                    _canonical_json_sha256(legacy_payload) == receipt.get("payload_digest")
+                    and _canonical_json_sha256(legacy) == receipt.get("result_sha256")
+                )
+                if direct_binding:
+                    receipt_binding = "LEGACY_PREANNOTATION_RECONSTRUCTED"
+        if not direct_binding:
+            raise RestoreError("analysis result/receipt provenance mismatch")
+        net = payload.get("net_usd")
+        economic_result = (
+            "VALID_NEGATIVE_RETAINED"
+            if isinstance(net, (int, float)) and not isinstance(net, bool) and net < 0
+            else "VALID_RESULT_RETAINED"
+        )
+        proof = {
+            "schema": "alina.materialized_analysis_evidence.v1",
+            "evidence_tag": receipt.get("evidence_tag"),
+            "kind": kind,
+            "dataset_selection_id": receipt.get("dataset_selection_id"),
+            "code_sha": receipt.get("code_sha"),
+            "manifest_sha256": receipt.get("manifest_sha256"),
+            "archive_sha256": _sha256(archive_path),
+            "receipt_binding": receipt_binding,
+            "members": sorted(members, key=lambda row: row["path"]),
+            "economic_result": economic_result,
+            "paper_only": True,
+            "real_execution": False,
+        }
+        (temporary / "CERTIFIED_EVIDENCE.json").write_text(
+            json.dumps(proof, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        temporary.replace(destination)
+        return {
+            "status": "VERIFIED",
+            "destination": str(destination),
+            "file_count": len(members),
+            "bytes": sum(int(row["bytes"]) for row in members),
+            "economic_result": economic_result,
+        }
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
 def _load_current_safe_catalog(
     index_path: Path,
     metrics_path: Path,
@@ -893,8 +1190,102 @@ def _prune_verified_unselected_assets(
     return result
 
 
+def _staged_asset_receipt_path(
+    destination: Path, tag: str, name: str,
+) -> Path:
+    identity = hashlib.sha256(f"{tag}\0{name}".encode("utf-8")).hexdigest()
+    return destination / "control" / "staged_assets" / f"{identity}.json"
+
+
+def _materialized_row_target(destination: Path, row: Mapping[str, Any]) -> Path:
+    return (
+        destination / "usable" / "shards"
+        / _safe_component(str(row["release_tag"]))
+        / f"{_safe_component(str(row['dataset_id']))}.jsonl.gz"
+    )
+
+
+def _staged_materialized_asset_ok(
+    destination: Path,
+    repository: str,
+    tag: str,
+    asset: Mapping[str, Any],
+    rows: list[Mapping[str, Any]],
+) -> bool:
+    if not rows:
+        return False
+    path = _staged_asset_receipt_path(destination, tag, str(asset.get("name") or ""))
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    expected_rows = [
+        {
+            "dataset_id": str(row.get("dataset_id") or ""),
+            "bytes": row.get("bytes"),
+            "sha256": str(row.get("sha256") or "").lower(),
+        }
+        for row in rows
+    ]
+    if (
+        not isinstance(receipt, Mapping)
+        or receipt.get("schema") != "alina.staged_asset_materialization.v1"
+        or receipt.get("release_tag") != tag
+        or receipt.get("asset_name") != asset.get("name")
+        or receipt.get("asset_bytes") != asset.get("size")
+        or receipt.get("asset_sha256") != _expected_digest(asset)
+        or receipt.get("source_repository") != repository
+        or receipt.get("rows") != expected_rows
+    ):
+        return False
+    return all(
+        _verified_row_bytes(_materialized_row_target(destination, row), row)
+        for row in rows
+    )
+
+
+def _write_staged_asset_receipt(
+    destination: Path,
+    repository: str,
+    tag: str,
+    asset: Mapping[str, Any],
+    rows: list[Mapping[str, Any]],
+) -> Path:
+    if not all(
+        _verified_row_bytes(_materialized_row_target(destination, row), row)
+        for row in rows
+    ):
+        raise RestoreError("cannot seal staged asset before every member is verified")
+    path = _staged_asset_receipt_path(destination, tag, str(asset.get("name") or ""))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": "alina.staged_asset_materialization.v1",
+        "release_tag": tag,
+        "asset_name": asset.get("name"),
+        "asset_bytes": asset.get("size"),
+        "asset_sha256": _expected_digest(asset),
+        "rows": [
+            {
+                "dataset_id": str(row.get("dataset_id") or ""),
+                "bytes": row.get("bytes"),
+                "sha256": str(row.get("sha256") or "").lower(),
+            }
+            for row in rows
+        ],
+        "source_repository": repository,
+        "remote_recoverable": True,
+    }
+    temporary = path.with_suffix(".json.partial")
+    temporary.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    temporary.replace(path)
+    return path
+
+
 def _materialize_catalog_safe_shards(
     rows: list[Mapping[str, Any]], releases_root: Path, destination: Path,
+    *, prune_stale: bool = True,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
         "usable_shards": 0, "usable_bytes": 0, "quarantined_shards": 0,
@@ -966,7 +1357,7 @@ def _materialize_catalog_safe_shards(
             report["missing_or_corrupt_rows"] += 1
             report["failures"].append({"dataset_id": dataset_id, "error": str(exc)})
     usable_root = destination / "usable" / "shards"
-    if usable_root.is_dir():
+    if prune_stale and usable_root.is_dir():
         for previous in sorted(usable_root.glob("*/*.jsonl.gz")):
             if previous in expected:
                 continue
@@ -1645,6 +2036,7 @@ def restore_everything(
         raise RestoreError(f"unknown restore profile: {profile}")
     catalog_safe: dict[str, tuple[str, str]] | None = None
     catalog_verification: dict[str, Any] | None = None
+    working_set: dict[str, Any] | None = None
     replay_rows: list[Mapping[str, Any]] = []
     replay_required: dict[tuple[str, str], tuple[int, str]] = {}
     if catalog_path is not None:
@@ -1750,6 +2142,15 @@ def restore_everything(
     )
     selected_keys: set[tuple[str, str]] = set()
     if profile == "replay-ready":
+        assert catalog_path is not None
+        working_set = build_certified_working_set(
+            full_releases,
+            raw_required=replay_required,
+            receipts_root=catalog_path.parent / "receipts",
+            campaigns_root=catalog_path.parent / "campaigns",
+            repository=repository,
+        )
+        replay_required = dict(working_set["required_assets"])
         releases = _select_replay_ready_releases(full_releases, replay_required)
         selected_keys = {
             (str(release["tag_name"]), str(asset["name"]))
@@ -1759,6 +2160,14 @@ def restore_everything(
             row for row in unverified_source_assets
             if (str(row["release_tag"]), str(row["name"])) in selected_keys
         ]
+    raw_rows_by_asset: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    if profile == "replay-ready":
+        for row in replay_rows:
+            key = (
+                str(row.get("release_tag") or ""),
+                str(row.get("release_container_asset") or row.get("release_asset") or ""),
+            )
+            raw_rows_by_asset.setdefault(key, []).append(row)
     source_asset_bytes = sum(
         int(asset["size"]) for release in releases for asset in release["assets"]
     )
@@ -1779,6 +2188,9 @@ def restore_everything(
         raise RestoreError("Release tags collide after path normalization")
 
     pending_download_bytes = 0
+    pending_retained_download_bytes = 0
+    peak_staged_asset_bytes = 0
+    staging_releases_root = destination / ".staging" / "releases"
     for release in releases:
         tag = str(release.get("tag_name") or "")
         if not tag:
@@ -1802,15 +2214,30 @@ def restore_everything(
             ):
                 continue
             if not _asset_ok(target, asset):
+                raw_rows = raw_rows_by_asset.get((tag, name), [])
+                if raw_rows and _staged_materialized_asset_ok(
+                    destination, repository, tag, asset, raw_rows
+                ):
+                    continue
                 source = clone_sources.get((tag, name))
                 # A verified LFS hardlink occupies no new payload space on
                 # the same volume. A cross-volume copy still needs capacity.
                 if source is not None and source.stat().st_dev == releases_root.stat().st_dev:
                     continue
                 expected_size = max(0, int(asset.get("size") or 0))
-                partial = target.with_suffix(target.suffix + ".partial")
+                if raw_rows:
+                    staged_target = (
+                        staging_releases_root / _safe_component(tag)
+                        / _safe_component(name)
+                    )
+                    partial = staged_target.with_suffix(staged_target.suffix + ".partial")
                 partial_size = partial.stat().st_size if partial.is_file() else 0
-                pending_download_bytes += max(0, expected_size - partial_size)
+                remaining = max(0, expected_size - partial_size)
+                pending_download_bytes += remaining
+                if raw_rows:
+                    peak_staged_asset_bytes = max(peak_staged_asset_bytes, remaining)
+                else:
+                    pending_retained_download_bytes += remaining
 
     pending_materialization_bytes = 0
     if profile == "replay-ready":
@@ -1828,7 +2255,10 @@ def restore_everything(
     free_destination = shutil.disk_usage(destination).free
     safety_margin = 1024 * 1024 * 1024
     required_free_destination_bytes = (
-        pending_download_bytes + pending_materialization_bytes + safety_margin
+        pending_retained_download_bytes
+        + peak_staged_asset_bytes
+        + pending_materialization_bytes
+        + safety_margin
     )
     enough_disk = required_free_destination_bytes <= free_destination
     if preflight_only:
@@ -1838,6 +2268,8 @@ def restore_everything(
             "status": (
                 "PREFLIGHT_INSUFFICIENT_DISK" if not enough_disk
                 else "PREFLIGHT_SOURCE_UNVERIFIABLE" if unverified_source_assets
+                else "PREFLIGHT_WORKING_SET_INCOMPLETE"
+                if working_set is not None and working_set["failures"]
                 else "PREFLIGHT_READY_NOT_RESTORED"
             ),
             "repository": repository,
@@ -1857,11 +2289,27 @@ def restore_everything(
             "unverified_source_asset_count": len(unverified_source_assets),
             "unverified_source_assets_sample": unverified_source_assets[:50],
             "pending_download_bytes": pending_download_bytes,
+            "pending_retained_download_bytes": pending_retained_download_bytes,
+            "peak_staged_asset_bytes": peak_staged_asset_bytes,
             "pending_materialization_bytes": pending_materialization_bytes,
             "required_free_destination_bytes": required_free_destination_bytes,
             "free_destination_bytes": free_destination,
             "safety_margin_bytes": safety_margin,
             "enough_disk_for_release_assets": enough_disk,
+            "certified_working_set": (
+                {
+                    **{key: value for key, value in working_set.items()
+                       if key != "required_assets"},
+                    "required_assets": [
+                        {"release_tag": tag, "asset_name": name,
+                         "bytes": identity[0], "sha256": identity[1]}
+                        for (tag, name), identity in sorted(
+                            working_set["required_assets"].items()
+                        )
+                    ],
+                }
+                if working_set is not None else None
+            ),
             "note": (
                 "No payload assets downloaded; the SHA-256-verified restore "
                 "inventory control asset is cached and reusable. SAFE shard "
@@ -1909,6 +2357,8 @@ def restore_everything(
         "skipped_verified": 0,
         "lfs_reused_verified": 0,
         "pending_download_bytes_at_start": pending_download_bytes,
+        "pending_retained_download_bytes_at_start": pending_retained_download_bytes,
+        "peak_staged_asset_bytes_at_start": peak_staged_asset_bytes,
         "pending_materialization_bytes_at_start": pending_materialization_bytes,
         "required_free_destination_bytes_at_start": required_free_destination_bytes,
         "free_destination_bytes_at_start": free_destination,
@@ -1917,6 +2367,20 @@ def restore_everything(
         "read_only": True,
         "real_execution": False,
         "catalog_verification": catalog_verification,
+        "certified_working_set": (
+            {
+                **{key: value for key, value in working_set.items()
+                   if key != "required_assets"},
+                "required_assets": [
+                    {"release_tag": tag, "asset_name": name,
+                     "bytes": identity[0], "sha256": identity[1]}
+                    for (tag, name), identity in sorted(
+                        working_set["required_assets"].items()
+                    )
+                ],
+            }
+            if working_set is not None else None
+        ),
         "unverified_source_asset_count": len(unverified_source_assets),
         "unverified_source_assets_sample": unverified_source_assets[:50],
     }
@@ -1966,10 +2430,48 @@ def restore_everything(
                 })
                 continue
             try:
-                result = download_asset(
-                    asset, release_dir, token=token,
-                    clone_candidate=clone_sources.get((tag, str(asset.get("name") or ""))),
-                )
+                asset_name = str(asset.get("name") or "")
+                raw_rows = raw_rows_by_asset.get((tag, asset_name), [])
+                canonical_target = release_dir / _safe_component(asset_name)
+                if raw_rows and _staged_materialized_asset_ok(
+                    destination, repository, tag, asset, raw_rows
+                ):
+                    result = {
+                        "name": asset_name,
+                        "status": "MATERIALIZED_VERIFIED",
+                        "verification_status": "VERIFIED",
+                        "downloaded_size_bytes": int(asset["size"]),
+                        "calculated_sha256": _expected_digest(asset),
+                        "destination": str(_staged_asset_receipt_path(destination, tag, asset_name)),
+                    }
+                else:
+                    use_staging = bool(raw_rows) and not _asset_ok(canonical_target, asset)
+                    asset_root = staging_releases_root if use_staging else releases_root
+                    asset_dir = asset_root / safe_tag
+                    result = download_asset(
+                        asset, asset_dir, token=token,
+                        clone_candidate=clone_sources.get((tag, asset_name)),
+                    )
+                    if use_staging:
+                        staged_classification = _materialize_catalog_safe_shards(
+                            raw_rows, staging_releases_root, destination,
+                            prune_stale=False,
+                        )
+                        if staged_classification["failures"]:
+                            raise RestoreError(
+                                "staged SAFE materialization failed: "
+                                + str(staged_classification["failures"][:3])
+                            )
+                        receipt_path = _write_staged_asset_receipt(
+                            destination, repository, tag, asset, raw_rows
+                        )
+                        staged_target = asset_dir / _safe_component(asset_name)
+                        staged_target.unlink()
+                        result = {
+                            **result,
+                            "status": "STAGED_MATERIALIZED_VERIFIED",
+                            "destination": str(receipt_path),
+                        }
                 row["assets"].append({**identity, **result})
                 report["verified_asset_bytes"] += int(asset["size"])
                 report["verified_asset_count"] += 1
@@ -2041,6 +2543,48 @@ def restore_everything(
             allowed_release_dirs=allowed_release_dirs - unsafe_manifest_release_dirs,
         )
     )
+    report["analysis_evidence"] = {
+        "required": 0,
+        "materialized": 0,
+        "verified_files": 0,
+        "verified_bytes": 0,
+        "results": [],
+        "failures": [],
+    }
+    if working_set is not None:
+        entries = working_set.get("analysis_evidence")
+        for entry in entries if isinstance(entries, list) else []:
+            if not isinstance(entry, Mapping):
+                continue
+            receipt = entry.get("receipt")
+            assets = entry.get("assets")
+            if not isinstance(receipt, Mapping) or not isinstance(assets, list):
+                continue
+            report["analysis_evidence"]["required"] += 1
+            if len(assets) != 1 or not str(assets[0].get("name") or "").endswith(".tgz"):
+                failure = {
+                    "evidence_tag": entry.get("evidence_tag"),
+                    "error": "analysis evidence Release must contain exactly one .tgz asset",
+                }
+                report["analysis_evidence"]["failures"].append(failure)
+                report["failures"].append({"stage": "analysis_evidence", **failure})
+                continue
+            archive = (
+                releases_root / _safe_component(str(entry["evidence_tag"]))
+                / _safe_component(str(assets[0]["name"]))
+            )
+            try:
+                result = materialize_analysis_evidence(
+                    archive, receipt, destination / "usable"
+                )
+                report["analysis_evidence"]["results"].append(result)
+                report["analysis_evidence"]["materialized"] += 1
+                report["analysis_evidence"]["verified_files"] += int(result["file_count"])
+                report["analysis_evidence"]["verified_bytes"] += int(result["bytes"])
+            except (OSError, ValueError, TypeError, json.JSONDecodeError, tarfile.TarError, RestoreError) as exc:
+                failure = {"evidence_tag": entry.get("evidence_tag"), "error": str(exc)}
+                report["analysis_evidence"]["failures"].append(failure)
+                report["failures"].append({"stage": "analysis_evidence", **failure})
     report["expected_assets"] = sum(len(release["assets"]) for release in releases)
     report["all_source_assets_accounted_for"] = (
         report["asset_count"] == report["expected_assets"]
@@ -2092,6 +2636,9 @@ def restore_everything(
         and not report["verification_failures"]
         and not report["classification"]["failures"]
         and not report["unclaimed_dataset_release_count"]
+        and (working_set is None or not working_set["failures"])
+        and report["analysis_evidence"]["materialized"]
+        == report["analysis_evidence"]["required"]
     )
     report["status"] = (
         "REPLAY_READY_COMPLETE" if complete and profile == "replay-ready"
@@ -2217,7 +2764,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.preflight_only:
-        print(json.dumps(report, indent=2, sort_keys=True))
+        # The full, SHA-bound asset plan remains in RESTORE_PREFLIGHT.json.
+        # Keep stdout bounded even when the plan contains thousands of assets.
+        print(json.dumps({
+            "status": report.get("status"),
+            "report": report.get("report"),
+            "source_inventory_sha256": report.get("source_inventory_sha256"),
+            "release_count": report.get("release_count"),
+            "asset_count": report.get("asset_count"),
+            "source_asset_bytes": report.get("source_asset_bytes"),
+            "pending_download_bytes": report.get("pending_download_bytes"),
+            "pending_materialization_bytes": report.get("pending_materialization_bytes"),
+            "required_free_destination_bytes": report.get("required_free_destination_bytes"),
+            "free_destination_bytes": report.get("free_destination_bytes"),
+            "enough_disk_for_release_assets": report.get("enough_disk_for_release_assets"),
+            "unverified_source_asset_count": report.get("unverified_source_asset_count", 0),
+        }, indent=2, sort_keys=True))
         return 0 if (
             report["enough_disk_for_release_assets"]
             and not report.get("unverified_source_asset_count", 0)

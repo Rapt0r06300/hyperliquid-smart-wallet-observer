@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -22,11 +23,301 @@ def _module():
     return module
 
 
+def _locally_valid_manifest(dataset_id: str, **overrides):
+    row = {
+        "dataset_id": dataset_id,
+        "family": "l2Book",
+        "venue": "bybit",
+        "symbol": "BTCUSDT",
+        "start_ts_ms": 1000,
+        "end_ts_ms": 1001,
+        "sha256": "a" * 64,
+        "bytes": 10,
+        "event_count": 1,
+        "collector_version": "b" * 40,
+        "source": "bybit_public_ws",
+        "quality_status": "PARTIAL",
+        "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
+        "asset_verified": False,
+        "replay_compatible": True,
+        "provenance": {
+            "public_data_only": True,
+            "authenticated": False,
+            "real_execution": False,
+            "transports": ["websocket"],
+        },
+        "integrity": {
+            "gap_count": 0,
+            "duplicate_count": 0,
+            "regression_count": 0,
+            "missing_timestamp_count": 0,
+            "missing_monotonic_count": 0,
+            "desync_count": 0,
+            "duplicates_deduped": True,
+        },
+        "synchronization": {"connection_count": 1},
+        "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
+        "required_channels": [],
+        "observed_channels": ["l2Book"],
+        "cost_model": {"applicable": False, "ready": False},
+    }
+    row.update(overrides)
+    return row
+
+
 def test_release_capacity_reserves_run_manifest_slot() -> None:
     module = _module()
     module.validate_release_capacity(999)
     with pytest.raises(module.PublishError):
         module.validate_release_capacity(1000)
+
+
+def test_partition_publishable_manifests_requires_explicit_safe_replayable() -> None:
+    module = _module()
+    rows = [
+        _locally_valid_manifest("eligible", quality_status="SAFE"),
+        _locally_valid_manifest("safe-unproven", quality_status="SAFE", replay_compatible=False),
+        _locally_valid_manifest("partial", quality_reasons=["COST_MODEL_NOT_READY"]),
+        _locally_valid_manifest("reject", quality_status="REJECT", replay_compatible=False),
+        _locally_valid_manifest("unknown", quality_status="MYSTERY"),
+    ]
+
+    eligible, diagnostic = module.partition_publishable_manifests(rows)
+
+    assert [row["dataset_id"] for row in eligible] == ["eligible"]
+    assert [row["dataset_id"] for row in diagnostic] == [
+        "partial", "reject", "safe-unproven", "unknown",
+    ]
+    assert all(row["validation_allowed"] is False for row in diagnostic)
+    assert all(row["replay_compatible"] is False for row in diagnostic)
+
+
+def test_partition_allows_only_remote_verification_pending_candidate() -> None:
+    module = _module()
+    rows = [
+        _locally_valid_manifest("remote-pending"),
+        _locally_valid_manifest(
+            "has-gap-too",
+            quality_reasons=["REMOTE_ASSET_NOT_VERIFIED", "SEQUENCE_OR_QUEUE_GAP"],
+            integrity={"gap_count": 1},
+        ),
+    ]
+
+    eligible, diagnostic = module.partition_publishable_manifests(rows)
+
+    assert [row["dataset_id"] for row in eligible] == ["remote-pending"]
+    assert [row["dataset_id"] for row in diagnostic] == ["has-gap-too"]
+
+
+def test_partition_preserves_manifest_path_binding_for_duplicate_identity(tmp_path) -> None:
+    module = _module()
+    safe_path = tmp_path / "safe.json"
+    rejected_path = tmp_path / "rejected.json"
+    shared = {
+        "release_asset": "duplicate.jsonl.gz",
+        "sha256": "a" * 64,
+    }
+    rows = [
+        _locally_valid_manifest("duplicate", **shared),
+        _locally_valid_manifest(
+            "duplicate",
+            **shared,
+            quality_reasons=["REMOTE_ASSET_NOT_VERIFIED", "SEQUENCE_OR_QUEUE_GAP"],
+            replay_compatible=False,
+        ),
+    ]
+
+    eligible, diagnostic = module.partition_manifest_entries(
+        [safe_path, rejected_path], rows
+    )
+
+    assert eligible == [(safe_path, rows[0])]
+    assert diagnostic[0][0] == rejected_path
+    assert diagnostic[0][1]["validation_allowed"] is False
+
+
+def test_final_publication_inventory_must_be_safe_and_replayable() -> None:
+    module = _module()
+    module.assert_safe_final_manifests([
+        {"dataset_id": "safe", "quality_status": "SAFE", "replay_compatible": True}
+    ])
+
+    with pytest.raises(module.PublishError, match="final manifest is not SAFE"):
+        module.assert_safe_final_manifests([
+            {
+                "dataset_id": "partial",
+                "quality_status": "PARTIAL",
+                "replay_compatible": False,
+            }
+        ])
+
+
+def test_quality_register_is_deterministic_metadata_without_payload(tmp_path) -> None:
+    module = _module()
+    rejected = [{
+        "dataset_id": "bad-window",
+        "family": "trades",
+        "venue": "gate",
+        "symbol": "BTC_USDT",
+        "quality_status": "PARTIAL",
+        "quality_reasons": ["GAP"],
+        "release_asset": "bad.jsonl.gz",
+        "bytes": 123,
+        "sha256": "a" * 64,
+        "event_count": 7,
+        "trade_count": 6,
+        "collector_version": "b" * 40,
+        "provenance": {"source": "public_ws"},
+        "local_source_path": "/runner/private/raw.jsonl",
+        "local_asset_path": str(tmp_path / "payload"),
+        "payload": "market bytes must never be copied",
+        "validation_allowed": True,
+        "replay_compatible": True,
+    }]
+
+    first = module.write_quality_register(tmp_path, rejected)
+    assert first is not None
+    first_bytes = first.read_bytes()
+    second = module.write_quality_register(tmp_path, list(reversed(rejected)))
+
+    assert second == first
+    assert second.read_bytes() == first_bytes
+    register = json.loads(gzip.decompress(first_bytes))
+    assert register["schema"] == "alina.dataset_quality_rejections.v1"
+    assert register["row_count"] == 1
+    [row] = register["rows"]
+    assert row["dataset_id"] == "bad-window"
+    assert row["bytes"] == 123
+    assert row["sha256"] == "a" * 64
+    assert row["validation_allowed"] is False
+    assert row["replay_compatible"] is False
+    assert "local_source_path" not in row
+    assert "local_asset_path" not in row
+    assert "payload" not in row
+
+
+def test_quality_register_is_absent_without_rejections(tmp_path) -> None:
+    module = _module()
+
+    assert module.write_quality_register(tmp_path, []) is None
+    assert not (tmp_path / "QUALITY_REJECTIONS.json.gz").exists()
+
+
+def _write_safe_only_test_bundle(tmp_path, rows):
+    bundle = tmp_path / "bundle"
+    assets = bundle / "assets"
+    manifests = bundle / "manifests"
+    assets.mkdir(parents=True)
+    manifests.mkdir(parents=True)
+    manifest_names = []
+    for row in rows:
+        payload = str(row["dataset_id"]).encode("utf-8")
+        asset_name = f"{row['dataset_id']}.jsonl.gz"
+        (assets / asset_name).write_bytes(payload)
+        manifest = {
+            **_locally_valid_manifest(str(row["dataset_id"])),
+            "release_asset": asset_name,
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "event_count": 1,
+            "collector_version": "a" * 40,
+            **row,
+        }
+        path = manifests / f"{row['dataset_id']}.json"
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+        manifest_names.append(f"manifests/{path.name}")
+    (bundle / "BUNDLE_INDEX.json").write_text(json.dumps({
+        "collector_version": "a" * 40,
+        "collection_run_id": "safe-only-test",
+        "manifests": manifest_names,
+    }), encoding="utf-8")
+    return bundle
+
+
+def _mock_release_io(module, monkeypatch, uploaded):
+    monkeypatch.setattr(module, "ensure_release", lambda **_kw: {"id": 77, "assets": []})
+    monkeypatch.setattr(
+        module, "upload_file",
+        lambda **kwargs: uploaded.append(Path(kwargs["path"])),
+    )
+
+    def fake_json(_args):
+        return {"id": 77, "assets": [{
+            "id": index,
+            "name": path.name,
+            "size": path.stat().st_size,
+            "digest": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest(),
+        } for index, path in enumerate(uploaded, 1)]}
+
+    monkeypatch.setattr(module, "_json", fake_json)
+
+
+def test_publish_zero_safe_uploads_only_diagnostics_and_manifest(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [{
+        "dataset_id": "rejected",
+        "quality_status": "REJECT",
+        "quality_reasons": ["SEQUENCE_OR_QUEUE_GAP"],
+        "replay_compatible": False,
+    }])
+    uploaded = []
+    _mock_release_io(module, monkeypatch, uploaded)
+
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-zero-safe",
+        target="main",
+        title="zero safe",
+    )
+
+    assert [path.name for path in uploaded] == [
+        "QUALITY_REJECTIONS.json.gz", "RUN_MANIFEST.json",
+    ]
+    assert result["shard_count"] == 0
+    assert result["quality_register"]["row_count"] == 1
+    assert result["quality_register"]["validation_allowed"] is False
+
+
+def test_publish_mixed_bundle_filters_payload_and_capsule_inputs(tmp_path, monkeypatch) -> None:
+    module = _module()
+    bundle = _write_safe_only_test_bundle(tmp_path, [
+        {
+            "dataset_id": "safe-candidate",
+            "quality_status": "PARTIAL",
+            "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
+            "replay_compatible": True,
+        },
+        {
+            "dataset_id": "partial-gap",
+            "quality_status": "PARTIAL",
+            "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED", "SEQUENCE_OR_QUEUE_GAP"],
+            "replay_compatible": False,
+        },
+    ])
+    capsule_inputs = []
+    monkeypatch.setattr(
+        module,
+        "publish_recovery_capsule",
+        lambda _root, **kwargs: capsule_inputs.extend(kwargs["manifests"]),
+    )
+    uploaded = []
+    _mock_release_io(module, monkeypatch, uploaded)
+
+    result = module.publish_bundle(
+        bundle,
+        repository="Rapt0r06300/hyperliquid-smart-wallet-observer",
+        tag="data-v2-mixed-safe",
+        target="main",
+        title="mixed safe",
+    )
+
+    assert [row["dataset_id"] for row in capsule_inputs] == ["safe-candidate"]
+    assert [path.name for path in uploaded] == [
+        "safe-candidate.jsonl.gz", "QUALITY_REJECTIONS.json.gz", "RUN_MANIFEST.json",
+    ]
+    assert result["shard_count"] == 1
+    assert result["quality_register"]["row_count"] == 1
 
 
 def test_compaction_packs_many_shards_deterministically(tmp_path) -> None:
@@ -98,6 +389,7 @@ def test_publish_compacts_large_bundle_into_two_github_writes(tmp_path, monkeypa
             "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload),
             "event_count": 1, "collector_version": "a" * 40,
             "source": "gate_public_ws", "quality_status": "PARTIAL",
+            "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
             "release_asset": name, "asset_verified": False,
             "replay_compatible": True,
             "provenance": {"public_data_only": True, "authenticated": False,
@@ -107,7 +399,7 @@ def test_publish_compacts_large_bundle_into_two_github_writes(tmp_path, monkeypa
                           "missing_monotonic_count": 0, "desync_count": 0,
                           "duplicates_deduped": True},
             "synchronization": {"connection_count": 1},
-            "reconciliation": {"status": "PARTIAL"},
+            "reconciliation": {"status": "SOURCE_CONTINUITY_VERIFIED"},
             "required_channels": [], "observed_channels": ["trades"],
             "cost_model": {"applicable": False, "ready": False},
         }
@@ -179,8 +471,10 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
             "collector_version": "a" * 40,
             "source": "bybit_public_ws",
             "quality_status": "PARTIAL",
+            "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
             "release_asset": asset_name,
             "asset_verified": False,
+            "replay_compatible": True,
             "provenance": {
                 "public_data_only": True,
                 "authenticated": False,
@@ -273,9 +567,9 @@ def test_publish_uploads_data_assets_plus_one_run_manifest_only(tmp_path, monkey
     assert result["venues"] == ["bybit"]
     assert result["symbols"] == ["BTCUSDT"]
     assert result["asset_sha256s"] == [row["sha256"] for row in result["manifests"]]
-    # PARTIAL fixtures must never be presented as SAFE replay coverage.
-    assert result["safe_coverage_matrix"]["safe_partitions"] == 0
-    assert result["safe_coverage_matrix"]["coins"] == []
+    # Locally valid candidates become SAFE only after exact remote verification.
+    assert result["safe_coverage_matrix"]["safe_partitions"] == 1
+    assert result["safe_coverage_matrix"]["coins"] == ["BTC"]
     assert (bundle / "RUN_MANIFEST.json").is_file()
 
 
@@ -336,8 +630,10 @@ def test_publish_skips_existing_compatible_assets(tmp_path, monkeypatch) -> None
         "collector_version": "a" * 40,
         "source": "okx_public_ws",
         "quality_status": "PARTIAL",
+        "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
         "release_asset": asset.name,
         "asset_verified": False,
+        "replay_compatible": True,
         "provenance": {
             "public_data_only": True,
             "authenticated": False,
@@ -472,8 +768,10 @@ def test_publish_moves_stale_incomplete_release_to_fresh_retry_tag(tmp_path, mon
         "collector_version": "a" * 40,
         "source": "bitget_public_ws",
         "quality_status": "PARTIAL",
+        "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
         "release_asset": asset.name,
         "asset_verified": False,
+        "replay_compatible": True,
         "provenance": {
             "public_data_only": True,
             "authenticated": False,
@@ -609,8 +907,10 @@ def test_publish_refuses_to_mutate_finalized_release_with_foreign_assets(
         "collector_version": "a" * 40,
         "source": "okx_public_ws",
         "quality_status": "PARTIAL",
+        "quality_reasons": ["REMOTE_ASSET_NOT_VERIFIED"],
         "release_asset": asset.name,
         "asset_verified": False,
+        "replay_compatible": True,
         "provenance": {
             "public_data_only": True,
             "authenticated": False,

@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import gzip
+import tarfile
 import zipfile
 from pathlib import Path
 
@@ -2262,6 +2263,18 @@ def test_replay_ready_profile_restores_only_catalog_safe_assets(tmp_path, monkey
     restored = (tmp_path / "restored" / "usable" / "shards" /
                 "data-v2-profile-test" / "safe-one.jsonl.gz")
     assert restored.read_bytes() == safe_bytes
+    assert not (tmp_path / "restored" / "releases" /
+                "data-v2-profile-test" / "safe.jsonl.gz").exists()
+
+    # A completed staged asset is proved by its outer identity plus every
+    # materialized member, so an incremental run must not download it again.
+    repeated = module.restore_everything(
+        "owner/repo", tmp_path / "restored", catalog_path=index_path,
+        metrics_path=metrics_path, profile="replay-ready", prune_unselected=True,
+    )
+    assert downloaded == ["https://example.invalid/safe"]
+    assert repeated["status"] == "REPLAY_READY_COMPLETE"
+    assert repeated["releases"][0]["assets"][0]["status"] == "MATERIALIZED_VERIFIED"
 
 
 def test_replay_ready_preflight_counts_zip_extraction_space(tmp_path, monkeypatch):
@@ -2384,3 +2397,152 @@ def test_release_asset_download_passes_exact_sha_bound_network_limit(monkeypatch
         assert receipt["verification_status"] == "VERIFIED"
         assert (tmp_path / asset["name"]).read_bytes() == payload
     assert checked == [5, 0]
+
+
+def _analysis_receipt(tmp_path, *, kind="backtest", campaign_id="analysis-e7-backtest-v2"):
+    campaigns = tmp_path / "catalog" / "campaigns"
+    receipts = tmp_path / "catalog" / "receipts"
+    campaigns.mkdir(parents=True)
+    receipts.mkdir(parents=True)
+    campaign = campaigns / f"{campaign_id}.json"
+    campaign.write_text(json.dumps({"campaign_id": campaign_id}), encoding="utf-8")
+    manifest_sha = hashlib.sha256(campaign.read_bytes()).hexdigest()
+    row = {
+        "schema": "alina.publication_receipt.v2",
+        "campaign_id": campaign_id,
+        "unit_id": "0",
+        "kind": kind,
+        "status": "COMPLETE",
+        "phase": "ANALYZE",
+        "phase_epoch": 7,
+        "source_collection_epoch": 6,
+        "collection_cutoff_at_utc": "2026-10-04T12:21:46Z",
+        "dataset_selection_id": "a" * 64,
+        "code_sha": "b" * 40,
+        "alina_head": "b" * 40,
+        "manifest_sha256": manifest_sha,
+        "checkpoint_id": "c" * 64,
+        "payload_digest": "d" * 64,
+        "result_sha256": "e" * 64,
+        "evidence_tag": f"campaign-evidence-{campaign_id}-u0",
+        "publication_state": "RELEASE_AND_RECEIPT_WRITTEN",
+        "paper_only": True,
+        "read_only": True,
+        "real_execution": False,
+    }
+    (receipts / f"{campaign_id}-u0.json").write_text(
+        json.dumps(row), encoding="utf-8"
+    )
+    return row, receipts, campaigns
+
+
+def test_certified_working_set_selects_provenance_bound_analysis_evidence(tmp_path):
+    module = _module()
+    receipt, receipts, campaigns = _analysis_receipt(tmp_path)
+    evidence = b"paper evidence"
+    asset = _asset("evidence.tgz", "https://example.invalid/evidence", evidence)
+    releases = [{"tag_name": receipt["evidence_tag"], "assets": [asset]}]
+
+    result = module.build_certified_working_set(
+        releases,
+        raw_required={("data-v2-safe", "safe.zip"): (12, "f" * 64)},
+        receipts_root=receipts,
+        campaigns_root=campaigns,
+        repository="owner/repo",
+    )
+
+    assert result["status"] == "CERTIFIED_WORKING_SET_PLANNED"
+    assert result["failures"] == []
+    assert result["by_class"]["collections"]["asset_count"] == 1
+    assert result["by_class"]["backtests"]["asset_count"] == 1
+    assert result["required_assets"][(receipt["evidence_tag"], "evidence.tgz")] == (
+        len(evidence), hashlib.sha256(evidence).hexdigest()
+    )
+
+
+def test_certified_working_set_excludes_unbound_analysis_receipt(tmp_path):
+    module = _module()
+    receipt, receipts, campaigns = _analysis_receipt(tmp_path)
+    path = next(receipts.glob("*.json"))
+    receipt["dataset_selection_id"] = "not-a-sha"
+    path.write_text(json.dumps(receipt), encoding="utf-8")
+
+    result = module.build_certified_working_set(
+        [], raw_required={}, receipts_root=receipts,
+        campaigns_root=campaigns, repository="owner/repo",
+    )
+
+    assert result["status"] == "CERTIFIED_WORKING_SET_INCOMPLETE"
+    assert result["excluded_receipts"] == 1
+    assert result["failures"][0]["reason"] == "INVALID_ANALYSIS_PROVENANCE"
+
+
+def test_materialize_analysis_evidence_keeps_valid_negative_results(tmp_path):
+    module = _module()
+    receipt, _receipts, _campaigns = _analysis_receipt(tmp_path)
+    result = {"status": "COMPLETE", "payload": {"net_usd": -5.25}}
+    canonical = lambda value: json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    receipt["payload_digest"] = hashlib.sha256(canonical(result["payload"])).hexdigest()
+    receipt["result_sha256"] = hashlib.sha256(canonical(result)).hexdigest()
+    archive = tmp_path / "evidence.tgz"
+    raw = json.dumps(result).encode()
+    with tarfile.open(archive, "w:gz") as tar:
+        info = tarfile.TarInfo("result.json")
+        info.size = len(raw)
+        tar.addfile(info, io.BytesIO(raw))
+
+    restored = module.materialize_analysis_evidence(
+        archive, receipt, tmp_path / "usable"
+    )
+
+    assert restored["status"] == "VERIFIED"
+    assert restored["economic_result"] == "VALID_NEGATIVE_RETAINED"
+    assert restored["file_count"] == 1
+    assert json.loads((Path(restored["destination"]) / "result.json").read_text())["payload"]["net_usd"] == -5.25
+    repeated = module.materialize_analysis_evidence(
+        archive, receipt, tmp_path / "usable"
+    )
+    assert repeated["status"] == "SKIPPED_VERIFIED"
+    assert repeated["destination"] == restored["destination"]
+
+
+def test_materialize_analysis_evidence_accepts_tar_root_and_legacy_preannotation(tmp_path):
+    module = _module()
+    receipt, _receipts, _campaigns = _analysis_receipt(tmp_path)
+    result = {
+        "status": "COMPLETE",
+        "payload": {"net_usd": 1.25},
+        "progressed": True,
+    }
+    canonical = lambda value: json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode()
+    result["sha256"] = hashlib.sha256(canonical(result["payload"])).hexdigest()
+    annotated = json.loads(json.dumps(result))
+    annotated["payload"].update({
+        "evidence_release_tag": receipt["evidence_tag"],
+        "evidence_repository": "owner/repo",
+        "durable_persisted": True,
+    })
+    annotated["sha256"] = hashlib.sha256(canonical(annotated["payload"])).hexdigest()
+    receipt["payload_digest"] = annotated["sha256"]
+    receipt["result_sha256"] = hashlib.sha256(canonical(annotated)).hexdigest()
+    receipt["_source_repository"] = "owner/repo"
+    archive = tmp_path / "legacy-evidence.tgz"
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname=".")
+
+    restored = module.materialize_analysis_evidence(
+        archive, receipt, tmp_path / "usable"
+    )
+
+    assert restored["status"] == "VERIFIED"
+    proof = json.loads(
+        (Path(restored["destination"]) / "CERTIFIED_EVIDENCE.json").read_text()
+    )
+    assert proof["receipt_binding"] == "LEGACY_PREANNOTATION_RECONSTRUCTED"

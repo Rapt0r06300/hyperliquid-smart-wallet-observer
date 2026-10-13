@@ -333,3 +333,55 @@ def test_recovery_one_publication_failure_does_not_abandon_other_capsules(
     assert report["recovered"] == 1
     assert len(report["failures"]) == 1
     assert report["failures"][0]["tag"] == "alina-recovery-broken"
+
+
+def test_recovered_run_must_contain_only_safe_replayable_manifests():
+    module = _module()
+    import pytest
+
+    module._assert_recovered_run_safe(
+        {
+            "shard_count": 1,
+            "safe_count": 1,
+            "partial_count": 0,
+            "reject_count": 0,
+            "manifests": [
+                {"dataset_id": "safe", "quality_status": "SAFE", "replay_compatible": True}
+            ],
+        }
+    )
+
+    with pytest.raises(module.RecoveryError, match="non-SAFE manifest"):
+        module._assert_recovered_run_safe(
+            {
+                "shard_count": 1,
+                "safe_count": 0,
+                "partial_count": 1,
+                "reject_count": 0,
+                "manifests": [
+                    {
+                        "dataset_id": "legacy-partial",
+                        "quality_status": "PARTIAL",
+                        "replay_compatible": False,
+                    }
+                ],
+            }
+        )
+
+
+def test_recovered_run_rejects_inconsistent_safe_counts():
+    module = _module()
+    import pytest
+
+    with pytest.raises(module.RecoveryError, match="SAFE counters"):
+        module._assert_recovered_run_safe(
+            {
+                "shard_count": 1,
+                "safe_count": 0,
+                "partial_count": 0,
+                "reject_count": 0,
+                "manifests": [
+                    {"dataset_id": "safe", "quality_status": "SAFE", "replay_compatible": True}
+                ],
+            }
+        )

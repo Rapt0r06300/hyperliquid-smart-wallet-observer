@@ -222,6 +222,22 @@ def test_resumable_worker_preserves_frozen_cursor_and_retry_policy():
     assert "failure=True" in worker
 
 
+def test_resumable_worker_fails_closed_on_non_safe_publication_manifest():
+    worker = _workflow("resumable-campaign-worker.yml")
+    assert "SAFE_ONLY_PUBLICATION_OK" in worker
+    assert 'row.get("quality_status") != "SAFE"' in worker
+    assert 'row.get("replay_compatible") is not True' in worker
+    assert "NON_SAFE_PAYLOAD_IN_RUN_MANIFEST" in worker
+    assert "QUALITY_REGISTER_CONSUMABLE" in worker
+
+
+def test_resumable_worker_binds_annotated_result_inside_evidence_archive():
+    worker = _workflow("resumable-campaign-worker.yml")
+    annotate = worker.index("python tools/augment_campaign_result.py evidence")
+    archive = worker.index('tar -C "$EVIDENCE_DIR" -czf "$EVIDENCE" .')
+    assert annotate < archive
+
+
 def test_resumable_creator_and_controller_track_current_main_for_new_work():
     creator = _workflow("create-resumable-campaigns.yml")
     controller = _workflow("resumable-campaign-controller.yml")
