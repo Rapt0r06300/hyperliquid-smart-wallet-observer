@@ -56,6 +56,11 @@ on:
         required: false
         type: string
         default: ""
+      reference_gap_export_limit:
+        description: "Manual Bitget reference-only missing trades to prove (0 disables; max 128; never added to WS)"
+        required: false
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -370,6 +375,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          REFERENCE_GAP_EXPORT_LIMIT: ${{ inputs.reference_gap_export_limit || 0 }}
         run: |
           set -euo pipefail
           OUTPUT="$RUNNER_TEMP/alina-selected-quarantine"
@@ -379,7 +385,9 @@ jobs:
           PYTHONPATH=src python tools/recheck_recovered_trade_reference.py \
             --dataset-id "$SELECTED_DATASET_ID" \
             --destination "$OUTPUT" \
-            --max-pages 8 > "$OUTPUT/OFFICIAL_REFERENCE_RECHECK.json"
+            --max-pages 8 \
+            --reference-gap-export-limit "$REFERENCE_GAP_EXPORT_LIMIT" \
+            > "$OUTPUT/OFFICIAL_REFERENCE_RECHECK.json"
           python - <<'PY'
           import json,os
           from pathlib import Path
@@ -389,6 +397,8 @@ jobs:
           assert result["replay_certified"] is False
           assert result["reclassified_safe"] is False
           assert result["reference_recheck_repair_count"] == 0
+          assert result.get("missing_trade_events_reconstructed", 0) == 0
+          assert result.get("rest_only_missing_trades_not_merged", True) is True
           assert result["status"] in {
             "REFERENCE_NOT_APPLICABLE",
             "OFFICIAL_REFERENCE_MATCHED_NOT_SAFE",

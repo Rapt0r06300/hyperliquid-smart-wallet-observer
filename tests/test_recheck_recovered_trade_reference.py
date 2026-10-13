@@ -151,3 +151,16 @@ def test_hosted_recheck_installs_declared_collection_dependencies():
     assert "python -m pip install --disable-pip-version-check pytest -e ." in workflow
     assert "python -m pip install --disable-pip-version-check -e . httpx==0.28.1" in workflow
     assert "            pyproject.toml\n            README.md" in workflow
+
+
+def test_recovery_hosted_manual_bitget_reference_gap_export_is_bounded():
+    from pathlib import Path
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" /
+        "catalog-partition-parity.yml"
+    ).read_text(encoding="utf-8")
+    assert "reference_gap_export_limit:" in workflow
+    assert "type: number" in workflow
+    assert "REFERENCE_GAP_EXPORT_LIMIT: ${{ inputs.reference_gap_export_limit || 0 }}" in workflow
+    assert '--reference-gap-export-limit "$REFERENCE_GAP_EXPORT_LIMIT"' in workflow
+    assert 'result.get("missing_trade_events_reconstructed", 0) == 0' in workflow
