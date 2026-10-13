@@ -273,6 +273,7 @@ jobs:
           python-version: '3.12'
 
       - name: Recover one byte-verified historical fragment into isolated quarantine
+        id: recover_source_bytes
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -326,6 +327,7 @@ jobs:
           PY
 
       - name: Verify SHA-bound recovered byte coverage
+        id: verify_source_bytes
         shell: bash
         run: |
           set -euo pipefail
@@ -409,6 +411,10 @@ jobs:
           PY
 
       - name: Export verified quarantine proof for Work
+        # Failed/blocked optional content or REST rechecks must NOT discard
+        # immutable bytes already proven by both release and shard SHA-256.
+        # Do not publish an artifact if either primary byte gate failed.
+        if: ${{ always() && steps.recover_source_bytes.outcome == 'success' && steps.verify_source_bytes.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: alina-selected-quarantined-shard-${{ github.run_id }}

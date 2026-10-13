@@ -310,3 +310,17 @@ def test_pilot_selection_prefers_known_zero_gap_over_newer_positive_gap(monkeypa
     assert chosen["symbol"] == "UMAUSDT"
     assert chosen["indexed_trade_count_exact"] is True
     assert chosen["replay_certified"] is False
+
+
+def test_work_recovery_artifact_survives_optional_reference_failure_only_after_sha_proof():
+    from pathlib import Path
+    workflow = (Path(__file__).resolve().parents[1] /
+                ".github/workflows/catalog-partition-parity.yml").read_text()
+    assert "id: recover_source_bytes" in workflow
+    assert "id: verify_source_bytes" in workflow
+    assert "always() && steps.recover_source_bytes.outcome == 'success'" in workflow
+    assert "steps.verify_source_bytes.outcome == 'success'" in workflow
+    assert workflow.index("Verify SHA-bound recovered byte coverage") < workflow.index(
+        "Export verified quarantine proof for Work"
+    )
+    assert "BYTE_VERIFIED_QUARANTINED_NOT_REPLAY_CERTIFIED" in workflow
