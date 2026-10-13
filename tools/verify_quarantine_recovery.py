@@ -71,6 +71,9 @@ def verify_quarantine(root: Path, index: Mapping[str, Any], index_sha: str) -> d
             row = by_id.get(ident)
             if row is None or ident not in unresolved:
                 raise ValueError("UNKNOWN_OR_ALREADY_REPLAY_READY_SHARD")
+            repository = row.get("release_repository") or index.get("release_repository_default")
+            if repository != CANONICAL:
+                raise ValueError("CATALOG_SOURCE_REPOSITORY_NOT_CANONICAL")
             snapshot_sha = receipt.get("catalog_index_sha256")
             if not isinstance(snapshot_sha, str) or not SHA.fullmatch(snapshot_sha):
                 raise ValueError("INVALID_OR_MISSING_ORIGINAL_CATALOG_SHA")

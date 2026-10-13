@@ -173,3 +173,23 @@ def test_recovery_audit_requires_inner_member_in_hashed_zip(tmp_path, monkeypatc
     assert result["invalid_or_stale_receipts"] == 1
     assert "SOURCE_ZIP_MEMBER_NOT_UNIQUE_OR_SIZE_CONFLICT" in str(result["invalid_reason_counts"])
     assert next(directory.glob("*.jsonl.gz")).read_bytes() == logical
+
+
+def test_legacy_receipt_must_not_certify_foreign_repository(tmp_path, monkeypatch):
+    index, root = sample(tmp_path, monkeypatch)
+    receipt_path = next(
+        (root / "quarantine" / "source_verified_non_replay").glob("*.receipt.json")
+    )
+    original = receipt_path.read_bytes()
+    receipt = json.loads(original)
+    receipt.pop("immutable_candidate_sha256")
+    receipt_path.write_text(json.dumps(receipt))
+    foreign = {**index, "shards": [
+        {**index["shards"][0], "release_repository": "other-owner/other-repo"}
+    ]}
+    result = audit.verify_quarantine(root, foreign, "a" * 64)
+    assert result["byte_verified_non_safe_shards"] == 0
+    assert result["invalid_or_stale_receipts"] == 1
+    assert "CATALOG_SOURCE_REPOSITORY_NOT_CANONICAL" in str(result["invalid_reason_counts"])
+    assert (root / "releases" / "tag" / "bundle.zip").is_file()
+    assert receipt_path.is_file()
