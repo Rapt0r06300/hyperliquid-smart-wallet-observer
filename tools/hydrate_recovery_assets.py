@@ -50,6 +50,7 @@ def select_assets(index: Mapping[str, Any],
     if len(rows_by_id) != len(rows):
         raise InventoryError("HYDRATE_DUPLICATE_INDEX_ID")
     seen = set()
+    outer_claims: dict[tuple[str, str], tuple[object, str]] = {}
     eligible_seen = 0
     selected = []
     reasons = Counter()
@@ -74,11 +75,13 @@ def select_assets(index: Mapping[str, Any],
         expected_size = raw.get("release_remote_size") if packed else raw.get("bytes")
         expected_hash = raw.get("release_remote_digest") if packed else raw.get("sha256")
         expected_hash = expected_hash.removeprefix("sha256:").lower() if isinstance(expected_hash, str) else ""
+        identity = (expected_size, expected_hash)
+        if key in outer_claims and outer_claims[key] != identity:
+            # Independent shards must agree on a shared outer ZIP even if
+            # the first encountered shard itself did not match the snapshot.
+            raise InventoryError("HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT")
+        outer_claims[key] = identity
         if expected_size != size or expected_hash != digest:
-            # The same outer Release archive must never be selected based
-            # on one matching shard while another indexed shard disagrees.
-            if key in seen:
-                raise InventoryError("HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT")
             reasons["OUTER_IDENTITY_CONFLICT"] += 1
             continue
         if key in seen:

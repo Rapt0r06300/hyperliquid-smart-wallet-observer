@@ -124,3 +124,14 @@ def test_shared_zip_with_conflicting_size_must_fail_even_after_first_match():
     index["shards"][1]["release_remote_size"] = 101
     with pytest.raises(InventoryError, match="HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT"):
         h.select_assets(index, {("tag", "pack.zip"): (100, SHA_B)})
+
+
+def test_shared_zip_claim_conflict_fails_regardless_of_row_order():
+    import pytest
+    from tools.preservation_inventory import InventoryError
+    index = rows()
+    index["shards"][0]["release_remote_digest"] = "sha256:" + SHA_A
+    # First row fails to match the inventory, second would match; neither
+    # may authorize download of a shared ZIP with contradictory claims.
+    with pytest.raises(InventoryError, match="HYDRATE_SHARED_OUTER_ASSET_IDENTITY_CONFLICT"):
+        h.select_assets(index, {("tag", "pack.zip"): (100, SHA_B)})
