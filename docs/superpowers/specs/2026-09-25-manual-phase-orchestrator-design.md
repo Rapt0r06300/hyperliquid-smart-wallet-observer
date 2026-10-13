@@ -13561,7 +13561,23 @@ objects are never deleted.
 
 The destructive action is explicit and manual, never scheduled. Dry-run is the
 default; execution requires the exact frozen inventory SHA-256, a bounded batch
-size and GitHub-hosted credentials scoped to the active repository. Each batch
+size and GitHub-hosted credentials scoped to the active repository.
+
+For a *single already-completed recovery capsule*, the manual
+`.github/workflows/alina-capsule-cleanup.yml` provides a narrower atomic
+retention action. `tools/prune_verified_recovery_capsule.py` verifies the
+published completion marker, immutable Release IDs/asset digests, the linked
+canonical SAFE-only RUN_MANIFEST, all remotely advertised SHA-256 identities,
+and **every source TAR member byte and manifest** against its corresponding
+canonical SAFE shard. It downloads temporary evidence **only on GitHub-hosted
+runners**, never a user's PC, never as a scheduled or push-triggered action.
+A first, no-delete inspection supplies the exact recovery Release ID and
+canonical manifest SHA-256. Deletion requires those identical explicit inputs
+and a fresh remote identity check; any missing, mismatched or unqualified
+source is kept. One invocation can remove at most one fully verified redundant
+capsule, not any underlying canonical shard or any unresolved PARTIAL/REJECT.
+This per-capsule cleanup is **not** the full historical migration, a proof of
+trade replay continuity, or a global dataset restoration certificate. Each batch
 writes a durable checkpoint so interruption, secondary rate limiting or API
 failure can resume without repeating verified work. It never deletes active
 collector state, campaign control records or current SAFE assets.
