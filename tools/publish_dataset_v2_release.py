@@ -1073,6 +1073,7 @@ def publish_bundle(
         "release_parts": release_parts,
         "recovery_capsule": recovery_capsule,
         "quality_register": quality_register,
+        "source_admission": index.get("source_admission"),
         "excluded_payload_count": len(rejected_manifests),
         "collector_version": index.get("collector_version"),
         "code_sha": index.get("collector_version"),

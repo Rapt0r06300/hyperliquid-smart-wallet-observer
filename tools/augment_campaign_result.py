@@ -93,6 +93,7 @@ def annotate_collection(
         "partial_count":int(manifest.get("partial_count") or 0),
         "reject_count":int(manifest.get("reject_count") or 0),
         "durable_persisted":True,
+        "source_admission":manifest.get("source_admission"),
         "collection_metrics":{
             "trade_count_observed":trade_count,
             "trade_count_coverage_complete":trade_shards == trade_shards_exact,

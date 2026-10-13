@@ -33,6 +33,7 @@ def test_collection_annotation_rehashes_and_persists_counts(tmp_path):
             "safe_count":2,
             "partial_count":1,
             "reject_count":1,
+            "source_admission":{"excluded_shards":3,"no_rejected_payload_published":True},
         }),
         encoding="utf-8",
     )
@@ -45,6 +46,7 @@ def test_collection_annotation_rehashes_and_persists_counts(tmp_path):
     )
     assert row["payload"]["durable_persisted"] is True
     assert row["payload"]["safe_count"] == 2
+    assert row["payload"]["source_admission"]["excluded_shards"] == 3
     assert row["sha256"] != before
 
 
