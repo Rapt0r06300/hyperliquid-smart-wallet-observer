@@ -289,3 +289,24 @@ def test_recovery_resume_across_unrelated_catalog_changes_keeps_old_proof(tmp_pa
             replaced, asset, root, download=True,
             max_source_bytes=10000, catalog_index_sha256="b"*64)
     assert evidence.read_bytes() == original_bytes
+
+
+def test_pilot_selection_prefers_known_zero_gap_over_newer_positive_gap(monkeypatch, tmp_path):
+    index, _candidate, _asset, _outer, _logical, _root = fixture(tmp_path)
+    first = dict(index["shards"][0], dataset_id="zero-gap",
+                 family="trades", quality_status="PARTIAL",
+                 start_ts_ms=10, gap_count=0, venue="bitget", symbol="UMAUSDT",
+                 trade_count_exact=True)
+    second = dict(first, dataset_id="positive-gap", start_ts_ms=20, gap_count=30)
+    index["shards"] = [second, first]
+    monkeypatch.setattr(recovery, "live_asset", lambda candidate, **_kw: {
+        "id": 50, "size": candidate["outer_bytes"],
+    })
+    chosen = recovery.select_pilot_candidate(index, max_source_bytes=10000)
+    assert chosen["dataset_id"] == "zero-gap"
+    assert chosen["original_quality_status"] == "PARTIAL"
+    assert chosen["indexed_gap_count"] == 0
+    assert chosen["venue"] == "bitget"
+    assert chosen["symbol"] == "UMAUSDT"
+    assert chosen["indexed_trade_count_exact"] is True
+    assert chosen["replay_certified"] is False

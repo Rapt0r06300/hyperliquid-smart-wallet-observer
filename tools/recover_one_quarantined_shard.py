@@ -358,14 +358,20 @@ def select_pilot_candidate(
         quality_priority = {"PARTIAL": 0, "STALE": 1, "REJECT": 2,
                             "SAFE": 3}[row["quality_status"]]
         priority = {"bbo": 0, "l2book": 1, "trades": 2}[row["family"]]
+        gap_count = row.get("gap_count")
+        # A known zero integrity gap is preferable to an unknown or known
+        # positive gap. Never turn this selection hint into SAFE proof.
+        gap_rank = 0 if type(gap_count) is int and gap_count == 0 else (
+            1 if gap_count is None else 2
+        )
         start = row.get("start_ts_ms")
         timestamp = start if type(start) is int and start >= 0 else 0
-        eligible.append((quality_priority, priority, -timestamp, size,
-                         str(row["dataset_id"])))
+        eligible.append((quality_priority, priority, gap_rank, -timestamp,
+                         size, str(row["dataset_id"])))
     eligible.sort()
     attempted = 0
     reasons: dict[str, int] = {}
-    for _quality_priority, _priority, _negtime, _size, dataset_id in eligible:
+    for _quality_priority, _priority, _gap_rank, _negtime, _size, dataset_id in eligible:
         if attempted >= max_live_attempts:
             break
         attempted += 1
@@ -376,8 +382,17 @@ def select_pilot_candidate(
             reason = type(exc).__name__
             reasons[reason] = reasons.get(reason, 0) + 1
             continue
+        selected = next(
+            row for row in index["shards"] if row["dataset_id"] == dataset_id
+        )
         return {
             "schema": "alina.pilot_recovery_selection.v1",
+            "original_quality_status": selected["quality_status"],
+            "venue": selected.get("venue"),
+            "symbol": selected.get("symbol"),
+            "indexed_gap_count": selected.get("gap_count"),
+            "indexed_trade_count_exact": selected.get("trade_count_exact") is True,
+            "indexed_unique_trade_count_exact": selected.get("unique_trade_count_exact") is True,
             "status": "LIVE_SOURCE_MATCHED_NOT_DOWNLOADED",
             "dataset_id": dataset_id,
             "family": ("bbo", "l2book", "trades")[_priority],
