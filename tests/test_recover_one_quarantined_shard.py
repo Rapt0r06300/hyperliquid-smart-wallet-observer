@@ -161,3 +161,27 @@ def test_quarantine_receipt_has_canonical_catalog_and_live_release_asset_id(tmp_
     assert stored["source_repository"] == recovery.CANONICAL
     assert stored["validation_allowed"] is False
     assert result["catalog_index_sha256"] == stored["catalog_index_sha256"]
+
+
+def test_recovery_pilot_chooses_verified_small_non_safe_without_download(monkeypatch, tmp_path):
+    index, _candidate, _asset, _outer, _logical, _root = fixture(tmp_path)
+    row = index["shards"][0]
+    row.update(family="bbo", start_ts_ms=1, quality_status="PARTIAL")
+    index["shards"].append(dict(row, dataset_id="safe", quality_status="SAFE", replay_compatible=True))
+    monkeypatch.setattr(recovery, "live_asset", lambda candidate, **kw: {
+        "id": 8, "size": candidate["outer_bytes"]})
+    selected = recovery.select_pilot_candidate(
+        index, max_source_bytes=10_000, max_live_attempts=2)
+    assert selected["dataset_id"] == "one"
+    assert selected["source_asset_id"] == 8
+    assert selected["replay_certified"] is False
+
+
+def test_recovery_pilot_refuses_unbounded_or_unverifiable_sources(monkeypatch, tmp_path):
+    index, _candidate, _asset, _outer, _logical, _root = fixture(tmp_path)
+    with pytest.raises(ValueError, match="INVALID_BOUNDS"):
+        recovery.select_pilot_candidate(index, max_source_bytes=0)
+    monkeypatch.setattr(recovery, "live_asset",
+                        lambda *_a, **_kw: (_ for _ in ()).throw(ValueError("offline")))
+    with pytest.raises(ValueError, match="NO_VERIFIABLE_LIVE_SOURCE"):
+        recovery.select_pilot_candidate(index, max_source_bytes=1_000_000)

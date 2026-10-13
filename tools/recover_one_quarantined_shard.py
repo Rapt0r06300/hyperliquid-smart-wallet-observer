@@ -267,13 +267,91 @@ def hydrate_candidate(
     return {**receipt, "source_cached_before_run": was_cached}
 
 
+
+def select_pilot_candidate(
+    index: Mapping[str, Any], *, token: str | None = None,
+    max_source_bytes: int = 4_000_000, max_live_attempts: int = 12,
+) -> dict[str, Any]:
+    """Select ONE recent small real source by live Release identity, not by guess.
+
+    Nothing is downloaded, reclassified or modified; the chosen shard remains
+    ineligible for replay until all later byte and causal tests succeed.
+    """
+    if (type(max_source_bytes) is not int or not 0 < max_source_bytes <= 100_000_000
+            or type(max_live_attempts) is not int or not 0 < max_live_attempts <= 50):
+        raise ValueError("RECOVERY_PILOT_INVALID_BOUNDS")
+    eligible = []
+    for row in index.get("shards", []):
+        if not isinstance(row, Mapping):
+            raise ValueError("RECOVERY_PILOT_INVALID_CATALOG_ROW")
+        if row.get("quality_status") not in ("PARTIAL", "REJECT", "STALE") and not (
+            row.get("quality_status") == "SAFE" and row.get("replay_compatible") is not True
+        ):
+            continue
+        if row.get("family") not in ("bbo", "l2book", "trades"):
+            continue
+        packed = bool(row.get("release_container_asset"))
+        size = row.get("release_remote_size") if packed else row.get("bytes")
+        if type(size) is not int or size <= 0 or size > max_source_bytes:
+            continue
+        logical_size = row.get("bytes")
+        if type(logical_size) is not int or not 0 < logical_size <= max_source_bytes:
+            continue
+        if (row.get("release_repository")
+                or index.get("release_repository_default")) != CANONICAL:
+            continue
+        if not row.get("release_tag") or not row.get("release_asset"):
+            continue
+        # Prefer recent market-context observations over massive old trade
+        # payloads; order is only a deterministic selection, not a quality rank.
+        priority = {"bbo": 0, "l2book": 1, "trades": 2}[row["family"]]
+        start = row.get("start_ts_ms")
+        timestamp = start if type(start) is int and start >= 0 else 0
+        eligible.append((priority, -timestamp, size, str(row["dataset_id"])))
+    eligible.sort()
+    attempted = 0
+    reasons: dict[str, int] = {}
+    for _priority, _negtime, _size, dataset_id in eligible:
+        if attempted >= max_live_attempts:
+            break
+        attempted += 1
+        try:
+            candidate = candidate_from_index(index, dataset_id)
+            asset = live_asset(candidate, token=token)
+        except (OSError, ValueError, RestoreError) as exc:
+            reason = type(exc).__name__
+            reasons[reason] = reasons.get(reason, 0) + 1
+            continue
+        return {
+            "schema": "alina.pilot_recovery_selection.v1",
+            "status": "LIVE_SOURCE_MATCHED_NOT_DOWNLOADED",
+            "dataset_id": dataset_id,
+            "family": ("bbo", "l2book", "trades")[_priority],
+            "source_asset_id": asset["id"],
+            "source_asset_bytes": candidate["outer_bytes"],
+            "source_asset_sha256": candidate["outer_sha256"],
+            "eligible_candidates_examined": attempted,
+            "total_small_index_candidates": len(eligible),
+            "replay_certified": False,
+            "validation_allowed": False,
+        }
+    raise ValueError(
+        "RECOVERY_PILOT_NO_VERIFIABLE_LIVE_SOURCE:checked="
+        + str(attempted) + ":reasons=" + json.dumps(reasons, sort_keys=True)
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset-id", required=True)
+    choice = parser.add_mutually_exclusive_group(required=True)
+    choice.add_argument("--dataset-id")
+    choice.add_argument("--select-pilot", action="store_true",
+                        help="Select one bounded live non-SAFE shard without download")
     parser.add_argument("--index", type=Path, default=Path("catalog/DATA_INDEX.json"))
     parser.add_argument("--metrics", type=Path, default=Path("catalog/DATA_METRICS.json"))
-    parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--destination", type=Path)
     parser.add_argument("--max-source-bytes", type=int, default=SOURCE_MAX)
+    parser.add_argument("--max-live-attempts", type=int, default=12)
     parser.add_argument("--download", action="store_true",
                         help="Transfer ONE SHA-verified Release asset into quarantine")
     args = parser.parse_args(argv)
@@ -282,6 +360,17 @@ def main(argv: list[str] | None = None) -> int:
         index = read_index(args.index)
         metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
         summarize(index, metrics, hashlib.sha256(raw).hexdigest())
+        if args.select_pilot:
+            result = select_pilot_candidate(
+                index, token=os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                max_source_bytes=args.max_source_bytes,
+                max_live_attempts=args.max_live_attempts,
+            )
+            result["catalog_index_sha256"] = hashlib.sha256(raw).hexdigest()
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 0
+        if args.destination is None:
+            raise ValueError("RECOVERY_DESTINATION_REQUIRED")
         candidate = candidate_from_index(index, args.dataset_id)
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         asset = live_asset(candidate, token=token)
