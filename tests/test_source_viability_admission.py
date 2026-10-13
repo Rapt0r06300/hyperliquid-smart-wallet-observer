@@ -39,7 +39,7 @@ def test_source_rejects_unreplayable_before_publication(tmp_path):
     assert index["source_shard_count"] == 2
     assert index["shard_count"] == 1
     assert index["source_admission"]["excluded_shards"] == 1
-    assert "GAP" in index["source_admission"]["blocking_reasons"]
+    assert "SEQUENCE_OR_QUEUE_GAP" in index["source_admission"]["blocking_reasons"]
     assert len(list((bundle / "assets").glob("*"))) == 1
     manifest = json.loads(next((bundle / "manifests").glob("*.json")).read_text())
     assert locally_replay_admissible(manifest)
