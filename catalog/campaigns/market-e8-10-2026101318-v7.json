@@ -1,24 +1,43 @@
 {
   "analysis_stage": null,
-  "attempts": 0,
+  "attempts": 1,
   "campaign_id": "market-e8-10-2026101318-v7",
   "checkpoint_lineage": [],
-  "chunk_index": 0,
+  "chunk_index": 1,
   "code_repo": "Rapt0r06300/hyperliquid-smart-wallet-observer",
   "code_sha": "c6fb03713a73817c5371af2c3b1ce102a2aec352",
   "collection_cutoff_at_utc": null,
-  "completed_units": {},
+  "completed_units": {
+    "0": {
+      "result": {
+        "failure_category": "INFRASTRUCTURE",
+        "previous_sha256": "3fa65fd65cb6efa4dcf1c399ad3a7a9a1b92ad2487982956a30aa9080d48ee0a",
+        "previous_status": "COMPLETE",
+        "publication_error_detail": "DATASET_V2_PUBLISH_NO_GO: gh release upload data-v2-campaign-market-e8-10-2026101318-v7-u0 /home/runner/work/_temp/campaign-output/market-e8-10-2026101318-v7/0/compacted-assets/packed-shards-0039.zip --repo Rapt0r06300/hyperliquid-smart-wallet-observer --clobber failed: HTTP 422: Validation Failed (https://uploads.github.com/repos/Rapt0r06300/hyperliquid-smart-wallet-observer/releases/412184302/assets?label=&name=packed-shards-0039.zip) ReleaseAsset.name already exists",
+        "reason": "durable_publication_failed",
+        "status": "FAILED"
+      },
+      "sha256": "a6ab5e74bebbb4b84a043659bb48639d7207e05ef67bc65ed7cf9d4b7fd4062c"
+    }
+  },
   "config_sha256": "b1bf61b1887e7f9c2f7d92d895db03ec0ae56f15fc7c3e0580b85be4363544eb",
-  "consecutive_failures": 0,
+  "consecutive_failures": 1,
   "created_at": "2026-10-13T18:13:47.379649+00:00",
   "creation_phase": "COLLECT",
   "cursor": {
+    "checkpoint_id": "a6ab5e74bebbb4b84a043659bb48639d7207e05ef67bc65ed7cf9d4b7fd4062c",
     "duration_s": 3500,
+    "generation": 1,
+    "handoff_generation": null,
+    "handoff_phase_epoch": 8,
+    "last_run_id": "38473706887",
     "market_shard_count": 16,
     "market_shard_index": 10,
     "max_coins": 0,
     "plan_file": "catalog/market_collection_plans/e8/2026101318/shard-10.json",
     "plan_sha256": "5e4e6b5a7667e4c101ed70c8034b0650ed310e9acf51b8c2b354729cfede72f1",
+    "predecessor_run_id": null,
+    "requested_handoff_at_utc": null,
     "require_all_native_venues": true,
     "rotate_mb": 64,
     "selected_coin_count": 52,
@@ -39,15 +58,16 @@
       "from": "PENDING",
       "reason": "worker_started",
       "to": "RUNNING"
+    },
+    {
+      "at": "2026-10-13T23:11:35.613138Z",
+      "from": "RUNNING",
+      "reason": "durable_publication_failed",
+      "to": "CONTINUATION_REQUIRED"
     }
   ],
   "kind": "market_collection",
-  "lease": {
-    "acquired_at": "2026-10-13T21:58:47.548415Z",
-    "expires_at": "2026-10-14T03:43:47.548415Z",
-    "lease_token_sha256": "4b61e55588cc8916749d6b5254f913ae7661b497227aa11f13627349d8dac5f6",
-    "owner_run_id": "38473706887"
-  },
+  "lease": null,
   "limits": {
     "max_attempts": 12,
     "max_chunks": 24,
@@ -56,7 +76,7 @@
     "max_wall_clock_s": 86400
   },
   "next_due_at": null,
-  "no_progress_count": 0,
+  "no_progress_count": 1,
   "operator_request_id": "867683cb3364809801cc1ca4b2028333b805257062249941185bc8ead53cac39",
   "outputs": [],
   "paper_only": true,
@@ -65,9 +85,9 @@
   "real_execution": false,
   "schema_version": "alina.resumable_campaign.v2",
   "source_collection_epoch": null,
-  "status": "RUNNING",
-  "status_reason": "worker_started",
+  "status": "CONTINUATION_REQUIRED",
+  "status_reason": "durable_publication_failed",
   "terminal_evidence_digest": null,
-  "updated_at": "2026-10-13T21:58:47.548466Z",
+  "updated_at": "2026-10-13T23:11:35.613138Z",
   "work_plan_sha256": "431e51039c9f4a8d041f96df51cbb0ad997a96a13ebacf8fec45ddeabced854b"
 }
