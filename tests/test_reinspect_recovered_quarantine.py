@@ -165,3 +165,26 @@ def test_manifest_global_drop_counter_does_not_override_event_gap_or_promote(tmp
     assert receipt["status"] == "CONTENT_REPLAY_CHECK_FAILED_NOT_SAFE"
     assert receipt["reclassified_safe"] is False
     assert receipt["validation_allowed"] is False
+
+
+def test_reinspection_survives_unrelated_new_shards_without_proving_full_coverage(tmp_path, monkeypatch):
+    from tools.verify_quarantine_recovery import verify_quarantine
+
+    index, output, repo, _manifest, restored = _fixture(tmp_path, monkeypatch)
+    original = json.loads(next(
+        (output / "quarantine" / "source_verified_non_replay").glob("*.receipt.json")
+    ).read_text())
+    index["shards"].append({
+        **index["shards"][0], "dataset_id": "new-collector-shard",
+        "sha256": "9" * 64, "release_asset": "new.jsonl.gz",
+    })
+    report = check.reinspect(index, "e" * 64, output, "demo", repo_root=repo)
+    assert report["status"] == "CONTENT_REPLAY_CHECK_PASSED_NOT_SAFE"
+    assert report["byte_coverage_verified"] is True
+    assert report["replay_certified"] is False
+    coverage = verify_quarantine(output, index, "e" * 64)
+    assert coverage["byte_verified_non_safe_shards"] == 1
+    assert coverage["byte_verified_after_unrelated_catalog_updates"] == 1
+    assert coverage["byte_coverage_complete"] is False
+    assert coverage["unresolved_without_current_byte_proof"] == 1
+    assert original["immutable_candidate_sha256"] == restored["immutable_candidate_sha256"]
