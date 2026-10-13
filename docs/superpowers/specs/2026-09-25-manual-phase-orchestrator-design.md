@@ -13569,7 +13569,11 @@ retention action. `tools/prune_verified_recovery_capsule.py` verifies the
 published completion marker, immutable Release IDs/asset digests, the linked
 canonical SAFE-only RUN_MANIFEST, all remotely advertised SHA-256 identities,
 and **every source TAR member byte and manifest** against its corresponding
-canonical SAFE shard. It downloads temporary evidence **only on GitHub-hosted
+canonical SAFE shard. Before any deletion, it also reconstructs the **current**
+partitioned DATA_INDEX, verifies the SHA-bound DATA_METRICS totals and demands
+that every affected shard still has its exact SAFE/replay-compatible catalog
+identity and immutable canonical Release asset locator. Later REJECT/PARTIAL
+downgrades, missing rows, stale metrics or unavailable partitions block deletion. It downloads temporary evidence **only on GitHub-hosted
 runners**, never a user's PC, never as a scheduled or push-triggered action.
 A first, no-delete inspection supplies the exact recovery Release ID and
 canonical manifest SHA-256. Deletion requires those identical explicit inputs
