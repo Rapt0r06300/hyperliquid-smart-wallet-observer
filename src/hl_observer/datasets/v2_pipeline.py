@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -229,6 +230,40 @@ def finalize_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
+def locally_replay_admissible(manifest: Mapping[str, Any]) -> bool:
+    """Pre-publication verdict, independent of remote SHA verification."""
+    if manifest.get("replay_compatible") is not True:
+        return False
+    candidate = finalize_manifest({**manifest, "asset_verified": True})
+    return (
+        candidate.get("quality_status") == "SAFE"
+        and candidate.get("replay_compatible") is True
+        and candidate.get("validation_allowed") is True
+    )
+
+
+def admission_rejection(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Payload-free classification; never promote non-replayable evidence."""
+    candidate = finalize_manifest({**manifest, "asset_verified": True})
+    return {
+        "quality_status": candidate.get("quality_status"),
+        "reasons": candidate.get("quality_reasons") or ["REPLAY_NOT_PROVEN"],
+        "compressed_bytes": max(0, _int(candidate.get("bytes")) or 0),
+    }
+
+
+def summarize_admission_rejections(rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        counts.update(str(reason) for reason in row.get("reasons", []) if reason)
+    return {
+        "excluded_shards": len(rows),
+        "excluded_compressed_bytes": sum(int(row.get("compressed_bytes") or 0) for row in rows),
+        "blocking_reasons": dict(sorted(counts.items())),
+        "no_rejected_payload_published": True,
+    }
+
+
 def attach_reconciliation(
     manifest: Mapping[str, Any],
     report: Mapping[str, Any],
@@ -318,6 +353,7 @@ def build_bundle(
     compact_target_bytes: int = 0,
     collection_config: Mapping[str, Any] | None = None,
     continuation_cursor: Mapping[str, Any] | str | None = None,
+    replay_admission_only: bool = False,
 ) -> dict[str, Any]:
     """Create a publication bundle from immutable partitioned tick shards.
 
@@ -343,8 +379,24 @@ def build_bundle(
         )
         for shard in shard_paths
     ]
+    rejected_admission: list[dict[str, Any]] = []
+    source_rows = list(zip(shard_paths, source_manifests, strict=True))
+    if replay_admission_only:
+        accepted_rows: list[tuple[Path, dict[str, Any]]] = []
+        for source_shard, source_manifest in source_rows:
+            preview = finalize_manifest({
+                **source_manifest,
+                "reconciliation": {
+                    "status": infer_reconciliation_status(source_manifest),
+                },
+            })
+            if locally_replay_admissible(preview):
+                accepted_rows.append((source_shard, source_manifest))
+            else:
+                rejected_admission.append(admission_rejection(preview))
+        source_rows = accepted_rows
     groups = _compaction_groups(
-        list(zip(shard_paths, source_manifests, strict=True)),
+        source_rows,
         target_bytes=max(0, int(compact_target_bytes)),
     )
     staging = output / ".compaction"
@@ -388,6 +440,9 @@ def build_bundle(
             "status": infer_reconciliation_status(preliminary),
         }
         preliminary = finalize_manifest(preliminary)
+        if replay_admission_only and not locally_replay_admissible(preliminary):
+            rejected_admission.append(admission_rejection(preliminary))
+            continue
 
         dataset_id = str(preliminary["dataset_id"])
         asset_name = f"{dataset_id}.jsonl.gz"
@@ -431,6 +486,10 @@ def build_bundle(
             else continuation_cursor
         ),
         "collection_queue_drops": max(0, int(collection_queue_drops)),
+        "source_admission": {
+            "mode": "replay_only" if replay_admission_only else "legacy",
+            **summarize_admission_rejections(rejected_admission),
+        },
         "shard_count": len(manifests),
         "source_shard_count": len(shard_paths),
         "compacted_source_shard_count": sum(
@@ -520,5 +579,8 @@ __all__ = [
     "build_bundle",
     "finalize_manifest",
     "infer_reconciliation_status",
+    "locally_replay_admissible",
+    "admission_rejection",
+    "summarize_admission_rejections",
     "verify_remote_asset",
 ]
