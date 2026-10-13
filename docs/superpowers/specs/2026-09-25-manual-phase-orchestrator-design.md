@@ -716,6 +716,15 @@ Raw WAL segments are immutable after sealing.
 
 ### Durable segment checkpoints
 
+The GitHub-hosted collection publisher must pass deterministic Bash syntax
+validation (including indented YAML `run: |` heredoc terminators) before
+deployment. A collector unit that completed capture but failed publication
+must stay `durable_publication_failed`, preserving its failure evidence and
+never claiming a verified Release asset. Correcting a publication workflow
+must not cancel already-running collectors, rewrite existing evidence, or
+silently change the `COLLECT` phase.
+
+
 A runner must not hold an entire multi-hour collection window only on ephemeral disk.
 
 During a collection unit it periodically seals bounded raw/normalized segments, compresses them, computes hashes, writes a segment manifest, and publishes them durably to GitHub Releases in the Alina repository.

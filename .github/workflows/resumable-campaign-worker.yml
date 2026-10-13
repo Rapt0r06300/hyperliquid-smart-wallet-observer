@@ -415,37 +415,37 @@ jobs:
               fi
               test -f "$BUNDLE/RUN_MANIFEST.json"
               python - "$BUNDLE/RUN_MANIFEST.json" <<'PY'
-              import json
-              import sys
+          import json
+          import sys
 
-              with open(sys.argv[1], encoding="utf-8") as handle:
-                  run = json.load(handle)
-              manifests = run.get("manifests")
-              if not isinstance(manifests, list):
-                  raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST: missing inventory")
-              bad = [
-                  row for row in manifests
-                  if not isinstance(row, dict)
-                  or row.get("quality_status") != "SAFE"
-                  or row.get("replay_compatible") is not True
-              ]
-              if bad:
-                  raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST")
-              if (
-                  run.get("shard_count") != len(manifests)
-                  or run.get("safe_count") != len(manifests)
-                  or run.get("partial_count") != 0
-                  or run.get("reject_count") != 0
-              ):
-                  raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST: inconsistent counters")
-              quality = run.get("quality_register")
-              if quality and (
-                  quality.get("validation_allowed") is not False
-                  or quality.get("replay_compatible") is not False
-              ):
-                  raise SystemExit("QUALITY_REGISTER_CONSUMABLE")
-              print("SAFE_ONLY_PUBLICATION_OK")
-              PY
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              run = json.load(handle)
+          manifests = run.get("manifests")
+          if not isinstance(manifests, list):
+              raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST: missing inventory")
+          bad = [
+              row for row in manifests
+              if not isinstance(row, dict)
+              or row.get("quality_status") != "SAFE"
+              or row.get("replay_compatible") is not True
+          ]
+          if bad:
+              raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST")
+          if (
+              run.get("shard_count") != len(manifests)
+              or run.get("safe_count") != len(manifests)
+              or run.get("partial_count") != 0
+              or run.get("reject_count") != 0
+          ):
+              raise SystemExit("NON_SAFE_PAYLOAD_IN_RUN_MANIFEST: inconsistent counters")
+          quality = run.get("quality_register")
+          if quality and (
+              quality.get("validation_allowed") is not False
+              or quality.get("replay_compatible") is not False
+          ):
+              raise SystemExit("QUALITY_REGISTER_CONSUMABLE")
+          print("SAFE_ONLY_PUBLICATION_OK")
+          PY
               ACTUAL_RELEASE_TAG="$(python -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8"))["release_tag"])' "$BUNDLE/RUN_MANIFEST.json")"
               test -n "$ACTUAL_RELEASE_TAG"
               python tools/augment_campaign_result.py collection                 --result "$RESULT"                 --run-manifest "$BUNDLE/RUN_MANIFEST.json"                 --tag "$ACTUAL_RELEASE_TAG"                 --repository "$GITHUB_REPOSITORY"
